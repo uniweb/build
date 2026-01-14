@@ -1,0 +1,47 @@
+{
+  "name": "@uniweb/build",
+  "version": "0.1.0",
+  "description": "Foundation build tooling for the Uniweb Component Web Platform",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./schema": "./src/schema.js",
+    "./images": "./src/images.js",
+    "./generate-entry": "./src/generate-entry.js",
+    "./vite-plugin": "./src/vite-foundation-plugin.js"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "uniweb",
+    "foundation",
+    "build",
+    "vite",
+    "components"
+  ],
+  "author": "Proximify",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uniweb/build.git"
+  },
+  "homepage": "https://github.com/uniweb/build#readme",
+  "bugs": {
+    "url": "https://github.com/uniweb/build/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "sharp": "^0.33.2"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  }
+}
