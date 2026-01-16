@@ -8,3 +8,9 @@
 
 export { siteContentPlugin, default } from './plugin.js'
 export { collectSiteContent } from './content-collector.js'
+export {
+  resolveAssetPath,
+  walkContentAssets,
+  collectSectionAssets,
+  mergeAssetManifests
+} from './assets.js'

@@ -25,6 +25,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, parse } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { collectSectionAssets, mergeAssetManifests } from './assets.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -112,8 +113,13 @@ function compareFilenames(a, b) {
 
 /**
  * Process a markdown file into a section
+ *
+ * @param {string} filePath - Path to markdown file
+ * @param {string} id - Section ID
+ * @param {string} siteRoot - Site root directory for asset resolution
+ * @returns {Object} Section data with assets manifest
  */
-async function processMarkdownFile(filePath, id) {
+async function processMarkdownFile(filePath, id, siteRoot) {
   const content = await readFile(filePath, 'utf8')
   let frontMatter = {}
   let markdown = content
@@ -132,7 +138,7 @@ async function processMarkdownFile(filePath, id) {
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
 
-  return {
+  const section = {
     id,
     component: type || component || 'Section',
     preset,
@@ -141,6 +147,11 @@ async function processMarkdownFile(filePath, id) {
     content: proseMirrorContent,
     subsections: []
   }
+
+  // Collect assets referenced in this section
+  const assets = collectSectionAssets(section, filePath, siteRoot)
+
+  return { section, assets }
 }
 
 /**
@@ -179,8 +190,13 @@ function buildSectionHierarchy(sections) {
 
 /**
  * Process a page directory
+ *
+ * @param {string} pagePath - Path to page directory
+ * @param {string} pageName - Name of the page
+ * @param {string} siteRoot - Site root directory for asset resolution
+ * @returns {Object} Page data with assets manifest
  */
-async function processPage(pagePath, pageName) {
+async function processPage(pagePath, pageName, siteRoot) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
   if (pageConfig.hidden) return null
@@ -189,8 +205,9 @@ async function processPage(pagePath, pageName) {
   const files = await readdir(pagePath)
   const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
 
-  // Process sections
+  // Process sections and collect assets
   const sections = []
+  let pageAssets = {}
   let lastModified = null
 
   for (const file of mdFiles) {
@@ -198,8 +215,9 @@ async function processPage(pagePath, pageName) {
     const { prefix } = parseNumericPrefix(name)
     const id = prefix || name
 
-    const section = await processMarkdownFile(join(pagePath, file), id)
+    const { section, assets } = await processMarkdownFile(join(pagePath, file), id, siteRoot)
     sections.push(section)
+    pageAssets = mergeAssetManifests(pageAssets, assets)
 
     // Track last modified time for sitemap
     const fileStat = await stat(join(pagePath, file))
@@ -223,18 +241,21 @@ async function processPage(pagePath, pageName) {
   const { seo = {}, ...restConfig } = pageConfig
 
   return {
-    route,
-    title: pageConfig.title || pageName,
-    description: pageConfig.description || '',
-    order: pageConfig.order,
-    lastModified: lastModified?.toISOString(),
-    seo: {
-      noindex: seo.noindex || false,
-      image: seo.image || null,
-      changefreq: seo.changefreq || null,
-      priority: seo.priority || null
+    page: {
+      route,
+      title: pageConfig.title || pageName,
+      description: pageConfig.description || '',
+      order: pageConfig.order,
+      lastModified: lastModified?.toISOString(),
+      seo: {
+        noindex: seo.noindex || false,
+        image: seo.image || null,
+        changefreq: seo.changefreq || null,
+        priority: seo.priority || null
+      },
+      sections: hierarchicalSections
     },
-    sections: hierarchicalSections
+    assets: pageAssets
   }
 }
 
@@ -242,7 +263,7 @@ async function processPage(pagePath, pageName) {
  * Collect all site content
  *
  * @param {string} sitePath - Path to site directory
- * @returns {Promise<Object>} Site content object
+ * @returns {Promise<Object>} Site content object with assets manifest
  */
 export async function collectSiteContent(sitePath) {
   const pagesPath = join(sitePath, 'pages')
@@ -256,13 +277,15 @@ export async function collectSiteContent(sitePath) {
     return {
       config: siteConfig,
       theme: themeConfig,
-      pages: []
+      pages: [],
+      assets: {}
     }
   }
 
   // Get page directories
   const entries = await readdir(pagesPath)
   const pages = []
+  let siteAssets = {}
   let header = null
   let footer = null
 
@@ -272,8 +295,11 @@ export async function collectSiteContent(sitePath) {
 
     if (!stats.isDirectory()) continue
 
-    const page = await processPage(entryPath, entry)
-    if (!page) continue
+    const result = await processPage(entryPath, entry, sitePath)
+    if (!result) continue
+
+    const { page, assets } = result
+    siteAssets = mergeAssetManifests(siteAssets, assets)
 
     // Handle special pages
     if (entry === '@header' || page.route === '/@header') {
@@ -288,12 +314,19 @@ export async function collectSiteContent(sitePath) {
   // Sort pages by order
   pages.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
 
+  // Log asset summary
+  const assetCount = Object.keys(siteAssets).length
+  if (assetCount > 0) {
+    console.log(`[content-collector] Found ${assetCount} asset references`)
+  }
+
   return {
     config: siteConfig,
     theme: themeConfig,
     pages,
     header,
-    footer
+    footer,
+    assets: siteAssets
   }
 }
 
