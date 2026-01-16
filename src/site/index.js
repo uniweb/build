@@ -14,3 +14,10 @@ export {
   collectSectionAssets,
   mergeAssetManifests
 } from './assets.js'
+export {
+  processAsset,
+  processAssets,
+  rewriteContentPaths,
+  rewriteParamPaths,
+  rewriteSiteContentPaths
+} from './asset-processor.js'

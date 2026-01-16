@@ -105,6 +105,12 @@ siteContentPlugin({
       disallow: ['/admin', '/api'],
       crawlDelay: 1
     }
+  },
+  assets: {                    // Asset processing (optional)
+    process: true,             // Process assets in production (default: true)
+    convertToWebp: true,       // Convert images to WebP (default: true)
+    quality: 80,               // WebP quality 1-100 (default: 80)
+    outputDir: 'assets'        // Output subdirectory (default: 'assets')
   }
 })
 ```
@@ -135,6 +141,33 @@ seo:
   image: /about-og.png    # Page-specific OG image
   changefreq: monthly     # Sitemap changefreq
   priority: 0.8           # Sitemap priority
+```
+
+#### Asset Processing
+
+The plugin automatically discovers and processes image assets referenced in your content. In content-driven sites, markdown acts as "code" - local asset references are like implicit imports and get optimized during build.
+
+**Supported path formats:**
+- `./image.png` - Relative to the markdown file
+- `../shared/logo.png` - Relative paths with parent traversal
+- `/images/hero.png` - Absolute paths (resolved from `public/` or `assets/` folder)
+
+**What gets processed:**
+- Images in markdown content: `![Alt](./photo.jpg)`
+- Images in frontmatter fields: `background`, `image`, `thumbnail`, `poster`, `avatar`, `logo`, `icon`
+
+**Processing behavior:**
+- PNG, JPG, JPEG, GIF → Converted to WebP for smaller file sizes
+- SVG, WebP, AVIF → Copied as-is (already optimized formats)
+- All processed assets get content-hashed filenames for cache busting
+
+**Build output:**
+```
+dist/
+├── assets/
+│   ├── hero-a1b2c3d4.webp    # Converted from hero.jpg
+│   └── logo-e5f6g7h8.svg     # Copied as-is
+└── site-content.json          # Paths rewritten to /assets/hero-a1b2c3d4.webp
 ```
 
 #### Foundation Dev Plugin Options

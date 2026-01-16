@@ -33,6 +33,7 @@
 import { resolve } from 'node:path'
 import { watch } from 'node:fs'
 import { collectSiteContent } from './content-collector.js'
+import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 
 /**
  * Generate sitemap.xml content
@@ -216,6 +217,11 @@ function escapeHtml(str) {
  * @param {Array} [options.seo.robots.disallow] - Paths to disallow
  * @param {Array} [options.seo.robots.allow] - Paths to explicitly allow
  * @param {number} [options.seo.robots.crawlDelay] - Crawl delay in seconds
+ * @param {Object} [options.assets] - Asset processing configuration
+ * @param {boolean} [options.assets.process=true] - Process assets in production builds
+ * @param {boolean} [options.assets.convertToWebp=true] - Convert images to WebP
+ * @param {number} [options.assets.quality=80] - WebP quality (1-100)
+ * @param {string} [options.assets.outputDir='assets'] - Output subdirectory for processed assets
  */
 export function siteContentPlugin(options = {}) {
   const {
@@ -225,8 +231,17 @@ export function siteContentPlugin(options = {}) {
     inject = true,
     filename = 'site-content.json',
     watch: shouldWatch = true,
-    seo = {}
+    seo = {},
+    assets: assetsConfig = {}
   } = options
+
+  // Extract asset processing options
+  const assetsOptions = {
+    process: assetsConfig.process !== false, // Default true
+    convertToWebp: assetsConfig.convertToWebp !== false, // Default true
+    quality: assetsConfig.quality || 80,
+    outputDir: assetsConfig.outputDir || 'assets'
+  }
 
   // Extract SEO options with defaults
   const seoEnabled = !!seo.baseUrl
@@ -240,6 +255,8 @@ export function siteContentPlugin(options = {}) {
 
   let siteContent = null
   let resolvedSitePath = null
+  let resolvedOutDir = null
+  let isProduction = false
   let watcher = null
   let server = null
 
@@ -248,6 +265,8 @@ export function siteContentPlugin(options = {}) {
 
     configResolved(config) {
       resolvedSitePath = resolve(config.root, sitePath)
+      resolvedOutDir = resolve(config.root, config.build.outDir)
+      isProduction = config.command === 'build'
     },
 
     async buildStart() {
@@ -344,18 +363,51 @@ export function siteContentPlugin(options = {}) {
       return html.replace('</head>', headInjection + '  </head>')
     },
 
-    generateBundle() {
+    async generateBundle() {
+      let finalContent = siteContent
+
+      // Process assets in production builds
+      if (isProduction && assetsOptions.process && siteContent?.assets) {
+        const assetCount = Object.keys(siteContent.assets).length
+
+        if (assetCount > 0) {
+          console.log(`[site-content] Processing ${assetCount} assets...`)
+
+          const { pathMapping, results } = await processAssets(siteContent.assets, {
+            outputDir: resolvedOutDir,
+            assetsSubdir: assetsOptions.outputDir,
+            convertToWebp: assetsOptions.convertToWebp,
+            quality: assetsOptions.quality
+          })
+
+          // Rewrite paths in content
+          finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+
+          // Log results
+          const sizeKB = (results.totalSize / 1024).toFixed(1)
+          console.log(`[site-content] Processed ${results.processed} assets (${results.converted} converted to WebP, ${sizeKB}KB total)`)
+
+          if (results.failed > 0) {
+            console.warn(`[site-content] ${results.failed} assets failed to process`)
+          }
+        }
+      } else {
+        // In dev or when processing is disabled, just remove the assets manifest
+        finalContent = { ...siteContent }
+        delete finalContent.assets
+      }
+
       // Emit content as JSON file in production build
       this.emitFile({
         type: 'asset',
         fileName: filename,
-        source: JSON.stringify(siteContent, null, 2)
+        source: JSON.stringify(finalContent, null, 2)
       })
 
       // Generate SEO files if enabled
-      if (seoEnabled && siteContent?.pages) {
+      if (seoEnabled && finalContent?.pages) {
         // Generate sitemap.xml
-        const sitemap = generateSitemap(siteContent.pages, seoOptions.baseUrl, seoOptions.locales)
+        const sitemap = generateSitemap(finalContent.pages, seoOptions.baseUrl, seoOptions.locales)
         this.emitFile({
           type: 'asset',
           fileName: 'sitemap.xml',
