@@ -7,6 +7,14 @@
  *   - page.yml: Page metadata
  *   - *.md: Section content with YAML frontmatter
  *
+ * Section frontmatter reserved properties:
+ * - type: Component type (e.g., "Hero", "Features")
+ * - preset: Preset configuration name
+ * - input: Input field mapping
+ * - props: Additional component props (merged with other params)
+ *
+ * Note: `component` is supported as an alias for `type` (deprecated)
+ *
  * Uses @uniweb/content-reader for markdown → ProseMirror conversion
  * when available, otherwise uses a simplified parser.
  *
@@ -119,14 +127,14 @@ async function processMarkdownFile(filePath, id) {
     }
   }
 
-  const { component, preset, input, props, ...params } = frontMatter
+  const { type, component, preset, input, props, ...params } = frontMatter
 
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
 
   return {
     id,
-    component: component || 'Section',
+    component: type || component || 'Section',
     preset,
     input,
     params: { ...params, ...props },
