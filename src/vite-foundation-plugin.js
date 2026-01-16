@@ -67,8 +67,12 @@ export function foundationBuildPlugin(options = {}) {
     },
 
     async writeBundle() {
-      // After bundle is written, generate schema.json
+      // After bundle is written, generate schema.json in meta folder
       const outDir = resolve(resolvedOutDir)
+      const metaDir = join(outDir, 'meta')
+
+      // Ensure meta directory exists
+      await mkdir(metaDir, { recursive: true })
 
       const schema = await buildSchemaWithPreviews(
         resolvedSrcDir,
@@ -76,10 +80,10 @@ export function foundationBuildPlugin(options = {}) {
         isProduction
       )
 
-      const schemaPath = join(outDir, 'schema.json')
+      const schemaPath = join(metaDir, 'schema.json')
       await writeFile(schemaPath, JSON.stringify(schema, null, 2), 'utf-8')
 
-      console.log(`Generated schema.json with ${Object.keys(schema).length - 1} components`)
+      console.log(`Generated meta/schema.json with ${Object.keys(schema).length - 1} components`)
     },
   }
 }

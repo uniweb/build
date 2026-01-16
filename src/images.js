@@ -2,6 +2,8 @@
  * Image Processing Utilities
  *
  * Handles preview image discovery, conversion to webp, and metadata extraction.
+ * Preview images are editor metadata (for preset visualization) and are output
+ * to dist/meta/previews/ to keep them separate from runtime assets.
  */
 
 import { readdir, mkdir, copyFile } from 'node:fs/promises'
@@ -71,8 +73,8 @@ export async function processComponentPreviews(componentDir, componentName, outp
     return previews
   }
 
-  // Create output directory
-  const componentOutputDir = join(outputDir, 'assets', componentName)
+  // Create output directory for preview images (editor metadata)
+  const componentOutputDir = join(outputDir, 'meta', 'previews', componentName)
   await mkdir(componentOutputDir, { recursive: true })
 
   // Get all image files
@@ -115,7 +117,7 @@ export async function processComponentPreviews(componentDir, componentName, outp
     }
 
     previews[presetName] = {
-      path: `assets/${componentName}/${outputFilename}`,
+      path: `meta/previews/${componentName}/${outputFilename}`,
       width: metadata.width,
       height: metadata.height,
       type: finalFormat,

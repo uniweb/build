@@ -261,10 +261,11 @@ After building, your foundation will contain:
 dist/
 ├── foundation.js      # Bundled components (~6KB typical)
 ├── foundation.js.map  # Source map
-├── schema.json        # Full metadata for editors
-└── assets/
-    └── Hero/
-        └── default.webp  # Processed preview images
+└── meta/              # Editor metadata (not needed at runtime)
+    ├── schema.json    # Full component metadata for editors
+    └── previews/      # Preset preview images
+        └── Hero/
+            └── default.webp
 ```
 
 ## API Reference
