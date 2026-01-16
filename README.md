@@ -110,7 +110,9 @@ siteContentPlugin({
     process: true,             // Process assets in production (default: true)
     convertToWebp: true,       // Convert images to WebP (default: true)
     quality: 80,               // WebP quality 1-100 (default: 80)
-    outputDir: 'assets'        // Output subdirectory (default: 'assets')
+    outputDir: 'assets',       // Output subdirectory (default: 'assets')
+    videoPosters: true,        // Extract poster from videos (default: true, requires ffmpeg)
+    pdfThumbnails: true        // Generate PDF thumbnails (default: true, requires pdf-lib)
   }
 })
 ```
@@ -145,7 +147,7 @@ seo:
 
 #### Asset Processing
 
-The plugin automatically discovers and processes image assets referenced in your content. In content-driven sites, markdown acts as "code" - local asset references are like implicit imports and get optimized during build.
+The plugin automatically discovers and processes assets referenced in your content. In content-driven sites, markdown acts as "code" - local asset references are like implicit imports and get optimized during build.
 
 **Supported path formats:**
 - `./image.png` - Relative to the markdown file
@@ -154,21 +156,36 @@ The plugin automatically discovers and processes image assets referenced in your
 
 **What gets processed:**
 - Images in markdown content: `![Alt](./photo.jpg)`
-- Images in frontmatter fields: `background`, `image`, `thumbnail`, `poster`, `avatar`, `logo`, `icon`
+- Media in frontmatter fields: `background`, `image`, `thumbnail`, `poster`, `avatar`, `logo`, `icon`, `video`, `pdf`, etc.
 
-**Processing behavior:**
+**Image processing:**
 - PNG, JPG, JPEG, GIF → Converted to WebP for smaller file sizes
 - SVG, WebP, AVIF → Copied as-is (already optimized formats)
 - All processed assets get content-hashed filenames for cache busting
+
+**Video poster extraction** (requires `ffmpeg` on system):
+- MP4, WebM, MOV, AVI, MKV → Poster frame extracted at 1 second
+- Poster images converted to WebP and added to `_assetMeta.posters`
+
+**PDF thumbnail generation** (requires `pdf-lib` package):
+- PDF files → Placeholder thumbnail with page count
+- Thumbnails added to `_assetMeta.thumbnails`
 
 **Build output:**
 ```
 dist/
 ├── assets/
-│   ├── hero-a1b2c3d4.webp    # Converted from hero.jpg
-│   └── logo-e5f6g7h8.svg     # Copied as-is
-└── site-content.json          # Paths rewritten to /assets/hero-a1b2c3d4.webp
+│   ├── hero-a1b2c3d4.webp       # Converted from hero.jpg
+│   ├── logo-e5f6g7h8.svg        # Copied as-is
+│   ├── intro-poster-9i0j1k2l.webp  # Video poster frame
+│   └── guide-thumb-3m4n5o6p.webp   # PDF thumbnail
+└── site-content.json             # Paths rewritten, _assetMeta included
 ```
+
+**Graceful degradation:**
+- If `ffmpeg` is not installed, video posters are silently skipped
+- If `pdf-lib` is not installed, PDF thumbnails are silently skipped
+- Missing assets are logged as warnings but don't fail the build
 
 #### Foundation Dev Plugin Options
 

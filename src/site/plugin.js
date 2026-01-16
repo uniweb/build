@@ -34,6 +34,7 @@ import { resolve } from 'node:path'
 import { watch } from 'node:fs'
 import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
+import { processAdvancedAssets } from './advanced-processors.js'
 
 /**
  * Generate sitemap.xml content
@@ -222,6 +223,8 @@ function escapeHtml(str) {
  * @param {boolean} [options.assets.convertToWebp=true] - Convert images to WebP
  * @param {number} [options.assets.quality=80] - WebP quality (1-100)
  * @param {string} [options.assets.outputDir='assets'] - Output subdirectory for processed assets
+ * @param {boolean} [options.assets.videoPosters=true] - Extract poster frames from videos (requires ffmpeg)
+ * @param {boolean} [options.assets.pdfThumbnails=true] - Generate thumbnails for PDFs (requires pdf-lib)
  */
 export function siteContentPlugin(options = {}) {
   const {
@@ -240,7 +243,9 @@ export function siteContentPlugin(options = {}) {
     process: assetsConfig.process !== false, // Default true
     convertToWebp: assetsConfig.convertToWebp !== false, // Default true
     quality: assetsConfig.quality || 80,
-    outputDir: assetsConfig.outputDir || 'assets'
+    outputDir: assetsConfig.outputDir || 'assets',
+    videoPosters: assetsConfig.videoPosters !== false, // Default true
+    pdfThumbnails: assetsConfig.pdfThumbnails !== false // Default true
   }
 
   // Extract SEO options with defaults
@@ -373,6 +378,7 @@ export function siteContentPlugin(options = {}) {
         if (assetCount > 0) {
           console.log(`[site-content] Processing ${assetCount} assets...`)
 
+          // Process standard assets (images)
           const { pathMapping, results } = await processAssets(siteContent.assets, {
             outputDir: resolvedOutDir,
             assetsSubdir: assetsOptions.outputDir,
@@ -380,8 +386,47 @@ export function siteContentPlugin(options = {}) {
             quality: assetsOptions.quality
           })
 
-          // Rewrite paths in content
-          finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+          // Process advanced assets (videos, PDFs)
+          const advancedEnabled = assetsOptions.videoPosters || assetsOptions.pdfThumbnails
+          let advancedResults = null
+
+          if (advancedEnabled) {
+            const { posterMapping, thumbnailMapping, results: advResults } = await processAdvancedAssets(
+              siteContent.assets,
+              {
+                outputDir: resolvedOutDir,
+                assetsSubdir: assetsOptions.outputDir,
+                videoPosters: assetsOptions.videoPosters,
+                pdfThumbnails: assetsOptions.pdfThumbnails,
+                quality: assetsOptions.quality
+              }
+            )
+            advancedResults = advResults
+
+            // Log advanced processing results
+            if (advResults.videos.processed > 0) {
+              console.log(`[site-content] Extracted ${advResults.videos.processed} video posters`)
+            }
+            if (advResults.pdfs.processed > 0) {
+              console.log(`[site-content] Generated ${advResults.pdfs.processed} PDF thumbnails`)
+            }
+
+            // Merge poster and thumbnail mappings into the path mapping
+            // Videos: add a .poster property to the content (not replace the src)
+            // PDFs: add a .thumbnail property to the content
+            finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+
+            // Add poster and thumbnail metadata to the site content
+            if (Object.keys(posterMapping).length > 0 || Object.keys(thumbnailMapping).length > 0) {
+              finalContent._assetMeta = {
+                posters: posterMapping,
+                thumbnails: thumbnailMapping
+              }
+            }
+          } else {
+            // Rewrite paths in content
+            finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+          }
 
           // Log results
           const sizeKB = (results.totalSize / 1024).toFixed(1)

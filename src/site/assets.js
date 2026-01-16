@@ -14,6 +14,12 @@ import { existsSync } from 'node:fs'
 // Image extensions we should process
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.avif']
 
+// Video extensions we can extract posters from
+const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov', '.avi', '.mkv']
+
+// PDF extension
+const PDF_EXTENSION = '.pdf'
+
 /**
  * Check if a path is an external URL
  */
@@ -27,6 +33,21 @@ function isExternalUrl(src) {
 function isImagePath(src) {
   const ext = src.split('.').pop()?.toLowerCase()
   return IMAGE_EXTENSIONS.some(e => e.slice(1) === ext)
+}
+
+/**
+ * Check if a path is a video file
+ */
+function isVideoPath(src) {
+  const ext = '.' + (src.split('.').pop()?.toLowerCase() || '')
+  return VIDEO_EXTENSIONS.includes(ext)
+}
+
+/**
+ * Check if a path is a PDF file
+ */
+function isPdfPath(src) {
+  return src.toLowerCase().endsWith(PDF_EXTENSION)
 }
 
 /**
@@ -75,7 +96,9 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
     src,
     resolved,
     external: false,
-    isImage: isImagePath(src)
+    isImage: isImagePath(src),
+    isVideo: isVideoPath(src),
+    isPdf: isPdfPath(src)
   }
 }
 
@@ -130,16 +153,22 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
         assets[node.attrs.src] = {
           original: node.attrs.src,
           resolved: result.resolved,
-          isImage: result.isImage
+          isImage: result.isImage,
+          isVideo: result.isVideo,
+          isPdf: result.isPdf
         }
       }
     })
   }
 
-  // Collect from frontmatter params (common image fields)
-  const imageFields = ['image', 'background', 'backgroundImage', 'thumbnail', 'poster', 'avatar', 'logo', 'icon']
+  // Collect from frontmatter params (common media fields)
+  const mediaFields = [
+    'image', 'background', 'backgroundImage', 'thumbnail',
+    'poster', 'avatar', 'logo', 'icon',
+    'video', 'videoSrc', 'media', 'file', 'pdf', 'document'
+  ]
 
-  for (const field of imageFields) {
+  for (const field of mediaFields) {
     const value = section.params?.[field]
     if (typeof value === 'string' && value) {
       const result = resolveAssetPath(value, markdownPath, siteRoot)
@@ -147,7 +176,9 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
         assets[value] = {
           original: value,
           resolved: result.resolved,
-          isImage: result.isImage
+          isImage: result.isImage,
+          isVideo: result.isVideo,
+          isPdf: result.isPdf
         }
       }
     }

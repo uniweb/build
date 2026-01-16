@@ -21,3 +21,12 @@ export {
   rewriteParamPaths,
   rewriteSiteContentPaths
 } from './asset-processor.js'
+export {
+  extractVideoPoster,
+  generatePdfThumbnail,
+  processAdvancedAsset,
+  processAdvancedAssets,
+  checkFfmpeg,
+  isVideoFile,
+  isPdfFile
+} from './advanced-processors.js'
