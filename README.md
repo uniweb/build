@@ -1,10 +1,10 @@
 # @uniweb/build
 
-Foundation build tooling for the Uniweb Component Web Platform.
+Build tooling for the Uniweb Component Web Platform.
 
 ## Overview
 
-This package provides build utilities for creating Uniweb Foundations—React component libraries that define the vocabulary and rendering logic for content-driven websites.
+This package provides Vite plugins and utilities for building both **Foundations** (component libraries) and **Sites** (content-driven websites).
 
 ## Installation
 
@@ -14,17 +14,23 @@ npm install @uniweb/build --save-dev
 
 ## Features
 
+**For Foundations:**
 - **Component Discovery** - Automatically discovers components from `src/components/*/meta.js`
 - **Entry Generation** - Generates the foundation entry point with all exports
 - **Schema Building** - Creates `schema.json` with full component metadata for editors
-- **Image Processing** - Converts preview images to WebP format with dimension extraction
+- **Image Processing** - Converts preview images to WebP format
 - **Vite Plugin** - Integrates seamlessly with Vite builds
+
+**For Sites:**
+- **Content Collection** - Collects pages from `pages/` directory with YAML/Markdown
+- **Dev Server Integration** - Watches for content changes with hot reload
+- **Foundation Dev Server** - Serves a local foundation during development
 
 ## Usage
 
-### Vite Plugin
+### Foundation Plugin
 
-Add the foundation plugin to your `vite.config.js`:
+Add the foundation plugin to your foundation's `vite.config.js`:
 
 ```js
 import { defineConfig } from 'vite'
@@ -46,6 +52,59 @@ export default defineConfig({
       external: ['react', 'react-dom', 'react/jsx-runtime']
     }
   }
+})
+```
+
+### Site Plugins
+
+For sites, use the content and dev plugins in your site's `vite.config.js`:
+
+```js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { siteContentPlugin } from '@uniweb/build/site'
+import { foundationDevPlugin } from '@uniweb/build/dev'
+
+export default defineConfig({
+  plugins: [
+    react(),
+
+    // Collect content from pages/ directory
+    siteContentPlugin({
+      sitePath: './',
+      inject: true,  // Inject into HTML
+    }),
+
+    // Serve local foundation during development
+    foundationDevPlugin({
+      path: '../foundation',
+      serve: '/foundation',
+    }),
+  ]
+})
+```
+
+#### Site Content Plugin Options
+
+```js
+siteContentPlugin({
+  sitePath: './',              // Path to site directory
+  pagesDir: 'pages',           // Pages subdirectory name
+  inject: true,                // Inject content into HTML
+  filename: 'site-content.json', // Output filename
+  watch: true                  // Watch for changes (dev mode)
+})
+```
+
+#### Foundation Dev Plugin Options
+
+```js
+foundationDevPlugin({
+  name: 'foundation',          // Name for logging
+  path: '../foundation',       // Path to foundation package
+  serve: '/foundation',        // URL path to serve from
+  watch: true,                 // Watch for source changes
+  buildOnStart: true           // Build when dev server starts
 })
 ```
 
@@ -194,16 +253,28 @@ dist/
 
 ### Vite Plugins
 
+**Foundation plugins** (`@uniweb/build`):
+
 | Plugin | Description |
 |--------|-------------|
 | `foundationPlugin(options)` | Combined dev + build plugin |
 | `foundationBuildPlugin(options)` | Build-only plugin |
 | `foundationDevPlugin(options)` | Dev-only plugin with HMR |
 
+**Site plugins** (`@uniweb/build/site` and `@uniweb/build/dev`):
+
+| Plugin | Description |
+|--------|-------------|
+| `siteContentPlugin(options)` | Collect and inject site content |
+| `collectSiteContent(sitePath)` | Programmatic content collection |
+| `foundationDevPlugin(options)` | Serve foundation during site dev |
+
 ## Related Packages
 
-- [`uniweb`](https://github.com/uniweb/cli) - CLI for creating Uniweb projects
-- [`@uniweb/runtime`](https://github.com/uniweb/runtime) - Runtime loader for sites
+- [`@uniweb/core`](https://github.com/uniweb/core) - Core classes (Uniweb, Website, Block)
+- [`@uniweb/kit`](https://github.com/uniweb/kit) - Component library for foundations
+- [`@uniweb/runtime`](https://github.com/uniweb/runtime) - Browser runtime for sites
+- [`uniweb`](https://github.com/uniweb/cli) - CLI for creating projects
 
 ## License
 
