@@ -335,21 +335,33 @@ export async function processAdvancedAsset(asset, options = {}) {
  *
  * @param {Object} assetManifest - Asset manifest
  * @param {Object} options - Processing options
+ * @param {Set} [options.hasExplicitPoster] - Set of video paths with explicit poster attributes
+ * @param {Set} [options.hasExplicitPreview] - Set of PDF paths with explicit preview attributes
  * @returns {Promise<Object>} Results with poster/thumbnail mappings
  */
 export async function processAdvancedAssets(assetManifest, options = {}) {
+  const {
+    hasExplicitPoster = new Set(),
+    hasExplicitPreview = new Set(),
+    ...processingOptions
+  } = options
+
   const posterMapping = {}  // video src -> poster url
   const thumbnailMapping = {} // pdf src -> thumbnail url
   const results = {
-    videos: { processed: 0, skipped: 0 },
-    pdfs: { processed: 0, skipped: 0 }
+    videos: { processed: 0, skipped: 0, explicit: 0 },
+    pdfs: { processed: 0, skipped: 0, explicit: 0 }
   }
 
   for (const [originalPath, asset] of Object.entries(assetManifest)) {
-    const ext = extname(asset.resolved || '').toLowerCase()
-
     if (isVideoFile(asset.resolved || '')) {
-      const result = await processAdvancedAsset(asset, options)
+      // Skip auto-generation if explicit poster was provided
+      if (hasExplicitPoster.has(originalPath)) {
+        results.videos.explicit++
+        continue
+      }
+
+      const result = await processAdvancedAsset(asset, processingOptions)
       if (result.processed && result.poster) {
         posterMapping[originalPath] = result.poster
         results.videos.processed++
@@ -357,7 +369,13 @@ export async function processAdvancedAssets(assetManifest, options = {}) {
         results.videos.skipped++
       }
     } else if (isPdfFile(asset.resolved || '')) {
-      const result = await processAdvancedAsset(asset, options)
+      // Skip auto-generation if explicit preview was provided
+      if (hasExplicitPreview.has(originalPath)) {
+        results.pdfs.explicit++
+        continue
+      }
+
+      const result = await processAdvancedAsset(asset, processingOptions)
       if (result.processed && result.thumbnail) {
         thumbnailMapping[originalPath] = {
           url: result.thumbnail,

@@ -12,7 +12,7 @@ export {
   resolveAssetPath,
   walkContentAssets,
   collectSectionAssets,
-  mergeAssetManifests
+  mergeAssetCollections
 } from './assets.js'
 export {
   processAsset,

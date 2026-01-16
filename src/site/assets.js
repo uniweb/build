@@ -106,7 +106,8 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
  * Walk a ProseMirror document and collect all asset references
  *
  * @param {Object} doc - ProseMirror document
- * @param {Function} visitor - Callback for each asset: (node, path) => void
+ * @param {Function} visitor - Callback for each asset: (node, path, attrName) => void
+ *                             attrName is 'src', 'poster', or 'preview'
  * @param {string} [path=''] - Current path in document (for debugging)
  */
 export function walkContentAssets(doc, visitor, path = '') {
@@ -114,7 +115,15 @@ export function walkContentAssets(doc, visitor, path = '') {
 
   // Check for image nodes
   if (doc.type === 'image' && doc.attrs?.src) {
-    visitor(doc, path)
+    visitor(doc, path, 'src')
+
+    // Also collect explicit poster/preview attributes as assets
+    if (doc.attrs.poster && !isExternalUrl(doc.attrs.poster)) {
+      visitor({ type: 'image', attrs: { src: doc.attrs.poster } }, path, 'poster')
+    }
+    if (doc.attrs.preview && !isExternalUrl(doc.attrs.preview)) {
+      visitor({ type: 'image', attrs: { src: doc.attrs.preview } }, path, 'preview')
+    }
   }
 
   // Recurse into content
@@ -128,7 +137,7 @@ export function walkContentAssets(doc, visitor, path = '') {
   if (doc.marks && Array.isArray(doc.marks)) {
     doc.marks.forEach((mark, index) => {
       if (mark.attrs?.src) {
-        visitor(mark, `${path}/marks[${index}]`)
+        visitor(mark, `${path}/marks[${index}]`, 'src')
       }
     })
   }
@@ -140,15 +149,37 @@ export function walkContentAssets(doc, visitor, path = '') {
  * @param {Object} section - Section object with content and params
  * @param {string} markdownPath - Path to the markdown file
  * @param {string} siteRoot - Site root directory
- * @returns {Object} Asset manifest for this section
+ * @returns {Object} Asset collection result
+ *   - assets: Asset manifest mapping original paths to resolved info
+ *   - hasExplicitPoster: Set of video src paths that have explicit poster attributes
+ *   - hasExplicitPreview: Set of PDF src paths that have explicit preview attributes
  */
 export function collectSectionAssets(section, markdownPath, siteRoot) {
   const assets = {}
+  const hasExplicitPoster = new Set()
+  const hasExplicitPreview = new Set()
+
+  // Track current image node's src when we encounter poster/preview
+  let currentImageSrc = null
 
   // Collect from ProseMirror content
   if (section.content) {
-    walkContentAssets(section.content, (node) => {
+    walkContentAssets(section.content, (node, path, attrName) => {
       const result = resolveAssetPath(node.attrs.src, markdownPath, siteRoot)
+
+      if (attrName === 'src') {
+        // Main src attribute - track it for potential poster/preview
+        currentImageSrc = node.attrs.src
+
+        // Check if this image has explicit poster/preview
+        if (node.attrs.poster) {
+          hasExplicitPoster.add(node.attrs.src)
+        }
+        if (node.attrs.preview) {
+          hasExplicitPreview.add(node.attrs.src)
+        }
+      }
+
       if (!result.external && result.resolved) {
         assets[node.attrs.src] = {
           original: node.attrs.src,
@@ -184,16 +215,33 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
     }
   }
 
-  return assets
+  return { assets, hasExplicitPoster, hasExplicitPreview }
 }
 
 /**
- * Merge multiple asset manifests
+ * Merge multiple asset collection results
+ *
+ * @param {...Object} collections - Asset collection results from collectSectionAssets
+ * @returns {Object} Merged collection with combined assets and sets
  */
-export function mergeAssetManifests(...manifests) {
-  const merged = {}
-  for (const manifest of manifests) {
-    Object.assign(merged, manifest)
+export function mergeAssetCollections(...collections) {
+  const merged = {
+    assets: {},
+    hasExplicitPoster: new Set(),
+    hasExplicitPreview: new Set()
   }
+
+  for (const collection of collections) {
+    // Handle both old format (plain object) and new format (with sets)
+    if (collection.assets) {
+      Object.assign(merged.assets, collection.assets)
+      collection.hasExplicitPoster?.forEach(p => merged.hasExplicitPoster.add(p))
+      collection.hasExplicitPreview?.forEach(p => merged.hasExplicitPreview.add(p))
+    } else {
+      // Legacy: plain asset manifest
+      Object.assign(merged.assets, collection)
+    }
+  }
+
   return merged
 }

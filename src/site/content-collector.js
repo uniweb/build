@@ -25,7 +25,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, parse } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { collectSectionAssets, mergeAssetManifests } from './assets.js'
+import { collectSectionAssets, mergeAssetCollections } from './assets.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -149,9 +149,9 @@ async function processMarkdownFile(filePath, id, siteRoot) {
   }
 
   // Collect assets referenced in this section
-  const assets = collectSectionAssets(section, filePath, siteRoot)
+  const assetCollection = collectSectionAssets(section, filePath, siteRoot)
 
-  return { section, assets }
+  return { section, assetCollection }
 }
 
 /**
@@ -207,7 +207,11 @@ async function processPage(pagePath, pageName, siteRoot) {
 
   // Process sections and collect assets
   const sections = []
-  let pageAssets = {}
+  let pageAssetCollection = {
+    assets: {},
+    hasExplicitPoster: new Set(),
+    hasExplicitPreview: new Set()
+  }
   let lastModified = null
 
   for (const file of mdFiles) {
@@ -215,9 +219,9 @@ async function processPage(pagePath, pageName, siteRoot) {
     const { prefix } = parseNumericPrefix(name)
     const id = prefix || name
 
-    const { section, assets } = await processMarkdownFile(join(pagePath, file), id, siteRoot)
+    const { section, assetCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot)
     sections.push(section)
-    pageAssets = mergeAssetManifests(pageAssets, assets)
+    pageAssetCollection = mergeAssetCollections(pageAssetCollection, assetCollection)
 
     // Track last modified time for sitemap
     const fileStat = await stat(join(pagePath, file))
@@ -255,7 +259,7 @@ async function processPage(pagePath, pageName, siteRoot) {
       },
       sections: hierarchicalSections
     },
-    assets: pageAssets
+    assetCollection: pageAssetCollection
   }
 }
 
@@ -285,7 +289,11 @@ export async function collectSiteContent(sitePath) {
   // Get page directories
   const entries = await readdir(pagesPath)
   const pages = []
-  let siteAssets = {}
+  let siteAssetCollection = {
+    assets: {},
+    hasExplicitPoster: new Set(),
+    hasExplicitPreview: new Set()
+  }
   let header = null
   let footer = null
 
@@ -298,8 +306,8 @@ export async function collectSiteContent(sitePath) {
     const result = await processPage(entryPath, entry, sitePath)
     if (!result) continue
 
-    const { page, assets } = result
-    siteAssets = mergeAssetManifests(siteAssets, assets)
+    const { page, assetCollection } = result
+    siteAssetCollection = mergeAssetCollections(siteAssetCollection, assetCollection)
 
     // Handle special pages
     if (entry === '@header' || page.route === '/@header') {
@@ -315,9 +323,10 @@ export async function collectSiteContent(sitePath) {
   pages.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
 
   // Log asset summary
-  const assetCount = Object.keys(siteAssets).length
+  const assetCount = Object.keys(siteAssetCollection.assets).length
+  const explicitCount = siteAssetCollection.hasExplicitPoster.size + siteAssetCollection.hasExplicitPreview.size
   if (assetCount > 0) {
-    console.log(`[content-collector] Found ${assetCount} asset references`)
+    console.log(`[content-collector] Found ${assetCount} asset references${explicitCount > 0 ? ` (${explicitCount} with explicit poster/preview)` : ''}`)
   }
 
   return {
@@ -326,7 +335,9 @@ export async function collectSiteContent(sitePath) {
     pages,
     header,
     footer,
-    assets: siteAssets
+    assets: siteAssetCollection.assets,
+    hasExplicitPoster: siteAssetCollection.hasExplicitPoster,
+    hasExplicitPreview: siteAssetCollection.hasExplicitPreview
   }
 }
 

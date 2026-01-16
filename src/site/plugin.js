@@ -398,7 +398,10 @@ export function siteContentPlugin(options = {}) {
                 assetsSubdir: assetsOptions.outputDir,
                 videoPosters: assetsOptions.videoPosters,
                 pdfThumbnails: assetsOptions.pdfThumbnails,
-                quality: assetsOptions.quality
+                quality: assetsOptions.quality,
+                // Pass explicit poster/preview sets to skip auto-generation
+                hasExplicitPoster: siteContent.hasExplicitPoster || new Set(),
+                hasExplicitPreview: siteContent.hasExplicitPreview || new Set()
               }
             )
             advancedResults = advResults
@@ -407,8 +410,14 @@ export function siteContentPlugin(options = {}) {
             if (advResults.videos.processed > 0) {
               console.log(`[site-content] Extracted ${advResults.videos.processed} video posters`)
             }
+            if (advResults.videos.explicit > 0) {
+              console.log(`[site-content] Skipped ${advResults.videos.explicit} videos with explicit posters`)
+            }
             if (advResults.pdfs.processed > 0) {
               console.log(`[site-content] Generated ${advResults.pdfs.processed} PDF thumbnails`)
+            }
+            if (advResults.pdfs.explicit > 0) {
+              console.log(`[site-content] Skipped ${advResults.pdfs.explicit} PDFs with explicit previews`)
             }
 
             // Merge poster and thumbnail mappings into the path mapping
@@ -441,6 +450,10 @@ export function siteContentPlugin(options = {}) {
         finalContent = { ...siteContent }
         delete finalContent.assets
       }
+
+      // Clean up internal properties that shouldn't be in the output (Sets don't serialize)
+      delete finalContent.hasExplicitPoster
+      delete finalContent.hasExplicitPreview
 
       // Emit content as JSON file in production build
       this.emitFile({
