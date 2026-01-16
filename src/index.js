@@ -35,5 +35,10 @@ export {
   foundationDevPlugin,
 } from './vite-foundation-plugin.js'
 
+// SSG Prerendering
+export {
+  prerenderSite,
+} from './prerender.js'
+
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'
