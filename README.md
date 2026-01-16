@@ -166,10 +166,25 @@ The plugin automatically discovers and processes assets referenced in your conte
 **Video poster extraction** (requires `ffmpeg` on system):
 - MP4, WebM, MOV, AVI, MKV → Poster frame extracted at 1 second
 - Poster images converted to WebP and added to `_assetMeta.posters`
+- Skipped if an explicit `poster` attribute is provided in markdown
 
 **PDF thumbnail generation** (requires `pdf-lib` package):
 - PDF files → Placeholder thumbnail with page count
 - Thumbnails added to `_assetMeta.thumbnails`
+- Skipped if an explicit `preview` attribute is provided in markdown
+
+**Explicit poster/preview images:**
+
+When you provide explicit `poster` or `preview` attributes in your markdown, those images are collected and optimized alongside other assets:
+
+```markdown
+![Video](./intro.mp4){role=video poster=./custom-poster.jpg}
+![PDF](./guide.pdf){role=pdf preview=./guide-preview.png}
+```
+
+- The explicit images (`./custom-poster.jpg`, `./guide-preview.png`) are processed and optimized
+- Auto-generation via ffmpeg/pdf-lib is skipped for these files
+- This gives you full control over preview images while still benefiting from optimization
 
 **Build output:**
 ```
