@@ -183,6 +183,8 @@ async function processPage(pagePath, pageName) {
 
   // Process sections
   const sections = []
+  let lastModified = null
+
   for (const file of mdFiles) {
     const { name } = parse(file)
     const { prefix } = parseNumericPrefix(name)
@@ -190,6 +192,12 @@ async function processPage(pagePath, pageName) {
 
     const section = await processMarkdownFile(join(pagePath, file), id)
     sections.push(section)
+
+    // Track last modified time for sitemap
+    const fileStat = await stat(join(pagePath, file))
+    if (!lastModified || fileStat.mtime > lastModified) {
+      lastModified = fileStat.mtime
+    }
   }
 
   // Build hierarchy
@@ -203,11 +211,21 @@ async function processPage(pagePath, pageName) {
     route = '/' + pageName
   }
 
+  // Extract SEO config from page
+  const { seo = {}, ...restConfig } = pageConfig
+
   return {
     route,
     title: pageConfig.title || pageName,
     description: pageConfig.description || '',
     order: pageConfig.order,
+    lastModified: lastModified?.toISOString(),
+    seo: {
+      noindex: seo.noindex || false,
+      image: seo.image || null,
+      changefreq: seo.changefreq || null,
+      priority: seo.priority || null
+    },
     sections: hierarchicalSections
   }
 }

@@ -92,8 +92,49 @@ siteContentPlugin({
   pagesDir: 'pages',           // Pages subdirectory name
   inject: true,                // Inject content into HTML
   filename: 'site-content.json', // Output filename
-  watch: true                  // Watch for changes (dev mode)
+  watch: true,                 // Watch for changes (dev mode)
+  seo: {                       // SEO configuration (optional)
+    baseUrl: 'https://example.com',
+    defaultImage: '/og-image.png',
+    twitterHandle: '@example',
+    locales: [
+      { code: 'en', default: true },
+      { code: 'es' }
+    ],
+    robots: {
+      disallow: ['/admin', '/api'],
+      crawlDelay: 1
+    }
+  }
 })
+```
+
+#### SEO Features
+
+When `seo.baseUrl` is provided, the plugin generates:
+
+**sitemap.xml** - Auto-generated from collected pages with:
+- Last modified dates from file timestamps
+- Per-page `changefreq` and `priority` from page frontmatter
+- Hreflang entries for multi-locale sites
+
+**robots.txt** - Generated with sitemap reference and optional rules
+
+**Meta Tags** - Injected into HTML `<head>`:
+- Open Graph tags (`og:title`, `og:description`, `og:image`, etc.)
+- Twitter Card tags (`twitter:card`, `twitter:site`, etc.)
+- Canonical URL
+- Hreflang links for multi-locale sites
+
+**Page-level SEO** - Configure in `page.yml`:
+```yaml
+title: About Us
+description: Learn about our company
+seo:
+  noindex: false          # Exclude from sitemap
+  image: /about-og.png    # Page-specific OG image
+  changefreq: monthly     # Sitemap changefreq
+  priority: 0.8           # Sitemap priority
 ```
 
 #### Foundation Dev Plugin Options
