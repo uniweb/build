@@ -40,5 +40,11 @@ export {
   prerenderSite,
 } from './prerender.js'
 
+// Documentation generation
+export {
+  generateDocs,
+  generateDocsFromSchema,
+} from './docs.js'
+
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'
