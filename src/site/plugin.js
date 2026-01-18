@@ -35,6 +35,7 @@ import { watch } from 'node:fs'
 import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
+import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
 
 /**
  * Generate sitemap.xml content
@@ -225,6 +226,9 @@ function escapeHtml(str) {
  * @param {string} [options.assets.outputDir='assets'] - Output subdirectory for processed assets
  * @param {boolean} [options.assets.videoPosters=true] - Extract poster frames from videos (requires ffmpeg)
  * @param {boolean} [options.assets.pdfThumbnails=true] - Generate thumbnails for PDFs (requires pdf-lib)
+ * @param {Object} [options.search] - Search index configuration
+ * @param {boolean} [options.search.enabled=true] - Generate search index (uses site.yml config by default)
+ * @param {string} [options.search.filename='search-index.json'] - Search index filename
  */
 export function siteContentPlugin(options = {}) {
   const {
@@ -235,7 +239,8 @@ export function siteContentPlugin(options = {}) {
     filename = 'site-content.json',
     watch: shouldWatch = true,
     seo = {},
-    assets: assetsConfig = {}
+    assets: assetsConfig = {},
+    search: searchPluginConfig = {}
   } = options
 
   // Extract asset processing options
@@ -338,6 +343,25 @@ export function siteContentPlugin(options = {}) {
           res.setHeader('Content-Type', 'text/plain')
           res.end(generateRobotsTxt(seoOptions.baseUrl, seoOptions.robots))
           return
+        }
+
+        // Serve search-index.json in dev mode
+        if (req.url === '/search-index.json' && siteContent) {
+          const searchEnabled = searchPluginConfig.enabled !== false && isSearchEnabled(siteContent)
+          if (searchEnabled) {
+            const searchConfig = siteContent.config?.search || {}
+            const defaultLocale = siteContent.config?.defaultLanguage || 'en'
+            const activeLocale = siteContent.config?.activeLocale || defaultLocale
+
+            const searchIndex = generateSearchIndex(siteContent, {
+              locale: activeLocale,
+              search: searchConfig
+            })
+
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(searchIndex, null, 2))
+            return
+          }
         }
 
         next()
@@ -481,6 +505,29 @@ export function siteContentPlugin(options = {}) {
           source: robotsTxt
         })
         console.log('[site-content] Generated robots.txt')
+      }
+
+      // Generate search index if enabled
+      const searchEnabled = searchPluginConfig.enabled !== false && isSearchEnabled(finalContent)
+      if (searchEnabled) {
+        const searchConfig = finalContent.config?.search || {}
+        const defaultLocale = finalContent.config?.defaultLanguage || 'en'
+        const activeLocale = finalContent.config?.activeLocale || defaultLocale
+
+        // Generate search index for current locale
+        const searchIndex = generateSearchIndex(finalContent, {
+          locale: activeLocale,
+          search: searchConfig
+        })
+
+        const searchFilename = getSearchIndexFilename(activeLocale, defaultLocale)
+        this.emitFile({
+          type: 'asset',
+          fileName: searchFilename,
+          source: JSON.stringify(searchIndex, null, 2)
+        })
+
+        console.log(`[site-content] Generated ${searchFilename} (${searchIndex.count} entries)`)
       }
     },
 

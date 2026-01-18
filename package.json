@@ -12,7 +12,8 @@
     "./site": "./src/site/index.js",
     "./dev": "./src/dev/index.js",
     "./prerender": "./src/prerender.js",
-    "./i18n": "./src/i18n/index.js"
+    "./i18n": "./src/i18n/index.js",
+    "./search": "./src/search/index.js"
   },
   "files": [
     "src"
