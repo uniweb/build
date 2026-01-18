@@ -23,12 +23,57 @@ export function mergeTranslations(siteContent, translations, options = {}) {
   for (const page of translated.pages || []) {
     const pageRoute = page.route || '/'
 
+    // Translate page metadata
+    translatePageMeta(page, pageRoute, translations, fallbackToSource)
+
+    // Translate section content
     for (const section of page.sections || []) {
       translateSection(section, pageRoute, translations, fallbackToSource)
     }
   }
 
   return translated
+}
+
+/**
+ * Translate page metadata (title, description, keywords, etc.)
+ */
+function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
+  const context = { page: pageRoute, section: '_meta' }
+
+  // Translate title
+  if (page.title && typeof page.title === 'string') {
+    page.title = lookupTranslation(page.title, context, translations, fallbackToSource)
+  }
+
+  // Translate description
+  if (page.description && typeof page.description === 'string') {
+    page.description = lookupTranslation(page.description, context, translations, fallbackToSource)
+  }
+
+  // Translate SEO fields
+  if (page.seo) {
+    if (page.seo.ogTitle && typeof page.seo.ogTitle === 'string') {
+      page.seo.ogTitle = lookupTranslation(page.seo.ogTitle, context, translations, fallbackToSource)
+    }
+    if (page.seo.ogDescription && typeof page.seo.ogDescription === 'string') {
+      page.seo.ogDescription = lookupTranslation(page.seo.ogDescription, context, translations, fallbackToSource)
+    }
+  }
+
+  // Translate keywords
+  if (page.keywords) {
+    if (Array.isArray(page.keywords)) {
+      page.keywords = page.keywords.map(keyword => {
+        if (keyword && typeof keyword === 'string') {
+          return lookupTranslation(keyword, context, translations, fallbackToSource)
+        }
+        return keyword
+      })
+    } else if (typeof page.keywords === 'string') {
+      page.keywords = lookupTranslation(page.keywords, context, translations, fallbackToSource)
+    }
+  }
 }
 
 /**

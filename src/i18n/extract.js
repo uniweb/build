@@ -18,6 +18,10 @@ export function extractTranslatableContent(siteContent) {
   for (const page of siteContent.pages || []) {
     const pageRoute = page.route || '/'
 
+    // Extract page metadata (title, description, keywords from page.yml)
+    extractFromPageMeta(page, pageRoute, units)
+
+    // Extract section content
     for (const section of page.sections || []) {
       extractFromSection(section, pageRoute, units)
     }
@@ -28,6 +32,52 @@ export function extractTranslatableContent(siteContent) {
     defaultLocale: siteContent.config?.defaultLanguage || 'en',
     extracted: new Date().toISOString(),
     units
+  }
+}
+
+/**
+ * Extract translatable page metadata
+ * @param {Object} page - Page data
+ * @param {string} pageRoute - Page route
+ * @param {Object} units - Units accumulator
+ */
+function extractFromPageMeta(page, pageRoute, units) {
+  // Use special section identifier for page-level metadata
+  const context = { page: pageRoute, section: '_meta' }
+
+  // Page title
+  if (page.title && typeof page.title === 'string') {
+    addUnit(units, page.title, 'page.title', context)
+  }
+
+  // Page description
+  if (page.description && typeof page.description === 'string') {
+    addUnit(units, page.description, 'page.description', context)
+  }
+
+  // SEO-specific fields (if present)
+  if (page.seo) {
+    // og:title, og:description might be different from page title/description
+    if (page.seo.ogTitle && typeof page.seo.ogTitle === 'string') {
+      addUnit(units, page.seo.ogTitle, 'page.seo.ogTitle', context)
+    }
+    if (page.seo.ogDescription && typeof page.seo.ogDescription === 'string') {
+      addUnit(units, page.seo.ogDescription, 'page.seo.ogDescription', context)
+    }
+  }
+
+  // Keywords (if array, join for translation context)
+  if (page.keywords) {
+    if (Array.isArray(page.keywords)) {
+      // Each keyword as separate unit for flexibility
+      page.keywords.forEach((keyword, index) => {
+        if (keyword && typeof keyword === 'string') {
+          addUnit(units, keyword, `page.keyword.${index}`, context)
+        }
+      })
+    } else if (typeof page.keywords === 'string') {
+      addUnit(units, page.keywords, 'page.keywords', context)
+    }
   }
 }
 
