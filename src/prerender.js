@@ -7,7 +7,7 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
@@ -25,7 +25,9 @@ async function loadDependencies(siteDir) {
 
   // Create a require function that resolves from the site's perspective
   // This ensures we get the same React instance that the foundation uses
-  const siteRequire = createRequire(join(siteDir, 'package.json'))
+  // Note: createRequire requires an absolute path
+  const absoluteSiteDir = resolve(siteDir)
+  const siteRequire = createRequire(join(absoluteSiteDir, 'package.json'))
 
   try {
     // Try to load React from site's node_modules
