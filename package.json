@@ -38,6 +38,12 @@
   "engines": {
     "node": ">=20.19"
   },
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
   "dependencies": {
     "js-yaml": "^4.1.0",
     "sharp": "^0.33.2"
