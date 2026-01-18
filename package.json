@@ -11,7 +11,8 @@
     "./vite-plugin": "./src/vite-foundation-plugin.js",
     "./site": "./src/site/index.js",
     "./dev": "./src/dev/index.js",
-    "./prerender": "./src/prerender.js"
+    "./prerender": "./src/prerender.js",
+    "./i18n": "./src/i18n/index.js"
   },
   "files": [
     "src"
