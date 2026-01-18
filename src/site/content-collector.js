@@ -414,6 +414,8 @@ export async function collectSiteContent(sitePath) {
   }
   let header = null
   let footer = null
+  let left = null
+  let right = null
 
   for (const entry of entries) {
     const entryPath = join(pagesPath, entry)
@@ -427,11 +429,15 @@ export async function collectSiteContent(sitePath) {
     const { page, assetCollection } = result
     siteAssetCollection = mergeAssetCollections(siteAssetCollection, assetCollection)
 
-    // Handle special pages
+    // Handle special pages (layout areas)
     if (entry === '@header' || page.route === '/@header') {
       header = page
     } else if (entry === '@footer' || page.route === '/@footer') {
       footer = page
+    } else if (entry === '@left' || page.route === '/@left') {
+      left = page
+    } else if (entry === '@right' || page.route === '/@right') {
+      right = page
     } else {
       pages.push(page)
     }
@@ -453,6 +459,8 @@ export async function collectSiteContent(sitePath) {
     pages,
     header,
     footer,
+    left,
+    right,
     assets: siteAssetCollection.assets,
     hasExplicitPoster: siteAssetCollection.hasExplicitPoster,
     hasExplicitPreview: siteAssetCollection.hasExplicitPreview
