@@ -159,22 +159,93 @@ export async function prerenderSite(siteDir, options = {}) {
 }
 
 /**
- * Minimal page renderer for SSG
- * Renders blocks using foundation components
+ * Render an array of blocks
+ */
+function BlocksRenderer({ blocks, foundation }) {
+  if (!blocks || blocks.length === 0) return null
+
+  return blocks.map((block, index) =>
+    React.createElement(BlockRenderer, {
+      key: block.id || index,
+      block,
+      foundation
+    })
+  )
+}
+
+/**
+ * Default layout - renders header, body, footer in sequence
+ */
+function DefaultLayout({ header, body, footer }) {
+  return React.createElement(React.Fragment, null, header, body, footer)
+}
+
+/**
+ * Layout component for SSG
+ * Supports foundation-provided custom Layout via site.Layout
+ */
+function Layout({ page, website, foundation }) {
+  // Check if foundation provides a custom Layout
+  const RemoteLayout = foundation.site?.Layout || null
+
+  // Get block groups from page
+  const headerBlocks = page.getHeaderBlocks()
+  const bodyBlocks = page.getBodyBlocks()
+  const footerBlocks = page.getFooterBlocks()
+  const leftBlocks = page.getLeftBlocks()
+  const rightBlocks = page.getRightBlocks()
+
+  // Pre-render each area
+  const headerElement = headerBlocks
+    ? React.createElement(BlocksRenderer, { blocks: headerBlocks, foundation })
+    : null
+  const bodyElement = bodyBlocks
+    ? React.createElement(BlocksRenderer, { blocks: bodyBlocks, foundation })
+    : null
+  const footerElement = footerBlocks
+    ? React.createElement(BlocksRenderer, { blocks: footerBlocks, foundation })
+    : null
+  const leftElement = leftBlocks
+    ? React.createElement(BlocksRenderer, { blocks: leftBlocks, foundation })
+    : null
+  const rightElement = rightBlocks
+    ? React.createElement(BlocksRenderer, { blocks: rightBlocks, foundation })
+    : null
+
+  // Use foundation's custom Layout if provided
+  if (RemoteLayout) {
+    return React.createElement(RemoteLayout, {
+      page,
+      website,
+      header: headerElement,
+      body: bodyElement,
+      footer: footerElement,
+      left: leftElement,
+      right: rightElement,
+      leftPanel: leftElement,
+      rightPanel: rightElement
+    })
+  }
+
+  // Default layout
+  return React.createElement(DefaultLayout, {
+    header: headerElement,
+    body: bodyElement,
+    footer: footerElement
+  })
+}
+
+/**
+ * Page renderer for SSG
+ * Uses Layout component for proper orchestration of layout areas
  */
 function PageRenderer({ page, foundation }) {
-  const blocks = page.getPageBlocks()
+  const website = globalThis.uniweb?.activeWebsite
 
   return React.createElement(
     'main',
     null,
-    blocks.map((block, index) =>
-      React.createElement(BlockRenderer, {
-        key: block.id || index,
-        block,
-        foundation
-      })
-    )
+    React.createElement(Layout, { page, website, foundation })
   )
 }
 
