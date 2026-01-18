@@ -189,6 +189,91 @@ function buildSectionHierarchy(sections) {
 }
 
 /**
+ * Process explicit sections array from page.yml
+ * Supports nested structure for subsections:
+ *   sections:
+ *     - hero
+ *     - features:
+ *         - logocloud
+ *         - stats
+ *     - pricing
+ *
+ * @param {Array} sectionsConfig - Sections array from page.yml
+ * @param {string} pagePath - Path to page directory
+ * @param {string} siteRoot - Site root for asset resolution
+ * @param {string} parentId - Parent section ID for building hierarchy
+ * @returns {Object} { sections, assetCollection, lastModified }
+ */
+async function processExplicitSections(sectionsConfig, pagePath, siteRoot, parentId = '') {
+  const sections = []
+  let assetCollection = {
+    assets: {},
+    hasExplicitPoster: new Set(),
+    hasExplicitPreview: new Set()
+  }
+  let lastModified = null
+
+  let index = 1
+  for (const item of sectionsConfig) {
+    let sectionName
+    let subsections = null
+
+    if (typeof item === 'string') {
+      // Simple section: "hero"
+      sectionName = item
+    } else if (typeof item === 'object' && item !== null) {
+      // Section with subsections: { features: [logocloud, stats] }
+      const keys = Object.keys(item)
+      if (keys.length === 1) {
+        sectionName = keys[0]
+        subsections = item[sectionName]
+      } else {
+        console.warn(`[content-collector] Invalid section entry:`, item)
+        continue
+      }
+    } else {
+      continue
+    }
+
+    // Build section ID
+    const id = parentId ? `${parentId}.${index}` : String(index)
+
+    // Look for the markdown file
+    const filePath = join(pagePath, `${sectionName}.md`)
+    if (!existsSync(filePath)) {
+      console.warn(`[content-collector] Section file not found: ${sectionName}.md`)
+      index++
+      continue
+    }
+
+    // Process the section
+    const { section, assetCollection: sectionAssets } = await processMarkdownFile(filePath, id, siteRoot)
+    assetCollection = mergeAssetCollections(assetCollection, sectionAssets)
+
+    // Track last modified
+    const fileStat = await stat(filePath)
+    if (!lastModified || fileStat.mtime > lastModified) {
+      lastModified = fileStat.mtime
+    }
+
+    // Process subsections recursively
+    if (Array.isArray(subsections) && subsections.length > 0) {
+      const subResult = await processExplicitSections(subsections, pagePath, siteRoot, id)
+      section.subsections = subResult.sections
+      assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+      if (subResult.lastModified && (!lastModified || subResult.lastModified > lastModified)) {
+        lastModified = subResult.lastModified
+      }
+    }
+
+    sections.push(section)
+    index++
+  }
+
+  return { sections, assetCollection, lastModified }
+}
+
+/**
  * Process a page directory
  *
  * @param {string} pagePath - Path to page directory
@@ -201,12 +286,7 @@ async function processPage(pagePath, pageName, siteRoot) {
 
   if (pageConfig.hidden) return null
 
-  // Get markdown files
-  const files = await readdir(pagePath)
-  const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
-
-  // Process sections and collect assets
-  const sections = []
+  let hierarchicalSections = []
   let pageAssetCollection = {
     assets: {},
     hasExplicitPoster: new Set(),
@@ -214,24 +294,45 @@ async function processPage(pagePath, pageName, siteRoot) {
   }
   let lastModified = null
 
-  for (const file of mdFiles) {
-    const { name } = parse(file)
-    const { prefix } = parseNumericPrefix(name)
-    const id = prefix || name
+  // Check for explicit sections configuration
+  const { sections: sectionsConfig } = pageConfig
 
-    const { section, assetCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot)
-    sections.push(section)
-    pageAssetCollection = mergeAssetCollections(pageAssetCollection, assetCollection)
+  if (sectionsConfig === undefined || sectionsConfig === '*') {
+    // Default behavior: discover all .md files, sort by numeric prefix
+    const files = await readdir(pagePath)
+    const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
 
-    // Track last modified time for sitemap
-    const fileStat = await stat(join(pagePath, file))
-    if (!lastModified || fileStat.mtime > lastModified) {
-      lastModified = fileStat.mtime
+    const sections = []
+    for (const file of mdFiles) {
+      const { name } = parse(file)
+      const { prefix } = parseNumericPrefix(name)
+      const id = prefix || name
+
+      const { section, assetCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot)
+      sections.push(section)
+      pageAssetCollection = mergeAssetCollections(pageAssetCollection, assetCollection)
+
+      // Track last modified time for sitemap
+      const fileStat = await stat(join(pagePath, file))
+      if (!lastModified || fileStat.mtime > lastModified) {
+        lastModified = fileStat.mtime
+      }
     }
-  }
 
-  // Build hierarchy
-  const hierarchicalSections = buildSectionHierarchy(sections)
+    // Build hierarchy from dot notation
+    hierarchicalSections = buildSectionHierarchy(sections)
+
+  } else if (Array.isArray(sectionsConfig) && sectionsConfig.length > 0) {
+    // Explicit sections array
+    const result = await processExplicitSections(sectionsConfig, pagePath, siteRoot)
+    hierarchicalSections = result.sections
+    pageAssetCollection = result.assetCollection
+    lastModified = result.lastModified
+
+  } else {
+    // Empty sections (null, empty array, or invalid) = pure route with no content
+    // hierarchicalSections stays empty, lastModified stays null
+  }
 
   // Determine route
   let route = '/' + pageName

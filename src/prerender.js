@@ -9,25 +9,44 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
 
 // Lazily loaded dependencies (ESM with React)
 let React, renderToString, createUniweb
 
 /**
- * Load dependencies dynamically
- * These are ESM modules that may not be available at import time
+ * Load dependencies dynamically from the site's context
+ * This ensures we use the same React instance as the foundation
+ *
+ * @param {string} siteDir - Path to the site directory
  */
-async function loadDependencies() {
+async function loadDependencies(siteDir) {
   if (React) return // Already loaded
 
-  const [reactMod, serverMod, coreMod] = await Promise.all([
-    import('react'),
-    import('react-dom/server'),
-    import('@uniweb/core')
-  ])
+  // Create a require function that resolves from the site's perspective
+  // This ensures we get the same React instance that the foundation uses
+  const siteRequire = createRequire(join(siteDir, 'package.json'))
 
-  React = reactMod.default || reactMod
-  renderToString = serverMod.renderToString
+  try {
+    // Try to load React from site's node_modules
+    const reactMod = siteRequire('react')
+    const serverMod = siteRequire('react-dom/server')
+
+    React = reactMod.default || reactMod
+    renderToString = serverMod.renderToString
+  } catch {
+    // Fallback to dynamic import if require fails
+    const [reactMod, serverMod] = await Promise.all([
+      import('react'),
+      import('react-dom/server')
+    ])
+
+    React = reactMod.default || reactMod
+    renderToString = serverMod.renderToString
+  }
+
+  // @uniweb/core can be imported normally
+  const coreMod = await import('@uniweb/core')
   createUniweb = coreMod.createUniweb
 }
 
@@ -53,9 +72,9 @@ export async function prerenderSite(siteDir, options = {}) {
     throw new Error(`Site must be built first. No dist directory found at: ${distDir}`)
   }
 
-  // Load dependencies
+  // Load dependencies from site's context (ensures same React instance as foundation)
   onProgress('Loading dependencies...')
-  await loadDependencies()
+  await loadDependencies(siteDir)
 
   // Load site content
   onProgress('Loading site content...')
