@@ -15,6 +15,7 @@ import { computeHash, normalizeText } from './hash.js'
 import { extractTranslatableContent } from './extract.js'
 import { syncManifests, formatSyncReport } from './sync.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
+import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
 
 export {
   // Hash utilities
@@ -219,14 +220,16 @@ export async function getTranslationStatus(siteRoot, options = {}) {
  * Build translated site content for all locales
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Options
- * @returns {Object} Map of locale to output path
+ * @param {boolean} [options.generateSearchIndex=true] - Generate search indexes for each locale
+ * @returns {Object} Map of locale to output paths
  */
 export async function buildLocalizedContent(siteRoot, options = {}) {
   const {
     localesDir = DEFAULTS.localesDir,
     locales = [],
     outputDir = join(siteRoot, 'dist'),
-    fallbackToSource = true
+    fallbackToSource = true,
+    generateSearchIndexes = true
   } = options
 
   const localesPath = join(siteRoot, localesDir)
@@ -253,16 +256,33 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
       fallbackToSource
     })
 
+    // Mark the active locale in the translated content
+    translated.config = { ...translated.config, activeLocale: locale }
+
     // Write to locale subdirectory
     const localeOutputDir = join(outputDir, locale)
     if (!existsSync(localeOutputDir)) {
       await mkdir(localeOutputDir, { recursive: true })
     }
 
-    const outputPath = join(localeOutputDir, 'site-content.json')
-    await writeFile(outputPath, JSON.stringify(translated, null, 2))
+    const contentOutputPath = join(localeOutputDir, 'site-content.json')
+    await writeFile(contentOutputPath, JSON.stringify(translated, null, 2))
 
-    outputs[locale] = outputPath
+    outputs[locale] = { content: contentOutputPath }
+
+    // Generate search index for this locale if search is enabled
+    if (generateSearchIndexes && isSearchEnabled(translated)) {
+      const searchConfig = translated.config?.search || {}
+      const searchIndex = generateSearchIndex(translated, {
+        locale,
+        search: searchConfig
+      })
+
+      const searchOutputPath = join(localeOutputDir, 'search-index.json')
+      await writeFile(searchOutputPath, JSON.stringify(searchIndex, null, 2))
+
+      outputs[locale].searchIndex = searchOutputPath
+    }
   }
 
   return outputs

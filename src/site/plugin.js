@@ -345,13 +345,16 @@ export function siteContentPlugin(options = {}) {
           return
         }
 
-        // Serve search-index.json in dev mode
-        if (req.url === '/search-index.json' && siteContent) {
+        // Serve search-index.json in dev mode (supports locale prefixes)
+        const searchIndexMatch = req.url.match(/^(?:\/([a-z]{2}))?\/search-index\.json$/)
+        if (searchIndexMatch && siteContent) {
           const searchEnabled = searchPluginConfig.enabled !== false && isSearchEnabled(siteContent)
           if (searchEnabled) {
             const searchConfig = siteContent.config?.search || {}
             const defaultLocale = siteContent.config?.defaultLanguage || 'en'
-            const activeLocale = siteContent.config?.activeLocale || defaultLocale
+            // Use requested locale from URL, fall back to active or default
+            const requestedLocale = searchIndexMatch[1]
+            const activeLocale = requestedLocale || siteContent.config?.activeLocale || defaultLocale
 
             const searchIndex = generateSearchIndex(siteContent, {
               locale: activeLocale,
