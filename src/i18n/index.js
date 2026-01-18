@@ -7,7 +7,7 @@
  *   import { extractManifest, syncManifest, mergeLocale } from '@uniweb/build/i18n'
  */
 
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, readdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join, dirname } from 'path'
 
@@ -26,7 +26,11 @@ export {
   syncManifests,
   formatSyncReport,
   mergeTranslations,
-  generateAllLocales
+  generateAllLocales,
+
+  // Locale resolution
+  getAvailableLocales,
+  resolveLocales
 }
 
 /**
@@ -36,6 +40,63 @@ const DEFAULTS = {
   localesDir: 'locales',
   manifestFile: 'manifest.json',
   memoryFile: '_memory.json'
+}
+
+/**
+ * Reserved files in the locales directory (not locale translation files)
+ */
+const RESERVED_FILES = new Set(['manifest.json', '_memory.json'])
+
+/**
+ * Get available locales by scanning the locales directory for *.json files
+ * @param {string} localesPath - Path to locales directory
+ * @returns {Promise<string[]>} Array of locale codes found
+ */
+async function getAvailableLocales(localesPath) {
+  if (!existsSync(localesPath)) {
+    return []
+  }
+
+  try {
+    const files = await readdir(localesPath)
+    return files
+      .filter(f => f.endsWith('.json') && !RESERVED_FILES.has(f))
+      .map(f => f.replace('.json', ''))
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Resolve locales configuration to actual locale list
+ *
+ * Handles:
+ * - undefined → all available locales (from locales/*.json)
+ * - '*' → explicitly all available locales
+ * - ['es', 'fr'] → only those specific locales
+ *
+ * @param {string[]|string|undefined} configLocales - Locales from config
+ * @param {string} localesPath - Path to locales directory
+ * @returns {Promise<string[]>} Resolved array of locale codes
+ */
+async function resolveLocales(configLocales, localesPath) {
+  // Explicit list of locales
+  if (Array.isArray(configLocales) && configLocales.length > 0) {
+    // Check for '*' in array (e.g., locales: ['*'])
+    if (configLocales.includes('*')) {
+      return getAvailableLocales(localesPath)
+    }
+    return configLocales
+  }
+
+  // String value '*' means all available
+  if (configLocales === '*') {
+    return getAvailableLocales(localesPath)
+  }
+
+  // undefined, null, or empty array → all available
+  return getAvailableLocales(localesPath)
 }
 
 /**
