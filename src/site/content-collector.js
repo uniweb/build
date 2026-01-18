@@ -284,7 +284,9 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
 async function processPage(pagePath, pageName, siteRoot) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
-  if (pageConfig.hidden) return null
+  // Note: We no longer skip hidden pages here - they still exist as valid pages,
+  // they're just filtered from navigation. This allows direct linking to hidden pages.
+  // if (pageConfig.hidden) return null
 
   let hierarchicalSections = []
   let pageAssetCollection = {
@@ -342,16 +344,31 @@ async function processPage(pagePath, pageName, siteRoot) {
     route = '/' + pageName
   }
 
-  // Extract SEO config from page
-  const { seo = {}, ...restConfig } = pageConfig
+  // Extract configuration
+  const { seo = {}, layout = {}, ...restConfig } = pageConfig
 
   return {
     page: {
       route,
       title: pageConfig.title || pageName,
       description: pageConfig.description || '',
+      label: pageConfig.label || null, // Short label for navigation (defaults to title)
       order: pageConfig.order,
       lastModified: lastModified?.toISOString(),
+
+      // Navigation options
+      hidden: pageConfig.hidden || false, // Hide from all navigation
+      hideInHeader: pageConfig.hideInHeader || false, // Hide from header nav
+      hideInFooter: pageConfig.hideInFooter || false, // Hide from footer nav
+
+      // Layout options (per-page overrides)
+      layout: {
+        header: layout.header !== false, // Show header (default true)
+        footer: layout.footer !== false, // Show footer (default true)
+        leftPanel: layout.leftPanel !== false, // Show left panel (default true)
+        rightPanel: layout.rightPanel !== false // Show right panel (default true)
+      },
+
       seo: {
         noindex: seo.noindex || false,
         image: seo.image || null,
