@@ -15,10 +15,30 @@ import {
 } from './schema.js'
 
 /**
+ * Detect site configuration file (for custom Layout, etc.)
+ * Looks for: src/site.js, src/site.jsx, src/site/index.js, src/site/index.jsx
+ */
+function detectSiteConfig(srcDir) {
+  const candidates = [
+    { path: 'site.js', ext: 'js' },
+    { path: 'site.jsx', ext: 'jsx' },
+    { path: 'site/index.js', ext: 'js' },
+    { path: 'site/index.jsx', ext: 'jsx' },
+  ]
+
+  for (const { path, ext } of candidates) {
+    if (existsSync(join(srcDir, path))) {
+      return { path: `./${path.replace(/\/index\.(js|jsx)$/, '')}`, ext }
+    }
+  }
+  return null
+}
+
+/**
  * Generate the entry point source code
  */
 function generateEntrySource(componentNames, runtimeConfig, options = {}) {
-  const { includeCss = true, cssPath = './index.css', componentExtensions = {} } = options
+  const { includeCss = true, cssPath = './index.css', componentExtensions = {}, siteConfig = null } = options
 
   const imports = []
   const exports = []
@@ -26,6 +46,11 @@ function generateEntrySource(componentNames, runtimeConfig, options = {}) {
   // CSS import
   if (includeCss) {
     imports.push(`import '${cssPath}'`)
+  }
+
+  // Site config import (for custom Layout, etc.)
+  if (siteConfig) {
+    imports.push(`import { site } from '${siteConfig.path}'`)
   }
 
   // Component imports (use detected extension or default to .js)
@@ -105,6 +130,11 @@ export function getSchema(name) {
     ? `\n// Named exports for direct imports\nexport { ${componentNames.join(', ')} }`
     : ''
 
+  // Site config export (for custom Layout, etc.)
+  const siteExport = siteConfig
+    ? `\n// Site configuration (Layout, etc.)\nexport { site }`
+    : `\n// No site configuration provided\nexport const site = null`
+
   return `// Auto-generated foundation entry point
 // DO NOT EDIT - This file is regenerated during build
 
@@ -114,6 +144,7 @@ ${componentsObj}
 ${runtimeConfigBlock}
 ${exportFunctions}
 ${namedExports}
+${siteExport}
 `
 }
 
@@ -166,10 +197,14 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   // Check if CSS exists
   const cssExists = existsSync(join(srcDir, 'index.css'))
 
+  // Check for site config (custom Layout, etc.)
+  const siteConfig = detectSiteConfig(srcDir)
+
   // Generate source
   const source = generateEntrySource(componentNames, runtimeConfig, {
     includeCss: cssExists,
     componentExtensions,
+    siteConfig,
   })
 
   // Write to file
@@ -179,11 +214,15 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
 
   console.log(`Generated entry point: ${output}`)
   console.log(`  - ${componentNames.length} components: ${componentNames.join(', ')}`)
+  if (siteConfig) {
+    console.log(`  - Site config found: ${siteConfig.path}`)
+  }
 
   return {
     outputPath: output,
     componentNames,
     runtimeConfig,
+    siteConfig,
   }
 }
 
