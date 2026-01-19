@@ -131,6 +131,7 @@ function virtualEntryPlugin(foundationInfo, isRuntimeMode) {
 
   return {
     name: 'uniweb:virtual-entry',
+    enforce: 'pre',
     resolveId(id) {
       if (id === VIRTUAL_ENTRY_ID) {
         return RESOLVED_VIRTUAL_ENTRY_ID
@@ -292,7 +293,22 @@ export async function defineSiteConfig(options = {}) {
 
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'],
-      exclude: ['virtual:uniweb-site-entry']
+      exclude: ['virtual:uniweb-site-entry'],
+      esbuildOptions: {
+        plugins: [
+          {
+            name: 'virtual-entry-resolver',
+            setup(build) {
+              // Tell esbuild that virtual:uniweb-site-entry is external
+              // This prevents the "could not be resolved" error during dep scanning
+              build.onResolve({ filter: /^virtual:uniweb-site-entry$/ }, () => ({
+                path: 'virtual:uniweb-site-entry',
+                external: true
+              }))
+            }
+          }
+        ]
+      }
     },
 
     ...restOptions
