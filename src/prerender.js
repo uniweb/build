@@ -256,7 +256,7 @@ function PageRenderer({ page, foundation }) {
  */
 function BlockRenderer({ block, foundation }) {
   // Get component from foundation
-  const componentName = block.component
+  const componentName = block.type
   let Component = null
 
   if (typeof foundation.getComponent === 'function') {
