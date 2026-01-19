@@ -92,7 +92,7 @@ function detectFoundationType(foundation, siteRoot) {
  * @param {string} siteRoot - Path to site directory
  * @returns {Object}
  */
-function readSiteConfig(siteRoot) {
+export function readSiteConfig(siteRoot) {
   const configPath = resolve(siteRoot, 'site.yml')
   if (!existsSync(configPath)) {
     return {}
