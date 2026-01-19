@@ -291,7 +291,8 @@ export async function defineSiteConfig(options = {}) {
     },
 
     optimizeDeps: {
-      include: ['react', 'react-dom', 'react-dom/client', 'react-router-dom']
+      include: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'],
+      exclude: ['virtual:uniweb-site-entry']
     },
 
     ...restOptions
