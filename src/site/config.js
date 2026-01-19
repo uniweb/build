@@ -24,10 +24,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import yaml from 'js-yaml'
 
-// Virtual module ID for the site entry
-const VIRTUAL_ENTRY_ID = 'virtual:uniweb-site-entry'
-const RESOLVED_VIRTUAL_ENTRY_ID = '\0' + VIRTUAL_ENTRY_ID
-
 /**
  * Detect foundation type from the foundation config value
  *
@@ -87,61 +83,6 @@ function detectFoundationType(foundation, siteRoot) {
     type: 'npm',
     name,
     path: resolve(siteRoot, 'node_modules', name)
-  }
-}
-
-/**
- * Generate the virtual entry module code based on foundation config
- *
- * @param {{ type: string, url?: string, cssUrl?: string }} foundationInfo
- * @param {boolean} isRuntimeMode
- * @returns {string}
- */
-function generateEntryCode(foundationInfo, isRuntimeMode) {
-  if (isRuntimeMode || foundationInfo.type === 'url') {
-    // Runtime loading - foundation loaded dynamically
-    const url = foundationInfo.url || '/foundation/foundation.js'
-    const cssUrl = foundationInfo.cssUrl || '/foundation/assets/style.css'
-
-    return `
-import { initRuntime } from '@uniweb/runtime'
-
-initRuntime({
-  url: '${url}',
-  cssUrl: '${cssUrl}'
-})
-`
-  }
-
-  // Bundled mode - foundation imported at build time
-  return `
-import { initRuntime } from '@uniweb/runtime'
-import foundation from '#foundation'
-import '#foundation/styles'
-
-initRuntime(foundation)
-`
-}
-
-/**
- * Create the virtual entry plugin
- */
-function virtualEntryPlugin(foundationInfo, isRuntimeMode) {
-  const entryCode = generateEntryCode(foundationInfo, isRuntimeMode)
-
-  return {
-    name: 'uniweb:virtual-entry',
-    enforce: 'pre',
-    resolveId(id) {
-      if (id === VIRTUAL_ENTRY_ID) {
-        return RESOLVED_VIRTUAL_ENTRY_ID
-      }
-    },
-    load(id) {
-      if (id === RESOLVED_VIRTUAL_ENTRY_ID) {
-        return entryCode
-      }
-    }
   }
 }
 
@@ -221,9 +162,6 @@ export async function defineSiteConfig(options = {}) {
 
   // Build the plugins array
   const plugins = [
-    // Virtual entry module
-    virtualEntryPlugin(foundationInfo, isRuntimeMode),
-
     // Standard plugins
     tailwindcss(),
     react(),
@@ -260,19 +198,19 @@ export async function defineSiteConfig(options = {}) {
     alias['#foundation'] = foundationInfo.name
   }
 
-  // Merge with user overrides
-  const resolveConfig = {
-    alias: {
-      ...alias,
-      ...resolveOverrides.alias
-    },
-    ...resolveOverrides
+  // Build foundation config for runtime
+  const foundationConfig = {
+    mode: isRuntimeMode ? 'runtime' : 'bundled',
+    url: foundationInfo.url || '/foundation/foundation.js',
+    cssUrl: foundationInfo.cssUrl || '/foundation/assets/style.css'
   }
-  delete resolveConfig.alias // We'll add it back properly
-  resolveConfig.alias = { ...alias, ...resolveOverrides.alias }
 
   return {
     plugins,
+
+    define: {
+      __FOUNDATION_CONFIG__: JSON.stringify(foundationConfig)
+    },
 
     resolve: {
       alias: {
@@ -292,23 +230,7 @@ export async function defineSiteConfig(options = {}) {
     },
 
     optimizeDeps: {
-      include: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'],
-      exclude: ['virtual:uniweb-site-entry'],
-      esbuildOptions: {
-        plugins: [
-          {
-            name: 'virtual-entry-resolver',
-            setup(build) {
-              // Tell esbuild that virtual:uniweb-site-entry is external
-              // This prevents the "could not be resolved" error during dep scanning
-              build.onResolve({ filter: /^virtual:uniweb-site-entry$/ }, () => ({
-                path: 'virtual:uniweb-site-entry',
-                external: true
-              }))
-            }
-          }
-        ]
-      }
+      include: ['react', 'react-dom', 'react-dom/client', 'react-router-dom']
     },
 
     ...restOptions
