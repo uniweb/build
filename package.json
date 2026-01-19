@@ -10,6 +10,7 @@
     "./generate-entry": "./src/generate-entry.js",
     "./vite-plugin": "./src/vite-foundation-plugin.js",
     "./site": "./src/site/index.js",
+    "./site/config": "./src/site/config.js",
     "./dev": "./src/dev/index.js",
     "./prerender": "./src/prerender.js",
     "./i18n": "./src/i18n/index.js",
@@ -56,7 +57,10 @@
     "vite": "^5.0.0 || ^6.0.0 || ^7.0.0",
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0",
-    "@uniweb/core": "workspace:*"
+    "@uniweb/core": "workspace:*",
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.0.0 || ^5.0.0",
+    "vite-plugin-svgr": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "vite": {
@@ -69,6 +73,15 @@
       "optional": true
     },
     "@uniweb/core": {
+      "optional": true
+    },
+    "@tailwindcss/vite": {
+      "optional": true
+    },
+    "@vitejs/plugin-react": {
+      "optional": true
+    },
+    "vite-plugin-svgr": {
       "optional": true
     }
   }

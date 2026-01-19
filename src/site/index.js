@@ -6,7 +6,8 @@
  * @module @uniweb/build/site
  */
 
-export { siteContentPlugin, default } from './plugin.js'
+export { siteContentPlugin } from './plugin.js'
+export { defineSiteConfig, default } from './config.js'
 export { collectSiteContent } from './content-collector.js'
 export {
   resolveAssetPath,
