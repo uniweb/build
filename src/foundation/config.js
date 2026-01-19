@@ -29,13 +29,16 @@ import { resolve } from 'node:path'
  * Default externals for foundations
  * These are not bundled into the foundation output
  */
+/**
+ * Default externals for foundations
+ * These are provided by the runtime and should not be bundled
+ */
 const DEFAULT_EXTERNALS = [
   'react',
   'react-dom',
   'react/jsx-runtime',
   'react/jsx-dev-runtime',
-  '@uniweb/core',
-  '@uniweb/kit'
+  '@uniweb/core'
 ]
 
 /**
