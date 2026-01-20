@@ -79,9 +79,14 @@ function isMarkdownFile(filename) {
 
 /**
  * Parse numeric prefix from filename (e.g., "1-hero.md" → { prefix: "1", name: "hero" })
+ * Supports:
+ *   - Simple: "1", "2", "3"
+ *   - Decimal ordering: "1.5" (between 1 and 2), "2.5" (between 2 and 3)
+ *   - Hierarchy via comma: "1,1" (child of 1), "1,2" (second child of 1)
+ *   - Mixed: "1.5,1" (child of section 1.5)
  */
 function parseNumericPrefix(filename) {
-  const match = filename.match(/^(\d+(?:\.\d+)*)-?(.*)$/)
+  const match = filename.match(/^(\d+(?:[.,]\d+)*)-?(.*)$/)
   if (match) {
     return { prefix: match[1], name: match[2] || match[1] }
   }
@@ -89,7 +94,9 @@ function parseNumericPrefix(filename) {
 }
 
 /**
- * Compare filenames for sorting by numeric prefix
+ * Compare filenames for sorting by numeric prefix.
+ * Both . and , are treated as separators for sorting purposes.
+ * This ensures correct ordering: 1, 1,1, 1.5, 2, 2,1, etc.
  */
 function compareFilenames(a, b) {
   const { prefix: prefixA } = parseNumericPrefix(parse(a).name)
@@ -99,8 +106,8 @@ function compareFilenames(a, b) {
   if (!prefixA) return 1
   if (!prefixB) return -1
 
-  const partsA = prefixA.split('.').map(Number)
-  const partsB = prefixB.split('.').map(Number)
+  const partsA = prefixA.split(/[.,]/).map(Number)
+  const partsB = prefixB.split(/[.,]/).map(Number)
 
   for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
     const numA = partsA[i] ?? 0
@@ -155,7 +162,11 @@ async function processMarkdownFile(filePath, id, siteRoot) {
 }
 
 /**
- * Build section hierarchy from flat list
+ * Build section hierarchy from flat list.
+ * Hierarchy is determined by comma separators:
+ *   - "1", "1.5", "2" → all top-level (dots are for ordering)
+ *   - "1,1", "1,2" → children of section "1"
+ *   - "1.5,1" → child of section "1.5"
  */
 function buildSectionHierarchy(sections) {
   const sectionMap = new Map()
@@ -166,15 +177,15 @@ function buildSectionHierarchy(sections) {
     sectionMap.set(section.id, section)
   }
 
-  // Second pass: build hierarchy
+  // Second pass: build hierarchy (comma = hierarchy)
   for (const section of sections) {
-    if (!section.id.includes('.')) {
+    if (!section.id.includes(',')) {
       topLevel.push(section)
       continue
     }
 
-    const parts = section.id.split('.')
-    const parentId = parts.slice(0, -1).join('.')
+    const parts = section.id.split(',')
+    const parentId = parts.slice(0, -1).join(',')
     const parent = sectionMap.get(parentId)
 
     if (parent) {
