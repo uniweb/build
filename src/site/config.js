@@ -238,8 +238,8 @@ export async function defineSiteConfig(options = {}) {
 
     server: {
       fs: {
-        // Allow parent (for foundation sibling) and node_modules (for pnpm)
-        allow: ['..', 'node_modules']
+        // Allow parent directory for foundation sibling access
+        allow: ['..']
       },
       port: siteConfig.build?.port || 3000,
       ...serverOverrides
