@@ -9,9 +9,7 @@ export {
   loadComponentMeta,
   loadFoundationMeta,
   discoverComponents,
-  extractRuntimeConfig,
   buildSchema,
-  buildRuntimeConfig,
   getExposedComponents,
 } from './schema.js'
 

@@ -343,13 +343,59 @@ dist/
 | `loadComponentMeta(componentDir)` | Load meta file for a component |
 | `loadFoundationMeta(srcDir)` | Load foundation-level meta |
 | `buildSchema(srcDir)` | Build complete schema object |
-| `buildRuntimeConfig(srcDir)` | Build minimal runtime config |
 
 ### Entry Generation
 
 | Function | Description |
 |----------|-------------|
 | `generateEntryPoint(srcDir, outputPath)` | Generate foundation entry file |
+
+#### Generated Entry Exports
+
+The generated `_entry.generated.js` file exports:
+
+| Export | Description |
+|--------|-------------|
+| `components` | Object map of component name → React component |
+| Named exports | Each component exported by name (e.g., `Hero`, `Features`) |
+| `runtime` | Custom Layout and props from `src/runtime.js` (or `null`) |
+| `meta` | Runtime metadata extracted from component `meta.js` files |
+
+#### Runtime Metadata (`meta` export)
+
+Some properties in `meta.js` are needed at runtime, not just editor-time. These are extracted into the `meta` export to keep them available without loading the full `schema.json`.
+
+Currently extracted properties:
+- `input` - Form input schemas (for components that accept user input)
+
+Example `meta.js` with form schema:
+```javascript
+export default {
+  title: 'Contact Form',
+  // ... editor-only properties ...
+
+  // This gets extracted to the runtime `meta` export
+  input: {
+    name: { type: 'text', label: 'Name', required: true },
+    email: { type: 'email', label: 'Email', required: true },
+    message: { type: 'textarea', label: 'Message' }
+  }
+}
+```
+
+Generated entry will include:
+```javascript
+export const meta = {
+  "ContactForm": {
+    "input": {
+      "name": { "type": "text", "label": "Name", "required": true },
+      // ...
+    }
+  }
+}
+```
+
+To add more runtime properties, update `RUNTIME_META_KEYS` in `src/generate-entry.js`.
 
 ### Image Processing
 

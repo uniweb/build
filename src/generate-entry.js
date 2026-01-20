@@ -2,17 +2,32 @@
  * Foundation Entry Point Generator
  *
  * Auto-generates the foundation entry point based on discovered components.
- * The generated file exports components and runtime configuration.
+ *
+ * Exports:
+ * - `components` - Object map of component name -> React component
+ * - `runtime` - Custom Layout and props from src/runtime.js (if present)
+ * - `meta` - Runtime metadata extracted from component meta.js files
+ *
+ * The `meta` export contains properties from meta.js that are needed at runtime,
+ * not just editor-time. Currently this includes:
+ * - `input` - Form input schemas (for components that accept user input)
+ *
+ * Full component metadata lives in schema.json (for the visual editor).
+ * Only runtime-essential properties are extracted here to keep bundles small.
  */
 
 import { writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import {
-  discoverComponents,
-  loadFoundationMeta,
-  extractRuntimeConfig,
-} from './schema.js'
+import { discoverComponents } from './schema.js'
+
+/**
+ * Keys from meta.js that should be included in the runtime bundle.
+ * These are properties needed at runtime, not just editor-time.
+ *
+ * - input: Form schemas for components that accept user input
+ */
+const RUNTIME_META_KEYS = ['input']
 
 /**
  * Detect runtime configuration file (for custom Layout, props, etc.)
@@ -49,116 +64,89 @@ function detectCssFile(srcDir) {
 }
 
 /**
+ * Extract runtime-needed properties from component meta
+ */
+function extractRuntimeMeta(componentsMeta) {
+  const meta = {}
+
+  for (const [name, componentMeta] of Object.entries(componentsMeta)) {
+    const extracted = {}
+    for (const key of RUNTIME_META_KEYS) {
+      if (componentMeta[key] !== undefined) {
+        extracted[key] = componentMeta[key]
+      }
+    }
+    if (Object.keys(extracted).length > 0) {
+      meta[name] = extracted
+    }
+  }
+
+  return meta
+}
+
+/**
  * Generate the entry point source code
  */
-function generateEntrySource(componentNames, runtimeConfig, options = {}) {
-  const { cssPath = null, componentExtensions = {}, runtimeExports = null } = options
+function generateEntrySource(componentNames, options = {}) {
+  const { cssPath = null, componentExtensions = {}, runtimeExports = null, runtimeMeta = {} } = options
 
-  const imports = []
+  const lines = [
+    '// Auto-generated foundation entry point',
+    '// DO NOT EDIT - This file is regenerated during build',
+    ''
+  ]
 
   // CSS import
   if (cssPath) {
-    imports.push(`import '${cssPath}'`)
+    lines.push(`import '${cssPath}'`)
   }
 
   // Runtime exports import (for custom Layout, props, etc.)
   if (runtimeExports) {
-    imports.push(`import runtime from '${runtimeExports.path}'`)
+    lines.push(`import runtime from '${runtimeExports.path}'`)
   }
 
   // Component imports (use detected extension or default to .js)
   for (const name of componentNames) {
     const ext = componentExtensions[name] || 'js'
-    imports.push(`import ${name} from './components/${name}/index.${ext}'`)
+    lines.push(`import ${name} from './components/${name}/index.${ext}'`)
   }
 
-  // Build components object
-  const componentsObj = `const components = {\n  ${componentNames.join(',\n  ')},\n}`
+  lines.push('')
 
-  // Runtime config (serialized)
-  const configStr = JSON.stringify(runtimeConfig, null, 2)
-    .split('\n')
-    .map((line, i) => (i === 0 ? line : '  ' + line))
-    .join('\n')
-
-  const runtimeConfigBlock = `
-// Runtime configuration (extracted from meta files)
-// Only includes properties needed at render time
-const runtimeConfig = ${configStr}`
-
-  // Export functions
-  const exportFunctions = `
-/**
- * Get a component by name
- */
-export function getComponent(name) {
-  return components[name]
-}
-
-/**
- * List all available component names
- */
-export function listComponents() {
-  return Object.keys(components)
-}
-
-/**
- * Get runtime config for a specific component
- * Returns input schema and other render-time properties
- */
-export function getComponentConfig(name) {
-  return runtimeConfig.components[name] || {}
-}
-
-/**
- * Get foundation-level runtime config
- */
-export function getFoundationConfig() {
-  return runtimeConfig.foundation
-}
-
-/**
- * Get all component schemas (for compatibility)
- * Note: Full schemas are in schema.json, this only returns runtime-relevant config
- */
-export function getAllSchemas() {
-  const schemas = {}
-  for (const name of Object.keys(components)) {
-    if (components[name].schema) {
-      schemas[name] = components[name].schema
-    }
+  // Export components object
+  if (componentNames.length > 0) {
+    lines.push(`export const components = { ${componentNames.join(', ')} }`)
+    lines.push('')
+    lines.push(`export { ${componentNames.join(', ')} }`)
+  } else {
+    lines.push('export const components = {}')
   }
-  return schemas
-}
-
-/**
- * Get schema for a specific component (for compatibility)
- */
-export function getSchema(name) {
-  return components[name]?.schema
-}`
-
-  // Named exports for direct imports
-  const namedExports = componentNames.length > 0
-    ? `\n// Named exports for direct imports\nexport { ${componentNames.join(', ')} }`
-    : ''
 
   // Runtime exports (Layout, props, etc.)
-  const runtimeExport = runtimeExports
-    ? `\n// Runtime exports (Layout, props, etc.)\nexport { runtime }`
-    : `\n// No runtime exports provided\nexport const runtime = null`
+  lines.push('')
+  if (runtimeExports) {
+    lines.push('export { runtime }')
+  } else {
+    lines.push('export const runtime = null')
+  }
 
-  return `// Auto-generated foundation entry point
-// DO NOT EDIT - This file is regenerated during build
+  // Runtime meta (form schemas, etc.) - only if non-empty
+  lines.push('')
+  if (Object.keys(runtimeMeta).length > 0) {
+    const metaJson = JSON.stringify(runtimeMeta, null, 2)
+      .split('\n')
+      .map((line, i) => (i === 0 ? line : line))
+      .join('\n')
+    lines.push(`// Runtime metadata (form schemas, etc.)`)
+    lines.push(`export const meta = ${metaJson}`)
+  } else {
+    lines.push('export const meta = {}')
+  }
 
-${imports.join('\n')}
+  lines.push('')
 
-${componentsObj}
-${runtimeConfigBlock}
-${exportFunctions}
-${namedExports}
-${runtimeExport}
-`
+  return lines.join('\n')
 }
 
 /**
@@ -178,7 +166,7 @@ function detectComponentExtension(srcDir, componentName) {
  * Generate the foundation entry point file
  */
 export async function generateEntryPoint(srcDir, outputPath = null) {
-  // Discover components
+  // Discover components (includes meta from meta.js files)
   const components = await discoverComponents(srcDir)
   const componentNames = Object.keys(components).sort()
 
@@ -192,32 +180,21 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
     componentExtensions[name] = detectComponentExtension(srcDir, name)
   }
 
-  // Load foundation meta and build runtime config
-  const foundationMeta = await loadFoundationMeta(srcDir)
-
-  const runtimeConfig = {
-    foundation: extractRuntimeConfig(foundationMeta),
-    components: {},
-  }
-
-  for (const [name, meta] of Object.entries(components)) {
-    const config = extractRuntimeConfig(meta)
-    if (Object.keys(config).length > 0) {
-      runtimeConfig.components[name] = config
-    }
-  }
-
   // Check for CSS file
   const cssPath = detectCssFile(srcDir)
 
   // Check for runtime exports (custom Layout, props, etc.)
   const runtimeExports = detectRuntimeExports(srcDir)
 
+  // Extract runtime-needed meta (form schemas, etc.)
+  const runtimeMeta = extractRuntimeMeta(components)
+
   // Generate source
-  const source = generateEntrySource(componentNames, runtimeConfig, {
+  const source = generateEntrySource(componentNames, {
     cssPath,
     componentExtensions,
     runtimeExports,
+    runtimeMeta,
   })
 
   // Write to file
@@ -234,7 +211,6 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   return {
     outputPath: output,
     componentNames,
-    runtimeConfig,
     runtimeExports,
   }
 }

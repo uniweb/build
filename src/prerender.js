@@ -108,9 +108,9 @@ export async function prerenderSite(siteDir, options = {}) {
   const uniweb = createUniweb(siteContent)
   uniweb.setFoundation(foundation)
 
-  // Check for foundation config (runtime is the new name, config/site are legacy)
-  if (foundation.runtime || foundation.config || foundation.site) {
-    uniweb.setFoundationConfig(foundation.runtime || foundation.config || foundation.site)
+  // Set foundation config if provided
+  if (foundation.runtime) {
+    uniweb.setFoundationConfig(foundation.runtime)
   }
 
   // Pre-render each page
@@ -185,11 +185,10 @@ function DefaultLayout({ header, body, footer }) {
 
 /**
  * Layout component for SSG
- * Supports foundation-provided custom Layout via site.Layout
+ * Supports foundation-provided custom Layout via runtime.Layout
  */
 function Layout({ page, website, foundation }) {
-  // Check if foundation provides a custom Layout (runtime is the new name, site is legacy)
-  const RemoteLayout = foundation.runtime?.Layout || foundation.site?.Layout || null
+  const RemoteLayout = foundation.runtime?.Layout || null
 
   // Get block groups from page
   const headerBlocks = page.getHeaderBlocks()

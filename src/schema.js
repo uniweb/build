@@ -1,8 +1,8 @@
 /**
  * Schema Discovery and Loading Utilities
  *
- * Discovers component meta files, loads them, and extracts
- * runtime-relevant configuration.
+ * Discovers component meta files and loads them for schema.json generation.
+ * Schema data is for editor-time only, not runtime.
  */
 
 import { readdir } from 'node:fs/promises'
@@ -12,9 +12,6 @@ import { pathToFileURL } from 'node:url'
 
 // Meta file name (standardized to meta.js)
 const META_FILE_NAME = 'meta.js'
-
-// Keys that should be extracted for runtime (embedded in foundation.js)
-const RUNTIME_KEYS = ['input', 'props']
 
 /**
  * Load a meta.js file via dynamic import
@@ -96,22 +93,6 @@ export async function discoverComponents(srcDir) {
 }
 
 /**
- * Extract runtime-relevant config from meta
- * Only includes keys that are needed at render time
- */
-export function extractRuntimeConfig(meta) {
-  if (!meta) return {}
-
-  const config = {}
-  for (const key of RUNTIME_KEYS) {
-    if (meta[key] !== undefined) {
-      config[key] = meta[key]
-    }
-  }
-  return config
-}
-
-/**
  * Build complete schema for a foundation
  * Returns { _self: foundationMeta, ComponentName: componentMeta, ... }
  */
@@ -122,27 +103,6 @@ export async function buildSchema(srcDir) {
   return {
     _self: foundationMeta,
     ...components,
-  }
-}
-
-/**
- * Build runtime config (minimal, for embedding in foundation.js)
- */
-export async function buildRuntimeConfig(srcDir) {
-  const foundationMeta = await loadFoundationMeta(srcDir)
-  const components = await discoverComponents(srcDir)
-
-  const componentConfigs = {}
-  for (const [name, meta] of Object.entries(components)) {
-    const config = extractRuntimeConfig(meta)
-    if (Object.keys(config).length > 0) {
-      componentConfigs[name] = config
-    }
-  }
-
-  return {
-    foundation: extractRuntimeConfig(foundationMeta),
-    components: componentConfigs,
   }
 }
 
