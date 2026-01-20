@@ -7,10 +7,9 @@
  * - Processing preview images for presets
  */
 
-import { writeFile, readFile, readdir, mkdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { join, resolve, relative } from 'node:path'
-import { buildSchema, discoverComponents } from './schema.js'
+import { writeFile, mkdir } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { buildSchema } from './schema.js'
 import { generateEntryPoint } from './generate-entry.js'
 import { processAllPreviews } from './images.js'
 
@@ -52,18 +51,20 @@ export function foundationBuildPlugin(options = {}) {
   return {
     name: 'uniweb-foundation-build',
 
+    // Generate entry before config resolution (entry must exist for Vite to resolve it)
+    async config(config) {
+      if (!generateEntry) return
+
+      const root = config.root || process.cwd()
+      const srcPath = resolve(root, srcDir)
+      const entryPath = join(srcPath, entryFileName)
+      await generateEntryPoint(srcPath, entryPath)
+    },
+
     async configResolved(config) {
       resolvedSrcDir = resolve(config.root, srcDir)
       resolvedOutDir = config.build.outDir
       isProduction = config.mode === 'production'
-    },
-
-    async buildStart() {
-      if (!generateEntry) return
-
-      // Generate entry point before build starts
-      const entryPath = join(resolvedSrcDir, entryFileName)
-      await generateEntryPoint(resolvedSrcDir, entryPath)
     },
 
     async writeBundle() {
@@ -103,24 +104,34 @@ export function foundationDevPlugin(options = {}) {
   return {
     name: 'uniweb-foundation-dev',
 
+    // Generate entry before config resolution
+    async config(config) {
+      const root = config.root || process.cwd()
+      const srcPath = resolve(root, srcDir)
+      const entryPath = join(srcPath, entryFileName)
+      await generateEntryPoint(srcPath, entryPath)
+    },
+
     configResolved(config) {
       resolvedSrcDir = resolve(config.root, srcDir)
     },
 
-    async buildStart() {
-      // Generate entry point at dev server start
-      const entryPath = join(resolvedSrcDir, entryFileName)
-      await generateEntryPoint(resolvedSrcDir, entryPath)
-    },
-
     async handleHotUpdate({ file, server }) {
-      // Regenerate entry when meta files change
-      if (file.includes('/components/') && file.match(/meta\.(js|yml)$|config\.(js|yml)$/)) {
-        console.log('Meta file changed, regenerating entry...')
+      // Regenerate entry when meta.js files change
+      if (file.includes('/components/') && file.endsWith('/meta.js')) {
+        console.log('Component meta.js changed, regenerating entry...')
         const entryPath = join(resolvedSrcDir, entryFileName)
         await generateEntryPoint(resolvedSrcDir, entryPath)
 
         // Trigger full reload since entry changed
+        server.ws.send({ type: 'full-reload' })
+      }
+
+      // Also regenerate if runtime.js changes
+      if (file.endsWith('/runtime.js') || file.endsWith('/runtime.jsx')) {
+        console.log('Runtime exports changed, regenerating entry...')
+        const entryPath = join(resolvedSrcDir, entryFileName)
+        await generateEntryPoint(resolvedSrcDir, entryPath)
         server.ws.send({ type: 'full-reload' })
       }
     },
@@ -137,13 +148,14 @@ export function foundationPlugin(options = {}) {
   return {
     name: 'uniweb-foundation',
 
+    async config(config) {
+      // Only need to call once - devPlugin.config generates the entry
+      await devPlugin.config?.(config)
+    },
+
     configResolved(config) {
       buildPlugin.configResolved?.(config)
       devPlugin.configResolved?.(config)
-    },
-
-    async buildStart() {
-      await devPlugin.buildStart?.()
     },
 
     async writeBundle(...args) {

@@ -15,15 +15,15 @@ import {
 } from './schema.js'
 
 /**
- * Detect site configuration file (for custom Layout, etc.)
- * Looks for: src/site.js, src/site.jsx, src/site/index.js, src/site/index.jsx
+ * Detect runtime configuration file (for custom Layout, props, etc.)
+ * Looks for: src/runtime.js, src/runtime.jsx, src/runtime/index.js, src/runtime/index.jsx
  */
-function detectSiteConfig(srcDir) {
+function detectRuntimeExports(srcDir) {
   const candidates = [
-    { path: 'site.js', ext: 'js' },
-    { path: 'site.jsx', ext: 'jsx' },
-    { path: 'site/index.js', ext: 'js' },
-    { path: 'site/index.jsx', ext: 'jsx' },
+    { path: 'runtime.js', ext: 'js' },
+    { path: 'runtime.jsx', ext: 'jsx' },
+    { path: 'runtime/index.js', ext: 'js' },
+    { path: 'runtime/index.jsx', ext: 'jsx' },
   ]
 
   for (const { path, ext } of candidates) {
@@ -35,22 +35,35 @@ function detectSiteConfig(srcDir) {
 }
 
 /**
+ * Detect CSS file
+ * Looks for: src/styles.css, src/index.css
+ */
+function detectCssFile(srcDir) {
+  const candidates = ['styles.css', 'index.css']
+  for (const file of candidates) {
+    if (existsSync(join(srcDir, file))) {
+      return `./${file}`
+    }
+  }
+  return null
+}
+
+/**
  * Generate the entry point source code
  */
 function generateEntrySource(componentNames, runtimeConfig, options = {}) {
-  const { includeCss = true, cssPath = './index.css', componentExtensions = {}, siteConfig = null } = options
+  const { cssPath = null, componentExtensions = {}, runtimeExports = null } = options
 
   const imports = []
-  const exports = []
 
   // CSS import
-  if (includeCss) {
+  if (cssPath) {
     imports.push(`import '${cssPath}'`)
   }
 
-  // Site config import (for custom Layout, etc.)
-  if (siteConfig) {
-    imports.push(`import { site } from '${siteConfig.path}'`)
+  // Runtime exports import (for custom Layout, props, etc.)
+  if (runtimeExports) {
+    imports.push(`import runtime from '${runtimeExports.path}'`)
   }
 
   // Component imports (use detected extension or default to .js)
@@ -130,10 +143,10 @@ export function getSchema(name) {
     ? `\n// Named exports for direct imports\nexport { ${componentNames.join(', ')} }`
     : ''
 
-  // Site config export (for custom Layout, etc.)
-  const siteExport = siteConfig
-    ? `\n// Site configuration (Layout, etc.)\nexport { site }`
-    : `\n// No site configuration provided\nexport const site = null`
+  // Runtime exports (Layout, props, etc.)
+  const runtimeExport = runtimeExports
+    ? `\n// Runtime exports (Layout, props, etc.)\nexport { runtime }`
+    : `\n// No runtime exports provided\nexport const runtime = null`
 
   return `// Auto-generated foundation entry point
 // DO NOT EDIT - This file is regenerated during build
@@ -144,7 +157,7 @@ ${componentsObj}
 ${runtimeConfigBlock}
 ${exportFunctions}
 ${namedExports}
-${siteExport}
+${runtimeExport}
 `
 }
 
@@ -194,17 +207,17 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
     }
   }
 
-  // Check if CSS exists
-  const cssExists = existsSync(join(srcDir, 'index.css'))
+  // Check for CSS file
+  const cssPath = detectCssFile(srcDir)
 
-  // Check for site config (custom Layout, etc.)
-  const siteConfig = detectSiteConfig(srcDir)
+  // Check for runtime exports (custom Layout, props, etc.)
+  const runtimeExports = detectRuntimeExports(srcDir)
 
   // Generate source
   const source = generateEntrySource(componentNames, runtimeConfig, {
-    includeCss: cssExists,
+    cssPath,
     componentExtensions,
-    siteConfig,
+    runtimeExports,
   })
 
   // Write to file
@@ -214,15 +227,15 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
 
   console.log(`Generated entry point: ${output}`)
   console.log(`  - ${componentNames.length} components: ${componentNames.join(', ')}`)
-  if (siteConfig) {
-    console.log(`  - Site config found: ${siteConfig.path}`)
+  if (runtimeExports) {
+    console.log(`  - Runtime exports found: ${runtimeExports.path}`)
   }
 
   return {
     outputPath: output,
     componentNames,
     runtimeConfig,
-    siteConfig,
+    runtimeExports,
   }
 }
 

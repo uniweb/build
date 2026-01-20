@@ -45,7 +45,7 @@ const DEFAULT_EXTERNALS = [
  * Create a complete Vite configuration for a Uniweb foundation
  *
  * @param {Object} [options={}] - Configuration options
- * @param {string} [options.entry] - Entry point path (default: 'src/entry-runtime.js')
+ * @param {string} [options.entry] - Entry point path (default: 'src/_entry.generated.js')
  * @param {string} [options.fileName] - Output file name (default: 'foundation')
  * @param {string[]} [options.externals] - Additional packages to externalize
  * @param {boolean} [options.includeDefaultExternals] - Include default externals (default: true)
@@ -57,7 +57,7 @@ const DEFAULT_EXTERNALS = [
  */
 export async function defineFoundationConfig(options = {}) {
   const {
-    entry = 'src/entry-runtime.js',
+    entry = 'src/_entry.generated.js',
     fileName = 'foundation',
     externals: additionalExternals = [],
     includeDefaultExternals = true,
