@@ -295,7 +295,9 @@ export function siteContentPlugin(options = {}) {
 
       // Watch for content changes in dev mode
       if (shouldWatch) {
-        const watchPath = resolve(resolvedSitePath, pagesDir)
+        const pagesPath = resolve(resolvedSitePath, pagesDir)
+        const siteYmlPath = resolve(resolvedSitePath, 'site.yml')
+        const themeYmlPath = resolve(resolvedSitePath, 'theme.yml')
 
         // Debounce rebuilds
         let rebuildTimeout = null
@@ -315,12 +317,33 @@ export function siteContentPlugin(options = {}) {
           }, 100)
         }
 
+        // Track all watchers for cleanup
+        const watchers = []
+
+        // Watch pages directory
         try {
-          watcher = watch(watchPath, { recursive: true }, scheduleRebuild)
-          console.log(`[site-content] Watching ${watchPath}`)
+          watchers.push(watch(pagesPath, { recursive: true }, scheduleRebuild))
+          console.log(`[site-content] Watching ${pagesPath}`)
         } catch (err) {
           console.warn('[site-content] Could not watch pages directory:', err.message)
         }
+
+        // Watch site.yml
+        try {
+          watchers.push(watch(siteYmlPath, scheduleRebuild))
+        } catch (err) {
+          // site.yml may not exist, that's ok
+        }
+
+        // Watch theme.yml
+        try {
+          watchers.push(watch(themeYmlPath, scheduleRebuild))
+        } catch (err) {
+          // theme.yml may not exist, that's ok
+        }
+
+        // Store watchers for cleanup
+        watcher = { close: () => watchers.forEach(w => w.close()) }
       }
 
       // Serve content and SEO files
