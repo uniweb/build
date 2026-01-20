@@ -24,6 +24,7 @@
  */
 
 import { resolve } from 'node:path'
+import { foundationPlugin } from '../vite-foundation-plugin.js'
 
 /**
  * Default externals for foundations
@@ -101,7 +102,9 @@ export async function defineFoundationConfig(options = {}) {
   }
 
   // Build the plugins array
+  // foundationPlugin handles entry generation and schema building
   const plugins = [
+    foundationPlugin({ srcDir: 'src' }),
     tailwind && tailwindcss(),
     react(),
     svgr(),
