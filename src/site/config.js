@@ -117,6 +117,7 @@ export function readSiteConfig(siteRoot) {
  * @param {Object} [options.seo] - SEO configuration for siteContentPlugin
  * @param {Object} [options.assets] - Asset processing configuration
  * @param {Object} [options.search] - Search index configuration
+ * @param {boolean} [options.tailwind] - Include Tailwind CSS v4 Vite plugin (default: true)
  * @returns {Promise<Object>} Vite configuration
  */
 export async function defineSiteConfig(options = {}) {
@@ -128,6 +129,7 @@ export async function defineSiteConfig(options = {}) {
     seo = {},
     assets = {},
     search = {},
+    tailwind = true,
     ...restOptions
   } = options
 
@@ -146,24 +148,39 @@ export async function defineSiteConfig(options = {}) {
 
   // Dynamic imports for optional peer dependencies
   // These are imported dynamically to avoid requiring them when not needed
-  const [
-    { default: tailwindcss },
-    { default: react },
-    { default: svgr },
-    { siteContentPlugin },
-    { foundationDevPlugin }
-  ] = await Promise.all([
-    import('@tailwindcss/vite'),
+  const imports = [
     import('@vitejs/plugin-react'),
     import('vite-plugin-svgr'),
     import('./plugin.js'),
     import('../dev/plugin.js')
-  ])
+  ]
+
+  // Only import Tailwind v4 Vite plugin if enabled
+  if (tailwind) {
+    imports.unshift(import('@tailwindcss/vite'))
+  }
+
+  const modules = await Promise.all(imports)
+
+  // Extract plugins based on what was imported
+  let tailwindcss, react, svgr, siteContentPlugin, foundationDevPlugin
+  if (tailwind) {
+    tailwindcss = modules[0].default
+    react = modules[1].default
+    svgr = modules[2].default
+    siteContentPlugin = modules[3].siteContentPlugin
+    foundationDevPlugin = modules[4].foundationDevPlugin
+  } else {
+    react = modules[0].default
+    svgr = modules[1].default
+    siteContentPlugin = modules[2].siteContentPlugin
+    foundationDevPlugin = modules[3].foundationDevPlugin
+  }
 
   // Build the plugins array
   const plugins = [
     // Standard plugins
-    tailwindcss(),
+    tailwind && tailwindcss(),
     react(),
     svgr(),
 
