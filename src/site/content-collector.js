@@ -288,11 +288,14 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
  * Process a page directory
  *
  * @param {string} pagePath - Path to page directory
- * @param {string} pageName - Name of the page
+ * @param {string} pageName - Name of the page (folder name, not full path)
  * @param {string} siteRoot - Site root directory for asset resolution
+ * @param {Object} options - Route options
+ * @param {boolean} options.isIndex - Whether this page is the index for its parent route
+ * @param {string} options.parentRoute - The parent route (e.g., '/' or '/docs')
  * @returns {Object} Page data with assets manifest
  */
-async function processPage(pagePath, pageName, siteRoot) {
+async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/' } = {}) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
   // Note: We no longer skip hidden pages here - they still exist as valid pages,
@@ -348,11 +351,16 @@ async function processPage(pagePath, pageName, siteRoot) {
   }
 
   // Determine route
-  let route = '/' + pageName
-  if (pageName === 'home' || pageName === 'index') {
-    route = '/'
+  let route
+  if (isIndex) {
+    // Index page gets the parent route
+    route = parentRoute
   } else if (pageName.startsWith('@')) {
-    route = '/' + pageName
+    // Special pages (layout areas) keep their @ prefix
+    route = parentRoute === '/' ? `/@${pageName.slice(1)}` : `${parentRoute}/@${pageName.slice(1)}`
+  } else {
+    // Normal pages get parent + their name
+    route = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
   }
 
   // Extract configuration
@@ -393,14 +401,49 @@ async function processPage(pagePath, pageName, siteRoot) {
 }
 
 /**
+ * Determine the index page name from ordering config
+ *
+ * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent
+ * @param {Array} availableFolders - Array of { name, order } for folders at this level
+ * @returns {string|null} The folder name that should be the index, or null
+ */
+function determineIndexPage(orderConfig, availableFolders) {
+  const { pages: pagesArray, index: indexName } = orderConfig || {}
+
+  // 1. Explicit pages array - first item is index
+  if (Array.isArray(pagesArray) && pagesArray.length > 0) {
+    return pagesArray[0]
+  }
+
+  // 2. Explicit index property
+  if (indexName) {
+    return indexName
+  }
+
+  // 3. Fallback: lowest order value, or first alphabetically
+  if (availableFolders.length === 0) return null
+
+  const sorted = [...availableFolders].sort((a, b) => {
+    // Sort by order (lower first), then alphabetically
+    const orderA = a.order ?? 999
+    const orderB = b.order ?? 999
+    if (orderA !== orderB) return orderA - orderB
+    return a.name.localeCompare(b.name)
+  })
+
+  return sorted[0].name
+}
+
+/**
  * Recursively collect pages from a directory
  *
  * @param {string} dirPath - Directory to scan
- * @param {string} routePrefix - Route prefix for nested pages
+ * @param {string} parentRoute - Parent route (e.g., '/' or '/docs')
  * @param {string} siteRoot - Site root directory for asset resolution
+ * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent's config
  * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right }
  */
-async function collectPagesRecursive(dirPath, routePrefix, siteRoot) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -413,30 +456,55 @@ async function collectPagesRecursive(dirPath, routePrefix, siteRoot) {
   let left = null
   let right = null
 
+  // First pass: discover all page folders and read their order values
+  const pageFolders = []
   for (const entry of entries) {
     const entryPath = join(dirPath, entry)
     const stats = await stat(entryPath)
-
     if (!stats.isDirectory()) continue
 
-    // Build the page name/route
-    const pageName = routePrefix ? `${routePrefix}/${entry}` : entry
+    // Read page.yml to get order and child page config
+    const pageConfig = await readYamlFile(join(entryPath, 'page.yml'))
+    pageFolders.push({
+      name: entry,
+      path: entryPath,
+      order: pageConfig.order,
+      childOrderConfig: {
+        pages: pageConfig.pages,
+        index: pageConfig.index
+      }
+    })
+  }
+
+  // Determine which page is the index for this level
+  const regularFolders = pageFolders.filter(f => !f.name.startsWith('@'))
+  const indexPageName = determineIndexPage(orderConfig, regularFolders)
+
+  // Second pass: process each page folder
+  for (const folder of pageFolders) {
+    const { name: entry, path: entryPath, childOrderConfig } = folder
+    const isIndex = entry === indexPageName
+    const isSpecial = entry.startsWith('@')
 
     // Process this directory as a page
-    const result = await processPage(entryPath, pageName, siteRoot)
+    const result = await processPage(entryPath, entry, siteRoot, {
+      isIndex: isIndex && !isSpecial,
+      parentRoute
+    })
+
     if (result) {
       const { page, assetCollection: pageAssets } = result
       assetCollection = mergeAssetCollections(assetCollection, pageAssets)
 
       // Handle special pages (layout areas) - only at root level
-      if (!routePrefix) {
-        if (entry === '@header' || page.route === '/@header') {
+      if (parentRoute === '/') {
+        if (entry === '@header') {
           header = page
-        } else if (entry === '@footer' || page.route === '/@footer') {
+        } else if (entry === '@footer') {
           footer = page
-        } else if (entry === '@left' || page.route === '/@left') {
+        } else if (entry === '@left') {
           left = page
-        } else if (entry === '@right' || page.route === '/@right') {
+        } else if (entry === '@right') {
           right = page
         } else {
           pages.push(page)
@@ -444,13 +512,15 @@ async function collectPagesRecursive(dirPath, routePrefix, siteRoot) {
       } else {
         pages.push(page)
       }
-    }
 
-    // Recursively process subdirectories (but not special @ directories)
-    if (!entry.startsWith('@')) {
-      const subResult = await collectPagesRecursive(entryPath, pageName, siteRoot)
-      pages.push(...subResult.pages)
-      assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+      // Recursively process subdirectories (but not special @ directories)
+      if (!isSpecial) {
+        // The child route depends on whether this page is the index
+        const childParentRoute = isIndex ? parentRoute : page.route
+        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig)
+        pages.push(...subResult.pages)
+        assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+      }
     }
   }
 
@@ -480,9 +550,15 @@ export async function collectSiteContent(sitePath) {
     }
   }
 
+  // Extract page ordering config from site.yml
+  const siteOrderConfig = {
+    pages: siteConfig.pages,
+    index: siteConfig.index
+  }
+
   // Recursively collect all pages
   const { pages, assetCollection, header, footer, left, right } =
-    await collectPagesRecursive(pagesPath, '', sitePath)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
 
   // Sort pages by order
   pages.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
