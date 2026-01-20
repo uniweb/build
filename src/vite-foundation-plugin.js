@@ -127,9 +127,9 @@ export function foundationDevPlugin(options = {}) {
         server.ws.send({ type: 'full-reload' })
       }
 
-      // Also regenerate if runtime.js changes
-      if (file.endsWith('/runtime.js') || file.endsWith('/runtime.jsx')) {
-        console.log('Runtime exports changed, regenerating entry...')
+      // Also regenerate if exports.js changes
+      if (file.endsWith('/exports.js') || file.endsWith('/exports.jsx')) {
+        console.log('Foundation exports changed, regenerating entry...')
         const entryPath = join(resolvedSrcDir, entryFileName)
         await generateEntryPoint(resolvedSrcDir, entryPath)
         server.ws.send({ type: 'full-reload' })

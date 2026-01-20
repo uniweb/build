@@ -5,7 +5,7 @@
  *
  * Exports:
  * - `components` - Object map of component name -> React component
- * - `runtime` - Custom Layout and props from src/runtime.js (if present)
+ * - `capabilities` - Custom Layout and props from src/exports.js (if present)
  * - `meta` - Runtime metadata extracted from component meta.js files
  *
  * The `meta` export contains properties from meta.js that are needed at runtime,
@@ -30,15 +30,15 @@ import { discoverComponents } from './schema.js'
 const RUNTIME_META_KEYS = ['input']
 
 /**
- * Detect runtime configuration file (for custom Layout, props, etc.)
- * Looks for: src/runtime.js, src/runtime.jsx, src/runtime/index.js, src/runtime/index.jsx
+ * Detect foundation exports file (for custom Layout, props, etc.)
+ * Looks for: src/exports.js, src/exports.jsx, src/exports/index.js, src/exports/index.jsx
  */
-function detectRuntimeExports(srcDir) {
+function detectFoundationExports(srcDir) {
   const candidates = [
-    { path: 'runtime.js', ext: 'js' },
-    { path: 'runtime.jsx', ext: 'jsx' },
-    { path: 'runtime/index.js', ext: 'js' },
-    { path: 'runtime/index.jsx', ext: 'jsx' },
+    { path: 'exports.js', ext: 'js' },
+    { path: 'exports.jsx', ext: 'jsx' },
+    { path: 'exports/index.js', ext: 'js' },
+    { path: 'exports/index.jsx', ext: 'jsx' },
   ]
 
   for (const { path, ext } of candidates) {
@@ -88,7 +88,7 @@ function extractRuntimeMeta(componentsMeta) {
  * Generate the entry point source code
  */
 function generateEntrySource(componentNames, options = {}) {
-  const { cssPath = null, componentExtensions = {}, runtimeExports = null, runtimeMeta = {} } = options
+  const { cssPath = null, componentExtensions = {}, foundationExports = null, runtimeMeta = {} } = options
 
   const lines = [
     '// Auto-generated foundation entry point',
@@ -101,9 +101,9 @@ function generateEntrySource(componentNames, options = {}) {
     lines.push(`import '${cssPath}'`)
   }
 
-  // Runtime exports import (for custom Layout, props, etc.)
-  if (runtimeExports) {
-    lines.push(`import runtime from '${runtimeExports.path}'`)
+  // Foundation capabilities import (for custom Layout, props, etc.)
+  if (foundationExports) {
+    lines.push(`import capabilities from '${foundationExports.path}'`)
   }
 
   // Component imports (use detected extension or default to .js)
@@ -123,12 +123,12 @@ function generateEntrySource(componentNames, options = {}) {
     lines.push('export const components = {}')
   }
 
-  // Runtime exports (Layout, props, etc.)
+  // Foundation capabilities (Layout, props, etc.)
   lines.push('')
-  if (runtimeExports) {
-    lines.push('export { runtime }')
+  if (foundationExports) {
+    lines.push('export { capabilities }')
   } else {
-    lines.push('export const runtime = null')
+    lines.push('export const capabilities = null')
   }
 
   // Runtime meta (form schemas, etc.) - only if non-empty
@@ -183,8 +183,8 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   // Check for CSS file
   const cssPath = detectCssFile(srcDir)
 
-  // Check for runtime exports (custom Layout, props, etc.)
-  const runtimeExports = detectRuntimeExports(srcDir)
+  // Check for foundation exports (custom Layout, props, etc.)
+  const foundationExports = detectFoundationExports(srcDir)
 
   // Extract runtime-needed meta (form schemas, etc.)
   const runtimeMeta = extractRuntimeMeta(components)
@@ -193,7 +193,7 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   const source = generateEntrySource(componentNames, {
     cssPath,
     componentExtensions,
-    runtimeExports,
+    foundationExports,
     runtimeMeta,
   })
 
@@ -204,14 +204,14 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
 
   console.log(`Generated entry point: ${output}`)
   console.log(`  - ${componentNames.length} components: ${componentNames.join(', ')}`)
-  if (runtimeExports) {
-    console.log(`  - Runtime exports found: ${runtimeExports.path}`)
+  if (foundationExports) {
+    console.log(`  - Foundation exports found: ${foundationExports.path}`)
   }
 
   return {
     outputPath: output,
     componentNames,
-    runtimeExports,
+    foundationExports,
   }
 }
 
