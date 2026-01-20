@@ -382,6 +382,71 @@ async function processPage(pagePath, pageName, siteRoot) {
 }
 
 /**
+ * Recursively collect pages from a directory
+ *
+ * @param {string} dirPath - Directory to scan
+ * @param {string} routePrefix - Route prefix for nested pages
+ * @param {string} siteRoot - Site root directory for asset resolution
+ * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right }
+ */
+async function collectPagesRecursive(dirPath, routePrefix, siteRoot) {
+  const entries = await readdir(dirPath)
+  const pages = []
+  let assetCollection = {
+    assets: {},
+    hasExplicitPoster: new Set(),
+    hasExplicitPreview: new Set()
+  }
+  let header = null
+  let footer = null
+  let left = null
+  let right = null
+
+  for (const entry of entries) {
+    const entryPath = join(dirPath, entry)
+    const stats = await stat(entryPath)
+
+    if (!stats.isDirectory()) continue
+
+    // Build the page name/route
+    const pageName = routePrefix ? `${routePrefix}/${entry}` : entry
+
+    // Process this directory as a page
+    const result = await processPage(entryPath, pageName, siteRoot)
+    if (result) {
+      const { page, assetCollection: pageAssets } = result
+      assetCollection = mergeAssetCollections(assetCollection, pageAssets)
+
+      // Handle special pages (layout areas) - only at root level
+      if (!routePrefix) {
+        if (entry === '@header' || page.route === '/@header') {
+          header = page
+        } else if (entry === '@footer' || page.route === '/@footer') {
+          footer = page
+        } else if (entry === '@left' || page.route === '/@left') {
+          left = page
+        } else if (entry === '@right' || page.route === '/@right') {
+          right = page
+        } else {
+          pages.push(page)
+        }
+      } else {
+        pages.push(page)
+      }
+    }
+
+    // Recursively process subdirectories (but not special @ directories)
+    if (!entry.startsWith('@')) {
+      const subResult = await collectPagesRecursive(entryPath, pageName, siteRoot)
+      pages.push(...subResult.pages)
+      assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+    }
+  }
+
+  return { pages, assetCollection, header, footer, left, right }
+}
+
+/**
  * Collect all site content
  *
  * @param {string} sitePath - Path to site directory
@@ -404,51 +469,16 @@ export async function collectSiteContent(sitePath) {
     }
   }
 
-  // Get page directories
-  const entries = await readdir(pagesPath)
-  const pages = []
-  let siteAssetCollection = {
-    assets: {},
-    hasExplicitPoster: new Set(),
-    hasExplicitPreview: new Set()
-  }
-  let header = null
-  let footer = null
-  let left = null
-  let right = null
-
-  for (const entry of entries) {
-    const entryPath = join(pagesPath, entry)
-    const stats = await stat(entryPath)
-
-    if (!stats.isDirectory()) continue
-
-    const result = await processPage(entryPath, entry, sitePath)
-    if (!result) continue
-
-    const { page, assetCollection } = result
-    siteAssetCollection = mergeAssetCollections(siteAssetCollection, assetCollection)
-
-    // Handle special pages (layout areas)
-    if (entry === '@header' || page.route === '/@header') {
-      header = page
-    } else if (entry === '@footer' || page.route === '/@footer') {
-      footer = page
-    } else if (entry === '@left' || page.route === '/@left') {
-      left = page
-    } else if (entry === '@right' || page.route === '/@right') {
-      right = page
-    } else {
-      pages.push(page)
-    }
-  }
+  // Recursively collect all pages
+  const { pages, assetCollection, header, footer, left, right } =
+    await collectPagesRecursive(pagesPath, '', sitePath)
 
   // Sort pages by order
   pages.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
 
   // Log asset summary
-  const assetCount = Object.keys(siteAssetCollection.assets).length
-  const explicitCount = siteAssetCollection.hasExplicitPoster.size + siteAssetCollection.hasExplicitPreview.size
+  const assetCount = Object.keys(assetCollection.assets).length
+  const explicitCount = assetCollection.hasExplicitPoster.size + assetCollection.hasExplicitPreview.size
   if (assetCount > 0) {
     console.log(`[content-collector] Found ${assetCount} asset references${explicitCount > 0 ? ` (${explicitCount} with explicit poster/preview)` : ''}`)
   }
@@ -461,9 +491,9 @@ export async function collectSiteContent(sitePath) {
     footer,
     left,
     right,
-    assets: siteAssetCollection.assets,
-    hasExplicitPoster: siteAssetCollection.hasExplicitPoster,
-    hasExplicitPreview: siteAssetCollection.hasExplicitPreview
+    assets: assetCollection.assets,
+    hasExplicitPoster: assetCollection.hasExplicitPoster,
+    hasExplicitPreview: assetCollection.hasExplicitPreview
   }
 }
 
