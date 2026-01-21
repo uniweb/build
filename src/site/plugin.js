@@ -30,12 +30,14 @@
  * })
  */
 
-import { resolve } from 'node:path'
-import { watch } from 'node:fs'
+import { resolve, join } from 'node:path'
+import { watch, existsSync } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
 import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
+import { mergeTranslations } from '../i18n/merge.js'
 
 /**
  * Generate sitemap.xml content
@@ -269,6 +271,62 @@ export function siteContentPlugin(options = {}) {
   let isProduction = false
   let watcher = null
   let server = null
+  let localeTranslations = {} // Cache: { locale: translations }
+  let localesDir = 'locales' // Default, updated from site config
+
+  /**
+   * Load translations for a specific locale
+   */
+  async function loadLocaleTranslations(locale) {
+    if (localeTranslations[locale]) {
+      return localeTranslations[locale]
+    }
+
+    const localePath = join(resolvedSitePath, localesDir, `${locale}.json`)
+    if (!existsSync(localePath)) {
+      return null
+    }
+
+    try {
+      const content = await readFile(localePath, 'utf-8')
+      const translations = JSON.parse(content)
+      localeTranslations[locale] = translations
+      return translations
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Get available locales from locales directory
+   */
+  async function getAvailableLocales() {
+    const localesPath = join(resolvedSitePath, localesDir)
+    if (!existsSync(localesPath)) {
+      return []
+    }
+
+    try {
+      const files = await readdir(localesPath)
+      return files
+        .filter(f => f.endsWith('.json') && f !== 'manifest.json' && !f.startsWith('_'))
+        .map(f => f.replace('.json', ''))
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Get translated content for a locale
+   */
+  async function getTranslatedContent(locale) {
+    if (!siteContent) return null
+
+    const translations = await loadLocaleTranslations(locale)
+    if (!translations) return null
+
+    return mergeTranslations(siteContent, translations)
+  }
 
   return {
     name: 'uniweb:site-content',
@@ -284,6 +342,14 @@ export function siteContentPlugin(options = {}) {
       try {
         siteContent = await collectSiteContent(resolvedSitePath)
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
+
+        // Update localesDir from site config
+        if (siteContent.config?.i18n?.localesDir) {
+          localesDir = siteContent.config.i18n.localesDir
+        }
+
+        // Clear translation cache on rebuild
+        localeTranslations = {}
       } catch (err) {
         console.error('[site-content] Failed to collect content:', err.message)
         siteContent = { config: {}, theme: {}, pages: [] }
@@ -346,12 +412,57 @@ export function siteContentPlugin(options = {}) {
         watcher = { close: () => watchers.forEach(w => w.close()) }
       }
 
+      // Watch locales directory for translation changes
+      const localesPath = resolve(resolvedSitePath, localesDir)
+      if (existsSync(localesPath)) {
+        try {
+          const localeWatcher = watch(localesPath, { recursive: false }, () => {
+            console.log('[site-content] Translation files changed, clearing cache...')
+            localeTranslations = {}
+            server.ws.send({ type: 'full-reload' })
+          })
+          if (watcher) {
+            const originalClose = watcher.close
+            watcher.close = () => {
+              originalClose()
+              localeWatcher.close()
+            }
+          }
+          console.log(`[site-content] Watching ${localesPath} for translation changes`)
+        } catch (err) {
+          // locales dir may not exist, that's ok
+        }
+      }
+
       // Serve content and SEO files
-      devServer.middlewares.use((req, res, next) => {
+      devServer.middlewares.use(async (req, res, next) => {
+        // Handle default locale site-content request
         if (req.url === `/${filename}`) {
           res.setHeader('Content-Type', 'application/json')
           res.end(JSON.stringify(siteContent, null, 2))
           return
+        }
+
+        // Handle locale-prefixed site-content request (e.g., /es/site-content.json)
+        const localeContentMatch = req.url.match(/^\/([a-z]{2})\/site-content\.json$/)
+        if (localeContentMatch) {
+          const locale = localeContentMatch[1]
+          const translatedContent = await getTranslatedContent(locale)
+
+          if (translatedContent) {
+            // Add activeLocale to the content so runtime knows which locale is active
+            const contentWithLocale = {
+              ...translatedContent,
+              config: {
+                ...translatedContent.config,
+                activeLocale: locale
+              }
+            }
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(contentWithLocale, null, 2))
+            return
+          }
+          // If no translations, fall through to serve default content
         }
 
         // Serve sitemap.xml in dev mode
@@ -394,14 +505,35 @@ export function siteContentPlugin(options = {}) {
       })
     },
 
-    transformIndexHtml(html) {
+    async transformIndexHtml(html, ctx) {
       if (!siteContent) return html
+
+      // Detect locale from URL (e.g., /es/about → 'es')
+      let contentToInject = siteContent
+      let activeLocale = null
+
+      if (ctx?.originalUrl) {
+        const localeMatch = ctx.originalUrl.match(/^\/([a-z]{2})(\/|$)/)
+        if (localeMatch) {
+          activeLocale = localeMatch[1]
+          const translatedContent = await getTranslatedContent(activeLocale)
+          if (translatedContent) {
+            contentToInject = {
+              ...translatedContent,
+              config: {
+                ...translatedContent.config,
+                activeLocale
+              }
+            }
+          }
+        }
+      }
 
       let headInjection = ''
 
       // Inject SEO meta tags
       if (seoEnabled) {
-        const metaTags = generateMetaTags(siteContent, seoOptions)
+        const metaTags = generateMetaTags(contentToInject, seoOptions)
         if (metaTags) {
           headInjection += `    ${metaTags}\n`
         }
@@ -409,7 +541,7 @@ export function siteContentPlugin(options = {}) {
 
       // Inject content as JSON script tag
       if (inject) {
-        headInjection += `    <script type="application/json" id="${variableName}">${JSON.stringify(siteContent)}</script>\n`
+        headInjection += `    <script type="application/json" id="${variableName}">${JSON.stringify(contentToInject)}</script>\n`
       }
 
       if (!headInjection) return html
