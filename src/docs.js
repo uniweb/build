@@ -30,51 +30,39 @@ function generateComponentDocs(name, meta) {
     lines.push('')
   }
 
-  // Category badge
-  if (meta.category) {
-    lines.push(`**Category:** ${meta.category}`)
-    lines.push('')
-  }
-
-  // Content Elements
-  if (meta.elements && Object.keys(meta.elements).length > 0) {
-    lines.push('### Content Elements')
-    lines.push('')
-    lines.push('| Element | Label | Required | Description |')
-    lines.push('|---------|-------|----------|-------------|')
-
-    for (const [key, element] of Object.entries(meta.elements)) {
-      const label = element.label || key
-      const required = element.required ? 'Yes' : ''
-      const description = element.description || ''
-      lines.push(`| \`${key}\` | ${label} | ${required} | ${description} |`)
-    }
-    lines.push('')
-  }
-
-  // Parameters/Properties
+  // Parameters/Properties (shown first - most important for content authors)
   if (meta.properties && Object.keys(meta.properties).length > 0) {
     lines.push('### Parameters')
     lines.push('')
-    lines.push('| Parameter | Type | Default | Description |')
-    lines.push('|-----------|------|---------|-------------|')
 
     for (const [key, prop] of Object.entries(meta.properties)) {
-      const type = prop.type || 'string'
-      const defaultVal = prop.default !== undefined ? `\`${prop.default}\`` : ''
-      let description = prop.label || ''
+      const defaultVal = prop.default !== undefined ? prop.default : ''
 
-      // Add options for select type
+      // Parameter name with default
+      if (defaultVal !== '') {
+        lines.push(`**${key}** = \`${defaultVal}\``)
+      } else {
+        lines.push(`**${key}**`)
+      }
+
+      // For select type, show options on next line
       if (prop.type === 'select' && prop.options) {
         const optionValues = prop.options.map(o =>
           typeof o === 'object' ? o.value : o
-        ).join(', ')
-        description += description ? ` (${optionValues})` : optionValues
+        ).join(' | ')
+        lines.push(`  ${optionValues}`)
+      } else if (prop.type === 'boolean') {
+        // For boolean, show the label as description
+        if (prop.label) {
+          lines.push(`  ${prop.label}`)
+        }
+      } else if (prop.label) {
+        // For other types, show label
+        lines.push(`  ${prop.label}`)
       }
 
-      lines.push(`| \`${key}\` | ${type} | ${defaultVal} | ${description} |`)
+      lines.push('')
     }
-    lines.push('')
   }
 
   // Presets
@@ -88,8 +76,21 @@ function generateComponentDocs(name, meta) {
             .map(([k, v]) => `${k}: ${v}`)
             .join(', ')
         : ''
-      lines.push(`- **${preset.name}** - ${preset.label || ''} ${settings ? `(${settings})` : ''}`)
+      lines.push(`- **${preset.name}**${settings ? ` — ${settings}` : ''}`)
     }
+    lines.push('')
+  }
+
+  // Content Elements (condensed - less important)
+  if (meta.elements && Object.keys(meta.elements).length > 0) {
+    const elements = Object.entries(meta.elements)
+    const elementList = elements.map(([key, el]) => {
+      return el.required ? `${key} (required)` : key
+    }).join(', ')
+
+    lines.push('### Content')
+    lines.push('')
+    lines.push(elementList)
     lines.push('')
   }
 
@@ -112,17 +113,11 @@ export function generateDocsFromSchema(schema, options = {}) {
   lines.push(`# ${title}`)
   lines.push('')
 
-  // Foundation info
+  // Foundation description
   const foundationMeta = schema._self
-  if (foundationMeta) {
-    if (foundationMeta.name) {
-      lines.push(`**${foundationMeta.name}**`)
-      lines.push('')
-    }
-    if (foundationMeta.description) {
-      lines.push(foundationMeta.description)
-      lines.push('')
-    }
+  if (foundationMeta?.description) {
+    lines.push(foundationMeta.description)
+    lines.push('')
   }
 
   lines.push('---')
@@ -134,11 +129,7 @@ export function generateDocsFromSchema(schema, options = {}) {
   if (componentNames.length > 0) {
     lines.push('## Components')
     lines.push('')
-    for (const name of componentNames) {
-      const meta = schema[name]
-      const title = meta.title || name
-      lines.push(`- [${title}](#${name.toLowerCase()}) - ${meta.description || ''}`)
-    }
+    lines.push(componentNames.map(name => `[${name}](#${name.toLowerCase()})`).join(' · '))
     lines.push('')
     lines.push('---')
     lines.push('')
@@ -152,10 +143,7 @@ export function generateDocsFromSchema(schema, options = {}) {
     lines.push('')
   }
 
-  // Footer
-  lines.push('*Generated from foundation schema*')
-
-  return lines.join('\n')
+  return lines.join('\n').trim() + '\n'
 }
 
 /**
