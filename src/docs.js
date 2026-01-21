@@ -7,7 +7,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import { buildSchema } from './schema.js'
 
 /**
@@ -194,8 +194,8 @@ export async function generateDocs(foundationDir, options = {}) {
   // Generate markdown
   const markdown = generateDocsFromSchema(schema, { title })
 
-  // Write output
-  const outputPath = join(foundationDir, output)
+  // Write output (support absolute paths for site-based generation)
+  const outputPath = isAbsolute(output) ? output : join(foundationDir, output)
   await writeFile(outputPath, markdown)
 
   // Count components
