@@ -351,11 +351,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   }
 
   // Determine route
+  // All pages get their actual folder-based route (no special treatment for index)
+  // The isIndex flag marks which page should also be accessible at the parent route
   let route
-  if (isIndex) {
-    // Index page gets the parent route
-    route = parentRoute
-  } else if (pageName.startsWith('@')) {
+  if (pageName.startsWith('@')) {
     // Special pages (layout areas) keep their @ prefix
     route = parentRoute === '/' ? `/@${pageName.slice(1)}` : `${parentRoute}/@${pageName.slice(1)}`
   } else {
@@ -369,6 +368,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   return {
     page: {
       route,
+      isIndex, // Marks this page as the index for its parent route (accessible at parentRoute)
       title: pageConfig.title || pageName,
       description: pageConfig.description || '',
       label: pageConfig.label || null, // Short label for navigation (defaults to title)

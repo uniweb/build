@@ -118,11 +118,21 @@ export async function prerenderSite(siteDir, options = {}) {
   const pages = uniweb.activeWebsite.pages
 
   for (const page of pages) {
-    const route = page.route
-    onProgress(`Rendering ${route}...`)
+    // Determine which routes to render this page at
+    // Index pages are rendered at both their actual route and their nav route
+    const routesToRender = [page.route]
+    if (page.isIndex) {
+      const navRoute = page.getNavRoute()
+      if (navRoute !== page.route) {
+        routesToRender.push(navRoute)
+      }
+    }
+
+    // Render once, output to multiple paths
+    onProgress(`Rendering ${routesToRender[0]}...`)
 
     // Set this as the active page
-    uniweb.activeWebsite.setActivePage(route)
+    uniweb.activeWebsite.setActivePage(page.route)
 
     // Create the page element
     // Note: We don't need StaticRouter for SSG since we're just rendering
@@ -134,7 +144,7 @@ export async function prerenderSite(siteDir, options = {}) {
     try {
       renderedContent = renderToString(element)
     } catch (err) {
-      console.warn(`Warning: Failed to render ${route}: ${err.message}`)
+      console.warn(`Warning: Failed to render ${page.route}: ${err.message}`)
       if (process.env.DEBUG) {
         console.error(err.stack)
       }
@@ -144,13 +154,15 @@ export async function prerenderSite(siteDir, options = {}) {
     // Inject into shell
     const html = injectContent(htmlShell, renderedContent, page, siteContent)
 
-    // Determine output path
-    const outputPath = getOutputPath(distDir, route)
-    await mkdir(dirname(outputPath), { recursive: true })
-    await writeFile(outputPath, html)
+    // Output to all routes for this page
+    for (const route of routesToRender) {
+      const outputPath = getOutputPath(distDir, route)
+      await mkdir(dirname(outputPath), { recursive: true })
+      await writeFile(outputPath, html)
 
-    renderedFiles.push(outputPath)
-    onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
+      renderedFiles.push(outputPath)
+      onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
+    }
   }
 
   onProgress(`Pre-rendered ${renderedFiles.length} pages`)
