@@ -8,6 +8,8 @@
  * - background: boolean for engine-level background handling
  * - data: { type, limit } for CMS entity binding
  * - defaults: param default values
+ * - context: static capabilities for cross-block coordination
+ * - initialState: initial values for mutable block state
  *
  * Full metadata (titles, descriptions, hints, etc.) stays in schema.json
  * for the visual editor.
@@ -86,6 +88,18 @@ export function extractRuntimeSchema(fullMeta) {
   const defaults = extractParamDefaults(paramsObj)
   if (defaults) {
     runtime.defaults = defaults
+  }
+
+  // Context - static capabilities for cross-block coordination
+  // e.g., { allowTranslucentTop: true } for Hero components
+  if (fullMeta.context && typeof fullMeta.context === 'object') {
+    runtime.context = fullMeta.context
+  }
+
+  // Initial state - default values for mutable block state
+  // e.g., { expanded: false } for accordion-like components
+  if (fullMeta.initialState && typeof fullMeta.initialState === 'object') {
+    runtime.initialState = fullMeta.initialState
   }
 
   return Object.keys(runtime).length > 0 ? runtime : null
