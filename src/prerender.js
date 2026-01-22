@@ -264,6 +264,50 @@ function PageRenderer({ page, foundation }) {
 }
 
 /**
+ * Guarantee content structure exists (mirrors runtime/prepare-props.js)
+ * Returns a content object with all standard paths guaranteed to exist
+ */
+function guaranteeContentStructure(parsedContent) {
+  const content = parsedContent || {}
+
+  return {
+    // Main content section
+    main: {
+      header: {
+        title: content.main?.header?.title || '',
+        pretitle: content.main?.header?.pretitle || '',
+        subtitle: content.main?.header?.subtitle || '',
+      },
+      body: {
+        paragraphs: content.main?.body?.paragraphs || [],
+        links: content.main?.body?.links || [],
+        imgs: content.main?.body?.imgs || [],
+        lists: content.main?.body?.lists || [],
+        icons: content.main?.body?.icons || [],
+      },
+    },
+    // Content items (H3 sections)
+    items: content.items || [],
+    // Preserve any additional fields from parser
+    ...content,
+  }
+}
+
+/**
+ * Apply param defaults from runtime schema
+ */
+function applyDefaults(params, defaults) {
+  if (!defaults || Object.keys(defaults).length === 0) {
+    return params || {}
+  }
+
+  return {
+    ...defaults,
+    ...(params || {}),
+  }
+}
+
+/**
  * Block renderer - maps block to foundation component
  */
 function BlockRenderer({ block, foundation }) {
@@ -290,13 +334,24 @@ function BlockRenderer({ block, foundation }) {
     )
   }
 
-  // Build content object (same as runtime's BlockRenderer)
-  let content
+  // Get runtime schema for defaults (from foundation.runtimeSchema)
+  const runtimeSchema = foundation.runtimeSchema || {}
+  const schema = runtimeSchema[componentName] || null
+  const defaults = schema?.defaults || {}
+
+  // Build content and params with runtime guarantees (same as runtime's BlockRenderer)
+  let content, params
   if (block.parsedContent?.raw) {
+    // Simple PoC format - content was passed directly
     content = block.parsedContent.raw
+    params = block.properties
   } else {
+    // Apply param defaults from meta.js
+    params = applyDefaults(block.properties, defaults)
+
+    // Guarantee content structure + merge with properties for backward compat
     content = {
-      ...block.parsedContent,
+      ...guaranteeContentStructure(block.parsedContent),
       ...block.properties,
       _prosemirror: block.parsedContent
     }
@@ -313,7 +368,7 @@ function BlockRenderer({ block, foundation }) {
   // Component props
   const componentProps = {
     content,
-    params: block.properties,
+    params,
     block,
     page: globalThis.uniweb?.activeWebsite?.activePage,
     website: globalThis.uniweb?.activeWebsite,
