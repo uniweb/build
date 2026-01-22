@@ -1,7 +1,6 @@
 import {
   extractRuntimeSchema,
   extractAllRuntimeSchemas,
-  extractFoundationRuntime,
 } from '../src/runtime-schema.js'
 
 describe('extractRuntimeSchema', () => {
@@ -231,74 +230,3 @@ describe('extractAllRuntimeSchemas', () => {
   })
 })
 
-describe('extractFoundationRuntime', () => {
-  it('returns empty object for invalid input', () => {
-    expect(extractFoundationRuntime(null)).toEqual({})
-    expect(extractFoundationRuntime(undefined)).toEqual({})
-    expect(extractFoundationRuntime('not an object')).toEqual({})
-  })
-
-  it('extracts name and title', () => {
-    const meta = {
-      name: 'marketing',
-      title: 'Marketing Foundation',
-      description: 'Components for marketing sites',
-    }
-    expect(extractFoundationRuntime(meta)).toEqual({
-      name: 'marketing',
-      title: 'Marketing Foundation',
-    })
-  })
-
-  it('extracts runtime props from "runtime" field', () => {
-    const meta = {
-      name: 'marketing',
-      runtime: {
-        themeToggle: true,
-        analyticsEnabled: false,
-      },
-    }
-    expect(extractFoundationRuntime(meta)).toEqual({
-      name: 'marketing',
-      runtime: {
-        themeToggle: true,
-        analyticsEnabled: false,
-      },
-    })
-  })
-
-  it('extracts runtime props from legacy "props" field', () => {
-    const meta = {
-      name: 'legacy',
-      props: {
-        themeToggle: true,
-      },
-    }
-    expect(extractFoundationRuntime(meta)).toEqual({
-      name: 'legacy',
-      runtime: {
-        themeToggle: true,
-      },
-    })
-  })
-
-  it('prefers "runtime" over "props" when both exist', () => {
-    const meta = {
-      name: 'test',
-      runtime: { newField: true },
-      props: { oldField: true },
-    }
-    expect(extractFoundationRuntime(meta)).toEqual({
-      name: 'test',
-      runtime: { newField: true },
-    })
-  })
-
-  it('returns empty object when no relevant fields', () => {
-    const meta = {
-      description: 'Just a description',
-      styles: { primary: { type: 'color' } },
-    }
-    expect(extractFoundationRuntime(meta)).toEqual({})
-  })
-})

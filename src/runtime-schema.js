@@ -123,36 +123,3 @@ export function extractAllRuntimeSchemas(componentsMeta) {
 
   return schemas
 }
-
-/**
- * Extract lean foundation runtime config from foundation meta.js
- *
- * @param {Object} foundationMeta - The foundation-level meta.js content
- * @returns {Object} - Foundation runtime config
- */
-export function extractFoundationRuntime(foundationMeta) {
-  if (!foundationMeta || typeof foundationMeta !== 'object') {
-    return {}
-  }
-
-  const foundation = {}
-
-  // Name (required for identification)
-  if (foundationMeta.name) {
-    foundation.name = foundationMeta.name
-  }
-
-  // Title (display name)
-  if (foundationMeta.title) {
-    foundation.title = foundationMeta.title
-  }
-
-  // Runtime props (available to all components)
-  // Support both 'runtime' (v2) and 'props' (v1) field names
-  const runtimeProps = foundationMeta.runtime || foundationMeta.props
-  if (runtimeProps && typeof runtimeProps === 'object') {
-    foundation.runtime = runtimeProps
-  }
-
-  return foundation
-}

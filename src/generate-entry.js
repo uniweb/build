@@ -6,23 +6,24 @@
  * Exports:
  * - `components` - Object map of component name -> React component
  * - `capabilities` - Custom Layout and props from src/exports.js (if present)
- * - `runtimeSchema` - Lean runtime metadata extracted from component meta.js files
- * - `foundation` - Foundation-level metadata from src/meta.js
+ * - `schema` - Lean runtime metadata extracted from component meta.js files
  *
- * The `runtimeSchema` export contains only properties needed at runtime:
+ * The `schema` export contains only properties needed at runtime:
  * - `background` - Engine-level background image handling
  * - `data` - CMS entity binding ({ type, limit })
  * - `defaults` - Param default values
+ * - `context` - Static capabilities for cross-block coordination
+ * - `initialState` - Initial values for mutable block state
  *
  * Full component metadata lives in schema.json (for the visual editor).
- * Only runtime-essential properties are extracted here to keep bundles small.
+ * Foundation identity (name, description) comes from package.json in the editor schema.
  */
 
 import { writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { discoverComponents, loadFoundationMeta } from './schema.js'
-import { extractAllRuntimeSchemas, extractFoundationRuntime } from './runtime-schema.js'
+import { discoverComponents } from './schema.js'
+import { extractAllRuntimeSchemas } from './runtime-schema.js'
 
 /**
  * Detect foundation exports file (for custom Layout, props, etc.)
@@ -67,8 +68,7 @@ function generateEntrySource(componentNames, options = {}) {
     cssPath = null,
     componentExtensions = {},
     foundationExports = null,
-    runtimeSchema = {},
-    foundation = {},
+    schema = {},
   } = options
 
   const lines = [
@@ -112,24 +112,14 @@ function generateEntrySource(componentNames, options = {}) {
     lines.push('export const capabilities = null')
   }
 
-  // Runtime schema (lean metadata for runtime: background, data, defaults)
+  // Runtime schema (lean metadata: defaults, context, initialState, background, data)
   lines.push('')
-  if (Object.keys(runtimeSchema).length > 0) {
-    const schemaJson = JSON.stringify(runtimeSchema, null, 2)
-    lines.push(`// Runtime schema (background, data binding, param defaults)`)
-    lines.push(`export const runtimeSchema = ${schemaJson}`)
+  if (Object.keys(schema).length > 0) {
+    const schemaJson = JSON.stringify(schema, null, 2)
+    lines.push(`// Runtime schema (per-component metadata)`)
+    lines.push(`export const schema = ${schemaJson}`)
   } else {
-    lines.push('export const runtimeSchema = {}')
-  }
-
-  // Foundation metadata (name, title, runtime props)
-  lines.push('')
-  if (Object.keys(foundation).length > 0) {
-    const foundationJson = JSON.stringify(foundation, null, 2)
-    lines.push(`// Foundation metadata`)
-    lines.push(`export const foundation = ${foundationJson}`)
-  } else {
-    lines.push('export const foundation = {}')
+    lines.push('export const schema = {}')
   }
 
   lines.push('')
@@ -175,19 +165,14 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   const foundationExports = detectFoundationExports(srcDir)
 
   // Extract lean runtime schema from component meta.js files
-  const runtimeSchema = extractAllRuntimeSchemas(components)
-
-  // Load and extract foundation-level metadata
-  const foundationMeta = await loadFoundationMeta(srcDir)
-  const foundation = extractFoundationRuntime(foundationMeta)
+  const schema = extractAllRuntimeSchemas(components)
 
   // Generate source
   const source = generateEntrySource(componentNames, {
     cssPath,
     componentExtensions,
     foundationExports,
-    runtimeSchema,
-    foundation,
+    schema,
   })
 
   // Write to file
@@ -200,16 +185,12 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   if (foundationExports) {
     console.log(`  - Foundation exports found: ${foundationExports.path}`)
   }
-  if (Object.keys(foundation).length > 0) {
-    console.log(`  - Foundation meta: ${foundation.name || 'unnamed'}`)
-  }
 
   return {
     outputPath: output,
     componentNames,
     foundationExports,
-    runtimeSchema,
-    foundation,
+    schema,
   }
 }
 
