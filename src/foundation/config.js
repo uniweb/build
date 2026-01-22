@@ -48,6 +48,9 @@ const DEFAULT_EXTERNALS = [
  * @param {Object} [options={}] - Configuration options
  * @param {string} [options.entry] - Entry point path (default: 'src/_entry.generated.js')
  * @param {string} [options.fileName] - Output file name (default: 'foundation')
+ * @param {string[]} [options.components] - Paths to search for components (relative to src/).
+ *                                          Default: ['components']
+ *                                          Example: ['components', 'components/sections']
  * @param {string[]} [options.externals] - Additional packages to externalize
  * @param {boolean} [options.includeDefaultExternals] - Include default externals (default: true)
  * @param {Array} [options.plugins] - Additional Vite plugins
@@ -60,6 +63,7 @@ export async function defineFoundationConfig(options = {}) {
   const {
     entry = 'src/_entry.generated.js',
     fileName = 'foundation',
+    components: componentPaths,
     externals: additionalExternals = [],
     includeDefaultExternals = true,
     plugins: extraPlugins = [],
@@ -104,7 +108,7 @@ export async function defineFoundationConfig(options = {}) {
   // Build the plugins array
   // foundationPlugin handles entry generation and schema building
   const plugins = [
-    foundationPlugin({ srcDir: 'src' }),
+    foundationPlugin({ srcDir: 'src', components: componentPaths }),
     tailwind && tailwindcss(),
     react(),
     svgr(),

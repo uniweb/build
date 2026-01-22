@@ -62,14 +62,18 @@ function detectCssFile(srcDir) {
 
 /**
  * Generate the entry point source code
+ *
+ * @param {Object} components - Map of componentName -> { name, path, ext, ...meta }
+ * @param {Object} options - Generation options
  */
-function generateEntrySource(componentNames, options = {}) {
+function generateEntrySource(components, options = {}) {
   const {
     cssPath = null,
-    componentExtensions = {},
     foundationExports = null,
     meta = {},
   } = options
+
+  const componentNames = Object.keys(components).sort()
 
   const lines = [
     '// Auto-generated foundation entry point',
@@ -87,10 +91,10 @@ function generateEntrySource(componentNames, options = {}) {
     lines.push(`import capabilities from '${foundationExports.path}'`)
   }
 
-  // Component imports (use detected extension or default to .js)
+  // Component imports (use component's path and detected extension)
   for (const name of componentNames) {
-    const ext = componentExtensions[name] || 'js'
-    lines.push(`import ${name} from './components/${name}/index.${ext}'`)
+    const { path, ext = 'js' } = components[name]
+    lines.push(`import ${name} from './${path}/index.${ext}'`)
   }
 
   lines.push('')
@@ -129,9 +133,12 @@ function generateEntrySource(componentNames, options = {}) {
 
 /**
  * Detect the index file extension for a component
+ *
+ * @param {string} srcDir - Source directory
+ * @param {string} componentPath - Relative path to component (e.g., 'components/Hero')
  */
-function detectComponentExtension(srcDir, componentName) {
-  const basePath = join(srcDir, 'components', componentName)
+function detectComponentExtension(srcDir, componentPath) {
+  const basePath = join(srcDir, componentPath)
   for (const ext of ['jsx', 'tsx', 'js', 'ts']) {
     if (existsSync(join(basePath, `index.${ext}`))) {
       return ext
@@ -142,20 +149,27 @@ function detectComponentExtension(srcDir, componentName) {
 
 /**
  * Generate the foundation entry point file
+ *
+ * @param {string} srcDir - Source directory
+ * @param {string} [outputPath] - Output file path (default: srcDir/_entry.generated.js)
+ * @param {Object} [options] - Options
+ * @param {string[]} [options.componentPaths] - Paths to search for components (relative to srcDir)
  */
-export async function generateEntryPoint(srcDir, outputPath = null) {
+export async function generateEntryPoint(srcDir, outputPath = null, options = {}) {
+  const { componentPaths } = options
+
   // Discover components (includes meta from meta.js files)
-  const components = await discoverComponents(srcDir)
+  const components = await discoverComponents(srcDir, componentPaths)
   const componentNames = Object.keys(components).sort()
 
   if (componentNames.length === 0) {
     console.warn('Warning: No exposed components found')
   }
 
-  // Detect extensions for each component
-  const componentExtensions = {}
+  // Detect extensions for each component and add to component info
   for (const name of componentNames) {
-    componentExtensions[name] = detectComponentExtension(srcDir, name)
+    const component = components[name]
+    component.ext = detectComponentExtension(srcDir, component.path)
   }
 
   // Check for CSS file
@@ -168,9 +182,8 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   const meta = extractAllRuntimeSchemas(components)
 
   // Generate source
-  const source = generateEntrySource(componentNames, {
+  const source = generateEntrySource(components, {
     cssPath,
-    componentExtensions,
     foundationExports,
     meta,
   })

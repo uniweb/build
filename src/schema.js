@@ -13,6 +13,9 @@ import { pathToFileURL } from 'node:url'
 // Meta file name (standardized to meta.js)
 const META_FILE_NAME = 'meta.js'
 
+// Default component paths (relative to srcDir)
+const DEFAULT_COMPONENT_PATHS = ['components']
+
 /**
  * Load a meta.js file via dynamic import
  */
@@ -57,23 +60,25 @@ export async function loadFoundationMeta(srcDir) {
 }
 
 /**
- * Discover all exposed components in a foundation
- * Returns map of componentName -> meta
+ * Discover components in a single path
+ * @param {string} srcDir - Source directory (e.g., 'src')
+ * @param {string} relativePath - Path relative to srcDir (e.g., 'components' or 'components/sections')
+ * @returns {Object} Map of componentName -> { name, path, ...meta }
  */
-export async function discoverComponents(srcDir) {
-  const componentsDir = join(srcDir, 'components')
+async function discoverComponentsInPath(srcDir, relativePath) {
+  const fullPath = join(srcDir, relativePath)
 
-  if (!existsSync(componentsDir)) {
+  if (!existsSync(fullPath)) {
     return {}
   }
 
-  const entries = await readdir(componentsDir, { withFileTypes: true })
+  const entries = await readdir(fullPath, { withFileTypes: true })
   const components = {}
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
 
-    const componentDir = join(componentsDir, entry.name)
+    const componentDir = join(fullPath, entry.name)
     const result = await loadComponentMeta(componentDir)
 
     if (result && result.meta) {
@@ -84,6 +89,7 @@ export async function discoverComponents(srcDir) {
 
       components[entry.name] = {
         name: entry.name,
+        path: join(relativePath, entry.name), // e.g., 'components/Hero' or 'components/sections/Hero'
         ...result.meta,
       }
     }
@@ -93,12 +99,42 @@ export async function discoverComponents(srcDir) {
 }
 
 /**
+ * Discover all exposed components in a foundation
+ *
+ * @param {string} srcDir - Source directory (e.g., 'src')
+ * @param {string[]} [componentPaths] - Paths to search for components (relative to srcDir)
+ *                                      Default: ['components']
+ * @returns {Object} Map of componentName -> { name, path, ...meta }
+ */
+export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPONENT_PATHS) {
+  const components = {}
+
+  for (const relativePath of componentPaths) {
+    const found = await discoverComponentsInPath(srcDir, relativePath)
+
+    for (const [name, meta] of Object.entries(found)) {
+      if (components[name]) {
+        // Component already found in an earlier path - skip (first wins)
+        console.warn(`Warning: Component "${name}" found in multiple paths. Using ${components[name].path}, ignoring ${meta.path}`)
+        continue
+      }
+      components[name] = meta
+    }
+  }
+
+  return components
+}
+
+/**
  * Build complete schema for a foundation
  * Returns { _self: foundationMeta, ComponentName: componentMeta, ... }
+ *
+ * @param {string} srcDir - Source directory
+ * @param {string[]} [componentPaths] - Paths to search for components
  */
-export async function buildSchema(srcDir) {
+export async function buildSchema(srcDir, componentPaths) {
   const foundationMeta = await loadFoundationMeta(srcDir)
-  const components = await discoverComponents(srcDir)
+  const components = await discoverComponents(srcDir, componentPaths)
 
   return {
     _self: foundationMeta,
@@ -108,8 +144,11 @@ export async function buildSchema(srcDir) {
 
 /**
  * Get list of exposed component names
+ *
+ * @param {string} srcDir - Source directory
+ * @param {string[]} [componentPaths] - Paths to search for components
  */
-export async function getExposedComponents(srcDir) {
-  const components = await discoverComponents(srcDir)
+export async function getExposedComponents(srcDir, componentPaths) {
+  const components = await discoverComponents(srcDir, componentPaths)
   return Object.keys(components)
 }

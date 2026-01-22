@@ -16,8 +16,8 @@ import { processAllPreviews } from './images.js'
 /**
  * Build schema.json with preview image references
  */
-async function buildSchemaWithPreviews(srcDir, outDir, isProduction) {
-  const schema = await buildSchema(srcDir)
+async function buildSchemaWithPreviews(srcDir, outDir, isProduction, componentPaths) {
+  const schema = await buildSchema(srcDir, componentPaths)
 
   // Process preview images
   const { schema: schemaWithImages, totalImages } = await processAllPreviews(
@@ -42,6 +42,7 @@ export function foundationBuildPlugin(options = {}) {
     srcDir = 'src',
     generateEntry = true,
     entryFileName = '_entry.generated.js',
+    components: componentPaths,
   } = options
 
   let resolvedSrcDir
@@ -58,7 +59,7 @@ export function foundationBuildPlugin(options = {}) {
       const root = config.root || process.cwd()
       const srcPath = resolve(root, srcDir)
       const entryPath = join(srcPath, entryFileName)
-      await generateEntryPoint(srcPath, entryPath)
+      await generateEntryPoint(srcPath, entryPath, { componentPaths })
     },
 
     async configResolved(config) {
@@ -78,7 +79,8 @@ export function foundationBuildPlugin(options = {}) {
       const schema = await buildSchemaWithPreviews(
         resolvedSrcDir,
         outDir,
-        isProduction
+        isProduction,
+        componentPaths
       )
 
       const schemaPath = join(metaDir, 'schema.json')
@@ -97,6 +99,7 @@ export function foundationDevPlugin(options = {}) {
   const {
     srcDir = 'src',
     entryFileName = '_entry.generated.js',
+    components: componentPaths,
   } = options
 
   let resolvedSrcDir
@@ -109,7 +112,7 @@ export function foundationDevPlugin(options = {}) {
       const root = config.root || process.cwd()
       const srcPath = resolve(root, srcDir)
       const entryPath = join(srcPath, entryFileName)
-      await generateEntryPoint(srcPath, entryPath)
+      await generateEntryPoint(srcPath, entryPath, { componentPaths })
     },
 
     configResolved(config) {
@@ -118,10 +121,11 @@ export function foundationDevPlugin(options = {}) {
 
     async handleHotUpdate({ file, server }) {
       // Regenerate entry when meta.js files change
-      if (file.includes('/components/') && file.endsWith('/meta.js')) {
+      // Check if file is a meta.js in the src directory
+      if (file.startsWith(resolvedSrcDir) && file.endsWith('/meta.js')) {
         console.log('Component meta.js changed, regenerating entry...')
         const entryPath = join(resolvedSrcDir, entryFileName)
-        await generateEntryPoint(resolvedSrcDir, entryPath)
+        await generateEntryPoint(resolvedSrcDir, entryPath, { componentPaths })
 
         // Trigger full reload since entry changed
         server.ws.send({ type: 'full-reload' })
@@ -131,7 +135,7 @@ export function foundationDevPlugin(options = {}) {
       if (file.endsWith('/exports.js') || file.endsWith('/exports.jsx')) {
         console.log('Foundation exports changed, regenerating entry...')
         const entryPath = join(resolvedSrcDir, entryFileName)
-        await generateEntryPoint(resolvedSrcDir, entryPath)
+        await generateEntryPoint(resolvedSrcDir, entryPath, { componentPaths })
         server.ws.send({ type: 'full-reload' })
       }
     },

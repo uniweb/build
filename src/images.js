@@ -132,28 +132,21 @@ export async function processComponentPreviews(componentDir, componentName, outp
  *
  * @param {string} srcDir - Source directory (e.g., src/)
  * @param {string} outputDir - Output directory (e.g., dist/)
- * @param {Object} schema - Schema object to update with image info
+ * @param {Object} schema - Schema object with components (each has `path` property)
  * @param {boolean} isProduction - Whether to convert to webp
  * @returns {Object} Updated schema with image references
  */
 export async function processAllPreviews(srcDir, outputDir, schema, isProduction = true) {
-  const componentsDir = join(srcDir, 'components')
-
-  if (!existsSync(componentsDir)) {
-    return schema
-  }
-
-  const entries = await readdir(componentsDir, { withFileTypes: true })
   let totalImages = 0
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
+  // Iterate through components in schema (skip _self)
+  for (const [componentName, componentMeta] of Object.entries(schema)) {
+    if (componentName === '_self') continue
+    if (!componentMeta.path) continue
 
-    const componentName = entry.name
-    const componentDir = join(componentsDir, componentName)
+    const componentDir = join(srcDir, componentMeta.path)
 
-    // Skip if component not in schema
-    if (!schema[componentName]) continue
+    if (!existsSync(componentDir)) continue
 
     // Process preview images
     const previews = await processComponentPreviews(
