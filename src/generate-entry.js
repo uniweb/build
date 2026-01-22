@@ -6,9 +6,9 @@
  * Exports:
  * - `components` - Object map of component name -> React component
  * - `capabilities` - Custom Layout and props from src/exports.js (if present)
- * - `schema` - Lean runtime metadata extracted from component meta.js files
+ * - `meta` - Per-component runtime metadata extracted from meta.js files
  *
- * The `schema` export contains only properties needed at runtime:
+ * The `meta` export contains only properties needed at runtime:
  * - `background` - Engine-level background image handling
  * - `data` - CMS entity binding ({ type, limit })
  * - `defaults` - Param default values
@@ -68,7 +68,7 @@ function generateEntrySource(componentNames, options = {}) {
     cssPath = null,
     componentExtensions = {},
     foundationExports = null,
-    schema = {},
+    meta = {},
   } = options
 
   const lines = [
@@ -112,14 +112,14 @@ function generateEntrySource(componentNames, options = {}) {
     lines.push('export const capabilities = null')
   }
 
-  // Runtime schema (lean metadata: defaults, context, initialState, background, data)
+  // Per-component metadata (defaults, context, initialState, background, data)
   lines.push('')
-  if (Object.keys(schema).length > 0) {
-    const schemaJson = JSON.stringify(schema, null, 2)
-    lines.push(`// Runtime schema (per-component metadata)`)
-    lines.push(`export const schema = ${schemaJson}`)
+  if (Object.keys(meta).length > 0) {
+    const metaJson = JSON.stringify(meta, null, 2)
+    lines.push(`// Per-component runtime metadata (from meta.js)`)
+    lines.push(`export const meta = ${metaJson}`)
   } else {
-    lines.push('export const schema = {}')
+    lines.push('export const meta = {}')
   }
 
   lines.push('')
@@ -164,15 +164,15 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
   // Check for foundation exports (custom Layout, props, etc.)
   const foundationExports = detectFoundationExports(srcDir)
 
-  // Extract lean runtime schema from component meta.js files
-  const schema = extractAllRuntimeSchemas(components)
+  // Extract per-component runtime metadata from meta.js files
+  const meta = extractAllRuntimeSchemas(components)
 
   // Generate source
   const source = generateEntrySource(componentNames, {
     cssPath,
     componentExtensions,
     foundationExports,
-    schema,
+    meta,
   })
 
   // Write to file
@@ -190,7 +190,7 @@ export async function generateEntryPoint(srcDir, outputPath = null) {
     outputPath: output,
     componentNames,
     foundationExports,
-    schema,
+    meta,
   }
 }
 
