@@ -370,8 +370,6 @@ function BlockRenderer({ block, foundation }) {
     content,
     params,
     block,
-    page: globalThis.uniweb?.activeWebsite?.activePage,
-    website: globalThis.uniweb?.activeWebsite,
     input: block.input
   }
 
