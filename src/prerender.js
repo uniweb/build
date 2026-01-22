@@ -270,8 +270,12 @@ function PageRenderer({ page, foundation }) {
 function guaranteeContentStructure(parsedContent) {
   const content = parsedContent || {}
 
+  // Spread content first, then override with guaranteed structure
+  // This ensures main.body.paragraphs etc. are always arrays
   return {
-    // Main content section
+    // Preserve any additional fields from parser
+    ...content,
+    // Main content section (override with guarantees)
     main: {
       header: {
         title: content.main?.header?.title || '',
@@ -288,8 +292,6 @@ function guaranteeContentStructure(parsedContent) {
     },
     // Content items (H3 sections)
     items: content.items || [],
-    // Preserve any additional fields from parser
-    ...content,
   }
 }
 
