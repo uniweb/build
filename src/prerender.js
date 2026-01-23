@@ -13,9 +13,88 @@ import { existsSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
+import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
 
 // Lazily loaded dependencies
 let React, renderToString, createUniweb, PageElement
+
+/**
+ * Execute all data fetches for prerender
+ * Processes site, page, and section level fetches, merging data appropriately
+ *
+ * @param {Object} siteContent - The site content from site-content.json
+ * @param {string} siteDir - Path to the site directory
+ * @param {function} onProgress - Progress callback
+ */
+async function executeAllFetches(siteContent, siteDir, onProgress) {
+  const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
+
+  // 1. Site-level fetch (cascades to all pages)
+  let siteCascadedData = {}
+  const siteFetch = siteContent.config?.fetch
+  if (siteFetch && siteFetch.prerender !== false) {
+    onProgress(`  Fetching site data: ${siteFetch.path || siteFetch.url}`)
+    const result = await executeFetch(siteFetch, fetchOptions)
+    if (result.data && !result.error) {
+      siteCascadedData[siteFetch.schema] = result.data
+    }
+  }
+
+  // 2. Process each page
+  for (const page of siteContent.pages || []) {
+    // Page-level fetch (cascades to sections in this page)
+    let pageCascadedData = { ...siteCascadedData }
+    const pageFetch = page.fetch
+    if (pageFetch && pageFetch.prerender !== false) {
+      onProgress(`  Fetching page data for ${page.route}: ${pageFetch.path || pageFetch.url}`)
+      const result = await executeFetch(pageFetch, fetchOptions)
+      if (result.data && !result.error) {
+        pageCascadedData[pageFetch.schema] = result.data
+      }
+    }
+
+    // Process sections recursively (handles subsections too)
+    await processSectionFetches(page.sections, pageCascadedData, fetchOptions, onProgress)
+  }
+}
+
+/**
+ * Process fetch configs for sections (and subsections recursively)
+ *
+ * @param {Array} sections - Array of section objects
+ * @param {Object} cascadedData - Data cascaded from site/page level
+ * @param {Object} fetchOptions - Options for executeFetch
+ * @param {function} onProgress - Progress callback
+ */
+async function processSectionFetches(sections, cascadedData, fetchOptions, onProgress) {
+  if (!sections || !Array.isArray(sections)) return
+
+  for (const section of sections) {
+    // Execute section-level fetch
+    const sectionFetch = section.fetch
+    if (sectionFetch && sectionFetch.prerender !== false) {
+      onProgress(`  Fetching section data: ${sectionFetch.path || sectionFetch.url}`)
+      const result = await executeFetch(sectionFetch, fetchOptions)
+      if (result.data && !result.error) {
+        // Merge fetched data into section's parsedContent
+        section.parsedContent = mergeDataIntoContent(
+          section.parsedContent || {},
+          result.data,
+          sectionFetch.schema,
+          sectionFetch.merge
+        )
+      }
+    }
+
+    // Attach cascaded data for components with inheritData
+    section.cascadedData = cascadedData
+
+    // Process subsections recursively
+    if (section.subsections && section.subsections.length > 0) {
+      await processSectionFetches(section.subsections, cascadedData, fetchOptions, onProgress)
+    }
+  }
+}
 
 /**
  * Load dependencies dynamically from the site's context
@@ -91,6 +170,10 @@ export async function prerenderSite(siteDir, options = {}) {
     throw new Error(`site-content.json not found at: ${contentPath}`)
   }
   const siteContent = JSON.parse(await readFile(contentPath, 'utf8'))
+
+  // Execute data fetches (site, page, section levels)
+  onProgress('Executing data fetches...')
+  await executeAllFetches(siteContent, siteDir, onProgress)
 
   // Load the HTML shell
   onProgress('Loading HTML shell...')

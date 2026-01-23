@@ -10,6 +10,7 @@
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
  * - initialState: initial values for mutable block state
+ * - inheritData: boolean or array for cascaded data from page/site fetches
  *
  * Full metadata (titles, descriptions, hints, etc.) stays in schema.json
  * for the visual editor.
@@ -202,6 +203,12 @@ export function extractRuntimeSchema(fullMeta) {
     if (schemas) {
       runtime.schemas = schemas
     }
+  }
+
+  // Data inheritance - component receives cascaded data from page/site level fetches
+  // Can be: true (inherit all), false (inherit none), or ['schema1', 'schema2'] (selective)
+  if (fullMeta.inheritData !== undefined) {
+    runtime.inheritData = fullMeta.inheritData
   }
 
   return Object.keys(runtime).length > 0 ? runtime : null

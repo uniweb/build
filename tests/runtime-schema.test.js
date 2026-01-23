@@ -401,6 +401,45 @@ describe('extractRuntimeSchema', () => {
   })
 })
 
+describe('inheritData extraction', () => {
+  it('extracts inheritData: true', () => {
+    const meta = { inheritData: true }
+    expect(extractRuntimeSchema(meta)).toEqual({ inheritData: true })
+  })
+
+  it('extracts inheritData: false', () => {
+    const meta = { inheritData: false }
+    expect(extractRuntimeSchema(meta)).toEqual({ inheritData: false })
+  })
+
+  it('extracts inheritData as array', () => {
+    const meta = { inheritData: ['person', 'config'] }
+    expect(extractRuntimeSchema(meta)).toEqual({
+      inheritData: ['person', 'config'],
+    })
+  })
+
+  it('ignores undefined inheritData', () => {
+    const meta = { background: true }
+    const result = extractRuntimeSchema(meta)
+    expect(result).toEqual({ background: true })
+    expect(result.inheritData).toBeUndefined()
+  })
+
+  it('combines with other runtime properties', () => {
+    const meta = {
+      background: true,
+      inheritData: true,
+      params: { theme: { default: 'dark' } },
+    }
+    expect(extractRuntimeSchema(meta)).toEqual({
+      background: true,
+      inheritData: true,
+      defaults: { theme: 'dark' },
+    })
+  })
+})
+
 describe('extractAllRuntimeSchemas', () => {
   it('extracts schemas for multiple components', () => {
     const componentsMeta = {

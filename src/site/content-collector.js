@@ -12,6 +12,7 @@
  * - preset: Preset configuration name
  * - input: Input field mapping
  * - props: Additional component props (merged with other params)
+ * - fetch: Data fetching configuration (path, url, schema, prerender, merge, transform)
  *
  * Note: `component` is supported as an alias for `type` (deprecated)
  *
@@ -26,6 +27,7 @@ import { join, parse } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections } from './assets.js'
+import { parseFetchConfig } from './data-fetcher.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -140,7 +142,7 @@ async function processMarkdownFile(filePath, id, siteRoot) {
     }
   }
 
-  const { type, component, preset, input, props, ...params } = frontMatter
+  const { type, component, preset, input, props, fetch, ...params } = frontMatter
 
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
@@ -152,6 +154,7 @@ async function processMarkdownFile(filePath, id, siteRoot) {
     input,
     params: { ...params, ...props },
     content: proseMirrorContent,
+    fetch: parseFetchConfig(fetch),
     subsections: []
   }
 
@@ -394,6 +397,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         changefreq: seo.changefreq || null,
         priority: seo.priority || null
       },
+
+      // Data fetching
+      fetch: parseFetchConfig(pageConfig.fetch),
+
       sections: hierarchicalSections
     },
     assetCollection: pageAssetCollection
@@ -571,7 +578,10 @@ export async function collectSiteContent(sitePath) {
   }
 
   return {
-    config: siteConfig,
+    config: {
+      ...siteConfig,
+      fetch: parseFetchConfig(siteConfig.fetch),
+    },
     theme: themeConfig,
     pages,
     header,
