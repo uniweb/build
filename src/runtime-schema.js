@@ -107,8 +107,28 @@ function extractSchemaFields(schemaFields) {
 }
 
 /**
+ * Check if a schema value is in the full @uniweb/schemas format
+ * Full format has: { name, version?, description?, fields: {...} }
+ *
+ * @param {Object} schema - Schema value to check
+ * @returns {boolean}
+ */
+function isFullSchemaFormat(schema) {
+  return (
+    schema &&
+    typeof schema === 'object' &&
+    typeof schema.fields === 'object' &&
+    schema.fields !== null
+  )
+}
+
+/**
  * Extract lean schemas from meta.js schemas object
  * Strips editor-only fields while preserving structure
+ *
+ * Supports two formats:
+ * 1. Full @uniweb/schemas format: { name, version, fields: {...} }
+ * 2. Inline fields format: { fieldName: fieldDef, ... }
  *
  * @param {Object} schemas - The schemas object from meta.js
  * @returns {Object|null} - Lean schemas or null if empty
@@ -119,7 +139,13 @@ function extractSchemas(schemas) {
   }
 
   const lean = {}
-  for (const [schemaName, schemaFields] of Object.entries(schemas)) {
+  for (const [schemaName, schemaValue] of Object.entries(schemas)) {
+    // Handle full schema format (from @uniweb/schemas or npm packages)
+    // Extract just the fields, discard name/version/description metadata
+    const schemaFields = isFullSchemaFormat(schemaValue)
+      ? schemaValue.fields
+      : schemaValue
+
     const leanSchema = extractSchemaFields(schemaFields)
     if (Object.keys(leanSchema).length > 0) {
       lean[schemaName] = leanSchema

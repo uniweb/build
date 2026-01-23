@@ -354,6 +354,86 @@ describe('extractRuntimeSchema', () => {
         },
       })
     })
+
+    it('handles full @uniweb/schemas format (with name/version/fields)', () => {
+      const meta = {
+        schemas: {
+          team: {
+            name: 'person',
+            version: '1.0.0',
+            description: 'A person schema',
+            fields: {
+              name: { type: 'string', required: true, description: 'Full name' },
+              role: { type: 'string', description: 'Job title' },
+              featured: { type: 'boolean', default: false },
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          team: {
+            name: 'string',
+            role: 'string',
+            featured: { type: 'boolean', default: false },
+          },
+        },
+      })
+    })
+
+    it('handles mixed inline and full format schemas', () => {
+      const meta = {
+        schemas: {
+          // Full format (from @uniweb/schemas)
+          team: {
+            name: 'person',
+            fields: {
+              name: 'string',
+              email: { type: 'string', format: 'email' },
+            },
+          },
+          // Inline format
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          team: {
+            name: 'string',
+            email: 'string',
+          },
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+        },
+      })
+    })
+
+    it('extracts defaults from full format schema fields', () => {
+      const meta = {
+        schemas: {
+          config: {
+            name: 'config',
+            fields: {
+              theme: { type: 'select', options: ['light', 'dark'], default: 'light' },
+              maxItems: { type: 'number', default: 10 },
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          config: {
+            theme: { type: 'select', options: ['light', 'dark'], default: 'light' },
+            maxItems: { type: 'number', default: 10 },
+          },
+        },
+      })
+    })
   })
 
   describe('combined extraction', () => {
