@@ -51,6 +51,72 @@ function isPdfPath(src) {
 }
 
 /**
+ * Check if a string looks like a local asset path
+ *
+ * @param {string} value - String to check
+ * @returns {boolean} True if it looks like a local asset path
+ */
+function isLocalAssetPath(value) {
+  if (typeof value !== 'string' || !value) return false
+
+  // Skip external URLs
+  if (isExternalUrl(value)) return false
+
+  // Must start with ./, ../, or / (absolute site path)
+  if (!value.startsWith('./') && !value.startsWith('../') && !value.startsWith('/')) {
+    return false
+  }
+
+  // Must have a media extension
+  return isImagePath(value) || isVideoPath(value) || isPdfPath(value)
+}
+
+/**
+ * Recursively walk a parsed data object and collect asset paths
+ *
+ * @param {any} data - Parsed JSON/YAML data
+ * @param {Function} visitor - Callback for each asset path: (path) => void
+ */
+function walkDataAssets(data, visitor) {
+  if (typeof data === 'string') {
+    if (isLocalAssetPath(data)) {
+      visitor(data)
+    }
+    return
+  }
+
+  if (Array.isArray(data)) {
+    data.forEach(item => walkDataAssets(item, visitor))
+    return
+  }
+
+  if (data && typeof data === 'object') {
+    Object.values(data).forEach(value => walkDataAssets(value, visitor))
+  }
+}
+
+/**
+ * Walk ProseMirror content and collect assets from data blocks
+ * Data blocks have pre-parsed structured data (parsed at content-reader build time)
+ *
+ * @param {Object} doc - ProseMirror document
+ * @param {Function} visitor - Callback for each asset: (path) => void
+ */
+function walkDataBlockAssets(doc, visitor) {
+  if (!doc) return
+
+  // dataBlock nodes have pre-parsed data in attrs.data
+  if (doc.type === 'dataBlock' && doc.attrs?.data) {
+    walkDataAssets(doc.attrs.data, visitor)
+  }
+
+  // Recurse into content
+  if (doc.content && Array.isArray(doc.content)) {
+    doc.content.forEach(child => walkDataBlockAssets(child, visitor))
+  }
+}
+
+/**
  * Resolve an asset path to absolute file system path
  *
  * @param {string} src - Original source path from content
@@ -213,6 +279,22 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
         }
       }
     }
+  }
+
+  // Collect from tagged code blocks (JSON/YAML data)
+  if (section.content) {
+    walkDataBlockAssets(section.content, (assetPath) => {
+      const result = resolveAssetPath(assetPath, markdownPath, siteRoot)
+      if (!result.external && result.resolved) {
+        assets[assetPath] = {
+          original: assetPath,
+          resolved: result.resolved,
+          isImage: result.isImage,
+          isVideo: result.isVideo,
+          isPdf: result.isPdf
+        }
+      }
+    })
   }
 
   return { assets, hasExplicitPoster, hasExplicitPreview }

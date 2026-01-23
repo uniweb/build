@@ -167,6 +167,33 @@ export async function processAssets(assetManifest, options = {}) {
 }
 
 /**
+ * Recursively rewrite asset paths in a data object
+ *
+ * @param {any} data - Parsed JSON/YAML data
+ * @param {Object} pathMapping - Map of original paths to new paths
+ * @returns {any} Data with rewritten paths
+ */
+function rewriteDataPaths(data, pathMapping) {
+  if (typeof data === 'string') {
+    return pathMapping[data] || data
+  }
+
+  if (Array.isArray(data)) {
+    return data.map(item => rewriteDataPaths(item, pathMapping))
+  }
+
+  if (data && typeof data === 'object') {
+    const result = {}
+    for (const [key, value] of Object.entries(data)) {
+      result[key] = rewriteDataPaths(value, pathMapping)
+    }
+    return result
+  }
+
+  return data
+}
+
+/**
  * Rewrite asset paths in ProseMirror content
  *
  * @param {Object} content - ProseMirror document
@@ -186,6 +213,11 @@ export function rewriteContentPaths(content, pathMapping) {
       if (newPath) {
         node.attrs.src = newPath
       }
+    }
+
+    // Rewrite paths in data blocks (structured data parsed at build time)
+    if (node.type === 'dataBlock' && node.attrs?.data) {
+      node.attrs.data = rewriteDataPaths(node.attrs.data, pathMapping)
     }
 
     // Recurse into content
