@@ -163,6 +163,199 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
+  describe('schemas extraction', () => {
+    it('extracts schemas with shorthand notation', () => {
+      const meta = {
+        schemas: {
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+        },
+      })
+    })
+
+    it('strips editor-only fields (label, hint)', () => {
+      const meta = {
+        schemas: {
+          'nav-links': {
+            label: {
+              type: 'string',
+              label: 'Link Label',
+              hint: 'Text shown in the navigation',
+            },
+            href: {
+              type: 'string',
+              label: 'Link URL',
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+        },
+      })
+    })
+
+    it('keeps runtime-relevant fields (default, options)', () => {
+      const meta = {
+        schemas: {
+          'nav-links': {
+            type: {
+              type: 'select',
+              label: 'Link Type',
+              options: ['plain', 'button', 'dropdown'],
+              default: 'plain',
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'nav-links': {
+            type: {
+              type: 'select',
+              options: ['plain', 'button', 'dropdown'],
+              default: 'plain',
+            },
+          },
+        },
+      })
+    })
+
+    it('handles nested object schema', () => {
+      const meta = {
+        schemas: {
+          'card': {
+            meta: {
+              type: 'object',
+              label: 'Metadata',
+              schema: {
+                author: { type: 'string', label: 'Author Name' },
+                date: 'string',
+              },
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'card': {
+            meta: {
+              type: 'object',
+              schema: {
+                author: 'string',
+                date: 'string',
+              },
+            },
+          },
+        },
+      })
+    })
+
+    it('handles array with string of-type', () => {
+      const meta = {
+        schemas: {
+          'tags': {
+            items: { type: 'array', of: 'string' },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'tags': {
+            items: { type: 'array', of: 'string' },
+          },
+        },
+      })
+    })
+
+    it('handles array with schema reference', () => {
+      const meta = {
+        schemas: {
+          'nav-links': {
+            children: { type: 'array', of: 'nav-links', label: 'Child Links' },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'nav-links': {
+            children: { type: 'array', of: 'nav-links' },
+          },
+        },
+      })
+    })
+
+    it('handles array with inline object of-type', () => {
+      const meta = {
+        schemas: {
+          'social': {
+            links: {
+              type: 'array',
+              label: 'Social Links',
+              of: {
+                platform: { type: 'string', label: 'Platform' },
+                url: 'string',
+              },
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'social': {
+            links: {
+              type: 'array',
+              of: {
+                platform: 'string',
+                url: 'string',
+              },
+            },
+          },
+        },
+      })
+    })
+
+    it('returns null for empty schemas', () => {
+      expect(extractRuntimeSchema({ schemas: {} })).toBeNull()
+      expect(extractRuntimeSchema({ schemas: null })).toBeNull()
+    })
+
+    it('handles multiple schemas', () => {
+      const meta = {
+        schemas: {
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+          'social': {
+            platform: 'string',
+            url: 'string',
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          'nav-links': { label: 'string', href: 'string' },
+          'social': { platform: 'string', url: 'string' },
+        },
+      })
+    })
+  })
+
   describe('combined extraction', () => {
     it('extracts all runtime properties', () => {
       const meta = {
@@ -180,6 +373,29 @@ describe('extractRuntimeSchema', () => {
         background: true,
         data: { type: 'events', limit: 6 },
         defaults: { layout: 'grid', columns: 3 },
+      })
+    })
+
+    it('extracts all properties including schemas', () => {
+      const meta = {
+        title: 'Header',
+        background: true,
+        params: {
+          theme: { type: 'select', default: 'dark' },
+        },
+        schemas: {
+          'nav-links': {
+            label: 'string',
+            href: 'string',
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        background: true,
+        defaults: { theme: 'dark' },
+        schemas: {
+          'nav-links': { label: 'string', href: 'string' },
+        },
       })
     })
   })

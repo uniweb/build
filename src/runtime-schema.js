@@ -36,6 +36,99 @@ function parseDataString(dataString) {
 }
 
 /**
+ * Extract lean schema field for runtime
+ * Strips editor-only fields (label, hint, description)
+ * Keeps runtime fields (type, default, options, of, schema)
+ *
+ * @param {string|Object} field - Schema field definition
+ * @returns {string|Object} - Lean field definition
+ */
+function extractSchemaField(field) {
+  // Shorthand: 'string', 'number', 'boolean'
+  if (typeof field === 'string') {
+    return field
+  }
+
+  if (!field || typeof field !== 'object') {
+    return field
+  }
+
+  const lean = {}
+
+  // Keep runtime-relevant fields
+  if (field.type) lean.type = field.type
+  if (field.default !== undefined) lean.default = field.default
+  if (field.options) lean.options = field.options
+
+  // Handle array 'of' - can be string, schema name, or inline object
+  if (field.of !== undefined) {
+    if (typeof field.of === 'string') {
+      lean.of = field.of
+    } else if (typeof field.of === 'object') {
+      // Inline schema definition
+      lean.of = extractSchemaFields(field.of)
+    }
+  }
+
+  // Handle nested object 'schema'
+  if (field.schema && typeof field.schema === 'object') {
+    lean.schema = extractSchemaFields(field.schema)
+  }
+
+  // If we only have 'type' and it's a simple type, use shorthand
+  const keys = Object.keys(lean)
+  if (keys.length === 1 && keys[0] === 'type' && ['string', 'number', 'boolean'].includes(lean.type)) {
+    return lean.type
+  }
+
+  return keys.length > 0 ? lean : null
+}
+
+/**
+ * Extract lean schema fields for an entire schema object
+ *
+ * @param {Object} schemaFields - Map of fieldName -> field definition
+ * @returns {Object} - Map of fieldName -> lean field definition
+ */
+function extractSchemaFields(schemaFields) {
+  if (!schemaFields || typeof schemaFields !== 'object') {
+    return {}
+  }
+
+  const lean = {}
+  for (const [name, field] of Object.entries(schemaFields)) {
+    const leanField = extractSchemaField(field)
+    if (leanField !== null) {
+      lean[name] = leanField
+    }
+  }
+  return lean
+}
+
+/**
+ * Extract lean schemas from meta.js schemas object
+ * Strips editor-only fields while preserving structure
+ *
+ * @param {Object} schemas - The schemas object from meta.js
+ * @returns {Object|null} - Lean schemas or null if empty
+ */
+function extractSchemas(schemas) {
+  if (!schemas || typeof schemas !== 'object') {
+    return null
+  }
+
+  const lean = {}
+  for (const [schemaName, schemaFields] of Object.entries(schemas)) {
+    const leanSchema = extractSchemaFields(schemaFields)
+    if (Object.keys(leanSchema).length > 0) {
+      lean[schemaName] = leanSchema
+    }
+  }
+
+  return Object.keys(lean).length > 0 ? lean : null
+}
+
+/**
  * Extract param defaults from params object
  *
  * @param {Object} params - The params object from meta.js
@@ -100,6 +193,15 @@ export function extractRuntimeSchema(fullMeta) {
   // e.g., { expanded: false } for accordion-like components
   if (fullMeta.initialState && typeof fullMeta.initialState === 'object') {
     runtime.initialState = fullMeta.initialState
+  }
+
+  // Schemas - lean version for runtime validation/defaults
+  // Strips editor-only fields (label, hint, description)
+  if (fullMeta.schemas) {
+    const schemas = extractSchemas(fullMeta.schemas)
+    if (schemas) {
+      runtime.schemas = schemas
+    }
   }
 
   return Object.keys(runtime).length > 0 ? runtime : null
