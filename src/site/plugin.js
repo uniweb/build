@@ -274,6 +274,7 @@ export function siteContentPlugin(options = {}) {
   let server = null
   let localeTranslations = {} // Cache: { locale: translations }
   let localesDir = 'locales' // Default, updated from site config
+  let collectionsConfig = null // Cached for watcher setup
 
   /**
    * Load translations for a specific locale
@@ -332,10 +333,28 @@ export function siteContentPlugin(options = {}) {
   return {
     name: 'uniweb:site-content',
 
-    configResolved(config) {
+    async configResolved(config) {
       resolvedSitePath = resolve(config.root, sitePath)
       resolvedOutDir = resolve(config.root, config.build.outDir)
       isProduction = config.command === 'build'
+
+      // In dev mode, process collections early so JSON files exist before server starts
+      // This runs before configureServer, ensuring data is available immediately
+      if (!isProduction) {
+        try {
+          // Do an early content collection to get the collections config
+          const earlyContent = await collectSiteContent(resolvedSitePath)
+          collectionsConfig = earlyContent.config?.collections
+
+          if (collectionsConfig) {
+            console.log('[site-content] Processing content collections...')
+            const collections = await processCollections(resolvedSitePath, collectionsConfig)
+            await writeCollectionFiles(resolvedSitePath, collections)
+          }
+        } catch (err) {
+          console.warn('[site-content] Early collection processing failed:', err.message)
+        }
+      }
     },
 
     async buildStart() {
@@ -345,8 +364,9 @@ export function siteContentPlugin(options = {}) {
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
         // Process content collections if defined in site.yml
-        // This generates JSON files in public/data/ BEFORE the Vite build
-        if (siteContent.config?.collections) {
+        // In dev mode, this was already done in configResolved (before server starts)
+        // In production, do it here
+        if (isProduction && siteContent.config?.collections) {
           console.log('[site-content] Processing content collections...')
           const collections = await processCollections(resolvedSitePath, siteContent.config.collections)
           await writeCollectionFiles(resolvedSitePath, collections)
@@ -399,9 +419,11 @@ export function siteContentPlugin(options = {}) {
           collectionRebuildTimeout = setTimeout(async () => {
             console.log('[site-content] Collection content changed, regenerating JSON...')
             try {
-              if (siteContent?.config?.collections) {
-                const collections = await processCollections(resolvedSitePath, siteContent.config.collections)
-                await writeCollectionFiles(resolvedSitePath, collections)
+              // Use collectionsConfig (cached from configResolved) or siteContent
+              const collections = collectionsConfig || siteContent?.config?.collections
+              if (collections) {
+                const processed = await processCollections(resolvedSitePath, collections)
+                await writeCollectionFiles(resolvedSitePath, processed)
               }
               // Send full reload to client
               server.ws.send({ type: 'full-reload' })
@@ -437,9 +459,10 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Watch content/ folder for collection changes
-        if (siteContent?.config?.collections) {
+        // Use collectionsConfig cached from configResolved (siteContent may be null here)
+        if (collectionsConfig) {
           const contentPaths = new Set()
-          for (const config of Object.values(siteContent.config.collections)) {
+          for (const config of Object.values(collectionsConfig)) {
             const collectionPath = typeof config === 'string' ? config : config.path
             if (collectionPath) {
               contentPaths.add(resolve(resolvedSitePath, collectionPath))
