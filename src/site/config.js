@@ -21,8 +21,9 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
+import { generateEntryPoint } from '../generate-entry.js'
 
 /**
  * Detect foundation type from the foundation config value
@@ -177,8 +178,52 @@ export async function defineSiteConfig(options = {}) {
     foundationDevPlugin = modules[3].foundationDevPlugin
   }
 
+  // Plugin to ensure foundation entry file exists (for bundled mode with local foundation)
+  const ensureFoundationEntryPlugin = !isRuntimeMode && foundationInfo.type === 'local' ? {
+    name: 'uniweb:ensure-foundation-entry',
+    async config() {
+      const srcDir = join(foundationInfo.path, 'src')
+      const entryPath = join(srcDir, '_entry.generated.js')
+
+      // Always regenerate on dev start to ensure it's current
+      // This handles new components being added
+      if (existsSync(srcDir)) {
+        console.log('[site] Ensuring foundation entry is up to date...')
+        try {
+          await generateEntryPoint(srcDir, entryPath)
+        } catch (err) {
+          console.warn('[site] Failed to generate foundation entry:', err.message)
+        }
+      }
+    },
+
+    configureServer(server) {
+      // Watch foundation src for meta.js changes to regenerate entry
+      const srcDir = join(foundationInfo.path, 'src')
+      const entryPath = join(srcDir, '_entry.generated.js')
+
+      server.watcher.add(join(srcDir, '**', 'meta.js'))
+
+      server.watcher.on('all', async (event, path) => {
+        // Regenerate entry when meta.js files change (new/deleted components)
+        if (path.includes(srcDir) && path.endsWith('meta.js')) {
+          console.log(`[site] Foundation meta.js changed, regenerating entry...`)
+          try {
+            await generateEntryPoint(srcDir, entryPath)
+            server.ws.send({ type: 'full-reload' })
+          } catch (err) {
+            console.warn('[site] Failed to regenerate foundation entry:', err.message)
+          }
+        }
+      })
+    }
+  } : null
+
   // Build the plugins array
   const plugins = [
+    // Ensure foundation entry exists first (bundled mode only)
+    ensureFoundationEntryPlugin,
+
     // Standard plugins
     tailwind && tailwindcss(),
     react(),
