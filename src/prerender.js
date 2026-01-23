@@ -264,34 +264,68 @@ function PageRenderer({ page, foundation }) {
 }
 
 /**
+ * Guarantee item has flat content structure
+ */
+function guaranteeItemStructure(item) {
+  return {
+    title: item.title || '',
+    pretitle: item.pretitle || '',
+    subtitle: item.subtitle || '',
+    paragraphs: item.paragraphs || [],
+    links: item.links || [],
+    imgs: item.imgs || [],
+    lists: item.lists || [],
+    icons: item.icons || [],
+    videos: item.videos || [],
+    buttons: item.buttons || [],
+    properties: item.properties || {},
+    cards: item.cards || [],
+    documents: item.documents || [],
+    forms: item.forms || [],
+    quotes: item.quotes || [],
+    headings: item.headings || [],
+  }
+}
+
+/**
  * Guarantee content structure exists (mirrors runtime/prepare-props.js)
- * Returns a content object with all standard paths guaranteed to exist
+ * Returns a flat content object with all standard fields guaranteed to exist
  */
 function guaranteeContentStructure(parsedContent) {
   const content = parsedContent || {}
 
-  // Spread content first, then override with guaranteed structure
-  // This ensures main.body.paragraphs etc. are always arrays
   return {
-    // Preserve any additional fields from parser
-    ...content,
-    // Main content section (override with guarantees)
-    main: {
-      header: {
-        title: content.main?.header?.title || '',
-        pretitle: content.main?.header?.pretitle || '',
-        subtitle: content.main?.header?.subtitle || '',
-      },
-      body: {
-        paragraphs: content.main?.body?.paragraphs || [],
-        links: content.main?.body?.links || [],
-        imgs: content.main?.body?.imgs || [],
-        lists: content.main?.body?.lists || [],
-        icons: content.main?.body?.icons || [],
-      },
-    },
-    // Content items (H3 sections)
-    items: content.items || [],
+    // Flat header fields
+    title: content.title || '',
+    pretitle: content.pretitle || '',
+    subtitle: content.subtitle || '',
+    subtitle2: content.subtitle2 || '',
+    alignment: content.alignment || null,
+
+    // Flat body fields
+    paragraphs: content.paragraphs || [],
+    links: content.links || [],
+    imgs: content.imgs || [],
+    lists: content.lists || [],
+    icons: content.icons || [],
+    videos: content.videos || [],
+    buttons: content.buttons || [],
+    properties: content.properties || {},
+    propertyBlocks: content.propertyBlocks || [],
+    cards: content.cards || [],
+    documents: content.documents || [],
+    forms: content.forms || [],
+    quotes: content.quotes || [],
+    headings: content.headings || [],
+
+    // Items with guaranteed structure
+    items: (content.items || []).map(guaranteeItemStructure),
+
+    // Sequence for ordered rendering
+    sequence: content.sequence || [],
+
+    // Preserve raw content if present
+    raw: content.raw,
   }
 }
 
@@ -343,9 +377,9 @@ function BlockRenderer({ block, foundation }) {
 
   // Build content and params with runtime guarantees (same as runtime's BlockRenderer)
   let content, params
-  if (block.parsedContent?.raw) {
+  if (block.parsedContent?._isPoc) {
     // Simple PoC format - content was passed directly
-    content = block.parsedContent.raw
+    content = block.parsedContent._pocContent
     params = block.properties
   } else {
     // Apply param defaults from meta.js
