@@ -31,3 +31,17 @@ export {
   isVideoFile,
   isPdfFile
 } from './advanced-processors.js'
+export {
+  processCollections,
+  writeCollectionFiles,
+  getCollectionLastModified
+} from './collection-processor.js'
+export {
+  parseFetchConfig,
+  executeFetch,
+  applyFilter,
+  applySort,
+  applyPostProcessing,
+  mergeDataIntoContent,
+  singularize
+} from './data-fetcher.js'

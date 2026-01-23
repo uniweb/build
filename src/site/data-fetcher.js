@@ -7,9 +7,11 @@
  * Supports:
  * - Simple string paths: "/data/team.json"
  * - Full config objects with schema, prerender, merge, transform options
+ * - Collection references: { collection: 'articles', limit: 3 }
  * - Local JSON/YAML files
  * - Remote URLs
  * - Transform paths to extract nested data
+ * - Post-processing: limit, sort, filter
  *
  * @module @uniweb/build/site/data-fetcher
  */
@@ -63,6 +65,129 @@ function getNestedValue(obj, path) {
 }
 
 /**
+ * Parse a filter value from string
+ *
+ * @param {string} raw - Raw value string
+ * @returns {any} Parsed value
+ */
+function parseFilterValue(raw) {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  if (raw === 'null') return null
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10)
+  if (/^\d+\.\d+$/.test(raw)) return parseFloat(raw)
+
+  // Remove quotes if present
+  if ((raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))) {
+    return raw.slice(1, -1)
+  }
+
+  return raw
+}
+
+/**
+ * Apply filter expression to array of items
+ *
+ * Supported operators: ==, !=, >, <, >=, <=, contains
+ *
+ * @param {Array} items - Items to filter
+ * @param {string} filterExpr - Filter expression (e.g., "published != false")
+ * @returns {Array} Filtered items
+ *
+ * @example
+ * applyFilter(items, 'published != false')
+ * applyFilter(items, 'tags contains featured')
+ */
+export function applyFilter(items, filterExpr) {
+  if (!filterExpr || !Array.isArray(items)) return items
+
+  const match = filterExpr.match(/^(\S+)\s*(==|!=|>=?|<=?|contains)\s*(.+)$/)
+  if (!match) return items
+
+  const [, field, op, rawValue] = match
+  const value = parseFilterValue(rawValue.trim())
+
+  return items.filter(item => {
+    const itemValue = getNestedValue(item, field)
+    switch (op) {
+      case '==': return itemValue === value
+      case '!=': return itemValue !== value
+      case '>': return itemValue > value
+      case '<': return itemValue < value
+      case '>=': return itemValue >= value
+      case '<=': return itemValue <= value
+      case 'contains':
+        return Array.isArray(itemValue)
+          ? itemValue.includes(value)
+          : String(itemValue).includes(value)
+      default: return true
+    }
+  })
+}
+
+/**
+ * Apply sort expression to array of items
+ *
+ * @param {Array} items - Items to sort
+ * @param {string} sortExpr - Sort expression (e.g., "date desc" or "order asc, title asc")
+ * @returns {Array} Sorted items (new array)
+ *
+ * @example
+ * applySort(items, 'date desc')
+ * applySort(items, 'order asc, title asc')
+ */
+export function applySort(items, sortExpr) {
+  if (!sortExpr || !Array.isArray(items)) return items
+
+  const sorts = sortExpr.split(',').map(s => {
+    const [field, dir = 'asc'] = s.trim().split(/\s+/)
+    return { field, desc: dir.toLowerCase() === 'desc' }
+  })
+
+  return [...items].sort((a, b) => {
+    for (const { field, desc } of sorts) {
+      const aVal = getNestedValue(a, field) ?? ''
+      const bVal = getNestedValue(b, field) ?? ''
+      if (aVal < bVal) return desc ? 1 : -1
+      if (aVal > bVal) return desc ? -1 : 1
+    }
+    return 0
+  })
+}
+
+/**
+ * Apply post-processing to fetched data (filter, sort, limit)
+ *
+ * @param {any} data - Fetched data
+ * @param {object} config - Fetch config with optional filter, sort, limit
+ * @returns {any} Processed data
+ */
+export function applyPostProcessing(data, config) {
+  if (!data || !Array.isArray(data)) return data
+  if (!config.filter && !config.sort && !config.limit) return data
+
+  let result = data
+
+  // Apply filter first
+  if (config.filter) {
+    result = applyFilter(result, config.filter)
+  }
+
+  // Apply sort
+  if (config.sort) {
+    result = applySort(result, config.sort)
+  }
+
+  // Apply limit last
+  if (config.limit && config.limit > 0) {
+    result = result.slice(0, config.limit)
+  }
+
+  return result
+}
+
+/**
  * Normalize a fetch configuration to standard form
  *
  * @param {string|object} fetch - Simple path string or full config object
@@ -76,6 +201,10 @@ function getNestedValue(obj, path) {
  * // Full config
  * parseFetchConfig({ path: '/team', schema: 'person', prerender: false })
  * // Returns: { path: '/team', schema: 'person', prerender: false, merge: false }
+ *
+ * // Collection reference
+ * parseFetchConfig({ collection: 'articles', limit: 3, sort: 'date desc' })
+ * // Returns: { path: '/data/articles.json', schema: 'articles', limit: 3, sort: 'date desc', ... }
  */
 export function parseFetchConfig(fetch) {
   if (!fetch) return null
@@ -96,6 +225,22 @@ export function parseFetchConfig(fetch) {
   // Full config object
   if (typeof fetch !== 'object') return null
 
+  // Collection reference: { collection: 'articles', limit: 3 }
+  if (fetch.collection) {
+    return {
+      path: `/data/${fetch.collection}.json`,
+      url: undefined,
+      schema: fetch.schema || fetch.collection,
+      prerender: fetch.prerender ?? true,
+      merge: fetch.merge ?? false,
+      transform: fetch.transform,
+      // Post-processing options
+      limit: fetch.limit,
+      sort: fetch.sort,
+      filter: fetch.filter,
+    }
+  }
+
   const {
     path,
     url,
@@ -103,6 +248,10 @@ export function parseFetchConfig(fetch) {
     prerender = true,
     merge = false,
     transform,
+    // Post-processing options (also supported for path/url fetches)
+    limit,
+    sort,
+    filter,
   } = fetch
 
   // Must have either path or url
@@ -115,6 +264,10 @@ export function parseFetchConfig(fetch) {
     prerender,
     merge,
     transform,
+    // Post-processing options
+    limit,
+    sort,
+    filter,
   }
 }
 
@@ -133,6 +286,14 @@ export function parseFetchConfig(fetch) {
  *   { siteRoot: '/path/to/site' }
  * )
  * // result.data contains the parsed JSON
+ *
+ * @example
+ * // With post-processing
+ * const result = await executeFetch(
+ *   { path: '/data/articles.json', limit: 3, sort: 'date desc' },
+ *   { siteRoot: '/path/to/site' }
+ * )
+ * // result.data contains the 3 most recent articles
  */
 export async function executeFetch(config, options = {}) {
   if (!config) return { data: null }
@@ -180,6 +341,9 @@ export async function executeFetch(config, options = {}) {
     if (transform && data) {
       data = getNestedValue(data, transform)
     }
+
+    // Apply post-processing (filter, sort, limit)
+    data = applyPostProcessing(data, config)
 
     // Ensure we return an array or object, defaulting to empty array
     return { data: data ?? [] }

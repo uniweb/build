@@ -3,6 +3,9 @@ import {
   executeFetch,
   mergeDataIntoContent,
   executeMultipleFetches,
+  applyFilter,
+  applySort,
+  applyPostProcessing,
 } from '../src/site/data-fetcher.js'
 
 describe('parseFetchConfig', () => {
@@ -116,6 +119,85 @@ describe('parseFetchConfig', () => {
   it('returns null for non-object, non-string input', () => {
     expect(parseFetchConfig(123)).toBeNull()
     expect(parseFetchConfig(['array'])).toBeNull()
+  })
+
+  describe('collection reference', () => {
+    it('parses collection shorthand', () => {
+      const config = { collection: 'articles' }
+      const result = parseFetchConfig(config)
+
+      expect(result.path).toBe('/data/articles.json')
+      expect(result.schema).toBe('articles')
+      expect(result.prerender).toBe(true)
+    })
+
+    it('parses collection with limit', () => {
+      const config = { collection: 'articles', limit: 3 }
+      const result = parseFetchConfig(config)
+
+      expect(result.path).toBe('/data/articles.json')
+      expect(result.limit).toBe(3)
+    })
+
+    it('parses collection with sort', () => {
+      const config = { collection: 'articles', sort: 'date desc' }
+      const result = parseFetchConfig(config)
+
+      expect(result.sort).toBe('date desc')
+    })
+
+    it('parses collection with filter', () => {
+      const config = { collection: 'articles', filter: 'tags contains featured' }
+      const result = parseFetchConfig(config)
+
+      expect(result.filter).toBe('tags contains featured')
+    })
+
+    it('allows schema override', () => {
+      const config = { collection: 'articles', schema: 'posts' }
+      const result = parseFetchConfig(config)
+
+      expect(result.schema).toBe('posts')
+    })
+
+    it('parses collection with all options', () => {
+      const config = {
+        collection: 'articles',
+        limit: 5,
+        sort: 'date desc',
+        filter: 'published != false',
+        schema: 'posts',
+      }
+      const result = parseFetchConfig(config)
+
+      expect(result.path).toBe('/data/articles.json')
+      expect(result.schema).toBe('posts')
+      expect(result.limit).toBe(5)
+      expect(result.sort).toBe('date desc')
+      expect(result.filter).toBe('published != false')
+    })
+  })
+
+  describe('post-processing options on path/url', () => {
+    it('parses path with limit', () => {
+      const config = { path: '/data/items.json', limit: 10 }
+      const result = parseFetchConfig(config)
+
+      expect(result.path).toBe('/data/items.json')
+      expect(result.limit).toBe(10)
+    })
+
+    it('parses url with sort and filter', () => {
+      const config = {
+        url: 'https://api.example.com/items',
+        sort: 'order asc',
+        filter: 'active == true',
+      }
+      const result = parseFetchConfig(config)
+
+      expect(result.sort).toBe('order asc')
+      expect(result.filter).toBe('active == true')
+    })
   })
 })
 
@@ -250,5 +332,165 @@ describe('executeMultipleFetches', () => {
   it('returns empty map for null configs', async () => {
     const result = await executeMultipleFetches(null)
     expect(result.size).toBe(0)
+  })
+})
+
+describe('applyFilter', () => {
+  const items = [
+    { name: 'A', active: true, tags: ['featured', 'new'], score: 10 },
+    { name: 'B', active: false, tags: ['old'], score: 5 },
+    { name: 'C', active: true, tags: ['featured'], score: 8 },
+  ]
+
+  it('returns original items if no filter', () => {
+    expect(applyFilter(items, null)).toBe(items)
+    expect(applyFilter(items, '')).toBe(items)
+  })
+
+  it('filters by equality (==)', () => {
+    const result = applyFilter(items, 'active == true')
+    expect(result).toHaveLength(2)
+    expect(result.map(i => i.name)).toEqual(['A', 'C'])
+  })
+
+  it('filters by inequality (!=)', () => {
+    const result = applyFilter(items, 'active != true')
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('B')
+  })
+
+  it('filters by greater than (>)', () => {
+    const result = applyFilter(items, 'score > 5')
+    expect(result).toHaveLength(2)
+    expect(result.map(i => i.name)).toEqual(['A', 'C'])
+  })
+
+  it('filters by less than (<)', () => {
+    const result = applyFilter(items, 'score < 10')
+    expect(result).toHaveLength(2)
+    expect(result.map(i => i.name)).toEqual(['B', 'C'])
+  })
+
+  it('filters by contains (array)', () => {
+    const result = applyFilter(items, 'tags contains featured')
+    expect(result).toHaveLength(2)
+    expect(result.map(i => i.name)).toEqual(['A', 'C'])
+  })
+
+  it('filters by contains (string)', () => {
+    const strItems = [
+      { name: 'hello world' },
+      { name: 'foo bar' },
+    ]
+    const result = applyFilter(strItems, 'name contains world')
+    expect(result).toHaveLength(1)
+  })
+
+  it('handles non-array input gracefully', () => {
+    expect(applyFilter(null, 'a == b')).toBeNull()
+    expect(applyFilter('not array', 'a == b')).toBe('not array')
+  })
+})
+
+describe('applySort', () => {
+  const items = [
+    { name: 'C', order: 3, date: '2025-01-03' },
+    { name: 'A', order: 1, date: '2025-01-01' },
+    { name: 'B', order: 2, date: '2025-01-02' },
+  ]
+
+  it('returns original items if no sort', () => {
+    expect(applySort(items, null)).toBe(items)
+    expect(applySort(items, '')).toBe(items)
+  })
+
+  it('sorts ascending by default', () => {
+    const result = applySort(items, 'order')
+    expect(result.map(i => i.name)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('sorts ascending explicitly', () => {
+    const result = applySort(items, 'order asc')
+    expect(result.map(i => i.name)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('sorts descending', () => {
+    const result = applySort(items, 'order desc')
+    expect(result.map(i => i.name)).toEqual(['C', 'B', 'A'])
+  })
+
+  it('sorts by string field', () => {
+    const result = applySort(items, 'name asc')
+    expect(result.map(i => i.name)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('sorts by date string', () => {
+    const result = applySort(items, 'date desc')
+    expect(result.map(i => i.name)).toEqual(['C', 'B', 'A'])
+  })
+
+  it('sorts by multiple fields', () => {
+    const multiItems = [
+      { category: 'B', order: 2 },
+      { category: 'A', order: 2 },
+      { category: 'A', order: 1 },
+    ]
+    const result = applySort(multiItems, 'category asc, order asc')
+    expect(result).toEqual([
+      { category: 'A', order: 1 },
+      { category: 'A', order: 2 },
+      { category: 'B', order: 2 },
+    ])
+  })
+
+  it('does not mutate original array', () => {
+    const original = [...items]
+    applySort(items, 'order desc')
+    expect(items).toEqual(original)
+  })
+})
+
+describe('applyPostProcessing', () => {
+  const items = [
+    { name: 'A', order: 3, active: true },
+    { name: 'B', order: 1, active: false },
+    { name: 'C', order: 2, active: true },
+  ]
+
+  it('returns original data if no post-processing options', () => {
+    expect(applyPostProcessing(items, {})).toBe(items)
+  })
+
+  it('returns non-array data unchanged', () => {
+    const obj = { foo: 'bar' }
+    expect(applyPostProcessing(obj, { limit: 1 })).toBe(obj)
+  })
+
+  it('applies filter only', () => {
+    const result = applyPostProcessing(items, { filter: 'active == true' })
+    expect(result).toHaveLength(2)
+  })
+
+  it('applies sort only', () => {
+    const result = applyPostProcessing(items, { sort: 'order asc' })
+    expect(result.map(i => i.name)).toEqual(['B', 'C', 'A'])
+  })
+
+  it('applies limit only', () => {
+    const result = applyPostProcessing(items, { limit: 2 })
+    expect(result).toHaveLength(2)
+  })
+
+  it('applies filter, sort, and limit in order', () => {
+    const result = applyPostProcessing(items, {
+      filter: 'active == true',
+      sort: 'order asc',
+      limit: 1,
+    })
+    // Filter: A, C (active=true)
+    // Sort by order asc: C (order=2), A (order=3)
+    // Limit 1: C
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toBe('C')
   })
 })

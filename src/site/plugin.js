@@ -36,6 +36,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
+import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
 import { mergeTranslations } from '../i18n/merge.js'
 
@@ -343,6 +344,14 @@ export function siteContentPlugin(options = {}) {
         siteContent = await collectSiteContent(resolvedSitePath)
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
+        // Process content collections if defined in site.yml
+        // This generates JSON files in public/data/ BEFORE the Vite build
+        if (siteContent.config?.collections) {
+          console.log('[site-content] Processing content collections...')
+          const collections = await processCollections(resolvedSitePath, siteContent.config.collections)
+          await writeCollectionFiles(resolvedSitePath, collections)
+        }
+
         // Update localesDir from site config
         if (siteContent.config?.i18n?.localesDir) {
           localesDir = siteContent.config.i18n.localesDir
@@ -383,6 +392,25 @@ export function siteContentPlugin(options = {}) {
           }, 100)
         }
 
+        // Debounce collection rebuilds separately (writes to file system)
+        let collectionRebuildTimeout = null
+        const scheduleCollectionRebuild = () => {
+          if (collectionRebuildTimeout) clearTimeout(collectionRebuildTimeout)
+          collectionRebuildTimeout = setTimeout(async () => {
+            console.log('[site-content] Collection content changed, regenerating JSON...')
+            try {
+              if (siteContent?.config?.collections) {
+                const collections = await processCollections(resolvedSitePath, siteContent.config.collections)
+                await writeCollectionFiles(resolvedSitePath, collections)
+              }
+              // Send full reload to client
+              server.ws.send({ type: 'full-reload' })
+            } catch (err) {
+              console.error('[site-content] Collection rebuild failed:', err.message)
+            }
+          }, 100)
+        }
+
         // Track all watchers for cleanup
         const watchers = []
 
@@ -406,6 +434,28 @@ export function siteContentPlugin(options = {}) {
           watchers.push(watch(themeYmlPath, scheduleRebuild))
         } catch (err) {
           // theme.yml may not exist, that's ok
+        }
+
+        // Watch content/ folder for collection changes
+        if (siteContent?.config?.collections) {
+          const contentPaths = new Set()
+          for (const config of Object.values(siteContent.config.collections)) {
+            const collectionPath = typeof config === 'string' ? config : config.path
+            if (collectionPath) {
+              contentPaths.add(resolve(resolvedSitePath, collectionPath))
+            }
+          }
+
+          for (const contentPath of contentPaths) {
+            if (existsSync(contentPath)) {
+              try {
+                watchers.push(watch(contentPath, { recursive: true }, scheduleCollectionRebuild))
+                console.log(`[site-content] Watching ${contentPath} for collection changes`)
+              } catch (err) {
+                console.warn('[site-content] Could not watch content directory:', err.message)
+              }
+            }
+          }
         }
 
         // Store watchers for cleanup
