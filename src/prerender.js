@@ -343,6 +343,69 @@ function applyDefaults(params, defaults) {
 }
 
 /**
+ * Apply a schema to a single object
+ * Only processes fields defined in the schema, preserves unknown fields
+ */
+function applySchemaToObject(obj, schema) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    return obj
+  }
+
+  const result = { ...obj }
+
+  for (const [field, fieldDef] of Object.entries(schema)) {
+    const defaultValue = typeof fieldDef === 'object' ? fieldDef.default : undefined
+
+    if (result[field] === undefined && defaultValue !== undefined) {
+      result[field] = defaultValue
+    }
+
+    if (typeof fieldDef === 'object' && fieldDef.type === 'object' && fieldDef.schema && result[field]) {
+      result[field] = applySchemaToObject(result[field], fieldDef.schema)
+    }
+
+    if (typeof fieldDef === 'object' && fieldDef.type === 'array' && fieldDef.of && result[field]) {
+      if (typeof fieldDef.of === 'object') {
+        result[field] = result[field].map(item => applySchemaToObject(item, fieldDef.of))
+      }
+    }
+  }
+
+  return result
+}
+
+/**
+ * Apply a schema to a value (object or array of objects)
+ */
+function applySchemaToValue(value, schema) {
+  if (Array.isArray(value)) {
+    return value.map(item => applySchemaToObject(item, schema))
+  }
+  return applySchemaToObject(value, schema)
+}
+
+/**
+ * Apply schemas to content.data
+ * Only processes tags that have a matching schema, leaves others untouched
+ */
+function applySchemas(data, schemas) {
+  if (!schemas || !data || typeof data !== 'object') {
+    return data || {}
+  }
+
+  const result = { ...data }
+
+  for (const [tag, rawValue] of Object.entries(data)) {
+    const schema = schemas[tag]
+    if (!schema) continue
+
+    result[tag] = applySchemaToValue(rawValue, schema)
+  }
+
+  return result
+}
+
+/**
  * Block renderer - maps block to foundation component
  */
 function BlockRenderer({ block, foundation }) {
@@ -371,8 +434,9 @@ function BlockRenderer({ block, foundation }) {
 
   // Get runtime schema for defaults (from foundation.runtimeSchema)
   const runtimeSchema = foundation.runtimeSchema || {}
-  const schema = runtimeSchema[componentName] || null
-  const defaults = schema?.defaults || {}
+  const componentSchema = runtimeSchema[componentName] || null
+  const defaults = componentSchema?.defaults || {}
+  const schemas = componentSchema?.schemas || null
 
   // Build content and params with runtime guarantees (same as runtime's BlockRenderer)
   let content, params
@@ -389,6 +453,11 @@ function BlockRenderer({ block, foundation }) {
       ...guaranteeContentStructure(block.parsedContent),
       ...block.properties,
       _prosemirror: block.parsedContent
+    }
+
+    // Apply schemas to content.data
+    if (schemas && content.data) {
+      content.data = applySchemas(content.data, schemas)
     }
   }
 
