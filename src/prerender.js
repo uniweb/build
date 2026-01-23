@@ -360,6 +360,15 @@ function applySchemaToObject(obj, schema) {
       result[field] = defaultValue
     }
 
+    // For select fields with options, apply default if value is not among valid options
+    if (typeof fieldDef === 'object' && fieldDef.options && Array.isArray(fieldDef.options)) {
+      if (result[field] !== undefined && !fieldDef.options.includes(result[field])) {
+        if (defaultValue !== undefined) {
+          result[field] = defaultValue
+        }
+      }
+    }
+
     if (typeof fieldDef === 'object' && fieldDef.type === 'object' && fieldDef.schema && result[field]) {
       result[field] = applySchemaToObject(result[field], fieldDef.schema)
     }
@@ -432,9 +441,9 @@ function BlockRenderer({ block, foundation }) {
     )
   }
 
-  // Get runtime schema for defaults (from foundation.runtimeSchema)
-  const runtimeSchema = foundation.runtimeSchema || {}
-  const componentSchema = runtimeSchema[componentName] || null
+  // Get runtime schema for defaults (from foundation.meta)
+  const runtimeMeta = foundation.meta || {}
+  const componentSchema = runtimeMeta[componentName] || null
   const defaults = componentSchema?.defaults || {}
   const schemas = componentSchema?.schemas || null
 
