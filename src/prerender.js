@@ -13,10 +13,11 @@ import { existsSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
-import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
+import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 
 // Lazily loaded dependencies
-let React, renderToString, createUniweb, PageElement
+let React, renderToString, createUniweb
+let preparePropsSSR, getComponentMetaSSR, guaranteeContentStructureSSR
 
 /**
  * Execute all data fetches for prerender
@@ -25,6 +26,7 @@ let React, renderToString, createUniweb, PageElement
  * @param {Object} siteContent - The site content from site-content.json
  * @param {string} siteDir - Path to the site directory
  * @param {function} onProgress - Progress callback
+ * @returns {Object} { siteCascadedData, pageFetchedData } - Fetched data for dynamic route expansion
  */
 async function executeAllFetches(siteContent, siteDir, onProgress) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
@@ -40,7 +42,9 @@ async function executeAllFetches(siteContent, siteDir, onProgress) {
     }
   }
 
-  // 2. Process each page
+  // 2. Process each page and track fetched data by route
+  const pageFetchedData = new Map()
+
   for (const page of siteContent.pages || []) {
     // Page-level fetch (cascades to sections in this page)
     let pageCascadedData = { ...siteCascadedData }
@@ -50,11 +54,131 @@ async function executeAllFetches(siteContent, siteDir, onProgress) {
       const result = await executeFetch(pageFetch, fetchOptions)
       if (result.data && !result.error) {
         pageCascadedData[pageFetch.schema] = result.data
+        // Store for dynamic route expansion
+        pageFetchedData.set(page.route, {
+          schema: pageFetch.schema,
+          data: result.data,
+        })
       }
     }
 
     // Process sections recursively (handles subsections too)
     await processSectionFetches(page.sections, pageCascadedData, fetchOptions, onProgress)
+  }
+
+  return { siteCascadedData, pageFetchedData }
+}
+
+/**
+ * Expand dynamic pages into concrete pages based on fetched data
+ * A dynamic page like /blog/:slug with parent data [{ slug: 'post-1' }, { slug: 'post-2' }]
+ * becomes /blog/post-1 and /blog/post-2
+ *
+ * @param {Array} pages - Original pages array
+ * @param {Map} pageFetchedData - Map of route -> { schema, data }
+ * @param {function} onProgress - Progress callback
+ * @returns {Array} Expanded pages array with dynamic pages replaced by concrete instances
+ */
+function expandDynamicPages(pages, pageFetchedData, onProgress) {
+  const expandedPages = []
+
+  for (const page of pages) {
+    if (!page.isDynamic) {
+      // Regular page - include as-is
+      expandedPages.push(page)
+      continue
+    }
+
+    // Dynamic page - expand based on parent's data
+    const { paramName, parentSchema } = page
+
+    if (!parentSchema) {
+      onProgress(`  Warning: Dynamic page ${page.route} has no parentSchema, skipping`)
+      continue
+    }
+
+    // Find the parent's data
+    // The parent route is the route without the :param suffix
+    const parentRoute = page.route.replace(/\/:[\w]+$/, '') || '/'
+    const parentData = pageFetchedData.get(parentRoute)
+
+    if (!parentData || !Array.isArray(parentData.data)) {
+      onProgress(`  Warning: No data found for dynamic page ${page.route} (parent: ${parentRoute})`)
+      continue
+    }
+
+    const items = parentData.data
+    const schema = parentData.schema
+    const singularSchema = singularize(schema)
+
+    onProgress(`  Expanding ${page.route} → ${items.length} pages from ${schema}`)
+
+    // Create a concrete page for each item
+    for (const item of items) {
+      // Get the param value from the item (e.g., item.slug for :slug)
+      const paramValue = item[paramName]
+      if (!paramValue) {
+        onProgress(`    Skipping item without ${paramName}`)
+        continue
+      }
+
+      // Create concrete route: /blog/:slug → /blog/my-post
+      const concreteRoute = page.route.replace(`:${paramName}`, paramValue)
+
+      // Deep clone the page with modifications
+      const concretePage = JSON.parse(JSON.stringify(page))
+      concretePage.route = concreteRoute
+      concretePage.isDynamic = false // No longer dynamic
+      concretePage.paramName = undefined
+      concretePage.parentSchema = undefined
+
+      // Store the dynamic route context for runtime data resolution
+      concretePage.dynamicContext = {
+        paramName,
+        paramValue,
+        schema,           // Plural: 'articles'
+        singularSchema,   // Singular: 'article'
+        currentItem: item,    // The item for this specific route
+        allItems: items,      // All items from parent
+      }
+
+      // Also inject into sections' cascadedData for components with inheritData
+      injectDynamicData(concretePage.sections, {
+        [singularSchema]: item,  // Current item as singular
+        [schema]: items,          // All items as plural
+      })
+
+      // Use item data for page metadata if available
+      if (item.title) concretePage.title = item.title
+      if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
+
+      expandedPages.push(concretePage)
+    }
+  }
+
+  return expandedPages
+}
+
+/**
+ * Inject dynamic route data into section cascadedData
+ * This ensures components with inheritData receive the current item
+ *
+ * @param {Array} sections - Sections to update
+ * @param {Object} data - Data to inject { article: {...}, articles: [...] }
+ */
+function injectDynamicData(sections, data) {
+  if (!sections || !Array.isArray(sections)) return
+
+  for (const section of sections) {
+    section.cascadedData = {
+      ...(section.cascadedData || {}),
+      ...data,
+    }
+
+    // Recurse into subsections
+    if (section.subsections && section.subsections.length > 0) {
+      injectDynamicData(section.subsections, data)
+    }
   }
 }
 
@@ -132,9 +256,127 @@ async function loadDependencies(siteDir) {
   const coreMod = await import('@uniweb/core')
   createUniweb = coreMod.createUniweb
 
-  // Load @uniweb/runtime/ssr for rendering components
-  const ssrMod = await import('@uniweb/runtime/ssr')
-  PageElement = ssrMod.PageElement
+  // Load runtime utilities (prepare-props doesn't use React)
+  const runtimeMod = await import('@uniweb/runtime/ssr')
+  preparePropsSSR = runtimeMod.prepareProps
+  getComponentMetaSSR = runtimeMod.getComponentMeta
+  guaranteeContentStructureSSR = runtimeMod.guaranteeContentStructure
+}
+
+/**
+ * Inline BlockRenderer for SSR
+ * Uses React from prerender's scope to avoid module resolution issues
+ */
+function renderBlock(block) {
+  const Component = block.initComponent()
+
+  if (!Component) {
+    return React.createElement('div', {
+      className: 'block-error',
+      style: { padding: '1rem', background: '#fef2f2', color: '#dc2626' }
+    }, `Component not found: ${block.type}`)
+  }
+
+  // Build content and params with runtime guarantees
+  let content, params
+
+  if (block.parsedContent?._isPoc) {
+    // Simple PoC format - content was passed directly
+    content = block.parsedContent._pocContent
+    params = block.properties
+  } else {
+    // Get runtime metadata for this component
+    const meta = getComponentMetaSSR(block.type)
+
+    // Prepare props with runtime guarantees
+    const prepared = preparePropsSSR(block, meta)
+    params = prepared.params
+    content = {
+      ...prepared.content,
+      ...block.properties,
+      _prosemirror: block.parsedContent
+    }
+  }
+
+  const componentProps = {
+    content,
+    params,
+    block,
+    input: block.input
+  }
+
+  // Wrapper props
+  const theme = block.themeName
+  const wrapperProps = {
+    id: `Section${block.id}`,
+    className: theme || ''
+  }
+
+  return React.createElement('div', wrapperProps,
+    React.createElement(Component, componentProps)
+  )
+}
+
+/**
+ * Inline Blocks renderer for SSR
+ */
+function renderBlocks(blocks) {
+  if (!blocks || blocks.length === 0) return null
+  return blocks.map((block, index) =>
+    React.createElement(React.Fragment, { key: block.id || index },
+      renderBlock(block)
+    )
+  )
+}
+
+/**
+ * Inline Layout renderer for SSR
+ */
+function renderLayout(page, website) {
+  const RemoteLayout = website.getRemoteLayout()
+
+  const headerBlocks = page.getHeaderBlocks()
+  const bodyBlocks = page.getBodyBlocks()
+  const footerBlocks = page.getFooterBlocks()
+  const leftBlocks = page.getLeftBlocks()
+  const rightBlocks = page.getRightBlocks()
+
+  const headerElement = headerBlocks ? renderBlocks(headerBlocks) : null
+  const bodyElement = bodyBlocks ? renderBlocks(bodyBlocks) : null
+  const footerElement = footerBlocks ? renderBlocks(footerBlocks) : null
+  const leftElement = leftBlocks ? renderBlocks(leftBlocks) : null
+  const rightElement = rightBlocks ? renderBlocks(rightBlocks) : null
+
+  if (RemoteLayout) {
+    return React.createElement(RemoteLayout, {
+      page,
+      website,
+      header: headerElement,
+      body: bodyElement,
+      footer: footerElement,
+      left: leftElement,
+      right: rightElement,
+      leftPanel: leftElement,
+      rightPanel: rightElement
+    })
+  }
+
+  // Default layout
+  return React.createElement(React.Fragment, null,
+    headerElement,
+    bodyElement,
+    footerElement
+  )
+}
+
+/**
+ * Inline PageElement for SSR
+ * Uses React from prerender's scope
+ */
+function createPageElement(page, website) {
+  return React.createElement('main', null,
+    renderLayout(page, website)
+  )
 }
 
 /**
@@ -173,7 +415,13 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // Execute data fetches (site, page, section levels)
   onProgress('Executing data fetches...')
-  await executeAllFetches(siteContent, siteDir, onProgress)
+  const { siteCascadedData, pageFetchedData } = await executeAllFetches(siteContent, siteDir, onProgress)
+
+  // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
+  if (siteContent.pages?.some(p => p.isDynamic)) {
+    onProgress('Expanding dynamic routes...')
+    siteContent.pages = expandDynamicPages(siteContent.pages, pageFetchedData, onProgress)
+  }
 
   // Load the HTML shell
   onProgress('Loading HTML shell...')
@@ -224,8 +472,9 @@ export async function prerenderSite(siteDir, options = {}) {
     // Set this as the active page
     uniweb.activeWebsite.setActivePage(page.route)
 
-    // Create the page element using the runtime's SSR components
-    const element = React.createElement(PageElement, { page, website })
+    // Create the page element using inline SSR rendering
+    // (uses React from prerender's scope to avoid module resolution issues)
+    const element = createPageElement(page, website)
 
     // Render to HTML string
     let renderedContent
@@ -298,8 +547,16 @@ function injectContent(shell, renderedContent, page, siteContent) {
   }
 
   // Inject site content as JSON for hydration
+  // Replace existing content if present, otherwise add it
   const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(siteContent)}</script>`
-  if (!html.includes('__SITE_CONTENT__')) {
+  if (html.includes('__SITE_CONTENT__')) {
+    // Replace existing site content with updated version (includes expanded dynamic routes)
+    // Match script tag with attributes in any order
+    html = html.replace(
+      /<script[^>]*id="__SITE_CONTENT__"[^>]*>[\s\S]*?<\/script>/,
+      contentScript
+    )
+  } else {
     html = html.replace(
       '</head>',
       `  ${contentScript}\n  </head>`

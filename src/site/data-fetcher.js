@@ -251,6 +251,58 @@ export function mergeDataIntoContent(content, fetchedData, schema, merge = false
 }
 
 /**
+ * Convert a plural schema name to singular
+ * Used for dynamic routes where the parent has "articles" and
+ * each child page gets the singular "article" for the current item
+ *
+ * @param {string} name - Plural name (e.g., 'articles', 'posts', 'people')
+ * @returns {string} Singular name (e.g., 'article', 'post', 'person')
+ *
+ * @example
+ * singularize('articles') // 'article'
+ * singularize('posts')    // 'post'
+ * singularize('people')   // 'person'
+ * singularize('categories') // 'category'
+ */
+export function singularize(name) {
+  if (!name) return name
+
+  // Handle common irregular plurals
+  const irregulars = {
+    people: 'person',
+    children: 'child',
+    men: 'man',
+    women: 'woman',
+    feet: 'foot',
+    teeth: 'tooth',
+    mice: 'mouse',
+    geese: 'goose',
+  }
+
+  if (irregulars[name]) return irregulars[name]
+
+  // Standard rules (in order of specificity)
+  if (name.endsWith('ies')) {
+    // categories -> category
+    return name.slice(0, -3) + 'y'
+  }
+  if (name.endsWith('ves')) {
+    // leaves -> leaf
+    return name.slice(0, -3) + 'f'
+  }
+  if (name.endsWith('es') && (name.endsWith('shes') || name.endsWith('ches') || name.endsWith('xes') || name.endsWith('sses') || name.endsWith('zes'))) {
+    // boxes -> box, watches -> watch
+    return name.slice(0, -2)
+  }
+  if (name.endsWith('s') && !name.endsWith('ss')) {
+    // articles -> article
+    return name.slice(0, -1)
+  }
+
+  return name
+}
+
+/**
  * Execute multiple fetch operations in parallel
  *
  * @param {object[]} configs - Array of normalized fetch configs

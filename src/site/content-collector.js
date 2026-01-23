@@ -27,7 +27,7 @@ import { join, parse } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections } from './assets.js'
-import { parseFetchConfig } from './data-fetcher.js'
+import { parseFetchConfig, singularize } from './data-fetcher.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -45,6 +45,25 @@ try {
       }
     ]
   })
+}
+
+/**
+ * Check if a folder name represents a dynamic route (e.g., [slug], [id])
+ * @param {string} folderName - The folder name to check
+ * @returns {boolean}
+ */
+function isDynamicRoute(folderName) {
+  return /^\[(\w+)\]$/.test(folderName)
+}
+
+/**
+ * Extract the parameter name from a dynamic route folder (e.g., [slug] → slug)
+ * @param {string} folderName - The folder name (e.g., "[slug]")
+ * @returns {string|null} The parameter name or null if not a dynamic route
+ */
+function extractRouteParam(folderName) {
+  const match = folderName.match(/^\[(\w+)\]$/)
+  return match ? match[1] : null
 }
 
 /**
@@ -296,9 +315,10 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
  * @param {Object} options - Route options
  * @param {boolean} options.isIndex - Whether this page is the index for its parent route
  * @param {string} options.parentRoute - The parent route (e.g., '/' or '/docs')
+ * @param {Object} options.parentFetch - Parent page's fetch config (for dynamic routes)
  * @returns {Object} Page data with assets manifest
  */
-async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/' } = {}) {
+async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null } = {}) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
   // Note: We no longer skip hidden pages here - they still exist as valid pages,
@@ -357,9 +377,16 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   // All pages get their actual folder-based route (no special treatment for index)
   // The isIndex flag marks which page should also be accessible at the parent route
   let route
+  const isDynamic = isDynamicRoute(pageName)
+  const paramName = isDynamic ? extractRouteParam(pageName) : null
+
   if (pageName.startsWith('@')) {
     // Special pages (layout areas) keep their @ prefix
     route = parentRoute === '/' ? `/@${pageName.slice(1)}` : `${parentRoute}/@${pageName.slice(1)}`
+  } else if (isDynamic) {
+    // Dynamic routes: /blog/[slug] → /blog/:slug (for route matching)
+    // The actual routes like /blog/my-post are generated at prerender time
+    route = parentRoute === '/' ? `/:${paramName}` : `${parentRoute}/:${paramName}`
   } else {
     // Normal pages get parent + their name
     route = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
@@ -367,6 +394,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
   // Extract configuration
   const { seo = {}, layout = {}, ...restConfig } = pageConfig
+
+  // For dynamic routes, determine the parent's data schema
+  // This tells prerender which data array to iterate over
+  let parentSchema = null
+  if (isDynamic && parentFetch) {
+    parentSchema = parentFetch.schema
+  }
 
   return {
     page: {
@@ -377,6 +411,11 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       label: pageConfig.label || null, // Short label for navigation (defaults to title)
       order: pageConfig.order,
       lastModified: lastModified?.toISOString(),
+
+      // Dynamic route metadata
+      isDynamic,
+      paramName, // e.g., "slug" from [slug]
+      parentSchema, // e.g., "articles" - the data array to iterate over
 
       // Navigation options
       hidden: pageConfig.hidden || false, // Hide from all navigation
@@ -448,9 +487,10 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} parentRoute - Parent route (e.g., '/' or '/docs')
  * @param {string} siteRoot - Site root directory for asset resolution
  * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent's config
+ * @param {Object} parentFetch - Parent page's fetch config (for dynamic child routes)
  * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -494,9 +534,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const isSpecial = entry.startsWith('@')
 
     // Process this directory as a page
+    // Pass parentFetch so dynamic routes can inherit parent's data schema
     const result = await processPage(entryPath, entry, siteRoot, {
       isIndex: isIndex && !isSpecial,
-      parentRoute
+      parentRoute,
+      parentFetch
     })
 
     if (result) {
@@ -524,7 +566,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       if (!isSpecial) {
         // The child route depends on whether this page is the index
         const childParentRoute = isIndex ? parentRoute : page.route
-        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig)
+        // Pass this page's fetch config to children (for dynamic routes that inherit parent data)
+        const childFetch = page.fetch || parentFetch
+        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
       }
