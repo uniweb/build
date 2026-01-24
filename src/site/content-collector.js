@@ -161,10 +161,19 @@ async function processMarkdownFile(filePath, id, siteRoot) {
     }
   }
 
-  const { type, component, preset, input, props, fetch, ...params } = frontMatter
+  const { type, component, preset, input, props, fetch, data, ...params } = frontMatter
 
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
+
+  // Support 'data:' shorthand for collection fetch
+  // data: team → fetch: { collection: team }
+  // data: [team, articles] → fetch: { collection: team } (first item, others via inheritData)
+  let resolvedFetch = fetch
+  if (!fetch && data) {
+    const collectionName = Array.isArray(data) ? data[0] : data
+    resolvedFetch = { collection: collectionName }
+  }
 
   const section = {
     id,
@@ -173,7 +182,7 @@ async function processMarkdownFile(filePath, id, siteRoot) {
     input,
     params: { ...params, ...props },
     content: proseMirrorContent,
-    fetch: parseFetchConfig(fetch),
+    fetch: parseFetchConfig(resolvedFetch),
     subsections: []
   }
 
@@ -438,7 +447,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       },
 
       // Data fetching
-      fetch: parseFetchConfig(pageConfig.fetch),
+      // Support 'data:' shorthand at page level
+      // data: team → fetch: { collection: team }
+      fetch: parseFetchConfig(
+        pageConfig.fetch || (pageConfig.data
+          ? { collection: Array.isArray(pageConfig.data) ? pageConfig.data[0] : pageConfig.data }
+          : undefined)
+      ),
 
       sections: hierarchicalSections
     },
