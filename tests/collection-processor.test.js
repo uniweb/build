@@ -22,8 +22,8 @@ describe('Collection Processor', () => {
 
   describe('processCollections', () => {
     it('should process markdown files into collection items', async () => {
-      // Create test content folder
-      const contentDir = join(testDir, 'content', 'articles')
+      // Create test library folder
+      const contentDir = join(testDir, 'library', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       // Create test markdown file
@@ -41,7 +41,7 @@ This is a test article.
 
       const collections = await processCollections(testDir, {
         articles: {
-          path: 'content/articles',
+          path: 'library/articles',
           sort: 'date desc'
         }
       })
@@ -63,7 +63,7 @@ This is a test article.
     })
 
     it('should exclude unpublished items', async () => {
-      const contentDir = join(testDir, 'content', 'articles')
+      const contentDir = join(testDir, 'library', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'published.md'), `---
@@ -82,7 +82,7 @@ Draft content.
 `)
 
       const collections = await processCollections(testDir, {
-        articles: 'content/articles'
+        articles: 'library/articles'
       })
 
       expect(collections.articles).toHaveLength(1)
@@ -90,7 +90,7 @@ Draft content.
     })
 
     it('should apply filter expressions', async () => {
-      const contentDir = join(testDir, 'content', 'posts')
+      const contentDir = join(testDir, 'library', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post1.md'), `---
@@ -109,7 +109,7 @@ Content.
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'content/posts',
+          path: 'library/posts',
           filter: 'category == tutorial'
         }
       })
@@ -119,7 +119,7 @@ Content.
     })
 
     it('should sort items by field', async () => {
-      const contentDir = join(testDir, 'content', 'items')
+      const contentDir = join(testDir, 'library', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'a.md'), `---
@@ -142,7 +142,7 @@ order: 2
 
       const collections = await processCollections(testDir, {
         items: {
-          path: 'content/items',
+          path: 'library/items',
           sort: 'order asc'
         }
       })
@@ -151,7 +151,7 @@ order: 2
     })
 
     it('should limit number of items', async () => {
-      const contentDir = join(testDir, 'content', 'posts')
+      const contentDir = join(testDir, 'library', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       for (let i = 1; i <= 5; i++) {
@@ -164,7 +164,7 @@ order: ${i}
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'content/posts',
+          path: 'library/posts',
           sort: 'order asc',
           limit: 3
         }
@@ -175,7 +175,7 @@ order: ${i}
 
     it('should handle missing collection folder gracefully', async () => {
       const collections = await processCollections(testDir, {
-        articles: 'content/nonexistent'
+        articles: 'library/nonexistent'
       })
 
       expect(collections.articles).toEqual([])
@@ -213,7 +213,7 @@ order: ${i}
 
   describe('excerpt extraction', () => {
     it('should auto-extract excerpt from content', async () => {
-      const contentDir = join(testDir, 'content', 'posts')
+      const contentDir = join(testDir, 'library', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -226,14 +226,14 @@ This is the second paragraph.
 `)
 
       const collections = await processCollections(testDir, {
-        posts: 'content/posts'
+        posts: 'library/posts'
       })
 
       expect(collections.posts[0].excerpt).toContain('first paragraph')
     })
 
     it('should prefer explicit excerpt from frontmatter', async () => {
-      const contentDir = join(testDir, 'content', 'posts')
+      const contentDir = join(testDir, 'library', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -245,7 +245,7 @@ This is the body content.
 `)
 
       const collections = await processCollections(testDir, {
-        posts: 'content/posts'
+        posts: 'library/posts'
       })
 
       expect(collections.posts[0].excerpt).toBe('Custom excerpt here')

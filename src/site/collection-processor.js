@@ -5,7 +5,7 @@
  * Collections are defined in site.yml and processed at build time.
  *
  * Features:
- * - Discovers markdown files in content folders
+ * - Discovers markdown files in collection folders
  * - Parses frontmatter for metadata
  * - Converts markdown body to ProseMirror JSON
  * - Supports filtering, sorting, and limiting
@@ -17,7 +17,7 @@
  * // site.yml
  * collections:
  *   articles:
- *     path: content/articles
+ *     path: library/articles
  *     sort: date desc
  *
  * // Usage
@@ -58,11 +58,11 @@ try {
  *
  * @example
  * // Simple form
- * parseCollectionConfig('articles', 'content/articles')
+ * parseCollectionConfig('articles', 'library/articles')
  *
  * // Extended form
  * parseCollectionConfig('articles', {
- *   path: 'content/articles',
+ *   path: 'library/articles',
  *   sort: 'date desc',
  *   filter: 'published != false',
  *   limit: 100
@@ -301,8 +301,8 @@ async function collectItems(siteDir, config) {
  *
  * @example
  * const collections = await processCollections('/path/to/site', {
- *   articles: { path: 'content/articles', sort: 'date desc' },
- *   products: 'content/products'
+ *   articles: { path: 'library/articles', sort: 'date desc' },
+ *   products: 'library/products'
  * })
  * // { articles: [...], products: [...] }
  */
