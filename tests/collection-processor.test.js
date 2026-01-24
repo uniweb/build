@@ -185,6 +185,67 @@ order: ${i}
       const collections = await processCollections(testDir, null)
       expect(collections).toEqual({})
     })
+
+    it('should add route to items when collection has route config', async () => {
+      const contentDir = join(testDir, 'library', 'articles')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'my-article.md'), `---
+title: My Article
+---
+
+Content here.
+`)
+
+      const collections = await processCollections(testDir, {
+        articles: {
+          path: 'library/articles',
+          route: '/blog'
+        }
+      })
+
+      expect(collections.articles).toHaveLength(1)
+      expect(collections.articles[0].route).toBe('/blog/my-article')
+    })
+
+    it('should handle trailing slash in route config', async () => {
+      const contentDir = join(testDir, 'library', 'posts')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'test-post.md'), `---
+title: Test Post
+---
+
+Content.
+`)
+
+      const collections = await processCollections(testDir, {
+        posts: {
+          path: 'library/posts',
+          route: '/news/'
+        }
+      })
+
+      expect(collections.posts[0].route).toBe('/news/test-post')
+    })
+
+    it('should not add route when route config is absent', async () => {
+      const contentDir = join(testDir, 'library', 'items')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'item.md'), `---
+title: Item
+---
+
+Content.
+`)
+
+      const collections = await processCollections(testDir, {
+        items: 'library/items'
+      })
+
+      expect(collections.items[0].route).toBeUndefined()
+    })
   })
 
   describe('writeCollectionFiles', () => {

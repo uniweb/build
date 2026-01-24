@@ -63,6 +63,7 @@ try {
  * // Extended form
  * parseCollectionConfig('articles', {
  *   path: 'library/articles',
+ *   route: '/blog',
  *   sort: 'date desc',
  *   filter: 'published != false',
  *   limit: 100
@@ -73,6 +74,7 @@ function parseCollectionConfig(name, config) {
     return {
       name,
       path: config,
+      route: null,
       sort: null,
       filter: null,
       limit: 0,
@@ -83,6 +85,7 @@ function parseCollectionConfig(name, config) {
   return {
     name,
     path: config.path,
+    route: config.route || null,
     sort: config.sort || null,
     filter: config.filter || null,
     limit: config.limit || 0,
@@ -273,6 +276,15 @@ async function collectItems(siteDir, config) {
 
   // Filter out nulls (unpublished items)
   items = items.filter(Boolean)
+
+  // Add routes to items if collection has a route configured
+  if (config.route) {
+    const baseRoute = config.route.replace(/\/$/, '') // Remove trailing slash
+    items = items.map(item => ({
+      ...item,
+      route: `${baseRoute}/${item.slug}`
+    }))
+  }
 
   // Apply custom filter
   if (config.filter) {
