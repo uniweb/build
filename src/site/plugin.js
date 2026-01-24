@@ -37,6 +37,79 @@ import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
+import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
+
+/**
+ * Execute all fetches for site content (used in dev mode)
+ * Populates section.cascadedData with fetched data
+ *
+ * @param {Object} siteContent - The collected site content
+ * @param {string} siteDir - Path to site directory
+ */
+async function executeDevFetches(siteContent, siteDir) {
+  const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
+
+  // Site-level fetch
+  let siteCascadedData = {}
+  const siteFetch = siteContent.config?.fetch
+  if (siteFetch) {
+    const result = await executeFetch(siteFetch, fetchOptions)
+    if (result.data && !result.error) {
+      siteCascadedData[siteFetch.schema] = result.data
+    }
+  }
+
+  // Process each page
+  for (const page of siteContent.pages || []) {
+    let pageCascadedData = { ...siteCascadedData }
+
+    // Page-level fetch
+    const pageFetch = page.fetch
+    if (pageFetch) {
+      const result = await executeFetch(pageFetch, fetchOptions)
+      if (result.data && !result.error) {
+        pageCascadedData[pageFetch.schema] = result.data
+      }
+    }
+
+    // Process sections
+    await processDevSectionFetches(page.sections, pageCascadedData, fetchOptions)
+  }
+}
+
+/**
+ * Process fetches for sections recursively
+ *
+ * @param {Array} sections - Sections to process
+ * @param {Object} cascadedData - Data from parent levels
+ * @param {Object} fetchOptions - Options for executeFetch
+ */
+async function processDevSectionFetches(sections, cascadedData, fetchOptions) {
+  if (!sections || !Array.isArray(sections)) return
+
+  for (const section of sections) {
+    // Execute section-level fetch
+    const sectionFetch = section.fetch
+    if (sectionFetch) {
+      const result = await executeFetch(sectionFetch, fetchOptions)
+      if (result.data && !result.error) {
+        // Merge fetched data into cascadedData for this section
+        cascadedData = {
+          ...cascadedData,
+          [sectionFetch.schema]: result.data
+        }
+      }
+    }
+
+    // Attach cascaded data to section
+    section.cascadedData = { ...cascadedData }
+
+    // Process subsections recursively
+    if (section.subsections && section.subsections.length > 0) {
+      await processDevSectionFetches(section.subsections, cascadedData, fetchOptions)
+    }
+  }
+}
 import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
 import { mergeTranslations } from '../i18n/merge.js'
 
@@ -372,6 +445,12 @@ export function siteContentPlugin(options = {}) {
           await writeCollectionFiles(resolvedSitePath, collections)
         }
 
+        // Execute data fetches in dev mode
+        // In production, prerender handles this
+        if (!isProduction) {
+          await executeDevFetches(siteContent, resolvedSitePath)
+        }
+
         // Update localesDir from site config
         if (siteContent.config?.i18n?.localesDir) {
           localesDir = siteContent.config.i18n.localesDir
@@ -402,6 +481,8 @@ export function siteContentPlugin(options = {}) {
             console.log('[site-content] Content changed, rebuilding...')
             try {
               siteContent = await collectSiteContent(resolvedSitePath)
+              // Execute fetches for the updated content
+              await executeDevFetches(siteContent, resolvedSitePath)
               console.log(`[site-content] Rebuilt ${siteContent.pages?.length || 0} pages`)
 
               // Send full reload to client
