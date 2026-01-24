@@ -488,7 +488,7 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} siteRoot - Site root directory for asset resolution
  * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent's config
  * @param {Object} parentFetch - Parent page's fetch config (for dynamic child routes)
- * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right }
+ * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right, notFound }
  */
 async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null) {
   const entries = await readdir(dirPath)
@@ -502,6 +502,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   let footer = null
   let left = null
   let right = null
+  let notFound = null
 
   // First pass: discover all page folders and read their order values
   const pageFolders = []
@@ -545,7 +546,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       const { page, assetCollection: pageAssets } = result
       assetCollection = mergeAssetCollections(assetCollection, pageAssets)
 
-      // Handle special pages (layout areas) - only at root level
+      // Handle special pages (layout areas and 404) - only at root level
       if (parentRoute === '/') {
         if (entry === '@header') {
           header = page
@@ -555,6 +556,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           left = page
         } else if (entry === '@right') {
           right = page
+        } else if (entry === '404') {
+          notFound = page
         } else {
           pages.push(page)
         }
@@ -575,7 +578,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     }
   }
 
-  return { pages, assetCollection, header, footer, left, right }
+  return { pages, assetCollection, header, footer, left, right, notFound }
 }
 
 /**
@@ -608,7 +611,7 @@ export async function collectSiteContent(sitePath) {
   }
 
   // Recursively collect all pages
-  const { pages, assetCollection, header, footer, left, right } =
+  const { pages, assetCollection, header, footer, left, right, notFound } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
 
   // Sort pages by order
@@ -632,6 +635,7 @@ export async function collectSiteContent(sitePath) {
     footer,
     left,
     right,
+    notFound,
     assets: assetCollection.assets,
     hasExplicitPoster: assetCollection.hasExplicitPoster,
     hasExplicitPreview: assetCollection.hasExplicitPreview
