@@ -526,7 +526,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       // Version metadata (if within a versioned section)
       version: versionContext?.version || null,
       versionMeta: versionContext?.versionMeta || null,
-      versionScope: versionContext?.scope || null
+      versionScope: versionContext?.scope || null,
 
       // Navigation options
       hidden: pageConfig.hidden || false, // Hide from all navigation
