@@ -305,6 +305,7 @@ function escapeHtml(str) {
  * @param {Object} [options.search] - Search index configuration
  * @param {boolean} [options.search.enabled=true] - Generate search index (uses site.yml config by default)
  * @param {string} [options.search.filename='search-index.json'] - Search index filename
+ * @param {string} [options.foundationPath] - Path to foundation directory (for loading theme vars)
  */
 export function siteContentPlugin(options = {}) {
   const {
@@ -316,7 +317,8 @@ export function siteContentPlugin(options = {}) {
     watch: shouldWatch = true,
     seo = {},
     assets: assetsConfig = {},
-    search: searchPluginConfig = {}
+    search: searchPluginConfig = {},
+    foundationPath
   } = options
 
   // Extract asset processing options
@@ -416,7 +418,7 @@ export function siteContentPlugin(options = {}) {
       if (!isProduction) {
         try {
           // Do an early content collection to get the collections config
-          const earlyContent = await collectSiteContent(resolvedSitePath)
+          const earlyContent = await collectSiteContent(resolvedSitePath, { foundationPath })
           collectionsConfig = earlyContent.config?.collections
 
           if (collectionsConfig) {
@@ -433,7 +435,7 @@ export function siteContentPlugin(options = {}) {
     async buildStart() {
       // Collect content at build start
       try {
-        siteContent = await collectSiteContent(resolvedSitePath)
+        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath })
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
         // Process content collections if defined in site.yml
@@ -480,7 +482,7 @@ export function siteContentPlugin(options = {}) {
           rebuildTimeout = setTimeout(async () => {
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = await collectSiteContent(resolvedSitePath)
+              siteContent = await collectSiteContent(resolvedSitePath, { foundationPath })
               // Execute fetches for the updated content
               await executeDevFetches(siteContent, resolvedSitePath)
               console.log(`[site-content] Rebuilt ${siteContent.pages?.length || 0} pages`)
@@ -685,6 +687,11 @@ export function siteContentPlugin(options = {}) {
 
       let headInjection = ''
 
+      // Inject theme CSS
+      if (contentToInject.theme?.css) {
+        headInjection += `    <style id="uniweb-theme">\n${contentToInject.theme.css}\n    </style>\n`
+      }
+
       // Inject SEO meta tags
       if (seoEnabled) {
         const metaTags = generateMetaTags(contentToInject, seoOptions)
@@ -790,6 +797,9 @@ export function siteContentPlugin(options = {}) {
       // Clean up internal properties that shouldn't be in the output (Sets don't serialize)
       delete finalContent.hasExplicitPoster
       delete finalContent.hasExplicitPreview
+
+      // Note: theme.css is kept here so prerender can inject it into HTML
+      // Prerender will strip it from the JSON it injects into each page
 
       // Emit content as JSON file in production build
       this.emitFile({

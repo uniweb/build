@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections } from './assets.js'
 import { parseFetchConfig, singularize } from './data-fetcher.js'
+import { buildTheme, extractFoundationVars } from '../theme/index.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -597,23 +598,68 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 }
 
 /**
+ * Load foundation variables from schema.json
+ *
+ * @param {string} foundationPath - Path to foundation directory
+ * @returns {Promise<Object>} Foundation variables or empty object
+ */
+async function loadFoundationVars(foundationPath) {
+  if (!foundationPath) return {}
+
+  // Try dist/schema.json first (built foundation), then src/schema.json
+  const distSchemaPath = join(foundationPath, 'dist', 'schema.json')
+  const srcSchemaPath = join(foundationPath, 'schema.json')
+
+  const schemaPath = existsSync(distSchemaPath) ? distSchemaPath : srcSchemaPath
+
+  if (!existsSync(schemaPath)) {
+    return {}
+  }
+
+  try {
+    const schemaContent = await readFile(schemaPath, 'utf8')
+    const schema = JSON.parse(schemaContent)
+    // Foundation meta is in _self, themeVars may be there or at root for backwards compat
+    return schema._self?.themeVars || schema.themeVars || {}
+  } catch (err) {
+    console.warn('[content-collector] Failed to load foundation schema:', err.message)
+    return {}
+  }
+}
+
+/**
  * Collect all site content
  *
  * @param {string} sitePath - Path to site directory
+ * @param {Object} options - Collection options
+ * @param {string} options.foundationPath - Path to foundation directory (for theme vars)
  * @returns {Promise<Object>} Site content object with assets manifest
  */
-export async function collectSiteContent(sitePath) {
+export async function collectSiteContent(sitePath, options = {}) {
+  const { foundationPath } = options
   const pagesPath = join(sitePath, 'pages')
 
-  // Read site config
+  // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, 'site.yml'))
-  const themeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
+  const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
+
+  // Load foundation vars and process theme
+  const foundationVars = await loadFoundationVars(foundationPath)
+  const { config: processedTheme, css: themeCSS, warnings } = buildTheme(rawThemeConfig, { foundationVars })
+
+  // Log theme warnings
+  if (warnings?.length > 0) {
+    warnings.forEach(w => console.warn(`[theme] ${w}`))
+  }
 
   // Check if pages directory exists
   if (!existsSync(pagesPath)) {
     return {
       config: siteConfig,
-      theme: themeConfig,
+      theme: {
+        ...processedTheme,
+        css: themeCSS
+      },
       pages: [],
       assets: {}
     }
@@ -644,7 +690,10 @@ export async function collectSiteContent(sitePath) {
       ...siteConfig,
       fetch: parseFetchConfig(siteConfig.fetch),
     },
-    theme: themeConfig,
+    theme: {
+      ...processedTheme,
+      css: themeCSS
+    },
     pages,
     header,
     footer,

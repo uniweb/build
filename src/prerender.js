@@ -516,6 +516,14 @@ export async function prerenderSite(siteDir, options = {}) {
 function injectContent(shell, renderedContent, page, siteContent) {
   let html = shell
 
+  // Inject theme CSS if not already present
+  if (siteContent?.theme?.css && !html.includes('id="uniweb-theme"')) {
+    html = html.replace(
+      '</head>',
+      `  <style id="uniweb-theme">\n${siteContent.theme.css}\n    </style>\n  </head>`
+    )
+  }
+
   // Replace the empty root div with pre-rendered content
   html = html.replace(
     /<div id="root">[\s\S]*?<\/div>/,
@@ -548,7 +556,13 @@ function injectContent(shell, renderedContent, page, siteContent) {
 
   // Inject site content as JSON for hydration
   // Replace existing content if present, otherwise add it
-  const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(siteContent)}</script>`
+  // Strip CSS from theme (it's already in a <style> tag)
+  const contentForJson = { ...siteContent }
+  if (contentForJson.theme?.css) {
+    contentForJson.theme = { ...contentForJson.theme }
+    delete contentForJson.theme.css
+  }
+  const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(contentForJson)}</script>`
   if (html.includes('__SITE_CONTENT__')) {
     // Replace existing site content with updated version (includes expanded dynamic routes)
     // Match script tag with attributes in any order

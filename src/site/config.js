@@ -235,7 +235,8 @@ export async function defineSiteConfig(options = {}) {
       inject: true,
       seo,
       assets,
-      search
+      search,
+      foundationPath: foundationInfo.path // For loading foundation theme vars
     }),
 
     // Foundation dev server (only in runtime mode with local foundation)
