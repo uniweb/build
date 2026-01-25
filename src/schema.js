@@ -5,9 +5,9 @@
  * Schema data is for editor-time only, not runtime.
  */
 
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // Component meta file name
@@ -43,6 +43,38 @@ export async function loadComponentMeta(componentDir) {
   } catch (error) {
     console.warn(`Warning: Failed to load ${filePath}:`, error.message)
     return null
+  }
+}
+
+/**
+ * Load package.json from foundation root
+ * Extracts identity fields: name, version, description
+ *
+ * @param {string} srcDir - Source directory (e.g., 'src')
+ * @returns {Object} Identity fields from package.json
+ */
+export async function loadPackageJson(srcDir) {
+  // package.json is in the foundation root (parent of srcDir)
+  const foundationRoot = dirname(srcDir)
+  const packagePath = join(foundationRoot, 'package.json')
+
+  if (!existsSync(packagePath)) {
+    return {}
+  }
+
+  try {
+    const content = await readFile(packagePath, 'utf-8')
+    const pkg = JSON.parse(content)
+
+    // Extract only identity fields for schema
+    return {
+      name: pkg.name,
+      version: pkg.version,
+      description: pkg.description,
+    }
+  } catch (error) {
+    console.warn(`Warning: Failed to load package.json:`, error.message)
+    return {}
   }
 }
 
@@ -148,17 +180,31 @@ export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPON
 
 /**
  * Build complete schema for a foundation
- * Returns { _self: foundationConfig, ComponentName: componentMeta, ... }
+ * Returns { _self: { identity + config }, ComponentName: componentMeta, ... }
+ *
+ * The _self object contains:
+ * - Identity from package.json (name, version, description)
+ * - Configuration from foundation.js (vars, Layout, etc.)
  *
  * @param {string} srcDir - Source directory
  * @param {string[]} [componentPaths] - Paths to search for components
  */
 export async function buildSchema(srcDir, componentPaths) {
+  // Load identity from package.json
+  const identity = await loadPackageJson(srcDir)
+
+  // Load configuration from foundation.js
   const foundationConfig = await loadFoundationConfig(srcDir)
+
+  // Discover components
   const components = await discoverComponents(srcDir, componentPaths)
 
   return {
-    _self: foundationConfig,
+    // Merge identity and config - identity fields take precedence
+    _self: {
+      ...foundationConfig,
+      ...identity,
+    },
     ...components,
   }
 }

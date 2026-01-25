@@ -333,6 +333,34 @@ dist/
             └── default.webp
 ```
 
+### Schema.json Structure
+
+The generated `schema.json` contains:
+
+```json
+{
+  "_self": {
+    "name": "foundation",
+    "version": "0.1.0",
+    "description": "My foundation description",
+    "vars": { ... }
+  },
+  "Hero": { ... },
+  "Features": { ... }
+}
+```
+
+The `_self` object contains foundation-level metadata:
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| `name` | `package.json` | Foundation package name |
+| `version` | `package.json` | Foundation version |
+| `description` | `package.json` | Foundation description |
+| `vars` | `foundation.js` | CSS custom properties sites can override |
+
+Identity fields (`name`, `version`, `description`) come from the foundation's `package.json`. Configuration fields (`vars`, etc.) come from `src/foundation.js`.
+
 ## API Reference
 
 ### Schema Functions
@@ -341,6 +369,7 @@ dist/
 |----------|-------------|
 | `discoverComponents(srcDir)` | Discover all exposed components |
 | `loadComponentMeta(componentDir)` | Load meta file for a component |
+| `loadPackageJson(srcDir)` | Load identity from package.json |
 | `loadFoundationConfig(srcDir)` | Load foundation.js configuration |
 | `buildSchema(srcDir)` | Build complete schema object |
 
