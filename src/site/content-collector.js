@@ -144,11 +144,12 @@ function compareFilenames(a, b) {
  * Process a markdown file into a section
  *
  * @param {string} filePath - Path to markdown file
- * @param {string} id - Section ID
+ * @param {string} id - Section ID (numeric/positional)
  * @param {string} siteRoot - Site root directory for asset resolution
+ * @param {string} defaultStableId - Default stable ID from filename (can be overridden in frontmatter)
  * @returns {Object} Section data with assets manifest
  */
-async function processMarkdownFile(filePath, id, siteRoot) {
+async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = null) {
   const content = await readFile(filePath, 'utf8')
   let frontMatter = {}
   let markdown = content
@@ -162,7 +163,7 @@ async function processMarkdownFile(filePath, id, siteRoot) {
     }
   }
 
-  const { type, component, preset, input, props, fetch, data, ...params } = frontMatter
+  const { type, component, preset, input, props, fetch, data, id: frontmatterId, ...params } = frontMatter
 
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
@@ -176,8 +177,13 @@ async function processMarkdownFile(filePath, id, siteRoot) {
     resolvedFetch = { collection: collectionName }
   }
 
+  // Stable ID for scroll targeting: frontmatter id > filename-derived > null
+  // This ID is stable across reordering (unlike the positional id)
+  const stableId = frontmatterId || defaultStableId || null
+
   const section = {
     id,
+    stableId,
     component: type || component || 'Section',
     preset,
     input,
@@ -290,7 +296,8 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
     }
 
     // Process the section
-    const { section, assetCollection: sectionAssets } = await processMarkdownFile(filePath, id, siteRoot)
+    // Use sectionName as stable ID for scroll targeting (e.g., "hero", "features")
+    const { section, assetCollection: sectionAssets } = await processMarkdownFile(filePath, id, siteRoot, sectionName)
     assetCollection = mergeAssetCollections(assetCollection, sectionAssets)
 
     // Track last modified
@@ -354,10 +361,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     const sections = []
     for (const file of mdFiles) {
       const { name } = parse(file)
-      const { prefix } = parseNumericPrefix(name)
+      const { prefix, name: stableName } = parseNumericPrefix(name)
       const id = prefix || name
+      // Use the name part (after prefix) as stable ID for scroll targeting
+      // e.g., "1-intro.md" → stableId: "intro", "2-features.md" → stableId: "features"
+      const stableId = stableName || name
 
-      const { section, assetCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot)
+      const { section, assetCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot, stableId)
       sections.push(section)
       pageAssetCollection = mergeAssetCollections(pageAssetCollection, assetCollection)
 
@@ -415,6 +425,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   return {
     page: {
       route,
+      id: pageConfig.id || null, // Stable page ID for page: links (survives reorganization)
       isIndex, // Marks this page as the index for its parent route (accessible at parentRoute)
       title: pageConfig.title || pageName,
       description: pageConfig.description || '',

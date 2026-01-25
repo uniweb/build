@@ -306,9 +306,11 @@ function renderBlock(block) {
   }
 
   // Wrapper props
+  // Use stableId for DOM ID if available (stable across reordering)
   const theme = block.themeName
+  const sectionId = block.stableId || block.id
   const wrapperProps = {
-    id: `Section${block.id}`,
+    id: `section-${sectionId}`,
     className: theme || ''
   }
 
