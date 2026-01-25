@@ -668,7 +668,12 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
         // For latest version, use parent route directly
         // For other versions, add version prefix to route
-        const versionRoute = isLatest ? parentRoute : `${parentRoute}/${entry}`
+        // Handle root scope specially to avoid double slash (//v1 → /v1)
+        const versionRoute = isLatest
+          ? parentRoute
+          : parentRoute === '/'
+            ? `/${entry}`
+            : `${parentRoute}/${entry}`
 
         // Recurse into version folder with version context
         const subResult = await collectPagesRecursive(
