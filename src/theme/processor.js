@@ -389,8 +389,28 @@ export function extractFoundationVars(varsModule) {
  * @returns {boolean}
  */
 export function foundationHasVars(foundationSchema) {
-  // Check both _self.themeVars (new location) and root themeVars (backwards compat)
-  return foundationSchema?._self?.themeVars != null || foundationSchema?.themeVars != null
+  // Check _self.vars (new), _self.themeVars (legacy), root themeVars (backwards compat)
+  return (
+    foundationSchema?._self?.vars != null ||
+    foundationSchema?._self?.themeVars != null ||
+    foundationSchema?.themeVars != null
+  )
+}
+
+/**
+ * Get foundation variables from schema
+ * Supports both new 'vars' and legacy 'themeVars' naming
+ *
+ * @param {Object} foundationSchema - Foundation schema.json content
+ * @returns {Object} Foundation variables
+ */
+export function getFoundationVars(foundationSchema) {
+  return (
+    foundationSchema?._self?.vars ||
+    foundationSchema?._self?.themeVars ||
+    foundationSchema?.themeVars ||
+    {}
+  )
 }
 
 export default {
@@ -398,4 +418,5 @@ export default {
   processTheme,
   extractFoundationVars,
   foundationHasVars,
+  getFoundationVars,
 }

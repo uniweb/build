@@ -7,7 +7,8 @@
 // Schema discovery and loading
 export {
   loadComponentMeta,
-  loadFoundationMeta,
+  loadFoundationConfig,
+  loadFoundationMeta, // @deprecated - use loadFoundationConfig
   discoverComponents,
   buildSchema,
   getExposedComponents,

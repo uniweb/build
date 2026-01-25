@@ -619,8 +619,8 @@ async function loadFoundationVars(foundationPath) {
   try {
     const schemaContent = await readFile(schemaPath, 'utf8')
     const schema = JSON.parse(schemaContent)
-    // Foundation meta is in _self, themeVars may be there or at root for backwards compat
-    return schema._self?.themeVars || schema.themeVars || {}
+    // Foundation config is in _self, support both 'vars' (new) and 'themeVars' (legacy)
+    return schema._self?.vars || schema._self?.themeVars || schema.themeVars || {}
   } catch (err) {
     console.warn('[content-collector] Failed to load foundation schema:', err.message)
     return {}

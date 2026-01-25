@@ -10,8 +10,11 @@ import { existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-// Meta file name (standardized to meta.js)
+// Component meta file name
 const META_FILE_NAME = 'meta.js'
+
+// Foundation config file name
+const FOUNDATION_FILE_NAME = 'foundation.js'
 
 // Default component paths (relative to srcDir)
 const DEFAULT_COMPONENT_PATHS = ['components']
@@ -44,19 +47,37 @@ export async function loadComponentMeta(componentDir) {
 }
 
 /**
- * Load foundation-level meta file
+ * Load foundation-level config file (foundation.js)
+ *
+ * Contains foundation-wide configuration:
+ * - vars: CSS custom properties sites can override
+ * - Layout: Custom layout component
+ * - Future: providers, middleware, etc.
  */
-export async function loadFoundationMeta(srcDir) {
-  const filePath = join(srcDir, META_FILE_NAME)
+export async function loadFoundationConfig(srcDir) {
+  const filePath = join(srcDir, FOUNDATION_FILE_NAME)
   if (!existsSync(filePath)) {
     return {}
   }
   try {
-    return await loadMetaFile(filePath)
+    const module = await import(pathToFileURL(filePath).href)
+    // Support both default export and named exports
+    return {
+      ...module.default,
+      vars: module.vars || module.default?.vars,
+      Layout: module.Layout || module.default?.Layout,
+    }
   } catch (error) {
-    console.warn(`Warning: Failed to load foundation meta ${filePath}:`, error.message)
+    console.warn(`Warning: Failed to load foundation config ${filePath}:`, error.message)
     return {}
   }
+}
+
+/**
+ * @deprecated Use loadFoundationConfig instead
+ */
+export async function loadFoundationMeta(srcDir) {
+  return loadFoundationConfig(srcDir)
 }
 
 /**
@@ -127,17 +148,17 @@ export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPON
 
 /**
  * Build complete schema for a foundation
- * Returns { _self: foundationMeta, ComponentName: componentMeta, ... }
+ * Returns { _self: foundationConfig, ComponentName: componentMeta, ... }
  *
  * @param {string} srcDir - Source directory
  * @param {string[]} [componentPaths] - Paths to search for components
  */
 export async function buildSchema(srcDir, componentPaths) {
-  const foundationMeta = await loadFoundationMeta(srcDir)
+  const foundationConfig = await loadFoundationConfig(srcDir)
   const components = await discoverComponents(srcDir, componentPaths)
 
   return {
-    _self: foundationMeta,
+    _self: foundationConfig,
     ...components,
   }
 }

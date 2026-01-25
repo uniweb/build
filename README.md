@@ -341,7 +341,7 @@ dist/
 |----------|-------------|
 | `discoverComponents(srcDir)` | Discover all exposed components |
 | `loadComponentMeta(componentDir)` | Load meta file for a component |
-| `loadFoundationMeta(srcDir)` | Load foundation-level meta |
+| `loadFoundationConfig(srcDir)` | Load foundation.js configuration |
 | `buildSchema(srcDir)` | Build complete schema object |
 
 ### Entry Generation
