@@ -606,11 +606,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 async function loadFoundationVars(foundationPath) {
   if (!foundationPath) return {}
 
-  // Try dist/schema.json first (built foundation), then src/schema.json
-  const distSchemaPath = join(foundationPath, 'dist', 'schema.json')
-  const srcSchemaPath = join(foundationPath, 'schema.json')
+  // Try dist/meta/schema.json first (built foundation), then root schema.json
+  const distSchemaPath = join(foundationPath, 'dist', 'meta', 'schema.json')
+  const rootSchemaPath = join(foundationPath, 'schema.json')
 
-  const schemaPath = existsSync(distSchemaPath) ? distSchemaPath : srcSchemaPath
+  const schemaPath = existsSync(distSchemaPath) ? distSchemaPath : rootSchemaPath
 
   if (!existsSync(schemaPath)) {
     return {}

@@ -165,8 +165,8 @@ export async function generateDocs(foundationDir, options = {}) {
 
   let schema
 
-  // Try to load schema.json from dist
-  const schemaPath = join(foundationDir, 'dist', 'schema.json')
+  // Try to load schema.json from dist/meta (where foundation build outputs it)
+  const schemaPath = join(foundationDir, 'dist', 'meta', 'schema.json')
 
   if (!fromSource && existsSync(schemaPath)) {
     // Load from existing schema.json
