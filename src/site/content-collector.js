@@ -67,6 +67,90 @@ function extractRouteParam(folderName) {
   return match ? match[1] : null
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Version Detection
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Check if a folder name represents a version (e.g., v1, v2, v1.0, v2.1)
+ * @param {string} folderName - The folder name to check
+ * @returns {boolean}
+ */
+function isVersionFolder(folderName) {
+  return /^v\d+(\.\d+)?$/.test(folderName)
+}
+
+/**
+ * Parse version info from folder name
+ * @param {string} folderName - The folder name (e.g., "v1", "v2.1")
+ * @returns {Object} Version info { id, major, minor, sortKey }
+ */
+function parseVersionInfo(folderName) {
+  const match = folderName.match(/^v(\d+)(?:\.(\d+))?$/)
+  if (!match) return null
+
+  const major = parseInt(match[1], 10)
+  const minor = match[2] ? parseInt(match[2], 10) : 0
+
+  return {
+    id: folderName,
+    major,
+    minor,
+    sortKey: major * 1000 + minor // For sorting: v2.1 > v2.0 > v1.9
+  }
+}
+
+/**
+ * Detect if a set of folders contains version folders
+ * @param {Array<string>} folderNames - List of folder names
+ * @returns {Array<Object>|null} Sorted version infos (highest first) or null if not versioned
+ */
+function detectVersions(folderNames) {
+  const versions = folderNames
+    .filter(isVersionFolder)
+    .map(parseVersionInfo)
+    .filter(Boolean)
+
+  if (versions.length === 0) return null
+
+  // Sort by version (highest first)
+  versions.sort((a, b) => b.sortKey - a.sortKey)
+
+  return versions
+}
+
+/**
+ * Build version metadata from detected versions and page.yml config
+ * @param {Array<Object>} detectedVersions - Detected version infos
+ * @param {Object} pageConfig - page.yml configuration
+ * @returns {Object} Version metadata { versions, latestId, scope }
+ */
+function buildVersionMetadata(detectedVersions, pageConfig = {}) {
+  const configVersions = pageConfig.versions || {}
+
+  // Build version list with metadata
+  const versions = detectedVersions.map((v, index) => {
+    const config = configVersions[v.id] || {}
+    const isLatest = config.latest === true || (index === 0 && !Object.values(configVersions).some(c => c.latest))
+
+    return {
+      id: v.id,
+      label: config.label || v.id,
+      latest: isLatest,
+      deprecated: config.deprecated || false,
+      sortKey: v.sortKey
+    }
+  })
+
+  // Find the latest version
+  const latestVersion = versions.find(v => v.latest) || versions[0]
+
+  return {
+    versions,
+    latestId: latestVersion?.id || null
+  }
+}
+
 /**
  * Parse YAML string using js-yaml
  */
@@ -333,9 +417,10 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
  * @param {boolean} options.isIndex - Whether this page is the index for its parent route
  * @param {string} options.parentRoute - The parent route (e.g., '/' or '/docs')
  * @param {Object} options.parentFetch - Parent page's fetch config (for dynamic routes)
+ * @param {Object} options.versionContext - Version context from parent { version, versionMeta, scope }
  * @returns {Object} Page data with assets manifest
  */
-async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null } = {}) {
+async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null, versionContext = null } = {}) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
   // Note: We no longer skip hidden pages here - they still exist as valid pages,
@@ -438,6 +523,11 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       paramName, // e.g., "slug" from [slug]
       parentSchema, // e.g., "articles" - the data array to iterate over
 
+      // Version metadata (if within a versioned section)
+      version: versionContext?.version || null,
+      versionMeta: versionContext?.versionMeta || null,
+      versionScope: versionContext?.scope || null
+
       // Navigation options
       hidden: pageConfig.hidden || false, // Hide from all navigation
       hideInHeader: pageConfig.hideInHeader || false, // Hide from header nav
@@ -515,9 +605,10 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} siteRoot - Site root directory for asset resolution
  * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent's config
  * @param {Object} parentFetch - Parent page's fetch config (for dynamic child routes)
- * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right, notFound }
+ * @param {Object} versionContext - Version context from parent { version, versionMeta }
+ * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right, notFound, versionedScopes }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -530,6 +621,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   let left = null
   let right = null
   let notFound = null
+  const versionedScopes = new Map() // scope route → versionMeta
 
   // First pass: discover all page folders and read their order values
   const pageFolders = []
@@ -544,11 +636,78 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       name: entry,
       path: entryPath,
       order: pageConfig.order,
+      pageConfig,
       childOrderConfig: {
         pages: pageConfig.pages,
         index: pageConfig.index
       }
     })
+  }
+
+  // Check if this directory contains version folders (versioned section)
+  const folderNames = pageFolders.map(f => f.name)
+  const detectedVersions = detectVersions(folderNames)
+
+  // If versioned section, handle version folders specially
+  if (detectedVersions && !versionContext) {
+    // Read parent page.yml for version metadata
+    const parentConfig = await readYamlFile(join(dirPath, 'page.yml'))
+    const versionMeta = buildVersionMetadata(detectedVersions, parentConfig)
+
+    // Record this versioned scope
+    versionedScopes.set(parentRoute, versionMeta)
+
+    // Process version folders
+    for (const folder of pageFolders) {
+      const { name: entry, path: entryPath, childOrderConfig, pageConfig } = folder
+
+      if (isVersionFolder(entry)) {
+        // This is a version folder
+        const versionInfo = versionMeta.versions.find(v => v.id === entry)
+        const isLatest = versionInfo?.latest || false
+
+        // For latest version, use parent route directly
+        // For other versions, add version prefix to route
+        const versionRoute = isLatest ? parentRoute : `${parentRoute}/${entry}`
+
+        // Recurse into version folder with version context
+        const subResult = await collectPagesRecursive(
+          entryPath,
+          versionRoute,
+          siteRoot,
+          childOrderConfig,
+          parentFetch,
+          {
+            version: versionInfo,
+            versionMeta,
+            scope: parentRoute // The route where versioning is scoped
+          }
+        )
+
+        pages.push(...subResult.pages)
+        assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+        // Merge any nested versioned scopes (shouldn't happen often, but possible)
+        for (const [scope, meta] of subResult.versionedScopes) {
+          versionedScopes.set(scope, meta)
+        }
+      } else if (!entry.startsWith('@')) {
+        // Non-version, non-special folders in a versioned section
+        // These could be shared across versions - process normally
+        const result = await processPage(entryPath, entry, siteRoot, {
+          isIndex: false,
+          parentRoute,
+          parentFetch
+        })
+
+        if (result) {
+          pages.push(result.page)
+          assetCollection = mergeAssetCollections(assetCollection, result.assetCollection)
+        }
+      }
+    }
+
+    // Return early - we've handled all children
+    return { pages, assetCollection, header, footer, left, right, notFound, versionedScopes }
   }
 
   // Determine which page is the index for this level
@@ -566,7 +725,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const result = await processPage(entryPath, entry, siteRoot, {
       isIndex: isIndex && !isSpecial,
       parentRoute,
-      parentFetch
+      parentFetch,
+      versionContext
     })
 
     if (result) {
@@ -598,14 +758,19 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         const childParentRoute = isIndex ? parentRoute : page.route
         // Pass this page's fetch config to children (for dynamic routes that inherit parent data)
         const childFetch = page.fetch || parentFetch
-        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch)
+        // Pass version context to children (maintains version scope)
+        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+        // Merge any versioned scopes from children
+        for (const [scope, meta] of subResult.versionedScopes) {
+          versionedScopes.set(scope, meta)
+        }
       }
     }
   }
 
-  return { pages, assetCollection, header, footer, left, right, notFound }
+  return { pages, assetCollection, header, footer, left, right, notFound, versionedScopes }
 }
 
 /**
@@ -683,7 +848,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   }
 
   // Recursively collect all pages
-  const { pages, assetCollection, header, footer, left, right, notFound } =
+  const { pages, assetCollection, header, footer, left, right, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
 
   // Sort pages by order
@@ -695,6 +860,9 @@ export async function collectSiteContent(sitePath, options = {}) {
   if (assetCount > 0) {
     console.log(`[content-collector] Found ${assetCount} asset references${explicitCount > 0 ? ` (${explicitCount} with explicit poster/preview)` : ''}`)
   }
+
+  // Convert versionedScopes Map to plain object for JSON serialization
+  const versionedScopesObj = Object.fromEntries(versionedScopes)
 
   return {
     config: {
@@ -711,6 +879,8 @@ export async function collectSiteContent(sitePath, options = {}) {
     left,
     right,
     notFound,
+    // Versioned scopes: route → { versions, latestId }
+    versionedScopes: versionedScopesObj,
     assets: assetCollection.assets,
     hasExplicitPoster: assetCollection.hasExplicitPoster,
     hasExplicitPreview: assetCollection.hasExplicitPreview
