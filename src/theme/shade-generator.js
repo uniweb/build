@@ -4,6 +4,11 @@
  * Generates 11 color shades (50-950) from a single base color using
  * the OKLCH color space for perceptually uniform results.
  *
+ * Supports multiple generation modes:
+ * - 'fixed' (default): Predictable lightness values, constant hue
+ * - 'natural': Temperature-aware hue shifts, curved chroma
+ * - 'vivid': Higher saturation, more dramatic chroma curve
+ *
  * @module @uniweb/build/theme/shade-generator
  */
 
@@ -40,6 +45,31 @@ const CHROMA_SCALE = {
   800: 0.75,
   900: 0.60,
   950: 0.45,  // Reduced chroma at dark end
+}
+
+// Mode-specific configurations
+const MODE_CONFIG = {
+  // Fixed mode: predictable, consistent (current default behavior)
+  fixed: {
+    hueShift: { light: 0, dark: 0 },
+    chromaBoost: 1.0,
+    lightEndChroma: 0.15,
+    darkEndChroma: 0.45,
+  },
+  // Natural mode: temperature-aware hue shifts, organic feel
+  natural: {
+    hueShift: { light: 5, dark: -15 },  // For warm colors (inverted for cool)
+    chromaBoost: 1.1,
+    lightEndChroma: 0.20,
+    darkEndChroma: 0.40,
+  },
+  // Vivid mode: higher saturation, more dramatic
+  vivid: {
+    hueShift: { light: 3, dark: -10 },
+    chromaBoost: 1.4,
+    lightEndChroma: 0.35,
+    darkEndChroma: 0.55,
+  },
 }
 
 /**
@@ -282,6 +312,80 @@ function oklchToRgb(l, c, h) {
 }
 
 /**
+ * Check if RGB values are within sRGB gamut
+ */
+function inGamut(r, g, b) {
+  return r >= -0.5 && r <= 255.5 && g >= -0.5 && g <= 255.5 && b >= -0.5 && b <= 255.5
+}
+
+/**
+ * Find maximum chroma that fits within sRGB gamut using binary search
+ *
+ * @param {number} l - Lightness
+ * @param {number} h - Hue
+ * @param {number} idealC - Desired chroma (upper bound)
+ * @returns {number} Maximum valid chroma
+ */
+function findMaxChroma(l, h, idealC) {
+  let minC = 0
+  let maxC = idealC
+  let bestC = 0
+
+  // Binary search with 8 iterations for precision
+  for (let i = 0; i < 8; i++) {
+    const midC = (minC + maxC) / 2
+    const rgb = oklchToRgb(l, midC, h)
+    if (inGamut(rgb.r, rgb.g, rgb.b)) {
+      bestC = midC
+      minC = midC
+    } else {
+      maxC = midC
+    }
+  }
+
+  return bestC
+}
+
+/**
+ * Quadratic Bézier interpolation for smooth chroma curves
+ *
+ * @param {number} a - Start value
+ * @param {number} control - Control point
+ * @param {number} b - End value
+ * @param {number} t - Interpolation factor (0-1)
+ * @returns {number} Interpolated value
+ */
+function quadBezier(a, control, b, t) {
+  const mt = 1 - t
+  return mt * mt * a + 2 * mt * t * control + t * t * b
+}
+
+/**
+ * Linear interpolation
+ */
+function lerp(a, b, t) {
+  return a + (b - a) * t
+}
+
+/**
+ * Normalize hue to 0-360 range
+ */
+function normalizeHue(h) {
+  h = h % 360
+  return h < 0 ? h + 360 : h
+}
+
+/**
+ * Check if a color is warm (reds, oranges, yellows)
+ *
+ * @param {number} h - Hue angle (0-360)
+ * @returns {boolean} True if warm
+ */
+function isWarmColor(h) {
+  return (h >= 0 && h < 120) || h > 300
+}
+
+/**
  * Format OKLCH values as CSS string
  *
  * @param {number} l - Lightness (0-1)
@@ -316,27 +420,65 @@ export function formatHex(r, g, b) {
  * @param {string} color - Base color in any supported format
  * @param {Object} options - Options
  * @param {string} [options.format='oklch'] - Output format: 'oklch' or 'hex'
+ * @param {string} [options.mode='fixed'] - Generation mode: 'fixed', 'natural', or 'vivid'
+ * @param {boolean} [options.exactMatch=false] - If true, shade 500 will be the exact input color
  * @returns {Object} Object with shade levels as keys (50-950) and color values
+ *
+ * @example
+ * // Default fixed mode (predictable, constant hue)
+ * generateShades('#3b82f6')
+ *
+ * @example
+ * // Natural mode (temperature-aware hue shifts)
+ * generateShades('#3b82f6', { mode: 'natural' })
+ *
+ * @example
+ * // Vivid mode (higher saturation)
+ * generateShades('#3b82f6', { mode: 'vivid', exactMatch: true })
  */
 export function generateShades(color, options = {}) {
-  const { format = 'oklch' } = options
-  const { l, c, h } = parseColor(color)
+  const { format = 'oklch', mode = 'fixed', exactMatch = false } = options
+  const base = parseColor(color)
+  const config = MODE_CONFIG[mode] || MODE_CONFIG.fixed
 
+  // For fixed mode, use the original simple algorithm
+  if (mode === 'fixed') {
+    return generateFixedShades(base, color, format, exactMatch)
+  }
+
+  // For natural/vivid modes, use enhanced algorithm
+  return generateEnhancedShades(base, color, format, config, exactMatch)
+}
+
+/**
+ * Original fixed-lightness algorithm (default)
+ */
+function generateFixedShades(base, originalColor, format, exactMatch) {
   const shades = {}
 
   for (const level of SHADE_LEVELS) {
+    // Handle exact match at 500
+    if (exactMatch && level === 500) {
+      if (format === 'hex') {
+        shades[level] = originalColor.startsWith('#') ? originalColor : formatHexFromOklch(base)
+      } else {
+        shades[level] = formatOklch(base.l, base.c, base.h)
+      }
+      continue
+    }
+
     const targetL = LIGHTNESS_MAP[level]
     const chromaScale = CHROMA_SCALE[level]
+    const targetC = base.c * chromaScale
 
-    // Scale chroma based on lightness to prevent clipping
-    // Also consider the original chroma - low chroma colors stay low
-    const targetC = c * chromaScale
+    // Use gamut mapping to find valid chroma
+    const safeC = findMaxChroma(targetL, base.h, targetC)
 
     if (format === 'hex') {
-      const rgb = oklchToRgb(targetL, targetC, h)
+      const rgb = oklchToRgb(targetL, safeC, base.h)
       shades[level] = formatHex(rgb.r, rgb.g, rgb.b)
     } else {
-      shades[level] = formatOklch(targetL, targetC, h)
+      shades[level] = formatOklch(targetL, safeC, base.h)
     }
   }
 
@@ -344,32 +486,149 @@ export function generateShades(color, options = {}) {
 }
 
 /**
+ * Enhanced algorithm with hue shifting and curved chroma (natural/vivid modes)
+ */
+function generateEnhancedShades(base, originalColor, format, config, exactMatch) {
+  const shades = {}
+  const isWarm = isWarmColor(base.h)
+
+  // Calculate hue shift direction based on color temperature
+  const hueShiftLight = isWarm ? config.hueShift.light : -config.hueShift.light
+  const hueShiftDark = isWarm ? config.hueShift.dark : -config.hueShift.dark
+
+  // Define endpoints
+  const lightEnd = {
+    l: LIGHTNESS_MAP[50],
+    c: base.c * config.lightEndChroma,
+    h: normalizeHue(base.h + hueShiftLight),
+  }
+
+  const darkEnd = {
+    l: LIGHTNESS_MAP[950],
+    c: base.c * config.darkEndChroma,
+    h: normalizeHue(base.h + hueShiftDark),
+  }
+
+  // Control point for chroma curve (peaks at middle)
+  const peakChroma = base.c * config.chromaBoost
+
+  for (let i = 0; i < SHADE_LEVELS.length; i++) {
+    const level = SHADE_LEVELS[i]
+
+    // Handle exact match at 500 (index 5)
+    if (exactMatch && level === 500) {
+      if (format === 'hex') {
+        shades[level] = originalColor.startsWith('#') ? originalColor : formatHexFromOklch(base)
+      } else {
+        shades[level] = formatOklch(base.l, base.c, base.h)
+      }
+      continue
+    }
+
+    let targetL, targetC, targetH
+
+    // Split the curve at the base color (index 5 = shade 500)
+    if (i <= 5) {
+      // Light half: interpolate from lightEnd to base
+      const t = i / 5
+      targetL = lerp(lightEnd.l, base.l, t)
+      targetH = lerp(lightEnd.h, base.h, t)
+
+      // Bézier curve for chroma with peak at middle
+      const controlC = (lightEnd.c + peakChroma) / 2
+      targetC = quadBezier(lightEnd.c, controlC, peakChroma, t)
+    } else {
+      // Dark half: interpolate from base to darkEnd
+      const t = (i - 5) / 5
+      targetL = lerp(base.l, darkEnd.l, t)
+      targetH = lerp(base.h, darkEnd.h, t)
+
+      // Bézier curve for chroma, descending from peak
+      const controlC = (peakChroma + darkEnd.c) / 2
+      targetC = quadBezier(peakChroma, controlC, darkEnd.c, t)
+    }
+
+    // Normalize hue
+    targetH = normalizeHue(targetH)
+
+    // Gamut map to find maximum valid chroma
+    const safeC = findMaxChroma(targetL, targetH, targetC)
+
+    if (format === 'hex') {
+      const rgb = oklchToRgb(targetL, safeC, targetH)
+      shades[level] = formatHex(rgb.r, rgb.g, rgb.b)
+    } else {
+      shades[level] = formatOklch(targetL, safeC, targetH)
+    }
+  }
+
+  return shades
+}
+
+/**
+ * Helper to format OKLCH as hex
+ */
+function formatHexFromOklch(oklch) {
+  const rgb = oklchToRgb(oklch.l, oklch.c, oklch.h)
+  return formatHex(rgb.r, rgb.g, rgb.b)
+}
+
+/**
  * Generate shades for multiple colors
  *
- * @param {Object} colors - Object with color names as keys and color values
- * @param {Object} options - Options passed to generateShades
+ * @param {Object} colors - Object with color names as keys and color values or config objects
+ * @param {Object} options - Default options passed to generateShades
  * @returns {Object} Object with color names, each containing shade levels
  *
  * @example
+ * // Simple usage with defaults
  * generatePalettes({
  *   primary: '#3b82f6',
  *   secondary: '#64748b'
  * })
- * // Returns: { primary: { 50: '...', 100: '...', ... }, secondary: { ... } }
+ *
+ * @example
+ * // With per-color options
+ * generatePalettes({
+ *   primary: { base: '#3b82f6', mode: 'vivid', exactMatch: true },
+ *   secondary: '#64748b',  // Uses defaults
+ *   neutral: { base: '#737373', mode: 'fixed' }
+ * })
  */
 export function generatePalettes(colors, options = {}) {
   const palettes = {}
 
-  for (const [name, color] of Object.entries(colors)) {
-    // Skip if color is already an object (pre-defined shades)
-    if (typeof color === 'object' && color !== null) {
-      palettes[name] = color
-    } else {
-      palettes[name] = generateShades(color, options)
+  for (const [name, colorConfig] of Object.entries(colors)) {
+    // Pre-defined shades (object with numeric keys)
+    if (typeof colorConfig === 'object' && colorConfig !== null && !colorConfig.base) {
+      // Check if it's a shades object (has numeric keys like 50, 100, etc)
+      const keys = Object.keys(colorConfig)
+      if (keys.some(k => !isNaN(parseInt(k)))) {
+        palettes[name] = colorConfig
+        continue
+      }
+    }
+
+    // Color config object with base and options
+    if (typeof colorConfig === 'object' && colorConfig !== null && colorConfig.base) {
+      const { base, ...colorOptions } = colorConfig
+      palettes[name] = generateShades(base, { ...options, ...colorOptions })
+    }
+    // Simple color string
+    else if (typeof colorConfig === 'string') {
+      palettes[name] = generateShades(colorConfig, options)
     }
   }
 
   return palettes
+}
+
+/**
+ * Get available generation modes
+ * @returns {string[]} Array of mode names
+ */
+export function getAvailableModes() {
+  return Object.keys(MODE_CONFIG)
 }
 
 /**
@@ -403,4 +662,5 @@ export default {
   generatePalettes,
   isValidColor,
   getShadeLevels,
+  getAvailableModes,
 }

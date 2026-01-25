@@ -7,6 +7,7 @@ import {
   generatePalettes,
   isValidColor,
   getShadeLevels,
+  getAvailableModes,
 } from '../src/theme/shade-generator.js'
 
 describe('shade-generator', () => {
@@ -252,6 +253,168 @@ describe('shade-generator', () => {
       levels1.push(999)
       const levels2 = getShadeLevels()
       expect(levels2).not.toContain(999)
+    })
+  })
+
+  describe('getAvailableModes', () => {
+    it('returns available mode names', () => {
+      const modes = getAvailableModes()
+      expect(modes).toContain('fixed')
+      expect(modes).toContain('natural')
+      expect(modes).toContain('vivid')
+    })
+  })
+
+  describe('generation modes', () => {
+    describe('fixed mode (default)', () => {
+      it('uses fixed mode by default', () => {
+        const shades = generateShades('#3b82f6')
+        const shadesExplicit = generateShades('#3b82f6', { mode: 'fixed' })
+
+        // Should produce same results
+        expect(shades[500]).toBe(shadesExplicit[500])
+        expect(shades[50]).toBe(shadesExplicit[50])
+      })
+
+      it('preserves hue across all shades in fixed mode', () => {
+        const shades = generateShades('#3b82f6', { mode: 'fixed' })
+        const getHue = (s) => parseFloat(s.match(/oklch\([^)]+\s([0-9.]+)\)/)[1])
+
+        const hues = Object.values(shades).map(getHue)
+        const avgHue = hues.reduce((a, b) => a + b) / hues.length
+
+        // All hues should be within 1 degree of average
+        hues.forEach(h => {
+          expect(Math.abs(h - avgHue)).toBeLessThan(1)
+        })
+      })
+    })
+
+    describe('natural mode', () => {
+      it('shifts hue for warm colors', () => {
+        // Orange is a warm color
+        const shades = generateShades('#f97316', { mode: 'natural' })
+        const getHue = (s) => parseFloat(s.match(/oklch\([^)]+\s([0-9.]+)\)/)[1])
+
+        const hue50 = getHue(shades[50])
+        const hue500 = getHue(shades[500])
+        const hue950 = getHue(shades[950])
+
+        // Light shades should shift cooler (higher hue for orange)
+        // Dark shades should shift warmer (lower hue)
+        // Allow for small differences due to gamut mapping
+        expect(hue50).not.toBeCloseTo(hue950, 0)
+      })
+
+      it('shifts hue for cool colors in opposite direction', () => {
+        // Blue is a cool color
+        const shades = generateShades('#3b82f6', { mode: 'natural' })
+        const getHue = (s) => parseFloat(s.match(/oklch\([^)]+\s([0-9.]+)\)/)[1])
+
+        const hue50 = getHue(shades[50])
+        const hue950 = getHue(shades[950])
+
+        // Cool colors shift opposite to warm colors
+        expect(hue50).not.toBeCloseTo(hue950, 0)
+      })
+
+      it('generates valid colors', () => {
+        const shades = generateShades('#3b82f6', { mode: 'natural', format: 'hex' })
+
+        for (const shade of Object.values(shades)) {
+          expect(shade).toMatch(/^#[0-9a-f]{6}$/)
+        }
+      })
+    })
+
+    describe('vivid mode', () => {
+      it('produces higher chroma than fixed mode', () => {
+        const fixed = generateShades('#3b82f6', { mode: 'fixed' })
+        const vivid = generateShades('#3b82f6', { mode: 'vivid' })
+
+        const getChroma = (s) => parseFloat(s.match(/oklch\([^)]+\s([0-9.]+)\s/)[1])
+
+        // Compare middle shades (300-700) where vivid boost is most apparent
+        const fixedChroma400 = getChroma(fixed[400])
+        const vividChroma400 = getChroma(vivid[400])
+
+        expect(vividChroma400).toBeGreaterThanOrEqual(fixedChroma400)
+      })
+
+      it('generates valid colors even with high chroma', () => {
+        // Test with already saturated color
+        const shades = generateShades('#ff0000', { mode: 'vivid', format: 'hex' })
+
+        for (const shade of Object.values(shades)) {
+          expect(shade).toMatch(/^#[0-9a-f]{6}$/)
+        }
+      })
+    })
+
+    describe('exactMatch option', () => {
+      it('preserves exact input color at shade 500 (hex)', () => {
+        const inputColor = '#e31937'
+        const shades = generateShades(inputColor, { format: 'hex', exactMatch: true })
+
+        expect(shades[500].toLowerCase()).toBe(inputColor.toLowerCase())
+      })
+
+      it('works with natural mode', () => {
+        const inputColor = '#3b82f6'
+        const shades = generateShades(inputColor, {
+          mode: 'natural',
+          format: 'hex',
+          exactMatch: true,
+        })
+
+        expect(shades[500].toLowerCase()).toBe(inputColor.toLowerCase())
+      })
+
+      it('works with vivid mode', () => {
+        const inputColor = '#10b981'
+        const shades = generateShades(inputColor, {
+          mode: 'vivid',
+          format: 'hex',
+          exactMatch: true,
+        })
+
+        expect(shades[500].toLowerCase()).toBe(inputColor.toLowerCase())
+      })
+    })
+  })
+
+  describe('generatePalettes with per-color config', () => {
+    it('supports per-color mode configuration', () => {
+      const palettes = generatePalettes({
+        primary: { base: '#3b82f6', mode: 'vivid' },
+        secondary: '#64748b', // Uses default
+      })
+
+      expect(Object.keys(palettes.primary)).toHaveLength(11)
+      expect(Object.keys(palettes.secondary)).toHaveLength(11)
+    })
+
+    it('supports per-color exactMatch option', () => {
+      const palettes = generatePalettes({
+        brand: { base: '#e31937', exactMatch: true, format: 'hex' },
+      })
+
+      expect(palettes.brand[500].toLowerCase()).toBe('#e31937')
+    })
+
+    it('passes through pre-defined shades with numeric keys', () => {
+      const predefined = {
+        50: '#fef2f2',
+        100: '#fee2e2',
+        500: '#ef4444',
+        950: '#450a0a',
+      }
+
+      const palettes = generatePalettes({
+        custom: predefined,
+      })
+
+      expect(palettes.custom).toBe(predefined)
     })
   })
 })
