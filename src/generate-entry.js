@@ -26,20 +26,41 @@ import { discoverComponents } from './schema.js'
 import { extractAllRuntimeSchemas } from './runtime-schema.js'
 
 /**
- * Detect foundation exports file (for custom Layout, props, etc.)
- * Looks for: src/exports.js, src/exports.jsx, src/exports/index.js, src/exports/index.jsx
+ * Detect foundation config/exports file (for custom Layout, props, vars, etc.)
+ *
+ * Looks for (in order of preference):
+ * 1. foundation.js - New consolidated format
+ * 2. exports.js - Legacy format (for backward compatibility)
+ *
+ * The file should export:
+ * - Layout (optional) - Custom page layout component
+ * - props (optional) - Foundation-wide props
+ * - vars (optional) - CSS custom properties (also read by schema builder)
  */
 function detectFoundationExports(srcDir) {
-  const candidates = [
+  // Prefer foundation.js (new consolidated format)
+  const foundationCandidates = [
+    { path: 'foundation.js', ext: 'js' },
+    { path: 'foundation.jsx', ext: 'jsx' },
+  ]
+
+  for (const { path, ext } of foundationCandidates) {
+    if (existsSync(join(srcDir, path))) {
+      return { path: `./${path}`, ext, isFoundationJs: true }
+    }
+  }
+
+  // Fall back to exports.js (legacy format)
+  const legacyCandidates = [
     { path: 'exports.js', ext: 'js' },
     { path: 'exports.jsx', ext: 'jsx' },
     { path: 'exports/index.js', ext: 'js' },
     { path: 'exports/index.jsx', ext: 'jsx' },
   ]
 
-  for (const { path, ext } of candidates) {
+  for (const { path, ext } of legacyCandidates) {
     if (existsSync(join(srcDir, path))) {
-      return { path: `./${path.replace(/\/index\.(js|jsx)$/, '')}`, ext }
+      return { path: `./${path.replace(/\/index\.(js|jsx)$/, '')}`, ext, isFoundationJs: false }
     }
   }
   return null
