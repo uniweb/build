@@ -458,18 +458,9 @@ export async function prerenderSite(siteDir, options = {}) {
   const website = uniweb.activeWebsite
 
   for (const page of pages) {
-    // Determine which routes to render this page at
-    // Index pages are rendered at both their actual route and their nav route
-    const routesToRender = [page.route]
-    if (page.isIndex) {
-      const navRoute = page.getNavRoute()
-      if (navRoute !== page.route) {
-        routesToRender.push(navRoute)
-      }
-    }
-
-    // Render once, output to multiple paths
-    onProgress(`Rendering ${routesToRender[0]}...`)
+    // Each page has a single canonical route
+    // Index pages already have their parent route as their canonical route
+    onProgress(`Rendering ${page.route}...`)
 
     // Set this as the active page
     uniweb.activeWebsite.setActivePage(page.route)
@@ -493,15 +484,13 @@ export async function prerenderSite(siteDir, options = {}) {
     // Inject into shell
     const html = injectContent(htmlShell, renderedContent, page, siteContent)
 
-    // Output to all routes for this page
-    for (const route of routesToRender) {
-      const outputPath = getOutputPath(distDir, route)
-      await mkdir(dirname(outputPath), { recursive: true })
-      await writeFile(outputPath, html)
+    // Output to the canonical route
+    const outputPath = getOutputPath(distDir, page.route)
+    await mkdir(dirname(outputPath), { recursive: true })
+    await writeFile(outputPath, html)
 
-      renderedFiles.push(outputPath)
-      onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
-    }
+    renderedFiles.push(outputPath)
+    onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
   }
 
   onProgress(`Pre-rendered ${renderedFiles.length} pages`)

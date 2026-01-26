@@ -479,23 +479,30 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   }
 
   // Determine route
-  // All pages get their actual folder-based route (no special treatment for index)
-  // The isIndex flag marks which page should also be accessible at the parent route
-  let route
+  // Index pages get the parent route as their canonical route (no dual routes)
+  // sourcePath stores the original folder-based path for ancestor checking
   const isDynamic = isDynamicRoute(pageName)
   const paramName = isDynamic ? extractRouteParam(pageName) : null
 
+  // First, calculate the folder-based route (what the route would be without index handling)
+  let folderRoute
   if (pageName.startsWith('@')) {
     // Special pages (layout areas) keep their @ prefix
-    route = parentRoute === '/' ? `/@${pageName.slice(1)}` : `${parentRoute}/@${pageName.slice(1)}`
+    folderRoute = parentRoute === '/' ? `/@${pageName.slice(1)}` : `${parentRoute}/@${pageName.slice(1)}`
   } else if (isDynamic) {
     // Dynamic routes: /blog/[slug] → /blog/:slug (for route matching)
-    // The actual routes like /blog/my-post are generated at prerender time
-    route = parentRoute === '/' ? `/:${paramName}` : `${parentRoute}/:${paramName}`
+    folderRoute = parentRoute === '/' ? `/:${paramName}` : `${parentRoute}/:${paramName}`
   } else {
     // Normal pages get parent + their name
-    route = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
+    folderRoute = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
   }
+
+  // For index pages, the canonical route is the parent route
+  // For non-index pages, the canonical route is the folder-based route
+  const route = isIndex ? parentRoute : folderRoute
+  // sourcePath is the original folder-based path (used for ancestor checking)
+  // Only set for index pages where it differs from route
+  const sourcePath = isIndex ? folderRoute : null
 
   // Extract configuration
   const { seo = {}, layout = {}, ...restConfig } = pageConfig
@@ -510,8 +517,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   return {
     page: {
       route,
+      sourcePath, // Original folder-based path (for ancestor checking in navigation)
       id: pageConfig.id || null, // Stable page ID for page: links (survives reorganization)
-      isIndex, // Marks this page as the index for its parent route (accessible at parentRoute)
+      isIndex, // Marks this page as the index for its parent route
       title: pageConfig.title || pageName,
       description: pageConfig.description || '',
       label: pageConfig.label || null, // Short label for navigation (defaults to title)
