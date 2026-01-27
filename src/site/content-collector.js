@@ -592,9 +592,12 @@ function determineIndexPage(orderConfig, availableFolders) {
   }
 
   // 3. Fallback: lowest order value, or first alphabetically
-  if (availableFolders.length === 0) return null
+  // IMPORTANT: Dynamic route folders (e.g., [slug]) can never be index pages
+  // They are templates for dynamic content, not actual navigable pages
+  const staticFolders = availableFolders.filter(f => !isDynamicRoute(f.name))
+  if (staticFolders.length === 0) return null
 
-  const sorted = [...availableFolders].sort((a, b) => {
+  const sorted = [...staticFolders].sort((a, b) => {
     // Sort by order (lower first), then alphabetically
     const orderA = a.order ?? 999
     const orderB = b.order ?? 999
