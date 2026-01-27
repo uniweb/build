@@ -30,6 +30,37 @@ const DEFAULT_FONTS = {
 }
 
 /**
+ * Default code block theme configuration
+ * Uses Shiki CSS variable names for compatibility
+ * These values are NOT converted to CSS here - the kit's Code component
+ * injects them at runtime only when code blocks are used (tree-shaking)
+ */
+const DEFAULT_CODE_THEME = {
+  // Background and foreground
+  background: '#1e1e2e',      // Dark editor background
+  foreground: '#cdd6f4',      // Default text color
+
+  // Syntax highlighting colors (Shiki token variables)
+  keyword: '#cba6f7',         // Purple - keywords (if, else, function)
+  string: '#a6e3a1',          // Green - strings
+  number: '#fab387',          // Orange - numbers
+  comment: '#6c7086',         // Gray - comments
+  function: '#89b4fa',        // Blue - function names
+  variable: '#f5e0dc',        // Light pink - variables
+  operator: '#89dceb',        // Cyan - operators
+  punctuation: '#9399b2',     // Gray - punctuation
+  type: '#f9e2af',            // Yellow - types
+  constant: '#f38ba8',        // Red - constants
+  property: '#94e2d5',        // Teal - properties
+  tag: '#89b4fa',             // Blue - HTML/JSX tags
+  attribute: '#f9e2af',       // Yellow - attributes
+
+  // UI elements
+  lineNumber: '#6c7086',      // Line number color
+  selection: '#45475a',       // Selection background
+}
+
+/**
  * Validate color configuration
  *
  * @param {Object} colors - Color configuration object
@@ -159,6 +190,35 @@ function validateAppearance(appearance) {
 }
 
 /**
+ * Validate code block theme configuration
+ *
+ * @param {Object} code - Code theme configuration
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+function validateCodeTheme(code) {
+  const errors = []
+
+  if (!code || typeof code !== 'object') {
+    return { valid: true, errors } // No code config is valid (use defaults)
+  }
+
+  // Validate color values
+  for (const [name, value] of Object.entries(code)) {
+    if (typeof value !== 'string') {
+      errors.push(`code.${name} must be a string, got ${typeof value}`)
+      continue
+    }
+
+    // Basic color format check (hex, rgb, hsl, or color name)
+    if (!isValidColor(value)) {
+      errors.push(`code.${name} has invalid color value: ${value}`)
+    }
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
+/**
  * Validate foundation variables configuration
  *
  * @param {Object} vars - Foundation variables
@@ -203,11 +263,13 @@ export function validateThemeConfig(config) {
   const contextValidation = validateContexts(config.contexts)
   const fontValidation = validateFonts(config.fonts)
   const appearanceValidation = validateAppearance(config.appearance)
+  const codeValidation = validateCodeTheme(config.code)
 
   allErrors.push(...colorValidation.errors)
   allErrors.push(...contextValidation.errors)
   allErrors.push(...fontValidation.errors)
   allErrors.push(...appearanceValidation.errors)
+  allErrors.push(...codeValidation.errors)
 
   return {
     valid: allErrors.length === 0,
@@ -352,6 +414,14 @@ export function processTheme(rawConfig = {}, options = {}) {
     warnings.push(...foundationValidation.errors)
   }
 
+  // Process code block theme
+  // These values are stored for runtime injection by kit's Code component
+  // (not converted to CSS here - enables tree-shaking when code blocks aren't used)
+  const code = {
+    ...DEFAULT_CODE_THEME,
+    ...(rawConfig.code || {}),
+  }
+
   const config = {
     colors,      // Raw colors for CSS generator
     palettes,    // Generated palettes for Theme class
@@ -359,6 +429,7 @@ export function processTheme(rawConfig = {}, options = {}) {
     fonts,
     appearance,
     foundationVars: mergedFoundationVars,
+    code,        // Code block theme for runtime injection
   }
 
   return { config, errors, warnings }
