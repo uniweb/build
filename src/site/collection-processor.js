@@ -25,11 +25,12 @@
  * await writeCollectionFiles(siteDir, collections)
  */
 
-import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises'
-import { join, basename, extname } from 'node:path'
+import { readFile, readdir, stat, writeFile, mkdir, copyFile } from 'node:fs/promises'
+import { join, basename, extname, dirname, relative } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { applyFilter, applySort } from './data-fetcher.js'
+import { resolveAssetPath, walkContentAssets } from './assets.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -202,6 +203,116 @@ function extractFirstImage(node) {
   return null
 }
 
+/**
+ * Check if a path is external (http/https/data URL)
+ */
+function isExternalUrl(src) {
+  return /^(https?:)?\/\//.test(src) || src.startsWith('data:')
+}
+
+/**
+ * Process assets in collection content
+ * - Resolves relative paths to site-root-relative paths
+ * - Copies co-located assets to public/library/<collection>/
+ * - Updates paths in the content in place
+ *
+ * @param {Object} content - ProseMirror document
+ * @param {string} itemPath - Path to the markdown file
+ * @param {string} siteRoot - Site root directory
+ * @param {string} collectionName - Name of the collection (e.g., 'articles')
+ * @returns {Promise<Object>} Asset manifest for this item
+ */
+async function processCollectionAssets(content, itemPath, siteRoot, collectionName) {
+  const assets = {}
+  const itemDir = dirname(itemPath)
+  const publicDir = join(siteRoot, 'public')
+  const targetDir = join(publicDir, 'library', collectionName)
+
+  // Walk content and collect asset paths
+  const assetNodes = []
+  walkContentAssets(content, (node, path, attrName) => {
+    assetNodes.push({ node, attrName })
+  })
+
+  for (const { node, attrName } of assetNodes) {
+    const src = node.attrs.src
+    if (!src || isExternalUrl(src)) continue
+
+    // Resolve the path
+    const result = resolveAssetPath(src, itemPath, siteRoot)
+    if (result.external || !result.resolved) continue
+
+    let finalPath = src
+
+    // Handle relative paths (co-located assets)
+    if (src.startsWith('./') || src.startsWith('../')) {
+      // Check if file exists at resolved location
+      if (existsSync(result.resolved)) {
+        // Copy to public/library/<collection>/
+        const assetFilename = basename(result.resolved)
+        const targetPath = join(targetDir, assetFilename)
+
+        // Ensure target directory exists
+        await mkdir(targetDir, { recursive: true })
+
+        // Copy the asset
+        await copyFile(result.resolved, targetPath)
+
+        // Update path to site-root-relative
+        finalPath = `/library/${collectionName}/${assetFilename}`
+
+        assets[src] = {
+          original: src,
+          resolved: result.resolved,
+          copied: targetPath,
+          publicPath: finalPath
+        }
+      }
+    }
+    // Handle absolute site paths - just validate they exist
+    else if (src.startsWith('/')) {
+      const publicPath = join(publicDir, src)
+      if (existsSync(publicPath)) {
+        assets[src] = {
+          original: src,
+          resolved: publicPath,
+          publicPath: src
+        }
+      }
+    }
+
+    // Update the node's src attribute if path changed
+    if (finalPath !== src) {
+      node.attrs.src = finalPath
+    }
+
+    // Also handle poster/preview attributes
+    if (node.attrs.poster && !isExternalUrl(node.attrs.poster)) {
+      const posterResult = resolveAssetPath(node.attrs.poster, itemPath, siteRoot)
+      if (posterResult.resolved && existsSync(posterResult.resolved)) {
+        const posterFilename = basename(posterResult.resolved)
+        const posterTarget = join(targetDir, posterFilename)
+        await mkdir(targetDir, { recursive: true })
+        await copyFile(posterResult.resolved, posterTarget)
+        node.attrs.poster = `/library/${collectionName}/${posterFilename}`
+      }
+    }
+
+    if (node.attrs.preview && !isExternalUrl(node.attrs.preview)) {
+      const previewResult = resolveAssetPath(node.attrs.preview, itemPath, siteRoot)
+      if (previewResult.resolved && existsSync(previewResult.resolved)) {
+        const previewFilename = basename(previewResult.resolved)
+        const previewTarget = join(targetDir, previewFilename)
+        await mkdir(targetDir, { recursive: true })
+        await copyFile(previewResult.resolved, previewTarget)
+        node.attrs.preview = `/library/${collectionName}/${previewFilename}`
+      }
+    }
+  }
+
+  return assets
+}
+
 // Filter and sort utilities are imported from data-fetcher.js
 
 /**
@@ -210,9 +321,10 @@ function extractFirstImage(node) {
  * @param {string} dir - Collection directory path
  * @param {string} filename - Markdown filename
  * @param {Object} config - Collection configuration
+ * @param {string} siteRoot - Site root directory for asset resolution
  * @returns {Promise<Object|null>} Processed item or null if unpublished
  */
-async function processContentItem(dir, filename, config) {
+async function processContentItem(dir, filename, config, siteRoot) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, extname(filename))
@@ -228,10 +340,15 @@ async function processContentItem(dir, filename, config) {
   // Parse markdown body to ProseMirror
   const content = markdownToProseMirror(body)
 
+  // Process assets (resolve paths, copy co-located files)
+  // This modifies content in place, updating paths to site-root-relative
+  await processCollectionAssets(content, filepath, siteRoot, config.name)
+
   // Extract excerpt
   const excerpt = extractExcerpt(frontmatter, content, config.excerpt)
 
   // Extract first image (frontmatter takes precedence)
+  // Note: paths in content have already been updated by processCollectionAssets
   const image = frontmatter.image || extractFirstImage(content)
 
   // Get file stats for lastModified
@@ -271,7 +388,7 @@ async function collectItems(siteDir, config) {
 
   // Process all markdown files
   let items = await Promise.all(
-    mdFiles.map(file => processContentItem(collectionDir, file, config))
+    mdFiles.map(file => processContentItem(collectionDir, file, config, siteDir))
   )
 
   // Filter out nulls (unpublished items)
