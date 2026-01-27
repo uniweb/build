@@ -287,7 +287,7 @@ export async function defineSiteConfig(options = {}) {
         // Allow parent directory for foundation sibling access
         allow: ['..']
       },
-      port: siteConfig.build?.port || 3000,
+      ...(siteConfig.build?.port && { port: siteConfig.build.port }),
       ...serverOverrides
     },
 
