@@ -119,6 +119,7 @@ export function readSiteConfig(siteRoot) {
  * @param {Object} [options.assets] - Asset processing configuration
  * @param {Object} [options.search] - Search index configuration
  * @param {boolean} [options.tailwind] - Include Tailwind CSS v4 Vite plugin (default: true)
+ * @param {string} [options.base] - Base public path for deployment (e.g., '/demos/mysite/')
  * @returns {Promise<Object>} Vite configuration
  */
 export async function defineSiteConfig(options = {}) {
@@ -131,6 +132,7 @@ export async function defineSiteConfig(options = {}) {
     assets = {},
     search = {},
     tailwind = true,
+    base: baseOption,
     ...restOptions
   } = options
 
@@ -139,6 +141,11 @@ export async function defineSiteConfig(options = {}) {
 
   // Read site.yml
   const siteConfig = readSiteConfig(siteRoot)
+
+  // Determine base path for deployment (priority: option > env > site.yml)
+  // Ensures trailing slash for Vite compatibility
+  const rawBase = baseOption || process.env.UNIWEB_BASE || siteConfig.base
+  const base = rawBase ? (rawBase.endsWith('/') ? rawBase : `${rawBase}/`) : undefined
 
   // Detect foundation type
   const foundationInfo = detectFoundationType(siteConfig.foundation, siteRoot)
@@ -269,6 +276,10 @@ export async function defineSiteConfig(options = {}) {
   }
 
   return {
+    // Base public path for deployment (e.g., '/demos/mysite/')
+    // Vite uses this to prefix all asset URLs and sets import.meta.env.BASE_URL
+    ...(base && { base }),
+
     plugins,
 
     define: {

@@ -15,6 +15,13 @@ import { computeHash, normalizeText } from './hash.js'
 import { extractTranslatableContent } from './extract.js'
 import { syncManifests, formatSyncReport } from './sync.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
+import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
+import {
+  extractCollectionContent,
+  buildLocalizedCollections,
+  getCollectionLocales,
+  COLLECTIONS_DIR
+} from './collections.js'
 import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
 
 export {
@@ -28,6 +35,17 @@ export {
   formatSyncReport,
   mergeTranslations,
   generateAllLocales,
+
+  // Audit functions
+  auditLocale,
+  cleanLocale,
+  formatAuditReport,
+
+  // Collection functions
+  extractCollectionContent,
+  buildLocalizedCollections,
+  getCollectionLocales,
+  COLLECTIONS_DIR,
 
   // Locale resolution
   getAvailableLocales,
@@ -145,6 +163,46 @@ export async function extractManifest(siteRoot, options = {}) {
     console.log(`\nManifest written to: ${manifestPath}`)
     console.log(`Total units: ${Object.keys(manifest.units).length}`)
   }
+
+  return { manifest, report }
+}
+
+/**
+ * Extract collection manifest from collection data and write to file
+ * @param {string} siteRoot - Site root directory
+ * @param {Object} options - Options
+ * @returns {Promise<Object>} { manifest, report }
+ */
+export async function extractCollectionManifest(siteRoot, options = {}) {
+  const { localesDir = DEFAULTS.localesDir } = options
+
+  // Extract translatable content from collections
+  const manifest = await extractCollectionContent(siteRoot)
+
+  // Ensure collections locales directory exists
+  const collectionsDir = join(siteRoot, localesDir, COLLECTIONS_DIR)
+  if (!existsSync(collectionsDir)) {
+    await mkdir(collectionsDir, { recursive: true })
+  }
+
+  const manifestPath = join(collectionsDir, 'manifest.json')
+
+  // Load previous manifest for comparison
+  let previousManifest = null
+  if (existsSync(manifestPath)) {
+    try {
+      const prevRaw = await readFile(manifestPath, 'utf-8')
+      previousManifest = JSON.parse(prevRaw)
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  // Generate sync report
+  const report = syncManifests(previousManifest, manifest)
+
+  // Write new manifest
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
 
   return { manifest, report }
 }
