@@ -9,7 +9,7 @@
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
@@ -382,6 +382,62 @@ function createPageElement(page, website) {
 }
 
 /**
+ * Discover all locale content files in the dist directory
+ * Returns an array of { locale, contentPath, htmlPath, isDefault }
+ *
+ * @param {string} distDir - Path to dist directory
+ * @param {Object} defaultContent - Default site content (to get default locale)
+ * @returns {Array} Locale configurations
+ */
+async function discoverLocaleContents(distDir, defaultContent) {
+  const locales = []
+  const defaultLocale = defaultContent.config?.defaultLanguage || 'en'
+
+  // Add the default locale (root level)
+  locales.push({
+    locale: defaultLocale,
+    contentPath: join(distDir, 'site-content.json'),
+    htmlPath: join(distDir, 'index.html'),
+    isDefault: true,
+    routePrefix: ''
+  })
+
+  // Check for locale subdirectories with site-content.json
+  try {
+    const entries = readdirSync(distDir)
+    for (const entry of entries) {
+      const entryPath = join(distDir, entry)
+      // Skip if not a directory
+      if (!statSync(entryPath).isDirectory()) continue
+
+      // Check if this looks like a locale code (2-3 letter code)
+      if (!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(entry)) continue
+
+      // Check if it has a site-content.json
+      const localeContentPath = join(entryPath, 'site-content.json')
+      const localeHtmlPath = join(entryPath, 'index.html')
+
+      if (existsSync(localeContentPath)) {
+        locales.push({
+          locale: entry,
+          contentPath: localeContentPath,
+          htmlPath: localeHtmlPath,
+          isDefault: false,
+          routePrefix: `/${entry}`
+        })
+      }
+    }
+  } catch (err) {
+    // Ignore errors reading directory
+    if (process.env.DEBUG) {
+      console.error('Error discovering locale contents:', err.message)
+    }
+  }
+
+  return locales
+}
+
+/**
  * Pre-render all pages in a built site to static HTML
  *
  * @param {string} siteDir - Path to the site directory
@@ -407,33 +463,21 @@ export async function prerenderSite(siteDir, options = {}) {
   onProgress('Loading dependencies...')
   await loadDependencies(siteDir)
 
-  // Load site content
+  // Load default site content
   onProgress('Loading site content...')
   const contentPath = join(distDir, 'site-content.json')
   if (!existsSync(contentPath)) {
     throw new Error(`site-content.json not found at: ${contentPath}`)
   }
-  const siteContent = JSON.parse(await readFile(contentPath, 'utf8'))
+  const defaultSiteContent = JSON.parse(await readFile(contentPath, 'utf8'))
 
-  // Execute data fetches (site, page, section levels)
-  onProgress('Executing data fetches...')
-  const { siteCascadedData, pageFetchedData } = await executeAllFetches(siteContent, siteDir, onProgress)
-
-  // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
-  if (siteContent.pages?.some(p => p.isDynamic)) {
-    onProgress('Expanding dynamic routes...')
-    siteContent.pages = expandDynamicPages(siteContent.pages, pageFetchedData, onProgress)
+  // Discover all locale content files
+  const localeConfigs = await discoverLocaleContents(distDir, defaultSiteContent)
+  if (localeConfigs.length > 1) {
+    onProgress(`Found ${localeConfigs.length} locales: ${localeConfigs.map(l => l.locale).join(', ')}`)
   }
 
-  // Load the HTML shell
-  onProgress('Loading HTML shell...')
-  const shellPath = join(distDir, 'index.html')
-  if (!existsSync(shellPath)) {
-    throw new Error(`index.html not found at: ${shellPath}`)
-  }
-  const htmlShell = await readFile(shellPath, 'utf8')
-
-  // Load the foundation module
+  // Load the foundation module (shared across all locales)
   onProgress('Loading foundation...')
   const foundationPath = join(foundationDir, 'dist', 'foundation.js')
   if (!existsSync(foundationPath)) {
@@ -442,58 +486,87 @@ export async function prerenderSite(siteDir, options = {}) {
   const foundationUrl = pathToFileURL(foundationPath).href
   const foundation = await import(foundationUrl)
 
-  // Initialize the Uniweb runtime (this sets globalThis.uniweb)
-  onProgress('Initializing runtime...')
-  const uniweb = createUniweb(siteContent)
-  uniweb.setFoundation(foundation)
-
-  // Set foundation capabilities (Layout, props, etc.)
-  if (foundation.capabilities) {
-    uniweb.setFoundationConfig(foundation.capabilities)
-  }
-
-  // Pre-render each page
+  // Pre-render each locale
   const renderedFiles = []
-  const pages = uniweb.activeWebsite.pages
-  const website = uniweb.activeWebsite
 
-  for (const page of pages) {
-    // Each page has a single canonical route
-    // Index pages already have their parent route as their canonical route
-    onProgress(`Rendering ${page.route}...`)
+  for (const localeConfig of localeConfigs) {
+    const { locale, contentPath: localeContentPath, htmlPath, isDefault, routePrefix } = localeConfig
 
-    // Set this as the active page
-    uniweb.activeWebsite.setActivePage(page.route)
+    onProgress(`\nRendering ${isDefault ? 'default' : locale} locale...`)
 
-    // Create the page element using inline SSR rendering
-    // (uses React from prerender's scope to avoid module resolution issues)
-    const element = createPageElement(page, website)
+    // Load locale-specific content
+    const siteContent = JSON.parse(await readFile(localeContentPath, 'utf8'))
 
-    // Render to HTML string
-    let renderedContent
-    try {
-      renderedContent = renderToString(element)
-    } catch (err) {
-      console.warn(`Warning: Failed to render ${page.route}: ${err.message}`)
-      if (process.env.DEBUG) {
-        console.error(err.stack)
-      }
-      continue
+    // Set the active locale in the content
+    siteContent.config = siteContent.config || {}
+    siteContent.config.activeLocale = locale
+
+    // Execute data fetches (site, page, section levels)
+    onProgress('Executing data fetches...')
+    const { siteCascadedData, pageFetchedData } = await executeAllFetches(siteContent, siteDir, onProgress)
+
+    // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
+    if (siteContent.pages?.some(p => p.isDynamic)) {
+      onProgress('Expanding dynamic routes...')
+      siteContent.pages = expandDynamicPages(siteContent.pages, pageFetchedData, onProgress)
     }
 
-    // Inject into shell
-    const html = injectContent(htmlShell, renderedContent, page, siteContent)
+    // Load the HTML shell for this locale
+    const shellPath = existsSync(htmlPath) ? htmlPath : join(distDir, 'index.html')
+    const htmlShell = await readFile(shellPath, 'utf8')
 
-    // Output to the canonical route
-    const outputPath = getOutputPath(distDir, page.route)
-    await mkdir(dirname(outputPath), { recursive: true })
-    await writeFile(outputPath, html)
+    // Initialize the Uniweb runtime for this locale
+    onProgress('Initializing runtime...')
+    const uniweb = createUniweb(siteContent)
+    uniweb.setFoundation(foundation)
 
-    renderedFiles.push(outputPath)
-    onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
+    // Set foundation capabilities (Layout, props, etc.)
+    if (foundation.capabilities) {
+      uniweb.setFoundationConfig(foundation.capabilities)
+    }
+
+    // Pre-render each page
+    const pages = uniweb.activeWebsite.pages
+    const website = uniweb.activeWebsite
+
+    for (const page of pages) {
+      // Build the output route with locale prefix
+      const outputRoute = routePrefix + page.route
+
+      onProgress(`Rendering ${outputRoute}...`)
+
+      // Set this as the active page
+      uniweb.activeWebsite.setActivePage(page.route)
+
+      // Create the page element using inline SSR rendering
+      const element = createPageElement(page, website)
+
+      // Render to HTML string
+      let renderedContent
+      try {
+        renderedContent = renderToString(element)
+      } catch (err) {
+        console.warn(`Warning: Failed to render ${outputRoute}: ${err.message}`)
+        if (process.env.DEBUG) {
+          console.error(err.stack)
+        }
+        continue
+      }
+
+      // Inject into shell
+      const html = injectContent(htmlShell, renderedContent, page, siteContent)
+
+      // Output to the locale-prefixed route
+      const outputPath = getOutputPath(distDir, outputRoute)
+      await mkdir(dirname(outputPath), { recursive: true })
+      await writeFile(outputPath, html)
+
+      renderedFiles.push(outputPath)
+      onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
+    }
   }
 
-  onProgress(`Pre-rendered ${renderedFiles.length} pages`)
+  onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
 
   return {
     pages: renderedFiles.length,
