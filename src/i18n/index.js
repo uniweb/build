@@ -24,6 +24,30 @@ import {
 } from './collections.js'
 import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
 
+// Free-form translation support
+import {
+  loadFreeformTranslation,
+  loadFreeformCollectionItem,
+  discoverFreeformTranslations,
+  getFreeformFileMeta,
+  parseFreeformPath,
+  buildFreeformPath,
+  buildFreeformCollectionPath
+} from './freeform.js'
+import {
+  computeSourceHash,
+  loadManifest as loadFreeformManifest,
+  saveManifest as saveFreeformManifest,
+  recordHash,
+  checkStaleness,
+  updateHash,
+  removeManifestEntries,
+  renameManifestEntries,
+  getStaleTranslations,
+  getOrphanedTranslations,
+  getUnregisteredTranslations
+} from './freeform-manifest.js'
+
 export {
   // Hash utilities
   computeHash,
@@ -49,7 +73,29 @@ export {
 
   // Locale resolution
   getAvailableLocales,
-  resolveLocales
+  resolveLocales,
+
+  // Free-form translation functions
+  loadFreeformTranslation,
+  loadFreeformCollectionItem,
+  discoverFreeformTranslations,
+  getFreeformFileMeta,
+  parseFreeformPath,
+  buildFreeformPath,
+  buildFreeformCollectionPath,
+
+  // Free-form manifest functions
+  computeSourceHash,
+  loadFreeformManifest,
+  saveFreeformManifest,
+  recordHash,
+  checkStaleness,
+  updateHash,
+  removeManifestEntries,
+  renameManifestEntries,
+  getStaleTranslations,
+  getOrphanedTranslations,
+  getUnregisteredTranslations
 }
 
 /**
@@ -278,7 +324,8 @@ export async function getTranslationStatus(siteRoot, options = {}) {
  * Build translated site content for all locales
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Options
- * @param {boolean} [options.generateSearchIndex=true] - Generate search indexes for each locale
+ * @param {boolean} [options.generateSearchIndexes=true] - Generate search indexes for each locale
+ * @param {boolean} [options.freeformEnabled=true] - Enable free-form translation support
  * @returns {Object} Map of locale to output paths
  */
 export async function buildLocalizedContent(siteRoot, options = {}) {
@@ -287,7 +334,8 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
     locales = [],
     outputDir = join(siteRoot, 'dist'),
     fallbackToSource = true,
-    generateSearchIndexes = true
+    generateSearchIndexes = true,
+    freeformEnabled = true
   } = options
 
   const localesPath = join(siteRoot, localesDir)
@@ -309,10 +357,29 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
       translations = JSON.parse(localeRaw)
     }
 
-    // Merge translations
-    const translated = mergeTranslations(siteContent, translations, {
-      fallbackToSource
-    })
+    // Check if free-form translations exist for this locale
+    const freeformDir = join(localesPath, 'freeform', locale)
+    const hasFreeform = freeformEnabled && existsSync(freeformDir)
+
+    // Merge translations (with free-form support if enabled)
+    let translated
+    if (hasFreeform) {
+      // Use async merge with free-form support
+      translated = await mergeTranslations(siteContent, translations, {
+        fallbackToSource,
+        locale,
+        localesDir: localesPath,
+        freeformEnabled: true
+      })
+
+      // Check for stale/orphaned free-form translations and warn
+      await warnAboutFreeformIssues(locale, freeformDir, siteContent)
+    } else {
+      // Use sync merge (original behavior)
+      translated = mergeTranslations(siteContent, translations, {
+        fallbackToSource
+      })
+    }
 
     // Mark the active locale in the translated content
     translated.config = { ...translated.config, activeLocale: locale }
@@ -344,6 +411,63 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
   }
 
   return outputs
+}
+
+/**
+ * Check for stale/orphaned free-form translations and emit warnings
+ * @param {string} locale - Locale code
+ * @param {string} freeformDir - Path to locale's freeform directory
+ * @param {Object} siteContent - Site content for building source hashes
+ */
+async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
+  try {
+    // Build map of valid source hashes
+    const sourceHashes = {}
+    const validPaths = new Set()
+
+    for (const page of siteContent.pages || []) {
+      for (const section of page.sections || []) {
+        if (section.stableId) {
+          const path = buildFreeformPath(section, page)
+          if (path) {
+            validPaths.add(path)
+            // Compute source hash for staleness check
+            if (section.content) {
+              sourceHashes[path] = computeSourceHash(section.content)
+            }
+          }
+        }
+      }
+    }
+
+    // Check for stale translations
+    const stale = await getStaleTranslations(freeformDir, sourceHashes)
+    for (const item of stale) {
+      console.warn(`[i18n] Free-form translation stale: ${locale}/${item.path} (source changed ${item.recordedDate})`)
+    }
+
+    // Check for orphaned translations
+    const orphaned = await getOrphanedTranslations(freeformDir, validPaths)
+    for (const item of orphaned) {
+      console.warn(`[i18n] Free-form translation orphaned: ${locale}/${item.path}`)
+    }
+
+    // Check for unregistered translations (new files)
+    const discovered = await discoverFreeformTranslations(locale, dirname(dirname(freeformDir)))
+    const allPaths = [...discovered.pages, ...discovered.pageIds, ...discovered.collections]
+    const unregistered = await getUnregisteredTranslations(freeformDir, allPaths)
+    for (const path of unregistered) {
+      // Auto-register new free-form translations
+      const sourcePath = validPaths.has(path) ? path : null
+      if (sourcePath && sourceHashes[sourcePath]) {
+        await recordHash(freeformDir, path, sourceHashes[sourcePath])
+        console.log(`[i18n] Free-form translation registered: ${locale}/${path} (new file)`)
+      }
+    }
+  } catch (err) {
+    // Non-fatal: just log and continue
+    console.warn(`[i18n] Could not check free-form translation status for ${locale}: ${err.message}`)
+  }
 }
 
 /**

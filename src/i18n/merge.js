@@ -3,20 +3,55 @@
  *
  * Takes site-content.json and locale translations,
  * produces translated site-content for each locale.
+ *
+ * Supports two translation modes:
+ * 1. Hash-based (granular): Translate individual strings by hash lookup
+ * 2. Free-form: Complete content replacement from markdown files
+ *
+ * Free-form translations are checked first, falling back to hash-based
+ * when no free-form translation exists.
  */
 
 import { computeHash } from './hash.js'
+import { loadFreeformTranslation } from './freeform.js'
 
 /**
  * Merge translations into site content for a specific locale
+ *
  * @param {Object} siteContent - Original site-content.json
  * @param {Object} translations - Locale translations (hash -> translation)
  * @param {Object} options - Merge options
- * @returns {Object} Translated site content
+ * @param {boolean} [options.fallbackToSource=true] - Return source if no translation
+ * @param {string} [options.locale] - Locale code for free-form lookups
+ * @param {string} [options.localesDir] - Path to locales directory
+ * @param {boolean} [options.freeformEnabled=false] - Enable free-form translation lookup
+ * @returns {Object|Promise<Object>} Translated site content (async if freeformEnabled)
  */
 export function mergeTranslations(siteContent, translations, options = {}) {
-  const { fallbackToSource = true } = options
+  const {
+    fallbackToSource = true,
+    locale = null,
+    localesDir = null,
+    freeformEnabled = false
+  } = options
 
+  // If free-form is enabled, use async version
+  if (freeformEnabled && locale && localesDir) {
+    return mergeTranslationsAsync(siteContent, translations, {
+      fallbackToSource,
+      locale,
+      localesDir
+    })
+  }
+
+  // Sync version (original behavior)
+  return mergeTranslationsSync(siteContent, translations, fallbackToSource)
+}
+
+/**
+ * Synchronous merge (original behavior, no free-form)
+ */
+function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
 
@@ -28,7 +63,35 @@ export function mergeTranslations(siteContent, translations, options = {}) {
 
     // Translate section content
     for (const section of page.sections || []) {
-      translateSection(section, pageRoute, translations, fallbackToSource)
+      translateSectionSync(section, pageRoute, translations, fallbackToSource)
+    }
+  }
+
+  return translated
+}
+
+/**
+ * Asynchronous merge with free-form support
+ */
+async function mergeTranslationsAsync(siteContent, translations, options) {
+  const { fallbackToSource, locale, localesDir } = options
+
+  // Deep clone to avoid mutating original
+  const translated = JSON.parse(JSON.stringify(siteContent))
+
+  for (const page of translated.pages || []) {
+    const pageRoute = page.route || '/'
+
+    // Translate page metadata (always hash-based)
+    translatePageMeta(page, pageRoute, translations, fallbackToSource)
+
+    // Translate section content (with free-form check)
+    for (const section of page.sections || []) {
+      await translateSectionAsync(section, page, translations, {
+        fallbackToSource,
+        locale,
+        localesDir
+      })
     }
   }
 
@@ -77,9 +140,9 @@ function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
 }
 
 /**
- * Translate a section's content
+ * Translate a section's content (synchronous, hash-based only)
  */
-function translateSection(section, pageRoute, translations, fallbackToSource) {
+function translateSectionSync(section, pageRoute, translations, fallbackToSource) {
   const sectionId = section.id || 'unknown'
   const context = { page: pageRoute, section: sectionId }
 
@@ -89,7 +152,40 @@ function translateSection(section, pageRoute, translations, fallbackToSource) {
 
   // Recursively translate subsections
   for (const subsection of section.subsections || []) {
-    translateSection(subsection, pageRoute, translations, fallbackToSource)
+    translateSectionSync(subsection, pageRoute, translations, fallbackToSource)
+  }
+}
+
+/**
+ * Translate a section's content (async, with free-form check)
+ *
+ * Resolution order:
+ * 1. Check for free-form translation (complete replacement)
+ * 2. Fall back to hash-based translation (element-by-element)
+ */
+async function translateSectionAsync(section, page, translations, options) {
+  const { fallbackToSource, locale, localesDir } = options
+  const pageRoute = page.route || '/'
+  const sectionId = section.id || 'unknown'
+  const context = { page: pageRoute, section: sectionId }
+
+  // Check for free-form translation first
+  const freeform = await loadFreeformTranslation(section, page, locale, localesDir)
+
+  if (freeform) {
+    // Complete content replacement
+    section.content = freeform.content
+    // Note: We could also merge frontmatter into params here if needed
+  } else {
+    // Fall back to hash-based translation
+    if (section.content?.type === 'doc') {
+      translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
+    }
+  }
+
+  // Recursively translate subsections
+  for (const subsection of section.subsections || []) {
+    await translateSectionAsync(subsection, page, translations, options)
   }
 }
 

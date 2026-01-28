@@ -9,6 +9,7 @@ import { readFile, writeFile, readdir, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { computeHash } from './hash.js'
+import { loadFreeformCollectionItem } from './freeform.js'
 
 export const COLLECTIONS_DIR = 'collections'
 
@@ -198,13 +199,16 @@ function addUnit(units, source, field, context) {
  * Merge translations into collection data and write locale-specific files
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Options
+ * @param {boolean} [options.freeformEnabled=true] - Enable free-form translation support
  * @returns {Promise<Object>} Map of locale to output paths
  */
 export async function buildLocalizedCollections(siteRoot, options = {}) {
   const {
     locales = [],
     outputDir = join(siteRoot, 'dist'),
-    collectionsLocalesDir = join(siteRoot, 'locales', COLLECTIONS_DIR)
+    collectionsLocalesDir = join(siteRoot, 'locales', COLLECTIONS_DIR),
+    localesDir = join(siteRoot, 'locales'),
+    freeformEnabled = true
   } = options
 
   const dataDir = join(siteRoot, 'public', 'data')
@@ -240,6 +244,10 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
       }
     }
 
+    // Check if free-form translations exist for this locale
+    const freeformDir = join(localesDir, 'freeform', locale)
+    const hasFreeform = freeformEnabled && existsSync(freeformDir)
+
     // Create locale data directory
     const localeDataDir = join(outputDir, locale, 'data')
     await mkdir(localeDataDir, { recursive: true })
@@ -262,9 +270,15 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
           continue
         }
 
-        // Translate each item
-        const translatedItems = items.map(item =>
-          translateItem(item, collectionName, translations)
+        // Translate each item (with free-form support)
+        const translatedItems = await Promise.all(
+          items.map(item =>
+            translateItemAsync(item, collectionName, translations, {
+              locale,
+              localesDir,
+              freeformEnabled: hasFreeform
+            })
+          )
         )
 
         const destPath = join(localeDataDir, file)
@@ -280,13 +294,69 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
 }
 
 /**
- * Apply translations to a collection item
+ * Apply translations to a collection item (async, with free-form support)
+ *
+ * Resolution order:
+ * 1. Check for free-form translation (complete or partial replacement)
+ * 2. Fall back to hash-based translation
+ *
+ * @param {Object} item - Collection item
+ * @param {string} collectionName - Name of the collection
+ * @param {Object} translations - Hash-based translations
+ * @param {Object} options - Options
+ * @returns {Promise<Object>} Translated item
  */
-function translateItem(item, collectionName, translations) {
+async function translateItemAsync(item, collectionName, translations, options = {}) {
+  const { locale, localesDir, freeformEnabled } = options
   const translated = { ...item }
   const slug = item.slug || 'unknown'
   const context = { collection: collectionName, item: slug }
 
+  // Check for free-form translation first
+  if (freeformEnabled && locale && localesDir) {
+    const freeform = await loadFreeformCollectionItem(item, collectionName, locale, localesDir)
+
+    if (freeform) {
+      // Merge free-form data (supports partial: frontmatter only, body only, or both)
+      if (freeform.frontmatter) {
+        // Merge frontmatter fields from free-form
+        Object.assign(translated, freeform.frontmatter)
+      }
+      if (freeform.content) {
+        // Replace content entirely with free-form content
+        translated.content = freeform.content
+        // Skip hash-based content translation since we have free-form
+        return translateItemFields(translated, context, translations)
+      }
+    }
+  }
+
+  // Fall back to hash-based translation (or continue after partial free-form)
+  return translateItemSync(translated, collectionName, translations)
+}
+
+/**
+ * Apply translations to a collection item (sync, hash-based only)
+ */
+function translateItemSync(item, collectionName, translations) {
+  const translated = { ...item }
+  const slug = item.slug || 'unknown'
+  const context = { collection: collectionName, item: slug }
+
+  // Translate all fields including content
+  return translateItemFields(translated, context, translations, true)
+}
+
+/**
+ * Translate item fields (frontmatter and optionally content)
+ *
+ * @param {Object} translated - Item being translated
+ * @param {Object} context - Translation context
+ * @param {Object} translations - Hash-based translations
+ * @param {boolean} includeContent - Whether to translate ProseMirror content
+ * @returns {Object} Translated item
+ */
+function translateItemFields(translated, context, translations, includeContent = false) {
   // Translate frontmatter fields
   const translatableFields = ['title', 'description', 'excerpt', 'summary', 'subtitle']
 
@@ -320,8 +390,8 @@ function translateItem(item, collectionName, translations) {
     })
   }
 
-  // Translate ProseMirror content
-  if (translated.content?.type === 'doc') {
+  // Translate ProseMirror content (only if requested)
+  if (includeContent && translated.content?.type === 'doc') {
     translated.content = translateProseMirrorDoc(
       translated.content,
       context,
@@ -330,6 +400,14 @@ function translateItem(item, collectionName, translations) {
   }
 
   return translated
+}
+
+/**
+ * Apply translations to a collection item (legacy sync function)
+ * @deprecated Use translateItemAsync for free-form support
+ */
+function translateItem(item, collectionName, translations) {
+  return translateItemSync(item, collectionName, translations)
 }
 
 /**

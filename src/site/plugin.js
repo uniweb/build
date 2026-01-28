@@ -399,14 +399,30 @@ export function siteContentPlugin(options = {}) {
 
   /**
    * Get translated content for a locale
+   *
+   * Supports both hash-based (granular) and free-form (complete replacement) translations.
+   * Free-form translations are checked first, falling back to hash-based when not found.
    */
   async function getTranslatedContent(locale) {
     if (!siteContent) return null
 
     const translations = await loadLocaleTranslations(locale)
-    if (!translations) return null
+    // Even with no hash-based translations, free-form might exist
+    const hasTranslations = translations !== null
 
-    return mergeTranslations(siteContent, translations)
+    // Check if free-form translations exist for this locale
+    const freeformDir = join(resolvedSitePath, localesDir, 'freeform', locale)
+    const hasFreeform = existsSync(freeformDir)
+
+    // If no translations at all (neither hash-based nor free-form), return null
+    if (!hasTranslations && !hasFreeform) return null
+
+    // Use free-form enabled merge
+    return mergeTranslations(siteContent, translations || {}, {
+      locale,
+      localesDir: join(resolvedSitePath, localesDir),
+      freeformEnabled: hasFreeform
+    })
   }
 
   return {
@@ -574,6 +590,8 @@ export function siteContentPlugin(options = {}) {
 
       // Watch locales directory for translation changes
       const localesPath = resolve(resolvedSitePath, localesDir)
+      const additionalWatchers = []
+
       if (existsSync(localesPath)) {
         try {
           const localeWatcher = watch(localesPath, { recursive: false }, () => {
@@ -581,16 +599,34 @@ export function siteContentPlugin(options = {}) {
             localeTranslations = {}
             server.ws.send({ type: 'full-reload' })
           })
-          if (watcher) {
-            const originalClose = watcher.close
-            watcher.close = () => {
-              originalClose()
-              localeWatcher.close()
-            }
-          }
+          additionalWatchers.push(localeWatcher)
           console.log(`[site-content] Watching ${localesPath} for translation changes`)
         } catch (err) {
           // locales dir may not exist, that's ok
+        }
+
+        // Watch free-form translations directory
+        const freeformPath = resolve(localesPath, 'freeform')
+        if (existsSync(freeformPath)) {
+          try {
+            const freeformWatcher = watch(freeformPath, { recursive: true }, () => {
+              console.log('[site-content] Free-form translation changed, reloading...')
+              server.ws.send({ type: 'full-reload' })
+            })
+            additionalWatchers.push(freeformWatcher)
+            console.log(`[site-content] Watching ${freeformPath} for free-form translation changes`)
+          } catch (err) {
+            // freeform dir may not exist, that's ok
+          }
+        }
+      }
+
+      // Add additional watchers to cleanup
+      if (additionalWatchers.length > 0 && watcher) {
+        const originalClose = watcher.close
+        watcher.close = () => {
+          originalClose()
+          additionalWatchers.forEach(w => w.close())
         }
       }
 
