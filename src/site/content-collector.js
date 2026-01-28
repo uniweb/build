@@ -523,7 +523,6 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       title: pageConfig.title || pageName,
       description: pageConfig.description || '',
       label: pageConfig.label || null, // Short label for navigation (defaults to title)
-      order: pageConfig.order,
       lastModified: lastModified?.toISOString(),
 
       // Dynamic route metadata
@@ -599,8 +598,9 @@ function determineIndexPage(orderConfig, availableFolders) {
 
   const sorted = [...staticFolders].sort((a, b) => {
     // Sort by order (lower first), then alphabetically
-    const orderA = a.order ?? 999
-    const orderB = b.order ?? 999
+    // Pages without explicit order come after ordered pages
+    const orderA = a.order ?? Infinity
+    const orderB = b.order ?? Infinity
     if (orderA !== orderB) return orderA - orderB
     return a.name.localeCompare(b.name)
   })
@@ -654,6 +654,15 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       }
     })
   }
+
+  // Sort page folders by order (ascending), then alphabetically
+  // Pages without explicit order come after ordered pages (order ?? Infinity)
+  pageFolders.sort((a, b) => {
+    const orderA = a.order ?? Infinity
+    const orderB = b.order ?? Infinity
+    if (orderA !== orderB) return orderA - orderB
+    return a.name.localeCompare(b.name)
+  })
 
   // Check if this directory contains version folders (versioned section)
   const folderNames = pageFolders.map(f => f.name)
