@@ -27,6 +27,7 @@ import { join, parse } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections } from './assets.js'
+import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { parseFetchConfig, singularize } from './data-fetcher.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 
@@ -280,7 +281,10 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // Collect assets referenced in this section
   const assetCollection = collectSectionAssets(section, filePath, siteRoot)
 
-  return { section, assetCollection }
+  // Collect icons referenced in this section
+  const iconCollection = collectSectionIcons(section, filePath)
+
+  return { section, assetCollection, iconCollection }
 }
 
 /**
@@ -335,7 +339,7 @@ function buildSectionHierarchy(sections) {
  * @param {string} pagePath - Path to page directory
  * @param {string} siteRoot - Site root for asset resolution
  * @param {string} parentId - Parent section ID for building hierarchy
- * @returns {Object} { sections, assetCollection, lastModified }
+ * @returns {Object} { sections, assetCollection, iconCollection, lastModified }
  */
 async function processExplicitSections(sectionsConfig, pagePath, siteRoot, parentId = '') {
   const sections = []
@@ -343,6 +347,10 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
     assets: {},
     hasExplicitPoster: new Set(),
     hasExplicitPreview: new Set()
+  }
+  let iconCollection = {
+    icons: new Set(),
+    bySource: new Map()
   }
   let lastModified = null
 
@@ -381,8 +389,9 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
 
     // Process the section
     // Use sectionName as stable ID for scroll targeting (e.g., "hero", "features")
-    const { section, assetCollection: sectionAssets } = await processMarkdownFile(filePath, id, siteRoot, sectionName)
+    const { section, assetCollection: sectionAssets, iconCollection: sectionIcons } = await processMarkdownFile(filePath, id, siteRoot, sectionName)
     assetCollection = mergeAssetCollections(assetCollection, sectionAssets)
+    iconCollection = mergeIconCollections(iconCollection, sectionIcons)
 
     // Track last modified
     const fileStat = await stat(filePath)
@@ -395,6 +404,7 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
       const subResult = await processExplicitSections(subsections, pagePath, siteRoot, id)
       section.subsections = subResult.sections
       assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+      iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
       if (subResult.lastModified && (!lastModified || subResult.lastModified > lastModified)) {
         lastModified = subResult.lastModified
       }
@@ -404,7 +414,7 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
     index++
   }
 
-  return { sections, assetCollection, lastModified }
+  return { sections, assetCollection, iconCollection, lastModified }
 }
 
 /**
@@ -433,6 +443,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     hasExplicitPoster: new Set(),
     hasExplicitPreview: new Set()
   }
+  let pageIconCollection = {
+    icons: new Set(),
+    bySource: new Map()
+  }
   let lastModified = null
 
   // Check for explicit sections configuration
@@ -452,9 +466,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       // e.g., "1-intro.md" → stableId: "intro", "2-features.md" → stableId: "features"
       const stableId = stableName || name
 
-      const { section, assetCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot, stableId)
+      const { section, assetCollection, iconCollection } = await processMarkdownFile(join(pagePath, file), id, siteRoot, stableId)
       sections.push(section)
       pageAssetCollection = mergeAssetCollections(pageAssetCollection, assetCollection)
+      pageIconCollection = mergeIconCollections(pageIconCollection, iconCollection)
 
       // Track last modified time for sitemap
       const fileStat = await stat(join(pagePath, file))
@@ -471,6 +486,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     const result = await processExplicitSections(sectionsConfig, pagePath, siteRoot)
     hierarchicalSections = result.sections
     pageAssetCollection = result.assetCollection
+    pageIconCollection = result.iconCollection
     lastModified = result.lastModified
 
   } else {
@@ -566,7 +582,8 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
       sections: hierarchicalSections
     },
-    assetCollection: pageAssetCollection
+    assetCollection: pageAssetCollection,
+    iconCollection: pageIconCollection
   }
 }
 
@@ -617,7 +634,7 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent's config
  * @param {Object} parentFetch - Parent page's fetch config (for dynamic child routes)
  * @param {Object} versionContext - Version context from parent { version, versionMeta }
- * @returns {Promise<Object>} { pages, assetCollection, header, footer, left, right, notFound, versionedScopes }
+ * @returns {Promise<Object>} { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes }
  */
 async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null) {
   const entries = await readdir(dirPath)
@@ -626,6 +643,10 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     assets: {},
     hasExplicitPoster: new Set(),
     hasExplicitPreview: new Set()
+  }
+  let iconCollection = {
+    icons: new Set(),
+    bySource: new Map()
   }
   let header = null
   let footer = null
@@ -711,6 +732,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+        iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
         // Merge any nested versioned scopes (shouldn't happen often, but possible)
         for (const [scope, meta] of subResult.versionedScopes) {
           versionedScopes.set(scope, meta)
@@ -727,12 +749,13 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         if (result) {
           pages.push(result.page)
           assetCollection = mergeAssetCollections(assetCollection, result.assetCollection)
+          iconCollection = mergeIconCollections(iconCollection, result.iconCollection)
         }
       }
     }
 
     // Return early - we've handled all children
-    return { pages, assetCollection, header, footer, left, right, notFound, versionedScopes }
+    return { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes }
   }
 
   // Determine which page is the index for this level
@@ -755,8 +778,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     })
 
     if (result) {
-      const { page, assetCollection: pageAssets } = result
+      const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
       assetCollection = mergeAssetCollections(assetCollection, pageAssets)
+      iconCollection = mergeIconCollections(iconCollection, pageIcons)
 
       // Handle special pages (layout areas and 404) - only at root level
       if (parentRoute === '/') {
@@ -787,6 +811,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+        iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
         // Merge any versioned scopes from children
         for (const [scope, meta] of subResult.versionedScopes) {
           versionedScopes.set(scope, meta)
@@ -795,7 +820,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     }
   }
 
-  return { pages, assetCollection, header, footer, left, right, notFound, versionedScopes }
+  return { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes }
 }
 
 /**
@@ -873,7 +898,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   }
 
   // Recursively collect all pages
-  const { pages, assetCollection, header, footer, left, right, notFound, versionedScopes } =
+  const { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
 
   // Sort pages by order
@@ -884,6 +909,12 @@ export async function collectSiteContent(sitePath, options = {}) {
   const explicitCount = assetCollection.hasExplicitPoster.size + assetCollection.hasExplicitPreview.size
   if (assetCount > 0) {
     console.log(`[content-collector] Found ${assetCount} asset references${explicitCount > 0 ? ` (${explicitCount} with explicit poster/preview)` : ''}`)
+  }
+
+  // Build icon manifest from collected icons
+  const iconManifest = buildIconManifest(iconCollection)
+  if (iconManifest.count > 0) {
+    console.log(`[content-collector] Found ${iconManifest.count} icon references from ${iconManifest.families.length} families: ${iconManifest.families.join(', ')}`)
   }
 
   // Convert versionedScopes Map to plain object for JSON serialization
@@ -908,7 +939,9 @@ export async function collectSiteContent(sitePath, options = {}) {
     versionedScopes: versionedScopesObj,
     assets: assetCollection.assets,
     hasExplicitPoster: assetCollection.hasExplicitPoster,
-    hasExplicitPreview: assetCollection.hasExplicitPreview
+    hasExplicitPreview: assetCollection.hasExplicitPreview,
+    // Icon manifest for preloading
+    icons: iconManifest
   }
 }
 
