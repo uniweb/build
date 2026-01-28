@@ -301,8 +301,7 @@ function renderBlock(block) {
   const componentProps = {
     content,
     params,
-    block,
-    input: block.input
+    block
   }
 
   // Wrapper props
