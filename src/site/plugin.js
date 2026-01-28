@@ -93,16 +93,20 @@ async function processDevSectionFetches(sections, cascadedData, fetchOptions) {
     if (sectionFetch) {
       const result = await executeFetch(sectionFetch, fetchOptions)
       if (result.data && !result.error) {
-        // Merge fetched data into cascadedData for this section
-        cascadedData = {
-          ...cascadedData,
-          [sectionFetch.schema]: result.data
-        }
+        // Merge fetched data into section's parsedContent (not cascadedData)
+        // This matches prerender behavior - section's own fetch goes to content.data
+        section.parsedContent = mergeDataIntoContent(
+          section.parsedContent || {},
+          result.data,
+          sectionFetch.schema,
+          sectionFetch.merge
+        )
       }
     }
 
-    // Attach cascaded data to section
-    section.cascadedData = { ...cascadedData }
+    // Attach cascaded data for components with inheritData
+    // Note: cascadedData is from page/site level only, not section's own fetch
+    section.cascadedData = cascadedData
 
     // Process subsections recursively
     if (section.subsections && section.subsections.length > 0) {
