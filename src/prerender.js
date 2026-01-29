@@ -292,6 +292,12 @@ async function prefetchIcons(siteContent, uniweb, onProgress) {
   if (failed > 0) {
     console.warn(`[prerender] Fetched ${succeeded}/${icons.length} icons (${failed} failed)`)
   }
+
+  // Store icon cache on siteContent for embedding in HTML
+  // This allows the client runtime to populate the cache before rendering
+  if (uniweb.iconCache.size > 0) {
+    siteContent._iconCache = Object.fromEntries(uniweb.iconCache)
+  }
 }
 
 /**
@@ -672,6 +678,22 @@ function injectContent(shell, renderedContent, page, siteContent) {
       '</head>',
       `  ${contentScript}\n  </head>`
     )
+  }
+
+  // Inject icon cache so client can render icons immediately without CDN fetches
+  if (siteContent._iconCache) {
+    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${JSON.stringify(siteContent._iconCache)}</script>`
+    if (html.includes('__ICON_CACHE__')) {
+      html = html.replace(
+        /<script[^>]*id="__ICON_CACHE__"[^>]*>[\s\S]*?<\/script>/,
+        iconScript
+      )
+    } else {
+      html = html.replace(
+        '</head>',
+        `  ${iconScript}\n  </head>`
+      )
+    }
   }
 
   return html

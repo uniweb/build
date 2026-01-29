@@ -287,6 +287,10 @@ export async function defineSiteConfig(options = {}) {
     },
 
     resolve: {
+      // Deduplicate React packages to prevent dual-instance issues
+      // Foundation externalizes React; when site bundles it, CJS and ESM
+      // copies can coexist without this, causing "useRef of null" errors
+      dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
       alias: {
         ...alias,
         ...resolveOverrides?.alias
