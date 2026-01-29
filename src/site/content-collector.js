@@ -759,8 +759,13 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   }
 
   // Determine which page is the index for this level
+  // A directory with its own .md content is a real page, not a container —
+  // never promote a child as index, even if explicit config says so
+  // (that config is likely a leftover from before the directory had content)
   const regularFolders = pageFolders.filter(f => !f.name.startsWith('@'))
-  const indexPageName = determineIndexPage(orderConfig, regularFolders)
+  const hasExplicitOrder = orderConfig?.index || (Array.isArray(orderConfig?.pages) && orderConfig.pages.length > 0)
+  const hasMdContent = entries.some(e => isMarkdownFile(e))
+  const indexPageName = hasMdContent ? null : determineIndexPage(orderConfig, regularFolders)
 
   // Second pass: process each page folder
   for (const folder of pageFolders) {
@@ -804,7 +809,12 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       // Recursively process subdirectories (but not special @ directories)
       if (!isSpecial) {
         // The child route depends on whether this page is the index
-        const childParentRoute = isIndex ? parentRoute : page.route
+        // For explicit index (from site.yml `index:` or `pages:`), children use parentRoute
+        // since that's a true structural promotion. For auto-detected index, children use
+        // the page's original folder path so they nest correctly under it.
+        const childParentRoute = isIndex
+          ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
+          : page.route
         // Pass this page's fetch config to children (for dynamic routes that inherit parent data)
         const childFetch = page.fetch || parentFetch
         // Pass version context to children (maintains version scope)
@@ -900,6 +910,51 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Recursively collect all pages
   const { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
+
+  // Deduplicate: remove content-less container pages whose route duplicates
+  // a content-bearing page (e.g., a promoted index page)
+  const routeCounts = new Map()
+  for (const page of pages) {
+    const existing = routeCounts.get(page.route)
+    if (!existing) {
+      routeCounts.set(page.route, [page])
+    } else {
+      existing.push(page)
+    }
+  }
+  for (const [route, group] of routeCounts) {
+    if (group.length > 1) {
+      // Keep the page with content, remove content-less duplicates
+      const withContent = group.filter(p => p.sections && p.sections.length > 0)
+      const toRemove = withContent.length > 0
+        ? group.filter(p => !p.sections || p.sections.length === 0)
+        : group.slice(1) // If none have content, keep first
+      for (const page of toRemove) {
+        const idx = pages.indexOf(page)
+        if (idx !== -1) pages.splice(idx, 1)
+      }
+    }
+  }
+
+  // Compute parent route for each page (hierarchy declaration)
+  // This runs once at build time so runtime doesn't need to re-derive hierarchy
+  const pageRouteMap = new Map()
+  for (const page of pages) {
+    pageRouteMap.set(page.route, page)
+    if (page.sourcePath) {
+      pageRouteMap.set(page.sourcePath, page)
+    }
+  }
+  for (const page of pages) {
+    const segments = page.route.split('/').filter(Boolean)
+    if (segments.length <= 1) {
+      page.parent = null
+      continue
+    }
+    const parentRoute = '/' + segments.slice(0, -1).join('/')
+    const parentPage = pageRouteMap.get(parentRoute)
+    page.parent = parentPage ? parentPage.route : null
+  }
 
   // Sort pages by order
   pages.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
