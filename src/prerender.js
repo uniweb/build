@@ -264,6 +264,37 @@ async function loadDependencies(siteDir) {
 }
 
 /**
+ * Pre-fetch icons from CDN and populate the Uniweb icon cache.
+ * This allows the Icon component to render SVGs synchronously during SSR
+ * instead of producing empty placeholders.
+ */
+async function prefetchIcons(siteContent, uniweb, onProgress) {
+  const icons = siteContent.icons?.used || []
+  if (icons.length === 0) return
+
+  const cdnBase = siteContent.config?.icons?.cdnUrl || 'https://uniweb.github.io/icons'
+
+  onProgress(`Fetching ${icons.length} icons for SSR...`)
+
+  const results = await Promise.allSettled(
+    icons.map(async (iconRef) => {
+      const [family, name] = iconRef.split(':')
+      const url = `${cdnBase}/${family}/${family}-${name}.svg`
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const svg = await response.text()
+      uniweb.iconCache.set(`${family}:${name}`, svg)
+    })
+  )
+
+  const succeeded = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.filter(r => r.status === 'rejected').length
+  if (failed > 0) {
+    console.warn(`[prerender] Fetched ${succeeded}/${icons.length} icons (${failed} failed)`)
+  }
+}
+
+/**
  * Inline BlockRenderer for SSR
  * Uses React from prerender's scope to avoid module resolution issues
  */
@@ -523,6 +554,9 @@ export async function prerenderSite(siteDir, options = {}) {
     if (foundation.capabilities) {
       uniweb.setFoundationConfig(foundation.capabilities)
     }
+
+    // Pre-fetch icons for SSR embedding
+    await prefetchIcons(siteContent, uniweb, onProgress)
 
     // Pre-render each page
     const pages = uniweb.activeWebsite.pages
