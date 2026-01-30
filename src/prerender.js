@@ -11,13 +11,13 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 
 // Lazily loaded dependencies
 let React, renderToString, createUniweb
-let preparePropsSSR, getComponentMetaSSR, guaranteeContentStructureSSR
+let preparePropsSSR, getComponentMetaSSR
 
 /**
  * Execute all data fetches for prerender
@@ -229,25 +229,24 @@ async function processSectionFetches(sections, cascadedData, fetchOptions, onPro
 async function loadDependencies(siteDir) {
   if (React) return // Already loaded
 
-  // Create a require function that resolves from the site's perspective
-  // This ensures we get the same React instance that the foundation uses
+  // Load React from the site's node_modules using createRequire.
+  // This ensures we get the same React instance as the foundation
+  // components (which are loaded via pathToFileURL and externalize React
+  // to the same node_modules). Using bare import('react') would resolve
+  // from @uniweb/build's context, creating a dual-React instance problem.
   const absoluteSiteDir = resolve(siteDir)
   const siteRequire = createRequire(join(absoluteSiteDir, 'package.json'))
 
   try {
-    // Try to load React from site's node_modules
     const reactMod = siteRequire('react')
     const serverMod = siteRequire('react-dom/server')
-
     React = reactMod.default || reactMod
     renderToString = serverMod.renderToString
   } catch {
-    // Fallback to dynamic import if require fails
     const [reactMod, serverMod] = await Promise.all([
       import('react'),
       import('react-dom/server')
     ])
-
     React = reactMod.default || reactMod
     renderToString = serverMod.renderToString
   }
@@ -256,11 +255,12 @@ async function loadDependencies(siteDir) {
   const coreMod = await import('@uniweb/core')
   createUniweb = coreMod.createUniweb
 
-  // Load runtime utilities (prepare-props doesn't use React)
+  // Load pure utility functions from runtime SSR bundle.
+  // These are plain functions (no hooks), so they work even if the SSR
+  // bundle resolves a different React instance internally.
   const runtimeMod = await import('@uniweb/runtime/ssr')
   preparePropsSSR = runtimeMod.prepareProps
   getComponentMetaSSR = runtimeMod.getComponentMeta
-  guaranteeContentStructureSSR = runtimeMod.guaranteeContentStructure
 }
 
 /**
@@ -301,8 +301,155 @@ async function prefetchIcons(siteContent, uniweb, onProgress) {
 }
 
 /**
- * Inline BlockRenderer for SSR
- * Uses React from prerender's scope to avoid module resolution issues
+ * Valid color contexts for section theming
+ */
+const VALID_CONTEXTS = ['light', 'medium', 'dark']
+
+/**
+ * Build wrapper props from block configuration
+ * Mirrors getWrapperProps in BlockRenderer.jsx
+ */
+function getWrapperProps(block) {
+  const theme = block.themeName
+  const blockClassName = block.state?.className || ''
+
+  let contextClass = ''
+  if (theme && VALID_CONTEXTS.includes(theme)) {
+    contextClass = `context-${theme}`
+  }
+
+  let className = contextClass
+  if (blockClassName) {
+    className = className ? `${className} ${blockClassName}` : blockClassName
+  }
+
+  const { background = {} } = block.standardOptions
+  const style = {}
+  if (background.mode) {
+    style.position = 'relative'
+  }
+
+  const sectionId = block.stableId || block.id
+  return { id: `section-${sectionId}`, style, className, background }
+}
+
+/**
+ * Render a background element for SSR
+ * Mirrors the Background component in Background.jsx (image, color, gradient only)
+ * Video backgrounds are skipped in SSR (they require JS for autoplay)
+ */
+function renderBackground(background) {
+  if (!background?.mode) return null
+
+  const containerStyle = {
+    position: 'absolute',
+    inset: '0',
+    overflow: 'hidden',
+    zIndex: 0,
+  }
+
+  const children = []
+
+  // Resolve URL against basePath for subdirectory deployments
+  const basePath = globalThis.uniweb?.activeWebsite?.basePath || ''
+  function resolveUrl(url) {
+    if (!url || !url.startsWith('/')) return url
+    if (!basePath) return url
+    if (url.startsWith(basePath + '/') || url === basePath) return url
+    return basePath + url
+  }
+
+  if (background.mode === 'color' && background.color) {
+    children.push(
+      React.createElement('div', {
+        key: 'bg-color',
+        className: 'background-color',
+        style: { position: 'absolute', inset: '0', backgroundColor: background.color },
+        'aria-hidden': 'true'
+      })
+    )
+  }
+
+  if (background.mode === 'gradient' && background.gradient) {
+    const g = background.gradient
+    const angle = g.angle || 0
+    const start = g.start || 'transparent'
+    const end = g.end || 'transparent'
+    const startPos = g.startPosition || 0
+    const endPos = g.endPosition || 100
+    children.push(
+      React.createElement('div', {
+        key: 'bg-gradient',
+        className: 'background-gradient',
+        style: {
+          position: 'absolute', inset: '0',
+          background: `linear-gradient(${angle}deg, ${start} ${startPos}%, ${end} ${endPos}%)`
+        },
+        'aria-hidden': 'true'
+      })
+    )
+  }
+
+  if (background.mode === 'image' && background.image?.src) {
+    const img = background.image
+    children.push(
+      React.createElement('div', {
+        key: 'bg-image',
+        className: 'background-image',
+        style: {
+          position: 'absolute', inset: '0',
+          backgroundImage: `url(${resolveUrl(img.src)})`,
+          backgroundPosition: img.position || 'center',
+          backgroundSize: img.size || 'cover',
+          backgroundRepeat: 'no-repeat'
+        },
+        'aria-hidden': 'true'
+      })
+    )
+  }
+
+  // Overlay
+  if (background.overlay?.enabled) {
+    const ov = background.overlay
+    let overlayStyle
+
+    if (ov.gradient) {
+      const g = ov.gradient
+      overlayStyle = {
+        position: 'absolute', inset: '0', pointerEvents: 'none',
+        background: `linear-gradient(${g.angle || 180}deg, ${g.start || 'rgba(0,0,0,0.7)'} ${g.startPosition || 0}%, ${g.end || 'rgba(0,0,0,0)'} ${g.endPosition || 100}%)`,
+        opacity: ov.opacity ?? 0.5
+      }
+    } else {
+      const baseColor = ov.type === 'light' ? '255, 255, 255' : '0, 0, 0'
+      overlayStyle = {
+        position: 'absolute', inset: '0', pointerEvents: 'none',
+        backgroundColor: `rgba(${baseColor}, ${ov.opacity ?? 0.5})`
+      }
+    }
+
+    children.push(
+      React.createElement('div', {
+        key: 'bg-overlay',
+        className: 'background-overlay',
+        style: overlayStyle,
+        'aria-hidden': 'true'
+      })
+    )
+  }
+
+  if (children.length === 0) return null
+
+  return React.createElement('div', {
+    className: `background background--${background.mode}`,
+    style: containerStyle,
+    'aria-hidden': 'true'
+  }, ...children)
+}
+
+/**
+ * Render a single block for SSR
+ * Mirrors BlockRenderer.jsx but without hooks (no runtime data fetching in SSR)
  */
 function renderBlock(block) {
   const Component = block.initComponent()
@@ -318,14 +465,10 @@ function renderBlock(block) {
   let content, params
 
   if (block.parsedContent?._isPoc) {
-    // Simple PoC format - content was passed directly
     content = block.parsedContent._pocContent
     params = block.properties
   } else {
-    // Get runtime metadata for this component
     const meta = getComponentMetaSSR(block.type)
-
-    // Prepare props with runtime guarantees
     const prepared = preparePropsSSR(block, meta)
     params = prepared.params
     content = {
@@ -335,34 +478,33 @@ function renderBlock(block) {
     }
   }
 
-  // Signal to the component if the author set a background in frontmatter
-  const hasBackground = !!block.standardOptions?.background?.mode
+  // Background handling (mirrors BlockRenderer.jsx)
+  const { background, ...wrapperProps } = getWrapperProps(block)
+  const meta = getComponentMetaSSR(block.type)
+  const hasBackground = background?.mode && meta?.background !== 'self'
+
   if (hasBackground) {
     params = { ...params, _hasBackground: true }
   }
 
-  const componentProps = {
-    content,
-    params,
-    block
+  const componentProps = { content, params, block }
+
+  if (hasBackground) {
+    return React.createElement('section', wrapperProps,
+      renderBackground(background),
+      React.createElement('div', { className: 'relative z-10' },
+        React.createElement(Component, componentProps)
+      )
+    )
   }
 
-  // Wrapper props
-  // Use stableId for DOM ID if available (stable across reordering)
-  const theme = block.themeName
-  const sectionId = block.stableId || block.id
-  const wrapperProps = {
-    id: `section-${sectionId}`,
-    className: theme || ''
-  }
-
-  return React.createElement('div', wrapperProps,
+  return React.createElement('section', wrapperProps,
     React.createElement(Component, componentProps)
   )
 }
 
 /**
- * Inline Blocks renderer for SSR
+ * Render an array of blocks for SSR
  */
 function renderBlocks(blocks) {
   if (!blocks || blocks.length === 0) return null
@@ -374,7 +516,7 @@ function renderBlocks(blocks) {
 }
 
 /**
- * Inline Layout renderer for SSR
+ * Render page layout for SSR
  */
 function renderLayout(page, website) {
   const RemoteLayout = website.getRemoteLayout()
@@ -393,29 +535,20 @@ function renderLayout(page, website) {
 
   if (RemoteLayout) {
     return React.createElement(RemoteLayout, {
-      page,
-      website,
-      header: headerElement,
-      body: bodyElement,
-      footer: footerElement,
-      left: leftElement,
-      right: rightElement,
-      leftPanel: leftElement,
-      rightPanel: rightElement
+      page, website,
+      header: headerElement, body: bodyElement, footer: footerElement,
+      left: leftElement, right: rightElement,
+      leftPanel: leftElement, rightPanel: rightElement
     })
   }
 
-  // Default layout
   return React.createElement(React.Fragment, null,
-    headerElement,
-    bodyElement,
-    footerElement
+    headerElement, bodyElement, footerElement
   )
 }
 
 /**
- * Inline PageElement for SSR
- * Uses React from prerender's scope
+ * Create a page element for SSR
  */
 function createPageElement(page, website) {
   return React.createElement('main', null,
@@ -591,7 +724,7 @@ export async function prerenderSite(siteDir, options = {}) {
       // Set this as the active page
       uniweb.activeWebsite.setActivePage(page.route)
 
-      // Create the page element using inline SSR rendering
+      // Create the page element for SSR
       const element = createPageElement(page, website)
 
       // Render to HTML string
