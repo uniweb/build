@@ -570,7 +570,9 @@ export async function prerenderSite(siteDir, options = {}) {
 
     for (const page of pages) {
       // Build the output route with locale prefix
-      const outputRoute = routePrefix + page.route
+      // For non-default locales, translate route slugs (e.g., /about → /acerca-de)
+      const translatedPageRoute = isDefault ? page.route : website.translateRoute(page.route, locale)
+      const outputRoute = routePrefix + translatedPageRoute
 
       onProgress(`Rendering ${outputRoute}...`)
 

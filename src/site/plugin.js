@@ -118,9 +118,27 @@ import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '..
 import { mergeTranslations } from '../i18n/merge.js'
 
 /**
+ * Translate a canonical route for a given locale using route translations config
+ * Supports exact and prefix matching (e.g., /blog → /noticias also applies to /blog/post)
+ */
+function applyRouteTranslation(route, locale, routeTranslations) {
+  const localeMap = routeTranslations?.[locale]
+  if (!localeMap) return route
+  // Exact match
+  if (localeMap[route]) return localeMap[route]
+  // Prefix match
+  for (const [canonical, translated] of Object.entries(localeMap)) {
+    if (route.startsWith(canonical + '/')) {
+      return translated + route.slice(canonical.length)
+    }
+  }
+  return route
+}
+
+/**
  * Generate sitemap.xml content
  */
-function generateSitemap(pages, baseUrl, locales = []) {
+function generateSitemap(pages, baseUrl, locales = [], routeTranslations = {}) {
   const urls = []
 
   for (const page of pages) {
@@ -137,7 +155,13 @@ function generateSitemap(pages, baseUrl, locales = []) {
     // Add hreflang entries for multi-locale sites
     if (locales.length > 1) {
       for (const locale of locales) {
-        const localeLoc = locale.default ? loc : `${baseUrl}/${locale.code}${page.route === '/' ? '' : page.route}`
+        let localeLoc
+        if (locale.default) {
+          localeLoc = loc
+        } else {
+          const translatedRoute = page.route === '/' ? '' : applyRouteTranslation(page.route, locale.code, routeTranslations)
+          localeLoc = `${baseUrl}/${locale.code}${translatedRoute}`
+        }
         urlEntry += `\n    <xhtml:link rel="alternate" hreflang="${locale.code}" href="${escapeXml(localeLoc)}" />`
       }
       // Add x-default pointing to default locale
@@ -664,7 +688,7 @@ export function siteContentPlugin(options = {}) {
         // Serve sitemap.xml in dev mode
         if (req.url === '/sitemap.xml' && seoEnabled && siteContent?.pages) {
           res.setHeader('Content-Type', 'application/xml')
-          res.end(generateSitemap(siteContent.pages, seoOptions.baseUrl, seoOptions.locales))
+          res.end(generateSitemap(siteContent.pages, seoOptions.baseUrl, seoOptions.locales, siteContent.config?.i18n?.routeTranslations))
           return
         }
 
@@ -851,7 +875,7 @@ export function siteContentPlugin(options = {}) {
       // Generate SEO files if enabled
       if (seoEnabled && finalContent?.pages) {
         // Generate sitemap.xml
-        const sitemap = generateSitemap(finalContent.pages, seoOptions.baseUrl, seoOptions.locales)
+        const sitemap = generateSitemap(finalContent.pages, seoOptions.baseUrl, seoOptions.locales, finalContent.config?.i18n?.routeTranslations)
         this.emitFile({
           type: 'asset',
           fileName: 'sitemap.xml',
