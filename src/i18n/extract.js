@@ -27,6 +27,17 @@ export function extractTranslatableContent(siteContent) {
     }
   }
 
+  // Extract from shared layout pages (header, footer, left, right panels)
+  for (const layoutKey of ['header', 'footer', 'left', 'right']) {
+    const layoutPage = siteContent[layoutKey]
+    if (layoutPage?.sections) {
+      const pageRoute = layoutPage.route || `/@${layoutKey}`
+      for (const section of layoutPage.sections) {
+        extractFromSection(section, pageRoute, units)
+      }
+    }
+  }
+
   return {
     version: '1.0',
     defaultLocale: siteContent.config?.defaultLanguage || 'en',

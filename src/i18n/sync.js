@@ -94,10 +94,12 @@ export function syncManifests(previous, current) {
  * Check if two context arrays are equal
  */
 function contextsEqual(contexts1, contexts2) {
-  if (contexts1.length !== contexts2.length) return false
+  const c1 = contexts1 || []
+  const c2 = contexts2 || []
+  if (c1.length !== c2.length) return false
 
-  const set1 = new Set(contexts1.map(c => `${c.page}:${c.section}`))
-  const set2 = new Set(contexts2.map(c => `${c.page}:${c.section}`))
+  const set1 = new Set(c1.map(c => `${c.page || c.collection}:${c.section || c.item}`))
+  const set2 = new Set(c2.map(c => `${c.page || c.collection}:${c.section || c.item}`))
 
   if (set1.size !== set2.size) return false
   for (const key of set1) {
@@ -115,8 +117,9 @@ function findMatchingContext(currentContexts, previousUnits) {
     const contextKey = `${context.page}:${context.section}`
 
     for (const [hash, unit] of Object.entries(previousUnits)) {
-      const hasContext = unit.contexts.some(
-        c => `${c.page}:${c.section}` === contextKey
+      const unitContexts = unit.contexts || []
+      const hasContext = unitContexts.some(
+        c => `${c.page || c.collection}:${c.section || c.item}` === contextKey
       )
       if (hasContext) {
         return { hash, source: unit.source, contexts: unit.contexts }

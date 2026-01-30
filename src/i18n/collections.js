@@ -178,7 +178,8 @@ function addUnit(units, source, field, context) {
   const hash = computeHash(source)
 
   if (units[hash]) {
-    const existingContexts = units[hash].contexts
+    const existingContexts = units[hash].contexts || []
+    units[hash].contexts = existingContexts
     const contextKey = `${context.collection}:${context.item}`
     const exists = existingContexts.some(
       c => `${c.collection}:${c.item}` === contextKey
