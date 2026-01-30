@@ -26,6 +26,34 @@ import yaml from 'js-yaml'
 import { generateEntryPoint } from '../generate-entry.js'
 
 /**
+ * Normalize a base path for Vite compatibility
+ *
+ * Handles common user mistakes:
+ * - Missing leading slash: "docs/" → "/docs/"
+ * - Missing trailing slash: "/docs" → "/docs/"
+ * - Extra slashes: "//docs///" → "/docs/"
+ * - Just a slash: "/" → undefined (root, no base needed)
+ *
+ * @param {string} raw - Raw base path from site.yml, env, or option
+ * @returns {string|undefined} Normalized path with leading+trailing slash, or undefined for root
+ */
+function normalizeBasePath(raw) {
+  // Collapse repeated slashes and trim whitespace
+  let path = raw.trim().replace(/\/{2,}/g, '/')
+
+  // Ensure leading slash
+  if (!path.startsWith('/')) path = '/' + path
+
+  // Ensure trailing slash (Vite requirement)
+  if (!path.endsWith('/')) path = path + '/'
+
+  // Root path means no base needed
+  if (path === '/') return undefined
+
+  return path
+}
+
+/**
  * Detect foundation type from the foundation config value
  *
  * @param {string|Object} foundation - Foundation config from site.yml
@@ -143,9 +171,9 @@ export async function defineSiteConfig(options = {}) {
   const siteConfig = readSiteConfig(siteRoot)
 
   // Determine base path for deployment (priority: option > env > site.yml)
-  // Ensures trailing slash for Vite compatibility
+  // Normalize: ensure leading slash, collapse repeated slashes, add trailing slash for Vite
   const rawBase = baseOption || process.env.UNIWEB_BASE || siteConfig.base
-  const base = rawBase ? (rawBase.endsWith('/') ? rawBase : `${rawBase}/`) : undefined
+  const base = rawBase ? normalizeBasePath(String(rawBase)) : undefined
 
   // Detect foundation type
   const foundationInfo = detectFoundationType(siteConfig.foundation, siteRoot)
