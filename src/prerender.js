@@ -556,6 +556,12 @@ export async function prerenderSite(siteDir, options = {}) {
     const uniweb = createUniweb(siteContent)
     uniweb.setFoundation(foundation)
 
+    // Set base path from site config so components can access it during SSR
+    // (e.g., <Link reload> needs basePath to prefix hrefs for subdirectory deployments)
+    if (siteContent.config?.base && uniweb.activeWebsite?.setBasePath) {
+      uniweb.activeWebsite.setBasePath(siteContent.config.base)
+    }
+
     // Set foundation capabilities (Layout, props, etc.)
     if (foundation.capabilities) {
       uniweb.setFoundationConfig(foundation.capabilities)
