@@ -335,6 +335,12 @@ function renderBlock(block) {
     }
   }
 
+  // Signal to the component if the author set a background in frontmatter
+  const hasBackground = !!block.standardOptions?.background?.mode
+  if (hasBackground) {
+    params = { ...params, _hasBackground: true }
+  }
+
   const componentProps = {
     content,
     params,
