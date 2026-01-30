@@ -76,6 +76,17 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
     }
   }
 
+  // Translate shared layout sections (header, footer, sidebars)
+  for (const layoutKey of ['header', 'footer', 'left', 'right']) {
+    const layoutPage = translated[layoutKey]
+    if (layoutPage?.sections) {
+      const pageRoute = layoutPage.route || `/@${layoutKey}`
+      for (const section of layoutPage.sections) {
+        translateSectionSync(section, pageRoute, translations, fallbackToSource)
+      }
+    }
+  }
+
   return translated
 }
 
@@ -114,6 +125,22 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
         locale,
         localesDir
       })
+    }
+  }
+
+  // Translate shared layout sections (header, footer, sidebars)
+  for (const layoutKey of ['header', 'footer', 'left', 'right']) {
+    const layoutPage = translated[layoutKey]
+    if (layoutPage?.sections) {
+      // Ensure route is set for context matching (extract uses /@header, etc.)
+      if (!layoutPage.route) layoutPage.route = `/@${layoutKey}`
+      for (const section of layoutPage.sections) {
+        await translateSectionAsync(section, layoutPage, translations, {
+          fallbackToSource,
+          locale,
+          localesDir
+        })
+      }
     }
   }
 

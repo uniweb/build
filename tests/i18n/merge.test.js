@@ -265,6 +265,117 @@ describe('mergeTranslations', () => {
     expect(translated.pages[0].sections[0].subsections[0].content.content[0].content[0].text).toBe('Rápido')
   })
 
+  it('translates header section content', () => {
+    const siteContent = {
+      pages: [],
+      header: {
+        route: '/@header',
+        sections: [{
+          id: '1',
+          content: {
+            type: 'doc',
+            content: [{
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'My Brand' }]
+            }]
+          }
+        }]
+      }
+    }
+    const translations = {
+      [computeHash('My Brand')]: 'Mi Marca'
+    }
+
+    const translated = mergeTranslations(siteContent, translations)
+
+    expect(translated.header.sections[0].content.content[0].content[0].text).toBe('Mi Marca')
+  })
+
+  it('translates footer section content', () => {
+    const siteContent = {
+      pages: [],
+      footer: {
+        route: '/@footer',
+        sections: [{
+          id: '1',
+          content: {
+            type: 'doc',
+            content: [{
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Copyright notice' }]
+            }]
+          }
+        }]
+      }
+    }
+    const translations = {
+      [computeHash('Copyright notice')]: 'Aviso de derechos'
+    }
+
+    const translated = mergeTranslations(siteContent, translations)
+
+    expect(translated.footer.sections[0].content.content[0].content[0].text).toBe('Aviso de derechos')
+  })
+
+  it('translates left and right sidebar sections', () => {
+    const siteContent = {
+      pages: [],
+      left: {
+        route: '/@left',
+        sections: [{
+          id: '1',
+          content: {
+            type: 'doc',
+            content: [{
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Navigation' }]
+            }]
+          }
+        }]
+      },
+      right: {
+        route: '/@right',
+        sections: [{
+          id: '1',
+          content: {
+            type: 'doc',
+            content: [{
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Sidebar' }]
+            }]
+          }
+        }]
+      }
+    }
+    const translations = {
+      [computeHash('Navigation')]: 'Navegación',
+      [computeHash('Sidebar')]: 'Barra lateral'
+    }
+
+    const translated = mergeTranslations(siteContent, translations)
+
+    expect(translated.left.sections[0].content.content[0].content[0].text).toBe('Navegación')
+    expect(translated.right.sections[0].content.content[0].content[0].text).toBe('Barra lateral')
+  })
+
+  it('skips layout sections that do not exist', () => {
+    const siteContent = {
+      pages: [{
+        route: '/',
+        title: 'Home',
+        sections: []
+      }]
+    }
+    const translations = {}
+
+    const translated = mergeTranslations(siteContent, translations)
+
+    expect(translated.header).toBeUndefined()
+    expect(translated.footer).toBeUndefined()
+    expect(translated.left).toBeUndefined()
+    expect(translated.right).toBeUndefined()
+  })
+
   it('preserves leading/trailing whitespace from original', () => {
     const siteContent = {
       pages: [{
