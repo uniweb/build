@@ -5,7 +5,7 @@
  * The runtime schema is optimized for size and contains only what's
  * needed at render time:
  *
- * - background: boolean for engine-level background handling
+ * - background: 'self' when component handles its own background
  * - data: { type, limit } for CMS entity binding
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
@@ -190,7 +190,8 @@ export function extractRuntimeSchema(fullMeta) {
 
   const runtime = {}
 
-  // Background handling (boolean or 'auto'/'manual')
+  // Background opt-out: 'self' means the component renders its own background
+  // layer (solid colors, insets, effects), so the runtime skips its Background.
   if (fullMeta.background) {
     runtime.background = fullMeta.background
   }

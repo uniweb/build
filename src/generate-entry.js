@@ -9,7 +9,7 @@
  * - `meta` - Per-component runtime metadata extracted from meta.js files
  *
  * The `meta` export contains only properties needed at runtime:
- * - `background` - Engine-level background image handling
+ * - `background` - 'self' opt-out when component handles its own background
  * - `data` - CMS entity binding ({ type, limit })
  * - `defaults` - Param default values
  * - `context` - Static capabilities for cross-block coordination
