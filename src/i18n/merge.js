@@ -67,6 +67,15 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
     }
   }
 
+  // Translate 404 page (stored as top-level notFound)
+  if (translated.notFound) {
+    const pageRoute = translated.notFound.route || '/404'
+    translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource)
+    for (const section of translated.notFound.sections || []) {
+      translateSectionSync(section, pageRoute, translations, fallbackToSource)
+    }
+  }
+
   return translated
 }
 
@@ -95,6 +104,19 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
     }
   }
 
+  // Translate 404 page (stored as top-level notFound)
+  if (translated.notFound) {
+    const pageRoute = translated.notFound.route || '/404'
+    translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource)
+    for (const section of translated.notFound.sections || []) {
+      await translateSectionAsync(section, translated.notFound, translations, {
+        fallbackToSource,
+        locale,
+        localesDir
+      })
+    }
+  }
+
   return translated
 }
 
@@ -107,6 +129,11 @@ function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
   // Translate title
   if (page.title && typeof page.title === 'string') {
     page.title = lookupTranslation(page.title, context, translations, fallbackToSource)
+  }
+
+  // Translate label (short navigation label)
+  if (page.label && typeof page.label === 'string') {
+    page.label = lookupTranslation(page.label, context, translations, fallbackToSource)
   }
 
   // Translate description

@@ -27,6 +27,16 @@ export function extractTranslatableContent(siteContent) {
     }
   }
 
+  // Extract from 404 page (stored as top-level notFound)
+  if (siteContent.notFound) {
+    const notFoundPage = siteContent.notFound
+    const pageRoute = notFoundPage.route || '/404'
+    extractFromPageMeta(notFoundPage, pageRoute, units)
+    for (const section of notFoundPage.sections || []) {
+      extractFromSection(section, pageRoute, units)
+    }
+  }
+
   // Extract from shared layout pages (header, footer, left, right panels)
   for (const layoutKey of ['header', 'footer', 'left', 'right']) {
     const layoutPage = siteContent[layoutKey]
@@ -59,6 +69,11 @@ function extractFromPageMeta(page, pageRoute, units) {
   // Page title
   if (page.title && typeof page.title === 'string') {
     addUnit(units, page.title, 'page.title', context)
+  }
+
+  // Page label (short navigation label, distinct from title)
+  if (page.label && typeof page.label === 'string') {
+    addUnit(units, page.label, 'page.label', context)
   }
 
   // Page description
