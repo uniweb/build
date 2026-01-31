@@ -48,9 +48,9 @@ const DEFAULT_EXTERNALS = [
  * @param {Object} [options={}] - Configuration options
  * @param {string} [options.entry] - Entry point path (default: 'src/_entry.generated.js')
  * @param {string} [options.fileName] - Output file name (default: 'foundation')
- * @param {string[]} [options.components] - Paths to search for components (relative to src/).
- *                                          Default: ['components']
- *                                          Example: ['components', 'components/sections']
+ * @param {string[]} [options.components] - Paths to scan for content interfaces (relative to src/).
+ *                                          Default: ['sections', 'components']
+ *                                          Example: ['sections', 'sections/marketing']
  * @param {string[]} [options.externals] - Additional packages to externalize
  * @param {boolean} [options.includeDefaultExternals] - Include default externals (default: true)
  * @param {Array} [options.plugins] - Additional Vite plugins

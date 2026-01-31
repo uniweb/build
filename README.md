@@ -367,7 +367,7 @@ Identity fields (`name`, `version`, `description`) come from the foundation's `p
 
 | Function | Description |
 |----------|-------------|
-| `discoverComponents(srcDir)` | Discover all exposed components |
+| `discoverComponents(srcDir)` | Discover all section types (folders with meta.js) |
 | `loadComponentMeta(componentDir)` | Load meta file for a component |
 | `loadPackageJson(srcDir)` | Load identity from package.json |
 | `loadFoundationConfig(srcDir)` | Load foundation.js configuration |

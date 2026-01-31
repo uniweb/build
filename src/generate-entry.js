@@ -112,10 +112,10 @@ function generateEntrySource(components, options = {}) {
     lines.push(`import capabilities from '${foundationExports.path}'`)
   }
 
-  // Component imports (use component's path and detected extension)
+  // Component imports
   for (const name of componentNames) {
-    const { path, ext = 'js' } = components[name]
-    lines.push(`import ${name} from './${path}/index.${ext}'`)
+    const { path, entryFile = `index.js` } = components[name]
+    lines.push(`import ${name} from './${path}/${entryFile}'`)
   }
 
   lines.push('')
@@ -153,19 +153,33 @@ function generateEntrySource(components, options = {}) {
 }
 
 /**
- * Detect the index file extension for a component
+ * Detect the entry file for a component
+ *
+ * Supports two conventions:
+ * - index.jsx (default)
+ * - ComponentName.jsx (named file matching the directory name)
+ *
+ * Named files are checked first so that Hero/Hero.jsx takes precedence
+ * over Hero/index.jsx when both exist (the named file is more intentional).
  *
  * @param {string} srcDir - Source directory
  * @param {string} componentPath - Relative path to component (e.g., 'components/Hero')
+ * @param {string} componentName - Component name (e.g., 'Hero')
+ * @returns {{ file: string, ext: string }} Entry file name and extension
  */
-function detectComponentExtension(srcDir, componentPath) {
+function detectComponentEntry(srcDir, componentPath, componentName) {
   const basePath = join(srcDir, componentPath)
   for (const ext of ['jsx', 'tsx', 'js', 'ts']) {
+    // Check named file first: Hero/Hero.jsx
+    if (existsSync(join(basePath, `${componentName}.${ext}`))) {
+      return { file: `${componentName}.${ext}`, ext }
+    }
+    // Then index file: Hero/index.jsx
     if (existsSync(join(basePath, `index.${ext}`))) {
-      return ext
+      return { file: `index.${ext}`, ext }
     }
   }
-  return 'js' // default
+  return { file: 'index.js', ext: 'js' } // default
 }
 
 /**
@@ -184,13 +198,15 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   const componentNames = Object.keys(components).sort()
 
   if (componentNames.length === 0) {
-    console.warn('Warning: No exposed components found')
+    console.warn('Warning: No section types found (no meta.js files discovered)')
   }
 
-  // Detect extensions for each component and add to component info
+  // Detect entry files for each component
   for (const name of componentNames) {
     const component = components[name]
-    component.ext = detectComponentExtension(srcDir, component.path)
+    const entry = detectComponentEntry(srcDir, component.path, component.name)
+    component.ext = entry.ext
+    component.entryFile = entry.file
   }
 
   // Check for CSS file

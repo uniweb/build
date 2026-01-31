@@ -16,8 +16,9 @@ const META_FILE_NAME = 'meta.js'
 // Foundation config file name
 const FOUNDATION_FILE_NAME = 'foundation.js'
 
-// Default component paths (relative to srcDir)
-const DEFAULT_COMPONENT_PATHS = ['components']
+// Default paths to scan for content interfaces (relative to srcDir)
+// sections/ is the primary convention; components/ supported for backward compatibility
+const DEFAULT_COMPONENT_PATHS = ['sections', 'components']
 
 /**
  * Load a meta.js file via dynamic import
@@ -135,7 +136,7 @@ async function discoverComponentsInPath(srcDir, relativePath) {
     const result = await loadComponentMeta(componentDir)
 
     if (result && result.meta) {
-      // Check if explicitly not exposed
+      // Check if explicitly hidden from discovery
       if (result.meta.exposed === false) {
         continue
       }
@@ -152,12 +153,16 @@ async function discoverComponentsInPath(srcDir, relativePath) {
 }
 
 /**
- * Discover all exposed components in a foundation
+ * Discover all section types in a foundation
+ *
+ * Scans directories for folders containing meta.js files.
+ * Each discovered folder becomes a section type — a component that content
+ * authors can reference by name in frontmatter (e.g., `type: Hero`).
  *
  * @param {string} srcDir - Source directory (e.g., 'src')
- * @param {string[]} [componentPaths] - Paths to search for components (relative to srcDir)
- *                                      Default: ['components']
- * @returns {Object} Map of componentName -> { name, path, ...meta }
+ * @param {string[]} [componentPaths] - Paths to scan for section types (relative to srcDir).
+ *                                      Default: ['sections', 'components']
+ * @returns {Object} Map of sectionTypeName -> { name, path, ...meta }
  */
 export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPONENT_PATHS) {
   const components = {}
@@ -210,10 +215,10 @@ export async function buildSchema(srcDir, componentPaths) {
 }
 
 /**
- * Get list of exposed component names
+ * Get list of section type names
  *
  * @param {string} srcDir - Source directory
- * @param {string[]} [componentPaths] - Paths to search for components
+ * @param {string[]} [componentPaths] - Paths to scan for section types
  */
 export async function getExposedComponents(srcDir, componentPaths) {
   const components = await discoverComponents(srcDir, componentPaths)
