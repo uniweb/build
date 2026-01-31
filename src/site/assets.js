@@ -130,8 +130,9 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
     return { src, resolved: null, external: true }
   }
 
-  // Already absolute path on filesystem
-  if (isAbsolute(src)) {
+  // Already absolute path on filesystem (e.g., /Users/foo/bar.jpg)
+  // Must actually exist — otherwise it's a site-relative path like /images/hero.jpg
+  if (isAbsolute(src) && existsSync(src)) {
     return { src, resolved: src, external: false }
   }
 
@@ -276,6 +277,27 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
           isImage: result.isImage,
           isVideo: result.isVideo,
           isPdf: result.isPdf
+        }
+      }
+    }
+  }
+
+  // Collect from structured background object
+  // Background can be { image: { src }, video: { src } } with nested asset paths
+  const bg = section.params?.background
+  if (bg && typeof bg === 'object') {
+    const bgSources = [bg.image?.src, bg.video?.src].filter(Boolean)
+    for (const src of bgSources) {
+      if (typeof src === 'string') {
+        const result = resolveAssetPath(src, markdownPath, siteRoot)
+        if (!result.external && result.resolved) {
+          assets[src] = {
+            original: src,
+            resolved: result.resolved,
+            isImage: result.isImage,
+            isVideo: result.isVideo,
+            isPdf: result.isPdf
+          }
         }
       }
     }

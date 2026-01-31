@@ -261,6 +261,18 @@ export function rewriteParamPaths(params, pathMapping) {
     }
   }
 
+  // Rewrite nested paths in structured background object
+  if (result.background && typeof result.background === 'object') {
+    const bg = { ...result.background }
+    if (bg.image?.src && pathMapping[bg.image.src]) {
+      bg.image = { ...bg.image, src: pathMapping[bg.image.src] }
+    }
+    if (bg.video?.src && pathMapping[bg.video.src]) {
+      bg.video = { ...bg.video, src: pathMapping[bg.video.src] }
+    }
+    result.background = bg
+  }
+
   return result
 }
 
