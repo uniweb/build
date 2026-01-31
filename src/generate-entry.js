@@ -198,15 +198,18 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   const componentNames = Object.keys(components).sort()
 
   if (componentNames.length === 0) {
-    console.warn('Warning: No section types found (no meta.js files discovered)')
+    console.warn('Warning: No section types found')
   }
 
   // Detect entry files for each component
+  // Bare files discovered in sections/ already have entryFile set — skip detection for those
   for (const name of componentNames) {
     const component = components[name]
-    const entry = detectComponentEntry(srcDir, component.path, component.name)
-    component.ext = entry.ext
-    component.entryFile = entry.file
+    if (!component.entryFile) {
+      const entry = detectComponentEntry(srcDir, component.path, component.name)
+      component.ext = entry.ext
+      component.entryFile = entry.file
+    }
   }
 
   // Check for CSS file

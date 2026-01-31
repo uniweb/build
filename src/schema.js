@@ -3,12 +3,18 @@
  *
  * Discovers component meta files and loads them for schema.json generation.
  * Schema data is for editor-time only, not runtime.
+ *
+ * Discovery rules:
+ * - sections/ root: bare files and folders are addressable by default (implicit empty meta)
+ * - sections/ nested: meta.js required for addressability
+ * - components/ (and other paths): meta.js required (backward compatibility)
  */
 
 import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { inferTitle } from './utils/infer-title.js'
 
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
@@ -19,6 +25,12 @@ const FOUNDATION_FILE_NAME = 'foundation.js'
 // Default paths to scan for content interfaces (relative to srcDir)
 // sections/ is the primary convention; components/ supported for backward compatibility
 const DEFAULT_COMPONENT_PATHS = ['sections', 'components']
+
+// Extensions recognized as component entry files
+const COMPONENT_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
+
+// The primary sections path where relaxed discovery applies
+const SECTIONS_PATH = 'sections'
 
 /**
  * Load a meta.js file via dynamic import
@@ -114,12 +126,173 @@ export async function loadFoundationMeta(srcDir) {
 }
 
 /**
- * Discover components in a single path
+ * Check if a filename looks like a PascalCase component (starts with uppercase)
+ */
+function isComponentFileName(name) {
+  return /^[A-Z]/.test(name)
+}
+
+/**
+ * Check if a directory has a valid entry file (Name.ext or index.ext)
+ */
+function hasEntryFile(dirPath, dirName) {
+  for (const ext of ['.jsx', '.tsx', '.js', '.ts']) {
+    if (existsSync(join(dirPath, `${dirName}${ext}`))) return true
+    if (existsSync(join(dirPath, `index${ext}`))) return true
+  }
+  return false
+}
+
+/**
+ * Create an implicit empty meta for a section type discovered without meta.js
+ */
+function createImplicitMeta(name) {
+  return { title: inferTitle(name) }
+}
+
+/**
+ * Build a component entry with title inference applied
+ */
+function buildComponentEntry(name, relativePath, meta) {
+  const entry = {
+    name,
+    path: relativePath,
+    ...meta,
+  }
+  // Apply title inference if meta has no explicit title
+  if (!entry.title) {
+    entry.title = inferTitle(name)
+  }
+  return entry
+}
+
+/**
+ * Discover section types in sections/ with relaxed rules
+ *
+ * Root level: bare files and folders are addressable by default.
+ * Nested levels: meta.js required for addressability.
+ *
  * @param {string} srcDir - Source directory (e.g., 'src')
- * @param {string} relativePath - Path relative to srcDir (e.g., 'components' or 'components/sections')
+ * @param {string} sectionsRelPath - Relative path to sections dir (e.g., 'sections')
+ */
+async function discoverSectionsInPath(srcDir, sectionsRelPath) {
+  const fullPath = join(srcDir, sectionsRelPath)
+
+  if (!existsSync(fullPath)) {
+    return {}
+  }
+
+  const entries = await readdir(fullPath, { withFileTypes: true })
+  const components = {}
+
+  // Collect names from both files and directories to detect collisions
+  const fileNames = new Set()
+  const dirNames = new Set()
+
+  for (const entry of entries) {
+    const ext = extname(entry.name)
+    if (entry.isFile() && COMPONENT_EXTENSIONS.has(ext)) {
+      const name = basename(entry.name, ext)
+      if (isComponentFileName(name)) {
+        fileNames.add(name)
+      }
+    } else if (entry.isDirectory()) {
+      dirNames.add(entry.name)
+    }
+  }
+
+  // Check for name collisions (e.g., Hero.jsx AND Hero/)
+  for (const name of fileNames) {
+    if (dirNames.has(name)) {
+      throw new Error(
+        `Name collision in ${sectionsRelPath}/: both "${name}.jsx" (or similar) and "${name}/" exist. ` +
+        `Use one or the other, not both.`
+      )
+    }
+  }
+
+  // Discover bare files at root
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const ext = extname(entry.name)
+    if (!COMPONENT_EXTENSIONS.has(ext)) continue
+    const name = basename(entry.name, ext)
+    if (!isComponentFileName(name)) continue
+
+    const meta = createImplicitMeta(name)
+    components[name] = {
+      ...buildComponentEntry(name, sectionsRelPath, meta),
+      // Bare file: the entry file IS the file itself (not inside a subdirectory)
+      entryFile: entry.name,
+    }
+  }
+
+  // Discover directories at root
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!isComponentFileName(entry.name)) continue
+
+    const dirPath = join(fullPath, entry.name)
+    const relativePath = join(sectionsRelPath, entry.name)
+    const result = await loadComponentMeta(dirPath)
+
+    if (result && result.meta) {
+      // Has meta.js — use explicit meta
+      if (result.meta.exposed === false) continue
+      components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
+    } else if (hasEntryFile(dirPath, entry.name)) {
+      // No meta.js but has entry file — implicit section type at root
+      components[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
+    }
+
+    // Recurse into subdirectories for nested section types (meta.js required)
+    await discoverNestedSections(srcDir, dirPath, relativePath, components)
+  }
+
+  return components
+}
+
+/**
+ * Recursively discover nested section types that have meta.js
+ *
+ * @param {string} srcDir - Source directory
+ * @param {string} parentFullPath - Absolute path to parent directory
+ * @param {string} parentRelPath - Relative path from srcDir to parent
+ * @param {Object} components - Accumulator for discovered components
+ */
+async function discoverNestedSections(srcDir, parentFullPath, parentRelPath, components) {
+  let entries
+  try {
+    entries = await readdir(parentFullPath, { withFileTypes: true })
+  } catch {
+    return
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+
+    const dirPath = join(parentFullPath, entry.name)
+    const relativePath = join(parentRelPath, entry.name)
+    const result = await loadComponentMeta(dirPath)
+
+    if (result && result.meta) {
+      if (result.meta.exposed === false) continue
+      components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
+    }
+
+    // Continue recursing regardless — deeper levels may have meta.js
+    await discoverNestedSections(srcDir, dirPath, relativePath, components)
+  }
+}
+
+/**
+ * Discover components in a non-sections path (meta.js required)
+ *
+ * @param {string} srcDir - Source directory (e.g., 'src')
+ * @param {string} relativePath - Path relative to srcDir (e.g., 'components')
  * @returns {Object} Map of componentName -> { name, path, ...meta }
  */
-async function discoverComponentsInPath(srcDir, relativePath) {
+async function discoverExplicitComponentsInPath(srcDir, relativePath) {
   const fullPath = join(srcDir, relativePath)
 
   if (!existsSync(fullPath)) {
@@ -141,11 +314,7 @@ async function discoverComponentsInPath(srcDir, relativePath) {
         continue
       }
 
-      components[entry.name] = {
-        name: entry.name,
-        path: join(relativePath, entry.name), // e.g., 'components/Hero' or 'components/sections/Hero'
-        ...result.meta,
-      }
+      components[entry.name] = buildComponentEntry(entry.name, join(relativePath, entry.name), result.meta)
     }
   }
 
@@ -155,9 +324,9 @@ async function discoverComponentsInPath(srcDir, relativePath) {
 /**
  * Discover all section types in a foundation
  *
- * Scans directories for folders containing meta.js files.
- * Each discovered folder becomes a section type — a component that content
- * authors can reference by name in frontmatter (e.g., `type: Hero`).
+ * For the 'sections' path: relaxed discovery (bare files and folders at root,
+ * meta.js required for nested levels).
+ * For other paths: strict discovery (meta.js required).
  *
  * @param {string} srcDir - Source directory (e.g., 'src')
  * @param {string[]} [componentPaths] - Paths to scan for section types (relative to srcDir).
@@ -168,7 +337,10 @@ export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPON
   const components = {}
 
   for (const relativePath of componentPaths) {
-    const found = await discoverComponentsInPath(srcDir, relativePath)
+    // Use relaxed discovery for the primary sections path
+    const found = relativePath === SECTIONS_PATH
+      ? await discoverSectionsInPath(srcDir, relativePath)
+      : await discoverExplicitComponentsInPath(srcDir, relativePath)
 
     for (const [name, meta] of Object.entries(found)) {
       if (components[name]) {
