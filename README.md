@@ -15,7 +15,7 @@ npm install @uniweb/build --save-dev
 ## Features
 
 **For Foundations:**
-- **Component Discovery** - Automatically discovers components from `src/components/*/meta.js`
+- **Component Discovery** - Discovers section types from `src/sections/` (implicit at root) and `src/components/` (requires `meta.js`)
 - **Entry Generation** - Generates the foundation entry point with all exports
 - **Schema Building** - Creates `schema.json` with full component metadata for editors
 - **Image Processing** - Converts preview images to WebP format
@@ -263,7 +263,7 @@ src/
 ### Component Meta File
 
 ```js
-// src/components/Hero/meta.js
+// src/sections/Hero/meta.js
 export default {
   title: 'Hero Banner',
   description: 'A prominent header section',
