@@ -543,7 +543,9 @@ function renderLayout(page, website) {
   }
 
   return React.createElement(React.Fragment, null,
-    headerElement, bodyElement, footerElement
+    headerElement && React.createElement('header', null, headerElement),
+    bodyElement && React.createElement('main', null, bodyElement),
+    footerElement && React.createElement('footer', null, footerElement)
   )
 }
 
@@ -551,9 +553,7 @@ function renderLayout(page, website) {
  * Create a page element for SSR
  */
 function createPageElement(page, website) {
-  return React.createElement('main', null,
-    renderLayout(page, website)
-  )
+  return renderLayout(page, website)
 }
 
 /**
