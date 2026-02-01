@@ -462,25 +462,16 @@ function renderBlock(block) {
   }
 
   // Build content and params with runtime guarantees
-  let content, params
-
-  if (block.parsedContent?._isPoc) {
-    content = block.parsedContent._pocContent
-    params = block.properties
-  } else {
-    const meta = getComponentMetaSSR(block.type)
-    const prepared = preparePropsSSR(block, meta)
-    params = prepared.params
-    content = {
-      ...prepared.content,
-      ...block.properties,
-      _prosemirror: block.parsedContent
-    }
+  const meta = getComponentMetaSSR(block.type)
+  const prepared = preparePropsSSR(block, meta)
+  let params = prepared.params
+  let content = {
+    ...prepared.content,
+    ...block.properties,
   }
 
   // Background handling (mirrors BlockRenderer.jsx)
   const { background, ...wrapperProps } = getWrapperProps(block)
-  const meta = getComponentMetaSSR(block.type)
   const hasBackground = background?.mode && meta?.background !== 'self'
 
   if (hasBackground) {
