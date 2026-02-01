@@ -262,6 +262,12 @@ export function extractRuntimeSchema(fullMeta) {
     runtime.inheritData = fullMeta.inheritData
   }
 
+  // Auto-derive inheritData from entity type when no explicit inherit is set.
+  // data: { entity: 'articles' } implies inheritData: ['articles']
+  if (runtime.data && runtime.inheritData === undefined) {
+    runtime.inheritData = [runtime.data.type]
+  }
+
   return Object.keys(runtime).length > 0 ? runtime : null
 }
 

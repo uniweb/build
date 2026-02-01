@@ -46,6 +46,7 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: 'events' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: null },
+        inheritData: ['events'],
       })
     })
 
@@ -53,6 +54,7 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: 'events:6' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
+        inheritData: ['events'],
       })
     })
 
@@ -60,6 +62,7 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: ' articles : 5 ' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'articles', limit: 5 },
+        inheritData: ['articles'],
       })
     })
 
@@ -67,6 +70,7 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: 'project:1' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'project', limit: 1 },
+        inheritData: ['project'],
       })
     })
 
@@ -82,6 +86,7 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: { entity: 'events:6' } }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
+        inheritData: ['events'],
       })
     })
 
@@ -89,6 +94,7 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: { entity: 'events' } }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: null },
+        inheritData: ['events'],
       })
     })
 
@@ -184,6 +190,7 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
         schemas: { event: { title: 'string' } },
+        inheritData: ['events'],
       })
     })
 
@@ -580,6 +587,7 @@ describe('extractRuntimeSchema', () => {
         background: true,
         data: { type: 'events', limit: 6 },
         defaults: { layout: 'grid', columns: 3 },
+        inheritData: ['events'],
       })
     })
 
@@ -647,6 +655,55 @@ describe('inheritData extraction', () => {
   })
 })
 
+describe('auto-derive inheritData from entity', () => {
+  it('derives inheritData from string data format', () => {
+    const meta = { data: 'articles:5' }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toEqual(['articles'])
+  })
+
+  it('derives inheritData from object entity format', () => {
+    const meta = { data: { entity: 'team' } }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toEqual(['team'])
+  })
+
+  it('explicit data.inherit array overrides auto-derive', () => {
+    const meta = { data: { entity: 'articles', inherit: ['articles', 'featured'] } }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toEqual(['articles', 'featured'])
+  })
+
+  it('explicit data.inherit: true overrides auto-derive', () => {
+    const meta = { data: { entity: 'articles', inherit: true } }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toBe(true)
+  })
+
+  it('explicit data.inherit: false overrides auto-derive', () => {
+    const meta = { data: { entity: 'articles', inherit: false } }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toBe(false)
+  })
+
+  it('top-level inheritData overrides auto-derive', () => {
+    const meta = { data: 'articles:5', inheritData: ['articles', 'featured'] }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toEqual(['articles', 'featured'])
+  })
+
+  it('does not derive when no entity is declared', () => {
+    const meta = { data: { schemas: { nav: { label: 'string' } } } }
+    const result = extractRuntimeSchema(meta)
+    expect(result.inheritData).toBeUndefined()
+  })
+
+  it('does not derive for empty data object', () => {
+    const result = extractRuntimeSchema({ data: {} })
+    expect(result).toBeNull()
+  })
+})
+
 describe('extractAllRuntimeSchemas', () => {
   it('extracts schemas for multiple components', () => {
     const componentsMeta = {
@@ -674,6 +731,7 @@ describe('extractAllRuntimeSchemas', () => {
       },
       Features: {
         data: { type: 'features', limit: 6 },
+        inheritData: ['features'],
       },
       // Text is excluded (no runtime properties)
     })
