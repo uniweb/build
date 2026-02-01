@@ -223,9 +223,6 @@ export function extractRuntimeSchema(fullMeta) {
       if (fullMeta.data.inherit !== undefined) {
         runtime.inheritData = fullMeta.data.inherit
       }
-      if (fullMeta.data.eager) {
-        runtime.eager = true
-      }
     }
   }
 

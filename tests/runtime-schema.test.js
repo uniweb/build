@@ -198,21 +198,8 @@ describe('extractRuntimeSchema', () => {
       })
     })
 
-    it('extracts eager: true from data object', () => {
+    it('ignores eager (removed — BlockRenderer always renders immediately)', () => {
       const meta = { data: { eager: true } }
-      expect(extractRuntimeSchema(meta)).toEqual({ eager: true })
-    })
-
-    it('extracts eager alongside entity', () => {
-      const meta = { data: { entity: 'events:6', eager: true } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: 6 },
-        eager: true,
-      })
-    })
-
-    it('does not extract eager: false', () => {
-      const meta = { data: { eager: false } }
       expect(extractRuntimeSchema(meta)).toBeNull()
     })
   })
