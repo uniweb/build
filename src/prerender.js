@@ -26,19 +26,19 @@ let preparePropsSSR, getComponentMetaSSR
  * @param {Object} siteContent - The site content from site-content.json
  * @param {string} siteDir - Path to the site directory
  * @param {function} onProgress - Progress callback
- * @returns {Object} { siteCascadedData, pageFetchedData } - Fetched data for dynamic route expansion
+ * @returns {Object} { pageFetchedData, fetchedData } - Fetched data for dynamic route expansion and DataStore pre-population
  */
 async function executeAllFetches(siteContent, siteDir, onProgress) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
+  const fetchedData = [] // Collected for DataStore pre-population
 
-  // 1. Site-level fetch (cascades to all pages)
-  let siteCascadedData = {}
+  // 1. Site-level fetch
   const siteFetch = siteContent.config?.fetch
   if (siteFetch && siteFetch.prerender !== false) {
     onProgress(`  Fetching site data: ${siteFetch.path || siteFetch.url}`)
     const result = await executeFetch(siteFetch, fetchOptions)
     if (result.data && !result.error) {
-      siteCascadedData[siteFetch.schema] = result.data
+      fetchedData.push({ config: siteFetch, data: result.data })
     }
   }
 
@@ -46,14 +46,13 @@ async function executeAllFetches(siteContent, siteDir, onProgress) {
   const pageFetchedData = new Map()
 
   for (const page of siteContent.pages || []) {
-    // Page-level fetch (cascades to sections in this page)
-    let pageCascadedData = { ...siteCascadedData }
+    // Page-level fetch
     const pageFetch = page.fetch
     if (pageFetch && pageFetch.prerender !== false) {
       onProgress(`  Fetching page data for ${page.route}: ${pageFetch.path || pageFetch.url}`)
       const result = await executeFetch(pageFetch, fetchOptions)
       if (result.data && !result.error) {
-        pageCascadedData[pageFetch.schema] = result.data
+        fetchedData.push({ config: pageFetch, data: result.data })
         // Store for dynamic route expansion
         pageFetchedData.set(page.route, {
           schema: pageFetch.schema,
@@ -62,11 +61,11 @@ async function executeAllFetches(siteContent, siteDir, onProgress) {
       }
     }
 
-    // Process sections recursively (handles subsections too)
-    await processSectionFetches(page.sections, pageCascadedData, fetchOptions, onProgress)
+    // Process section-level fetches (own fetch → parsedContent.data, not cascaded)
+    await processSectionFetches(page.sections, fetchOptions, onProgress)
   }
 
-  return { siteCascadedData, pageFetchedData }
+  return { pageFetchedData, fetchedData }
 }
 
 /**
@@ -142,12 +141,6 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
         allItems: items,      // All items from parent
       }
 
-      // Also inject into sections' cascadedData for components with data.inherit
-      injectDynamicData(concretePage.sections, {
-        [singularSchema]: item,  // Current item as singular
-        [schema]: items,          // All items as plural
-      })
-
       // Use item data for page metadata if available
       if (item.title) concretePage.title = item.title
       if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
@@ -160,37 +153,14 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
 }
 
 /**
- * Inject dynamic route data into section cascadedData
- * This ensures components with data.inherit receive the current item
- *
- * @param {Array} sections - Sections to update
- * @param {Object} data - Data to inject { article: {...}, articles: [...] }
- */
-function injectDynamicData(sections, data) {
-  if (!sections || !Array.isArray(sections)) return
-
-  for (const section of sections) {
-    section.cascadedData = {
-      ...(section.cascadedData || {}),
-      ...data,
-    }
-
-    // Recurse into subsections
-    if (section.subsections && section.subsections.length > 0) {
-      injectDynamicData(section.subsections, data)
-    }
-  }
-}
-
-/**
  * Process fetch configs for sections (and subsections recursively)
+ * Section-level fetches merge data into parsedContent.data (not cascaded).
  *
  * @param {Array} sections - Array of section objects
- * @param {Object} cascadedData - Data cascaded from site/page level
  * @param {Object} fetchOptions - Options for executeFetch
  * @param {function} onProgress - Progress callback
  */
-async function processSectionFetches(sections, cascadedData, fetchOptions, onProgress) {
+async function processSectionFetches(sections, fetchOptions, onProgress) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
@@ -210,12 +180,9 @@ async function processSectionFetches(sections, cascadedData, fetchOptions, onPro
       }
     }
 
-    // Attach cascaded data for components with data.inherit
-    section.cascadedData = cascadedData
-
     // Process subsections recursively
     if (section.subsections && section.subsections.length > 0) {
-      await processSectionFetches(section.subsections, cascadedData, fetchOptions, onProgress)
+      await processSectionFetches(section.subsections, fetchOptions, onProgress)
     }
   }
 }
@@ -668,7 +635,10 @@ export async function prerenderSite(siteDir, options = {}) {
 
     // Execute data fetches (site, page, section levels)
     onProgress('Executing data fetches...')
-    const { siteCascadedData, pageFetchedData } = await executeAllFetches(siteContent, siteDir, onProgress)
+    const { pageFetchedData, fetchedData } = await executeAllFetches(siteContent, siteDir, onProgress)
+
+    // Store fetchedData on siteContent for runtime DataStore pre-population
+    siteContent.fetchedData = fetchedData
 
     // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
     if (siteContent.pages?.some(p => p.isDynamic)) {
@@ -683,6 +653,14 @@ export async function prerenderSite(siteDir, options = {}) {
     // Initialize the Uniweb runtime for this locale
     onProgress('Initializing runtime...')
     const uniweb = createUniweb(siteContent)
+
+    // Pre-populate DataStore so EntityStore can resolve data during prerender
+    if (fetchedData.length > 0 && uniweb.activeWebsite?.dataStore) {
+      for (const entry of fetchedData) {
+        uniweb.activeWebsite.dataStore.set(entry.config, entry.data)
+      }
+    }
+
     uniweb.setFoundation(foundation)
 
     // Set base path from site config so components can access it during SSR

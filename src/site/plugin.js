@@ -41,50 +41,51 @@ import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 
 /**
  * Execute all fetches for site content (used in dev mode)
- * Populates section.cascadedData with fetched data
+ * Collects fetchedData for DataStore pre-population at runtime
  *
  * @param {Object} siteContent - The collected site content
  * @param {string} siteDir - Path to site directory
  */
 async function executeDevFetches(siteContent, siteDir) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
+  const fetchedData = []
 
   // Site-level fetch
-  let siteCascadedData = {}
   const siteFetch = siteContent.config?.fetch
   if (siteFetch) {
     const result = await executeFetch(siteFetch, fetchOptions)
     if (result.data && !result.error) {
-      siteCascadedData[siteFetch.schema] = result.data
+      fetchedData.push({ config: siteFetch, data: result.data })
     }
   }
 
   // Process each page
   for (const page of siteContent.pages || []) {
-    let pageCascadedData = { ...siteCascadedData }
-
     // Page-level fetch
     const pageFetch = page.fetch
     if (pageFetch) {
       const result = await executeFetch(pageFetch, fetchOptions)
       if (result.data && !result.error) {
-        pageCascadedData[pageFetch.schema] = result.data
+        fetchedData.push({ config: pageFetch, data: result.data })
       }
     }
 
-    // Process sections
-    await processDevSectionFetches(page.sections, pageCascadedData, fetchOptions)
+    // Process section-level fetches (own fetch → parsedContent.data)
+    await processDevSectionFetches(page.sections, fetchOptions)
   }
+
+  // Store on siteContent for runtime DataStore pre-population
+  siteContent.fetchedData = fetchedData
 }
 
 /**
  * Process fetches for sections recursively
+ * Section-level fetches merge data into parsedContent.data (not cascaded).
  *
  * @param {Array} sections - Sections to process
- * @param {Object} cascadedData - Data from parent levels
  * @param {Object} fetchOptions - Options for executeFetch
  */
-async function processDevSectionFetches(sections, cascadedData, fetchOptions) {
+async function processDevSectionFetches(sections, fetchOptions) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
@@ -104,13 +105,9 @@ async function processDevSectionFetches(sections, cascadedData, fetchOptions) {
       }
     }
 
-    // Attach cascaded data for components with inheritData
-    // Note: cascadedData is from page/site level only, not section's own fetch
-    section.cascadedData = cascadedData
-
     // Process subsections recursively
     if (section.subsections && section.subsections.length > 0) {
-      await processDevSectionFetches(section.subsections, cascadedData, fetchOptions)
+      await processDevSectionFetches(section.subsections, fetchOptions)
     }
   }
 }
