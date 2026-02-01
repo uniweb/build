@@ -474,9 +474,7 @@ function renderBlock(block) {
   const { background, ...wrapperProps } = getWrapperProps(block)
   const hasBackground = background?.mode && meta?.background !== 'self'
 
-  if (hasBackground) {
-    params = { ...params, _hasBackground: true }
-  }
+  block.hasBackground = hasBackground
 
   const componentProps = { content, params, block }
 
