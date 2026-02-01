@@ -248,6 +248,7 @@ export function parseFetchConfig(fetch) {
     prerender = true,
     merge = false,
     transform,
+    detail,
     // Post-processing options (also supported for path/url fetches)
     limit,
     sort,
@@ -264,6 +265,7 @@ export function parseFetchConfig(fetch) {
     prerender,
     merge,
     transform,
+    detail,
     // Post-processing options
     limit,
     sort,
