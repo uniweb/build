@@ -142,7 +142,7 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
         allItems: items,      // All items from parent
       }
 
-      // Also inject into sections' cascadedData for components with inheritData
+      // Also inject into sections' cascadedData for components with data.inherit
       injectDynamicData(concretePage.sections, {
         [singularSchema]: item,  // Current item as singular
         [schema]: items,          // All items as plural
@@ -161,7 +161,7 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
 
 /**
  * Inject dynamic route data into section cascadedData
- * This ensures components with inheritData receive the current item
+ * This ensures components with data.inherit receive the current item
  *
  * @param {Array} sections - Sections to update
  * @param {Object} data - Data to inject { article: {...}, articles: [...] }
@@ -210,7 +210,7 @@ async function processSectionFetches(sections, cascadedData, fetchOptions, onPro
       }
     }
 
-    // Attach cascaded data for components with inheritData
+    // Attach cascaded data for components with data.inherit
     section.cascadedData = cascadedData
 
     // Process subsections recursively

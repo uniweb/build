@@ -77,6 +77,128 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
+  describe('consolidated data object format', () => {
+    it('extracts entity from data object', () => {
+      const meta = { data: { entity: 'events:6' } }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'events', limit: 6 },
+      })
+    })
+
+    it('extracts entity without limit', () => {
+      const meta = { data: { entity: 'events' } }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'events', limit: null },
+      })
+    })
+
+    it('extracts all three subfields', () => {
+      const meta = {
+        data: {
+          entity: 'person:6',
+          schemas: { team: { name: 'string', role: 'string' } },
+          inherit: true,
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'person', limit: 6 },
+        schemas: { team: { name: 'string', role: 'string' } },
+        inheritData: true,
+      })
+    })
+
+    it('extracts schemas without entity', () => {
+      const meta = {
+        data: {
+          schemas: { nav: { label: 'string', href: 'string' } },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: { nav: { label: 'string', href: 'string' } },
+      })
+    })
+
+    it('extracts inherit without entity', () => {
+      const meta = { data: { inherit: ['team'] } }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        inheritData: ['team'],
+      })
+    })
+
+    it('extracts inherit: false', () => {
+      const meta = { data: { inherit: false } }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        inheritData: false,
+      })
+    })
+
+    it('returns null for empty data object', () => {
+      expect(extractRuntimeSchema({ data: {} })).toBeNull()
+    })
+
+    it('ignores empty entity string in data object', () => {
+      const meta = { data: { entity: '' } }
+      expect(extractRuntimeSchema(meta)).toBeNull()
+    })
+
+    it('data.schemas takes priority over top-level schemas', () => {
+      const meta = {
+        data: {
+          schemas: { nav: { label: 'string' } },
+        },
+        schemas: { nav: { label: 'string', href: 'string' } },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: { nav: { label: 'string' } },
+      })
+    })
+
+    it('data.inherit takes priority over top-level inheritData', () => {
+      const meta = {
+        data: { inherit: ['team'] },
+        inheritData: true,
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        inheritData: ['team'],
+      })
+    })
+
+    it('old top-level format still works', () => {
+      const meta = {
+        data: 'events:6',
+        schemas: { event: { title: 'string' } },
+        inheritData: true,
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'events', limit: 6 },
+        schemas: { event: { title: 'string' } },
+        inheritData: true,
+      })
+    })
+
+    it('top-level schemas used when data object has no schemas', () => {
+      const meta = {
+        data: { entity: 'events:6' },
+        schemas: { event: { title: 'string' } },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'events', limit: 6 },
+        schemas: { event: { title: 'string' } },
+      })
+    })
+
+    it('top-level inheritData used when data object has no inherit', () => {
+      const meta = {
+        data: { entity: 'events:6' },
+        inheritData: ['event'],
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'events', limit: 6 },
+        inheritData: ['event'],
+      })
+    })
+  })
+
   describe('param defaults extraction', () => {
     it('extracts defaults from params', () => {
       const meta = {

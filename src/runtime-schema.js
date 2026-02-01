@@ -197,10 +197,32 @@ export function extractRuntimeSchema(fullMeta) {
   }
 
   // Data binding (CMS entities)
+  // Supports both old format (data: 'person:6') and new consolidated format
+  // (data: { entity: 'person:6', schemas: {...}, inherit: [...] })
   if (fullMeta.data) {
-    const parsed = parseDataString(fullMeta.data)
-    if (parsed) {
-      runtime.data = parsed
+    if (typeof fullMeta.data === 'string') {
+      // Old format: data: 'person:6'
+      const parsed = parseDataString(fullMeta.data)
+      if (parsed) {
+        runtime.data = parsed
+      }
+    } else if (typeof fullMeta.data === 'object') {
+      // New format: data: { entity, schemas, inherit }
+      if (fullMeta.data.entity) {
+        const parsed = parseDataString(fullMeta.data.entity)
+        if (parsed) {
+          runtime.data = parsed
+        }
+      }
+      if (fullMeta.data.schemas) {
+        const schemas = extractSchemas(fullMeta.data.schemas)
+        if (schemas) {
+          runtime.schemas = schemas
+        }
+      }
+      if (fullMeta.data.inherit !== undefined) {
+        runtime.inheritData = fullMeta.data.inherit
+      }
     }
   }
 
@@ -225,7 +247,8 @@ export function extractRuntimeSchema(fullMeta) {
 
   // Schemas - lean version for runtime validation/defaults
   // Strips editor-only fields (label, hint, description)
-  if (fullMeta.schemas) {
+  // Top-level schemas supported for backwards compat (lower priority than data.schemas)
+  if (fullMeta.schemas && !runtime.schemas) {
     const schemas = extractSchemas(fullMeta.schemas)
     if (schemas) {
       runtime.schemas = schemas
@@ -234,7 +257,8 @@ export function extractRuntimeSchema(fullMeta) {
 
   // Data inheritance - component receives cascaded data from page/site level fetches
   // Can be: true (inherit all), false (inherit none), or ['schema1', 'schema2'] (selective)
-  if (fullMeta.inheritData !== undefined) {
+  // Top-level inheritData supported for backwards compat (lower priority than data.inherit)
+  if (fullMeta.inheritData !== undefined && runtime.inheritData === undefined) {
     runtime.inheritData = fullMeta.inheritData
   }
 
