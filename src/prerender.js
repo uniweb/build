@@ -449,7 +449,8 @@ function renderBackground(background) {
 
 /**
  * Render a single block for SSR
- * Mirrors BlockRenderer.jsx but without hooks (no runtime data fetching in SSR)
+ * Mirrors BlockRenderer.jsx but without hooks (no runtime data fetching in SSR).
+ * block.dataLoading is always false at prerender time — runtime fetches only happen client-side.
  */
 function renderBlock(block) {
   const Component = block.initComponent()
