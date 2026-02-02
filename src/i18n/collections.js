@@ -3,15 +3,407 @@
  *
  * Extract translatable strings from collection items and merge translations.
  * Collections are separate from page content (stored in public/data/*.json).
+ *
+ * Supports three extraction modes:
+ * 1. Schema-guided — companion .schema.js or standard @uniweb/schemas
+ * 2. Heuristic — recursive walk, extract all strings, skip structural patterns
+ * 3. Legacy — flat field list (fallback within heuristic)
  */
 
 import { readFile, writeFile, readdir, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { computeHash } from './hash.js'
 import { loadFreeformCollectionItem } from './freeform.js'
 
 export const COLLECTIONS_DIR = 'collections'
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Types that are never translatable regardless of schema */
+const NON_TRANSLATABLE_TYPES = new Set([
+  'number', 'boolean', 'date', 'datetime', 'url', 'email', 'image'
+])
+
+/** Field names skipped by the heuristic extractor (structural, not human-readable) */
+const HEURISTIC_SKIP_FIELDS = new Set([
+  'slug', 'id', 'type', 'status', 'href', 'url', 'src', 'icon',
+  'target', 'email', 'phone', 'orcid', 'doi', 'arxiv', 'isbn',
+  'pmid', 'bibtex', 'pdf', 'code', 'data', 'slides', 'video',
+  'repository', 'caseStudy', 'website', 'avatar', 'image',
+  'thumbnail', 'currency', 'order', 'hidden', 'current',
+  'featured', 'published', 'allDay', 'remote', 'hybrid',
+  'noindex', 'corresponding', 'required', 'virtual',
+  'lastModified', 'date', 'updated', 'posted', 'submitted',
+  'accepted', 'startDate', 'endDate', 'deadline',
+  'readTime', 'citations', 'capacity', 'volume', 'issue', 'pages',
+  'time', 'timezone',
+])
+
+/** String patterns that indicate non-translatable values */
+const HEURISTIC_SKIP_PATTERNS = [
+  /^https?:\/\//,                  // URLs
+  /^mailto:/,                      // mailto links
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/,   // email addresses
+  /^\d{4}-\d{2}-\d{2}/,           // ISO dates
+  /^#[0-9a-fA-F]{3,8}$/,          // hex colors
+  /^[\w./\\-]+\.\w{2,4}$/,        // file paths (e.g., ./logo.svg, /img/hero.jpg)
+  /^[A-Z]{3}$/,                   // currency codes (USD, EUR)
+  /^\d+(\.\d+)?$/,                // plain numbers as strings
+  /^\d{1,2}:\d{2}(:\d{2})?$/,    // times (09:00, 14:30:00)
+]
+
+/** Max recursion depth for heuristic extraction */
+const MAX_HEURISTIC_DEPTH = 5
+
+// ---------------------------------------------------------------------------
+// Schema resolution
+// ---------------------------------------------------------------------------
+
+/** Cache for resolved schemas (collection name → schema or null) */
+const schemaCache = new Map()
+
+/**
+ * Resolve schema for a collection.
+ *
+ * Discovery order:
+ * 1. Companion file: public/data/<name>.schema.js (ESM default export)
+ * 2. Standard schema: @uniweb/schemas by collection name (with naive singularization)
+ * 3. null (no schema found → heuristic fallback)
+ *
+ * @param {string} collectionName
+ * @param {string} siteRoot
+ * @returns {Promise<Object|null>}
+ */
+async function resolveSchema(collectionName, siteRoot) {
+  if (schemaCache.has(collectionName)) {
+    return schemaCache.get(collectionName)
+  }
+
+  let schema = null
+
+  // 1. Companion schema file
+  const companionPath = join(siteRoot, 'public', 'data', `${collectionName}.schema.js`)
+  if (existsSync(companionPath)) {
+    try {
+      const mod = await import(pathToFileURL(companionPath).href)
+      schema = mod.default || mod
+      schemaCache.set(collectionName, schema)
+      return schema
+    } catch (err) {
+      console.warn(`[i18n] Failed to load companion schema ${companionPath}: ${err.message}`)
+    }
+  }
+
+  // 2. Standard schema from @uniweb/schemas (try exact name + singularized)
+  try {
+    const schemasModule = await import('@uniweb/schemas')
+    const names = [collectionName, singularize(collectionName)]
+
+    for (const name of names) {
+      if (schemasModule.schemas?.[name]) {
+        schema = schemasModule.schemas[name]
+        break
+      }
+    }
+  } catch {
+    // @uniweb/schemas not installed — that's fine
+  }
+
+  schemaCache.set(collectionName, schema)
+  return schema
+}
+
+/**
+ * Naive singularization for schema lookup.
+ * Handles common plural suffixes: articles→article, opportunities→opportunity
+ */
+function singularize(name) {
+  if (name.endsWith('ies')) return name.slice(0, -3) + 'y'
+  if (name.endsWith('ses') || name.endsWith('xes') || name.endsWith('zes')) return name.slice(0, -2)
+  if (name.endsWith('s') && !name.endsWith('ss')) return name.slice(0, -1)
+  return name
+}
+
+// ---------------------------------------------------------------------------
+// Field translatability
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine if a schema field should be extracted for translation.
+ *
+ * @param {Object} fieldDef - Schema field definition
+ * @returns {'yes'|'no'|'recurse'} Whether the field is translatable
+ */
+function isFieldTranslatable(fieldDef) {
+  // Explicit override always wins
+  if (fieldDef.translatable === true) return 'yes'
+  if (fieldDef.translatable === false) return 'no'
+
+  const type = fieldDef.type
+
+  // Types that are never translatable
+  if (NON_TRANSLATABLE_TYPES.has(type)) return 'no'
+
+  // Markdown is always translatable
+  if (type === 'markdown') return 'yes'
+
+  // Strings with enum default to NOT translatable (status codes, types)
+  if (type === 'string' && fieldDef.enum) return 'no'
+
+  // Plain strings default to translatable
+  if (type === 'string') return 'yes'
+
+  // Objects and arrays: recurse into their nested definitions
+  if (type === 'object' || type === 'array') return 'recurse'
+
+  // Unknown types: skip
+  return 'no'
+}
+
+// ---------------------------------------------------------------------------
+// Schema-guided extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract translatable fields from an item using a schema.
+ *
+ * @param {Object} item - Data item
+ * @param {Object} schema - Schema with `fields`
+ * @param {string} collectionName
+ * @param {Object} units - Accumulator
+ */
+function extractWithSchema(item, schema, collectionName, units) {
+  const slug = item.slug || item.id || item.name || 'unknown'
+  const context = { collection: collectionName, item: slug }
+
+  extractFromItemWithSchema(item, schema.fields, '', context, units)
+
+  // Also extract ProseMirror content body (not covered by schema fields)
+  if (item.content?.type === 'doc') {
+    extractFromProseMirrorDoc(item.content, context, units)
+  }
+}
+
+/**
+ * Recursively extract translatable fields guided by schema.
+ */
+function extractFromItemWithSchema(data, fields, pathPrefix, context, units) {
+  if (!data || typeof data !== 'object') return
+
+  for (const [fieldName, fieldDef] of Object.entries(fields)) {
+    const value = data[fieldName]
+    if (value === undefined || value === null) continue
+
+    const fieldPath = pathPrefix ? `${pathPrefix}.${fieldName}` : fieldName
+    const translatable = isFieldTranslatable(fieldDef)
+
+    if (translatable === 'yes') {
+      if (typeof value === 'string' && value.trim()) {
+        addUnit(units, value, fieldPath, context)
+      }
+    } else if (translatable === 'recurse') {
+      if (fieldDef.type === 'object' && fieldDef.fields && typeof value === 'object' && !Array.isArray(value)) {
+        extractFromItemWithSchema(value, fieldDef.fields, fieldPath, context, units)
+      } else if (fieldDef.type === 'array' && Array.isArray(value)) {
+        const itemDef = fieldDef.items
+        if (itemDef) {
+          value.forEach((elem, i) => {
+            const elemPath = `${fieldPath}[${i}]`
+            if (itemDef.type === 'object' && itemDef.fields && typeof elem === 'object') {
+              extractFromItemWithSchema(elem, itemDef.fields, elemPath, context, units)
+            } else if (itemDef.type === 'string') {
+              // Array of strings — check item-level translatable
+              const itemTranslatable = isFieldTranslatable(itemDef)
+              if (itemTranslatable === 'yes' && typeof elem === 'string' && elem.trim()) {
+                addUnit(units, elem, elemPath, context)
+              }
+            }
+          })
+        }
+      }
+    }
+    // translatable === 'no' → skip
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Heuristic extraction (no schema)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract translatable fields from an item using heuristics.
+ * Recursively walks the data, extracting strings that look like human-readable text.
+ */
+function extractHeuristic(item, collectionName, units) {
+  const slug = item.slug || item.id || item.name || 'unknown'
+  const context = { collection: collectionName, item: slug }
+
+  extractFromItemHeuristic(item, '', context, units, 0)
+
+  // Also extract ProseMirror content body
+  if (item.content?.type === 'doc') {
+    extractFromProseMirrorDoc(item.content, context, units)
+  }
+}
+
+/**
+ * Recursively extract strings that look translatable.
+ */
+function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
+  if (!data || typeof data !== 'object' || depth > MAX_HEURISTIC_DEPTH) return
+
+  const entries = Array.isArray(data)
+    ? data.map((v, i) => [`[${i}]`, v])
+    : Object.entries(data)
+
+  for (const [key, value] of entries) {
+    // Build the field path
+    const fieldPath = Array.isArray(data)
+      ? `${pathPrefix}${key}`
+      : (pathPrefix ? `${pathPrefix}.${key}` : key)
+
+    if (value === undefined || value === null) continue
+
+    // Skip ProseMirror content (handled separately)
+    if (key === 'content' && typeof value === 'object' && value?.type === 'doc') continue
+
+    if (typeof value === 'string') {
+      // Skip known structural field names
+      if (!Array.isArray(data) && HEURISTIC_SKIP_FIELDS.has(key)) continue
+
+      // Skip strings matching structural patterns
+      if (isStructuralString(value)) continue
+
+      // Must have non-empty trimmed content
+      if (!value.trim()) continue
+
+      addUnit(units, value, fieldPath, context)
+    } else if (typeof value === 'object') {
+      // Recurse into objects and arrays
+      extractFromItemHeuristic(value, fieldPath, context, units, depth + 1)
+    }
+    // Skip numbers, booleans
+  }
+}
+
+/**
+ * Check if a string value looks structural (not human-readable).
+ */
+function isStructuralString(value) {
+  return HEURISTIC_SKIP_PATTERNS.some(pattern => pattern.test(value))
+}
+
+// ---------------------------------------------------------------------------
+// Schema-guided translation
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate item fields using schema guidance.
+ */
+function translateWithSchema(item, schema, context, translations, includeContent = true) {
+  const translated = { ...item }
+  translateItemWithSchema(translated, schema.fields, context, translations)
+
+  // Translate ProseMirror content
+  if (includeContent && translated.content?.type === 'doc') {
+    translated.content = translateProseMirrorDoc(translated.content, context, translations)
+  }
+
+  return translated
+}
+
+/**
+ * Recursively translate fields guided by schema.
+ */
+function translateItemWithSchema(data, fields, context, translations) {
+  if (!data || typeof data !== 'object') return
+
+  for (const [fieldName, fieldDef] of Object.entries(fields)) {
+    const value = data[fieldName]
+    if (value === undefined || value === null) continue
+
+    const translatable = isFieldTranslatable(fieldDef)
+
+    if (translatable === 'yes') {
+      if (typeof value === 'string') {
+        data[fieldName] = lookupTranslation(value, context, translations)
+      }
+    } else if (translatable === 'recurse') {
+      if (fieldDef.type === 'object' && fieldDef.fields && typeof value === 'object' && !Array.isArray(value)) {
+        translateItemWithSchema(value, fieldDef.fields, context, translations)
+      } else if (fieldDef.type === 'array' && Array.isArray(value)) {
+        const itemDef = fieldDef.items
+        if (itemDef) {
+          value.forEach((elem, i) => {
+            if (itemDef.type === 'object' && itemDef.fields && typeof elem === 'object') {
+              translateItemWithSchema(elem, itemDef.fields, context, translations)
+            } else if (itemDef.type === 'string') {
+              const itemTranslatable = isFieldTranslatable(itemDef)
+              if (itemTranslatable === 'yes' && typeof elem === 'string') {
+                value[i] = lookupTranslation(elem, context, translations)
+              }
+            }
+          })
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Heuristic translation (no schema)
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate item fields using heuristics.
+ */
+function translateHeuristic(item, context, translations, includeContent = true) {
+  const translated = { ...item }
+  translateItemHeuristic(translated, context, translations, 0)
+
+  if (includeContent && translated.content?.type === 'doc') {
+    translated.content = translateProseMirrorDoc(translated.content, context, translations)
+  }
+
+  return translated
+}
+
+/**
+ * Recursively translate strings that look translatable.
+ */
+function translateItemHeuristic(data, context, translations, depth) {
+  if (!data || typeof data !== 'object' || depth > MAX_HEURISTIC_DEPTH) return
+
+  const keys = Array.isArray(data)
+    ? data.map((_, i) => i)
+    : Object.keys(data)
+
+  for (const key of keys) {
+    const value = data[key]
+    if (value === undefined || value === null) continue
+
+    // Skip ProseMirror content (handled separately)
+    if (key === 'content' && typeof value === 'object' && value?.type === 'doc') continue
+
+    if (typeof value === 'string') {
+      if (!Array.isArray(data) && HEURISTIC_SKIP_FIELDS.has(key)) continue
+      if (isStructuralString(value)) continue
+      if (!value.trim()) continue
+
+      data[key] = lookupTranslation(value, context, translations)
+    } else if (typeof value === 'object') {
+      translateItemHeuristic(value, context, translations, depth + 1)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main extraction entry point
+// ---------------------------------------------------------------------------
 
 /**
  * Extract translatable content from all collections
@@ -47,8 +439,15 @@ export async function extractCollectionContent(siteRoot, options = {}) {
 
       if (!Array.isArray(items)) continue
 
+      // Resolve schema once per collection
+      const schema = await resolveSchema(collectionName, siteRoot)
+
       for (const item of items) {
-        extractFromItem(item, collectionName, units)
+        if (schema?.fields) {
+          extractWithSchema(item, schema, collectionName, units)
+        } else {
+          extractHeuristic(item, collectionName, units)
+        }
       }
     } catch (err) {
       // Skip files that can't be parsed
@@ -63,54 +462,12 @@ export async function extractCollectionContent(siteRoot, options = {}) {
   }
 }
 
-/**
- * Extract translatable strings from a collection item
- * @param {Object} item - Collection item
- * @param {string} collectionName - Name of the collection
- * @param {Object} units - Units accumulator
- */
-function extractFromItem(item, collectionName, units) {
-  const slug = item.slug || 'unknown'
-  const context = { collection: collectionName, item: slug }
-
-  // Extract string fields from frontmatter
-  // Common translatable fields
-  const translatableFields = ['title', 'description', 'excerpt', 'summary', 'subtitle']
-
-  for (const field of translatableFields) {
-    if (item[field] && typeof item[field] === 'string' && item[field].trim()) {
-      addUnit(units, item[field], field, context)
-    }
-  }
-
-  // Extract from tags/categories if they're strings
-  if (Array.isArray(item.tags)) {
-    item.tags.forEach((tag, i) => {
-      if (typeof tag === 'string' && tag.trim()) {
-        addUnit(units, tag, `tag.${i}`, context)
-      }
-    })
-  }
-
-  if (Array.isArray(item.categories)) {
-    item.categories.forEach((cat, i) => {
-      if (typeof cat === 'string' && cat.trim()) {
-        addUnit(units, cat, `category.${i}`, context)
-      }
-    })
-  }
-
-  // Extract from ProseMirror content body
-  if (item.content?.type === 'doc') {
-    extractFromProseMirrorDoc(item.content, context, units)
-  }
-}
+// ---------------------------------------------------------------------------
+// ProseMirror extraction helpers (unchanged)
+// ---------------------------------------------------------------------------
 
 /**
  * Extract from ProseMirror document
- * @param {Object} doc - ProseMirror document
- * @param {Object} context - Context for the item
- * @param {Object} units - Units accumulator
  */
 function extractFromProseMirrorDoc(doc, context, units) {
   if (!doc.content) return
@@ -169,6 +526,10 @@ function extractTextFromNode(node) {
     .trim()
 }
 
+// ---------------------------------------------------------------------------
+// Unit accumulator
+// ---------------------------------------------------------------------------
+
 /**
  * Add a translation unit to the accumulator
  */
@@ -195,6 +556,10 @@ function addUnit(units, source, field, context) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Translation entry points
+// ---------------------------------------------------------------------------
 
 /**
  * Merge translations into collection data and write locale-specific files
@@ -271,10 +636,13 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
           continue
         }
 
+        // Resolve schema once per collection
+        const schema = await resolveSchema(collectionName, siteRoot)
+
         // Translate each item (with free-form support)
         const translatedItems = await Promise.all(
           items.map(item =>
-            translateItemAsync(item, collectionName, translations, {
+            translateItemAsync(item, collectionName, translations, schema, {
               locale,
               localesDir,
               freeformEnabled: hasFreeform
@@ -299,18 +667,12 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
  *
  * Resolution order:
  * 1. Check for free-form translation (complete or partial replacement)
- * 2. Fall back to hash-based translation
- *
- * @param {Object} item - Collection item
- * @param {string} collectionName - Name of the collection
- * @param {Object} translations - Hash-based translations
- * @param {Object} options - Options
- * @returns {Promise<Object>} Translated item
+ * 2. Fall back to hash-based translation (schema-guided or heuristic)
  */
-async function translateItemAsync(item, collectionName, translations, options = {}) {
+async function translateItemAsync(item, collectionName, translations, schema, options = {}) {
   const { locale, localesDir, freeformEnabled } = options
   const translated = { ...item }
-  const slug = item.slug || 'unknown'
+  const slug = item.slug || item.id || item.name || 'unknown'
   const context = { collection: collectionName, item: slug }
 
   // Check for free-form translation first
@@ -320,96 +682,41 @@ async function translateItemAsync(item, collectionName, translations, options = 
     if (freeform) {
       // Merge free-form data (supports partial: frontmatter only, body only, or both)
       if (freeform.frontmatter) {
-        // Merge frontmatter fields from free-form
         Object.assign(translated, freeform.frontmatter)
       }
       if (freeform.content) {
-        // Replace content entirely with free-form content
         translated.content = freeform.content
         // Skip hash-based content translation since we have free-form
-        return translateItemFields(translated, context, translations)
+        // Still translate frontmatter fields via schema/heuristic
+        if (schema?.fields) {
+          return translateWithSchema(translated, schema, context, translations, false)
+        }
+        return translateHeuristic(translated, context, translations, false)
       }
     }
   }
 
-  // Fall back to hash-based translation (or continue after partial free-form)
-  return translateItemSync(translated, collectionName, translations)
+  // Fall back to hash-based translation
+  return translateItemSync(translated, collectionName, translations, schema)
 }
 
 /**
  * Apply translations to a collection item (sync, hash-based only)
  */
-function translateItemSync(item, collectionName, translations) {
+function translateItemSync(item, collectionName, translations, schema) {
   const translated = { ...item }
-  const slug = item.slug || 'unknown'
+  const slug = item.slug || item.id || item.name || 'unknown'
   const context = { collection: collectionName, item: slug }
 
-  // Translate all fields including content
-  return translateItemFields(translated, context, translations, true)
+  if (schema?.fields) {
+    return translateWithSchema(translated, schema, context, translations)
+  }
+  return translateHeuristic(translated, context, translations)
 }
 
-/**
- * Translate item fields (frontmatter and optionally content)
- *
- * @param {Object} translated - Item being translated
- * @param {Object} context - Translation context
- * @param {Object} translations - Hash-based translations
- * @param {boolean} includeContent - Whether to translate ProseMirror content
- * @returns {Object} Translated item
- */
-function translateItemFields(translated, context, translations, includeContent = false) {
-  // Translate frontmatter fields
-  const translatableFields = ['title', 'description', 'excerpt', 'summary', 'subtitle']
-
-  for (const field of translatableFields) {
-    if (translated[field] && typeof translated[field] === 'string') {
-      translated[field] = lookupTranslation(
-        translated[field],
-        context,
-        translations
-      )
-    }
-  }
-
-  // Translate tags
-  if (Array.isArray(translated.tags)) {
-    translated.tags = translated.tags.map(tag => {
-      if (typeof tag === 'string') {
-        return lookupTranslation(tag, context, translations)
-      }
-      return tag
-    })
-  }
-
-  // Translate categories
-  if (Array.isArray(translated.categories)) {
-    translated.categories = translated.categories.map(cat => {
-      if (typeof cat === 'string') {
-        return lookupTranslation(cat, context, translations)
-      }
-      return cat
-    })
-  }
-
-  // Translate ProseMirror content (only if requested)
-  if (includeContent && translated.content?.type === 'doc') {
-    translated.content = translateProseMirrorDoc(
-      translated.content,
-      context,
-      translations
-    )
-  }
-
-  return translated
-}
-
-/**
- * Apply translations to a collection item (legacy sync function)
- * @deprecated Use translateItemAsync for free-form support
- */
-function translateItem(item, collectionName, translations) {
-  return translateItemSync(item, collectionName, translations)
-}
+// ---------------------------------------------------------------------------
+// ProseMirror translation helpers (unchanged)
+// ---------------------------------------------------------------------------
 
 /**
  * Translate a ProseMirror document
@@ -477,6 +784,10 @@ function lookupTranslation(source, context, translations) {
 
   return source
 }
+
+// ---------------------------------------------------------------------------
+// Locale helpers
+// ---------------------------------------------------------------------------
 
 /**
  * Get available collection locales

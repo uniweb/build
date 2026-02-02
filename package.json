@@ -54,7 +54,8 @@
   },
   "optionalDependencies": {
     "@uniweb/content-reader": "workspace:*",
-    "@uniweb/runtime": "workspace:*"
+    "@uniweb/runtime": "workspace:*",
+    "@uniweb/schemas": "workspace:*"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0 || ^7.0.0",
