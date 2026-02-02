@@ -134,7 +134,7 @@ function generateContextCSS(context, tokens = {}) {
 
   const vars = generateVarDeclarations(mergedTokens)
 
-  return `.context-${context} {\n${vars}\n}`
+  return `.context-${context} {\n${vars}\n  background-color: var(--bg);\n}`
 }
 
 /**

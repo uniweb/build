@@ -339,18 +339,16 @@ function renderBackground(background) {
 
   if (background.mode === 'gradient' && background.gradient) {
     const g = background.gradient
-    const angle = g.angle || 0
-    const start = g.start || 'transparent'
-    const end = g.end || 'transparent'
-    const startPos = g.startPosition || 0
-    const endPos = g.endPosition || 100
+    // Raw CSS gradient string (e.g., "linear-gradient(to bottom, #000, #333)")
+    const bgValue = typeof g === 'string' ? g
+      : `linear-gradient(${g.angle || 0}deg, ${g.start || 'transparent'} ${g.startPosition || 0}%, ${g.end || 'transparent'} ${g.endPosition || 100}%)`
     children.push(
       React.createElement('div', {
         key: 'bg-gradient',
         className: 'background-gradient',
         style: {
           position: 'absolute', inset: '0',
-          background: `linear-gradient(${angle}deg, ${start} ${startPos}%, ${end} ${endPos}%)`
+          background: bgValue
         },
         'aria-hidden': 'true'
       })
