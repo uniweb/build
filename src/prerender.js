@@ -296,6 +296,13 @@ function getWrapperProps(block) {
     style.position = 'relative'
   }
 
+  // Apply context overrides as inline CSS custom properties (mirrors BlockRenderer.jsx)
+  if (block.contextOverrides) {
+    for (const [key, value] of Object.entries(block.contextOverrides)) {
+      style[`--${key}`] = value
+    }
+  }
+
   const sectionId = block.stableId || block.id
   return { id: `section-${sectionId}`, style, className, background }
 }
