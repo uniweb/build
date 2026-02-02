@@ -310,6 +310,21 @@ export function generateThemeCSS(config = {}) {
     sections.push(`/* Site Background */\nbody {\n  background: ${config.background};\n}`)
   }
 
+  // 8. Inline text styles (if specified in theme.yml)
+  if (config.inline && typeof config.inline === 'object') {
+    const rules = Object.entries(config.inline)
+      .filter(([, styles]) => styles && typeof styles === 'object')
+      .map(([name, styles]) => {
+        const declarations = Object.entries(styles)
+          .map(([prop, value]) => `  ${prop}: ${value};`)
+          .join('\n')
+        return `span[${name}] {\n${declarations}\n}`
+      })
+    if (rules.length > 0) {
+      sections.push('/* Inline Text Styles */\n' + rules.join('\n\n'))
+    }
+  }
+
   return sections.join('\n\n')
 }
 

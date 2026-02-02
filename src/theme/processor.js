@@ -425,6 +425,9 @@ export function processTheme(rawConfig = {}, options = {}) {
   // Site background (pass through as CSS value)
   const background = rawConfig.background || null
 
+  // Inline text styles (semantic names → CSS declarations)
+  const inline = rawConfig.inline || null
+
   const config = {
     colors,      // Raw colors for CSS generator
     palettes,    // Generated palettes for Theme class
@@ -434,6 +437,7 @@ export function processTheme(rawConfig = {}, options = {}) {
     foundationVars: mergedFoundationVars,
     code,        // Code block theme for runtime injection
     background,  // Site-level background CSS value
+    inline,      // Inline text style definitions
   }
 
   return { config, errors, warnings }
