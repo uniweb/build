@@ -305,6 +305,11 @@ export function generateThemeCSS(config = {}) {
     sections.push(generateDarkSchemeCSS(appearance))
   }
 
+  // 7. Site background (if specified in theme.yml)
+  if (config.background) {
+    sections.push(`/* Site Background */\nbody {\n  background: ${config.background};\n}`)
+  }
+
   return sections.join('\n\n')
 }
 

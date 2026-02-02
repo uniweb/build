@@ -422,6 +422,9 @@ export function processTheme(rawConfig = {}, options = {}) {
     ...(rawConfig.code || {}),
   }
 
+  // Site background (pass through as CSS value)
+  const background = rawConfig.background || null
+
   const config = {
     colors,      // Raw colors for CSS generator
     palettes,    // Generated palettes for Theme class
@@ -430,6 +433,7 @@ export function processTheme(rawConfig = {}, options = {}) {
     appearance,
     foundationVars: mergedFoundationVars,
     code,        // Code block theme for runtime injection
+    background,  // Site-level background CSS value
   }
 
   return { config, errors, warnings }
