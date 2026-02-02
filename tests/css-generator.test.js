@@ -14,8 +14,8 @@ describe('css-generator', () => {
       const css = generateThemeCSS()
 
       // Should include color palettes
-      expect(css).toContain('--color-primary-500:')
-      expect(css).toContain('--color-neutral-500:')
+      expect(css).toContain('--primary-500:')
+      expect(css).toContain('--neutral-500:')
 
       // Should include semantic tokens
       expect(css).toContain('--bg:')
@@ -33,8 +33,8 @@ describe('css-generator', () => {
       const levels = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
 
       for (const level of levels) {
-        expect(css).toContain(`--color-primary-${level}:`)
-        expect(css).toContain(`--color-neutral-${level}:`)
+        expect(css).toContain(`--primary-${level}:`)
+        expect(css).toContain(`--neutral-${level}:`)
       }
     })
 
@@ -46,8 +46,8 @@ describe('css-generator', () => {
         },
       })
 
-      expect(css).toContain('--color-brand-500:')
-      expect(css).toContain('--color-success-500:')
+      expect(css).toContain('--brand-500:')
+      expect(css).toContain('--success-500:')
     })
 
     it('applies context token overrides', () => {
@@ -149,7 +149,7 @@ describe('css-generator', () => {
       expect(css).toContain('.context-dark')
       expect(css).toContain('--bg:')
       // Dark context should have lighter text
-      expect(css).toContain('--color-neutral-50')
+      expect(css).toContain('--neutral-50')
     })
 
     it('merges custom tokens with defaults', () => {
@@ -178,9 +178,9 @@ describe('css-generator', () => {
       })
       const css = generatePaletteVars(palettes)
 
-      expect(css).toContain('--color-primary-50:')
-      expect(css).toContain('--color-primary-500:')
-      expect(css).toContain('--color-primary-950:')
+      expect(css).toContain('--primary-50:')
+      expect(css).toContain('--primary-500:')
+      expect(css).toContain('--primary-950:')
     })
 
     it('handles multiple palettes', () => {
@@ -190,8 +190,8 @@ describe('css-generator', () => {
       })
       const css = generatePaletteVars(palettes)
 
-      expect(css).toContain('--color-primary-500:')
-      expect(css).toContain('--color-secondary-500:')
+      expect(css).toContain('--primary-500:')
+      expect(css).toContain('--secondary-500:')
     })
 
     it('generates oklch values', () => {
