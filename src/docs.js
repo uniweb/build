@@ -30,12 +30,12 @@ function generateComponentDocs(name, meta) {
     lines.push('')
   }
 
-  // Parameters/Properties (shown first - most important for content authors)
-  if (meta.properties && Object.keys(meta.properties).length > 0) {
+  // Parameters (shown first - most important for content authors)
+  if (meta.params && Object.keys(meta.params).length > 0) {
     lines.push('### Parameters')
     lines.push('')
 
-    for (const [key, prop] of Object.entries(meta.properties)) {
+    for (const [key, prop] of Object.entries(meta.params)) {
       const defaultVal = prop.default !== undefined ? prop.default : ''
 
       // Parameter name with default

@@ -226,8 +226,7 @@ export function extractRuntimeSchema(fullMeta) {
     }
   }
 
-  // Param defaults - support both v2 'params' and v1 'properties'
-  const paramsObj = fullMeta.params || fullMeta.properties
+  const paramsObj = fullMeta.params
   const defaults = extractParamDefaults(paramsObj)
   if (defaults) {
     runtime.defaults = defaults
