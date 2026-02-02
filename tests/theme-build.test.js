@@ -23,7 +23,7 @@ describe('Theme Build Pipeline', () => {
       // Check all shade levels are present
       const shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
       for (const shade of shades) {
-        expect(result.css).toContain(`--primary-${shade}:`)
+        expect(result.css).toContain(`--color-primary-${shade}:`)
       }
     })
 
@@ -174,9 +174,9 @@ describe('Theme Build Pipeline', () => {
         },
       })
 
-      expect(result.css).toContain('--custom-50: #fef2f2')
-      expect(result.css).toContain('--custom-500: #ef4444')
-      expect(result.css).toContain('--custom-950: #450a0a')
+      expect(result.css).toContain('--color-custom-50: #fef2f2')
+      expect(result.css).toContain('--color-custom-500: #ef4444')
+      expect(result.css).toContain('--color-custom-950: #450a0a')
     })
   })
 
@@ -228,13 +228,13 @@ describe('Theme Build Pipeline', () => {
         contexts: {
           light: {
             bg: 'white',
-            fg: 'var(--neutral-900)',
+            fg: 'var(--color-neutral-900)',
           },
           medium: {
-            bg: 'var(--neutral-100)',
+            bg: 'var(--color-neutral-100)',
           },
           dark: {
-            bg: 'var(--neutral-900)',
+            bg: 'var(--color-neutral-900)',
             fg: 'white',
           },
         },
@@ -263,10 +263,10 @@ describe('Theme Build Pipeline', () => {
       const result = buildTheme(themeConfig, { foundationVars })
 
       // Verify all colors generated
-      expect(result.css).toContain('--primary-500:')
-      expect(result.css).toContain('--secondary-500:')
-      expect(result.css).toContain('--accent-500:')
-      expect(result.css).toContain('--neutral-500:')
+      expect(result.css).toContain('--color-primary-500:')
+      expect(result.css).toContain('--color-secondary-500:')
+      expect(result.css).toContain('--color-accent-500:')
+      expect(result.css).toContain('--color-neutral-500:')
 
       // Verify contexts
       expect(result.css).toContain('.context-light')
@@ -297,7 +297,7 @@ describe('Theme Build Pipeline', () => {
       })
 
       expect(result.errors).toHaveLength(0)
-      expect(result.css).toContain('--primary-500:')
+      expect(result.css).toContain('--color-primary-500:')
       // Should still have defaults for other required items
       expect(result.css).toContain('.context-light')
     })
