@@ -1,15 +1,15 @@
 /**
  * Collection Processor
  *
- * Processes content collections from markdown files into JSON data.
+ * Processes content collections from markdown and YAML files into JSON data.
  * Collections are defined in site.yml and processed at build time.
  *
  * Features:
- * - Discovers markdown files in collection folders
- * - Parses frontmatter for metadata
+ * - Discovers markdown (.md), data (.yml/.yaml), and JSON (.json) files in collection folders
+ * - Parses frontmatter for metadata (markdown), full YAML (data items), or JSON (data items)
  * - Converts markdown body to ProseMirror JSON
  * - Supports filtering, sorting, and limiting
- * - Auto-generates excerpts and extracts first images
+ * - Auto-generates excerpts and extracts first images (markdown items only)
  *
  * @module @uniweb/build/site/collection-processor
  *
@@ -316,6 +316,53 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
 // Filter and sort utilities are imported from data-fetcher.js
 
 /**
+ * Process a single data item from a YAML file
+ *
+ * YAML items are pure data — no ProseMirror conversion, no body, no excerpt,
+ * no image extraction, no lastModified. The output is slug + YAML fields.
+ *
+ * @param {string} dir - Collection directory path
+ * @param {string} filename - YAML filename (.yml or .yaml)
+ * @returns {Promise<Object|null>} Processed item or null if unpublished
+ */
+async function processDataItem(dir, filename) {
+  const filepath = join(dir, filename)
+  const raw = await readFile(filepath, 'utf-8')
+  const slug = basename(filename, extname(filename))
+  const data = yaml.load(raw) || {}
+
+  // Skip unpublished items
+  if (data.published === false) return null
+
+  return { slug, ...data }
+}
+
+/**
+ * Process a single data item from a JSON file
+ *
+ * JSON items are pure data — like YAML items, no ProseMirror conversion.
+ * A JSON file containing an array returns all items (single-file collection).
+ * A JSON file containing an object returns a single item with slug from filename.
+ *
+ * @param {string} dir - Collection directory path
+ * @param {string} filename - JSON filename
+ * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
+ */
+async function processJsonItem(dir, filename) {
+  const filepath = join(dir, filename)
+  const raw = await readFile(filepath, 'utf-8')
+  const slug = basename(filename, '.json')
+  const data = JSON.parse(raw)
+
+  // Array → multiple items (single-file collection)
+  if (Array.isArray(data)) return data
+
+  // Object → single item
+  if (data.published === false) return null
+  return { slug, ...data }
+}
+
+/**
  * Process a single content item from a markdown file
  *
  * @param {string} dir - Collection directory path
@@ -384,12 +431,26 @@ async function collectItems(siteDir, config) {
   }
 
   const files = await readdir(collectionDir)
-  const mdFiles = files.filter(f => f.endsWith('.md') && !f.startsWith('_'))
-
-  // Process all markdown files
-  let items = await Promise.all(
-    mdFiles.map(file => processContentItem(collectionDir, file, config, siteDir))
+  const itemFiles = files.filter(f =>
+    !f.startsWith('_') &&
+    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json'))
   )
+
+  // Process all collection files (markdown → content items, YAML/JSON → data items)
+  let items = await Promise.all(
+    itemFiles.map(file => {
+      if (file.endsWith('.json')) {
+        return processJsonItem(collectionDir, file)
+      }
+      if (file.endsWith('.yml') || file.endsWith('.yaml')) {
+        return processDataItem(collectionDir, file)
+      }
+      return processContentItem(collectionDir, file, config, siteDir)
+    })
+  )
+
+  // Flatten arrays from JSON files that contain multiple items
+  items = items.flat()
 
   // Filter out nulls (unpublished items)
   items = items.filter(Boolean)
@@ -496,11 +557,14 @@ export async function getCollectionLastModified(siteDir, config) {
   }
 
   const files = await readdir(collectionDir)
-  const mdFiles = files.filter(f => f.endsWith('.md') && !f.startsWith('_'))
+  const itemFiles = files.filter(f =>
+    !f.startsWith('_') &&
+    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json'))
+  )
 
   let lastModified = null
 
-  for (const file of mdFiles) {
+  for (const file of itemFiles) {
     const fileStat = await stat(join(collectionDir, file))
     if (!lastModified || fileStat.mtime > lastModified) {
       lastModified = fileStat.mtime

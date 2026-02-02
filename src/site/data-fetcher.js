@@ -245,7 +245,7 @@ export function parseFetchConfig(fetch) {
     path,
     url,
     schema,
-    prerender = true,
+    prerender = url ? false : true,
     merge = false,
     transform,
     detail,

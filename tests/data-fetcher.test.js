@@ -67,14 +67,11 @@ describe('parseFetchConfig', () => {
         url: 'https://api.example.com/team',
         schema: 'team',
       }
-      expect(parseFetchConfig(config)).toEqual({
-        path: undefined,
-        url: 'https://api.example.com/team',
-        schema: 'team',
-        prerender: true,
-        merge: false,
-        transform: undefined,
-      })
+      const result = parseFetchConfig(config)
+      expect(result.url).toBe('https://api.example.com/team')
+      expect(result.schema).toBe('team')
+      expect(result.prerender).toBe(false)
+      expect(result.merge).toBe(false)
     })
 
     it('parses config with transform', () => {
@@ -83,14 +80,27 @@ describe('parseFetchConfig', () => {
         schema: 'items',
         transform: 'data.items',
       }
-      expect(parseFetchConfig(config)).toEqual({
-        path: undefined,
-        url: 'https://api.example.com/response',
-        schema: 'items',
-        prerender: true,
-        merge: false,
-        transform: 'data.items',
-      })
+      const result = parseFetchConfig(config)
+      expect(result.url).toBe('https://api.example.com/response')
+      expect(result.schema).toBe('items')
+      expect(result.prerender).toBe(false)
+      expect(result.merge).toBe(false)
+      expect(result.transform).toBe('data.items')
+    })
+
+    it('defaults prerender to true for path configs', () => {
+      const config = { path: '/data/team.json' }
+      expect(parseFetchConfig(config).prerender).toBe(true)
+    })
+
+    it('defaults prerender to false for url configs', () => {
+      const config = { url: 'https://api.example.com/team' }
+      expect(parseFetchConfig(config).prerender).toBe(false)
+    })
+
+    it('respects explicit prerender: true for url configs', () => {
+      const config = { url: 'https://api.example.com/team', prerender: true }
+      expect(parseFetchConfig(config).prerender).toBe(true)
     })
 
     it('infers schema from path when not provided', () => {
