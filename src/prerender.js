@@ -440,14 +440,27 @@ function renderBlock(block) {
 
   // Background handling (mirrors BlockRenderer.jsx)
   const { background, ...wrapperProps } = getWrapperProps(block)
+
+  // Merge Component.className (static classes declared on the component function)
+  // Order: context-{theme} + block.state.className + Component.className
+  const componentClassName = Component.className
+  if (componentClassName) {
+    wrapperProps.className = wrapperProps.className
+      ? `${wrapperProps.className} ${componentClassName}`
+      : componentClassName
+  }
+
   const hasBackground = background?.mode && meta?.background !== 'self'
 
   block.hasBackground = hasBackground
 
+  // Use Component.as as the wrapper tag (default: 'section')
+  const wrapperTag = Component.as || 'section'
+
   const componentProps = { content, params, block }
 
   if (hasBackground) {
-    return React.createElement('section', wrapperProps,
+    return React.createElement(wrapperTag, wrapperProps,
       renderBackground(background),
       React.createElement('div', { className: 'relative z-10' },
         React.createElement(Component, componentProps)
@@ -455,7 +468,7 @@ function renderBlock(block) {
     )
   }
 
-  return React.createElement('section', wrapperProps,
+  return React.createElement(wrapperTag, wrapperProps,
     React.createElement(Component, componentProps)
   )
 }
