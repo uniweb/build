@@ -373,6 +373,7 @@ export function siteContentPlugin(options = {}) {
   let watcher = null
   let server = null
   let localeTranslations = {} // Cache: { locale: translations }
+  let collectionTranslations = {} // Cache: { locale: collection translations }
   let localesDir = 'locales' // Default, updated from site config
   let collectionsConfig = null // Cached for watcher setup
 
@@ -393,6 +394,29 @@ export function siteContentPlugin(options = {}) {
       const content = await readFile(localePath, 'utf-8')
       const translations = JSON.parse(content)
       localeTranslations[locale] = translations
+      return translations
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Load collection translations for a specific locale
+   */
+  async function loadCollectionTranslations(locale) {
+    if (collectionTranslations[locale]) {
+      return collectionTranslations[locale]
+    }
+
+    const localePath = join(resolvedSitePath, localesDir, 'collections', `${locale}.json`)
+    if (!existsSync(localePath)) {
+      return null
+    }
+
+    try {
+      const content = await readFile(localePath, 'utf-8')
+      const translations = JSON.parse(content)
+      collectionTranslations[locale] = translations
       return translations
     } catch {
       return null
@@ -501,6 +525,7 @@ export function siteContentPlugin(options = {}) {
 
         // Clear translation cache on rebuild
         localeTranslations = {}
+        collectionTranslations = {}
       } catch (err) {
         console.error('[site-content] Failed to collect content:', err.message)
         siteContent = { config: {}, theme: {}, pages: [] }
@@ -618,6 +643,7 @@ export function siteContentPlugin(options = {}) {
           const localeWatcher = watch(localesPath, { recursive: false }, () => {
             console.log('[site-content] Translation files changed, clearing cache...')
             localeTranslations = {}
+            collectionTranslations = {}
             server.ws.send({ type: 'full-reload' })
           })
           additionalWatchers.push(localeWatcher)
@@ -638,6 +664,22 @@ export function siteContentPlugin(options = {}) {
             console.log(`[site-content] Watching ${freeformPath} for free-form translation changes`)
           } catch (err) {
             // freeform dir may not exist, that's ok
+          }
+        }
+
+        // Watch collection translations directory
+        const collectionsLocalesPath = resolve(localesPath, 'collections')
+        if (existsSync(collectionsLocalesPath)) {
+          try {
+            const collWatcher = watch(collectionsLocalesPath, { recursive: false }, () => {
+              console.log('[site-content] Collection translations changed, clearing cache...')
+              collectionTranslations = {}
+              server.ws.send({ type: 'full-reload' })
+            })
+            additionalWatchers.push(collWatcher)
+            console.log(`[site-content] Watching ${collectionsLocalesPath} for collection translation changes`)
+          } catch (err) {
+            // collections locales dir may not exist, that's ok
           }
         }
       }
@@ -715,6 +757,45 @@ export function siteContentPlugin(options = {}) {
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify(searchIndex, null, 2))
             return
+          }
+        }
+
+        // Handle localized collection data (e.g., /fr/data/articles.json)
+        const localeDataMatch = req.url.match(/^\/([a-z]{2})\/data\/(.+\.json)$/)
+        if (localeDataMatch) {
+          const locale = localeDataMatch[1]
+          const filename = localeDataMatch[2]
+          const collectionName = filename.replace('.json', '')
+          const sourcePath = join(resolvedSitePath, 'public', 'data', filename)
+
+          if (existsSync(sourcePath)) {
+            try {
+              const raw = await readFile(sourcePath, 'utf-8')
+              const items = JSON.parse(raw)
+
+              // Load collection translations for this locale
+              const translations = await loadCollectionTranslations(locale) || {}
+
+              // Check for free-form translations
+              const freeformDir = join(resolvedSitePath, localesDir, 'freeform', locale)
+              const hasFreeform = existsSync(freeformDir)
+
+              // Translate using the collections module
+              const { translateCollectionData } = await import('../i18n/collections.js')
+              const translated = await translateCollectionData(items, collectionName, resolvedSitePath, {
+                locale,
+                localesDir: join(resolvedSitePath, localesDir),
+                translations,
+                freeformEnabled: hasFreeform
+              })
+
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify(translated, null, 2))
+              return
+            } catch (err) {
+              console.warn(`[site-content] Failed to serve localized collection ${filename}: ${err.message}`)
+              // Fall through to Vite's static server
+            }
           }
         }
 

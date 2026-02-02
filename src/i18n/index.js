@@ -20,6 +20,7 @@ import {
   extractCollectionContent,
   buildLocalizedCollections,
   getCollectionLocales,
+  translateCollectionData,
   COLLECTIONS_DIR
 } from './collections.js'
 import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
@@ -69,6 +70,7 @@ export {
   extractCollectionContent,
   buildLocalizedCollections,
   getCollectionLocales,
+  translateCollectionData,
   COLLECTIONS_DIR,
 
   // Locale resolution

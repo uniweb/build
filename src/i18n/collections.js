@@ -786,6 +786,48 @@ function lookupTranslation(source, context, translations) {
 }
 
 // ---------------------------------------------------------------------------
+// Public translation entry point (for dev server middleware)
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate a collection's items array for a given locale.
+ * Used by dev server middleware for on-the-fly translation.
+ *
+ * @param {Array} items - Collection items array
+ * @param {string} collectionName - Collection name (e.g., 'articles')
+ * @param {string} siteRoot - Site root directory
+ * @param {Object} options - Translation options
+ * @param {string} options.locale - Target locale code
+ * @param {string} options.localesDir - Absolute path to locales directory
+ * @param {Object} [options.translations={}] - Hash-based translations
+ * @param {boolean} [options.freeformEnabled=false] - Enable free-form translations
+ * @returns {Promise<Array>} Translated items
+ */
+export async function translateCollectionData(items, collectionName, siteRoot, options = {}) {
+  const { locale, localesDir, translations = {}, freeformEnabled = false } = options
+
+  if (!Array.isArray(items)) return items
+
+  const schema = await resolveSchema(collectionName, siteRoot)
+
+  if (freeformEnabled) {
+    return Promise.all(
+      items.map(item =>
+        translateItemAsync(item, collectionName, translations, schema, {
+          locale,
+          localesDir,
+          freeformEnabled
+        })
+      )
+    )
+  }
+
+  return items.map(item =>
+    translateItemSync(item, collectionName, translations, schema)
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Locale helpers
 // ---------------------------------------------------------------------------
 
