@@ -274,26 +274,13 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema({ params: 'invalid' })).toBeNull()
     })
 
-    it('supports v1 "properties" field name', () => {
+    it('ignores legacy "properties" field name', () => {
       const meta = {
         properties: {
           theme: { type: 'select', default: 'gradient' },
-          layout: { type: 'select', default: 'center' },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        defaults: { theme: 'gradient', layout: 'center' },
-      })
-    })
-
-    it('prefers v2 "params" over v1 "properties"', () => {
-      const meta = {
-        params: { theme: { default: 'v2-value' } },
-        properties: { theme: { default: 'v1-value' } },
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        defaults: { theme: 'v2-value' },
-      })
+      expect(extractRuntimeSchema(meta)).toBeNull()
     })
   })
 
