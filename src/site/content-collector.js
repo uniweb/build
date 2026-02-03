@@ -186,6 +186,33 @@ function isMarkdownFile(filename) {
 }
 
 /**
+ * Read folder configuration, determining content mode from config file presence.
+ *
+ * - folder.yml present → pages mode (md files are child pages)
+ * - page.yml present → sections mode (md files are sections of this page)
+ * - Neither → inherit mode from parent
+ *
+ * @param {string} dirPath - Directory path
+ * @param {string} inheritedMode - Mode inherited from parent ('sections' or 'pages')
+ * @returns {Promise<{config: Object, mode: string, source: string}>}
+ */
+async function readFolderConfig(dirPath, inheritedMode) {
+  const folderYml = await readYamlFile(join(dirPath, 'folder.yml'))
+  if (Object.keys(folderYml).length > 0) {
+    return { config: folderYml, mode: 'pages', source: 'folder.yml' }
+  }
+  const pageYml = await readYamlFile(join(dirPath, 'page.yml'))
+  if (Object.keys(pageYml).length > 0) {
+    return { config: pageYml, mode: 'sections', source: 'page.yml' }
+  }
+  // Check for empty folder.yml (presence signals pages mode even if empty)
+  if (existsSync(join(dirPath, 'folder.yml'))) {
+    return { config: {}, mode: 'pages', source: 'folder.yml' }
+  }
+  return { config: {}, mode: inheritedMode, source: 'inherited' }
+}
+
+/**
  * Parse numeric prefix from filename (e.g., "1-hero.md" → { prefix: "1", name: "hero" })
  * Supports:
  *   - Simple: "1", "2", "3"
@@ -224,6 +251,89 @@ function compareFilenames(a, b) {
   }
 
   return 0
+}
+
+/**
+ * Apply non-strict ordering to a list of items.
+ * Listed items appear first in array order, then unlisted items in their existing order.
+ *
+ * Unlike strict arrays (pages: [...], sections: [...]) which hide unlisted items,
+ * this preserves all items — it only affects order.
+ *
+ * @param {Array} items - Items with a .name property
+ * @param {Array<string>} orderArray - Names in desired order
+ * @returns {Array} Reordered items (all items preserved)
+ */
+function applyNonStrictOrder(items, orderArray) {
+  if (!Array.isArray(orderArray) || orderArray.length === 0) return items
+  const orderMap = new Map(orderArray.map((name, i) => [name, i]))
+  const listed = items.filter(i => orderMap.has(i.name))
+    .sort((a, b) => orderMap.get(a.name) - orderMap.get(b.name))
+  const unlisted = items.filter(i => !orderMap.has(i.name))
+  return [...listed, ...unlisted]
+}
+
+/**
+ * Process a markdown file as a standalone page (pages mode).
+ * Creates a page with a single section from the markdown content.
+ *
+ * @param {string} filePath - Path to markdown file
+ * @param {string} fileName - Filename (e.g., "getting-started.md")
+ * @param {string} siteRoot - Site root directory for asset resolution
+ * @param {string} parentRoute - Parent route (e.g., '/docs')
+ * @returns {Promise<Object>} Page data with assets manifest
+ */
+async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
+  const { name } = parse(fileName)
+  const { prefix, name: stableName } = parseNumericPrefix(name)
+  const pageName = stableName || name
+  const route = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
+
+  // Process the markdown as a single section
+  const { section, assetCollection, iconCollection } = await processMarkdownFile(
+    filePath, '1', siteRoot, pageName
+  )
+
+  const fileStat = await stat(filePath)
+
+  return {
+    page: {
+      route,
+      sourcePath: null,
+      id: null,
+      isIndex: false,
+      title: pageName,
+      description: '',
+      label: null,
+      lastModified: fileStat.mtime?.toISOString() || null,
+      isDynamic: false,
+      paramName: null,
+      parentSchema: null,
+      version: null,
+      versionMeta: null,
+      versionScope: null,
+      hidden: false,
+      hideInHeader: false,
+      hideInFooter: false,
+      layout: {
+        header: true,
+        footer: true,
+        leftPanel: true,
+        rightPanel: true
+      },
+      seo: {
+        noindex: false,
+        image: null,
+        changefreq: null,
+        priority: null
+      },
+      fetch: null,
+      sections: [section],
+      order: prefix ? parseFloat(prefix) : undefined
+    },
+    assetCollection,
+    iconCollection
+  }
 }
 
 /**
@@ -629,12 +739,13 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} dirPath - Directory to scan
  * @param {string} parentRoute - Parent route (e.g., '/' or '/docs')
  * @param {string} siteRoot - Site root directory for asset resolution
- * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent's config
+ * @param {Object} orderConfig - { pages: [...], index: 'name', order: [...] } from parent's config
  * @param {Object} parentFetch - Parent page's fetch config (for dynamic child routes)
  * @param {Object} versionContext - Version context from parent { version, versionMeta }
- * @returns {Promise<Object>} { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes }
+ * @param {string} contentMode - 'sections' (default) or 'pages' (md files are child pages)
+ * @returns {Promise<Object>} { pages, assetCollection, iconCollection, notFound, versionedScopes }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections') {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -649,23 +760,28 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   let notFound = null
   const versionedScopes = new Map() // scope route → versionMeta
 
-  // First pass: discover all page folders and read their order values
+  // First pass: discover all page folders and read their config
   const pageFolders = []
   for (const entry of entries) {
     const entryPath = join(dirPath, entry)
     const stats = await stat(entryPath)
     if (!stats.isDirectory()) continue
 
-    // Read page.yml to get order and child page config
-    const pageConfig = await readYamlFile(join(entryPath, 'page.yml'))
+    // Read folder.yml or page.yml to determine mode and get config
+    const { config: dirConfig, mode: dirMode } = await readFolderConfig(entryPath, contentMode)
+    const numericOrder = typeof dirConfig.order === 'number' ? dirConfig.order : undefined
+    const childOrderArray = Array.isArray(dirConfig.order) ? dirConfig.order : undefined
+
     pageFolders.push({
       name: entry,
       path: entryPath,
-      order: pageConfig.order,
-      pageConfig,
+      order: numericOrder,
+      dirConfig,
+      dirMode,
       childOrderConfig: {
-        pages: pageConfig.pages,
-        index: pageConfig.index
+        pages: dirConfig.pages,
+        index: dirConfig.index,
+        order: childOrderArray
       }
     })
   }
@@ -679,67 +795,46 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     return a.name.localeCompare(b.name)
   })
 
+  // Apply non-strict order from parent config (if present)
+  const orderedFolders = applyNonStrictOrder(pageFolders, orderConfig?.order)
+
   // Check if this directory contains version folders (versioned section)
-  const folderNames = pageFolders.map(f => f.name)
+  const folderNames = orderedFolders.map(f => f.name)
   const detectedVersions = detectVersions(folderNames)
 
-  // If versioned section, handle version folders specially
+  // If versioned section, handle version folders specially (always sections mode)
   if (detectedVersions && !versionContext) {
-    // Read parent page.yml for version metadata
     const parentConfig = await readYamlFile(join(dirPath, 'page.yml'))
     const versionMeta = buildVersionMetadata(detectedVersions, parentConfig)
-
-    // Record this versioned scope
     versionedScopes.set(parentRoute, versionMeta)
 
-    // Process version folders
-    for (const folder of pageFolders) {
-      const { name: entry, path: entryPath, childOrderConfig, pageConfig } = folder
+    for (const folder of orderedFolders) {
+      const { name: entry, path: entryPath, childOrderConfig } = folder
 
       if (isVersionFolder(entry)) {
-        // This is a version folder
         const versionInfo = versionMeta.versions.find(v => v.id === entry)
         const isLatest = versionInfo?.latest || false
-
-        // For latest version, use parent route directly
-        // For other versions, add version prefix to route
-        // Handle root scope specially to avoid double slash (//v1 → /v1)
         const versionRoute = isLatest
           ? parentRoute
           : parentRoute === '/'
             ? `/${entry}`
             : `${parentRoute}/${entry}`
 
-        // Recurse into version folder with version context
         const subResult = await collectPagesRecursive(
-          entryPath,
-          versionRoute,
-          siteRoot,
-          childOrderConfig,
-          parentFetch,
-          {
-            version: versionInfo,
-            versionMeta,
-            scope: parentRoute // The route where versioning is scoped
-          }
+          entryPath, versionRoute, siteRoot, childOrderConfig, parentFetch,
+          { version: versionInfo, versionMeta, scope: parentRoute }
         )
 
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
-        // Merge any nested versioned scopes (shouldn't happen often, but possible)
         for (const [scope, meta] of subResult.versionedScopes) {
           versionedScopes.set(scope, meta)
         }
       } else {
-        // Non-version folders in a versioned section
-        // These could be shared across versions - process normally
         const result = await processPage(entryPath, entry, siteRoot, {
-          isIndex: false,
-          parentRoute,
-          parentFetch
+          isIndex: false, parentRoute, parentFetch
         })
-
         if (result) {
           pages.push(result.page)
           assetCollection = mergeAssetCollections(assetCollection, result.assetCollection)
@@ -748,31 +843,153 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       }
     }
 
-    // Return early - we've handled all children
     return { pages, assetCollection, iconCollection, notFound, versionedScopes }
   }
+
+  // --- Pages mode: .md files are child pages ---
+  if (contentMode === 'pages') {
+    // Collect and process .md files as individual pages
+    const mdFiles = entries.filter(isMarkdownFile).sort(compareFilenames)
+    const mdPageItems = []
+
+    for (const file of mdFiles) {
+      const { name } = parse(file)
+      const { name: stableName } = parseNumericPrefix(name)
+      const result = await processFileAsPage(join(dirPath, file), file, siteRoot, parentRoute)
+      if (result) {
+        mdPageItems.push({ name: stableName || name, result })
+      }
+    }
+
+    // Apply non-strict order to md-file-pages
+    const orderedMdPages = applyNonStrictOrder(mdPageItems, orderConfig?.order)
+
+    // Determine index page from all children (md files + folders)
+    // Combine names for index determination
+    const allChildNames = [
+      ...orderedMdPages.map(m => ({ name: m.name, order: m.result.page.order })),
+      ...orderedFolders.map(f => ({ name: f.name, order: f.order }))
+    ]
+    const indexName = determineIndexPage(orderConfig, allChildNames)
+
+    // Add md-file-pages
+    for (const { name, result } of orderedMdPages) {
+      const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
+      assetCollection = mergeAssetCollections(assetCollection, pageAssets)
+      iconCollection = mergeIconCollections(iconCollection, pageIcons)
+
+      // Handle index: promote to parent route
+      if (name === indexName) {
+        page.isIndex = true
+        page.sourcePath = page.route
+        page.route = parentRoute
+      }
+
+      pages.push(page)
+    }
+
+    // Process subdirectories
+    for (const folder of orderedFolders) {
+      const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig } = folder
+      const isIndex = entry === indexName
+
+      if (dirMode === 'sections') {
+        // Subdirectory overrides to sections mode — process normally
+        const result = await processPage(entryPath, entry, siteRoot, {
+          isIndex, parentRoute, parentFetch, versionContext
+        })
+
+        if (result) {
+          const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
+          assetCollection = mergeAssetCollections(assetCollection, pageAssets)
+          iconCollection = mergeIconCollections(iconCollection, pageIcons)
+          pages.push(page)
+
+          // Recurse into subdirectories (sections mode)
+          const childParentRoute = isIndex ? parentRoute : page.route
+          const childFetch = page.fetch || parentFetch
+          const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections')
+          pages.push(...subResult.pages)
+          assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+          iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
+          for (const [scope, meta] of subResult.versionedScopes) {
+            versionedScopes.set(scope, meta)
+          }
+        }
+      } else {
+        // Container directory in pages mode — create minimal page, recurse
+        const containerRoute = isIndex
+          ? parentRoute
+          : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
+
+        const containerPage = {
+          route: containerRoute,
+          sourcePath: isIndex ? (parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`) : null,
+          id: dirConfig.id || null,
+          isIndex,
+          title: dirConfig.title || entry,
+          description: dirConfig.description || '',
+          label: dirConfig.label || null,
+          lastModified: null,
+          isDynamic: false,
+          paramName: null,
+          parentSchema: null,
+          version: versionContext?.version || null,
+          versionMeta: versionContext?.versionMeta || null,
+          versionScope: versionContext?.scope || null,
+          hidden: dirConfig.hidden || false,
+          hideInHeader: dirConfig.hideInHeader || false,
+          hideInFooter: dirConfig.hideInFooter || false,
+          layout: {
+            header: dirConfig.layout?.header !== false,
+            footer: dirConfig.layout?.footer !== false,
+            leftPanel: dirConfig.layout?.leftPanel !== false,
+            rightPanel: dirConfig.layout?.rightPanel !== false
+          },
+          seo: {
+            noindex: dirConfig.seo?.noindex || false,
+            image: dirConfig.seo?.image || null,
+            changefreq: dirConfig.seo?.changefreq || null,
+            priority: dirConfig.seo?.priority || null
+          },
+          fetch: null,
+          sections: [],
+          order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
+        }
+
+        pages.push(containerPage)
+
+        // Recurse in pages mode
+        const subResult = await collectPagesRecursive(entryPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages')
+        pages.push(...subResult.pages)
+        assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+        iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
+        for (const [scope, meta] of subResult.versionedScopes) {
+          versionedScopes.set(scope, meta)
+        }
+      }
+    }
+
+    return { pages, assetCollection, iconCollection, notFound, versionedScopes }
+  }
+
+  // --- Sections mode (default): existing behavior ---
 
   // Determine which page is the index for this level
   // A directory with its own .md content is a real page, not a container —
   // never promote a child as index, even if explicit config says so
-  // (that config is likely a leftover from before the directory had content)
-  const regularFolders = pageFolders
   const hasExplicitOrder = orderConfig?.index || (Array.isArray(orderConfig?.pages) && orderConfig.pages.length > 0)
   const hasMdContent = entries.some(e => isMarkdownFile(e))
-  const indexPageName = hasMdContent ? null : determineIndexPage(orderConfig, regularFolders)
+  const indexPageName = hasMdContent ? null : determineIndexPage(orderConfig, orderedFolders)
 
   // Second pass: process each page folder
-  for (const folder of pageFolders) {
-    const { name: entry, path: entryPath, childOrderConfig } = folder
+  for (const folder of orderedFolders) {
+    const { name: entry, path: entryPath, dirMode, childOrderConfig } = folder
     const isIndex = entry === indexPageName
 
     // Process this directory as a page
-    // Pass parentFetch so dynamic routes can inherit parent's data schema
     const result = await processPage(entryPath, entry, siteRoot, {
-      isIndex,
-      parentRoute,
-      parentFetch,
-      versionContext
+      isIndex, parentRoute, parentFetch, versionContext
     })
 
     if (result) {
@@ -789,21 +1006,15 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
       // Recursively process subdirectories
       {
-        // The child route depends on whether this page is the index
-        // For explicit index (from site.yml `index:` or `pages:`), children use parentRoute
-        // since that's a true structural promotion. For auto-detected index, children use
-        // the page's original folder path so they nest correctly under it.
         const childParentRoute = isIndex
           ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
           : page.route
-        // Pass this page's fetch config to children (for dynamic routes that inherit parent data)
         const childFetch = page.fetch || parentFetch
-        // Pass version context to children (maintains version scope)
-        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext)
+        // Pass the child directory's mode (it may switch to pages mode via folder.yml)
+        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
-        // Merge any versioned scopes from children
         for (const [scope, meta] of subResult.versionedScopes) {
           versionedScopes.set(scope, meta)
         }
@@ -930,15 +1141,19 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Extract page ordering config from site.yml
   const siteOrderConfig = {
     pages: siteConfig.pages,
-    index: siteConfig.index
+    index: siteConfig.index,
+    order: Array.isArray(siteConfig.order) ? siteConfig.order : undefined
   }
+
+  // Determine root content mode from folder.yml/page.yml presence in pages directory
+  const { mode: rootContentMode } = await readFolderConfig(pagesPath, 'sections')
 
   // Collect layout panels from layout/ directory
   const { header, footer, left, right } = await collectLayoutPanels(layoutPath, sitePath)
 
   // Recursively collect all pages
   const { pages, assetCollection, iconCollection, notFound, versionedScopes } =
-    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode)
 
   // Deduplicate: remove content-less container pages whose route duplicates
   // a content-bearing page (e.g., a promoted index page)
