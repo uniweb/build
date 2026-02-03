@@ -26,7 +26,7 @@
  */
 
 import { readFile, readdir, stat, writeFile, mkdir, copyFile } from 'node:fs/promises'
-import { join, basename, extname, dirname, relative } from 'node:path'
+import { join, basename, extname, dirname, relative, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { applyFilter, applySort } from './data-fetcher.js'
@@ -421,8 +421,9 @@ async function processContentItem(dir, filename, config, siteRoot) {
  * @param {Object} config - Parsed collection config
  * @returns {Promise<Array>} Array of processed items
  */
-async function collectItems(siteDir, config) {
-  const collectionDir = join(siteDir, config.path)
+async function collectItems(siteDir, config, collectionsBase) {
+  const base = collectionsBase || siteDir
+  const collectionDir = resolve(base, config.path)
 
   // Check if collection directory exists
   if (!existsSync(collectionDir)) {
@@ -496,7 +497,7 @@ async function collectItems(siteDir, config) {
  * })
  * // { articles: [...], products: [...] }
  */
-export async function processCollections(siteDir, collectionsConfig) {
+export async function processCollections(siteDir, collectionsConfig, collectionsBase) {
   if (!collectionsConfig || typeof collectionsConfig !== 'object') {
     return {}
   }
@@ -505,7 +506,7 @@ export async function processCollections(siteDir, collectionsConfig) {
 
   for (const [name, config] of Object.entries(collectionsConfig)) {
     const parsed = parseCollectionConfig(name, config)
-    const items = await collectItems(siteDir, parsed)
+    const items = await collectItems(siteDir, parsed, collectionsBase)
     results[name] = items
     console.log(`[collection-processor] Processed ${name}: ${items.length} items`)
   }

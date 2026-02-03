@@ -376,6 +376,9 @@ export function siteContentPlugin(options = {}) {
   let collectionTranslations = {} // Cache: { locale: collection translations }
   let localesDir = 'locales' // Default, updated from site config
   let collectionsConfig = null // Cached for watcher setup
+  let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
+  let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
+  let resolvedCollectionsBase = null // Resolved from site.yml collectionsDir
 
   /**
    * Load translations for a specific locale
@@ -486,14 +489,41 @@ export function siteContentPlugin(options = {}) {
           const earlyContent = await collectSiteContent(resolvedSitePath, { foundationPath })
           collectionsConfig = earlyContent.config?.collections
 
+          // Resolve content directory paths from site.yml
+          const cfg = earlyContent?.config || {}
+          resolvedPagesPath = cfg.pagesDir
+            ? resolve(resolvedSitePath, cfg.pagesDir)
+            : resolve(resolvedSitePath, pagesDir)
+          resolvedLayoutPath = cfg.layoutDir
+            ? resolve(resolvedSitePath, cfg.layoutDir)
+            : resolve(resolvedSitePath, 'layout')
+          resolvedCollectionsBase = cfg.collectionsDir
+            ? resolve(resolvedSitePath, cfg.collectionsDir)
+            : null
+
           if (collectionsConfig) {
             console.log('[site-content] Processing content collections...')
-            const collections = await processCollections(resolvedSitePath, collectionsConfig)
+            const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedCollectionsBase)
             await writeCollectionFiles(resolvedSitePath, collections)
           }
         } catch (err) {
           console.warn('[site-content] Early collection processing failed:', err.message)
         }
+      }
+
+      // In production, resolve content paths from site.yml directly
+      if (isProduction || !resolvedPagesPath) {
+        const { readSiteConfig } = await import('./config.js')
+        const cfg = readSiteConfig(resolvedSitePath)
+        resolvedPagesPath = cfg.pagesDir
+          ? resolve(resolvedSitePath, cfg.pagesDir)
+          : resolve(resolvedSitePath, pagesDir)
+        resolvedLayoutPath = cfg.layoutDir
+          ? resolve(resolvedSitePath, cfg.layoutDir)
+          : resolve(resolvedSitePath, 'layout')
+        resolvedCollectionsBase = cfg.collectionsDir
+          ? resolve(resolvedSitePath, cfg.collectionsDir)
+          : null
       }
     },
 
@@ -508,7 +538,7 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.collections) {
           console.log('[site-content] Processing content collections...')
-          const collections = await processCollections(resolvedSitePath, siteContent.config.collections)
+          const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedCollectionsBase)
           await writeCollectionFiles(resolvedSitePath, collections)
         }
 
@@ -537,7 +567,6 @@ export function siteContentPlugin(options = {}) {
 
       // Watch for content changes in dev mode
       if (shouldWatch) {
-        const pagesPath = resolve(resolvedSitePath, pagesDir)
         const siteYmlPath = resolve(resolvedSitePath, 'site.yml')
         const themeYmlPath = resolve(resolvedSitePath, 'theme.yml')
 
@@ -571,7 +600,7 @@ export function siteContentPlugin(options = {}) {
               // Use collectionsConfig (cached from configResolved) or siteContent
               const collections = collectionsConfig || siteContent?.config?.collections
               if (collections) {
-                const processed = await processCollections(resolvedSitePath, collections)
+                const processed = await processCollections(resolvedSitePath, collections, resolvedCollectionsBase)
                 await writeCollectionFiles(resolvedSitePath, processed)
               }
               // Send full reload to client
@@ -585,20 +614,21 @@ export function siteContentPlugin(options = {}) {
         // Track all watchers for cleanup
         const watchers = []
 
-        // Watch pages directory
-        try {
-          watchers.push(watch(pagesPath, { recursive: true }, scheduleRebuild))
-          console.log(`[site-content] Watching ${pagesPath}`)
-        } catch (err) {
-          console.warn('[site-content] Could not watch pages directory:', err.message)
+        // Watch pages directory (resolved from site.yml pagesDir or default)
+        if (existsSync(resolvedPagesPath)) {
+          try {
+            watchers.push(watch(resolvedPagesPath, { recursive: true }, scheduleRebuild))
+            console.log(`[site-content] Watching ${resolvedPagesPath}`)
+          } catch (err) {
+            console.warn('[site-content] Could not watch pages directory:', err.message)
+          }
         }
 
-        // Watch layout directory (header, footer, sidebars)
-        const layoutPath = resolve(resolvedSitePath, 'layout')
-        if (existsSync(layoutPath)) {
+        // Watch layout directory (resolved from site.yml layoutDir or default)
+        if (existsSync(resolvedLayoutPath)) {
           try {
-            watchers.push(watch(layoutPath, { recursive: true }, scheduleRebuild))
-            console.log(`[site-content] Watching ${layoutPath}`)
+            watchers.push(watch(resolvedLayoutPath, { recursive: true }, scheduleRebuild))
+            console.log(`[site-content] Watching ${resolvedLayoutPath}`)
           } catch (err) {
             console.warn('[site-content] Could not watch layout directory:', err.message)
           }
@@ -622,10 +652,11 @@ export function siteContentPlugin(options = {}) {
         // Use collectionsConfig cached from configResolved (siteContent may be null here)
         if (collectionsConfig) {
           const contentPaths = new Set()
+          const collectionBase = resolvedCollectionsBase || resolvedSitePath
           for (const config of Object.values(collectionsConfig)) {
             const collectionPath = typeof config === 'string' ? config : config.path
             if (collectionPath) {
-              contentPaths.add(resolve(resolvedSitePath, collectionPath))
+              contentPaths.add(resolve(collectionBase, collectionPath))
             }
           }
 

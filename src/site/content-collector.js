@@ -24,7 +24,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { join, parse } from 'node:path'
+import { join, parse, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections } from './assets.js'
@@ -891,11 +891,18 @@ async function collectLayoutPanels(layoutDir, siteRoot) {
  */
 export async function collectSiteContent(sitePath, options = {}) {
   const { foundationPath } = options
-  const pagesPath = join(sitePath, 'pages')
-  const layoutPath = join(sitePath, 'layout')
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, 'site.yml'))
+
+  // Resolve content paths from site.yml, defaulting to standard locations
+  const pagesPath = siteConfig.pagesDir
+    ? resolve(sitePath, siteConfig.pagesDir)
+    : join(sitePath, 'pages')
+
+  const layoutPath = siteConfig.layoutDir
+    ? resolve(sitePath, siteConfig.layoutDir)
+    : join(sitePath, 'layout')
   const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
 
   // Load foundation vars and process theme
