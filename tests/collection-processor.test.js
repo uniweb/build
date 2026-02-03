@@ -23,7 +23,7 @@ describe('Collection Processor', () => {
   describe('processCollections', () => {
     it('should process markdown files into collection items', async () => {
       // Create test library folder
-      const contentDir = join(testDir, 'library', 'articles')
+      const contentDir = join(testDir, 'collections', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       // Create test markdown file
@@ -41,7 +41,7 @@ This is a test article.
 
       const collections = await processCollections(testDir, {
         articles: {
-          path: 'library/articles',
+          path: 'collections/articles',
           sort: 'date desc'
         }
       })
@@ -63,7 +63,7 @@ This is a test article.
     })
 
     it('should exclude unpublished items', async () => {
-      const contentDir = join(testDir, 'library', 'articles')
+      const contentDir = join(testDir, 'collections', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'published.md'), `---
@@ -82,7 +82,7 @@ Draft content.
 `)
 
       const collections = await processCollections(testDir, {
-        articles: 'library/articles'
+        articles: 'collections/articles'
       })
 
       expect(collections.articles).toHaveLength(1)
@@ -90,7 +90,7 @@ Draft content.
     })
 
     it('should apply filter expressions', async () => {
-      const contentDir = join(testDir, 'library', 'posts')
+      const contentDir = join(testDir, 'collections', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post1.md'), `---
@@ -109,7 +109,7 @@ Content.
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'library/posts',
+          path: 'collections/posts',
           filter: 'category == tutorial'
         }
       })
@@ -119,7 +119,7 @@ Content.
     })
 
     it('should sort items by field', async () => {
-      const contentDir = join(testDir, 'library', 'items')
+      const contentDir = join(testDir, 'collections', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'a.md'), `---
@@ -142,7 +142,7 @@ order: 2
 
       const collections = await processCollections(testDir, {
         items: {
-          path: 'library/items',
+          path: 'collections/items',
           sort: 'order asc'
         }
       })
@@ -151,7 +151,7 @@ order: 2
     })
 
     it('should limit number of items', async () => {
-      const contentDir = join(testDir, 'library', 'posts')
+      const contentDir = join(testDir, 'collections', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       for (let i = 1; i <= 5; i++) {
@@ -164,7 +164,7 @@ order: ${i}
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'library/posts',
+          path: 'collections/posts',
           sort: 'order asc',
           limit: 3
         }
@@ -175,7 +175,7 @@ order: ${i}
 
     it('should handle missing collection folder gracefully', async () => {
       const collections = await processCollections(testDir, {
-        articles: 'library/nonexistent'
+        articles: 'collections/nonexistent'
       })
 
       expect(collections.articles).toEqual([])
@@ -187,7 +187,7 @@ order: ${i}
     })
 
     it('should add route to items when collection has route config', async () => {
-      const contentDir = join(testDir, 'library', 'articles')
+      const contentDir = join(testDir, 'collections', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'my-article.md'), `---
@@ -199,7 +199,7 @@ Content here.
 
       const collections = await processCollections(testDir, {
         articles: {
-          path: 'library/articles',
+          path: 'collections/articles',
           route: '/blog'
         }
       })
@@ -209,7 +209,7 @@ Content here.
     })
 
     it('should handle trailing slash in route config', async () => {
-      const contentDir = join(testDir, 'library', 'posts')
+      const contentDir = join(testDir, 'collections', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'test-post.md'), `---
@@ -221,7 +221,7 @@ Content.
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'library/posts',
+          path: 'collections/posts',
           route: '/news/'
         }
       })
@@ -230,7 +230,7 @@ Content.
     })
 
     it('should not add route when route config is absent', async () => {
-      const contentDir = join(testDir, 'library', 'items')
+      const contentDir = join(testDir, 'collections', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'item.md'), `---
@@ -241,7 +241,7 @@ Content.
 `)
 
       const collections = await processCollections(testDir, {
-        items: 'library/items'
+        items: 'collections/items'
       })
 
       expect(collections.items[0].route).toBeUndefined()
@@ -274,7 +274,7 @@ Content.
 
   describe('excerpt extraction', () => {
     it('should auto-extract excerpt from content', async () => {
-      const contentDir = join(testDir, 'library', 'posts')
+      const contentDir = join(testDir, 'collections', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -287,14 +287,14 @@ This is the second paragraph.
 `)
 
       const collections = await processCollections(testDir, {
-        posts: 'library/posts'
+        posts: 'collections/posts'
       })
 
       expect(collections.posts[0].excerpt).toContain('first paragraph')
     })
 
     it('should prefer explicit excerpt from frontmatter', async () => {
-      const contentDir = join(testDir, 'library', 'posts')
+      const contentDir = join(testDir, 'collections', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -306,7 +306,7 @@ This is the body content.
 `)
 
       const collections = await processCollections(testDir, {
-        posts: 'library/posts'
+        posts: 'collections/posts'
       })
 
       expect(collections.posts[0].excerpt).toBe('Custom excerpt here')

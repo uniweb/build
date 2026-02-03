@@ -17,7 +17,7 @@
  * // site.yml
  * collections:
  *   articles:
- *     path: library/articles
+ *     path: collections/articles
  *     sort: date desc
  *
  * // Usage
@@ -59,11 +59,11 @@ try {
  *
  * @example
  * // Simple form
- * parseCollectionConfig('articles', 'library/articles')
+ * parseCollectionConfig('articles', 'collections/articles')
  *
  * // Extended form
  * parseCollectionConfig('articles', {
- *   path: 'library/articles',
+ *   path: 'collections/articles',
  *   route: '/blog',
  *   sort: 'date desc',
  *   filter: 'published != false',
@@ -213,7 +213,7 @@ function isExternalUrl(src) {
 /**
  * Process assets in collection content
  * - Resolves relative paths to site-root-relative paths
- * - Copies co-located assets to public/library/<collection>/
+ * - Copies co-located assets to public/collections/<collection>/
  * - Updates paths in the content in place
  *
  * @param {Object} content - ProseMirror document
@@ -226,7 +226,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
   const assets = {}
   const itemDir = dirname(itemPath)
   const publicDir = join(siteRoot, 'public')
-  const targetDir = join(publicDir, 'library', collectionName)
+  const targetDir = join(publicDir, 'collections', collectionName)
 
   // Walk content and collect asset paths
   const assetNodes = []
@@ -248,7 +248,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
     if (src.startsWith('./') || src.startsWith('../')) {
       // Check if file exists at resolved location
       if (existsSync(result.resolved)) {
-        // Copy to public/library/<collection>/
+        // Copy to public/collections/<collection>/
         const assetFilename = basename(result.resolved)
         const targetPath = join(targetDir, assetFilename)
 
@@ -259,7 +259,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         await copyFile(result.resolved, targetPath)
 
         // Update path to site-root-relative
-        finalPath = `/library/${collectionName}/${assetFilename}`
+        finalPath = `/collections/${collectionName}/${assetFilename}`
 
         assets[src] = {
           original: src,
@@ -294,7 +294,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         const posterTarget = join(targetDir, posterFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(posterResult.resolved, posterTarget)
-        node.attrs.poster = `/library/${collectionName}/${posterFilename}`
+        node.attrs.poster = `/collections/${collectionName}/${posterFilename}`
       }
     }
 
@@ -305,7 +305,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         const previewTarget = join(targetDir, previewFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(previewResult.resolved, previewTarget)
-        node.attrs.preview = `/library/${collectionName}/${previewFilename}`
+        node.attrs.preview = `/collections/${collectionName}/${previewFilename}`
       }
     }
   }
@@ -491,8 +491,8 @@ async function collectItems(siteDir, config) {
  *
  * @example
  * const collections = await processCollections('/path/to/site', {
- *   articles: { path: 'library/articles', sort: 'date desc' },
- *   products: 'library/products'
+ *   articles: { path: 'collections/articles', sort: 'date desc' },
+ *   products: 'collections/products'
  * })
  * // { articles: [...], products: [...] }
  */

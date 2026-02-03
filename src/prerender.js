@@ -26,19 +26,41 @@ let preparePropsSSR, getComponentMetaSSR
  * @param {Object} siteContent - The site content from site-content.json
  * @param {string} siteDir - Path to the site directory
  * @param {function} onProgress - Progress callback
+ * @param {Object} [localeInfo] - Locale info for collection data localization
+ * @param {string} [localeInfo.locale] - Active locale code
+ * @param {string} [localeInfo.defaultLocale] - Default locale code
+ * @param {string} [localeInfo.distDir] - Path to dist directory (where locale-specific data lives)
  * @returns {Object} { pageFetchedData, fetchedData } - Fetched data for dynamic route expansion and DataStore pre-population
  */
-async function executeAllFetches(siteContent, siteDir, onProgress) {
+async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
   const fetchedData = [] // Collected for DataStore pre-population
+
+  // For non-default locales, translated collection data lives in dist/{locale}/data/
+  // instead of public/data/. Create a localized fetch helper.
+  const isNonDefaultLocale = localeInfo &&
+    localeInfo.locale !== localeInfo.defaultLocale &&
+    localeInfo.distDir
+
+  function localizeFetch(config) {
+    if (!isNonDefaultLocale || !config.path?.startsWith('/data/')) return config
+    return { ...config, path: `/${localeInfo.locale}${config.path}` }
+  }
+
+  // Fetch options pointing to dist/ for localized data
+  const localizedFetchOptions = isNonDefaultLocale
+    ? { siteRoot: localeInfo.distDir, publicDir: '.' }
+    : fetchOptions
 
   // 1. Site-level fetch
   const siteFetch = siteContent.config?.fetch
   if (siteFetch && siteFetch.prerender !== false) {
-    onProgress(`  Fetching site data: ${siteFetch.path || siteFetch.url}`)
-    const result = await executeFetch(siteFetch, fetchOptions)
+    const cfg = localizeFetch(siteFetch)
+    const opts = cfg !== siteFetch ? localizedFetchOptions : fetchOptions
+    onProgress(`  Fetching site data: ${cfg.path || cfg.url}`)
+    const result = await executeFetch(cfg, opts)
     if (result.data && !result.error) {
-      fetchedData.push({ config: siteFetch, data: result.data })
+      fetchedData.push({ config: cfg, data: result.data })
     }
   }
 
@@ -49,10 +71,12 @@ async function executeAllFetches(siteContent, siteDir, onProgress) {
     // Page-level fetch
     const pageFetch = page.fetch
     if (pageFetch && pageFetch.prerender !== false) {
-      onProgress(`  Fetching page data for ${page.route}: ${pageFetch.path || pageFetch.url}`)
-      const result = await executeFetch(pageFetch, fetchOptions)
+      const cfg = localizeFetch(pageFetch)
+      const opts = cfg !== pageFetch ? localizedFetchOptions : fetchOptions
+      onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
+      const result = await executeFetch(cfg, opts)
       if (result.data && !result.error) {
-        fetchedData.push({ config: pageFetch, data: result.data })
+        fetchedData.push({ config: cfg, data: result.data })
         // Store for dynamic route expansion
         pageFetchedData.set(page.route, {
           schema: pageFetch.schema,
@@ -656,8 +680,13 @@ export async function prerenderSite(siteDir, options = {}) {
     siteContent.config.activeLocale = locale
 
     // Execute data fetches (site, page, section levels)
+    // For non-default locales, collection data is read from dist/{locale}/data/
     onProgress('Executing data fetches...')
-    const { pageFetchedData, fetchedData } = await executeAllFetches(siteContent, siteDir, onProgress)
+    const defaultLocale = defaultSiteContent.config?.defaultLanguage || 'en'
+    const { pageFetchedData, fetchedData } = await executeAllFetches(
+      siteContent, siteDir, onProgress,
+      { locale, defaultLocale, distDir }
+    )
 
     // Store fetchedData on siteContent for runtime DataStore pre-population
     siteContent.fetchedData = fetchedData
