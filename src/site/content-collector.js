@@ -864,13 +864,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     // Apply non-strict order to md-file-pages
     const orderedMdPages = applyNonStrictOrder(mdPageItems, orderConfig?.order)
 
-    // Determine index page from all children (md files + folders)
-    // Combine names for index determination
-    const allChildNames = [
-      ...orderedMdPages.map(m => ({ name: m.name, order: m.result.page.order })),
-      ...orderedFolders.map(f => ({ name: f.name, order: f.order }))
-    ]
-    const indexName = determineIndexPage(orderConfig, allChildNames)
+    // In pages mode, only promote an index if explicitly set via index: in folder.yml
+    // The container page itself owns the parent route — don't auto-promote children
+    const indexName = orderConfig?.index || null
 
     // Add md-file-pages
     for (const { name, result } of orderedMdPages) {
@@ -984,39 +980,95 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
-    const { name: entry, path: entryPath, dirMode, childOrderConfig } = folder
+    const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig } = folder
     const isIndex = entry === indexPageName
 
-    // Process this directory as a page
-    const result = await processPage(entryPath, entry, siteRoot, {
-      isIndex, parentRoute, parentFetch, versionContext
-    })
+    if (dirMode === 'pages') {
+      // Child directory switches to pages mode (has folder.yml) —
+      // create container page with empty sections, recurse in pages mode
+      const containerRoute = isIndex
+        ? parentRoute
+        : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
 
-    if (result) {
-      const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
-      assetCollection = mergeAssetCollections(assetCollection, pageAssets)
-      iconCollection = mergeIconCollections(iconCollection, pageIcons)
-
-      // Handle 404 page - only at root level
-      if (parentRoute === '/' && entry === '404') {
-        notFound = page
-      } else {
-        pages.push(page)
+      const containerPage = {
+        route: containerRoute,
+        sourcePath: isIndex ? (parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`) : null,
+        id: dirConfig.id || null,
+        isIndex,
+        title: dirConfig.title || entry,
+        description: dirConfig.description || '',
+        label: dirConfig.label || null,
+        lastModified: null,
+        isDynamic: false,
+        paramName: null,
+        parentSchema: null,
+        version: versionContext?.version || null,
+        versionMeta: versionContext?.versionMeta || null,
+        versionScope: versionContext?.scope || null,
+        hidden: dirConfig.hidden || false,
+        hideInHeader: dirConfig.hideInHeader || false,
+        hideInFooter: dirConfig.hideInFooter || false,
+        layout: {
+          header: dirConfig.layout?.header !== false,
+          footer: dirConfig.layout?.footer !== false,
+          leftPanel: dirConfig.layout?.leftPanel !== false,
+          rightPanel: dirConfig.layout?.rightPanel !== false
+        },
+        seo: {
+          noindex: dirConfig.seo?.noindex || false,
+          image: dirConfig.seo?.image || null,
+          changefreq: dirConfig.seo?.changefreq || null,
+          priority: dirConfig.seo?.priority || null
+        },
+        fetch: null,
+        sections: [],
+        order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
       }
 
-      // Recursively process subdirectories
-      {
-        const childParentRoute = isIndex
-          ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
-          : page.route
-        const childFetch = page.fetch || parentFetch
-        // Pass the child directory's mode (it may switch to pages mode via folder.yml)
-        const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode)
-        pages.push(...subResult.pages)
-        assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
-        iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
-        for (const [scope, meta] of subResult.versionedScopes) {
-          versionedScopes.set(scope, meta)
+      if (parentRoute === '/' && entry === '404') {
+        notFound = containerPage
+      } else {
+        pages.push(containerPage)
+      }
+
+      const subResult = await collectPagesRecursive(entryPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages')
+      pages.push(...subResult.pages)
+      assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+      iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
+      for (const [scope, meta] of subResult.versionedScopes) {
+        versionedScopes.set(scope, meta)
+      }
+    } else {
+      // Sections mode — process directory as a page (existing behavior)
+      const result = await processPage(entryPath, entry, siteRoot, {
+        isIndex, parentRoute, parentFetch, versionContext
+      })
+
+      if (result) {
+        const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
+        assetCollection = mergeAssetCollections(assetCollection, pageAssets)
+        iconCollection = mergeIconCollections(iconCollection, pageIcons)
+
+        // Handle 404 page - only at root level
+        if (parentRoute === '/' && entry === '404') {
+          notFound = page
+        } else {
+          pages.push(page)
+        }
+
+        // Recursively process subdirectories
+        {
+          const childParentRoute = isIndex
+            ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
+            : page.route
+          const childFetch = page.fetch || parentFetch
+          const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode)
+          pages.push(...subResult.pages)
+          assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
+          iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
+          for (const [scope, meta] of subResult.versionedScopes) {
+            versionedScopes.set(scope, meta)
+          }
         }
       }
     }
