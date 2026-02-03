@@ -92,7 +92,8 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
     const { paramName, parentSchema } = page
 
     if (!parentSchema) {
-      onProgress(`  Warning: Dynamic page ${page.route} has no parentSchema, skipping`)
+      onProgress(`  Warning: Dynamic page ${page.route} has no parentSchema, keeping as template for runtime`)
+      expandedPages.push(page)
       continue
     }
 
@@ -102,7 +103,10 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
     const parentData = pageFetchedData.get(parentRoute)
 
     if (!parentData || !Array.isArray(parentData.data)) {
-      onProgress(`  Warning: No data found for dynamic page ${page.route} (parent: ${parentRoute})`)
+      // No build-time data available (e.g., prerender: false on parent fetch).
+      // Keep the dynamic template so the runtime can match it client-side.
+      onProgress(`  Keeping dynamic template ${page.route} for runtime (no build-time data)`)
+      expandedPages.push(page)
       continue
     }
 
@@ -700,6 +704,10 @@ export async function prerenderSite(siteDir, options = {}) {
     const website = uniweb.activeWebsite
 
     for (const page of pages) {
+      // Skip dynamic template pages — they exist in the content for runtime
+      // route matching but can't be pre-rendered (no concrete route)
+      if (page.route.includes(':')) continue
+
       // Build the output route with locale prefix
       // For non-default locales, translate route slugs (e.g., /about → /acerca-de)
       const translatedPageRoute = isDefault ? page.route : website.translateRoute(page.route, locale)
