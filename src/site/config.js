@@ -328,13 +328,14 @@ export async function defineSiteConfig(options = {}) {
     server: {
       fs: {
         // Allow parent directory for foundation sibling access
-        // Plus any external content paths from site.yml (pagesDir, layoutDir, collectionsDir)
+        // Plus any external content paths from site.yml paths: group
         allow: (() => {
           const allowed = ['..']
           const parentDir = resolve(siteRoot, '..')
-          for (const key of ['pagesDir', 'layoutDir', 'collectionsDir']) {
-            if (siteConfig[key]) {
-              const resolved = resolve(siteRoot, siteConfig[key])
+          const paths = siteConfig.paths || {}
+          for (const key of ['pages', 'layout', 'collections']) {
+            if (paths[key]) {
+              const resolved = resolve(siteRoot, paths[key])
               if (!resolved.startsWith(parentDir)) {
                 allowed.push(resolved)
               }

@@ -489,16 +489,16 @@ export function siteContentPlugin(options = {}) {
           const earlyContent = await collectSiteContent(resolvedSitePath, { foundationPath })
           collectionsConfig = earlyContent.config?.collections
 
-          // Resolve content directory paths from site.yml
-          const cfg = earlyContent?.config || {}
-          resolvedPagesPath = cfg.pagesDir
-            ? resolve(resolvedSitePath, cfg.pagesDir)
+          // Resolve content directory paths from site.yml paths: group
+          const paths = earlyContent?.config?.paths || {}
+          resolvedPagesPath = paths.pages
+            ? resolve(resolvedSitePath, paths.pages)
             : resolve(resolvedSitePath, pagesDir)
-          resolvedLayoutPath = cfg.layoutDir
-            ? resolve(resolvedSitePath, cfg.layoutDir)
+          resolvedLayoutPath = paths.layout
+            ? resolve(resolvedSitePath, paths.layout)
             : resolve(resolvedSitePath, 'layout')
-          resolvedCollectionsBase = cfg.collectionsDir
-            ? resolve(resolvedSitePath, cfg.collectionsDir)
+          resolvedCollectionsBase = paths.collections
+            ? resolve(resolvedSitePath, paths.collections)
             : null
 
           if (collectionsConfig) {
@@ -515,14 +515,15 @@ export function siteContentPlugin(options = {}) {
       if (isProduction || !resolvedPagesPath) {
         const { readSiteConfig } = await import('./config.js')
         const cfg = readSiteConfig(resolvedSitePath)
-        resolvedPagesPath = cfg.pagesDir
-          ? resolve(resolvedSitePath, cfg.pagesDir)
+        const paths = cfg.paths || {}
+        resolvedPagesPath = paths.pages
+          ? resolve(resolvedSitePath, paths.pages)
           : resolve(resolvedSitePath, pagesDir)
-        resolvedLayoutPath = cfg.layoutDir
-          ? resolve(resolvedSitePath, cfg.layoutDir)
+        resolvedLayoutPath = paths.layout
+          ? resolve(resolvedSitePath, paths.layout)
           : resolve(resolvedSitePath, 'layout')
-        resolvedCollectionsBase = cfg.collectionsDir
-          ? resolve(resolvedSitePath, cfg.collectionsDir)
+        resolvedCollectionsBase = paths.collections
+          ? resolve(resolvedSitePath, paths.collections)
           : null
       }
     },

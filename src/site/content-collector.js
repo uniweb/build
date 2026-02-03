@@ -895,13 +895,13 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, 'site.yml'))
 
-  // Resolve content paths from site.yml, defaulting to standard locations
-  const pagesPath = siteConfig.pagesDir
-    ? resolve(sitePath, siteConfig.pagesDir)
+  // Resolve content paths from site.yml paths: group, defaulting to standard locations
+  const pagesPath = siteConfig.paths?.pages
+    ? resolve(sitePath, siteConfig.paths.pages)
     : join(sitePath, 'pages')
 
-  const layoutPath = siteConfig.layoutDir
-    ? resolve(sitePath, siteConfig.layoutDir)
+  const layoutPath = siteConfig.paths?.layout
+    ? resolve(sitePath, siteConfig.paths.layout)
     : join(sitePath, 'layout')
   const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
 
