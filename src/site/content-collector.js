@@ -1,11 +1,12 @@
 /**
  * Content Collector
  *
- * Collects site content from a pages/ directory structure:
+ * Collects site content from a site directory structure:
  * - site.yml: Site configuration
  * - pages/: Directory of page folders
  *   - page.yml: Page metadata
  *   - *.md: Section content with YAML frontmatter
+ * - layout/: Layout panel folders (header, footer, left, right)
  *
  * Section frontmatter reserved properties:
  * - type: Component type (e.g., "Hero", "Features")
@@ -502,10 +503,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
   // First, calculate the folder-based route (what the route would be without index handling)
   let folderRoute
-  if (pageName.startsWith('@')) {
-    // Special pages (layout areas) keep their @ prefix
-    folderRoute = parentRoute === '/' ? `/@${pageName.slice(1)}` : `${parentRoute}/@${pageName.slice(1)}`
-  } else if (isDynamic) {
+  if (isDynamic) {
     // Dynamic routes: /blog/[slug] → /blog/:slug (for route matching)
     folderRoute = parentRoute === '/' ? `/:${paramName}` : `${parentRoute}/:${paramName}`
   } else {
@@ -648,10 +646,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     icons: new Set(),
     bySource: new Map()
   }
-  let header = null
-  let footer = null
-  let left = null
-  let right = null
   let notFound = null
   const versionedScopes = new Map() // scope route → versionMeta
 
@@ -737,8 +731,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         for (const [scope, meta] of subResult.versionedScopes) {
           versionedScopes.set(scope, meta)
         }
-      } else if (!entry.startsWith('@')) {
-        // Non-version, non-special folders in a versioned section
+      } else {
+        // Non-version folders in a versioned section
         // These could be shared across versions - process normally
         const result = await processPage(entryPath, entry, siteRoot, {
           isIndex: false,
@@ -755,14 +749,14 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     }
 
     // Return early - we've handled all children
-    return { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes }
+    return { pages, assetCollection, iconCollection, notFound, versionedScopes }
   }
 
   // Determine which page is the index for this level
   // A directory with its own .md content is a real page, not a container —
   // never promote a child as index, even if explicit config says so
   // (that config is likely a leftover from before the directory had content)
-  const regularFolders = pageFolders.filter(f => !f.name.startsWith('@'))
+  const regularFolders = pageFolders
   const hasExplicitOrder = orderConfig?.index || (Array.isArray(orderConfig?.pages) && orderConfig.pages.length > 0)
   const hasMdContent = entries.some(e => isMarkdownFile(e))
   const indexPageName = hasMdContent ? null : determineIndexPage(orderConfig, regularFolders)
@@ -771,12 +765,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   for (const folder of pageFolders) {
     const { name: entry, path: entryPath, childOrderConfig } = folder
     const isIndex = entry === indexPageName
-    const isSpecial = entry.startsWith('@')
 
     // Process this directory as a page
     // Pass parentFetch so dynamic routes can inherit parent's data schema
     const result = await processPage(entryPath, entry, siteRoot, {
-      isIndex: isIndex && !isSpecial,
+      isIndex,
       parentRoute,
       parentFetch,
       versionContext
@@ -787,27 +780,15 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       assetCollection = mergeAssetCollections(assetCollection, pageAssets)
       iconCollection = mergeIconCollections(iconCollection, pageIcons)
 
-      // Handle special pages (layout areas and 404) - only at root level
-      if (parentRoute === '/') {
-        if (entry === '@header') {
-          header = page
-        } else if (entry === '@footer') {
-          footer = page
-        } else if (entry === '@left') {
-          left = page
-        } else if (entry === '@right') {
-          right = page
-        } else if (entry === '404') {
-          notFound = page
-        } else {
-          pages.push(page)
-        }
+      // Handle 404 page - only at root level
+      if (parentRoute === '/' && entry === '404') {
+        notFound = page
       } else {
         pages.push(page)
       }
 
-      // Recursively process subdirectories (but not special @ directories)
-      if (!isSpecial) {
+      // Recursively process subdirectories
+      {
         // The child route depends on whether this page is the index
         // For explicit index (from site.yml `index:` or `pages:`), children use parentRoute
         // since that's a true structural promotion. For auto-detected index, children use
@@ -830,7 +811,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     }
   }
 
-  return { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes }
+  return { pages, assetCollection, iconCollection, notFound, versionedScopes }
 }
 
 /**
@@ -864,6 +845,43 @@ async function loadFoundationVars(foundationPath) {
 }
 
 /**
+ * Collect layout panels from the layout/ directory
+ *
+ * Layout panels (header, footer, left, right) are persistent regions
+ * that appear on every page. They live in layout/ parallel to pages/.
+ *
+ * @param {string} layoutDir - Path to layout directory
+ * @param {string} siteRoot - Path to site root
+ * @returns {Promise<Object>} { header, footer, left, right }
+ */
+async function collectLayoutPanels(layoutDir, siteRoot) {
+  const result = { header: null, footer: null, left: null, right: null }
+
+  if (!existsSync(layoutDir)) return result
+
+  const knownPanels = ['header', 'footer', 'left', 'right']
+  const entries = await readdir(layoutDir)
+
+  for (const entry of entries) {
+    if (!knownPanels.includes(entry)) continue
+    const entryPath = join(layoutDir, entry)
+    const stats = await stat(entryPath)
+    if (!stats.isDirectory()) continue
+
+    const pageResult = await processPage(entryPath, entry, siteRoot, {
+      isIndex: false,
+      parentRoute: '/layout'
+    })
+
+    if (pageResult) {
+      result[entry] = pageResult.page
+    }
+  }
+
+  return result
+}
+
+/**
  * Collect all site content
  *
  * @param {string} sitePath - Path to site directory
@@ -874,6 +892,7 @@ async function loadFoundationVars(foundationPath) {
 export async function collectSiteContent(sitePath, options = {}) {
   const { foundationPath } = options
   const pagesPath = join(sitePath, 'pages')
+  const layoutPath = join(sitePath, 'layout')
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, 'site.yml'))
@@ -907,8 +926,11 @@ export async function collectSiteContent(sitePath, options = {}) {
     index: siteConfig.index
   }
 
+  // Collect layout panels from layout/ directory
+  const { header, footer, left, right } = await collectLayoutPanels(layoutPath, sitePath)
+
   // Recursively collect all pages
-  const { pages, assetCollection, iconCollection, header, footer, left, right, notFound, versionedScopes } =
+  const { pages, assetCollection, iconCollection, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig)
 
   // Deduplicate: remove content-less container pages whose route duplicates

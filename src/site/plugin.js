@@ -593,6 +593,17 @@ export function siteContentPlugin(options = {}) {
           console.warn('[site-content] Could not watch pages directory:', err.message)
         }
 
+        // Watch layout directory (header, footer, sidebars)
+        const layoutPath = resolve(resolvedSitePath, 'layout')
+        if (existsSync(layoutPath)) {
+          try {
+            watchers.push(watch(layoutPath, { recursive: true }, scheduleRebuild))
+            console.log(`[site-content] Watching ${layoutPath}`)
+          } catch (err) {
+            console.warn('[site-content] Could not watch layout directory:', err.message)
+          }
+        }
+
         // Watch site.yml
         try {
           watchers.push(watch(siteYmlPath, scheduleRebuild))

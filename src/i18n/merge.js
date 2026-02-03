@@ -80,7 +80,7 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
   for (const layoutKey of ['header', 'footer', 'left', 'right']) {
     const layoutPage = translated[layoutKey]
     if (layoutPage?.sections) {
-      const pageRoute = layoutPage.route || `/@${layoutKey}`
+      const pageRoute = layoutPage.route || `/layout/${layoutKey}`
       for (const section of layoutPage.sections) {
         translateSectionSync(section, pageRoute, translations, fallbackToSource)
       }
@@ -132,8 +132,8 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
   for (const layoutKey of ['header', 'footer', 'left', 'right']) {
     const layoutPage = translated[layoutKey]
     if (layoutPage?.sections) {
-      // Ensure route is set for context matching (extract uses /@header, etc.)
-      if (!layoutPage.route) layoutPage.route = `/@${layoutKey}`
+      // Ensure route is set for context matching
+      if (!layoutPage.route) layoutPage.route = `/layout/${layoutKey}`
       for (const section of layoutPage.sections) {
         await translateSectionAsync(section, layoutPage, translations, {
           fallbackToSource,

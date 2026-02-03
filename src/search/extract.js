@@ -41,11 +41,6 @@ export function extractSearchContent(siteContent, options = {}) {
       continue
     }
 
-    // Skip special pages (header, footer, etc.)
-    if (pageRoute.startsWith('/@')) {
-      continue
-    }
-
     // Skip pages marked as noindex
     if (page.seo?.noindex) {
       continue

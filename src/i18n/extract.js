@@ -41,7 +41,7 @@ export function extractTranslatableContent(siteContent) {
   for (const layoutKey of ['header', 'footer', 'left', 'right']) {
     const layoutPage = siteContent[layoutKey]
     if (layoutPage?.sections) {
-      const pageRoute = layoutPage.route || `/@${layoutKey}`
+      const pageRoute = layoutPage.route || `/layout/${layoutKey}`
       for (const section of layoutPage.sections) {
         extractFromSection(section, pageRoute, units)
       }

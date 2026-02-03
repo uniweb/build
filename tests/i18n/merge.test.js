@@ -269,7 +269,7 @@ describe('mergeTranslations', () => {
     const siteContent = {
       pages: [],
       header: {
-        route: '/@header',
+        route: '/layout/header',
         sections: [{
           id: '1',
           content: {
@@ -295,7 +295,7 @@ describe('mergeTranslations', () => {
     const siteContent = {
       pages: [],
       footer: {
-        route: '/@footer',
+        route: '/layout/footer',
         sections: [{
           id: '1',
           content: {
@@ -321,7 +321,7 @@ describe('mergeTranslations', () => {
     const siteContent = {
       pages: [],
       left: {
-        route: '/@left',
+        route: '/layout/left',
         sections: [{
           id: '1',
           content: {
@@ -334,7 +334,7 @@ describe('mergeTranslations', () => {
         }]
       },
       right: {
-        route: '/@right',
+        route: '/layout/right',
         sections: [{
           id: '1',
           content: {
