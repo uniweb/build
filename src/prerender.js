@@ -714,6 +714,22 @@ export async function prerenderSite(siteDir, options = {}) {
 
     uniweb.setFoundation(foundation)
 
+    // Load extensions (secondary foundations via URL)
+    const extensions = siteContent.config?.extensions
+    if (extensions?.length) {
+      onProgress(`Loading ${extensions.length} extension(s)...`)
+      for (const ext of extensions) {
+        try {
+          const url = typeof ext === 'string' ? ext : ext.url
+          const extModule = await import(url)
+          uniweb.registerExtension(extModule)
+          onProgress(`  Extension loaded: ${url}`)
+        } catch (err) {
+          onProgress(`  Warning: Extension failed to load: ${ext} (${err.message})`)
+        }
+      }
+    }
+
     // Set base path from site config so components can access it during SSR
     // (e.g., <Link reload> needs basePath to prefix hrefs for subdirectory deployments)
     if (siteContent.config?.base && uniweb.activeWebsite?.setBasePath) {
