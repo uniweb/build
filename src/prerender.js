@@ -15,6 +15,37 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 
+/**
+ * Resolve an extension URL to a filesystem path for prerender.
+ * Browser URLs like "/effects/foundation.js" need mapping to local files.
+ *
+ * Resolution order:
+ * 1. dist directory (post-build copy target, e.g., site/dist/effects/foundation.js)
+ * 2. Project root with dist subdir (dev layout, e.g., project/effects/dist/foundation.js)
+ * 3. Original URL (absolute or remote — let import() handle it)
+ */
+function resolveExtensionPath(url, distDir, projectRoot) {
+  // Only resolve URLs that look like root-relative paths
+  if (url.startsWith('/')) {
+    // Try dist directory first (production: files copied to site/dist/)
+    const distPath = join(distDir, url)
+    if (existsSync(distPath)) return distPath
+
+    // Try project root with dist subdir (dev layout: effects/dist/foundation.js)
+    // "/effects/foundation.js" → "effects/dist/foundation.js"
+    const parts = url.slice(1).split('/')
+    if (parts.length >= 2) {
+      const pkgName = parts[0]
+      const rest = parts.slice(1).join('/')
+      const devPath = join(projectRoot, pkgName, 'dist', rest)
+      if (existsSync(devPath)) return devPath
+    }
+  }
+
+  // Return as-is for absolute paths or remote URLs
+  return url
+}
+
 // Lazily loaded dependencies
 let React, renderToString, createUniweb
 let preparePropsSSR, getComponentMetaSSR
@@ -718,10 +749,12 @@ export async function prerenderSite(siteDir, options = {}) {
     const extensions = siteContent.config?.extensions
     if (extensions?.length) {
       onProgress(`Loading ${extensions.length} extension(s)...`)
+      const projectRoot = join(siteDir, '..')
       for (const ext of extensions) {
         try {
           const url = typeof ext === 'string' ? ext : ext.url
-          const extModule = await import(url)
+          const extPath = resolveExtensionPath(url, distDir, projectRoot)
+          const extModule = await import(pathToFileURL(extPath).href)
           uniweb.registerExtension(extModule)
           onProgress(`  Extension loaded: ${url}`)
         } catch (err) {
