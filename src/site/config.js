@@ -175,12 +175,15 @@ export async function defineSiteConfig(options = {}) {
   const rawBase = baseOption || process.env.UNIWEB_BASE || siteConfig.base
   const base = rawBase ? normalizeBasePath(String(rawBase)) : undefined
 
+  // Check for shell mode (no embedded content, for dynamic backend)
+  const isShellMode = process.env.UNIWEB_SHELL === 'true'
+
   // Detect foundation type
   const foundationInfo = detectFoundationType(siteConfig.foundation, siteRoot)
 
-  // Check for runtime mode (env variable or URL-based foundation)
+  // Check for runtime mode (env variable, URL-based foundation, or shell mode)
   const isRuntimeMode =
-    process.env.VITE_FOUNDATION_MODE === 'runtime' || foundationInfo.type === 'url'
+    isShellMode || process.env.VITE_FOUNDATION_MODE === 'runtime' || foundationInfo.type === 'url'
 
   // Dynamic imports for optional peer dependencies
   // These are imported dynamically to avoid requiring them when not needed
@@ -267,7 +270,8 @@ export async function defineSiteConfig(options = {}) {
     // Site content collection and injection
     siteContentPlugin({
       sitePath: './',
-      inject: true,
+      inject: !isShellMode,
+      shell: isShellMode,
       seo,
       assets,
       search,
@@ -422,7 +426,7 @@ export async function defineSiteConfig(options = {}) {
     plugins,
 
     define: {
-      __FOUNDATION_CONFIG__: JSON.stringify(foundationConfig)
+      __FOUNDATION_CONFIG__: isShellMode ? 'null' : JSON.stringify(foundationConfig)
     },
 
     resolve: {

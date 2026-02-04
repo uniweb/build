@@ -338,6 +338,7 @@ export function siteContentPlugin(options = {}) {
     pagesDir = 'pages',
     variableName = '__SITE_CONTENT__',
     inject = true,
+    shell = false,
     filename = 'site-content.json',
     watch: shouldWatch = true,
     seo = {},
@@ -871,6 +872,9 @@ export function siteContentPlugin(options = {}) {
 
     async transformIndexHtml(html, ctx) {
       if (!siteContent) return html
+
+      // Shell mode: skip all HTML injections — backend provides __DATA__ at serve time
+      if (shell) return html
 
       // Detect locale from URL (e.g., /es/about → 'es')
       let contentToInject = siteContent
