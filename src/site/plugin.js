@@ -379,6 +379,7 @@ export function siteContentPlugin(options = {}) {
   let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
   let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
   let resolvedCollectionsBase = null // Resolved from site.yml collectionsDir
+  let headHtml = '' // Contents of site/head.html for injection
 
   /**
    * Load translations for a specific locale
@@ -423,6 +424,18 @@ export function siteContentPlugin(options = {}) {
       return translations
     } catch {
       return null
+    }
+  }
+
+  /**
+   * Read head.html from site root (if it exists)
+   */
+  async function loadHeadHtml() {
+    const headPath = resolve(resolvedSitePath, 'head.html')
+    try {
+      return await readFile(headPath, 'utf-8')
+    } catch {
+      return ''
     }
   }
 
@@ -532,6 +545,7 @@ export function siteContentPlugin(options = {}) {
       // Collect content at build start
       try {
         siteContent = await collectSiteContent(resolvedSitePath, { foundationPath })
+        headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
         // Process content collections if defined in site.yml
@@ -579,6 +593,7 @@ export function siteContentPlugin(options = {}) {
             console.log('[site-content] Content changed, rebuilding...')
             try {
               siteContent = await collectSiteContent(resolvedSitePath, { foundationPath })
+              headHtml = await loadHeadHtml()
               // Execute fetches for the updated content
               await executeDevFetches(siteContent, resolvedSitePath)
               console.log(`[site-content] Rebuilt ${siteContent.pages?.length || 0} pages`)
@@ -647,6 +662,14 @@ export function siteContentPlugin(options = {}) {
           watchers.push(watch(themeYmlPath, scheduleRebuild))
         } catch (err) {
           // theme.yml may not exist, that's ok
+        }
+
+        // Watch head.html
+        const headHtmlPath = resolve(resolvedSitePath, 'head.html')
+        try {
+          watchers.push(watch(headHtmlPath, scheduleRebuild))
+        } catch {
+          // head.html may not exist, that's ok
         }
 
         // Watch content/ folder for collection changes
@@ -871,6 +894,11 @@ export function siteContentPlugin(options = {}) {
       }
 
       let headInjection = ''
+
+      // Inject user's head.html (analytics, third-party scripts)
+      if (headHtml) {
+        headInjection += headHtml + '\n'
+      }
 
       // Inject theme CSS
       if (contentToInject.theme?.css) {
