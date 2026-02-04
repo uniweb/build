@@ -1113,6 +1113,11 @@ async function loadFoundationVars(foundationPath) {
  * Layout panels (header, footer, left, right) are persistent regions
  * that appear on every page. They live in layout/ parallel to pages/.
  *
+ * Supports two forms:
+ *   - Folder: layout/header/ (directory with .md files, like a page)
+ *   - File shorthand: layout/header.md (single markdown file)
+ * Folder takes priority when both exist.
+ *
  * @param {string} layoutDir - Path to layout directory
  * @param {string} siteRoot - Path to site root
  * @returns {Promise<Object>} { header, footer, left, right }
@@ -1125,19 +1130,35 @@ async function collectLayoutPanels(layoutDir, siteRoot) {
   const knownPanels = ['header', 'footer', 'left', 'right']
   const entries = await readdir(layoutDir)
 
-  for (const entry of entries) {
-    if (!knownPanels.includes(entry)) continue
-    const entryPath = join(layoutDir, entry)
-    const stats = await stat(entryPath)
-    if (!stats.isDirectory()) continue
+  for (const panel of knownPanels) {
+    // Folder form (higher priority)
+    if (entries.includes(panel)) {
+      const entryPath = join(layoutDir, panel)
+      const stats = await stat(entryPath)
+      if (stats.isDirectory()) {
+        const pageResult = await processPage(entryPath, panel, siteRoot, {
+          isIndex: false,
+          parentRoute: '/layout'
+        })
+        if (pageResult) {
+          result[panel] = pageResult.page
+        }
+        continue
+      }
+    }
 
-    const pageResult = await processPage(entryPath, entry, siteRoot, {
-      isIndex: false,
-      parentRoute: '/layout'
-    })
-
-    if (pageResult) {
-      result[entry] = pageResult.page
+    // File shorthand: layout/header.md
+    const mdFile = `${panel}.md`
+    if (entries.includes(mdFile)) {
+      const filePath = join(layoutDir, mdFile)
+      const { section } = await processMarkdownFile(filePath, '1', siteRoot, panel)
+      result[panel] = {
+        route: `/layout/${panel}`,
+        title: panel.charAt(0).toUpperCase() + panel.slice(1),
+        description: '',
+        layout: { header: true, footer: true, leftPanel: true, rightPanel: true },
+        sections: [section]
+      }
     }
   }
 
