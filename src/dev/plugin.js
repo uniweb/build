@@ -63,20 +63,28 @@ export function foundationDevPlugin(options = {}) {
     console.log(`[foundation] Building ${name}...`)
 
     try {
-      // Use Vite's native config loading by specifying configFile
       const configPath = join(resolvedFoundationPath, 'vite.config.js')
 
-      // Build using Vite with the foundation's own config file
-      await build({
-        root: resolvedFoundationPath,
-        configFile: existsSync(configPath) ? configPath : false,
-        logLevel: 'warn',
-        build: {
-          outDir: 'dist',
-          emptyOutDir: true,
-          watch: null // Don't use Vite's watch, we handle it ourselves
-        }
-      })
+      // Temporarily change cwd to foundation directory so that
+      // defineFoundationConfig() resolves the entry path correctly
+      // (it uses process.cwd() as the foundation root)
+      const originalCwd = process.cwd()
+      process.chdir(resolvedFoundationPath)
+
+      try {
+        await build({
+          root: resolvedFoundationPath,
+          configFile: existsSync(configPath) ? configPath : false,
+          logLevel: 'warn',
+          build: {
+            outDir: 'dist',
+            emptyOutDir: true,
+            watch: null // Don't use Vite's watch, we handle it ourselves
+          }
+        })
+      } finally {
+        process.chdir(originalCwd)
+      }
 
       lastBuildTime = Date.now()
       console.log(`[foundation] Built ${name} in ${lastBuildTime - startTime}ms`)
@@ -173,7 +181,10 @@ export function foundationDevPlugin(options = {}) {
 
         try {
           watcher = watch(srcPath, { recursive: true }, (eventType, filename) => {
-            // Ignore non-source files
+            // Ignore generated files (build output triggers entry regeneration)
+            if (filename && filename.includes('_entry.generated')) return
+
+            // Only rebuild for source file changes
             if (
               filename &&
               (filename.endsWith('.js') ||

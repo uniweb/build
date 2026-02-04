@@ -291,10 +291,121 @@ export async function defineSiteConfig(options = {}) {
   // Build resolve.alias configuration
   const alias = {}
 
-  // Set up #foundation alias for bundled mode
-  if (!isRuntimeMode && foundationInfo.type !== 'url') {
+  if (isRuntimeMode) {
+    // In runtime mode, foundation is loaded via URL at runtime.
+    // main.js still imports #foundation so Vite can resolve it,
+    // but start() ignores the import and uses the URL instead.
+    // Point #foundation at a virtual noop module.
+    alias['#foundation'] = '\0__foundation-noop__'
+  } else if (foundationInfo.type !== 'url') {
+    // Bundled mode: #foundation points to the actual package
     alias['#foundation'] = foundationInfo.name
   }
+
+  // Virtual module plugin for the noop foundation stub
+  const noopFoundationPlugin = isRuntimeMode ? {
+    name: 'uniweb:foundation-noop',
+    resolveId(id) {
+      if (id === '\0__foundation-noop__' || id.startsWith('\0__foundation-noop__')) return id
+    },
+    load(id) {
+      if (id === '\0__foundation-noop__') return 'export default {}'
+      // Handle #foundation/styles → noop CSS
+      if (id.startsWith('\0__foundation-noop__')) return ''
+    }
+  } : null
+
+  if (noopFoundationPlugin) plugins.push(noopFoundationPlugin)
+
+  // Import map plugin for runtime mode production builds
+  // Emits re-export modules for each externalized package (react, @uniweb/core, etc.)
+  // so the browser can resolve bare specifiers in the dynamically-imported foundation
+  const IMPORT_MAP_EXTERNALS = [
+    'react',
+    'react-dom',
+    'react/jsx-runtime',
+    'react/jsx-dev-runtime',
+    '@uniweb/core'
+  ]
+  const IMPORT_MAP_PREFIX = '\0importmap:'
+
+  const importMapPlugin = isRuntimeMode ? (() => {
+    let isBuild = false
+
+    return {
+      name: 'uniweb:import-map',
+
+      configResolved(config) {
+        isBuild = config.command === 'build'
+      },
+
+      resolveId(id) {
+        if (id.startsWith(IMPORT_MAP_PREFIX)) return id
+      },
+
+      async load(id) {
+        if (!id.startsWith(IMPORT_MAP_PREFIX)) return
+        const pkg = id.slice(IMPORT_MAP_PREFIX.length)
+        // Dynamically discover exports at build time by importing the package.
+        // We generate explicit named re-exports (not `export *`) because CJS
+        // packages like React only expose a default via `export *`, losing
+        // individual named exports (useState, jsx, etc.) that foundations need.
+        try {
+          const mod = await import(pkg)
+          const names = Object.keys(mod).filter(k => k !== '__esModule')
+          const hasDefault = 'default' in mod
+          const named = names.filter(k => k !== 'default')
+          const lines = []
+          if (named.length) {
+            lines.push(`export { ${named.join(', ')} } from '${pkg}'`)
+          }
+          if (hasDefault) {
+            lines.push(`export { default } from '${pkg}'`)
+          }
+          return lines.join('\n') || `export {}`
+        } catch {
+          // Fallback: generic re-export (may not preserve named exports for CJS)
+          return `export * from '${pkg}'`
+        }
+      },
+
+      // Emit deterministic chunks for each external (production only).
+      // preserveSignature: 'exports-only' tells Rollup to preserve the original
+      // export names (useState, jsx, etc.) instead of mangling them.
+      // In dev mode, Vite's transformRequest() resolves bare specifiers instead.
+      buildStart() {
+        if (!isBuild) return
+        for (const ext of IMPORT_MAP_EXTERNALS) {
+          this.emitFile({
+            type: 'chunk',
+            id: `${IMPORT_MAP_PREFIX}${ext}`,
+            fileName: `_importmap/${ext.replace(/\//g, '-')}.js`,
+            preserveSignature: 'exports-only'
+          })
+        }
+      },
+
+      // Inject the import map into the HTML (production only).
+      // In dev mode, Vite's transformRequest() handles bare specifier resolution.
+      transformIndexHtml: {
+        order: 'pre',
+        handler(html) {
+          if (!isBuild) return html
+          const basePath = base || '/'
+          const imports = {}
+          for (const ext of IMPORT_MAP_EXTERNALS) {
+            imports[ext] = `${basePath}_importmap/${ext.replace(/\//g, '-')}.js`
+          }
+          const importMap = JSON.stringify({ imports }, null, 2)
+          const script = `    <script type="importmap">\n${importMap}\n    </script>\n`
+          // Import map must appear before any module scripts
+          return html.replace('<head>', '<head>\n' + script)
+        }
+      }
+    }
+  })() : null
+
+  if (importMapPlugin) plugins.push(importMapPlugin)
 
   // Build foundation config for runtime
   const foundationConfig = {
