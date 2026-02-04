@@ -900,6 +900,24 @@ export function siteContentPlugin(options = {}) {
         headInjection += headHtml + '\n'
       }
 
+      // Inject font preconnect links (before theme CSS so browser starts DNS early)
+      const fontImports = contentToInject.theme?.fonts?.import
+      if (Array.isArray(fontImports) && fontImports.length > 0) {
+        const origins = new Set()
+        for (const font of fontImports) {
+          if (font.url) {
+            try { origins.add(new URL(font.url).origin) } catch {}
+          }
+        }
+        for (const origin of origins) {
+          headInjection += `    <link rel="preconnect" href="${origin}">\n`
+        }
+        // Google Fonts serves CSS from googleapis.com but font files from gstatic.com
+        if (origins.has('https://fonts.googleapis.com')) {
+          headInjection += `    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n`
+        }
+      }
+
       // Inject theme CSS
       if (contentToInject.theme?.css) {
         headInjection += `    <style id="uniweb-theme">\n${contentToInject.theme.css}\n    </style>\n`
