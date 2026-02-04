@@ -185,6 +185,11 @@ export async function defineSiteConfig(options = {}) {
   const isRuntimeMode =
     isShellMode || process.env.VITE_FOUNDATION_MODE === 'runtime' || foundationInfo.type === 'url'
 
+  // Extensions are always runtime-loaded via import(), so they need import maps
+  // to resolve bare specifiers (react, @uniweb/core) even in bundled mode
+  const hasExtensions = siteConfig.extensions?.length > 0
+  const needsImportMap = isRuntimeMode || hasExtensions
+
   // Dynamic imports for optional peer dependencies
   // These are imported dynamically to avoid requiring them when not needed
   const imports = [
@@ -333,7 +338,7 @@ export async function defineSiteConfig(options = {}) {
   ]
   const IMPORT_MAP_PREFIX = '\0importmap:'
 
-  const importMapPlugin = isRuntimeMode ? (() => {
+  const importMapPlugin = needsImportMap ? (() => {
     let isBuild = false
 
     return {
