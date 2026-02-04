@@ -502,6 +502,22 @@ function renderBlock(block) {
     ...block.properties,
   }
 
+  // Resolve inherited entity data (mirrors BlockRenderer.jsx)
+  // EntityStore walks page/site hierarchy to find data matching meta.inheritData
+  const entityStore = block.website?.entityStore
+  if (entityStore) {
+    const resolved = entityStore.resolve(block, meta)
+    if (resolved.status === 'ready' && resolved.data) {
+      const merged = { ...content.data }
+      for (const key of Object.keys(resolved.data)) {
+        if (merged[key] === undefined) {
+          merged[key] = resolved.data[key]
+        }
+      }
+      content.data = merged
+    }
+  }
+
   // Background handling (mirrors BlockRenderer.jsx)
   const { background, ...wrapperProps } = getWrapperProps(block)
 
