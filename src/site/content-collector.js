@@ -179,10 +179,25 @@ async function readYamlFile(filePath) {
 }
 
 /**
- * Check if a file is a markdown file
+ * Check if a file is a markdown file that should be processed.
+ * Excludes:
+ * - Files not ending in .md
+ * - Files starting with _ (drafts/private)
+ * - README.md (repo documentation, not site content)
  */
 function isMarkdownFile(filename) {
-  return filename.endsWith('.md') && !filename.startsWith('_')
+  if (!filename.endsWith('.md')) return false
+  if (filename.startsWith('_')) return false
+  if (filename.toLowerCase() === 'readme.md') return false
+  return true
+}
+
+/**
+ * Check if a folder should be ignored.
+ * Excludes folders starting with _ (drafts/private).
+ */
+function isIgnoredFolder(name) {
+  return name.startsWith('_')
 }
 
 /**
@@ -763,6 +778,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   // First pass: discover all page folders and read their config
   const pageFolders = []
   for (const entry of entries) {
+    if (isIgnoredFolder(entry)) continue // Skip _prefixed folders
     const entryPath = join(dirPath, entry)
     const stats = await stat(entryPath)
     if (!stats.isDirectory()) continue
