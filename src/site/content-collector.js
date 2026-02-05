@@ -203,9 +203,11 @@ function isIgnoredFolder(name) {
 /**
  * Read folder configuration, determining content mode from config file presence.
  *
- * - folder.yml present → pages mode (md files are child pages)
- * - page.yml present → sections mode (md files are sections of this page)
+ * - folder.yml present → folder mode (md files are child pages)
+ * - page.yml present → page mode (md files are sections of this page)
  * - Neither → inherit mode from parent
+ *
+ * Internal mode values: 'pages' (folder mode), 'sections' (page mode)
  *
  * @param {string} dirPath - Directory path
  * @param {string} inheritedMode - Mode inherited from parent ('sections' or 'pages')
@@ -220,7 +222,7 @@ async function readFolderConfig(dirPath, inheritedMode) {
   if (Object.keys(pageYml).length > 0) {
     return { config: pageYml, mode: 'sections', source: 'page.yml' }
   }
-  // Check for empty folder.yml (presence signals pages mode even if empty)
+  // Check for empty folder.yml (presence signals folder mode even if empty)
   if (existsSync(join(dirPath, 'folder.yml'))) {
     return { config: {}, mode: 'pages', source: 'folder.yml' }
   }
@@ -289,7 +291,7 @@ function applyNonStrictOrder(items, orderArray) {
 }
 
 /**
- * Process a markdown file as a standalone page (pages mode).
+ * Process a markdown file as a standalone page (folder mode).
  * Creates a page with a single section from the markdown content.
  *
  * @param {string} filePath - Path to markdown file
@@ -818,7 +820,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   const folderNames = orderedFolders.map(f => f.name)
   const detectedVersions = detectVersions(folderNames)
 
-  // If versioned section, handle version folders specially (always sections mode)
+  // If versioned section, handle version folders specially (always page mode)
   if (detectedVersions && !versionContext) {
     const parentConfig = await readYamlFile(join(dirPath, 'page.yml'))
     const versionMeta = buildVersionMetadata(detectedVersions, parentConfig)
@@ -880,7 +882,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     // Apply non-strict order to md-file-pages
     const orderedMdPages = applyNonStrictOrder(mdPageItems, orderConfig?.order)
 
-    // In pages mode, only promote an index if explicitly set via index: in folder.yml
+    // In folder mode, only promote an index if explicitly set via index: in folder.yml
     // The container page itself owns the parent route — don't auto-promote children
     const indexName = orderConfig?.index || null
 
@@ -906,7 +908,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       const isIndex = entry === indexName
 
       if (dirMode === 'sections') {
-        // Subdirectory overrides to sections mode — process normally
+        // Subdirectory overrides to page mode — process normally
         const result = await processPage(entryPath, entry, siteRoot, {
           isIndex, parentRoute, parentFetch, versionContext
         })
@@ -917,7 +919,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           iconCollection = mergeIconCollections(iconCollection, pageIcons)
           pages.push(page)
 
-          // Recurse into subdirectories (sections mode)
+          // Recurse into subdirectories (page mode)
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
           const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections')
@@ -929,7 +931,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           }
         }
       } else {
-        // Container directory in pages mode — create minimal page, recurse
+        // Container directory in folder mode — create minimal page, recurse
         const containerRoute = isIndex
           ? parentRoute
           : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
@@ -971,7 +973,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
         pages.push(containerPage)
 
-        // Recurse in pages mode
+        // Recurse in folder mode
         const subResult = await collectPagesRecursive(entryPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages')
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
@@ -1000,8 +1002,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const isIndex = entry === indexPageName
 
     if (dirMode === 'pages') {
-      // Child directory switches to pages mode (has folder.yml) —
-      // create container page with empty sections, recurse in pages mode
+      // Child directory switches to folder mode (has folder.yml) —
+      // create container page with empty sections, recurse in folder mode
       const containerRoute = isIndex
         ? parentRoute
         : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
