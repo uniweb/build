@@ -291,6 +291,133 @@ function applyNonStrictOrder(items, orderArray) {
 }
 
 /**
+ * Extract the name from a config array item.
+ * Handles both string entries ("hero") and object entries ({ features: [...] }).
+ * @param {*} item - Array item from sections: or pages: config
+ * @returns {string|null} The name, or null if not a valid entry
+ */
+function extractItemName(item) {
+  if (typeof item === 'string') return item
+  if (typeof item === 'object' && item !== null) {
+    const keys = Object.keys(item)
+    if (keys.length === 1) return keys[0]
+  }
+  return null
+}
+
+/**
+ * Parse a config array that may contain '...' rest markers.
+ *
+ * Returns structured info:
+ * - mode 'strict': no '...' — only listed items visible in navigation
+ * - mode 'inclusive': '...' present — pinned items + auto-discovered rest
+ * - mode 'all': array is just ['...'] — equivalent to omitting config
+ *
+ * @param {Array} arr - Config array (may contain '...' strings and/or objects)
+ * @returns {{ mode: 'strict'|'inclusive'|'all', before: Array, after: Array }|null}
+ */
+function parseWildcardArray(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return null
+
+  const firstRestIndex = arr.indexOf('...')
+  if (firstRestIndex === -1) {
+    return { mode: 'strict', before: [...arr], after: [] }
+  }
+
+  // Find last '...' index
+  let lastRestIndex = firstRestIndex
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i] === '...') { lastRestIndex = i; break }
+  }
+
+  const before = arr.slice(0, firstRestIndex).filter(x => x !== '...')
+  const after = arr.slice(lastRestIndex + 1).filter(x => x !== '...')
+
+  if (before.length === 0 && after.length === 0) {
+    return { mode: 'all', before: [], after: [] }
+  }
+
+  return { mode: 'inclusive', before, after }
+}
+
+/**
+ * Apply wildcard-aware ordering to a list of named items.
+ *
+ * - strict: listed items first in listed order, then unlisted (all items returned)
+ * - inclusive: before items, then rest (in existing order), then after items
+ * - all/null: return items unchanged
+ *
+ * @param {Array} items - Items with a .name property
+ * @param {{ mode: string, before: Array, after: Array }|null} parsed - From parseWildcardArray
+ * @returns {Array} Reordered items
+ */
+function applyWildcardOrder(items, parsed) {
+  if (!parsed || parsed.mode === 'all') return items
+
+  const itemMap = new Map(items.map(i => [i.name, i]))
+  const beforeNames = parsed.before.map(extractItemName).filter(Boolean)
+  const afterNames = parsed.after.map(extractItemName).filter(Boolean)
+  const allPinnedNames = new Set([...beforeNames, ...afterNames])
+
+  const beforeItems = beforeNames.filter(n => itemMap.has(n)).map(n => itemMap.get(n))
+  const afterItems = afterNames.filter(n => itemMap.has(n)).map(n => itemMap.get(n))
+  const rest = items.filter(i => !allPinnedNames.has(i.name))
+
+  if (parsed.mode === 'strict') {
+    // Listed items first, then unlisted (hiding is applied separately)
+    return [...beforeItems, ...rest]
+  }
+
+  // Inclusive: before + rest + after
+  return [...beforeItems, ...rest, ...afterItems]
+}
+
+/**
+ * Find the markdown file for a section name, handling numeric prefixes.
+ * Tries exact match first ("hero.md"), then prefix-based ("1-hero.md").
+ *
+ * @param {string} pagePath - Directory containing section files
+ * @param {string} sectionName - Logical section name (e.g., 'hero')
+ * @param {string[]} [cachedFiles] - Pre-read directory listing (optimization)
+ * @returns {{ filePath: string, stableName: string, prefix: string|null }|null}
+ */
+function findSectionFile(pagePath, sectionName, cachedFiles) {
+  const exactPath = join(pagePath, `${sectionName}.md`)
+  if (existsSync(exactPath)) {
+    return { filePath: exactPath, stableName: sectionName, prefix: null }
+  }
+
+  const files = cachedFiles || []
+  for (const file of files) {
+    if (!isMarkdownFile(file)) continue
+    const { name } = parse(file)
+    const { prefix, name: parsedName } = parseNumericPrefix(name)
+    if (parsedName === sectionName) {
+      return { filePath: join(pagePath, file), stableName: sectionName, prefix }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Extract a direct child's folder name from its route, relative to parentRoute.
+ * Returns null for the index page (route === parentRoute) or non-direct-children.
+ *
+ * @param {string} route - Page route (e.g., '/about')
+ * @param {string} parentRoute - Parent route (e.g., '/')
+ * @returns {string|null}
+ */
+function getDirectChildName(route, parentRoute) {
+  if (!route || route === parentRoute) return null
+  const prefix = parentRoute === '/' ? '/' : parentRoute + '/'
+  if (!route.startsWith(prefix)) return null
+  const rest = route.slice(prefix.length)
+  if (rest.includes('/')) return null
+  return rest
+}
+
+/**
  * Process a markdown file as a standalone page (folder mode).
  * Creates a page with a single section from the markdown content.
  *
@@ -482,6 +609,9 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
   }
   let lastModified = null
 
+  // Cache directory listing for prefix-based file resolution
+  const cachedFiles = await readdir(pagePath)
+
   let index = 1
   for (const item of sectionsConfig) {
     let sectionName
@@ -507,13 +637,14 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
     // Build section ID
     const id = parentId ? `${parentId}.${index}` : String(index)
 
-    // Look for the markdown file
-    const filePath = join(pagePath, `${sectionName}.md`)
-    if (!existsSync(filePath)) {
+    // Look for the markdown file (exact match or prefix-based, e.g., "hero" → "1-hero.md")
+    const found = findSectionFile(pagePath, sectionName, cachedFiles)
+    if (!found) {
       console.warn(`[content-collector] Section file not found: ${sectionName}.md`)
       index++
       continue
     }
+    const filePath = found.filePath
 
     // Process the section
     // Use sectionName as stable ID for scroll targeting (e.g., "hero", "features")
@@ -579,8 +710,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
   // Check for explicit sections configuration
   const { sections: sectionsConfig } = pageConfig
+  const sectionsParsed = Array.isArray(sectionsConfig) ? parseWildcardArray(sectionsConfig) : null
 
-  if (sectionsConfig === undefined || sectionsConfig === '*') {
+  if (sectionsConfig === undefined || sectionsConfig === '*' || sectionsParsed?.mode === 'all') {
     // Default behavior: discover all .md files, sort by numeric prefix
     const files = await readdir(pagePath)
     const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
@@ -609,8 +741,79 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     // Build hierarchy from dot notation
     hierarchicalSections = buildSectionHierarchy(sections)
 
+  } else if (sectionsParsed?.mode === 'inclusive') {
+    // Inclusive: pinned sections + auto-discovered rest via '...' wildcard
+    const files = await readdir(pagePath)
+    const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
+
+    // Build name → file info map from discovered files
+    const discoveredMap = new Map()
+    for (const file of mdFiles) {
+      const { name } = parse(file)
+      const { prefix, name: stableName } = parseNumericPrefix(name)
+      const key = stableName || name
+      if (!discoveredMap.has(key)) {
+        discoveredMap.set(key, { file, prefix, stableName: key })
+      }
+    }
+
+    // Create items with .name property for applyWildcardOrder
+    const allItems = [...discoveredMap.keys()].map(name => ({ name }))
+    const ordered = applyWildcardOrder(allItems, sectionsParsed)
+
+    // Collect subsection configs from the original array (e.g., { features: [a, b] })
+    const subsectionConfigs = new Map()
+    for (const item of [...sectionsParsed.before, ...sectionsParsed.after]) {
+      if (typeof item === 'object' && item !== null) {
+        const keys = Object.keys(item)
+        if (keys.length === 1) {
+          subsectionConfigs.set(keys[0], item[keys[0]])
+        }
+      }
+    }
+
+    // Process sections in wildcard-expanded order
+    const sections = []
+    let sectionIndex = 1
+    for (const { name } of ordered) {
+      const entry = discoveredMap.get(name)
+      if (!entry) {
+        console.warn(`[content-collector] Section '${name}' not found in ${pagePath}`)
+        continue
+      }
+
+      const id = String(sectionIndex)
+      const { section, assetCollection: sectionAssets, iconCollection: sectionIcons } =
+        await processMarkdownFile(join(pagePath, entry.file), id, siteRoot, entry.stableName)
+      sections.push(section)
+      pageAssetCollection = mergeAssetCollections(pageAssetCollection, sectionAssets)
+      pageIconCollection = mergeIconCollections(pageIconCollection, sectionIcons)
+
+      // Track last modified
+      const fileStat = await stat(join(pagePath, entry.file))
+      if (!lastModified || fileStat.mtime > lastModified) {
+        lastModified = fileStat.mtime
+      }
+
+      // Process subsections if configured (e.g., { features: [logocloud, stats] })
+      const subsections = subsectionConfigs.get(name)
+      if (Array.isArray(subsections) && subsections.length > 0) {
+        const subResult = await processExplicitSections(subsections, pagePath, siteRoot, id)
+        section.subsections = subResult.sections
+        pageAssetCollection = mergeAssetCollections(pageAssetCollection, subResult.assetCollection)
+        pageIconCollection = mergeIconCollections(pageIconCollection, subResult.iconCollection)
+        if (subResult.lastModified && (!lastModified || subResult.lastModified > lastModified)) {
+          lastModified = subResult.lastModified
+        }
+      }
+
+      sectionIndex++
+    }
+
+    hierarchicalSections = buildSectionHierarchy(sections)
+
   } else if (Array.isArray(sectionsConfig) && sectionsConfig.length > 0) {
-    // Explicit sections array
+    // Strict: explicit sections array (only listed sections processed)
     const result = await processExplicitSections(sectionsConfig, pagePath, siteRoot)
     hierarchicalSections = result.sections
     pageAssetCollection = result.assetCollection
@@ -722,9 +925,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 function determineIndexPage(orderConfig, availableFolders) {
   const { pages: pagesArray, index: indexName } = orderConfig || {}
 
-  // 1. Explicit pages array - first item is index
+  // 1. Explicit pages array - first non-'...' item is index
   if (Array.isArray(pagesArray) && pagesArray.length > 0) {
-    return pagesArray[0]
+    const parsed = parseWildcardArray(pagesArray)
+    if (parsed && parsed.before.length > 0) {
+      return extractItemName(parsed.before[0])
+    }
+    // Array starts with '...' or is ['...'] — no index from pages, fall through
   }
 
   // 2. Explicit index property
@@ -813,8 +1020,22 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     return a.name.localeCompare(b.name)
   })
 
-  // Apply non-strict order from parent config (if present)
-  const orderedFolders = applyNonStrictOrder(pageFolders, orderConfig?.order)
+  // Apply ordering: pages: (wildcard-aware) > order: [array] (backward compat) > default
+  let orderedFolders
+  let strictPageNames = null
+
+  const pagesParsed = Array.isArray(orderConfig?.pages) ? parseWildcardArray(orderConfig.pages) : null
+
+  if (pagesParsed && pagesParsed.mode !== 'all') {
+    orderedFolders = applyWildcardOrder(pageFolders, pagesParsed)
+    if (pagesParsed.mode === 'strict') {
+      strictPageNames = new Set(pagesParsed.before.map(extractItemName).filter(Boolean))
+    }
+  } else if (Array.isArray(orderConfig?.order)) {
+    orderedFolders = applyNonStrictOrder(pageFolders, orderConfig.order)
+  } else {
+    orderedFolders = pageFolders
+  }
 
   // Check if this directory contains version folders (versioned section)
   const folderNames = orderedFolders.map(f => f.name)
@@ -879,12 +1100,30 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       }
     }
 
-    // Apply non-strict order to md-file-pages
-    const orderedMdPages = applyNonStrictOrder(mdPageItems, orderConfig?.order)
+    // Apply ordering: pages: (wildcard-aware) > order: [array] (backward compat) > default
+    let orderedMdPages
+    let strictPageNamesFM = null
 
-    // In folder mode, only promote an index if explicitly set via index: in folder.yml
-    // The container page itself owns the parent route — don't auto-promote children
-    const indexName = orderConfig?.index || null
+    const pagesParsedFM = Array.isArray(orderConfig?.pages) ? parseWildcardArray(orderConfig.pages) : null
+
+    if (pagesParsedFM && pagesParsedFM.mode !== 'all') {
+      orderedMdPages = applyWildcardOrder(mdPageItems, pagesParsedFM)
+      if (pagesParsedFM.mode === 'strict') {
+        strictPageNamesFM = new Set(pagesParsedFM.before.map(extractItemName).filter(Boolean))
+      }
+    } else if (Array.isArray(orderConfig?.order)) {
+      orderedMdPages = applyNonStrictOrder(mdPageItems, orderConfig.order)
+    } else {
+      orderedMdPages = mdPageItems
+    }
+
+    // In folder mode, determine index: pages: first item, or explicit index:
+    let indexName = null
+    if (pagesParsedFM && pagesParsedFM.before.length > 0) {
+      indexName = extractItemName(pagesParsedFM.before[0])
+    } else {
+      indexName = orderConfig?.index || null
+    }
 
     // Add md-file-pages
     for (const { name, result } of orderedMdPages) {
@@ -980,6 +1219,17 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
         for (const [scope, meta] of subResult.versionedScopes) {
           versionedScopes.set(scope, meta)
+        }
+      }
+    }
+
+    // When pages: is strict (no '...'), hide unlisted direct children from navigation
+    if (strictPageNamesFM) {
+      for (const page of pages) {
+        const childName = getDirectChildName(page.route, parentRoute)
+          || (page.sourcePath ? getDirectChildName(page.sourcePath, parentRoute) : null)
+        if (childName && !strictPageNamesFM.has(childName) && !page.hidden) {
+          page.hidden = true
         }
       }
     }
@@ -1088,6 +1338,17 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             versionedScopes.set(scope, meta)
           }
         }
+      }
+    }
+  }
+
+  // When pages: is strict (no '...'), hide unlisted direct children from navigation
+  if (strictPageNames) {
+    for (const page of pages) {
+      const childName = getDirectChildName(page.route, parentRoute)
+        || (page.sourcePath ? getDirectChildName(page.sourcePath, parentRoute) : null)
+      if (childName && !strictPageNames.has(childName) && !page.hidden) {
+        page.hidden = true
       }
     }
   }
@@ -1291,8 +1552,11 @@ export async function collectSiteContent(sitePath, options = {}) {
     page.parent = parentPage ? parentPage.route : null
   }
 
-  // Sort pages by order
-  pages.sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+  // Page order is determined by per-level sorting during collection:
+  // 1. Numeric 'order' property in page.yml (lower first, within each level)
+  // 2. pages: array in parent config (wildcard-aware, overrides numeric order)
+  // 3. order: [array] in parent config (non-strict, backward compat)
+  // No global re-sort — collection order is authoritative.
 
   // Log asset summary
   const assetCount = Object.keys(assetCollection.assets).length
@@ -1333,6 +1597,14 @@ export async function collectSiteContent(sitePath, options = {}) {
     // Icon manifest for preloading
     icons: iconManifest
   }
+}
+
+// Exported for testing
+export {
+  extractItemName,
+  parseWildcardArray,
+  applyWildcardOrder,
+  getDirectChildName
 }
 
 export default collectSiteContent
