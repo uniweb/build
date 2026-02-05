@@ -937,7 +937,7 @@ export function siteContentPlugin(options = {}) {
 
       // Inject content as JSON script tag
       if (inject) {
-        headInjection += `    <script type="application/json" id="${variableName}">${JSON.stringify(contentToInject)}</script>\n`
+        headInjection += `    <script type="application/json" id="${variableName}">${JSON.stringify(contentToInject).replace(/</g, '\\u003c')}</script>\n`
       }
 
       if (!headInjection) return html

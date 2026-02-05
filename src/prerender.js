@@ -900,7 +900,7 @@ function injectContent(shell, renderedContent, page, siteContent) {
     contentForJson.theme = { ...contentForJson.theme }
     delete contentForJson.theme.css
   }
-  const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(contentForJson)}</script>`
+  const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(contentForJson).replace(/</g, '\\u003c')}</script>`
   if (html.includes('__SITE_CONTENT__')) {
     // Replace existing site content with updated version (includes expanded dynamic routes)
     // Match script tag with attributes in any order
@@ -917,7 +917,7 @@ function injectContent(shell, renderedContent, page, siteContent) {
 
   // Inject icon cache so client can render icons immediately without CDN fetches
   if (siteContent._iconCache) {
-    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${JSON.stringify(siteContent._iconCache)}</script>`
+    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${JSON.stringify(siteContent._iconCache).replace(/</g, '\\u003c')}</script>`
     if (html.includes('__ICON_CACHE__')) {
       html = html.replace(
         /<script[^>]*id="__ICON_CACHE__"[^>]*>[\s\S]*?<\/script>/,
