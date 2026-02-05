@@ -380,7 +380,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const section = {
     id,
     stableId,
-    component: type || component || 'Section',
+    type: type || component || null,  // frontmatter: type > component (legacy)
     preset,
     input,
     params: { ...params, ...props },
