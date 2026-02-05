@@ -169,26 +169,16 @@ async function resolveLocales(configLocales, localesPath) {
 /**
  * Extract manifest from site content and write to file
  * @param {string} siteRoot - Site root directory
+ * @param {Object} siteContent - Collected site content (from collectSiteContent)
  * @param {Object} options - Options
  * @returns {Object} { manifest, report }
  */
-export async function extractManifest(siteRoot, options = {}) {
+export async function extractManifest(siteRoot, siteContent, options = {}) {
   const {
     localesDir = DEFAULTS.localesDir,
-    siteContent: providedContent,
-    siteContentPath = join(siteRoot, 'dist', 'site-content.json'),
     verbose = false,
     dryRun = false
   } = options
-
-  // Use provided content, or fall back to reading from file
-  let siteContent
-  if (providedContent) {
-    siteContent = providedContent
-  } else {
-    const siteContentRaw = await readFile(siteContentPath, 'utf-8')
-    siteContent = JSON.parse(siteContentRaw)
-  }
 
   // Extract translatable content
   const manifest = extractTranslatableContent(siteContent)
