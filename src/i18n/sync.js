@@ -143,6 +143,15 @@ export function formatSyncReport(report) {
 
   if (report.moved.length > 0) {
     lines.push(`  ↻ ${report.moved.length} strings moved (contexts updated)`)
+    for (const item of report.moved.slice(0, 5)) {
+      const preview = truncate(item.source, 40)
+      const oldCtx = formatContext(item.previousContexts?.[0])
+      const newCtx = formatContext(item.currentContexts?.[0])
+      lines.push(`    - "${preview}" ${oldCtx} → ${newCtx}`)
+    }
+    if (report.moved.length > 5) {
+      lines.push(`    ... and ${report.moved.length - 5} more`)
+    }
   }
 
   if (report.changed.length > 0) {
@@ -150,7 +159,7 @@ export function formatSyncReport(report) {
     for (const item of report.changed.slice(0, 5)) {
       const prevPreview = truncate(item.previousSource, 30)
       const currPreview = truncate(item.source, 30)
-      lines.push(`    - ${item.previousHash}: "${prevPreview}" → "${currPreview}"`)
+      lines.push(`    - "${prevPreview}" → "${currPreview}"`)
     }
     if (report.changed.length > 5) {
       lines.push(`    ... and ${report.changed.length - 5} more`)
@@ -159,13 +168,40 @@ export function formatSyncReport(report) {
 
   if (report.added.length > 0) {
     lines.push(`  + ${report.added.length} new strings`)
+    for (const item of report.added.slice(0, 5)) {
+      const preview = truncate(item.source, 40)
+      const ctx = formatContext(item.contexts?.[0])
+      lines.push(`    - "${preview}" ${ctx}`)
+    }
+    if (report.added.length > 5) {
+      lines.push(`    ... and ${report.added.length - 5} more`)
+    }
   }
 
   if (report.removed.length > 0) {
     lines.push(`  - ${report.removed.length} strings removed`)
+    for (const item of report.removed.slice(0, 5)) {
+      const preview = truncate(item.source, 40)
+      const ctx = formatContext(item.contexts?.[0])
+      lines.push(`    - "${preview}" ${ctx}`)
+    }
+    if (report.removed.length > 5) {
+      lines.push(`    ... and ${report.removed.length - 5} more`)
+    }
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Format a context object for display
+ */
+function formatContext(context) {
+  if (!context) return ''
+  const location = context.page || context.collection || ''
+  const section = context.section || context.item || ''
+  if (!location && !section) return ''
+  return `(${location}:${section})`
 }
 
 /**

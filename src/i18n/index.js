@@ -176,7 +176,8 @@ export async function extractManifest(siteRoot, options = {}) {
   const {
     localesDir = DEFAULTS.localesDir,
     siteContentPath = join(siteRoot, 'dist', 'site-content.json'),
-    verbose = false
+    verbose = false,
+    dryRun = false
   } = options
 
   // Load site content
@@ -203,8 +204,10 @@ export async function extractManifest(siteRoot, options = {}) {
   // Generate sync report
   const report = syncManifests(previousManifest, manifest)
 
-  // Write new manifest
-  await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+  // Write new manifest (skip in dry-run mode)
+  if (!dryRun) {
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+  }
 
   if (verbose) {
     console.log(formatSyncReport(report))
@@ -222,7 +225,7 @@ export async function extractManifest(siteRoot, options = {}) {
  * @returns {Promise<Object>} { manifest, report }
  */
 export async function extractCollectionManifest(siteRoot, options = {}) {
-  const { localesDir = DEFAULTS.localesDir } = options
+  const { localesDir = DEFAULTS.localesDir, dryRun = false } = options
 
   // Extract translatable content from collections
   const manifest = await extractCollectionContent(siteRoot)
@@ -249,8 +252,10 @@ export async function extractCollectionManifest(siteRoot, options = {}) {
   // Generate sync report
   const report = syncManifests(previousManifest, manifest)
 
-  // Write new manifest
-  await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+  // Write new manifest (skip in dry-run mode)
+  if (!dryRun) {
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+  }
 
   return { manifest, report }
 }
