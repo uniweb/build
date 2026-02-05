@@ -271,26 +271,6 @@ function compareFilenames(a, b) {
 }
 
 /**
- * Apply non-strict ordering to a list of items.
- * Listed items appear first in array order, then unlisted items in their existing order.
- *
- * Unlike strict arrays (pages: [...], sections: [...]) which hide unlisted items,
- * this preserves all items — it only affects order.
- *
- * @param {Array} items - Items with a .name property
- * @param {Array<string>} orderArray - Names in desired order
- * @returns {Array} Reordered items (all items preserved)
- */
-function applyNonStrictOrder(items, orderArray) {
-  if (!Array.isArray(orderArray) || orderArray.length === 0) return items
-  const orderMap = new Map(orderArray.map((name, i) => [name, i]))
-  const listed = items.filter(i => orderMap.has(i.name))
-    .sort((a, b) => orderMap.get(a.name) - orderMap.get(b.name))
-  const unlisted = items.filter(i => !orderMap.has(i.name))
-  return [...listed, ...unlisted]
-}
-
-/**
  * Extract the name from a config array item.
  * Handles both string entries ("hero") and object entries ({ features: [...] }).
  * @param {*} item - Array item from sections: or pages: config
@@ -995,7 +975,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     // Read folder.yml or page.yml to determine mode and get config
     const { config: dirConfig, mode: dirMode } = await readFolderConfig(entryPath, contentMode)
     const numericOrder = typeof dirConfig.order === 'number' ? dirConfig.order : undefined
-    const childOrderArray = Array.isArray(dirConfig.order) ? dirConfig.order : undefined
 
     pageFolders.push({
       name: entry,
@@ -1005,8 +984,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       dirMode,
       childOrderConfig: {
         pages: dirConfig.pages,
-        index: dirConfig.index,
-        order: childOrderArray
+        index: dirConfig.index
       }
     })
   }
@@ -1031,8 +1009,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     if (pagesParsed.mode === 'strict') {
       strictPageNames = new Set(pagesParsed.before.map(extractItemName).filter(Boolean))
     }
-  } else if (Array.isArray(orderConfig?.order)) {
-    orderedFolders = applyNonStrictOrder(pageFolders, orderConfig.order)
   } else {
     orderedFolders = pageFolders
   }
@@ -1111,8 +1087,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       if (pagesParsedFM.mode === 'strict') {
         strictPageNamesFM = new Set(pagesParsedFM.before.map(extractItemName).filter(Boolean))
       }
-    } else if (Array.isArray(orderConfig?.order)) {
-      orderedMdPages = applyNonStrictOrder(mdPageItems, orderConfig.order)
     } else {
       orderedMdPages = mdPageItems
     }
@@ -1493,8 +1467,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Extract page ordering config from site.yml
   const siteOrderConfig = {
     pages: siteConfig.pages,
-    index: siteConfig.index,
-    order: Array.isArray(siteConfig.order) ? siteConfig.order : undefined
+    index: siteConfig.index
   }
 
   // Determine root content mode from folder.yml/page.yml presence in pages directory
