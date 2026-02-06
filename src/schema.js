@@ -137,6 +137,16 @@ function isComponentFileName(name) {
 }
 
 /**
+ * Check if a name is a valid layout identifier.
+ * Layout names are lowercase identifiers (e.g., 'docs', 'marketing')
+ * but PascalCase is also accepted for backward compatibility.
+ * Skips private names (leading _ or .).
+ */
+function isLayoutName(name) {
+  return /^[a-zA-Z]/.test(name)
+}
+
+/**
  * Check if a directory has a valid entry file (Name.ext or index.ext)
  */
 function hasEntryFile(dirPath, dirName) {
@@ -284,15 +294,17 @@ export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PAT
     const ext = extname(entry.name)
     if (entry.isFile() && COMPONENT_EXTENSIONS.has(ext)) {
       const name = basename(entry.name, ext)
-      if (isComponentFileName(name)) {
+      if (isLayoutName(name)) {
         fileNames.add(name)
       }
     } else if (entry.isDirectory()) {
-      dirNames.add(entry.name)
+      if (isLayoutName(entry.name)) {
+        dirNames.add(entry.name)
+      }
     }
   }
 
-  // Check for name collisions (e.g., DocsLayout.jsx AND DocsLayout/)
+  // Check for name collisions (e.g., docs.jsx AND docs/)
   for (const name of fileNames) {
     if (dirNames.has(name)) {
       throw new Error(
@@ -308,7 +320,7 @@ export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PAT
     const ext = extname(entry.name)
     if (!COMPONENT_EXTENSIONS.has(ext)) continue
     const name = basename(entry.name, ext)
-    if (!isComponentFileName(name)) continue
+    if (!isLayoutName(name)) continue
 
     const meta = createImplicitMeta(name)
     layouts[name] = {
@@ -320,7 +332,7 @@ export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PAT
   // Discover directories at root (no recursion for layouts)
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    if (!isComponentFileName(entry.name)) continue
+    if (!isLayoutName(entry.name)) continue
 
     const dirPath = join(fullPath, entry.name)
     const relativePath = join(layoutsRelPath, entry.name)
