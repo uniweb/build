@@ -312,12 +312,27 @@ export function rewriteSiteContentPaths(siteContent, pathMapping) {
     result.pages.forEach(processPage)
   }
 
-  // Process header and footer
+  // Process named layout section sets
+  if (result.layouts) {
+    for (const [name, panels] of Object.entries(result.layouts)) {
+      for (const panel of ['header', 'footer', 'left', 'right']) {
+        if (panels[panel]) processPage(panels[panel])
+      }
+    }
+  }
+
+  // Process flat header/footer/left/right (backward compat)
   if (result.header) {
     processPage(result.header)
   }
   if (result.footer) {
     processPage(result.footer)
+  }
+  if (result.left) {
+    processPage(result.left)
+  }
+  if (result.right) {
+    processPage(result.right)
   }
 
   // Remove the assets manifest from output (no longer needed at runtime)

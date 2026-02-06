@@ -765,7 +765,7 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
  * @param {Object} options.versionContext - Version context from parent { version, versionMeta, scope }
  * @returns {Object} Page data with assets manifest
  */
-async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null, versionContext = null } = {}) {
+async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null, versionContext = null, layoutName = null } = {}) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
   // Note: We no longer skip hidden pages here - they still exist as valid pages,
@@ -925,7 +925,15 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   const sourcePath = isIndex ? folderRoute : null
 
   // Extract configuration
-  const { seo = {}, layout = {}, ...restConfig } = pageConfig
+  const { seo = {}, layout: layoutConfig, ...restConfig } = pageConfig
+
+  // Resolve layout name: page.yml layout (string or object.name) > inherited from parent > null
+  const pageLayoutName = typeof layoutConfig === 'string' ? layoutConfig
+    : layoutConfig?.name || null
+  const resolvedLayoutName = pageLayoutName || layoutName || null
+
+  // Layout panel visibility (from object form of layout config)
+  const layoutObj = typeof layoutConfig === 'object' && layoutConfig !== null ? layoutConfig : {}
 
   // For dynamic routes, determine the parent's data schema
   // This tells prerender which data array to iterate over
@@ -960,12 +968,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       hideInHeader: pageConfig.hideInHeader || false, // Hide from header nav
       hideInFooter: pageConfig.hideInFooter || false, // Hide from footer nav
 
-      // Layout options (per-page overrides)
+      // Layout options (named layout + per-page overrides)
       layout: {
-        header: layout.header !== false, // Show header (default true)
-        footer: layout.footer !== false, // Show footer (default true)
-        leftPanel: layout.leftPanel !== false, // Show left panel (default true)
-        rightPanel: layout.rightPanel !== false // Show right panel (default true)
+        ...(resolvedLayoutName ? { name: resolvedLayoutName } : {}),
+        header: layoutObj.header !== false, // Show header (default true)
+        footer: layoutObj.footer !== false, // Show footer (default true)
+        leftPanel: layoutObj.leftPanel !== false, // Show left panel (default true)
+        rightPanel: layoutObj.rightPanel !== false // Show right panel (default true)
       },
 
       seo: {
@@ -1045,7 +1054,7 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} contentMode - 'sections' (default) or 'pages' (md files are child pages)
  * @returns {Promise<Object>} { pages, assetCollection, iconCollection, notFound, versionedScopes }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections', mounts = null) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections', mounts = null, parentLayoutName = null) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -1072,6 +1081,10 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const { config: dirConfig, mode: dirMode } = await readFolderConfig(entryPath, contentMode)
     const numericOrder = typeof dirConfig.order === 'number' ? dirConfig.order : undefined
 
+    // Extract layout name from folder config (folder.yml layout: or page.yml layout:)
+    const folderLayout = typeof dirConfig.layout === 'string' ? dirConfig.layout
+      : dirConfig.layout?.name || null
+
     pageFolders.push({
       name: entry,
       path: entryPath,
@@ -1081,7 +1094,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       childOrderConfig: {
         pages: dirConfig.pages,
         index: dirConfig.index
-      }
+      },
+      childLayoutName: folderLayout
     })
   }
 
@@ -1090,6 +1104,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     for (const [routeSegment, mountPath] of mounts) {
       if (!pageFolders.some(f => f.name === routeSegment)) {
         const { config: mountConfig } = await readFolderConfig(mountPath, 'pages')
+        const mountLayout = typeof mountConfig.layout === 'string' ? mountConfig.layout
+          : mountConfig.layout?.name || null
         pageFolders.push({
           name: routeSegment,
           path: mountPath,
@@ -1099,7 +1115,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           childOrderConfig: {
             pages: mountConfig.pages,
             index: mountConfig.index
-          }
+          },
+          childLayoutName: mountLayout
         })
       }
     }
@@ -1140,7 +1157,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     versionedScopes.set(parentRoute, versionMeta)
 
     for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, childOrderConfig } = folder
+      const { name: entry, path: entryPath, childOrderConfig, childLayoutName } = folder
 
       if (isVersionFolder(entry)) {
         const versionInfo = versionMeta.versions.find(v => v.id === entry)
@@ -1153,7 +1170,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
         const subResult = await collectPagesRecursive(
           entryPath, versionRoute, siteRoot, childOrderConfig, parentFetch,
-          { version: versionInfo, versionMeta, scope: parentRoute }
+          { version: versionInfo, versionMeta, scope: parentRoute },
+          'sections', null, childLayoutName || parentLayoutName
         )
 
         pages.push(...subResult.pages)
@@ -1164,7 +1182,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         }
       } else {
         const result = await processPage(entryPath, entry, siteRoot, {
-          isIndex: false, parentRoute, parentFetch
+          isIndex: false, parentRoute, parentFetch,
+          layoutName: childLayoutName || parentLayoutName
         })
         if (result) {
           pages.push(result.page)
@@ -1228,18 +1247,25 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         page.route = parentRoute
       }
 
+      // Inherit layout name from parent (folder.yml or site.yml cascade)
+      if (parentLayoutName && !page.layout.name) {
+        page.layout.name = parentLayoutName
+      }
+
       pages.push(page)
     }
 
     // Process subdirectories
     for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig } = folder
+      const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig, childLayoutName } = folder
       const isIndex = entry === indexName
+      const effectiveLayout = childLayoutName || parentLayoutName
 
       if (dirMode === 'sections') {
         // Subdirectory overrides to page mode — process normally
         const result = await processPage(entryPath, entry, siteRoot, {
-          isIndex, parentRoute, parentFetch, versionContext
+          isIndex, parentRoute, parentFetch, versionContext,
+          layoutName: effectiveLayout
         })
 
         if (result) {
@@ -1252,7 +1278,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           const childDirPath = mounts?.get(entry) || entryPath
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
-          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections', null)
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections', null, effectiveLayout)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1265,6 +1291,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         const containerRoute = isIndex
           ? parentRoute
           : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
+
+        // Resolve layout for container page
+        const containerLayoutObj = typeof dirConfig.layout === 'object' && dirConfig.layout !== null ? dirConfig.layout : {}
 
         const containerPage = {
           route: containerRoute,
@@ -1285,10 +1314,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           hideInHeader: dirConfig.hideInHeader || false,
           hideInFooter: dirConfig.hideInFooter || false,
           layout: {
-            header: dirConfig.layout?.header !== false,
-            footer: dirConfig.layout?.footer !== false,
-            leftPanel: dirConfig.layout?.leftPanel !== false,
-            rightPanel: dirConfig.layout?.rightPanel !== false
+            ...(effectiveLayout ? { name: effectiveLayout } : {}),
+            header: containerLayoutObj.header !== false,
+            footer: containerLayoutObj.footer !== false,
+            leftPanel: containerLayoutObj.leftPanel !== false,
+            rightPanel: containerLayoutObj.rightPanel !== false
           },
           seo: {
             noindex: dirConfig.seo?.noindex || false,
@@ -1305,7 +1335,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
         // Recurse in folder mode
         const childDirPath = mounts?.get(entry) || entryPath
-        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null)
+        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null, effectiveLayout)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1340,8 +1370,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
-    const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig } = folder
+    const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig, childLayoutName } = folder
     const isIndex = entry === indexPageName
+    const effectiveLayout = childLayoutName || parentLayoutName
 
     if (dirMode === 'pages') {
       // Child directory switches to folder mode (has folder.yml) —
@@ -1349,6 +1380,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       const containerRoute = isIndex
         ? parentRoute
         : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
+
+      // Resolve layout for container page
+      const containerLayoutObj = typeof dirConfig.layout === 'object' && dirConfig.layout !== null ? dirConfig.layout : {}
 
       const containerPage = {
         route: containerRoute,
@@ -1369,10 +1403,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         hideInHeader: dirConfig.hideInHeader || false,
         hideInFooter: dirConfig.hideInFooter || false,
         layout: {
-          header: dirConfig.layout?.header !== false,
-          footer: dirConfig.layout?.footer !== false,
-          leftPanel: dirConfig.layout?.leftPanel !== false,
-          rightPanel: dirConfig.layout?.rightPanel !== false
+          ...(effectiveLayout ? { name: effectiveLayout } : {}),
+          header: containerLayoutObj.header !== false,
+          footer: containerLayoutObj.footer !== false,
+          leftPanel: containerLayoutObj.leftPanel !== false,
+          rightPanel: containerLayoutObj.rightPanel !== false
         },
         seo: {
           noindex: dirConfig.seo?.noindex || false,
@@ -1392,7 +1427,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       }
 
       const childDirPath = mounts?.get(entry) || entryPath
-      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null)
+      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null, effectiveLayout)
       pages.push(...subResult.pages)
       assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
       iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1402,7 +1437,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     } else {
       // Sections mode — process directory as a page (existing behavior)
       const result = await processPage(entryPath, entry, siteRoot, {
-        isIndex, parentRoute, parentFetch, versionContext
+        isIndex, parentRoute, parentFetch, versionContext,
+        layoutName: effectiveLayout
       })
 
       if (result) {
@@ -1424,7 +1460,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
             : page.route
           const childFetch = page.fetch || parentFetch
-          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode, null)
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode, null, effectiveLayout)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1481,37 +1517,35 @@ async function loadFoundationVars(foundationPath) {
 }
 
 /**
- * Collect layout panels from the layout/ directory
+ * Collect panel data (header, footer, left, right) from a single directory.
  *
- * Layout panels (header, footer, left, right) are persistent regions
- * that appear on every page. They live in layout/ parallel to pages/.
- *
- * Supports two forms:
- *   - Folder: layout/header/ (directory with .md files, like a page)
- *   - File shorthand: layout/header.md (single markdown file)
+ * Supports two forms per panel:
+ *   - Folder: dir/header/ (directory with .md files, like a page)
+ *   - File shorthand: dir/header.md (single markdown file)
  * Folder takes priority when both exist.
  *
- * @param {string} layoutDir - Path to layout directory
+ * @param {string} dir - Directory to scan for panel files
  * @param {string} siteRoot - Path to site root
+ * @param {string} routePrefix - Route prefix for panel pages (e.g., '/layout' or '/layout/marketing')
  * @returns {Promise<Object>} { header, footer, left, right }
  */
-async function collectLayoutPanels(layoutDir, siteRoot) {
+async function collectPanelsFromDir(dir, siteRoot, routePrefix = '/layout') {
   const result = { header: null, footer: null, left: null, right: null }
 
-  if (!existsSync(layoutDir)) return result
+  if (!existsSync(dir)) return result
 
   const knownPanels = ['header', 'footer', 'left', 'right']
-  const entries = await readdir(layoutDir)
+  const entries = await readdir(dir)
 
   for (const panel of knownPanels) {
     // Folder form (higher priority)
     if (entries.includes(panel)) {
-      const entryPath = join(layoutDir, panel)
+      const entryPath = join(dir, panel)
       const stats = await stat(entryPath)
       if (stats.isDirectory()) {
         const pageResult = await processPage(entryPath, panel, siteRoot, {
           isIndex: false,
-          parentRoute: '/layout'
+          parentRoute: routePrefix
         })
         if (pageResult) {
           result[panel] = pageResult.page
@@ -1520,13 +1554,13 @@ async function collectLayoutPanels(layoutDir, siteRoot) {
       }
     }
 
-    // File shorthand: layout/header.md
+    // File shorthand: header.md
     const mdFile = `${panel}.md`
     if (entries.includes(mdFile)) {
-      const filePath = join(layoutDir, mdFile)
+      const filePath = join(dir, mdFile)
       const { section } = await processMarkdownFile(filePath, '1', siteRoot, panel)
       result[panel] = {
-        route: `/layout/${panel}`,
+        route: `${routePrefix}/${panel}`,
         title: panel.charAt(0).toUpperCase() + panel.slice(1),
         description: '',
         layout: { header: true, footer: true, leftPanel: true, rightPanel: true },
@@ -1536,6 +1570,50 @@ async function collectLayoutPanels(layoutDir, siteRoot) {
   }
 
   return result
+}
+
+/**
+ * Collect layout panels from the layout/ directory, including named layout subdirectories.
+ *
+ * Root-level files/folders are the "default" layout's panels.
+ * Subdirectories (other than the four known panel names) are named layouts,
+ * each self-contained with its own panel set.
+ *
+ * @param {string} layoutDir - Path to layout directory
+ * @param {string} siteRoot - Path to site root
+ * @returns {Promise<Object>} { layouts, header, footer, left, right }
+ */
+async function collectLayouts(layoutDir, siteRoot) {
+  if (!existsSync(layoutDir)) {
+    return { layouts: null, header: null, footer: null, left: null, right: null }
+  }
+
+  // Collect root-level panels (= "default" layout, backward compat)
+  const defaultPanels = await collectPanelsFromDir(layoutDir, siteRoot, '/layout')
+
+  // Scan for named layout subdirectories
+  const entries = await readdir(layoutDir, { withFileTypes: true })
+  const knownPanels = new Set(['header', 'footer', 'left', 'right'])
+  const namedLayouts = {}
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (knownPanels.has(entry.name)) continue  // Skip panel folders (belong to default)
+    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
+
+    // This is a named layout subdirectory
+    const subdir = join(layoutDir, entry.name)
+    namedLayouts[entry.name] = await collectPanelsFromDir(subdir, siteRoot, `/layout/${entry.name}`)
+  }
+
+  if (Object.keys(namedLayouts).length === 0) {
+    // No named layouts — backward compatible mode
+    return { layouts: null, ...defaultPanels }
+  }
+
+  // Named layouts mode: root panels become "default", subdirs are named
+  const layouts = { default: defaultPanels, ...namedLayouts }
+  return { layouts, ...defaultPanels }
 }
 
 /**
@@ -1595,12 +1673,16 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Determine root content mode from folder.yml/page.yml presence in pages directory
   const { mode: rootContentMode } = await readFolderConfig(pagesPath, 'sections')
 
-  // Collect layout panels from layout/ directory
-  const { header, footer, left, right } = await collectLayoutPanels(layoutPath, sitePath)
+  // Collect layout panels from layout/ directory (including named layout subdirectories)
+  const { layouts, header, footer, left, right } = await collectLayouts(layoutPath, sitePath)
+
+  // Site-level layout name (from site.yml layout: field)
+  const siteLayoutName = typeof siteConfig.layout === 'string' ? siteConfig.layout
+    : siteConfig.layout?.name || null
 
   // Recursively collect all pages
   const { pages, assetCollection, iconCollection, notFound, versionedScopes } =
-    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts, siteLayoutName)
 
   // Deduplicate: remove content-less container pages whose route duplicates
   // a content-bearing page (e.g., a promoted index page)
@@ -1679,6 +1761,9 @@ export async function collectSiteContent(sitePath, options = {}) {
       css: themeCSS
     },
     pages,
+    // Named layout section sets (null if no named layouts — backward compat)
+    layouts,
+    // Flat panel fields (always present for backward compat)
     header,
     footer,
     left,

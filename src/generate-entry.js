@@ -108,8 +108,12 @@ function generateEntrySource(components, options = {}) {
   }
 
   // Foundation capabilities import (for custom Layout, props, etc.)
+  // Use namespace import to merge named exports (Layout, layouts) into capabilities.
+  // This ensures both `export const layouts = {...}` (named) and
+  // `export default { layouts: {...} }` (default) work correctly.
   if (foundationExports) {
-    lines.push(`import capabilities from '${foundationExports.path}'`)
+    lines.push(`import * as _foundationModule from '${foundationExports.path}'`)
+    lines.push(`const capabilities = { ..._foundationModule.default, ...(_foundationModule.Layout && { Layout: _foundationModule.Layout }), ...(_foundationModule.layouts && { layouts: _foundationModule.layouts }) }`)
   }
 
   // Component imports

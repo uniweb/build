@@ -569,7 +569,7 @@ function renderBlocks(blocks) {
  * Render page layout for SSR
  */
 function renderLayout(page, website) {
-  const RemoteLayout = website.getRemoteLayout()
+  const RemoteLayout = website.getRemoteLayout(page.getLayoutName())
 
   const headerBlocks = page.getHeaderBlocks()
   const bodyBlocks = page.getBodyBlocks()

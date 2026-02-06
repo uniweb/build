@@ -111,6 +111,8 @@ export async function loadFoundationConfig(srcDir) {
       ...module.default,
       vars: module.vars || module.default?.vars,
       Layout: module.Layout || module.default?.Layout,
+      layouts: module.layouts || module.default?.layouts,
+      defaultLayout: module.default?.defaultLayout,
     }
   } catch (error) {
     console.warn(`Warning: Failed to load foundation config ${filePath}:`, error.message)
