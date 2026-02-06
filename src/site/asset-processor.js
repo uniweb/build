@@ -207,6 +207,8 @@ export function rewriteContentPaths(content, pathMapping) {
   const result = JSON.parse(JSON.stringify(content))
 
   function walk(node) {
+    if (!node) return
+
     // Rewrite image src
     if (node.type === 'image' && node.attrs?.src) {
       const newPath = pathMapping[node.attrs.src]
