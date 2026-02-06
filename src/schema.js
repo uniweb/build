@@ -476,14 +476,31 @@ export async function buildSchema(srcDir, componentPaths) {
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
 
+  // Determine extension role
+  const isExtension = !!foundationConfig.extension
+
+  // Warn if extension declares things it shouldn't
+  if (isExtension) {
+    if (foundationConfig.vars && Object.keys(foundationConfig.vars).length > 0) {
+      console.warn(`Warning: Extension declares theme variables (vars). Extensions don't define theme variables — the primary foundation owns those.`)
+    }
+    if (Object.keys(layouts).length > 0) {
+      console.warn(`Warning: Extension provides layouts. Extensions don't provide layouts — the primary foundation owns the layout.`)
+    }
+  }
+
+  // Build _self, stripping the raw extension boolean in favor of normalized role
+  const { extension: _ext, ...configWithoutExtension } = foundationConfig
+
   return {
     _self: {
-      ...foundationConfig,
+      ...configWithoutExtension,
       ...identity,
       // foundation.js overrides package.json for editor-facing identity
       ...(foundationConfig.name && { name: foundationConfig.name }),
       ...(foundationConfig.description && { description: foundationConfig.description }),
       ...(foundationConfig.defaultLayout && { defaultLayout: foundationConfig.defaultLayout }),
+      ...(isExtension && { role: 'extension' }),
     },
     // Layout metadata (full, for editor)
     ...(Object.keys(layouts).length > 0 && { _layouts: layouts }),
