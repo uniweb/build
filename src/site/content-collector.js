@@ -24,8 +24,8 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { join, parse, resolve } from 'node:path'
-import { existsSync } from 'node:fs'
+import { join, parse, resolve, sep } from 'node:path'
+import { existsSync, statSync, realpathSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
@@ -227,6 +227,102 @@ async function readFolderConfig(dirPath, inheritedMode) {
     return { config: {}, mode: 'pages', source: 'folder.yml' }
   }
   return { config: {}, mode: inheritedMode, source: 'inherited' }
+}
+
+/**
+ * Extract page mounts from site.yml paths: config.
+ *
+ * Keys like `pages/docs: ../../../docs` map a route segment to an external
+ * directory. All validation happens upfront before any page collection begins.
+ *
+ * @param {Object} pathsConfig - The paths: object from site.yml
+ * @param {string} sitePath - Absolute path to the site directory
+ * @param {string} pagesPath - Resolved absolute path to the pages directory
+ * @returns {Map<string, string>|null} Route segment → canonical absolute path, or null
+ */
+function resolveMounts(pathsConfig, sitePath, pagesPath) {
+  if (!pathsConfig || typeof pathsConfig !== 'object') return null
+
+  // Extract entries with "pages/" prefix (e.g., "pages/docs": "../../../docs")
+  const mountEntries = Object.entries(pathsConfig)
+    .filter(([key]) => key.startsWith('pages/'))
+    .map(([key, value]) => [key.slice('pages/'.length), value])
+
+  if (mountEntries.length === 0) return null
+
+  const resolved = new Map()
+  const canonicalPagesPath = existsSync(pagesPath) ? realpathSync(pagesPath) : resolve(pagesPath)
+
+  for (const [routeSegment, relativePath] of mountEntries) {
+    // Validate route segment (simple name, no slashes, no special chars)
+    if (!routeSegment || routeSegment.includes('/') || routeSegment.startsWith('.') || routeSegment.startsWith('_')) {
+      throw new Error(
+        `[content-collector] Invalid mount "pages/${routeSegment}" in site.yml paths.\n` +
+        `  The segment after "pages/" must be a simple name (no slashes, dots, or underscores prefix).`
+      )
+    }
+
+    const absolutePath = resolve(sitePath, relativePath)
+
+    // Check existence
+    if (!existsSync(absolutePath)) {
+      throw new Error(
+        `[content-collector] External pages path does not exist: ${absolutePath}\n` +
+        `  Declared in site.yml: pages/${routeSegment}: ${relativePath}`
+      )
+    }
+
+    // Check it's a directory
+    if (!statSync(absolutePath).isDirectory()) {
+      throw new Error(
+        `[content-collector] External pages path is not a directory: ${absolutePath}\n` +
+        `  Declared in site.yml: pages/${routeSegment}: ${relativePath}`
+      )
+    }
+
+    const canonical = realpathSync(absolutePath)
+
+    // Reject node_modules
+    if (canonical.includes(`${sep}node_modules${sep}`)) {
+      throw new Error(
+        `[content-collector] External pages path must not be inside node_modules: ${canonical}\n` +
+        `  Declared in site.yml: pages/${routeSegment}: ${relativePath}`
+      )
+    }
+
+    // Self-inclusion: must not overlap with site pages directory
+    if (
+      canonical === canonicalPagesPath ||
+      canonical.startsWith(canonicalPagesPath + sep) ||
+      canonicalPagesPath.startsWith(canonical + sep)
+    ) {
+      throw new Error(
+        `[content-collector] External pages path overlaps with site pages directory:\n` +
+        `  Path: ${canonical}\n` +
+        `  Site pages: ${canonicalPagesPath}\n` +
+        `  Declared in site.yml: pages/${routeSegment}`
+      )
+    }
+
+    // Cross-mount overlap: no mount target should be ancestor/descendant of another
+    for (const [otherKey, otherPath] of resolved) {
+      if (
+        canonical === otherPath ||
+        canonical.startsWith(otherPath + sep) ||
+        otherPath.startsWith(canonical + sep)
+      ) {
+        throw new Error(
+          `[content-collector] External pages paths overlap:\n` +
+          `  "pages/${routeSegment}" → ${canonical}\n` +
+          `  "pages/${otherKey}" → ${otherPath}`
+        )
+      }
+    }
+
+    resolved.set(routeSegment, canonical)
+  }
+
+  return resolved.size > 0 ? resolved : null
 }
 
 /**
@@ -949,7 +1045,7 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} contentMode - 'sections' (default) or 'pages' (md files are child pages)
  * @returns {Promise<Object>} { pages, assetCollection, iconCollection, notFound, versionedScopes }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections') {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections', mounts = null) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -987,6 +1083,26 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         index: dirConfig.index
       }
     })
+  }
+
+  // Inject virtual entries for mounts without physical directories
+  if (mounts) {
+    for (const [routeSegment, mountPath] of mounts) {
+      if (!pageFolders.some(f => f.name === routeSegment)) {
+        const { config: mountConfig } = await readFolderConfig(mountPath, 'pages')
+        pageFolders.push({
+          name: routeSegment,
+          path: mountPath,
+          order: typeof mountConfig.order === 'number' ? mountConfig.order : undefined,
+          dirConfig: { title: mountConfig.title || routeSegment, ...mountConfig },
+          dirMode: 'pages',
+          childOrderConfig: {
+            pages: mountConfig.pages,
+            index: mountConfig.index
+          }
+        })
+      }
+    }
   }
 
   // Sort page folders by order (ascending), then alphabetically
@@ -1133,9 +1249,10 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           pages.push(page)
 
           // Recurse into subdirectories (page mode)
+          const childDirPath = mounts?.get(entry) || entryPath
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
-          const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections')
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections', null)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1187,7 +1304,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         pages.push(containerPage)
 
         // Recurse in folder mode
-        const subResult = await collectPagesRecursive(entryPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages')
+        const childDirPath = mounts?.get(entry) || entryPath
+        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1273,7 +1391,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         pages.push(containerPage)
       }
 
-      const subResult = await collectPagesRecursive(entryPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages')
+      const childDirPath = mounts?.get(entry) || entryPath
+      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null)
       pages.push(...subResult.pages)
       assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
       iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1300,11 +1419,12 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
         // Recursively process subdirectories
         {
+          const childDirPath = mounts?.get(entry) || entryPath
           const childParentRoute = isIndex
             ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
             : page.route
           const childFetch = page.fetch || parentFetch
-          const subResult = await collectPagesRecursive(entryPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode)
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode, null)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1437,6 +1557,8 @@ export async function collectSiteContent(sitePath, options = {}) {
     ? resolve(sitePath, siteConfig.paths.pages)
     : join(sitePath, 'pages')
 
+  const mounts = resolveMounts(siteConfig.paths, sitePath, pagesPath)
+
   const layoutPath = siteConfig.paths?.layout
     ? resolve(sitePath, siteConfig.paths.layout)
     : join(sitePath, 'layout')
@@ -1478,7 +1600,7 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Recursively collect all pages
   const { pages, assetCollection, iconCollection, notFound, versionedScopes } =
-    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts)
 
   // Deduplicate: remove content-less container pages whose route duplicates
   // a content-bearing page (e.g., a promoted index page)
