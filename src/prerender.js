@@ -569,33 +569,33 @@ function renderBlocks(blocks) {
  * Render page layout for SSR
  */
 function renderLayout(page, website) {
-  const RemoteLayout = website.getRemoteLayout(page.getLayoutName())
+  const layoutName = page.getLayoutName()
+  const RemoteLayout = website.getRemoteLayout(layoutName)
+  const layoutMeta = website.getLayoutMeta(layoutName)
 
-  const headerBlocks = page.getHeaderBlocks()
   const bodyBlocks = page.getBodyBlocks()
-  const footerBlocks = page.getFooterBlocks()
-  const leftBlocks = page.getLeftBlocks()
-  const rightBlocks = page.getRightBlocks()
+  const areas = page.getLayoutAreas()
 
-  const headerElement = headerBlocks ? renderBlocks(headerBlocks) : null
   const bodyElement = bodyBlocks ? renderBlocks(bodyBlocks) : null
-  const footerElement = footerBlocks ? renderBlocks(footerBlocks) : null
-  const leftElement = leftBlocks ? renderBlocks(leftBlocks) : null
-  const rightElement = rightBlocks ? renderBlocks(rightBlocks) : null
+  const areaElements = {}
+  for (const [name, blocks] of Object.entries(areas)) {
+    areaElements[name] = renderBlocks(blocks)
+  }
 
   if (RemoteLayout) {
+    const params = { ...(layoutMeta?.defaults || {}), ...(page.getLayoutParams() || {}) }
+
     return React.createElement(RemoteLayout, {
-      page, website,
-      header: headerElement, body: bodyElement, footer: footerElement,
-      left: leftElement, right: rightElement,
-      leftPanel: leftElement, rightPanel: rightElement
+      page, website, params,
+      body: bodyElement,
+      ...areaElements,
     })
   }
 
   return React.createElement(React.Fragment, null,
-    headerElement && React.createElement('header', null, headerElement),
+    areaElements.header && React.createElement('header', null, areaElements.header),
     bodyElement && React.createElement('main', null, bodyElement),
-    footerElement && React.createElement('footer', null, footerElement)
+    areaElements.footer && React.createElement('footer', null, areaElements.footer)
   )
 }
 

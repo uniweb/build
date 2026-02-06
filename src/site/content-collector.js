@@ -535,12 +535,7 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
       hidden: false,
       hideInHeader: false,
       hideInFooter: false,
-      layout: {
-        header: true,
-        footer: true,
-        leftPanel: true,
-        rightPanel: true
-      },
+      layout: {},
       seo: {
         noindex: false,
         image: null,
@@ -971,10 +966,8 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       // Layout options (named layout + per-page overrides)
       layout: {
         ...(resolvedLayoutName ? { name: resolvedLayoutName } : {}),
-        header: layoutObj.header !== false, // Show header (default true)
-        footer: layoutObj.footer !== false, // Show footer (default true)
-        leftPanel: layoutObj.leftPanel !== false, // Show left panel (default true)
-        rightPanel: layoutObj.rightPanel !== false // Show right panel (default true)
+        ...(layoutObj.hide ? { hide: layoutObj.hide } : {}),
+        ...(layoutObj.params ? { params: layoutObj.params } : {}),
       },
 
       seo: {
@@ -1315,10 +1308,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           hideInFooter: dirConfig.hideInFooter || false,
           layout: {
             ...(effectiveLayout ? { name: effectiveLayout } : {}),
-            header: containerLayoutObj.header !== false,
-            footer: containerLayoutObj.footer !== false,
-            leftPanel: containerLayoutObj.leftPanel !== false,
-            rightPanel: containerLayoutObj.rightPanel !== false
+            ...(containerLayoutObj.hide ? { hide: containerLayoutObj.hide } : {}),
+            ...(containerLayoutObj.params ? { params: containerLayoutObj.params } : {}),
           },
           seo: {
             noindex: dirConfig.seo?.noindex || false,
@@ -1404,10 +1395,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         hideInFooter: dirConfig.hideInFooter || false,
         layout: {
           ...(effectiveLayout ? { name: effectiveLayout } : {}),
-          header: containerLayoutObj.header !== false,
-          footer: containerLayoutObj.footer !== false,
-          leftPanel: containerLayoutObj.leftPanel !== false,
-          rightPanel: containerLayoutObj.rightPanel !== false
+          ...(containerLayoutObj.hide ? { hide: containerLayoutObj.hide } : {}),
+          ...(containerLayoutObj.params ? { params: containerLayoutObj.params } : {}),
         },
         seo: {
           noindex: dirConfig.seo?.noindex || false,
@@ -1517,55 +1506,62 @@ async function loadFoundationVars(foundationPath) {
 }
 
 /**
- * Collect panel data (header, footer, left, right) from a single directory.
+ * Collect areas from a single directory (general named areas, not hardcoded).
  *
- * Supports two forms per panel:
+ * Supports two forms per area:
  *   - Folder: dir/header/ (directory with .md files, like a page)
  *   - File shorthand: dir/header.md (single markdown file)
  * Folder takes priority when both exist.
  *
- * @param {string} dir - Directory to scan for panel files
+ * @param {string} dir - Directory to scan for area files
  * @param {string} siteRoot - Path to site root
- * @param {string} routePrefix - Route prefix for panel pages (e.g., '/layout' or '/layout/marketing')
- * @returns {Promise<Object>} { header, footer, left, right }
+ * @param {string} routePrefix - Route prefix for area pages (e.g., '/layout' or '/layout/marketing')
+ * @returns {Promise<Object>} Map of areaName -> page data
  */
-async function collectPanelsFromDir(dir, siteRoot, routePrefix = '/layout') {
-  const result = { header: null, footer: null, left: null, right: null }
+async function collectAreasFromDir(dir, siteRoot, routePrefix = '/layout') {
+  const result = {}
 
   if (!existsSync(dir)) return result
 
-  const knownPanels = ['header', 'footer', 'left', 'right']
-  const entries = await readdir(dir)
+  const entries = await readdir(dir, { withFileTypes: true })
 
-  for (const panel of knownPanels) {
-    // Folder form (higher priority)
-    if (entries.includes(panel)) {
-      const entryPath = join(dir, panel)
-      const stats = await stat(entryPath)
-      if (stats.isDirectory()) {
-        const pageResult = await processPage(entryPath, panel, siteRoot, {
-          isIndex: false,
-          parentRoute: routePrefix
-        })
-        if (pageResult) {
-          result[panel] = pageResult.page
-        }
-        continue
-      }
+  // Track which area names we've already processed (folder form takes priority)
+  const processed = new Set()
+
+  // First pass: directories (folder form, higher priority)
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
+
+    const areaName = entry.name
+    const entryPath = join(dir, areaName)
+    const pageResult = await processPage(entryPath, areaName, siteRoot, {
+      isIndex: false,
+      parentRoute: routePrefix
+    })
+    if (pageResult) {
+      result[areaName] = pageResult.page
+      processed.add(areaName)
     }
+  }
 
-    // File shorthand: header.md
-    const mdFile = `${panel}.md`
-    if (entries.includes(mdFile)) {
-      const filePath = join(dir, mdFile)
-      const { section } = await processMarkdownFile(filePath, '1', siteRoot, panel)
-      result[panel] = {
-        route: `${routePrefix}/${panel}`,
-        title: panel.charAt(0).toUpperCase() + panel.slice(1),
-        description: '',
-        layout: { header: true, footer: true, leftPanel: true, rightPanel: true },
-        sections: [section]
-      }
+  // Second pass: markdown file shorthand (only if not already processed as folder)
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (!entry.name.endsWith('.md')) continue
+    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
+
+    const areaName = entry.name.replace('.md', '')
+    if (processed.has(areaName)) continue
+
+    const filePath = join(dir, entry.name)
+    const { section } = await processMarkdownFile(filePath, '1', siteRoot, areaName)
+    result[areaName] = {
+      route: `${routePrefix}/${areaName}`,
+      title: areaName.charAt(0).toUpperCase() + areaName.slice(1),
+      description: '',
+      layout: {},
+      sections: [section]
     }
   }
 
@@ -1573,47 +1569,94 @@ async function collectPanelsFromDir(dir, siteRoot, routePrefix = '/layout') {
 }
 
 /**
- * Collect layout panels from the layout/ directory, including named layout subdirectories.
+ * Check if a directory looks like a named layout (contains area-like .md files or area subdirs)
+ * vs an area in folder form (contains section content processed by processPage).
  *
- * Root-level files/folders are the "default" layout's panels.
- * Subdirectories (other than the four known panel names) are named layouts,
- * each self-contained with its own panel set.
+ * Heuristic: if a directory contains .md files at the top level AND no page.yml,
+ * it's a named layout (those .md files are its area definitions).
+ * If it has page.yml or looks like a page directory, it's an area folder.
+ *
+ * @param {string} dirPath - Path to the directory
+ * @returns {Promise<boolean>} True if this looks like a named layout directory
+ */
+async function isNamedLayoutDir(dirPath) {
+  // If it has page.yml, it's an area folder (processPage will handle it)
+  if (existsSync(join(dirPath, 'page.yml'))) return false
+
+  const entries = await readdir(dirPath)
+  // If directory contains .md files but no page.yml, it's a named layout
+  return entries.some(e => e.endsWith('.md') && !e.startsWith('_') && !e.startsWith('.'))
+}
+
+/**
+ * Collect layout areas from the layout/ directory, including named layout subdirectories.
+ *
+ * Root-level .md files and area directories form the "default" layout's areas.
+ * Subdirectories that themselves contain .md files (without page.yml) are named layouts,
+ * each with its own set of areas.
  *
  * @param {string} layoutDir - Path to layout directory
  * @param {string} siteRoot - Path to site root
- * @returns {Promise<Object>} { layouts, header, footer, left, right }
+ * @returns {Promise<Object>} { layouts }
  */
 async function collectLayouts(layoutDir, siteRoot) {
   if (!existsSync(layoutDir)) {
-    return { layouts: null, header: null, footer: null, left: null, right: null }
+    return { layouts: null }
   }
 
-  // Collect root-level panels (= "default" layout, backward compat)
-  const defaultPanels = await collectPanelsFromDir(layoutDir, siteRoot, '/layout')
-
-  // Scan for named layout subdirectories
   const entries = await readdir(layoutDir, { withFileTypes: true })
-  const knownPanels = new Set(['header', 'footer', 'left', 'right'])
-  const namedLayouts = {}
+
+  // Separate root-level entries into:
+  // 1. Area .md files (for default layout)
+  // 2. Area directories (for default layout) vs named layout directories
+  const defaultAreaFiles = []
+  const defaultAreaDirs = []
+  const namedLayoutDirs = []
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    if (knownPanels.has(entry.name)) continue  // Skip panel folders (belong to default)
     if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
 
-    // This is a named layout subdirectory
+    if (entry.isFile() && entry.name.endsWith('.md')) {
+      defaultAreaFiles.push(entry)
+    } else if (entry.isDirectory()) {
+      const dirPath = join(layoutDir, entry.name)
+      if (await isNamedLayoutDir(dirPath)) {
+        namedLayoutDirs.push(entry)
+      } else {
+        defaultAreaDirs.push(entry)
+      }
+    }
+  }
+
+  // Collect default layout areas
+  const defaultAreas = await collectAreasFromDir(layoutDir, siteRoot, '/layout')
+  // Remove any named layout directories that got collected as areas
+  for (const dir of namedLayoutDirs) {
+    delete defaultAreas[dir.name]
+  }
+
+  // Collect named layout areas
+  const namedLayouts = {}
+  for (const entry of namedLayoutDirs) {
     const subdir = join(layoutDir, entry.name)
-    namedLayouts[entry.name] = await collectPanelsFromDir(subdir, siteRoot, `/layout/${entry.name}`)
+    namedLayouts[entry.name] = await collectAreasFromDir(subdir, siteRoot, `/layout/${entry.name}`)
   }
 
-  if (Object.keys(namedLayouts).length === 0) {
-    // No named layouts — backward compatible mode
-    return { layouts: null, ...defaultPanels }
+  const hasDefaultAreas = Object.keys(defaultAreas).length > 0
+  const hasNamedLayouts = Object.keys(namedLayouts).length > 0
+
+  if (!hasDefaultAreas && !hasNamedLayouts) {
+    return { layouts: null }
   }
 
-  // Named layouts mode: root panels become "default", subdirs are named
-  const layouts = { default: defaultPanels, ...namedLayouts }
-  return { layouts, ...defaultPanels }
+  // Always use the layouts object format (general areas)
+  const layouts = {}
+  if (hasDefaultAreas) {
+    layouts.default = defaultAreas
+  }
+  Object.assign(layouts, namedLayouts)
+
+  return { layouts }
 }
 
 /**
@@ -1673,8 +1716,8 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Determine root content mode from folder.yml/page.yml presence in pages directory
   const { mode: rootContentMode } = await readFolderConfig(pagesPath, 'sections')
 
-  // Collect layout panels from layout/ directory (including named layout subdirectories)
-  const { layouts, header, footer, left, right } = await collectLayouts(layoutPath, sitePath)
+  // Collect layout areas from layout/ directory (including named layout subdirectories)
+  const { layouts } = await collectLayouts(layoutPath, sitePath)
 
   // Site-level layout name (from site.yml layout: field)
   const siteLayoutName = typeof siteConfig.layout === 'string' ? siteConfig.layout
@@ -1761,13 +1804,8 @@ export async function collectSiteContent(sitePath, options = {}) {
       css: themeCSS
     },
     pages,
-    // Named layout section sets (null if no named layouts — backward compat)
+    // Layout area sets: { default: { header: page, footer: page, ... }, marketing: { ... } }
     layouts,
-    // Flat panel fields (always present for backward compat)
-    header,
-    footer,
-    left,
-    right,
     notFound,
     // Versioned scopes: route → { versions, latestId }
     versionedScopes: versionedScopesObj,

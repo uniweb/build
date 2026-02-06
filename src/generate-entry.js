@@ -22,20 +22,22 @@
 import { writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { discoverComponents } from './schema.js'
-import { extractAllRuntimeSchemas } from './runtime-schema.js'
+import { discoverComponents, discoverLayoutsInPath } from './schema.js'
+import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
 
 /**
- * Detect foundation config/exports file (for custom Layout, props, vars, etc.)
+ * Detect foundation config/exports file (for props, vars, etc.)
  *
  * Looks for (in order of preference):
  * 1. foundation.js - New consolidated format
  * 2. exports.js - Legacy format (for backward compatibility)
  *
  * The file should export:
- * - Layout (optional) - Custom page layout component
  * - props (optional) - Foundation-wide props
  * - vars (optional) - CSS custom properties (also read by schema builder)
+ * - defaultLayout (optional) - Default layout name
+ *
+ * Note: Layout components are now discovered from src/layouts/
  */
 function detectFoundationExports(srcDir) {
   // Prefer foundation.js (new consolidated format)
@@ -92,9 +94,12 @@ function generateEntrySource(components, options = {}) {
     cssPath = null,
     foundationExports = null,
     meta = {},
+    layouts = {},
+    layoutMeta = {},
   } = options
 
   const componentNames = Object.keys(components).sort()
+  const layoutNames = Object.keys(layouts).sort()
 
   const lines = [
     '// Auto-generated foundation entry point',
@@ -107,18 +112,21 @@ function generateEntrySource(components, options = {}) {
     lines.push(`import '${cssPath}'`)
   }
 
-  // Foundation capabilities import (for custom Layout, props, etc.)
-  // Use namespace import to merge named exports (Layout, layouts) into capabilities.
-  // This ensures both `export const layouts = {...}` (named) and
-  // `export default { layouts: {...} }` (default) work correctly.
+  // Foundation capabilities import (for props, vars, etc.)
+  // Note: Layout/layouts no longer merged from foundation.js — layouts come from src/layouts/ discovery
   if (foundationExports) {
     lines.push(`import * as _foundationModule from '${foundationExports.path}'`)
-    lines.push(`const capabilities = { ..._foundationModule.default, ...(_foundationModule.Layout && { Layout: _foundationModule.Layout }), ...(_foundationModule.layouts && { layouts: _foundationModule.layouts }) }`)
   }
 
   // Component imports
   for (const name of componentNames) {
     const { path, entryFile = `index.js` } = components[name]
+    lines.push(`import ${name} from './${path}/${entryFile}'`)
+  }
+
+  // Layout imports
+  for (const name of layoutNames) {
+    const { path, entryFile = `index.js` } = layouts[name]
     lines.push(`import ${name} from './${path}/${entryFile}'`)
   }
 
@@ -133,9 +141,17 @@ function generateEntrySource(components, options = {}) {
     lines.push('export const components = {}')
   }
 
-  // Foundation capabilities (Layout, props, etc.)
+  // Foundation capabilities (props, vars, etc. + discovered layouts)
   lines.push('')
-  if (foundationExports) {
+  if (foundationExports || layoutNames.length > 0) {
+    const capParts = []
+    if (foundationExports) {
+      capParts.push('..._foundationModule.default')
+    }
+    if (layoutNames.length > 0) {
+      capParts.push(`layouts: { ${layoutNames.join(', ')} }`)
+    }
+    lines.push(`const capabilities = { ${capParts.join(', ')} }`)
     lines.push('export { capabilities }')
   } else {
     lines.push('export const capabilities = null')
@@ -149,6 +165,16 @@ function generateEntrySource(components, options = {}) {
     lines.push(`export const meta = ${metaJson}`)
   } else {
     lines.push('export const meta = {}')
+  }
+
+  // Per-layout runtime metadata (areas, transitions, defaults)
+  lines.push('')
+  if (Object.keys(layoutMeta).length > 0) {
+    const layoutMetaJson = JSON.stringify(layoutMeta, null, 2)
+    lines.push(`// Per-layout runtime metadata (from meta.js)`)
+    lines.push(`export const layoutMeta = ${layoutMetaJson}`)
+  } else {
+    lines.push('export const layoutMeta = {}')
   }
 
   lines.push('')
@@ -205,6 +231,10 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     console.warn('Warning: No section types found')
   }
 
+  // Discover layouts from src/layouts/
+  const layouts = await discoverLayoutsInPath(srcDir)
+  const layoutNames = Object.keys(layouts).sort()
+
   // Detect entry files for each component
   // Bare files discovered in sections/ already have entryFile set — skip detection for those
   for (const name of componentNames) {
@@ -216,20 +246,35 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     }
   }
 
+  // Detect entry files for each layout (same logic as components)
+  for (const name of layoutNames) {
+    const layout = layouts[name]
+    if (!layout.entryFile) {
+      const entry = detectComponentEntry(srcDir, layout.path, layout.name)
+      layout.ext = entry.ext
+      layout.entryFile = entry.file
+    }
+  }
+
   // Check for CSS file
   const cssPath = detectCssFile(srcDir)
 
-  // Check for foundation exports (custom Layout, props, etc.)
+  // Check for foundation exports (props, vars, etc.)
   const foundationExports = detectFoundationExports(srcDir)
 
   // Extract per-component runtime metadata from meta.js files
   const meta = extractAllRuntimeSchemas(components)
+
+  // Extract per-layout runtime metadata from meta.js files
+  const layoutMeta = extractAllLayoutRuntimeSchemas(layouts)
 
   // Generate source
   const source = generateEntrySource(components, {
     cssPath,
     foundationExports,
     meta,
+    layouts,
+    layoutMeta,
   })
 
   // Write to file
@@ -239,6 +284,9 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
 
   console.log(`Generated entry point: ${output}`)
   console.log(`  - ${componentNames.length} components: ${componentNames.join(', ')}`)
+  if (layoutNames.length > 0) {
+    console.log(`  - ${layoutNames.length} layouts: ${layoutNames.join(', ')}`)
+  }
   if (foundationExports) {
     console.log(`  - Foundation exports found: ${foundationExports.path}`)
   }
@@ -246,8 +294,10 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   return {
     outputPath: output,
     componentNames,
+    layoutNames,
     foundationExports,
     meta,
+    layoutMeta,
   }
 }
 

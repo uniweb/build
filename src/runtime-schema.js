@@ -288,3 +288,56 @@ export function extractAllRuntimeSchemas(componentsMeta) {
 
   return schemas
 }
+
+/**
+ * Extract lean runtime schema for a layout from its full meta.js
+ *
+ * Layout runtime metadata:
+ * - areas: Array of area names this layout supports
+ * - transitions: View transition name mapping (stored but not acted on yet)
+ * - defaults: Param default values
+ *
+ * @param {Object} fullMeta - The full meta.js default export for a layout
+ * @returns {Object|null} - Lean layout runtime schema or null if empty
+ */
+export function extractLayoutRuntimeSchema(fullMeta) {
+  if (!fullMeta || typeof fullMeta !== 'object') {
+    return null
+  }
+
+  const runtime = {}
+
+  if (fullMeta.areas && Array.isArray(fullMeta.areas)) {
+    runtime.areas = fullMeta.areas
+  }
+
+  if (fullMeta.transitions && typeof fullMeta.transitions === 'object') {
+    runtime.transitions = fullMeta.transitions
+  }
+
+  const defaults = extractParamDefaults(fullMeta.params)
+  if (defaults) {
+    runtime.defaults = defaults
+  }
+
+  return Object.keys(runtime).length > 0 ? runtime : null
+}
+
+/**
+ * Extract runtime schemas for all layouts
+ *
+ * @param {Object} layoutsMeta - Map of layoutName -> meta.js content
+ * @returns {Object} - Map of layoutName -> layout runtime schema (excludes null entries)
+ */
+export function extractAllLayoutRuntimeSchemas(layoutsMeta) {
+  const schemas = {}
+
+  for (const [name, meta] of Object.entries(layoutsMeta)) {
+    const schema = extractLayoutRuntimeSchema(meta)
+    if (schema) {
+      schemas[name] = schema
+    }
+  }
+
+  return schemas
+}

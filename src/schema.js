@@ -32,6 +32,9 @@ const COMPONENT_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
 // The primary sections path where relaxed discovery applies
 const SECTIONS_PATH = 'sections'
 
+// The layouts path where layout components are discovered
+const LAYOUTS_PATH = 'layouts'
+
 /**
  * Load a meta.js file via dynamic import
  */
@@ -107,11 +110,10 @@ export async function loadFoundationConfig(srcDir) {
   try {
     const module = await import(pathToFileURL(filePath).href)
     // Support both default export and named exports
+    // Note: Layout/layouts no longer read from foundation.js — layouts come from src/layouts/ discovery
     return {
       ...module.default,
       vars: module.vars || module.default?.vars,
-      Layout: module.Layout || module.default?.Layout,
-      layouts: module.layouts || module.default?.layouts,
       defaultLayout: module.default?.defaultLayout,
     }
   } catch (error) {
@@ -255,6 +257,87 @@ async function discoverSectionsInPath(srcDir, sectionsRelPath) {
 }
 
 /**
+ * Discover layout components in src/layouts/ with relaxed rules
+ *
+ * Same discovery pattern as sections: root-level files and directories
+ * are addressable by default. No recursion — layouts are flat.
+ *
+ * @param {string} srcDir - Source directory (e.g., 'src')
+ * @param {string} layoutsRelPath - Relative path to layouts dir (e.g., 'layouts')
+ * @returns {Object} Map of layoutName -> { name, path, ...meta }
+ */
+export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PATH) {
+  const fullPath = join(srcDir, layoutsRelPath)
+
+  if (!existsSync(fullPath)) {
+    return {}
+  }
+
+  const entries = await readdir(fullPath, { withFileTypes: true })
+  const layouts = {}
+
+  // Collect names from both files and directories to detect collisions
+  const fileNames = new Set()
+  const dirNames = new Set()
+
+  for (const entry of entries) {
+    const ext = extname(entry.name)
+    if (entry.isFile() && COMPONENT_EXTENSIONS.has(ext)) {
+      const name = basename(entry.name, ext)
+      if (isComponentFileName(name)) {
+        fileNames.add(name)
+      }
+    } else if (entry.isDirectory()) {
+      dirNames.add(entry.name)
+    }
+  }
+
+  // Check for name collisions (e.g., DocsLayout.jsx AND DocsLayout/)
+  for (const name of fileNames) {
+    if (dirNames.has(name)) {
+      throw new Error(
+        `Name collision in ${layoutsRelPath}/: both "${name}.jsx" (or similar) and "${name}/" exist. ` +
+        `Use one or the other, not both.`
+      )
+    }
+  }
+
+  // Discover bare files at root
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const ext = extname(entry.name)
+    if (!COMPONENT_EXTENSIONS.has(ext)) continue
+    const name = basename(entry.name, ext)
+    if (!isComponentFileName(name)) continue
+
+    const meta = createImplicitMeta(name)
+    layouts[name] = {
+      ...buildComponentEntry(name, layoutsRelPath, meta),
+      entryFile: entry.name,
+    }
+  }
+
+  // Discover directories at root (no recursion for layouts)
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!isComponentFileName(entry.name)) continue
+
+    const dirPath = join(fullPath, entry.name)
+    const relativePath = join(layoutsRelPath, entry.name)
+    const result = await loadComponentMeta(dirPath)
+
+    if (result && result.meta) {
+      if (result.meta.exposed === false) continue
+      layouts[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
+    } else if (hasEntryFile(dirPath, entry.name)) {
+      layouts[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
+    }
+  }
+
+  return layouts
+}
+
+/**
  * Recursively discover nested section types that have meta.js
  *
  * @param {string} srcDir - Source directory
@@ -378,12 +461,20 @@ export async function buildSchema(srcDir, componentPaths) {
   // Discover components
   const components = await discoverComponents(srcDir, componentPaths)
 
+  // Discover layouts from src/layouts/
+  const layouts = await discoverLayoutsInPath(srcDir)
+
   return {
-    // Merge identity and config - identity fields take precedence
     _self: {
       ...foundationConfig,
       ...identity,
+      // foundation.js overrides package.json for editor-facing identity
+      ...(foundationConfig.name && { name: foundationConfig.name }),
+      ...(foundationConfig.description && { description: foundationConfig.description }),
+      ...(foundationConfig.defaultLayout && { defaultLayout: foundationConfig.defaultLayout }),
     },
+    // Layout metadata (full, for editor)
+    ...(Object.keys(layouts).length > 0 && { _layouts: layouts }),
     ...components,
   }
 }
