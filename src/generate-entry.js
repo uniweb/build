@@ -19,7 +19,7 @@
  * Foundation identity (name, description) comes from package.json in the editor schema.
  */
 
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, readFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { discoverComponents, discoverLayoutsInPath } from './schema.js'
@@ -277,12 +277,23 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     layoutMeta,
   })
 
-  // Write to file
+  // Write to file (skip if content unchanged to avoid unnecessary watcher triggers)
   const output = outputPath || join(srcDir, '_entry.generated.js')
   await mkdir(dirname(output), { recursive: true })
-  await writeFile(output, source, 'utf-8')
 
-  console.log(`Generated entry point: ${output}`)
+  let written = false
+  if (existsSync(output)) {
+    const existing = await readFile(output, 'utf-8')
+    if (existing !== source) {
+      await writeFile(output, source, 'utf-8')
+      written = true
+    }
+  } else {
+    await writeFile(output, source, 'utf-8')
+    written = true
+  }
+
+  console.log(`${written ? 'Generated' : 'Unchanged'} entry point: ${output}`)
   console.log(`  - ${componentNames.length} components: ${componentNames.join(', ')}`)
   if (layoutNames.length > 0) {
     console.log(`  - ${layoutNames.length} layouts: ${layoutNames.join(', ')}`)
@@ -301,14 +312,4 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   }
 }
 
-/**
- * Check if entry point needs regeneration
- * (Compare discovered components with existing generated file)
- */
-export async function shouldRegenerateEntry(srcDir, entryPath) {
-  if (!existsSync(entryPath)) return true
 
-  // Could add more sophisticated checking here
-  // For now, always regenerate during build
-  return true
-}

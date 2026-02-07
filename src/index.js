@@ -17,7 +17,6 @@ export {
 // Entry point generation
 export {
   generateEntryPoint,
-  shouldRegenerateEntry,
 } from './generate-entry.js'
 
 // Image processing
