@@ -5,7 +5,7 @@
  *
  * Exports:
  * - `components` - Object map of component name -> React component
- * - `capabilities` - Custom Layout and props from src/exports.js (if present)
+ * - `capabilities` - Custom Layout and props from src/foundation.js (if present)
  * - `meta` - Per-component runtime metadata extracted from meta.js files
  *
  * The `meta` export contains only properties needed at runtime:
@@ -26,11 +26,9 @@ import { discoverComponents, discoverLayoutsInPath } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
 
 /**
- * Detect foundation config/exports file (for props, vars, etc.)
+ * Detect foundation config file (for props, vars, etc.)
  *
- * Looks for (in order of preference):
- * 1. foundation.js - New consolidated format
- * 2. exports.js - Legacy format (for backward compatibility)
+ * Looks for: foundation.js or foundation.jsx
  *
  * The file should export:
  * - props (optional) - Foundation-wide props
@@ -40,29 +38,14 @@ import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runt
  * Note: Layout components are now discovered from src/layouts/
  */
 function detectFoundationExports(srcDir) {
-  // Prefer foundation.js (new consolidated format)
-  const foundationCandidates = [
+  const candidates = [
     { path: 'foundation.js', ext: 'js' },
     { path: 'foundation.jsx', ext: 'jsx' },
   ]
 
-  for (const { path, ext } of foundationCandidates) {
+  for (const { path, ext } of candidates) {
     if (existsSync(join(srcDir, path))) {
-      return { path: `./${path}`, ext, isFoundationJs: true }
-    }
-  }
-
-  // Fall back to exports.js (legacy format)
-  const legacyCandidates = [
-    { path: 'exports.js', ext: 'js' },
-    { path: 'exports.jsx', ext: 'jsx' },
-    { path: 'exports/index.js', ext: 'js' },
-    { path: 'exports/index.jsx', ext: 'jsx' },
-  ]
-
-  for (const { path, ext } of legacyCandidates) {
-    if (existsSync(join(srcDir, path))) {
-      return { path: `./${path.replace(/\/index\.(js|jsx)$/, '')}`, ext, isFoundationJs: false }
+      return { path: `./${path}`, ext }
     }
   }
   return null
@@ -338,11 +321,6 @@ export function shouldRegenerateForFile(file, srcDir) {
   // foundation.js / foundation.jsx at root — affects capabilities import
   if (/^foundation\.(js|jsx)$/.test(rel)) {
     return 'foundation config changed'
-  }
-
-  // exports.js (legacy) — affects capabilities import
-  if (/^exports\.(js|jsx)$/.test(rel) || /^exports\/index\.(js|jsx)$/.test(rel)) {
-    return 'foundation exports changed'
   }
 
   // styles.css / index.css at root — affects CSS import line

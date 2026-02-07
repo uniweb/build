@@ -387,7 +387,7 @@ The generated `_entry.generated.js` file exports:
 |--------|-------------|
 | `components` | Object map of component name → React component |
 | Named exports | Each component exported by name (e.g., `Hero`, `Features`) |
-| `capabilities` | Custom Layout and props from `src/exports.js` (or `null`) |
+| `capabilities` | Custom Layout and props from `src/foundation.js` (or `null`) |
 | `meta` | Runtime metadata extracted from component `meta.js` files |
 
 #### Runtime Metadata (`meta` export)
