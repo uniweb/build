@@ -23,7 +23,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
-import { generateEntryPoint } from '../generate-entry.js'
+import { generateEntryPoint, shouldRegenerateForFile } from '../generate-entry.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -241,16 +241,16 @@ export async function defineSiteConfig(options = {}) {
     },
 
     configureServer(server) {
-      // Watch foundation src for meta.js changes to regenerate entry
+      // Watch foundation src for structural changes that affect the entry
       const srcDir = join(foundationInfo.path, 'src')
       const entryPath = join(srcDir, '_entry.generated.js')
 
-      server.watcher.add(join(srcDir, '**', 'meta.js'))
+      server.watcher.add(srcDir)
 
       server.watcher.on('all', async (event, path) => {
-        // Regenerate entry when meta.js files change (new/deleted components)
-        if (path.includes(srcDir) && path.endsWith('meta.js')) {
-          console.log(`[site] Foundation meta.js changed, regenerating entry...`)
+        const reason = shouldRegenerateForFile(path, srcDir)
+        if (reason) {
+          console.log(`[site] Foundation ${reason}, regenerating entry...`)
           try {
             await generateEntryPoint(srcDir, entryPath)
             server.ws.send({ type: 'full-reload' })

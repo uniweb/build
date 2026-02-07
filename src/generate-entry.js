@@ -312,4 +312,81 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   }
 }
 
+/**
+ * Check if a file change should trigger entry point regeneration.
+ *
+ * Used by both the foundation dev plugin and the site's bundled-mode plugin
+ * to decide when to re-run generateEntryPoint().
+ *
+ * The content-comparison guard in generateEntryPoint() makes false positives
+ * cheap (discovery runs but no write), so we err on the side of regenerating.
+ *
+ * @param {string} file - Absolute path of the changed file
+ * @param {string} srcDir - Foundation source directory (absolute)
+ * @returns {string|null} Reason string if regeneration needed, null otherwise
+ */
+export function shouldRegenerateForFile(file, srcDir) {
+  if (!file.startsWith(srcDir + '/')) return null
 
+  const rel = file.slice(srcDir.length + 1)
+
+  // meta.js anywhere — affects runtime metadata
+  if (rel.endsWith('/meta.js') || rel === 'meta.js') {
+    return 'meta.js changed'
+  }
+
+  // foundation.js / foundation.jsx at root — affects capabilities import
+  if (/^foundation\.(js|jsx)$/.test(rel)) {
+    return 'foundation config changed'
+  }
+
+  // exports.js (legacy) — affects capabilities import
+  if (/^exports\.(js|jsx)$/.test(rel) || /^exports\/index\.(js|jsx)$/.test(rel)) {
+    return 'foundation exports changed'
+  }
+
+  // styles.css / index.css at root — affects CSS import line
+  if (/^(styles|index)\.css$/.test(rel)) {
+    return 'foundation styles changed'
+  }
+
+  // sections/ — relaxed discovery (bare files + entry files in PascalCase dirs)
+  if (rel.startsWith('sections/')) {
+    const inner = rel.slice('sections/'.length)
+    const parts = inner.split('/')
+
+    // Bare file at sections root: sections/Hero.jsx
+    if (parts.length === 1 && /^[A-Z].*\.(jsx|tsx|js|ts)$/.test(parts[0])) {
+      return `section file: ${parts[0]}`
+    }
+
+    // Entry file in a PascalCase directory: sections/Hero/index.jsx or sections/Hero/Hero.jsx
+    if (parts.length === 2 && /^[A-Z]/.test(parts[0]) && /\.(jsx|tsx|js|ts)$/.test(parts[1])) {
+      const base = parts[1].replace(/\.(jsx|tsx|js|ts)$/, '')
+      if (base === 'index' || base === parts[0]) {
+        return `section entry: ${inner}`
+      }
+    }
+  }
+
+  // layouts/ — bare files and entry files
+  if (rel.startsWith('layouts/')) {
+    const inner = rel.slice('layouts/'.length)
+    const parts = inner.split('/')
+
+    // Bare file at layouts root: layouts/docs.jsx
+    if (parts.length === 1 && /\.(jsx|tsx|js|ts)$/.test(parts[0])) {
+      return `layout file: ${parts[0]}`
+    }
+
+    // Entry file in a directory: layouts/docs/index.jsx or layouts/docs/docs.jsx
+    if (parts.length === 2 && /\.(jsx|tsx|js|ts)$/.test(parts[1])) {
+      const base = parts[1].replace(/\.(jsx|tsx|js|ts)$/, '')
+      if (base === 'index' || base === parts[0]) {
+        return `layout entry: ${inner}`
+      }
+    }
+  }
+
+  return null
+}

@@ -10,7 +10,7 @@
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { buildSchema } from './schema.js'
-import { generateEntryPoint } from './generate-entry.js'
+import { generateEntryPoint, shouldRegenerateForFile } from './generate-entry.js'
 import { processAllPreviews } from './images.js'
 
 /**
@@ -120,33 +120,10 @@ export function foundationDevPlugin(options = {}) {
     },
 
     async handleHotUpdate({ file, server }) {
-      const entryPath = join(resolvedSrcDir, entryFileName)
-
-      // Regenerate entry when meta.js files change
-      if (file.startsWith(resolvedSrcDir) && file.endsWith('/meta.js')) {
-        console.log('Component meta.js changed, regenerating entry...')
-        await generateEntryPoint(resolvedSrcDir, entryPath, { componentPaths })
-        server.ws.send({ type: 'full-reload' })
-        return
-      }
-
-      // Regenerate when component files are added/removed in sections/ root
-      // (bare file discovery means any .jsx/.tsx/.js/.ts at sections root is a section type)
-      const sectionsDir = join(resolvedSrcDir, 'sections')
-      if (file.startsWith(sectionsDir)) {
-        const relative = file.slice(sectionsDir.length + 1)
-        // Direct child of sections/ (no further slashes) — could be a new/removed bare file
-        if (!relative.includes('/') && /\.(jsx|tsx|js|ts)$/.test(relative)) {
-          console.log('Section file changed, regenerating entry...')
-          await generateEntryPoint(resolvedSrcDir, entryPath, { componentPaths })
-          server.ws.send({ type: 'full-reload' })
-          return
-        }
-      }
-
-      // Also regenerate if exports.js changes
-      if (file.endsWith('/exports.js') || file.endsWith('/exports.jsx')) {
-        console.log('Foundation exports changed, regenerating entry...')
+      const reason = shouldRegenerateForFile(file, resolvedSrcDir)
+      if (reason) {
+        console.log(`[foundation] ${reason}, regenerating entry...`)
+        const entryPath = join(resolvedSrcDir, entryFileName)
         await generateEntryPoint(resolvedSrcDir, entryPath, { componentPaths })
         server.ws.send({ type: 'full-reload' })
       }
