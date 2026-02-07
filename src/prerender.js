@@ -786,8 +786,13 @@ export async function prerenderSite(siteDir, options = {}) {
     }
 
     // Set foundation capabilities (Layout, props, etc.)
-    if (foundation.capabilities) {
-      uniweb.setFoundationConfig(foundation.capabilities)
+    if (foundation.default?.capabilities) {
+      uniweb.setFoundationConfig(foundation.default.capabilities)
+    }
+
+    // Attach layout metadata (areas, transitions, defaults)
+    if (foundation.default?.layoutMeta && uniweb.foundationConfig) {
+      uniweb.foundationConfig.layoutMeta = foundation.default.layoutMeta
     }
 
     // Pre-fetch icons for SSR embedding

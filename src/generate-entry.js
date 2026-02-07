@@ -115,13 +115,9 @@ function generateEntrySource(components, options = {}) {
 
   lines.push('')
 
-  // Export components object
+  // Named exports — one per component
   if (componentNames.length > 0) {
-    lines.push(`export const components = { ${componentNames.join(', ')} }`)
-    lines.push('')
     lines.push(`export { ${componentNames.join(', ')} }`)
-  } else {
-    lines.push('export const components = {}')
   }
 
   // Foundation capabilities (props, vars, etc. + discovered layouts)
@@ -135,31 +131,23 @@ function generateEntrySource(components, options = {}) {
       capParts.push(`layouts: { ${layoutNames.join(', ')} }`)
     }
     lines.push(`const capabilities = { ${capParts.join(', ')} }`)
-    lines.push('export { capabilities }')
   } else {
-    lines.push('export const capabilities = null')
+    lines.push('const capabilities = null')
   }
 
-  // Per-component metadata (defaults, context, initialState, background, data)
+  // Per-component runtime metadata (defaults, context, initialState, background, data)
   lines.push('')
-  if (Object.keys(meta).length > 0) {
-    const metaJson = JSON.stringify(meta, null, 2)
-    lines.push(`// Per-component runtime metadata (from meta.js)`)
-    lines.push(`export const meta = ${metaJson}`)
-  } else {
-    lines.push('export const meta = {}')
-  }
+  const metaJson = JSON.stringify(Object.keys(meta).length > 0 ? meta : {}, null, 2)
+  lines.push(`const meta = ${metaJson}`)
 
   // Per-layout runtime metadata (areas, transitions, defaults)
   lines.push('')
-  if (Object.keys(layoutMeta).length > 0) {
-    const layoutMetaJson = JSON.stringify(layoutMeta, null, 2)
-    lines.push(`// Per-layout runtime metadata (from meta.js)`)
-    lines.push(`export const layoutMeta = ${layoutMetaJson}`)
-  } else {
-    lines.push('export const layoutMeta = {}')
-  }
+  const layoutMetaJson = JSON.stringify(Object.keys(layoutMeta).length > 0 ? layoutMeta : {}, null, 2)
+  lines.push(`const layoutMeta = ${layoutMetaJson}`)
 
+  // Default export — non-component data (naturally unforgeable key)
+  lines.push('')
+  lines.push('export default { meta, capabilities, layoutMeta }')
   lines.push('')
 
   return lines.join('\n')
