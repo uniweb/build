@@ -236,43 +236,43 @@ describe('sections/ discovery', () => {
   })
 })
 
-// ── Components path (strict rules — backward compat) ─────────────────
+// ── Extra paths (strict rules — meta.js required) ────────────────────
 
-describe('components/ discovery (strict)', () => {
+describe('extra section paths (strict)', () => {
   afterEach(cleanup)
 
   it('does NOT discover folder without meta.js', async () => {
     fresh()
-    touch('components/Hero/Hero.jsx', 'export default function Hero() {}')
+    touch('widgets/Hero/Hero.jsx', 'export default function Hero() {}')
 
-    const result = await discoverComponents(tmpRoot, ['components'])
+    const result = await discoverComponents(tmpRoot, ['widgets'])
     expect(result.Hero).toBeUndefined()
   })
 
   it('discovers folder with meta.js', async () => {
     fresh()
-    touch('components/Hero/Hero.jsx', 'export default function Hero() {}')
-    writeMeta('components/Hero/meta.js', { title: 'Hero Banner' })
+    touch('widgets/Hero/Hero.jsx', 'export default function Hero() {}')
+    writeMeta('widgets/Hero/meta.js', { title: 'Hero Banner' })
 
-    const result = await discoverComponents(tmpRoot, ['components'])
+    const result = await discoverComponents(tmpRoot, ['widgets'])
     expect(result.Hero).toBeDefined()
     expect(result.Hero.title).toBe('Hero Banner')
   })
 
-  it('infers title for components with meta.js but no title', async () => {
+  it('infers title when meta.js has no title field', async () => {
     fresh()
-    touch('components/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
-    writeMeta('components/TeamRoster/meta.js', { category: 'about' })
+    touch('widgets/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
+    writeMeta('widgets/TeamRoster/meta.js', { category: 'about' })
 
-    const result = await discoverComponents(tmpRoot, ['components'])
+    const result = await discoverComponents(tmpRoot, ['widgets'])
     expect(result.TeamRoster.title).toBe('Team Roster')
   })
 
-  it('does NOT discover bare files in components/', async () => {
+  it('does NOT discover bare files', async () => {
     fresh()
-    touch('components/CTA.jsx', 'export default function CTA() {}')
+    touch('widgets/CTA.jsx', 'export default function CTA() {}')
 
-    const result = await discoverComponents(tmpRoot, ['components'])
+    const result = await discoverComponents(tmpRoot, ['widgets'])
     expect(result.CTA).toBeUndefined()
   })
 })
@@ -282,25 +282,37 @@ describe('components/ discovery (strict)', () => {
 describe('multi-path discovery', () => {
   afterEach(cleanup)
 
-  it('sections wins over components (first path wins)', async () => {
+  it('sections wins over extra path (first path wins)', async () => {
     fresh()
     touch('sections/Hero.jsx', 'export default function Hero() {}')
-    touch('components/Hero/Hero.jsx', 'export default function Hero() {}')
-    writeMeta('components/Hero/meta.js', { title: 'Component Hero' })
+    touch('widgets/Hero/Hero.jsx', 'export default function Hero() {}')
+    writeMeta('widgets/Hero/meta.js', { title: 'Widget Hero' })
 
-    const result = await discoverComponents(tmpRoot, ['sections', 'components'])
+    const result = await discoverComponents(tmpRoot, ['sections', 'widgets'])
     // sections/ found it first as a bare file
     expect(result.Hero.path).toBe('sections')
     expect(result.Hero.title).toBe('Hero')
   })
 
-  it('falls through to components when not in sections', async () => {
+  it('falls through to extra path when not in sections', async () => {
     fresh()
-    touch('components/Legacy/Legacy.jsx', 'export default function Legacy() {}')
-    writeMeta('components/Legacy/meta.js', { title: 'Legacy Widget' })
+    touch('widgets/Legacy/Legacy.jsx', 'export default function Legacy() {}')
+    writeMeta('widgets/Legacy/meta.js', { title: 'Legacy Widget' })
 
-    const result = await discoverComponents(tmpRoot, ['sections', 'components'])
+    const result = await discoverComponents(tmpRoot, ['sections', 'widgets'])
     expect(result.Legacy).toBeDefined()
     expect(result.Legacy.title).toBe('Legacy Widget')
+  })
+
+  it('default paths only include sections', async () => {
+    fresh()
+    touch('sections/Hero.jsx', 'export default function Hero() {}')
+    touch('components/Banner/Banner.jsx', 'export default function Banner() {}')
+    writeMeta('components/Banner/meta.js', { title: 'Banner' })
+
+    // Using default paths (no explicit paths argument)
+    const result = await discoverComponents(tmpRoot)
+    expect(result.Hero).toBeDefined()
+    expect(result.Banner).toBeUndefined()
   })
 })

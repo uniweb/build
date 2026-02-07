@@ -16,8 +16,8 @@ import { processAllPreviews } from './images.js'
 /**
  * Build schema.json with preview image references
  */
-async function buildSchemaWithPreviews(srcDir, outDir, isProduction, componentPaths) {
-  const schema = await buildSchema(srcDir, componentPaths)
+async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPaths) {
+  const schema = await buildSchema(srcDir, sectionPaths)
 
   // Process preview images
   const { schema: schemaWithImages, totalImages } = await processAllPreviews(
@@ -42,7 +42,7 @@ export function foundationBuildPlugin(options = {}) {
     srcDir = 'src',
     generateEntry = true,
     entryFileName = '_entry.generated.js',
-    components: componentPaths,
+    sections: sectionPaths,
   } = options
 
   let resolvedSrcDir
@@ -59,7 +59,7 @@ export function foundationBuildPlugin(options = {}) {
       const root = config.root || process.cwd()
       const srcPath = resolve(root, srcDir)
       const entryPath = join(srcPath, entryFileName)
-      await generateEntryPoint(srcPath, entryPath, { componentPaths })
+      await generateEntryPoint(srcPath, entryPath, { sectionPaths })
     },
 
     async configResolved(config) {
@@ -80,7 +80,7 @@ export function foundationBuildPlugin(options = {}) {
         resolvedSrcDir,
         outDir,
         isProduction,
-        componentPaths
+        sectionPaths
       )
 
       const schemaPath = join(metaDir, 'schema.json')
@@ -99,7 +99,7 @@ export function foundationDevPlugin(options = {}) {
   const {
     srcDir = 'src',
     entryFileName = '_entry.generated.js',
-    components: componentPaths,
+    sections: sectionPaths,
   } = options
 
   let resolvedSrcDir
@@ -112,7 +112,7 @@ export function foundationDevPlugin(options = {}) {
       const root = config.root || process.cwd()
       const srcPath = resolve(root, srcDir)
       const entryPath = join(srcPath, entryFileName)
-      await generateEntryPoint(srcPath, entryPath, { componentPaths })
+      await generateEntryPoint(srcPath, entryPath, { sectionPaths })
     },
 
     configResolved(config) {
@@ -124,7 +124,7 @@ export function foundationDevPlugin(options = {}) {
       if (reason) {
         console.log(`[foundation] ${reason}, regenerating entry...`)
         const entryPath = join(resolvedSrcDir, entryFileName)
-        await generateEntryPoint(resolvedSrcDir, entryPath, { componentPaths })
+        await generateEntryPoint(resolvedSrcDir, entryPath, { sectionPaths })
         server.ws.send({ type: 'full-reload' })
       }
     },

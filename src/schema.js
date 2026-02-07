@@ -1,13 +1,13 @@
 /**
  * Schema Discovery and Loading Utilities
  *
- * Discovers component meta files and loads them for schema.json generation.
+ * Discovers section type meta files and loads them for schema.json generation.
  * Schema data is for editor-time only, not runtime.
  *
  * Discovery rules:
  * - sections/ root: bare files and folders are addressable by default (implicit empty meta)
  * - sections/ nested: meta.js required for addressability
- * - components/ (and other paths): meta.js required (backward compatibility)
+ * - Additional paths (via config): meta.js required for addressability
  */
 
 import { readdir, readFile } from 'node:fs/promises'
@@ -22,9 +22,8 @@ const META_FILE_NAME = 'meta.js'
 // Foundation config file name
 const FOUNDATION_FILE_NAME = 'foundation.js'
 
-// Default paths to scan for content interfaces (relative to srcDir)
-// sections/ is the primary convention; components/ supported for backward compatibility
-const DEFAULT_COMPONENT_PATHS = ['sections', 'components']
+// Default paths to scan for section types (relative to srcDir)
+const DEFAULT_SECTION_PATHS = ['sections']
 
 // Extensions recognized as component entry files
 const COMPONENT_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
@@ -383,13 +382,13 @@ async function discoverNestedSections(srcDir, parentFullPath, parentRelPath, com
 }
 
 /**
- * Discover components in a non-sections path (meta.js required)
+ * Discover section types in a non-sections path (meta.js required)
  *
  * @param {string} srcDir - Source directory (e.g., 'src')
- * @param {string} relativePath - Path relative to srcDir (e.g., 'components')
- * @returns {Object} Map of componentName -> { name, path, ...meta }
+ * @param {string} relativePath - Path relative to srcDir
+ * @returns {Object} Map of sectionTypeName -> { name, path, ...meta }
  */
-async function discoverExplicitComponentsInPath(srcDir, relativePath) {
+async function discoverExplicitSectionsInPath(srcDir, relativePath) {
   const fullPath = join(srcDir, relativePath)
 
   if (!existsSync(fullPath)) {
@@ -426,30 +425,30 @@ async function discoverExplicitComponentsInPath(srcDir, relativePath) {
  * For other paths: strict discovery (meta.js required).
  *
  * @param {string} srcDir - Source directory (e.g., 'src')
- * @param {string[]} [componentPaths] - Paths to scan for section types (relative to srcDir).
- *                                      Default: ['sections', 'components']
+ * @param {string[]} [sectionPaths] - Paths to scan for section types (relative to srcDir).
+ *                                    Default: ['sections']
  * @returns {Object} Map of sectionTypeName -> { name, path, ...meta }
  */
-export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPONENT_PATHS) {
-  const components = {}
+export async function discoverComponents(srcDir, sectionPaths = DEFAULT_SECTION_PATHS) {
+  const sections = {}
 
-  for (const relativePath of componentPaths) {
+  for (const relativePath of sectionPaths) {
     // Use relaxed discovery for the primary sections path
     const found = relativePath === SECTIONS_PATH
       ? await discoverSectionsInPath(srcDir, relativePath)
-      : await discoverExplicitComponentsInPath(srcDir, relativePath)
+      : await discoverExplicitSectionsInPath(srcDir, relativePath)
 
     for (const [name, meta] of Object.entries(found)) {
-      if (components[name]) {
-        // Component already found in an earlier path - skip (first wins)
-        console.warn(`Warning: Component "${name}" found in multiple paths. Using ${components[name].path}, ignoring ${meta.path}`)
+      if (sections[name]) {
+        // Section type already found in an earlier path — skip (first wins)
+        console.warn(`Warning: Section type "${name}" found in multiple paths. Using ${sections[name].path}, ignoring ${meta.path}`)
         continue
       }
-      components[name] = meta
+      sections[name] = meta
     }
   }
 
-  return components
+  return sections
 }
 
 /**
@@ -461,17 +460,17 @@ export async function discoverComponents(srcDir, componentPaths = DEFAULT_COMPON
  * - Configuration from foundation.js (vars, Layout, etc.)
  *
  * @param {string} srcDir - Source directory
- * @param {string[]} [componentPaths] - Paths to search for components
+ * @param {string[]} [sectionPaths] - Paths to scan for section types
  */
-export async function buildSchema(srcDir, componentPaths) {
+export async function buildSchema(srcDir, sectionPaths) {
   // Load identity from package.json
   const identity = await loadPackageJson(srcDir)
 
   // Load configuration from foundation.js
   const foundationConfig = await loadFoundationConfig(srcDir)
 
-  // Discover components
-  const components = await discoverComponents(srcDir, componentPaths)
+  // Discover section types
+  const components = await discoverComponents(srcDir, sectionPaths)
 
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
@@ -512,9 +511,9 @@ export async function buildSchema(srcDir, componentPaths) {
  * Get list of section type names
  *
  * @param {string} srcDir - Source directory
- * @param {string[]} [componentPaths] - Paths to scan for section types
+ * @param {string[]} [sectionPaths] - Paths to scan for section types
  */
-export async function getExposedComponents(srcDir, componentPaths) {
-  const components = await discoverComponents(srcDir, componentPaths)
+export async function getExposedComponents(srcDir, sectionPaths) {
+  const components = await discoverComponents(srcDir, sectionPaths)
   return Object.keys(components)
 }

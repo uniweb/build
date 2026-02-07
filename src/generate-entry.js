@@ -189,13 +189,13 @@ function detectComponentEntry(srcDir, componentPath, componentName) {
  * @param {string} srcDir - Source directory
  * @param {string} [outputPath] - Output file path (default: srcDir/_entry.generated.js)
  * @param {Object} [options] - Options
- * @param {string[]} [options.componentPaths] - Paths to search for components (relative to srcDir)
+ * @param {string[]} [options.sectionPaths] - Paths to scan for section types (relative to srcDir)
  */
 export async function generateEntryPoint(srcDir, outputPath = null, options = {}) {
-  const { componentPaths } = options
+  const { sectionPaths } = options
 
-  // Discover components (includes meta from meta.js files)
-  const components = await discoverComponents(srcDir, componentPaths)
+  // Discover section types (includes meta from meta.js files)
+  const components = await discoverComponents(srcDir, sectionPaths)
   const componentNames = Object.keys(components).sort()
 
   if (componentNames.length === 0) {
