@@ -348,8 +348,18 @@ export async function defineSiteConfig(options = {}) {
         isBuild = config.command === 'build'
       },
 
-      resolveId(id) {
+      resolveId(id, importer) {
         if (id.startsWith(IMPORT_MAP_PREFIX)) return id
+        // Bare specifiers inside our virtual modules (e.g. '@uniweb/core' re-exported
+        // from '\0importmap:@uniweb/core') can't be resolved by Rollup because virtual
+        // modules have no filesystem context. Resolve from the foundation directory where
+        // @uniweb/core is a direct dependency (the site may not have it under pnpm strict).
+        if (importer?.startsWith(IMPORT_MAP_PREFIX) && IMPORT_MAP_EXTERNALS.includes(id)) {
+          const resolveFrom = foundationInfo.path
+            ? resolve(foundationInfo.path, 'package.json')
+            : resolve(siteRoot, 'main.js')
+          return this.resolve(id, resolveFrom, { skipSelf: true })
+        }
       },
 
       async load(id) {
