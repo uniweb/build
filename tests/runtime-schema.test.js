@@ -19,6 +19,24 @@ describe('extractRuntimeSchema', () => {
     expect(extractRuntimeSchema(meta)).toBeNull()
   })
 
+  describe('embed extraction', () => {
+    it('extracts embed: true', () => {
+      const meta = { embed: true }
+      expect(extractRuntimeSchema(meta)).toEqual({ embed: true })
+    })
+
+    it('ignores embed when falsy', () => {
+      const meta = { embed: false }
+      expect(extractRuntimeSchema(meta)).toBeNull()
+    })
+
+    it('ignores embed when not present', () => {
+      const meta = { background: 'self' }
+      const result = extractRuntimeSchema(meta)
+      expect(result.embed).toBeUndefined()
+    })
+  })
+
   describe('background extraction', () => {
     it('extracts background: true', () => {
       const meta = { background: true }
