@@ -195,11 +195,6 @@ export function extractRuntimeSchema(fullMeta) {
     runtime.inset = true
   }
 
-  // Embed flag (legacy): signals this component is designed for inline embedding via @ refs
-  if (fullMeta.embed) {
-    runtime.inset = true
-  }
-
   // Background opt-out: 'self' means the component renders its own background
   // layer (solid colors, insets, effects), so the runtime skips its Background.
   if (fullMeta.background) {

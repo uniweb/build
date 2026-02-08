@@ -186,8 +186,6 @@ async function readYamlFile(filePath) {
  * document and replaced with an `inset_placeholder` node carrying a
  * unique refId. The extracted refs are returned as an array.
  *
- * Also handles legacy `inline_child_ref` nodes for backward compatibility.
- *
  * @param {Object} doc - ProseMirror document (mutated in place)
  * @returns {Array} Array of { refId, type, params, description }
  */
@@ -199,7 +197,7 @@ function extractInsets(doc) {
 
   for (let i = 0; i < doc.content.length; i++) {
     const node = doc.content[i]
-    if (node.type === 'inset_ref' || node.type === 'inline_child_ref') {
+    if (node.type === 'inset_ref') {
       const { component, alt, ...params } = node.attrs || {}
       const refId = `inset_${refIndex++}`
       insets.push({
