@@ -12,6 +12,31 @@ import { isValidColor, generatePalettes } from './shade-generator.js'
 import { getDefaultColors, getDefaultContextTokens } from './css-generator.js'
 
 /**
+ * Named neutral presets mapping to Tailwind gray families
+ */
+const NEUTRAL_PRESETS = {
+  stone: '#78716c',
+  zinc: '#71717a',
+  gray: '#6b7280',
+  slate: '#64748b',
+  neutral: '#737373',
+}
+
+/**
+ * Default inline text styles (content-author markdown: [text]{emphasis})
+ * These reference semantic tokens so they adapt to context automatically
+ */
+const DEFAULT_INLINE = {
+  emphasis: {
+    color: 'var(--link)',
+    'font-weight': '600',
+  },
+  muted: {
+    color: 'var(--subtle)',
+  },
+}
+
+/**
  * Default appearance configuration
  */
 const DEFAULT_APPEARANCE = {
@@ -81,6 +106,11 @@ function validateColors(colors) {
 
     if (typeof value !== 'string') {
       errors.push(`Color "${name}" must be a string or shade object, got ${typeof value}`)
+      continue
+    }
+
+    // Accept neutral preset names (stone, zinc, gray, slate, neutral)
+    if (name === 'neutral' && NEUTRAL_PRESETS[value]) {
       continue
     }
 
@@ -357,7 +387,12 @@ export function processTheme(rawConfig = {}, options = {}) {
 
   // Process colors
   const defaultColors = getDefaultColors()
-  const rawColors = rawConfig.colors || {}
+  const rawColors = { ...(rawConfig.colors || {}) }
+
+  // Resolve named neutral presets to hex values
+  if (typeof rawColors.neutral === 'string' && NEUTRAL_PRESETS[rawColors.neutral]) {
+    rawColors.neutral = NEUTRAL_PRESETS[rawColors.neutral]
+  }
 
   // Filter to only valid colors (skip invalid ones in non-strict mode)
   const validColors = {}
@@ -382,7 +417,7 @@ export function processTheme(rawConfig = {}, options = {}) {
     warnings.push('No primary color specified, using default blue (#3b82f6)')
   }
   if (!rawConfig.colors?.neutral) {
-    warnings.push('No neutral color specified, using default zinc (#71717a)')
+    warnings.push('No neutral color specified, using default stone (#78716c)')
   }
 
   // Process contexts
@@ -426,7 +461,8 @@ export function processTheme(rawConfig = {}, options = {}) {
   const background = rawConfig.background || null
 
   // Inline text styles (semantic names → CSS declarations)
-  const inline = rawConfig.inline || null
+  // Merge framework defaults with user overrides (user values win)
+  const inline = { ...DEFAULT_INLINE, ...(rawConfig.inline || {}) }
 
   const config = {
     colors,      // Raw colors for CSS generator

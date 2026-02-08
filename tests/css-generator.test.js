@@ -18,8 +18,8 @@ describe('css-generator', () => {
       expect(css).toContain('--neutral-500:')
 
       // Should include semantic tokens
-      expect(css).toContain('--bg:')
-      expect(css).toContain('--text:')
+      expect(css).toContain('--section:')
+      expect(css).toContain('--body:')
       expect(css).toContain('--link:')
 
       // Should include context classes
@@ -130,8 +130,8 @@ describe('css-generator', () => {
       const css = generateContextCSS('light')
 
       expect(css).toContain('.context-light')
-      expect(css).toContain('--bg:')
-      expect(css).toContain('--text:')
+      expect(css).toContain('--section:')
+      expect(css).toContain('--body:')
       expect(css).toContain('--heading:')
       expect(css).toContain('--link:')
     })
@@ -140,14 +140,14 @@ describe('css-generator', () => {
       const css = generateContextCSS('medium')
 
       expect(css).toContain('.context-medium')
-      expect(css).toContain('--bg:')
+      expect(css).toContain('--section:')
     })
 
     it('generates dark context CSS', () => {
       const css = generateContextCSS('dark')
 
       expect(css).toContain('.context-dark')
-      expect(css).toContain('--bg:')
+      expect(css).toContain('--section:')
       // Dark context should have lighter text
       expect(css).toContain('--neutral-50')
     })
@@ -159,15 +159,15 @@ describe('css-generator', () => {
 
       expect(css).toContain('--custom-var: #ff0000')
       // Should still have default tokens
-      expect(css).toContain('--bg:')
+      expect(css).toContain('--section:')
     })
 
     it('overrides default tokens with custom values', () => {
       const css = generateContextCSS('light', {
-        'bg': '#ffffff',
+        'section': '#ffffff',
       })
 
-      expect(css).toContain('--bg: #ffffff')
+      expect(css).toContain('--section: #ffffff')
     })
   })
 
@@ -216,8 +216,19 @@ describe('css-generator', () => {
     it('returns complete token sets', () => {
       const tokens = getDefaultContextTokens()
 
-      const requiredTokens = ['bg', 'text', 'heading', 'link', 'border']
+      const requiredTokens = ['section', 'body', 'heading', 'link', 'border']
       for (const token of requiredTokens) {
+        expect(tokens.light).toHaveProperty(token)
+        expect(tokens.medium).toHaveProperty(token)
+        expect(tokens.dark).toHaveProperty(token)
+      }
+    })
+
+    it('includes status tokens in all contexts', () => {
+      const tokens = getDefaultContextTokens()
+      const statusTokens = ['success', 'success-subtle', 'warning', 'warning-subtle', 'error', 'error-subtle', 'info', 'info-subtle']
+
+      for (const token of statusTokens) {
         expect(tokens.light).toHaveProperty(token)
         expect(tokens.medium).toHaveProperty(token)
         expect(tokens.dark).toHaveProperty(token)

@@ -72,9 +72,9 @@ describe('theme-processor', () => {
     it('accepts valid context configs', () => {
       const result = validateThemeConfig({
         contexts: {
-          light: { bg: 'white' },
-          medium: { bg: '#f5f5f5' },
-          dark: { bg: 'black' },
+          light: { section: 'white' },
+          medium: { section: '#f5f5f5' },
+          dark: { section: 'black' },
         },
       })
 
@@ -179,7 +179,7 @@ describe('theme-processor', () => {
       })
 
       expect(config.contexts.light['custom-token']).toBe('custom-value')
-      expect(config.contexts.light.bg).toBeDefined() // Default preserved
+      expect(config.contexts.light.section).toBeDefined() // Default preserved
     })
 
     it('processes font configuration', () => {
@@ -227,6 +227,65 @@ describe('theme-processor', () => {
       const { warnings } = processTheme({})
 
       expect(warnings).toContainEqual(expect.stringContaining('primary'))
+    })
+
+    it('resolves neutral preset names to hex', () => {
+      const { config, errors } = processTheme({
+        colors: { neutral: 'stone' },
+      })
+
+      expect(errors).toHaveLength(0)
+      expect(config.colors.neutral).toBe('#78716c')
+    })
+
+    it('accepts all neutral preset names', () => {
+      for (const preset of ['stone', 'zinc', 'gray', 'slate', 'neutral']) {
+        const { errors } = processTheme({ colors: { neutral: preset } })
+        expect(errors).toHaveLength(0)
+      }
+    })
+
+    it('validates neutral preset names', () => {
+      const { valid } = validateThemeConfig({ colors: { neutral: 'stone' } })
+      expect(valid).toBe(true)
+    })
+
+    it('provides default inline styles', () => {
+      const { config } = processTheme({})
+
+      expect(config.inline).toHaveProperty('emphasis')
+      expect(config.inline.emphasis.color).toBe('var(--link)')
+      expect(config.inline).toHaveProperty('muted')
+      expect(config.inline.muted.color).toBe('var(--subtle)')
+    })
+
+    it('merges user inline styles with defaults', () => {
+      const { config } = processTheme({
+        inline: {
+          highlight: {
+            'background-color': 'var(--accent-100)',
+          },
+        },
+      })
+
+      // User style present
+      expect(config.inline.highlight['background-color']).toBe('var(--accent-100)')
+      // Defaults preserved
+      expect(config.inline.emphasis.color).toBe('var(--link)')
+    })
+
+    it('allows user to override default inline styles', () => {
+      const { config } = processTheme({
+        inline: {
+          emphasis: {
+            color: 'var(--accent-600)',
+            'font-style': 'italic',
+          },
+        },
+      })
+
+      expect(config.inline.emphasis.color).toBe('var(--accent-600)')
+      expect(config.inline.emphasis['font-style']).toBe('italic')
     })
 
     it('throws in strict mode with errors', () => {

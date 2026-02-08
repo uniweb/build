@@ -47,9 +47,9 @@ describe('Theme Build Pipeline', () => {
       const result = buildTheme({})
 
       // Each context should have semantic tokens
-      expect(result.css).toMatch(/\.context-light[^}]+--bg:/)
-      expect(result.css).toMatch(/\.context-light[^}]+--text:/)
-      expect(result.css).toMatch(/\.context-dark[^}]+--bg:/)
+      expect(result.css).toMatch(/\.context-light[^}]+--section:/)
+      expect(result.css).toMatch(/\.context-light[^}]+--body:/)
+      expect(result.css).toMatch(/\.context-dark[^}]+--section:/)
     })
 
     it('applies custom context token overrides', () => {
@@ -227,15 +227,15 @@ describe('Theme Build Pipeline', () => {
         },
         contexts: {
           light: {
-            bg: 'white',
-            fg: 'var(--neutral-900)',
+            section: 'white',
+            body: 'var(--neutral-900)',
           },
           medium: {
-            bg: 'var(--neutral-100)',
+            section: 'var(--neutral-100)',
           },
           dark: {
-            bg: 'var(--neutral-900)',
-            fg: 'white',
+            section: 'var(--neutral-900)',
+            body: 'white',
           },
         },
         fonts: {
@@ -310,6 +310,55 @@ describe('Theme Build Pipeline', () => {
       // Should have all default content
       expect(result.css).toContain(':root')
       expect(result.css).toContain('.context-light')
+    })
+  })
+
+  describe('Status Tokens', () => {
+    it('includes status tokens in generated CSS', () => {
+      const result = buildTheme({})
+
+      expect(result.css).toContain('--success:')
+      expect(result.css).toContain('--success-subtle:')
+      expect(result.css).toContain('--warning:')
+      expect(result.css).toContain('--error:')
+      expect(result.css).toContain('--info:')
+      expect(result.css).toContain('--info-subtle:')
+    })
+
+    it('has different status shades for dark context', () => {
+      const result = buildTheme({})
+
+      // Dark context uses lighter shades (e.g., green-400 instead of green-600)
+      expect(result.css).toMatch(/\.context-dark[^}]+--success:\s*#4ade80/)
+      expect(result.css).toMatch(/\.context-light[^}]+--success:\s*#16a34a/)
+    })
+  })
+
+  describe('Neutral Presets', () => {
+    it('accepts named neutral presets', () => {
+      const result = buildTheme({
+        colors: { neutral: 'stone' },
+      })
+
+      expect(result.errors).toHaveLength(0)
+      expect(result.css).toContain('--neutral-500:')
+    })
+
+    it('uses stone as default neutral', () => {
+      const result = buildTheme({})
+
+      expect(result.config.colors.neutral).toBe('#78716c')
+    })
+  })
+
+  describe('Inline Defaults', () => {
+    it('includes default inline styles in output', () => {
+      const result = buildTheme({})
+
+      expect(result.css).toContain('span[emphasis]')
+      expect(result.css).toContain('var(--link)')
+      expect(result.css).toContain('span[muted]')
+      expect(result.css).toContain('var(--subtle)')
     })
   })
 
