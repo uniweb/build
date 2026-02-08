@@ -179,42 +179,44 @@ async function readYamlFile(filePath) {
 }
 
 /**
- * Extract inline child references from a ProseMirror document.
+ * Extract inset references from a ProseMirror document.
  *
- * Walks top-level nodes for `inline_child_ref` (produced by content-reader
+ * Walks top-level nodes for `inset_ref` (produced by content-reader
  * for `![alt](@ComponentName){params}` syntax). Each ref is removed from the
- * document and replaced with an `inline_child_placeholder` node carrying a
+ * document and replaced with an `inset_placeholder` node carrying a
  * unique refId. The extracted refs are returned as an array.
  *
+ * Also handles legacy `inline_child_ref` nodes for backward compatibility.
+ *
  * @param {Object} doc - ProseMirror document (mutated in place)
- * @returns {Array} Array of { refId, type, params, alt }
+ * @returns {Array} Array of { refId, type, params, description }
  */
-function extractInlineChildren(doc) {
+function extractInsets(doc) {
   if (!doc?.content || !Array.isArray(doc.content)) return []
 
-  const inlineChildren = []
+  const insets = []
   let refIndex = 0
 
   for (let i = 0; i < doc.content.length; i++) {
     const node = doc.content[i]
-    if (node.type === 'inline_child_ref') {
+    if (node.type === 'inset_ref' || node.type === 'inline_child_ref') {
       const { component, alt, ...params } = node.attrs || {}
-      const refId = `inline_${refIndex++}`
-      inlineChildren.push({
+      const refId = `inset_${refIndex++}`
+      insets.push({
         refId,
         type: component,
         params: Object.keys(params).length > 0 ? params : {},
-        alt: alt || null,
+        description: alt || null,
       })
       // Replace in-place with placeholder
       doc.content[i] = {
-        type: 'inline_child_placeholder',
+        type: 'inset_placeholder',
         attrs: { refId },
       }
     }
   }
 
-  return inlineChildren
+  return insets
 }
 
 /**
@@ -618,8 +620,8 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
 
-  // Extract @ component references → inline children (mutates doc)
-  const inlineChildren = extractInlineChildren(proseMirrorContent)
+  // Extract @ component references → insets (mutates doc)
+  const insets = extractInsets(proseMirrorContent)
 
   // Support 'data:' shorthand for collection fetch
   // data: team → fetch: { collection: team }
@@ -643,7 +645,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     params: { ...params, ...props },
     content: proseMirrorContent,
     fetch: parseFetchConfig(resolvedFetch),
-    ...(inlineChildren.length > 0 ? { inlineChildren } : {}),
+    ...(insets.length > 0 ? { insets } : {}),
     subsections: []
   }
 
@@ -1866,7 +1868,7 @@ export {
   parseWildcardArray,
   applyWildcardOrder,
   getDirectChildName,
-  extractInlineChildren
+  extractInsets
 }
 
 export default collectSiteContent
