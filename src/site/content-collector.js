@@ -232,6 +232,23 @@ function isMarkdownFile(filename) {
 }
 
 /**
+ * Check if a filename uses the @ prefix (child section convention).
+ * @-prefixed files are excluded from auto-discovered top-level sections —
+ * they exist to be nested under a parent via `nest:` in page.yml.
+ */
+function isChildSection(filename) {
+  return filename.startsWith('@')
+}
+
+/**
+ * Strip leading @ characters from a filename to get the section name.
+ * @card-a → card-a, @@sub-item → sub-item
+ */
+function stripAtPrefix(filename) {
+  return filename.replace(/^@+/, '')
+}
+
+/**
  * Check if a folder should be ignored.
  * Excludes folders starting with _ (drafts/private).
  */
@@ -369,11 +386,9 @@ function resolveMounts(pathsConfig, sitePath, pagesPath) {
  * Supports:
  *   - Simple: "1", "2", "3"
  *   - Decimal ordering: "1.5" (between 1 and 2), "2.5" (between 2 and 3)
- *   - Hierarchy via comma: "1,1" (child of 1), "1,2" (second child of 1)
- *   - Mixed: "1.5,1" (child of section 1.5)
  */
 function parseNumericPrefix(filename) {
-  const match = filename.match(/^(\d+(?:[.,]\d+)*)-?(.*)$/)
+  const match = filename.match(/^(\d+(?:\.\d+)*)-?(.*)$/)
   if (match) {
     return { prefix: match[1], name: match[2] || match[1] }
   }
@@ -382,19 +397,20 @@ function parseNumericPrefix(filename) {
 
 /**
  * Compare filenames for sorting by numeric prefix.
- * Both . and , are treated as separators for sorting purposes.
- * This ensures correct ordering: 1, 1,1, 1.5, 2, 2,1, etc.
+ * Dots are treated as sub-level separators: 1, 1.5, 2, 2.5, etc.
  */
 function compareFilenames(a, b) {
-  const { prefix: prefixA } = parseNumericPrefix(parse(a).name)
-  const { prefix: prefixB } = parseNumericPrefix(parse(b).name)
+  const nameA = isChildSection(parse(a).name) ? stripAtPrefix(parse(a).name) : parse(a).name
+  const nameB = isChildSection(parse(b).name) ? stripAtPrefix(parse(b).name) : parse(b).name
+  const { prefix: prefixA } = parseNumericPrefix(nameA)
+  const { prefix: prefixB } = parseNumericPrefix(nameB)
 
   if (!prefixA && !prefixB) return a.localeCompare(b)
   if (!prefixA) return 1
   if (!prefixB) return -1
 
-  const partsA = prefixA.split(/[.,]/).map(Number)
-  const partsB = prefixB.split(/[.,]/).map(Number)
+  const partsA = prefixA.split('.').map(Number)
+  const partsB = prefixB.split('.').map(Number)
 
   for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
     const numA = partsA[i] ?? 0
@@ -488,27 +504,37 @@ function applyWildcardOrder(items, parsed) {
 }
 
 /**
- * Find the markdown file for a section name, handling numeric prefixes.
- * Tries exact match first ("hero.md"), then prefix-based ("1-hero.md").
+ * Find the markdown file for a section name, handling numeric prefixes and @ prefix.
+ * Search order: name.md → @name.md → N-name.md → @N-name.md
  *
  * @param {string} pagePath - Directory containing section files
- * @param {string} sectionName - Logical section name (e.g., 'hero')
+ * @param {string} sectionName - Logical section name (e.g., 'hero', 'card-a')
  * @param {string[]} [cachedFiles] - Pre-read directory listing (optimization)
- * @returns {{ filePath: string, stableName: string, prefix: string|null }|null}
+ * @returns {{ filePath: string, stableName: string, prefix: string|null, isChild: boolean }|null}
  */
 function findSectionFile(pagePath, sectionName, cachedFiles) {
+  // Try exact match: name.md
   const exactPath = join(pagePath, `${sectionName}.md`)
   if (existsSync(exactPath)) {
-    return { filePath: exactPath, stableName: sectionName, prefix: null }
+    return { filePath: exactPath, stableName: sectionName, prefix: null, isChild: false }
   }
 
+  // Try @-prefixed exact match: @name.md
+  const atPath = join(pagePath, `@${sectionName}.md`)
+  if (existsSync(atPath)) {
+    return { filePath: atPath, stableName: sectionName, prefix: null, isChild: true }
+  }
+
+  // Try prefix-based: N-name.md or @N-name.md
   const files = cachedFiles || []
   for (const file of files) {
     if (!isMarkdownFile(file)) continue
     const { name } = parse(file)
-    const { prefix, name: parsedName } = parseNumericPrefix(name)
+    const isChild = isChildSection(name)
+    const stripped = isChild ? stripAtPrefix(name) : name
+    const { prefix, name: parsedName } = parseNumericPrefix(stripped)
     if (parsedName === sectionName) {
-      return { filePath: join(pagePath, file), stableName: sectionName, prefix }
+      return { filePath: join(pagePath, file), stableName: sectionName, prefix, isChild }
     }
   }
 
@@ -657,41 +683,80 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
 }
 
 /**
- * Build section hierarchy from flat list.
- * Hierarchy is determined by comma separators:
- *   - "1", "1.5", "2" → all top-level (dots are for ordering)
- *   - "1,1", "1,2" → children of section "1"
- *   - "1.5,1" → child of section "1.5"
+ * Process `nest:` config from page.yml to attach child sections to parents.
+ *
+ * nest:
+ *   features: [card-a, card-b]
+ *   card-a: [sub-1, sub-2]
+ *
+ * For each parent→children mapping, finds the parent section in the list,
+ * processes child files (expected to use @ prefix), and attaches as subsections.
+ * nest: overrides any inline nesting from sections: config.
+ *
+ * @param {Array} sections - Built top-level sections
+ * @param {Object} nestConfig - The nest: object from page.yml
+ * @param {string} pagePath - Path to page directory
+ * @param {string} siteRoot - Site root for asset resolution
+ * @param {string[]} cachedFiles - Pre-read directory listing
+ * @returns {Object} { assetCollection, iconCollection, lastModified, attachedChildren }
  */
-function buildSectionHierarchy(sections) {
-  const sectionMap = new Map()
-  const topLevel = []
-
-  // First pass: create map
-  for (const section of sections) {
-    sectionMap.set(section.id, section)
+async function processNesting(sections, nestConfig, pagePath, siteRoot, cachedFiles) {
+  const result = {
+    assetCollection: { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() },
+    iconCollection: { icons: new Set(), bySource: new Map() },
+    lastModified: null,
+    attachedChildren: new Set(),
   }
 
-  // Second pass: build hierarchy (comma = hierarchy)
-  for (const section of sections) {
-    if (!section.id.includes(',')) {
-      topLevel.push(section)
+  if (!nestConfig || typeof nestConfig !== 'object') return result
+
+  for (const [parentName, childNames] of Object.entries(nestConfig)) {
+    if (!Array.isArray(childNames)) continue
+
+    // Find parent section by stableId
+    const parent = sections.find(s => s.stableId === parentName)
+    if (!parent) {
+      console.warn(`[content-collector] nest: parent section '${parentName}' not found`)
       continue
     }
 
-    const parts = section.id.split(',')
-    const parentId = parts.slice(0, -1).join(',')
-    const parent = sectionMap.get(parentId)
+    // Override any existing subsections (nest: wins over inline sections: nesting)
+    parent.subsections = []
 
-    if (parent) {
+    let childIndex = 1
+    for (const childName of childNames) {
+      const found = findSectionFile(pagePath, childName, cachedFiles)
+      if (!found) {
+        console.warn(`[content-collector] nest: child section '${childName}' not found`)
+        continue
+      }
+
+      // Validate @ prefix
+      if (!found.isChild) {
+        console.warn(
+          `[content-collector] Section '${childName}' is declared as a child of '${parentName}' ` +
+          `but the file doesn't use the @ prefix`
+        )
+      }
+
+      const childId = `${parent.id}.${childIndex}`
+      const { section, assetCollection, iconCollection } =
+        await processMarkdownFile(found.filePath, childId, siteRoot, childName)
       parent.subsections.push(section)
-    } else {
-      // Orphan subsection - add to top level
-      topLevel.push(section)
+      result.assetCollection = mergeAssetCollections(result.assetCollection, assetCollection)
+      result.iconCollection = mergeIconCollections(result.iconCollection, iconCollection)
+      result.attachedChildren.add(childName)
+
+      const fileStat = await stat(found.filePath)
+      if (!result.lastModified || fileStat.mtime > result.lastModified) {
+        result.lastModified = fileStat.mtime
+      }
+
+      childIndex++
     }
   }
 
-  return topLevel
+  return result
 }
 
 /**
@@ -828,11 +893,14 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
   if (sectionsConfig === undefined || sectionsConfig === '*' || sectionsParsed?.mode === 'all') {
     // Default behavior: discover all .md files, sort by numeric prefix
+    // @-prefixed files are excluded from top-level (they're child sections for nest:)
     const files = await readdir(pagePath)
     const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
 
     const sections = []
     for (const file of mdFiles) {
+      if (isChildSection(file)) continue // Skip @-prefixed child sections
+
       const { name } = parse(file)
       const { prefix, name: stableName } = parseNumericPrefix(name)
       const id = prefix || name
@@ -852,17 +920,45 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       }
     }
 
-    // Build hierarchy from dot notation
-    hierarchicalSections = buildSectionHierarchy(sections)
+    // Process nest: config to attach child sections to parents
+    const nestResult = await processNesting(sections, pageConfig.nest, pagePath, siteRoot, files)
+    pageAssetCollection = mergeAssetCollections(pageAssetCollection, nestResult.assetCollection)
+    pageIconCollection = mergeIconCollections(pageIconCollection, nestResult.iconCollection)
+    if (nestResult.lastModified && (!lastModified || nestResult.lastModified > lastModified)) {
+      lastModified = nestResult.lastModified
+    }
+
+    // Warn about orphaned @-prefixed files (no parent in nest: or sections:)
+    const childFiles = mdFiles.filter(isChildSection)
+    for (const file of childFiles) {
+      const { name } = parse(file)
+      const stripped = stripAtPrefix(name)
+      const { name: childName } = parseNumericPrefix(stripped)
+      if (!nestResult.attachedChildren.has(childName)) {
+        console.warn(`[content-collector] Orphaned child section: ${file} (no parent declared in nest:)`)
+        // Graceful degradation: add to top level to avoid silent data loss
+        const id = String(sections.length + 1)
+        const { section, assetCollection, iconCollection } =
+          await processMarkdownFile(join(pagePath, file), id, siteRoot, childName)
+        sections.push(section)
+        pageAssetCollection = mergeAssetCollections(pageAssetCollection, assetCollection)
+        pageIconCollection = mergeIconCollections(pageIconCollection, iconCollection)
+      }
+    }
+
+    hierarchicalSections = sections
 
   } else if (sectionsParsed?.mode === 'inclusive') {
     // Inclusive: pinned sections + auto-discovered rest via '...' wildcard
+    // @-prefixed files are excluded from auto-discovery (they're child sections for nest:)
     const files = await readdir(pagePath)
     const mdFiles = files.filter(isMarkdownFile).sort(compareFilenames)
 
-    // Build name → file info map from discovered files
+    // Build name → file info map from discovered files (excluding @ children)
     const discoveredMap = new Map()
     for (const file of mdFiles) {
+      if (isChildSection(file)) continue // Skip @-prefixed child sections
+
       const { name } = parse(file)
       const { prefix, name: stableName } = parseNumericPrefix(name)
       const key = stableName || name
@@ -924,15 +1020,36 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       sectionIndex++
     }
 
-    hierarchicalSections = buildSectionHierarchy(sections)
+    // Process nest: config to attach child sections (overrides inline nesting)
+    if (pageConfig.nest) {
+      const nestResult = await processNesting(sections, pageConfig.nest, pagePath, siteRoot, files)
+      pageAssetCollection = mergeAssetCollections(pageAssetCollection, nestResult.assetCollection)
+      pageIconCollection = mergeIconCollections(pageIconCollection, nestResult.iconCollection)
+      if (nestResult.lastModified && (!lastModified || nestResult.lastModified > lastModified)) {
+        lastModified = nestResult.lastModified
+      }
+    }
+
+    hierarchicalSections = sections
 
   } else if (Array.isArray(sectionsConfig) && sectionsConfig.length > 0) {
     // Strict: explicit sections array (only listed sections processed)
+    const cachedFiles = await readdir(pagePath)
     const result = await processExplicitSections(sectionsConfig, pagePath, siteRoot)
     hierarchicalSections = result.sections
     pageAssetCollection = result.assetCollection
     pageIconCollection = result.iconCollection
     lastModified = result.lastModified
+
+    // Process nest: config (overrides inline nesting from sections:)
+    if (pageConfig.nest) {
+      const nestResult = await processNesting(hierarchicalSections, pageConfig.nest, pagePath, siteRoot, cachedFiles)
+      pageAssetCollection = mergeAssetCollections(pageAssetCollection, nestResult.assetCollection)
+      pageIconCollection = mergeIconCollections(pageIconCollection, nestResult.iconCollection)
+      if (nestResult.lastModified && (!lastModified || nestResult.lastModified > lastModified)) {
+        lastModified = nestResult.lastModified
+      }
+    }
 
   } else {
     // Empty sections (null, empty array, or invalid) = pure route with no content
