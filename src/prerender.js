@@ -825,7 +825,24 @@ export async function prerenderSite(siteDir, options = {}) {
       try {
         renderedContent = renderToString(element)
       } catch (err) {
-        console.warn(`Warning: Failed to render ${outputRoute}: ${err.message}`)
+        const msg = err.message || ''
+
+        if (msg.includes('Invalid hook call') || msg.includes('useState') || msg.includes('useEffect')) {
+          console.warn(
+            `  Skipped SSG for ${outputRoute} — contains components with React hooks ` +
+            `(useState/useEffect) that cannot render during pre-rendering. ` +
+            `The page will render correctly client-side.`
+          )
+        } else if (msg.includes('Element type is invalid') && msg.includes('null')) {
+          console.warn(
+            `  Skipped SSG for ${outputRoute} — a component resolved to null during pre-rendering. ` +
+            `This often happens with components that use React hooks. ` +
+            `The page will render correctly client-side.`
+          )
+        } else {
+          console.warn(`  Warning: Failed to render ${outputRoute}: ${msg}`)
+        }
+
         if (process.env.DEBUG) {
           console.error(err.stack)
         }
