@@ -23,11 +23,11 @@ const NEUTRAL_PRESETS = {
 }
 
 /**
- * Default inline text styles (content-author markdown: [text]{emphasis})
+ * Default inline text styles (content-author markdown: [text]{accent})
  * These reference semantic tokens so they adapt to context automatically
  */
 const DEFAULT_INLINE = {
-  emphasis: {
+  accent: {
     color: 'var(--link)',
     'font-weight': '600',
   },

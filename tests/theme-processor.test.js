@@ -273,8 +273,8 @@ describe('theme-processor', () => {
     it('provides default inline styles', () => {
       const { config } = processTheme({})
 
-      expect(config.inline).toHaveProperty('emphasis')
-      expect(config.inline.emphasis.color).toBe('var(--link)')
+      expect(config.inline).toHaveProperty('accent')
+      expect(config.inline.accent.color).toBe('var(--link)')
       expect(config.inline).toHaveProperty('muted')
       expect(config.inline.muted.color).toBe('var(--subtle)')
     })
@@ -291,21 +291,21 @@ describe('theme-processor', () => {
       // User style present
       expect(config.inline.highlight['background-color']).toBe('var(--accent-100)')
       // Defaults preserved
-      expect(config.inline.emphasis.color).toBe('var(--link)')
+      expect(config.inline.accent.color).toBe('var(--link)')
     })
 
     it('allows user to override default inline styles', () => {
       const { config } = processTheme({
         inline: {
-          emphasis: {
+          accent: {
             color: 'var(--accent-600)',
             'font-style': 'italic',
           },
         },
       })
 
-      expect(config.inline.emphasis.color).toBe('var(--accent-600)')
-      expect(config.inline.emphasis['font-style']).toBe('italic')
+      expect(config.inline.accent.color).toBe('var(--accent-600)')
+      expect(config.inline.accent['font-style']).toBe('italic')
     })
 
     it('throws in strict mode with errors', () => {

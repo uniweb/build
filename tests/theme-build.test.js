@@ -355,7 +355,7 @@ describe('Theme Build Pipeline', () => {
     it('includes default inline styles in output', () => {
       const result = buildTheme({})
 
-      expect(result.css).toContain('span[emphasis]')
+      expect(result.css).toContain('span[accent]')
       expect(result.css).toContain('var(--link)')
       expect(result.css).toContain('span[muted]')
       expect(result.css).toContain('var(--subtle)')
