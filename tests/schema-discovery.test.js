@@ -211,10 +211,10 @@ describe('sections/ discovery', () => {
     expect(result.Empty).toBeUndefined()
   })
 
-  it('respects exposed: false in meta.js', async () => {
+  it('respects hidden: true in meta.js', async () => {
     fresh()
     touch('sections/Internal/Internal.jsx', 'export default function Internal() {}')
-    writeMeta('sections/Internal/meta.js', { exposed: false })
+    writeMeta('sections/Internal/meta.js', { hidden: true })
 
     const result = await discoverComponents(tmpRoot, ['sections'])
     expect(result.Internal).toBeUndefined()

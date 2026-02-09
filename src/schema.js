@@ -251,7 +251,7 @@ async function discoverSectionsInPath(srcDir, sectionsRelPath) {
 
     if (result && result.meta) {
       // Has meta.js — use explicit meta
-      if (result.meta.exposed === false) continue
+      if (result.meta.hidden) continue
       components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
     } else if (hasEntryFile(dirPath, entry.name)) {
       // No meta.js but has entry file — implicit section type at root
@@ -338,7 +338,7 @@ export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PAT
     const result = await loadComponentMeta(dirPath)
 
     if (result && result.meta) {
-      if (result.meta.exposed === false) continue
+      if (result.meta.hidden) continue
       layouts[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
     } else if (hasEntryFile(dirPath, entry.name)) {
       layouts[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
@@ -372,7 +372,7 @@ async function discoverNestedSections(srcDir, parentFullPath, parentRelPath, com
     const result = await loadComponentMeta(dirPath)
 
     if (result && result.meta) {
-      if (result.meta.exposed === false) continue
+      if (result.meta.hidden) continue
       components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
     }
 
@@ -406,7 +406,7 @@ async function discoverExplicitSectionsInPath(srcDir, relativePath) {
 
     if (result && result.meta) {
       // Check if explicitly hidden from discovery
-      if (result.meta.exposed === false) {
+      if (result.meta.hidden) {
         continue
       }
 
