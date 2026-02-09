@@ -4,8 +4,14 @@
  * Generates 11 color shades (50-950) from a single base color using
  * the OKLCH color space for perceptually uniform results.
  *
+ * By default, shade 500 preserves the exact input color and surrounding
+ * shades are redistributed proportionally to maintain a monotonic lightness
+ * scale. This means `primary: "#E35D25"` guarantees that exact color appears
+ * at shade 500, regardless of its natural lightness. Set `exactMatch: false`
+ * to use fixed lightness values instead (shade 500 forced to lightness 0.55).
+ *
  * Supports multiple generation modes:
- * - 'fixed' (default): Predictable lightness values, constant hue
+ * - 'fixed' (default): Constant hue, proportional lightness redistribution
  * - 'natural': Temperature-aware hue shifts, curved chroma
  * - 'vivid': Higher saturation, more dramatic chroma curve
  *
@@ -23,7 +29,7 @@ const LIGHTNESS_MAP = {
   200: 0.87,
   300: 0.78,
   400: 0.68,
-  500: 0.55,  // Base color - most vibrant
+  500: 0.55,  // Reference midpoint (smart mode uses actual input lightness)
   600: 0.48,
   700: 0.40,
   800: 0.32,
@@ -45,6 +51,20 @@ const CHROMA_SCALE = {
   800: 0.75,
   900: 0.60,
   950: 0.45,  // Reduced chroma at dark end
+}
+
+// Relative positions of each shade within the light/dark halves of the LIGHTNESS_MAP.
+// Used by smart matching to redistribute shades proportionally around the input color
+// while preserving the perceptual spacing of the original map.
+const LIGHT_HALF_RANGE = LIGHTNESS_MAP[50] - LIGHTNESS_MAP[500]
+const DARK_HALF_RANGE = LIGHTNESS_MAP[500] - LIGHTNESS_MAP[950]
+const RELATIVE_POSITION = {}
+for (const level of SHADE_LEVELS) {
+  if (level < 500) {
+    RELATIVE_POSITION[level] = (LIGHTNESS_MAP[level] - LIGHTNESS_MAP[500]) / LIGHT_HALF_RANGE
+  } else if (level > 500) {
+    RELATIVE_POSITION[level] = (LIGHTNESS_MAP[500] - LIGHTNESS_MAP[level]) / DARK_HALF_RANGE
+  }
 }
 
 // Mode-specific configurations
@@ -417,27 +437,34 @@ export function formatHex(r, g, b) {
 /**
  * Generate color shades from a base color
  *
+ * By default, shade 500 preserves the exact input color and surrounding shades
+ * are redistributed proportionally to maintain a monotonic lightness scale.
+ * Set `exactMatch: false` to use fixed lightness values instead (shade 500
+ * may differ from your input).
+ *
  * @param {string} color - Base color in any supported format
  * @param {Object} options - Options
  * @param {string} [options.format='oklch'] - Output format: 'oklch' or 'hex'
  * @param {string} [options.mode='fixed'] - Generation mode: 'fixed', 'natural', or 'vivid'
- * @param {boolean} [options.exactMatch=false] - If true, shade 500 will be the exact input color
+ * @param {boolean} [options.exactMatch] - Controls shade 500 matching. Default (undefined/true):
+ *   shade 500 = exact input, other shades redistributed proportionally. False: all shades use
+ *   fixed lightness values (shade 500 may not match input).
  * @returns {Object} Object with shade levels as keys (50-950) and color values
  *
  * @example
- * // Default fixed mode (predictable, constant hue)
+ * // Default: shade 500 = your exact color, shades redistributed
  * generateShades('#3b82f6')
  *
  * @example
- * // Natural mode (temperature-aware hue shifts)
- * generateShades('#3b82f6', { mode: 'natural' })
+ * // Opt out: use fixed lightness scale (shade 500 may differ from input)
+ * generateShades('#3b82f6', { exactMatch: false })
  *
  * @example
- * // Vivid mode (higher saturation)
- * generateShades('#3b82f6', { mode: 'vivid', exactMatch: true })
+ * // Vivid mode with default smart matching
+ * generateShades('#3b82f6', { mode: 'vivid' })
  */
 export function generateShades(color, options = {}) {
-  const { format = 'oklch', mode = 'fixed', exactMatch = false } = options
+  const { format = 'oklch', mode = 'fixed', exactMatch } = options
   const base = parseColor(color)
   const config = MODE_CONFIG[mode] || MODE_CONFIG.fixed
 
@@ -451,14 +478,21 @@ export function generateShades(color, options = {}) {
 }
 
 /**
- * Original fixed-lightness algorithm (default)
+ * Fixed-hue algorithm with smart lightness redistribution.
+ *
+ * Default (exactMatch !== false): shade 500 = exact input color, other shades
+ * redistributed proportionally around the input's actual lightness. This preserves
+ * the perceptual spacing of the LIGHTNESS_MAP while guaranteeing a monotonic scale.
+ *
+ * exactMatch === false: all shades use fixed LIGHTNESS_MAP values (original behavior).
  */
 function generateFixedShades(base, originalColor, format, exactMatch) {
   const shades = {}
+  const smart = exactMatch !== false
 
   for (const level of SHADE_LEVELS) {
-    // Handle exact match at 500
-    if (exactMatch && level === 500) {
+    // Shade 500: use exact input color in smart mode
+    if (smart && level === 500) {
       if (format === 'hex') {
         shades[level] = originalColor.startsWith('#') ? originalColor : formatHexFromOklch(base)
       } else {
@@ -467,7 +501,19 @@ function generateFixedShades(base, originalColor, format, exactMatch) {
       continue
     }
 
-    const targetL = LIGHTNESS_MAP[level]
+    // Compute target lightness
+    let targetL
+    if (smart) {
+      // Redistribute proportionally around input lightness
+      if (level < 500) {
+        targetL = base.l + RELATIVE_POSITION[level] * (LIGHTNESS_MAP[50] - base.l)
+      } else {
+        targetL = base.l - RELATIVE_POSITION[level] * (base.l - LIGHTNESS_MAP[950])
+      }
+    } else {
+      targetL = LIGHTNESS_MAP[level]
+    }
+
     const chromaScale = CHROMA_SCALE[level]
     const targetC = base.c * chromaScale
 
@@ -515,8 +561,8 @@ function generateEnhancedShades(base, originalColor, format, config, exactMatch)
   for (let i = 0; i < SHADE_LEVELS.length; i++) {
     const level = SHADE_LEVELS[i]
 
-    // Handle exact match at 500 (index 5)
-    if (exactMatch && level === 500) {
+    // Handle exact match at 500 (index 5) — default behavior
+    if (exactMatch !== false && level === 500) {
       if (format === 'hex') {
         shades[level] = originalColor.startsWith('#') ? originalColor : formatHexFromOklch(base)
       } else {
