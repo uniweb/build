@@ -483,7 +483,7 @@ function renderBackground(background) {
  * Mirrors BlockRenderer.jsx but without hooks (no runtime data fetching in SSR).
  * block.dataLoading is always false at prerender time — runtime fetches only happen client-side.
  */
-function renderBlock(block) {
+function renderBlock(block, { pure = false } = {}) {
   const Component = block.initComponent()
 
   if (!Component) {
@@ -518,6 +518,13 @@ function renderBlock(block) {
     }
   }
 
+  const componentProps = { content, params, block }
+
+  // Pure mode: render component without section wrapper (used by ChildBlocks)
+  if (pure) {
+    return React.createElement(Component, componentProps)
+  }
+
   // Background handling (mirrors BlockRenderer.jsx)
   const { background, ...wrapperProps } = getWrapperProps(block)
 
@@ -536,8 +543,6 @@ function renderBlock(block) {
 
   // Use Component.as as the wrapper tag (default: 'section')
   const wrapperTag = Component.as || 'section'
-
-  const componentProps = { content, params, block }
 
   if (hasBackground) {
     return React.createElement(wrapperTag, wrapperProps,
@@ -793,6 +798,17 @@ export async function prerenderSite(siteDir, options = {}) {
     // Attach layout metadata (areas, transitions, defaults)
     if (foundation.default?.layoutMeta && uniweb.foundationConfig) {
       uniweb.foundationConfig.layoutMeta = foundation.default.layoutMeta
+    }
+
+    // Set childBlockRenderer so foundation components using ChildBlocks/Visual
+    // can render child blocks and insets during prerender (inline, no hooks)
+    uniweb.childBlockRenderer = function InlineChildBlocks({ blocks, from, pure = false }) {
+      const blockList = blocks || from?.childBlocks || []
+      return blockList.map((childBlock, index) =>
+        React.createElement(React.Fragment, { key: childBlock.id || index },
+          renderBlock(childBlock, { pure })
+        )
+      )
     }
 
     // Pre-fetch icons for SSR embedding

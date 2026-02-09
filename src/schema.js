@@ -243,22 +243,26 @@ async function discoverSectionsInPath(srcDir, sectionsRelPath) {
   // Discover directories at root
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
-    if (!isComponentFileName(entry.name)) continue
 
     const dirPath = join(fullPath, entry.name)
     const relativePath = join(sectionsRelPath, entry.name)
-    const result = await loadComponentMeta(dirPath)
 
-    if (result && result.meta) {
-      // Has meta.js — use explicit meta
-      if (result.meta.hidden) continue
-      components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
-    } else if (hasEntryFile(dirPath, entry.name)) {
-      // No meta.js but has entry file — implicit section type at root
-      components[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
+    // PascalCase directories are addressable section types at root
+    if (isComponentFileName(entry.name)) {
+      const result = await loadComponentMeta(dirPath)
+
+      if (result && result.meta) {
+        // Has meta.js — use explicit meta
+        if (result.meta.hidden) continue
+        components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
+      } else if (hasEntryFile(dirPath, entry.name)) {
+        // No meta.js but has entry file — implicit section type at root
+        components[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
+      }
     }
 
-    // Recurse into subdirectories for nested section types (meta.js required)
+    // Always recurse — lowercase directories (e.g. insets/) may contain
+    // nested section types with meta.js
     await discoverNestedSections(srcDir, dirPath, relativePath, components)
   }
 
