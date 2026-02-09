@@ -86,6 +86,45 @@ const DEFAULT_CODE_THEME = {
 }
 
 /**
+ * Valid shade levels for palette references
+ */
+const SHADE_LEVELS = new Set([50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950])
+
+/**
+ * Resolve context token values to valid CSS.
+ *
+ * Content authors write palette references as bare names: `primary-500`,
+ * `neutral-200`. This is the natural syntax in theme.yml. The processor
+ * resolves these to `var(--primary-500)` etc. Plain CSS values (hex, var(),
+ * named colors) pass through as-is — that's the escape hatch.
+ *
+ * @param {string} value - The token value from theme.yml
+ * @returns {string} Valid CSS value
+ */
+function normalizePaletteRef(value) {
+  if (typeof value !== 'string') return value
+
+  // Already a CSS function (var(), rgb(), etc.) — pass through
+  if (value.includes('(')) return value
+
+  // Hex color — pass through
+  if (value.startsWith('#')) return value
+
+  // Bare palette reference: "primary-500", "--primary-500"
+  const bare = value.replace(/^-{0,2}/, '')
+  const match = bare.match(/^([a-z][a-z0-9]*)-(\d+)$/)
+
+  if (match) {
+    const shade = parseInt(match[2], 10)
+    if (SHADE_LEVELS.has(shade)) {
+      return `var(--${bare})`
+    }
+  }
+
+  return value
+}
+
+/**
  * Validate color configuration
  *
  * @param {Object} colors - Color configuration object
@@ -420,12 +459,20 @@ export function processTheme(rawConfig = {}, options = {}) {
     warnings.push('No neutral color specified, using default stone (#78716c)')
   }
 
-  // Process contexts
+  // Process contexts (resolve bare palette refs like "primary-500" to var())
   const defaultContexts = getDefaultContextTokens()
-  const contexts = {
-    light: { ...defaultContexts.light, ...(rawConfig.contexts?.light || {}) },
-    medium: { ...defaultContexts.medium, ...(rawConfig.contexts?.medium || {}) },
-    dark: { ...defaultContexts.dark, ...(rawConfig.contexts?.dark || {}) },
+  const rawContexts = rawConfig.contexts || {}
+  const contexts = {}
+
+  for (const name of ['light', 'medium', 'dark']) {
+    const overrides = rawContexts[name] || {}
+    const normalized = {}
+
+    for (const [token, value] of Object.entries(overrides)) {
+      normalized[token] = normalizePaletteRef(value)
+    }
+
+    contexts[name] = { ...defaultContexts[name], ...normalized }
   }
 
   // Process fonts

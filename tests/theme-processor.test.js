@@ -182,6 +182,26 @@ describe('theme-processor', () => {
       expect(config.contexts.light.section).toBeDefined() // Default preserved
     })
 
+    it('resolves bare palette references in context overrides', () => {
+      const { config } = processTheme({
+        contexts: {
+          light: {
+            primary: 'primary-500',
+            'primary-hover': '--primary-600',
+            section: 'white',           // Named color — pass through
+            link: 'var(--accent-400)',   // Already var() — pass through
+            border: '#e5e5e5',           // Hex — pass through
+          },
+        },
+      })
+
+      expect(config.contexts.light.primary).toBe('var(--primary-500)')
+      expect(config.contexts.light['primary-hover']).toBe('var(--primary-600)')
+      expect(config.contexts.light.section).toBe('white')
+      expect(config.contexts.light.link).toBe('var(--accent-400)')
+      expect(config.contexts.light.border).toBe('#e5e5e5')
+    })
+
     it('processes font configuration', () => {
       const { config } = processTheme({
         fonts: {
