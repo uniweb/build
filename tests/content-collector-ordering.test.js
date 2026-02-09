@@ -3,7 +3,7 @@ import {
   parseWildcardArray,
   applyWildcardOrder,
   getDirectChildName,
-  extractInlineChildren
+  extractInsets
 } from '../src/site/content-collector.js'
 
 describe('extractItemName', () => {
@@ -161,32 +161,32 @@ describe('getDirectChildName', () => {
   })
 })
 
-describe('extractInlineChildren', () => {
-  it('extracts inline_child_ref nodes and replaces with placeholders', () => {
+describe('extractInsets', () => {
+  it('extracts inset_ref nodes and replaces with placeholders', () => {
     const doc = {
       type: 'doc',
       content: [
         { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title' }] },
-        { type: 'inline_child_ref', attrs: { component: 'NetworkDiagram', alt: 'diagram', variant: 'compact' } },
+        { type: 'inset_ref', attrs: { component: 'NetworkDiagram', alt: 'diagram', variant: 'compact' } },
         { type: 'paragraph', content: [{ type: 'text', text: 'After' }] },
       ]
     }
 
-    const result = extractInlineChildren(doc)
+    const result = extractInsets(doc)
 
-    // Should extract one inline child
+    // Should extract one inset
     expect(result).toHaveLength(1)
     expect(result[0]).toEqual({
-      refId: 'inline_0',
+      refId: 'inset_0',
       type: 'NetworkDiagram',
       params: { variant: 'compact' },
-      alt: 'diagram',
+      description: 'diagram',
     })
 
-    // Doc should be mutated: inline_child_ref → inline_child_placeholder
+    // Doc should be mutated: inset_ref → inset_placeholder
     expect(doc.content[1]).toEqual({
-      type: 'inline_child_placeholder',
-      attrs: { refId: 'inline_0' },
+      type: 'inset_placeholder',
+      attrs: { refId: 'inset_0' },
     })
     // Other nodes untouched
     expect(doc.content[0].type).toBe('heading')
@@ -197,17 +197,17 @@ describe('extractInlineChildren', () => {
     const doc = {
       type: 'doc',
       content: [
-        { type: 'inline_child_ref', attrs: { component: 'Widget', alt: null } },
-        { type: 'inline_child_ref', attrs: { component: 'Chart', alt: 'chart' } },
+        { type: 'inset_ref', attrs: { component: 'Widget', alt: null } },
+        { type: 'inset_ref', attrs: { component: 'Chart', alt: 'chart' } },
       ]
     }
 
-    const result = extractInlineChildren(doc)
+    const result = extractInsets(doc)
 
     expect(result).toHaveLength(2)
-    expect(result[0].refId).toBe('inline_0')
+    expect(result[0].refId).toBe('inset_0')
     expect(result[0].type).toBe('Widget')
-    expect(result[1].refId).toBe('inline_1')
+    expect(result[1].refId).toBe('inset_1')
     expect(result[1].type).toBe('Chart')
   })
 
@@ -219,27 +219,27 @@ describe('extractInlineChildren', () => {
       ]
     }
 
-    const result = extractInlineChildren(doc)
+    const result = extractInsets(doc)
     expect(result).toHaveLength(0)
     // Doc unchanged
     expect(doc.content[0].type).toBe('paragraph')
   })
 
   it('returns empty array for null/missing content', () => {
-    expect(extractInlineChildren(null)).toHaveLength(0)
-    expect(extractInlineChildren({})).toHaveLength(0)
-    expect(extractInlineChildren({ content: null })).toHaveLength(0)
+    expect(extractInsets(null)).toHaveLength(0)
+    expect(extractInsets({})).toHaveLength(0)
+    expect(extractInsets({ content: null })).toHaveLength(0)
   })
 
   it('params is empty object when no attributes besides component/alt', () => {
     const doc = {
       type: 'doc',
       content: [
-        { type: 'inline_child_ref', attrs: { component: 'Hero', alt: null } },
+        { type: 'inset_ref', attrs: { component: 'Hero', alt: null } },
       ]
     }
 
-    const result = extractInlineChildren(doc)
+    const result = extractInsets(doc)
     expect(result[0].params).toEqual({})
   })
 })

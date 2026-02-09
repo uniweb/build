@@ -19,21 +19,21 @@ describe('extractRuntimeSchema', () => {
     expect(extractRuntimeSchema(meta)).toBeNull()
   })
 
-  describe('embed extraction', () => {
-    it('extracts embed: true', () => {
-      const meta = { embed: true }
-      expect(extractRuntimeSchema(meta)).toEqual({ embed: true })
+  describe('inset extraction', () => {
+    it('extracts inset: true', () => {
+      const meta = { inset: true }
+      expect(extractRuntimeSchema(meta)).toEqual({ inset: true })
     })
 
-    it('ignores embed when falsy', () => {
-      const meta = { embed: false }
+    it('ignores inset when falsy', () => {
+      const meta = { inset: false }
       expect(extractRuntimeSchema(meta)).toBeNull()
     })
 
-    it('ignores embed when not present', () => {
+    it('ignores inset when not present', () => {
       const meta = { background: 'self' }
       const result = extractRuntimeSchema(meta)
-      expect(result.embed).toBeUndefined()
+      expect(result.inset).toBeUndefined()
     })
   })
 
