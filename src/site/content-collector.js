@@ -204,7 +204,7 @@ function extractInsets(doc) {
         refId,
         type: component,
         params: Object.keys(params).length > 0 ? params : {},
-        description: alt || null,
+        title: alt || null,
       })
       // Replace in-place with placeholder
       doc.content[i] = {
