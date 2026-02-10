@@ -87,7 +87,7 @@ function detectFoundationType(foundation, siteRoot) {
     }
   }
 
-  // Check if it's a local workspace sibling
+  // Check if it's a local workspace sibling (directory name matches package name)
   const localPath = resolve(siteRoot, '..', name)
   if (existsSync(localPath)) {
     return {
@@ -96,6 +96,23 @@ function detectFoundationType(foundation, siteRoot) {
       path: localPath
     }
   }
+
+  // Check if it's a file: dependency (co-located projects where dir name ≠ package name)
+  // e.g. "marketing-foundation": "file:../foundation" in marketing/site/package.json
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(siteRoot, 'package.json'), 'utf8'))
+    const dep = pkg.dependencies?.[name]
+    if (dep && dep.startsWith('file:')) {
+      const filePath = resolve(siteRoot, dep.slice(5))
+      if (existsSync(filePath)) {
+        return {
+          type: 'local',
+          name,
+          path: filePath
+        }
+      }
+    }
+  } catch {}
 
   // Check in foundations/ directory (for multi-site projects)
   const foundationsPath = resolve(siteRoot, '..', '..', 'foundations', name)
