@@ -180,7 +180,7 @@ describe('extractInsets', () => {
       refId: 'inset_0',
       type: 'NetworkDiagram',
       params: { variant: 'compact' },
-      description: 'diagram',
+      title: 'diagram',
     })
 
     // Doc should be mutated: inset_ref → inset_placeholder
