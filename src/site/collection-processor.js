@@ -456,19 +456,12 @@ async function processContentItem(dir, filename, config, siteRoot, basePath) {
   // Note: paths in content have already been updated by processCollectionAssets
   const image = frontmatter.image || extractFirstImage(content)
 
-  // Get file stats for lastModified
-  const fileStat = await stat(filepath)
-
   return {
     slug,
     ...frontmatter,
     excerpt,
     image,
-    // Include both raw markdown body (for simple rendering)
-    // and ProseMirror content (for rich rendering)
-    body: body.trim(),
-    content,
-    lastModified: fileStat.mtime.toISOString()
+    content
   }
 }
 
