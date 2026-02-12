@@ -381,6 +381,7 @@ export function siteContentPlugin(options = {}) {
   let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
   let resolvedCollectionsBase = null // Resolved from site.yml collectionsDir
   let headHtml = '' // Contents of site/head.html for injection
+  let basePath = '/' // Vite's config.base, always has trailing slash
 
   /**
    * Load translations for a specific locale
@@ -494,6 +495,7 @@ export function siteContentPlugin(options = {}) {
       resolvedSitePath = resolve(config.root, sitePath)
       resolvedOutDir = resolve(config.root, config.build.outDir)
       isProduction = config.command === 'build'
+      basePath = config.base || '/'
 
       // In dev mode, process collections early so JSON files exist before server starts
       // This runs before configureServer, ensuring data is available immediately
@@ -517,7 +519,7 @@ export function siteContentPlugin(options = {}) {
 
           if (collectionsConfig) {
             console.log('[site-content] Processing content collections...')
-            const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedCollectionsBase)
+            const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedCollectionsBase, basePath)
             await writeCollectionFiles(resolvedSitePath, collections)
           }
         } catch (err) {
@@ -554,7 +556,7 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.collections) {
           console.log('[site-content] Processing content collections...')
-          const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedCollectionsBase)
+          const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedCollectionsBase, basePath)
           await writeCollectionFiles(resolvedSitePath, collections)
         }
 
@@ -617,7 +619,7 @@ export function siteContentPlugin(options = {}) {
               // Use collectionsConfig (cached from configResolved) or siteContent
               const collections = collectionsConfig || siteContent?.config?.collections
               if (collections) {
-                const processed = await processCollections(resolvedSitePath, collections, resolvedCollectionsBase)
+                const processed = await processCollections(resolvedSitePath, collections, resolvedCollectionsBase, basePath)
                 await writeCollectionFiles(resolvedSitePath, processed)
               }
               // Send full reload to client

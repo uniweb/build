@@ -56,7 +56,7 @@ function isPdfPath(src) {
  * @param {string} value - String to check
  * @returns {boolean} True if it looks like a local asset path
  */
-function isLocalAssetPath(value) {
+export function isLocalAssetPath(value) {
   if (typeof value !== 'string' || !value) return false
 
   // Skip external URLs

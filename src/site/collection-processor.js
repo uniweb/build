@@ -30,7 +30,7 @@ import { join, basename, extname, dirname, relative, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { applyFilter, applySort } from './data-fetcher.js'
-import { resolveAssetPath, walkContentAssets } from './assets.js'
+import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -222,7 +222,7 @@ function isExternalUrl(src) {
  * @param {string} collectionName - Name of the collection (e.g., 'articles')
  * @returns {Promise<Object>} Asset manifest for this item
  */
-async function processCollectionAssets(content, itemPath, siteRoot, collectionName) {
+async function processCollectionAssets(content, itemPath, siteRoot, collectionName, basePath) {
   const assets = {}
   const itemDir = dirname(itemPath)
   const publicDir = join(siteRoot, 'public')
@@ -259,7 +259,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         await copyFile(result.resolved, targetPath)
 
         // Update path to site-root-relative
-        finalPath = `/collections/${collectionName}/${assetFilename}`
+        finalPath = `${basePath}collections/${collectionName}/${assetFilename}`
 
         assets[src] = {
           original: src,
@@ -294,7 +294,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         const posterTarget = join(targetDir, posterFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(posterResult.resolved, posterTarget)
-        node.attrs.poster = `/collections/${collectionName}/${posterFilename}`
+        node.attrs.poster = `${basePath}collections/${collectionName}/${posterFilename}`
       }
     }
 
@@ -305,12 +305,59 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         const previewTarget = join(targetDir, previewFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(previewResult.resolved, previewTarget)
-        node.attrs.preview = `/collections/${collectionName}/${previewFilename}`
+        node.attrs.preview = `${basePath}collections/${collectionName}/${previewFilename}`
       }
     }
   }
 
   return assets
+}
+
+/**
+ * Process assets in a data item (YAML/JSON)
+ * - Recursively walks the data object looking for local asset paths
+ * - Copies co-located assets to public/collections/<collection>/
+ * - Rewrites paths to absolute URLs (with base path)
+ *
+ * @param {Object} data - Parsed data object (mutated in place)
+ * @param {string} itemPath - Path to the data file
+ * @param {string} siteRoot - Site root directory
+ * @param {string} collectionName - Name of the collection
+ * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
+ */
+async function processDataItemAssets(data, itemPath, siteRoot, collectionName, basePath) {
+  const targetDir = join(siteRoot, 'public', 'collections', collectionName)
+
+  async function walk(parent, key) {
+    const val = parent[key]
+    if (typeof val === 'string' && isLocalAssetPath(val)) {
+      if (val.startsWith('./') || val.startsWith('../')) {
+        const resolved = resolve(dirname(itemPath), val)
+        if (existsSync(resolved)) {
+          const filename = basename(resolved)
+          await mkdir(targetDir, { recursive: true })
+          await copyFile(resolved, join(targetDir, filename))
+          parent[key] = `${basePath}collections/${collectionName}/${filename}`
+        }
+      } else if (val.startsWith('/')) {
+        // Absolute site path — just prepend base
+        parent[key] = `${basePath}${val.slice(1)}`
+      }
+      return
+    }
+    if (Array.isArray(val)) {
+      for (let i = 0; i < val.length; i++) await walk(val, i)
+      return
+    }
+    if (val && typeof val === 'object') {
+      for (const k of Object.keys(val)) await walk(val, k)
+    }
+  }
+
+  for (const key of Object.keys(data)) {
+    if (key === 'slug') continue
+    await walk(data, key)
+  }
 }
 
 // Filter and sort utilities are imported from data-fetcher.js
@@ -325,7 +372,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
  * @param {string} filename - YAML filename (.yml or .yaml)
  * @returns {Promise<Object|null>} Processed item or null if unpublished
  */
-async function processDataItem(dir, filename) {
+async function processDataItem(dir, filename, siteRoot, collectionName, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, extname(filename))
@@ -334,7 +381,9 @@ async function processDataItem(dir, filename) {
   // Skip unpublished items
   if (data.published === false) return null
 
-  return { slug, ...data }
+  const item = { slug, ...data }
+  await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+  return item
 }
 
 /**
@@ -348,18 +397,27 @@ async function processDataItem(dir, filename) {
  * @param {string} filename - JSON filename
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processJsonItem(dir, filename) {
+async function processJsonItem(dir, filename, siteRoot, collectionName, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, '.json')
   const data = JSON.parse(raw)
 
   // Array → multiple items (single-file collection)
-  if (Array.isArray(data)) return data
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      if (item && typeof item === 'object') {
+        await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+      }
+    }
+    return data
+  }
 
   // Object → single item
   if (data.published === false) return null
-  return { slug, ...data }
+  const item = { slug, ...data }
+  await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+  return item
 }
 
 /**
@@ -371,7 +429,7 @@ async function processJsonItem(dir, filename) {
  * @param {string} siteRoot - Site root directory for asset resolution
  * @returns {Promise<Object|null>} Processed item or null if unpublished
  */
-async function processContentItem(dir, filename, config, siteRoot) {
+async function processContentItem(dir, filename, config, siteRoot, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, extname(filename))
@@ -389,7 +447,7 @@ async function processContentItem(dir, filename, config, siteRoot) {
 
   // Process assets (resolve paths, copy co-located files)
   // This modifies content in place, updating paths to site-root-relative
-  await processCollectionAssets(content, filepath, siteRoot, config.name)
+  await processCollectionAssets(content, filepath, siteRoot, config.name, basePath)
 
   // Extract excerpt
   const excerpt = extractExcerpt(frontmatter, content, config.excerpt)
@@ -421,7 +479,7 @@ async function processContentItem(dir, filename, config, siteRoot) {
  * @param {Object} config - Parsed collection config
  * @returns {Promise<Array>} Array of processed items
  */
-async function collectItems(siteDir, config, collectionsBase) {
+async function collectItems(siteDir, config, collectionsBase, basePath) {
   const base = collectionsBase || siteDir
   const collectionDir = resolve(base, config.path)
 
@@ -441,12 +499,12 @@ async function collectItems(siteDir, config, collectionsBase) {
   let items = await Promise.all(
     itemFiles.map(file => {
       if (file.endsWith('.json')) {
-        return processJsonItem(collectionDir, file)
+        return processJsonItem(collectionDir, file, siteDir, config.name, basePath)
       }
       if (file.endsWith('.yml') || file.endsWith('.yaml')) {
-        return processDataItem(collectionDir, file)
+        return processDataItem(collectionDir, file, siteDir, config.name, basePath)
       }
-      return processContentItem(collectionDir, file, config, siteDir)
+      return processContentItem(collectionDir, file, config, siteDir, basePath)
     })
   )
 
@@ -497,7 +555,7 @@ async function collectItems(siteDir, config, collectionsBase) {
  * })
  * // { articles: [...], products: [...] }
  */
-export async function processCollections(siteDir, collectionsConfig, collectionsBase) {
+export async function processCollections(siteDir, collectionsConfig, collectionsBase, basePath = '/') {
   if (!collectionsConfig || typeof collectionsConfig !== 'object') {
     return {}
   }
@@ -506,7 +564,7 @@ export async function processCollections(siteDir, collectionsConfig, collections
 
   for (const [name, config] of Object.entries(collectionsConfig)) {
     const parsed = parseCollectionConfig(name, config)
-    const items = await collectItems(siteDir, parsed, collectionsBase)
+    const items = await collectItems(siteDir, parsed, collectionsBase, basePath)
     results[name] = items
     console.log(`[collection-processor] Processed ${name}: ${items.length} items`)
   }
