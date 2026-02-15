@@ -11,6 +11,7 @@
     "./vite-plugin": "./src/vite-foundation-plugin.js",
     "./foundation": "./src/foundation/index.js",
     "./foundation/config": "./src/foundation/config.js",
+    "./content": "./src/content/index.js",
     "./site": "./src/site/index.js",
     "./site/config": "./src/site/config.js",
     "./dev": "./src/dev/index.js",
