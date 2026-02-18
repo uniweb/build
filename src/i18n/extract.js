@@ -37,13 +37,18 @@ export function extractTranslatableContent(siteContent) {
     }
   }
 
-  // Extract from shared layout pages (header, footer, left, right panels)
-  for (const layoutKey of ['header', 'footer', 'left', 'right']) {
-    const layoutPage = siteContent[layoutKey]
-    if (layoutPage?.sections) {
-      const pageRoute = layoutPage.route || `/layout/${layoutKey}`
-      for (const section of layoutPage.sections) {
-        extractFromSection(section, pageRoute, units)
+  // Extract from layout areas (header, footer, left, right panels)
+  // Layouts are nested under siteContent.layouts: { default: { header, footer, ... }, marketing: { ... } }
+  if (siteContent.layouts) {
+    for (const [layoutName, areas] of Object.entries(siteContent.layouts)) {
+      if (!areas || typeof areas !== 'object') continue
+      for (const [areaKey, layoutPage] of Object.entries(areas)) {
+        if (layoutPage?.sections) {
+          const pageRoute = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
+          for (const section of layoutPage.sections) {
+            extractFromSection(section, pageRoute, units)
+          }
+        }
       }
     }
   }

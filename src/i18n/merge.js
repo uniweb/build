@@ -76,13 +76,18 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
     }
   }
 
-  // Translate shared layout sections (header, footer, sidebars)
-  for (const layoutKey of ['header', 'footer', 'left', 'right']) {
-    const layoutPage = translated[layoutKey]
-    if (layoutPage?.sections) {
-      const pageRoute = layoutPage.route || `/layout/${layoutKey}`
-      for (const section of layoutPage.sections) {
-        translateSectionSync(section, pageRoute, translations, fallbackToSource)
+  // Translate layout sections (header, footer, sidebars)
+  // Layouts are nested under translated.layouts: { default: { header, footer, ... }, marketing: { ... } }
+  if (translated.layouts) {
+    for (const [layoutName, areas] of Object.entries(translated.layouts)) {
+      if (!areas || typeof areas !== 'object') continue
+      for (const [areaKey, layoutPage] of Object.entries(areas)) {
+        if (layoutPage?.sections) {
+          const pageRoute = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
+          for (const section of layoutPage.sections) {
+            translateSectionSync(section, pageRoute, translations, fallbackToSource)
+          }
+        }
       }
     }
   }
@@ -128,18 +133,22 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
     }
   }
 
-  // Translate shared layout sections (header, footer, sidebars)
-  for (const layoutKey of ['header', 'footer', 'left', 'right']) {
-    const layoutPage = translated[layoutKey]
-    if (layoutPage?.sections) {
-      // Ensure route is set for context matching
-      if (!layoutPage.route) layoutPage.route = `/layout/${layoutKey}`
-      for (const section of layoutPage.sections) {
-        await translateSectionAsync(section, layoutPage, translations, {
-          fallbackToSource,
-          locale,
-          localesDir
-        })
+  // Translate layout sections (header, footer, sidebars)
+  // Layouts are nested under translated.layouts: { default: { header, footer, ... }, marketing: { ... } }
+  if (translated.layouts) {
+    for (const [layoutName, areas] of Object.entries(translated.layouts)) {
+      if (!areas || typeof areas !== 'object') continue
+      for (const [areaKey, layoutPage] of Object.entries(areas)) {
+        if (layoutPage?.sections) {
+          if (!layoutPage.route) layoutPage.route = `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
+          for (const section of layoutPage.sections) {
+            await translateSectionAsync(section, layoutPage, translations, {
+              fallbackToSource,
+              locale,
+              localesDir
+            })
+          }
+        }
       }
     }
   }
