@@ -24,6 +24,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
 import { generateEntryPoint, shouldRegenerateForFile } from '../generate-entry.js'
+import { importMapPlugin } from '../import-map-plugin.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -343,105 +344,20 @@ export async function defineSiteConfig(options = {}) {
 
   if (noopFoundationPlugin) plugins.push(noopFoundationPlugin)
 
-  // Import map plugin for runtime mode production builds
+  // Import map plugin for runtime mode production builds.
   // Emits re-export modules for each externalized package (react, @uniweb/core, etc.)
-  // so the browser can resolve bare specifiers in the dynamically-imported foundation
-  const IMPORT_MAP_EXTERNALS = [
-    'react',
-    'react-dom',
-    'react/jsx-runtime',
-    'react/jsx-dev-runtime',
-    '@uniweb/core'
-  ]
-  const IMPORT_MAP_PREFIX = '\0importmap:'
-
-  const importMapPlugin = needsImportMap ? (() => {
-    let isBuild = false
-
-    return {
-      name: 'uniweb:import-map',
-
-      configResolved(config) {
-        isBuild = config.command === 'build'
-      },
-
-      resolveId(id, importer) {
-        if (id.startsWith(IMPORT_MAP_PREFIX)) return id
-        // Bare specifiers inside our virtual modules (e.g. '@uniweb/core' re-exported
-        // from '\0importmap:@uniweb/core') can't be resolved by Rollup because virtual
-        // modules have no filesystem context. Resolve from the foundation directory where
-        // @uniweb/core is a direct dependency (the site may not have it under pnpm strict).
-        if (importer?.startsWith(IMPORT_MAP_PREFIX) && IMPORT_MAP_EXTERNALS.includes(id)) {
-          const resolveFrom = foundationInfo.path
-            ? resolve(foundationInfo.path, 'package.json')
-            : resolve(siteRoot, 'main.js')
-          return this.resolve(id, resolveFrom, { skipSelf: true })
-        }
-      },
-
-      async load(id) {
-        if (!id.startsWith(IMPORT_MAP_PREFIX)) return
-        const pkg = id.slice(IMPORT_MAP_PREFIX.length)
-        // Dynamically discover exports at build time by importing the package.
-        // We generate explicit named re-exports (not `export *`) because CJS
-        // packages like React only expose a default via `export *`, losing
-        // individual named exports (useState, jsx, etc.) that foundations need.
-        try {
-          const mod = await import(pkg)
-          const names = Object.keys(mod).filter(k => k !== '__esModule')
-          const hasDefault = 'default' in mod
-          const named = names.filter(k => k !== 'default')
-          const lines = []
-          if (named.length) {
-            lines.push(`export { ${named.join(', ')} } from '${pkg}'`)
-          }
-          if (hasDefault) {
-            lines.push(`export { default } from '${pkg}'`)
-          }
-          return lines.join('\n') || `export {}`
-        } catch {
-          // Fallback: generic re-export (may not preserve named exports for CJS)
-          return `export * from '${pkg}'`
-        }
-      },
-
-      // Emit deterministic chunks for each external (production only).
-      // preserveSignature: 'exports-only' tells Rollup to preserve the original
-      // export names (useState, jsx, etc.) instead of mangling them.
-      // In dev mode, Vite's transformRequest() resolves bare specifiers instead.
-      buildStart() {
-        if (!isBuild) return
-        for (const ext of IMPORT_MAP_EXTERNALS) {
-          this.emitFile({
-            type: 'chunk',
-            id: `${IMPORT_MAP_PREFIX}${ext}`,
-            fileName: `_importmap/${ext.replace(/\//g, '-')}.js`,
-            preserveSignature: 'exports-only'
-          })
-        }
-      },
-
-      // Inject the import map into the HTML (production only).
-      // In dev mode, Vite's transformRequest() handles bare specifier resolution.
-      transformIndexHtml: {
-        order: 'pre',
-        handler(html) {
-          if (!isBuild) return html
-          const basePath = base || '/'
-          const imports = {}
-          for (const ext of IMPORT_MAP_EXTERNALS) {
-            imports[ext] = `${basePath}_importmap/${ext.replace(/\//g, '-')}.js`
-          }
-          const importMap = JSON.stringify({ imports }, null, 2)
-          const script = `    <script type="importmap">\n${importMap}\n    </script>\n`
-          // Import map must appear before any module scripts
-          return html.replace('<head>', '<head>\n' + script)
-        }
-      }
-    }
-  })() : null
-
-  if (importMapPlugin) plugins.push(importMapPlugin)
+  // so the browser can resolve bare specifiers in the dynamically-imported foundation.
+  // In dev mode, Vite's transformRequest() handles bare specifier resolution instead.
+  if (needsImportMap) {
+    plugins.push(importMapPlugin({
+      basePath: base || '/',
+      // Under pnpm strict mode, the site may not have @uniweb/core in its own
+      // node_modules. Resolve from the foundation directory where it's a direct dep.
+      resolveFrom: foundationInfo.path
+        ? resolve(foundationInfo.path, 'package.json')
+        : resolve(siteRoot, 'main.js'),
+    }))
+  }
 
   // Build foundation config for runtime
   const foundationConfig = {
