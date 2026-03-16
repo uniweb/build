@@ -1425,6 +1425,14 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
           assetCollection = mergeAssetCollections(assetCollection, pageAssets)
           iconCollection = mergeIconCollections(iconCollection, pageIcons)
+
+          // Modern pattern: blog/index/ (isIndex) inherits the container's fetch config
+          // when it has no fetch of its own. Without this, EntityStore can't find the
+          // fetch config for sections on the index page (page.parent is null for /blog).
+          if (isIndex && !page.fetch && parentFetch) {
+            page.fetch = parentFetch
+          }
+
           pages.push(page)
 
           // Recurse into subdirectories (page mode)
@@ -1477,16 +1485,17 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             changefreq: dirConfig.seo?.changefreq || null,
             priority: dirConfig.seo?.priority || null
           },
-          fetch: null,
+          fetch: parseFetchConfig(dirConfig.fetch) || null,
           sections: [],
           order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
         }
 
         pages.push(containerPage)
 
-        // Recurse in folder mode
+        // Recurse in folder mode — pass container's own fetch config (or fall back to parent's)
         const childDirPath = mounts?.get(entry) || entryPath
-        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null, effectiveLayout)
+        const containerFetch = containerPage.fetch || parentFetch
+        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, versionContext, 'pages', null, effectiveLayout)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
