@@ -545,6 +545,57 @@ export async function prerenderSite(siteDir, options = {}) {
       renderedFiles.push(outputPath)
       onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
     }
+
+    // Write 404.html — serves two purposes for static hosts (GitHub Pages, Cloudflare Pages, etc.):
+    //  1. Real 404: pre-rendered custom 404 page content (or blank #root if none defined)
+    //  2. Valid dynamic route (e.g. /blog/2): inline script clears #root so SPA renders fresh
+    //
+    // Flow: static host serves 404.html → inline script runs before React mounts →
+    //   - dynamic route: clears #root, React renders the page normally
+    //   - real 404: leaves #root with pre-rendered content, React re-renders same 404 page
+
+    // Extract patterns for routes that remain as dynamic templates (prerender: false)
+    const dynamicTemplates = siteContent.pages?.filter((p) => p.isDynamic) || []
+    const routePatterns = dynamicTemplates.map((p) => {
+      // '/blog/:id' → /^\/blog\/[^\/]+\/?$/
+      const escaped = p.route
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/:[^/]+/g, '[^\\/]+')
+      return `^${escaped}\\/?$`
+    })
+
+    // Start with SPA shell: JS bundle + __SITE_CONTENT__ + theme CSS
+    let fallbackHtml = injectBuildData(htmlShell, siteContent)
+
+    // Pre-render the custom 404 page content into #root (if the site defines one)
+    const notFoundPage = website.getNotFoundPage()
+    if (notFoundPage) {
+      const notFoundResult = renderPage(notFoundPage, website)
+      if (notFoundResult && !notFoundResult.error) {
+        fallbackHtml = injectPageContent(fallbackHtml, notFoundResult.renderedContent, notFoundPage, {
+          sectionOverrideCSS: notFoundResult.sectionOverrideCSS,
+        })
+      }
+    }
+
+    // Inject inline script: if path matches a dynamic route, clear #root before React mounts
+    // so the SPA renders the correct page rather than the 404 content
+    if (routePatterns.length > 0) {
+      const patternList = routePatterns.map((p) => `/${p}/`).join(',')
+      const dynamicScript =
+        `<script>(function(){` +
+        `var p=[${patternList}],r=window.location.pathname;` +
+        `if(p.some(function(x){return x.test(r)})){` +
+        `var el=document.getElementById('root');if(el)el.innerHTML='';` +
+        `}})()</script>`
+      fallbackHtml = fallbackHtml.replace('</body>', `${dynamicScript}\n</body>`)
+    }
+
+    const fallbackDir = routePrefix ? join(distDir, routePrefix.replace(/^\//, '')) : distDir
+    await mkdir(fallbackDir, { recursive: true })
+    await writeFile(join(fallbackDir, '404.html'), fallbackHtml)
+    const fallbackNote = notFoundPage ? '404 page + SPA fallback' : 'SPA fallback'
+    onProgress(`  → ${routePrefix || ''}404.html (${fallbackNote})`)
   }
 
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
