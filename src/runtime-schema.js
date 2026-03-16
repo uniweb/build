@@ -228,6 +228,11 @@ export function extractRuntimeSchema(fullMeta) {
       if (fullMeta.data.inherit !== undefined) {
         runtime.inheritData = fullMeta.data.inherit
       }
+      // detail: false → opt out of single-item resolution on dynamic pages,
+      // returning the collection instead (minus the active item)
+      if (fullMeta.data.detail !== undefined) {
+        runtime.inheritDetail = fullMeta.data.detail
+      }
     }
   }
 
