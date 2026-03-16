@@ -359,6 +359,59 @@ export async function defineSiteConfig(options = {}) {
     }))
   }
 
+  // Preload hints for runtime-loaded foundations and extensions.
+  // In runtime mode, foundation JS is loaded via import() and CSS is injected
+  // dynamically in JavaScript — the browser doesn't discover them until JS executes.
+  // These <link> tags let the browser start fetching during HTML parsing.
+  // Shell mode is excluded: URLs come from __DATA__ at serve time (unicloud handles it).
+  if (isRuntimeMode && !isShellMode) {
+    plugins.push({
+      name: 'uniweb:foundation-preload',
+      transformIndexHtml: {
+        order: 'post',
+        handler() {
+          const tags = []
+
+          // Foundation JS modulepreload
+          if (foundationConfig.url) {
+            tags.push({
+              tag: 'link',
+              attrs: { rel: 'modulepreload', href: foundationConfig.url },
+              injectTo: 'head',
+            })
+          }
+
+          // Foundation CSS — injected as a real <link> so the browser fetches it
+          // during HTML parsing instead of waiting for loadFoundationCSS() in JS.
+          // The runtime's dynamic <link> deduplicates (same URL, already cached).
+          if (foundationConfig.cssUrl) {
+            tags.push({
+              tag: 'link',
+              attrs: { rel: 'stylesheet', href: foundationConfig.cssUrl },
+              injectTo: 'head',
+            })
+          }
+
+          // Extension JS modulepreload (CSS left to runtime — we can't reliably
+          // derive CSS URLs for all extension formats)
+          const extensions = siteConfig.extensions || []
+          for (const ext of extensions) {
+            const url = typeof ext === 'string' ? ext : ext?.url
+            if (url) {
+              tags.push({
+                tag: 'link',
+                attrs: { rel: 'modulepreload', href: url },
+                injectTo: 'head',
+              })
+            }
+          }
+
+          return tags
+        },
+      },
+    })
+  }
+
   // Build foundation config for runtime
   const foundationConfig = {
     mode: isRuntimeMode ? 'runtime' : 'bundled',
