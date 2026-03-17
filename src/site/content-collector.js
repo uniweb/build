@@ -1604,6 +1604,13 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         assetCollection = mergeAssetCollections(assetCollection, pageAssets)
         iconCollection = mergeIconCollections(iconCollection, pageIcons)
 
+        // Modern pattern: articles/index/ (isIndex) inherits the container's fetch config
+        // when it has no fetch of its own. Without this, EntityStore can't find the
+        // fetch config for sections on the index page.
+        if (isIndex && !page.fetch && parentFetch) {
+          page.fetch = parentFetch
+        }
+
         // Handle 404 page - only at root level
         if (parentRoute === '/' && entry === '404') {
           notFound = page

@@ -225,6 +225,18 @@ export function parseFetchConfig(fetch) {
   // Full config object
   if (typeof fetch !== 'object') return null
 
+  // Inherit-merge config: { inherit: true, detail: false, limit: 3 }
+  // No URL — merges with the parent fetch config at runtime; only carries override props.
+  if (fetch.inherit === true) {
+    return {
+      inherit: true,
+      ...(fetch.detail !== undefined ? { detail: fetch.detail } : {}),
+      ...(fetch.limit !== undefined ? { limit: fetch.limit } : {}),
+      ...(fetch.sort !== undefined ? { sort: fetch.sort } : {}),
+      ...(fetch.filter !== undefined ? { filter: fetch.filter } : {}),
+    }
+  }
+
   // Collection reference: { collection: 'articles', limit: 3 }
   if (fetch.collection) {
     return {

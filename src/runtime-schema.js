@@ -233,6 +233,9 @@ export function extractRuntimeSchema(fullMeta) {
       if (fullMeta.data.detail !== undefined) {
         runtime.inheritDetail = fullMeta.data.detail
       }
+      if (fullMeta.data.limit !== undefined) {
+        runtime.inheritLimit = fullMeta.data.limit
+      }
     }
   }
 
