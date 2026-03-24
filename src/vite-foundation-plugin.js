@@ -35,6 +35,73 @@ async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPath
 }
 
 /**
+ * Worker externals — these are provided by the Cloudflare Worker's custom require()
+ */
+const WORKER_EXTERNALS = [
+  'react',
+  'react-dom',
+  'react-dom/server',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  '@uniweb/core',
+]
+
+/**
+ * Module-level guard to prevent recursive worker bundle builds.
+ * When buildWorkerBundle calls viteBuild(), Vite may re-invoke the
+ * foundation plugin's writeBundle hook — this flag breaks the cycle.
+ */
+let _buildingWorkerBundle = false
+
+/**
+ * Build a CJS worker bundle from the ESM foundation output.
+ *
+ * The Worker provides a custom require() that maps these externals
+ * to its bundled modules. The CJS format is required because Workers
+ * evaluate foundation code with `new Function()`, not ES module import.
+ *
+ * @param {string} outDir - Path to dist/ directory containing foundation.js
+ */
+async function buildWorkerBundle(outDir) {
+  if (_buildingWorkerBundle) return
+  _buildingWorkerBundle = true
+
+  const entryPath = join(outDir, 'foundation.js')
+  try {
+    const { build: viteBuild } = await import('vite')
+    await viteBuild({
+      configFile: false,  // don't load project's vite.config.js
+      plugins: [],
+      build: {
+        lib: {
+          entry: entryPath,
+          formats: ['cjs'],
+          fileName: 'foundation.worker',
+        },
+        rollupOptions: {
+          external: WORKER_EXTERNALS,
+          output: { exports: 'named' },
+        },
+        outDir,
+        emptyOutDir: false,
+        sourcemap: false,
+        minify: false,
+      },
+      logLevel: 'warn',
+    })
+
+    const { statSync } = await import('node:fs')
+    const workerFile = join(outDir, 'foundation.worker.cjs')
+    const size = (statSync(workerFile).size / 1024).toFixed(1)
+    console.log(`Generated foundation.worker.cjs (${size} KB)`)
+  } catch (err) {
+    console.warn(`Warning: worker bundle build failed: ${err.message}`)
+  } finally {
+    _buildingWorkerBundle = false
+  }
+}
+
+/**
  * Vite plugin for foundation builds
  */
 export function foundationBuildPlugin(options = {}) {
@@ -69,6 +136,9 @@ export function foundationBuildPlugin(options = {}) {
     },
 
     async writeBundle() {
+      // Skip if this is a recursive call from buildWorkerBundle
+      if (_buildingWorkerBundle) return
+
       // After bundle is written, generate schema.json in meta folder
       const outDir = resolve(resolvedOutDir)
       const metaDir = join(outDir, 'meta')
@@ -87,6 +157,9 @@ export function foundationBuildPlugin(options = {}) {
       await writeFile(schemaPath, JSON.stringify(schema, null, 2), 'utf-8')
 
       console.log(`Generated meta/schema.json with ${Object.keys(schema).length - 1} components`)
+
+      // Build CJS worker bundle for edge SSR
+      await buildWorkerBundle(outDir)
     },
   }
 }
