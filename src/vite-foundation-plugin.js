@@ -35,69 +35,73 @@ async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPath
 }
 
 /**
- * Worker externals — these are provided by the Cloudflare Worker's custom require()
+ * Module-level guard to prevent recursive SSR bundle builds.
+ * When buildSSRBundle calls esbuild, it should not re-trigger
+ * the foundation plugin's writeBundle hook.
  */
-const WORKER_EXTERNALS = [
-  'react',
-  'react-dom',
-  'react-dom/server',
-  'react/jsx-runtime',
-  'react/jsx-dev-runtime',
-  '@uniweb/core',
-]
+let _buildingSSRBundle = false
 
 /**
- * Module-level guard to prevent recursive worker bundle builds.
- * When buildWorkerBundle calls viteBuild(), Vite may re-invoke the
- * foundation plugin's writeBundle hook — this flag breaks the cycle.
- */
-let _buildingWorkerBundle = false
-
-/**
- * Build a CJS worker bundle from the ESM foundation output.
+ * Build a self-contained ESM bundle for edge SSR (Dynamic Workers).
  *
- * The Worker provides a custom require() that maps these externals
- * to its bundled modules. The CJS format is required because Workers
- * evaluate foundation code with `new Function()`, not ES module import.
+ * Produces foundation.ssr.js — a single ESM file with React, ReactDOM/server,
+ * @uniweb/core, and the foundation components all inlined. No external imports.
+ *
+ * This bundle is loaded into a Cloudflare Dynamic Worker isolate at request time
+ * via env.LOADER.get(). The isolate caches the bundle per foundation version.
  *
  * @param {string} outDir - Path to dist/ directory containing foundation.js
  */
-async function buildWorkerBundle(outDir) {
-  if (_buildingWorkerBundle) return
-  _buildingWorkerBundle = true
+async function buildSSRBundle(outDir) {
+  if (_buildingSSRBundle) return
+  _buildingSSRBundle = true
 
   const entryPath = join(outDir, 'foundation.js')
   try {
-    const { build: viteBuild } = await import('vite')
-    await viteBuild({
-      configFile: false,  // don't load project's vite.config.js
-      plugins: [],
-      build: {
-        lib: {
-          entry: entryPath,
-          formats: ['cjs'],
-          fileName: 'foundation.worker',
-        },
-        rollupOptions: {
-          external: WORKER_EXTERNALS,
-          output: { exports: 'named' },
-        },
-        outDir,
-        emptyOutDir: false,
-        sourcemap: false,
-        minify: false,
+    const { build: esbuild } = await import('esbuild')
+    const { statSync } = await import('node:fs')
+
+    // Find node_modules — walk up from outDir until we find one
+    const { existsSync } = await import('node:fs')
+    let searchDir = resolve(outDir, '..')
+    let nodePaths = []
+    for (let i = 0; i < 5; i++) {
+      const candidate = join(searchDir, 'node_modules')
+      if (existsSync(candidate)) {
+        nodePaths.push(candidate)
+        break
+      }
+      searchDir = resolve(searchDir, '..')
+    }
+
+    await esbuild({
+      stdin: {
+        contents: [
+          `export { renderToString } from "react-dom/server.browser";`,
+          `export { createElement } from "react";`,
+          `export * from "${entryPath.replace(/\\/g, '/')}";`,
+        ].join('\n'),
+        resolveDir: outDir,
+        loader: 'js',
       },
-      logLevel: 'warn',
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      outfile: join(outDir, 'foundation.ssr.js'),
+      minify: false,
+      external: [],
+      nodePaths,
+      conditions: ['browser', 'module'],
+      logLevel: 'warning',
     })
 
-    const { statSync } = await import('node:fs')
-    const workerFile = join(outDir, 'foundation.worker.cjs')
-    const size = (statSync(workerFile).size / 1024).toFixed(1)
-    console.log(`Generated foundation.worker.cjs (${size} KB)`)
+    const ssrFile = join(outDir, 'foundation.ssr.js')
+    const size = (statSync(ssrFile).size / 1024).toFixed(1)
+    console.log(`Generated foundation.ssr.js (${size} KB)`)
   } catch (err) {
-    console.warn(`Warning: worker bundle build failed: ${err.message}`)
+    console.warn(`Warning: SSR bundle build failed: ${err.message}`)
   } finally {
-    _buildingWorkerBundle = false
+    _buildingSSRBundle = false
   }
 }
 
@@ -136,8 +140,8 @@ export function foundationBuildPlugin(options = {}) {
     },
 
     async writeBundle() {
-      // Skip if this is a recursive call from buildWorkerBundle
-      if (_buildingWorkerBundle) return
+      // Skip if this is a recursive call from buildSSRBundle
+      if (_buildingSSRBundle) return
 
       // After bundle is written, generate schema.json in meta folder
       const outDir = resolve(resolvedOutDir)
@@ -158,8 +162,8 @@ export function foundationBuildPlugin(options = {}) {
 
       console.log(`Generated meta/schema.json with ${Object.keys(schema).length - 1} components`)
 
-      // Build CJS worker bundle for edge SSR
-      await buildWorkerBundle(outDir)
+      // Build self-contained SSR bundle for edge rendering (Dynamic Workers)
+      await buildSSRBundle(outDir)
     },
   }
 }
