@@ -61,25 +61,80 @@ async function buildSSRBundle(outDir) {
     const { build: esbuild } = await import('esbuild')
     const { statSync } = await import('node:fs')
 
-    // Find node_modules — walk up from outDir until we find one
+    // Collect all node_modules directories up the tree (pnpm hoists to workspace root)
     const { existsSync } = await import('node:fs')
     let searchDir = resolve(outDir, '..')
     let nodePaths = []
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       const candidate = join(searchDir, 'node_modules')
       if (existsSync(candidate)) {
         nodePaths.push(candidate)
-        break
       }
-      searchDir = resolve(searchDir, '..')
+      const parent = resolve(searchDir, '..')
+      if (parent === searchDir) break
+      searchDir = parent
     }
 
+    // Resolve workspace packages that esbuild can't find via node_modules
+    // (pnpm workspace symlinks aren't in node_modules for the foundation project)
+    const { createRequire } = await import('node:module')
+    const pluginRequire = createRequire(import.meta.url)
+    let runtimeSSRPath
+    try {
+      runtimeSSRPath = pluginRequire.resolve('@uniweb/runtime/ssr')
+    } catch {
+      // Fallback: try to find it relative to the workspace root
+      for (const np of nodePaths) {
+        const candidate = join(np, '@uniweb', 'runtime', 'dist', 'ssr.js')
+        if (existsSync(candidate)) {
+          runtimeSSRPath = candidate
+          break
+        }
+      }
+    }
+
+    // Build a self-contained ESM bundle including:
+    // - Foundation components (from the just-built ESM output)
+    // - React + ReactDOM/server (browser version, no Node.js built-ins)
+    // - @uniweb/core (Website, Page, Block classes)
+    // - @uniweb/runtime/ssr (initPrerender, renderPage, injectPageContent)
+    // - @uniweb/theming (buildSectionOverrides, used by runtime/ssr)
+    //
+    // All in a single file so the Dynamic Worker isolate has one React instance.
+    const ssrExports = runtimeSSRPath
+      ? `export { initPrerender, renderPage, injectPageContent, prefetchIcons } from "${runtimeSSRPath.replace(/\\/g, '/')}";`
+      : ''
+
+    // Resolve React to a single package directory to avoid duplicate instances
+    // (foundation.js and runtime/ssr may resolve to different copies)
+    const { dirname } = await import('node:path')
+    let reactDir
+    try {
+      reactDir = dirname(pluginRequire.resolve('react/package.json'))
+    } catch {
+      // Fall back to nodePaths resolution
+    }
+    const alias = {}
+    if (reactDir) {
+      alias['react'] = reactDir
+      // Force react-dom/server imports to the browser version (no Node.js built-ins)
+      const reactDomDir = dirname(pluginRequire.resolve('react-dom/package.json'))
+      alias['react-dom'] = reactDomDir
+      alias['react-dom/server'] = join(reactDomDir, 'server.browser.js')
+    }
+
+    const foundationPath = entryPath.replace(/\\/g, '/')
     await esbuild({
       stdin: {
         contents: [
+          // Foundation components (named + default export)
+          `export * from "${foundationPath}";`,
+          `export { default } from "${foundationPath}";`,
+          // React SSR
           `export { renderToString } from "react-dom/server.browser";`,
           `export { createElement } from "react";`,
-          `export * from "${entryPath.replace(/\\/g, '/')}";`,
+          // Runtime SSR functions (initPrerender, renderPage, etc.)
+          ssrExports,
         ].join('\n'),
         resolveDir: outDir,
         loader: 'js',
@@ -91,6 +146,7 @@ async function buildSSRBundle(outDir) {
       minify: false,
       external: [],
       nodePaths,
+      alias,
       conditions: ['browser', 'module'],
       logLevel: 'warning',
     })
