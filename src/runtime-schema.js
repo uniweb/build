@@ -309,6 +309,7 @@ export function extractAllRuntimeSchemas(componentsMeta) {
  * - areas: Array of area names this layout supports
  * - transitions: View transition name mapping (stored but not acted on yet)
  * - defaults: Param default values
+ * - scroll: Scroll management mode ('self' or CSS selector)
  *
  * @param {Object} fullMeta - The full meta.js default export for a layout
  * @returns {Object|null} - Lean layout runtime schema or null if empty
@@ -326,6 +327,10 @@ export function extractLayoutRuntimeSchema(fullMeta) {
 
   if (fullMeta.transitions && typeof fullMeta.transitions === 'object') {
     runtime.transitions = fullMeta.transitions
+  }
+
+  if (fullMeta.scroll !== undefined) {
+    runtime.scroll = fullMeta.scroll
   }
 
   const defaults = extractParamDefaults(fullMeta.params)
