@@ -46,15 +46,19 @@ export async function auditLocale(localesPath, locale) {
   const valid = []
   const missing = []
   const stale = []
+  const needsTags = []
 
   // Check manifest entries
   for (const hash of manifestHashes) {
     if (translationHashes.has(hash)) {
-      valid.push({
-        hash,
-        source: manifest.units[hash].source,
-        translation: getTranslationText(translations[hash])
-      })
+      const source = manifest.units[hash].source
+      const translation = getTranslationText(translations[hash])
+      valid.push({ hash, source, translation })
+
+      // Flag entries where source has inline tags but translation doesn't
+      if (/<\d+>/.test(source) && !/<\d+>/.test(translation) && translation.length > 0) {
+        needsTags.push({ hash, source, translation })
+      }
     } else {
       missing.push({
         hash,
@@ -81,7 +85,8 @@ export async function auditLocale(localesPath, locale) {
     total: manifestHashes.size,
     valid,
     missing,
-    stale
+    stale,
+    needsTags
   }
 }
 
@@ -156,6 +161,9 @@ export function formatAuditReport(results, options = {}) {
     lines.push(`  Valid:   ${result.valid.length} (${coverage}%)`)
     lines.push(`  Missing: ${result.missing.length}`)
     lines.push(`  Stale:   ${result.stale.length}`)
+    if (result.needsTags?.length > 0) {
+      lines.push(`  Needs tags: ${result.needsTags.length}`)
+    }
 
     if (verbose && result.stale.length > 0) {
       lines.push(`\n  Stale entries:`)
@@ -165,6 +173,17 @@ export function formatAuditReport(results, options = {}) {
       }
       if (result.stale.length > 10) {
         lines.push(`    ... and ${result.stale.length - 10} more`)
+      }
+    }
+
+    if (verbose && result.needsTags?.length > 0) {
+      lines.push(`\n  Translations missing inline tags:`)
+      for (const entry of result.needsTags.slice(0, 10)) {
+        const src = truncate(entry.source, 50)
+        lines.push(`    - ${entry.hash}: "${src}"`)
+      }
+      if (result.needsTags.length > 10) {
+        lines.push(`    ... and ${result.needsTags.length - 10} more`)
       }
     }
   }
