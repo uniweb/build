@@ -5,7 +5,7 @@
  * strings and building a manifest of translation units.
  */
 
-import { computeHash } from './hash.js'
+import { computeHash, stripInlineTags } from './hash.js'
 
 /**
  * Extract all translatable units from site content
@@ -250,15 +250,36 @@ function extractFromList(listNode, context, units) {
 }
 
 /**
- * Extract all text content from a node
+ * Extract all text content from a node.
+ * When a node has multiple text children with some carrying span marks
+ * (e.g., `[text]{accent}`), wraps the marked spans in XLIFF-style
+ * `<N>...</N>` tags so translators can reposition them.
  */
 function extractTextFromNode(node) {
   if (!node.content) return ''
-  return node.content
-    .filter(n => n.type === 'text')
-    .map(n => n.text || '')
-    .join('')
-    .trim()
+  const textChildren = node.content.filter(n => n.type === 'text')
+
+  // Check for mixed inline marks (span marks from `[text]{class}` syntax)
+  const hasInlineMarks = textChildren.length > 1 &&
+    textChildren.some(n => n.marks?.some(m => m.type === 'span'))
+
+  if (!hasInlineMarks) {
+    return textChildren.map(n => n.text || '').join('').trim()
+  }
+
+  // Wrap span-marked text in numbered tags
+  let markCounter = 0
+  const parts = []
+  for (const child of textChildren) {
+    const text = child.text || ''
+    if (child.marks?.some(m => m.type === 'span')) {
+      markCounter++
+      parts.push(`<${markCounter}>${text}</${markCounter}>`)
+    } else {
+      parts.push(text)
+    }
+  }
+  return parts.join('').trim()
 }
 
 /**
@@ -267,7 +288,8 @@ function extractTextFromNode(node) {
 function addUnit(units, source, field, context) {
   if (!source || source.length === 0) return
 
-  const hash = computeHash(source)
+  // Hash on plain text (strip inline tags) so keys stay stable
+  const hash = computeHash(stripInlineTags(source))
 
   if (units[hash]) {
     // Unit exists - add context if not already present

@@ -12,7 +12,7 @@
  * when no free-form translation exists.
  */
 
-import { computeHash } from './hash.js'
+import { computeHash, stripInlineTags, parseInlineTags } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
 
 /**
@@ -264,26 +264,87 @@ function translateProseMirrorDoc(doc, context, translations, fallbackToSource) {
 }
 
 /**
- * Recursively translate a node and its children
+ * Recursively translate a node and its children.
+ * For nodes with mixed marked/unmarked text children (inline span marks),
+ * translates the node as a whole unit using XLIFF-style inline tags,
+ * then rebuilds children with original marks re-applied.
  */
 function translateNode(node, context, translations, fallbackToSource) {
-  // Translate text content
-  if (node.content) {
-    for (const child of node.content) {
-      if (child.type === 'text' && child.text) {
-        const translated = lookupTranslation(
-          child.text,
-          context,
-          translations,
-          fallbackToSource
-        )
-        if (translated !== child.text) {
-          child.text = translated
-        }
+  if (!node.content) return
+
+  // Check for inline span marks across multiple text children
+  const textChildren = node.content.filter(n => n.type === 'text')
+  const hasInlineMarks = textChildren.length > 1 &&
+    textChildren.some(n => n.marks?.some(m => m.type === 'span'))
+
+  if (hasInlineMarks) {
+    // Build tagged source string (mirrors extraction)
+    let markCounter = 0
+    const markMap = [] // tag index → original marks array
+    const parts = []
+    for (const child of textChildren) {
+      const text = child.text || ''
+      if (child.marks?.some(m => m.type === 'span')) {
+        markCounter++
+        markMap.push(child.marks)
+        parts.push(`<${markCounter}>${text}</${markCounter}>`)
       } else {
-        // Recurse into child nodes
+        parts.push(text)
+      }
+    }
+    const plainSource = stripInlineTags(parts.join('').trim())
+
+    const translated = lookupTranslation(plainSource, context, translations, fallbackToSource)
+    if (translated !== plainSource) {
+      // Parse tagged translation and rebuild text children
+      const { segments } = parseInlineTags(translated)
+      const newTextChildren = segments.map(seg => {
+        if (seg.markIndex !== undefined && markMap[seg.markIndex]) {
+          return { type: 'text', text: seg.text, marks: [...markMap[seg.markIndex]] }
+        }
+        return { type: 'text', text: seg.text }
+      })
+
+      // Replace text children in content, preserve non-text children in place
+      const result = []
+      let textInserted = false
+      for (const child of node.content) {
+        if (child.type === 'text') {
+          if (!textInserted) {
+            result.push(...newTextChildren)
+            textInserted = true
+          }
+          // Skip remaining old text children
+        } else {
+          result.push(child)
+        }
+      }
+      node.content = result
+    }
+
+    // Recurse into non-text children
+    for (const child of node.content) {
+      if (child.type !== 'text') {
         translateNode(child, context, translations, fallbackToSource)
       }
+    }
+    return
+  }
+
+  // Default: translate each child individually
+  for (const child of node.content) {
+    if (child.type === 'text' && child.text) {
+      const translated = lookupTranslation(
+        child.text,
+        context,
+        translations,
+        fallbackToSource
+      )
+      if (translated !== child.text) {
+        child.text = translated
+      }
+    } else {
+      translateNode(child, context, translations, fallbackToSource)
     }
   }
 }

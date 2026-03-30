@@ -942,10 +942,17 @@ export function siteContentPlugin(options = {}) {
         headInjection += `    <script type="application/json" id="${variableName}">${JSON.stringify(contentToInject).replace(/</g, '\\u003c')}</script>\n`
       }
 
-      if (!headInjection) return html
+      let result = html
+
+      // Update <html lang> for non-default locales
+      if (activeLocale) {
+        result = result.replace(/<html([^>]*)\slang="[^"]*"/, `<html$1 lang="${activeLocale}"`)
+      }
+
+      if (!headInjection) return result
 
       // Insert before </head>
-      return html.replace('</head>', headInjection + '  </head>')
+      return result.replace('</head>', headInjection + '  </head>')
     },
 
     async generateBundle() {
