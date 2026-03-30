@@ -1,6 +1,6 @@
 {
   "name": "@uniweb/build",
-  "version": "0.8.23",
+  "version": "0.8.24",
   "description": "Build tooling for the Uniweb Component Web Platform",
   "type": "module",
   "exports": {
