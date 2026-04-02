@@ -935,6 +935,33 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     }
   }
 
+  // Rewrite pages proxy to an external site — no content, no HTML output
+  if (pageConfig.rewrite) {
+    const route = isIndex ? parentRoute
+      : parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
+
+    return {
+      page: {
+        route,
+        sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
+        id: pageConfig.id || null,
+        isIndex,
+        title: pageConfig.title || prettifySlug(pageName),
+        description: pageConfig.description || '',
+        label: pageConfig.label || null,
+        hidden: pageConfig.hidden || false,
+        hideInHeader: pageConfig.hideInHeader || false,
+        hideInFooter: pageConfig.hideInFooter || false,
+        layout: {},
+        seo: { noindex: true },
+        rewrite: pageConfig.rewrite,
+        sections: []
+      },
+      assetCollection: { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() },
+      iconCollection: { icons: new Set(), bySource: new Map() }
+    }
+  }
+
   let hierarchicalSections = []
   let pageAssetCollection = {
     assets: {},

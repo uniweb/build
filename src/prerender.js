@@ -505,11 +505,15 @@ export async function prerenderSite(siteDir, options = {}) {
       // route matching but can't be pre-rendered (no concrete route)
       if (page.route.includes(':')) continue
 
+      // Build the output route with locale prefix
+      // For non-default locales, translate route slugs (e.g., /about → /acerca-de)
+      const translatedPageRoute = isDefault ? page.route : website.translateRoute(page.route, locale)
+      const outputRoute = routePrefix + translatedPageRoute
+
       // Redirect pages: emit a redirect HTML instead of rendering content
       if (page.redirect) {
-        const redirectTarget = page.redirect
-        onProgress(`  Redirect ${outputRoute} → ${redirectTarget}`)
-        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${redirectTarget}"><link rel="canonical" href="${redirectTarget}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${redirectTarget}">${redirectTarget}</a></p></body></html>`
+        onProgress(`  Redirect ${outputRoute} → ${page.redirect}`)
+        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${page.redirect}"><link rel="canonical" href="${page.redirect}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${page.redirect}">${page.redirect}</a></p></body></html>`
         const outputPath = getOutputPath(distDir, outputRoute)
         await mkdir(dirname(outputPath), { recursive: true })
         await writeFile(outputPath, redirectHtml)
@@ -517,10 +521,11 @@ export async function prerenderSite(siteDir, options = {}) {
         continue
       }
 
-      // Build the output route with locale prefix
-      // For non-default locales, translate route slugs (e.g., /about → /acerca-de)
-      const translatedPageRoute = isDefault ? page.route : website.translateRoute(page.route, locale)
-      const outputRoute = routePrefix + translatedPageRoute
+      // Rewrite pages: served by an external site, skip rendering entirely
+      if (page.rewrite) {
+        onProgress(`  Rewrite ${outputRoute} → ${page.rewrite}`)
+        continue
+      }
 
       onProgress(`Rendering ${outputRoute}...`)
 
@@ -574,15 +579,20 @@ export async function prerenderSite(siteDir, options = {}) {
     onProgress(`  → ${routePrefix || ''}404.html (${fallbackNote})`)
   }
 
-  // Generate _redirects file for Cloudflare Pages / Netlify
-  // Collect redirect entries from all pages across all locales
+  // Generate _redirects and _rewrites files for Cloudflare Pages / Netlify
+  // Collect entries from all pages across all locales
   const redirectEntries = []
+  const rewriteEntries = []
   for (const localeConfig of localeConfigs) {
     const siteContent = JSON.parse(await readFile(localeConfig.contentPath, 'utf8'))
     const prefix = localeConfig.routePrefix || ''
     for (const page of siteContent.pages || []) {
       if (page.redirect) {
         redirectEntries.push(`${prefix}${page.route} ${page.redirect} 302`)
+      }
+      if (page.rewrite) {
+        // Rewrite: path prefix → external origin (host proxies transparently)
+        rewriteEntries.push(`${prefix}${page.route}/* ${page.rewrite}/:splat 200`)
       }
     }
   }
@@ -593,6 +603,13 @@ export async function prerenderSite(siteDir, options = {}) {
     const generated = `# Auto-generated from page.yml redirect: declarations\n${redirectEntries.join('\n')}\n`
     await writeFile(redirectsPath, existing ? `${existing.trimEnd()}\n\n${generated}` : generated)
     onProgress(`Generated _redirects (${redirectEntries.length} entries)`)
+  }
+  if (rewriteEntries.length > 0) {
+    const rewritesPath = join(distDir, '_rewrites')
+    const existing = existsSync(rewritesPath) ? await readFile(rewritesPath, 'utf8') : ''
+    const generated = `# Auto-generated from page.yml rewrite: declarations\n${rewriteEntries.join('\n')}\n`
+    await writeFile(rewritesPath, existing ? `${existing.trimEnd()}\n\n${generated}` : generated)
+    onProgress(`Generated _rewrites (${rewriteEntries.length} entries)`)
   }
 
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
