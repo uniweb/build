@@ -387,6 +387,34 @@ function resolveMounts(pathsConfig, sitePath, pagesPath) {
  *   - Simple: "1", "2", "3"
  *   - Decimal ordering: "1.5" (between 1 and 2), "2.5" (between 2 and 3)
  */
+/**
+ * Extract the first H1 text from a ProseMirror document.
+ * Returns null if no H1 is found.
+ */
+function extractH1(proseMirrorDoc) {
+  const nodes = proseMirrorDoc?.content || proseMirrorDoc
+  if (!Array.isArray(nodes)) return null
+
+  for (const node of nodes) {
+    if (node.type === 'heading' && node.attrs?.level === 1 && node.content) {
+      return node.content.map(n => n.text || '').join('').trim() || null
+    }
+  }
+  return null
+}
+
+/**
+ * Prettify a slug into a human-readable title.
+ * Strips numeric prefixes, replaces hyphens with spaces, title-cases.
+ */
+function prettifySlug(slug) {
+  const stripped = slug.replace(/^\d+[-.]?\s*/, '')
+  return stripped
+    .split('-')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 function parseNumericPrefix(filename) {
   const match = filename.match(/^(\d+(?:\.\d+)*)-?(.*)$/)
   if (match) {
@@ -587,7 +615,7 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
       sourcePath: null,
       id: null,
       isIndex: false,
-      title: pageName,
+      title: extractH1(section.content) || prettifySlug(pageName),
       description: '',
       label: null,
       lastModified: fileStat.mtime?.toISOString() || null,
@@ -1103,7 +1131,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       sourcePath, // Original folder-based path (for ancestor checking in navigation)
       id: pageConfig.id || null, // Stable page ID for page: links (survives reorganization)
       isIndex, // Marks this page as the index for its parent route
-      title: pageConfig.title || pageName,
+      title: pageConfig.title || extractH1(hierarchicalSections[0]?.content) || prettifySlug(pageName),
       description: pageConfig.description || '',
       label: pageConfig.label || null, // Short label for navigation (defaults to title)
       lastModified: lastModified?.toISOString(),

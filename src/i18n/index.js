@@ -154,7 +154,8 @@ async function resolveLocales(configLocales, localesPath) {
     if (configLocales.includes('*')) {
       return getAvailableLocales(localesPath)
     }
-    return configLocales
+    // Normalize: support both string codes and objects ({code, label})
+    return configLocales.map(l => typeof l === 'string' ? l : l.code)
   }
 
   // String value '*' means all available
