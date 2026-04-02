@@ -1791,10 +1791,10 @@ async function collectAreasFromDir(dir, siteRoot, routePrefix = '/layout') {
  *
  * @param {string} layoutDir - Path to layout directory
  * @param {string} siteRoot - Path to site root
- * @param {Set<string>} foundationLayoutNames - Layout names declared in the foundation schema
+ * @param {Set<string>} layoutNames - Layout names declared in the foundation schema
  * @returns {Promise<Object>} { layouts }
  */
-async function collectLayouts(layoutDir, siteRoot, foundationLayoutNames = new Set()) {
+async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
   if (!existsSync(layoutDir)) {
     return { layouts: null }
   }
@@ -1809,7 +1809,7 @@ async function collectLayouts(layoutDir, siteRoot, foundationLayoutNames = new S
   for (const entry of entries) {
     if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
 
-    if (entry.isDirectory() && foundationLayoutNames.has(entry.name)) {
+    if (entry.isDirectory() && layoutNames.has(entry.name)) {
       namedLayoutDirs.push(entry)
     }
   }
@@ -1872,7 +1872,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
 
   // Load foundation info (vars + layout names) and process theme
-  const { vars: foundationVars, layoutNames: foundationLayoutNames } = await loadFoundationInfo(foundationPath)
+  const { vars: foundationVars, layoutNames: layoutNames } = await loadFoundationInfo(foundationPath)
   const { config: processedTheme, css: themeCSS, warnings } = buildTheme(rawThemeConfig, { foundationVars })
 
   // Log theme warnings
@@ -1903,7 +1903,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   const { mode: rootContentMode } = await readFolderConfig(pagesPath, 'sections')
 
   // Collect layout areas from layout/ directory (including named layout subdirectories)
-  const { layouts } = await collectLayouts(layoutPath, sitePath, foundationLayoutNames)
+  const { layouts } = await collectLayouts(layoutPath, sitePath, layoutNames)
 
   // Site-level layout name (from site.yml layout: field)
   const siteLayoutName = typeof siteConfig.layout === 'string' ? siteConfig.layout
