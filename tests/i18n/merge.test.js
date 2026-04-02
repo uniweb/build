@@ -268,18 +268,22 @@ describe('mergeTranslations', () => {
   it('translates header section content', () => {
     const siteContent = {
       pages: [],
-      header: {
-        route: '/layout/header',
-        sections: [{
-          id: '1',
-          content: {
-            type: 'doc',
-            content: [{
-              type: 'paragraph',
-              content: [{ type: 'text', text: 'My Brand' }]
+      layouts: {
+        default: {
+          header: {
+            route: '/layout/header',
+            sections: [{
+              id: '1',
+              content: {
+                type: 'doc',
+                content: [{
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: 'My Brand' }]
+                }]
+              }
             }]
           }
-        }]
+        }
       }
     }
     const translations = {
@@ -288,24 +292,28 @@ describe('mergeTranslations', () => {
 
     const translated = mergeTranslations(siteContent, translations)
 
-    expect(translated.header.sections[0].content.content[0].content[0].text).toBe('Mi Marca')
+    expect(translated.layouts.default.header.sections[0].content.content[0].content[0].text).toBe('Mi Marca')
   })
 
   it('translates footer section content', () => {
     const siteContent = {
       pages: [],
-      footer: {
-        route: '/layout/footer',
-        sections: [{
-          id: '1',
-          content: {
-            type: 'doc',
-            content: [{
-              type: 'paragraph',
-              content: [{ type: 'text', text: 'Copyright notice' }]
+      layouts: {
+        default: {
+          footer: {
+            route: '/layout/footer',
+            sections: [{
+              id: '1',
+              content: {
+                type: 'doc',
+                content: [{
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: 'Copyright notice' }]
+                }]
+              }
             }]
           }
-        }]
+        }
       }
     }
     const translations = {
@@ -314,37 +322,41 @@ describe('mergeTranslations', () => {
 
     const translated = mergeTranslations(siteContent, translations)
 
-    expect(translated.footer.sections[0].content.content[0].content[0].text).toBe('Aviso de derechos')
+    expect(translated.layouts.default.footer.sections[0].content.content[0].content[0].text).toBe('Aviso de derechos')
   })
 
   it('translates left and right sidebar sections', () => {
     const siteContent = {
       pages: [],
-      left: {
-        route: '/layout/left',
-        sections: [{
-          id: '1',
-          content: {
-            type: 'doc',
-            content: [{
-              type: 'paragraph',
-              content: [{ type: 'text', text: 'Navigation' }]
+      layouts: {
+        default: {
+          left: {
+            route: '/layout/left',
+            sections: [{
+              id: '1',
+              content: {
+                type: 'doc',
+                content: [{
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: 'Navigation' }]
+                }]
+              }
+            }]
+          },
+          right: {
+            route: '/layout/right',
+            sections: [{
+              id: '1',
+              content: {
+                type: 'doc',
+                content: [{
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: 'Sidebar' }]
+                }]
+              }
             }]
           }
-        }]
-      },
-      right: {
-        route: '/layout/right',
-        sections: [{
-          id: '1',
-          content: {
-            type: 'doc',
-            content: [{
-              type: 'paragraph',
-              content: [{ type: 'text', text: 'Sidebar' }]
-            }]
-          }
-        }]
+        }
       }
     }
     const translations = {
@@ -354,8 +366,8 @@ describe('mergeTranslations', () => {
 
     const translated = mergeTranslations(siteContent, translations)
 
-    expect(translated.left.sections[0].content.content[0].content[0].text).toBe('Navegación')
-    expect(translated.right.sections[0].content.content[0].content[0].text).toBe('Barra lateral')
+    expect(translated.layouts.default.left.sections[0].content.content[0].content[0].text).toBe('Navegación')
+    expect(translated.layouts.default.right.sections[0].content.content[0].content[0].text).toBe('Barra lateral')
   })
 
   it('skips layout sections that do not exist', () => {

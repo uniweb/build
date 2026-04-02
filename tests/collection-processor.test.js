@@ -57,8 +57,8 @@ This is a test article.
       expect(new Date(article.date).getTime()).toBe(expectedDate.getTime())
       expect(article.author).toBe('Test Author')
       expect(article.tags).toEqual(['test', 'example'])
-      expect(article.body).toContain('## Introduction')
       expect(article.content).toBeDefined()
+      expect(article.content.type).toBe('doc') // ProseMirror document
       expect(article.excerpt).toBeDefined()
     })
 
