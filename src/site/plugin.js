@@ -39,6 +39,9 @@ import { processAdvancedAssets } from './advanced-processors.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 
+// BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
+const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
+
 /**
  * Execute all fetches for site content (used in dev mode)
  * Collects fetchedData for DataStore pre-population at runtime
@@ -772,7 +775,7 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Handle locale-prefixed site-content request (e.g., /es/site-content.json)
-        const localeContentMatch = req.url.match(/^\/([a-z]{2})\/site-content\.json$/)
+        const localeContentMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/site-content\\.json$`))
         if (localeContentMatch) {
           const locale = localeContentMatch[1]
           const translatedContent = await getTranslatedContent(locale)
@@ -808,7 +811,7 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Serve search-index.json in dev mode (supports locale prefixes)
-        const searchIndexMatch = req.url.match(/^(?:\/([a-z]{2}))?\/search-index\.json$/)
+        const searchIndexMatch = req.url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/search-index\\.json$`))
         if (searchIndexMatch && siteContent) {
           const searchEnabled = searchPluginConfig.enabled !== false && isSearchEnabled(siteContent)
           if (searchEnabled) {
@@ -830,7 +833,7 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Handle localized collection data (e.g., /fr/data/articles.json)
-        const localeDataMatch = req.url.match(/^\/([a-z]{2})\/data\/(.+\.json)$/)
+        const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/data\\/(.+\\.json)$`))
         if (localeDataMatch) {
           const locale = localeDataMatch[1]
           const filename = localeDataMatch[2]
@@ -883,7 +886,7 @@ export function siteContentPlugin(options = {}) {
       let activeLocale = null
 
       if (ctx?.originalUrl) {
-        const localeMatch = ctx.originalUrl.match(/^\/([a-z]{2})(\/|$)/)
+        const localeMatch = ctx.originalUrl.match(new RegExp(`^\\/(${LOCALE_RE})(\\/|$)`))
         if (localeMatch) {
           activeLocale = localeMatch[1]
           const translatedContent = await getTranslatedContent(activeLocale)

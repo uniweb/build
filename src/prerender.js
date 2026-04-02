@@ -270,7 +270,7 @@ async function discoverLocaleContents(distDir, defaultContent) {
       if (!statSync(entryPath).isDirectory()) continue
 
       // Check if this looks like a locale code (2-3 letter code)
-      if (!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(entry)) continue
+      if (!/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(entry)) continue
 
       // Check if it has a site-content.json
       const localeContentPath = join(entryPath, 'site-content.json')
