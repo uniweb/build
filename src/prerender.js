@@ -579,37 +579,30 @@ export async function prerenderSite(siteDir, options = {}) {
     onProgress(`  → ${routePrefix || ''}404.html (${fallbackNote})`)
   }
 
-  // Generate _redirects and _rewrites files for Cloudflare Pages / Netlify
-  // Collect entries from all pages across all locales
-  const redirectEntries = []
-  const rewriteEntries = []
+  // Generate _redirects file for Cloudflare Pages / Netlify
+  // Format: source destination status
+  //   302 = redirect (browser URL changes)
+  //   200 = rewrite/proxy (browser URL stays, host proxies transparently)
+  const routingEntries = []
   for (const localeConfig of localeConfigs) {
     const siteContent = JSON.parse(await readFile(localeConfig.contentPath, 'utf8'))
     const prefix = localeConfig.routePrefix || ''
     for (const page of siteContent.pages || []) {
       if (page.redirect) {
-        redirectEntries.push(`${prefix}${page.route} ${page.redirect} 302`)
+        routingEntries.push(`${prefix}${page.route} ${page.redirect} 302`)
       }
       if (page.rewrite) {
-        // Rewrite: path prefix → external origin (host proxies transparently)
-        rewriteEntries.push(`${prefix}${page.route}/* ${page.rewrite}/:splat 200`)
+        routingEntries.push(`${prefix}${page.route}/* ${page.rewrite}/:splat 200`)
       }
     }
   }
-  if (redirectEntries.length > 0) {
+  if (routingEntries.length > 0) {
     const redirectsPath = join(distDir, '_redirects')
     // Append to existing _redirects if the developer maintains one
     const existing = existsSync(redirectsPath) ? await readFile(redirectsPath, 'utf8') : ''
-    const generated = `# Auto-generated from page.yml redirect: declarations\n${redirectEntries.join('\n')}\n`
+    const generated = `# Auto-generated from page.yml redirect: and rewrite: declarations\n${routingEntries.join('\n')}\n`
     await writeFile(redirectsPath, existing ? `${existing.trimEnd()}\n\n${generated}` : generated)
-    onProgress(`Generated _redirects (${redirectEntries.length} entries)`)
-  }
-  if (rewriteEntries.length > 0) {
-    const rewritesPath = join(distDir, '_rewrites')
-    const existing = existsSync(rewritesPath) ? await readFile(rewritesPath, 'utf8') : ''
-    const generated = `# Auto-generated from page.yml rewrite: declarations\n${rewriteEntries.join('\n')}\n`
-    await writeFile(rewritesPath, existing ? `${existing.trimEnd()}\n\n${generated}` : generated)
-    onProgress(`Generated _rewrites (${rewriteEntries.length} entries)`)
+    onProgress(`Generated _redirects (${routingEntries.length} entries)`)
   }
 
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
