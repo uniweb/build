@@ -1685,8 +1685,14 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
  * @param {string} foundationPath - Path to foundation directory
  * @returns {Promise<Object>} Foundation variables or empty object
  */
-async function loadFoundationVars(foundationPath) {
-  if (!foundationPath) return {}
+/**
+ * Load foundation schema data needed by the content collector.
+ *
+ * @param {string} foundationPath - Path to foundation directory
+ * @returns {Promise<{ vars: Object, layoutNames: Set<string> }>}
+ */
+async function loadFoundationInfo(foundationPath) {
+  if (!foundationPath) return { vars: {}, layoutNames: new Set() }
 
   // Try dist/meta/schema.json first (built foundation), then root schema.json
   const distSchemaPath = join(foundationPath, 'dist', 'meta', 'schema.json')
@@ -1695,17 +1701,20 @@ async function loadFoundationVars(foundationPath) {
   const schemaPath = existsSync(distSchemaPath) ? distSchemaPath : rootSchemaPath
 
   if (!existsSync(schemaPath)) {
-    return {}
+    return { vars: {}, layoutNames: new Set() }
   }
 
   try {
     const schemaContent = await readFile(schemaPath, 'utf8')
     const schema = JSON.parse(schemaContent)
     // Foundation config is in _self, support both 'vars' (new) and 'themeVars' (legacy)
-    return schema._self?.vars || schema._self?.themeVars || schema.themeVars || {}
+    const vars = schema._self?.vars || schema._self?.themeVars || schema.themeVars || {}
+    // Layout names from _layouts (keys are layout component names)
+    const layoutNames = new Set(schema._layouts ? Object.keys(schema._layouts) : [])
+    return { vars, layoutNames }
   } catch (err) {
     console.warn('[content-collector] Failed to load foundation schema:', err.message)
-    return {}
+    return { vars: {}, layoutNames: new Set() }
   }
 }
 
@@ -1773,62 +1782,35 @@ async function collectAreasFromDir(dir, siteRoot, routePrefix = '/layout') {
 }
 
 /**
- * Check if a directory looks like a named layout (contains area-like .md files or area subdirs)
- * vs an area in folder form (contains section content processed by processPage).
- *
- * Heuristic: if a directory contains .md files at the top level AND no page.yml,
- * it's a named layout (those .md files are its area definitions).
- * If it has page.yml or looks like a page directory, it's an area folder.
- *
- * @param {string} dirPath - Path to the directory
- * @returns {Promise<boolean>} True if this looks like a named layout directory
- */
-async function isNamedLayoutDir(dirPath) {
-  // If it has page.yml, it's an area folder (processPage will handle it)
-  if (existsSync(join(dirPath, 'page.yml'))) return false
-
-  const entries = await readdir(dirPath)
-  // If directory contains .md files but no page.yml, it's a named layout
-  return entries.some(e => e.endsWith('.md') && !e.startsWith('_') && !e.startsWith('.'))
-}
-
-/**
  * Collect layout areas from the layout/ directory, including named layout subdirectories.
  *
  * Root-level .md files and area directories form the "default" layout's areas.
- * Subdirectories that themselves contain .md files (without page.yml) are named layouts,
- * each with its own set of areas.
+ * Subdirectories that match a foundation-declared layout name are named layouts,
+ * each with its own set of areas. All other subdirectories are folder-form areas
+ * for the default layout (multi-section areas).
  *
  * @param {string} layoutDir - Path to layout directory
  * @param {string} siteRoot - Path to site root
+ * @param {Set<string>} foundationLayoutNames - Layout names declared in the foundation schema
  * @returns {Promise<Object>} { layouts }
  */
-async function collectLayouts(layoutDir, siteRoot) {
+async function collectLayouts(layoutDir, siteRoot, foundationLayoutNames = new Set()) {
   if (!existsSync(layoutDir)) {
     return { layouts: null }
   }
 
   const entries = await readdir(layoutDir, { withFileTypes: true })
 
-  // Separate root-level entries into:
-  // 1. Area .md files (for default layout)
-  // 2. Area directories (for default layout) vs named layout directories
-  const defaultAreaFiles = []
-  const defaultAreaDirs = []
+  // Identify named layout directories: only subdirectories whose name matches
+  // a layout component declared in the foundation. All others are folder-form
+  // areas for the default layout (e.g., layout/header/ with multiple sections).
   const namedLayoutDirs = []
 
   for (const entry of entries) {
     if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
 
-    if (entry.isFile() && entry.name.endsWith('.md')) {
-      defaultAreaFiles.push(entry)
-    } else if (entry.isDirectory()) {
-      const dirPath = join(layoutDir, entry.name)
-      if (await isNamedLayoutDir(dirPath)) {
-        namedLayoutDirs.push(entry)
-      } else {
-        defaultAreaDirs.push(entry)
-      }
+    if (entry.isDirectory() && foundationLayoutNames.has(entry.name)) {
+      namedLayoutDirs.push(entry)
     }
   }
 
@@ -1889,8 +1871,8 @@ export async function collectSiteContent(sitePath, options = {}) {
     : join(sitePath, 'layout')
   const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
 
-  // Load foundation vars and process theme
-  const foundationVars = await loadFoundationVars(foundationPath)
+  // Load foundation info (vars + layout names) and process theme
+  const { vars: foundationVars, layoutNames: foundationLayoutNames } = await loadFoundationInfo(foundationPath)
   const { config: processedTheme, css: themeCSS, warnings } = buildTheme(rawThemeConfig, { foundationVars })
 
   // Log theme warnings
@@ -1921,7 +1903,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   const { mode: rootContentMode } = await readFolderConfig(pagesPath, 'sections')
 
   // Collect layout areas from layout/ directory (including named layout subdirectories)
-  const { layouts } = await collectLayouts(layoutPath, sitePath)
+  const { layouts } = await collectLayouts(layoutPath, sitePath, foundationLayoutNames)
 
   // Site-level layout name (from site.yml layout: field)
   const siteLayoutName = typeof siteConfig.layout === 'string' ? siteConfig.layout
