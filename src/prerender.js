@@ -505,6 +505,16 @@ export async function prerenderSite(siteDir, options = {}) {
       // route matching but can't be pre-rendered (no concrete route)
       if (page.route.includes(':')) continue
 
+      // Redirect pages: emit a redirect HTML instead of rendering content
+      if (page.redirect) {
+        const redirectTarget = page.redirect
+        onProgress(`Redirect ${outputRoute} → ${redirectTarget}`)
+        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${redirectTarget}"><link rel="canonical" href="${redirectTarget}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${redirectTarget}">${redirectTarget}</a></p></body></html>`
+        const outputPath = outputRoute === '/' ? 'index.html' : `${outputRoute.slice(1)}/index.html`
+        renderedFiles.push({ path: outputPath, html: redirectHtml })
+        continue
+      }
+
       // Build the output route with locale prefix
       // For non-default locales, translate route slugs (e.g., /about → /acerca-de)
       const translatedPageRoute = isDefault ? page.route : website.translateRoute(page.route, locale)

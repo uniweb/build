@@ -903,6 +903,38 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   // they're just filtered from navigation. This allows direct linking to hidden pages.
   // if (pageConfig.hidden) return null
 
+  // Redirect pages have no content — resolve target and return early
+  if (pageConfig.redirect) {
+    const route = isIndex ? parentRoute
+      : parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
+    const redirect = pageConfig.redirect
+    // Resolve relative redirects against the page's own route
+    const target = redirect.startsWith('/') || redirect.startsWith('http')
+      ? redirect
+      : (route === '/' ? `/${redirect}` : `${route}/${redirect}`)
+
+    return {
+      page: {
+        route,
+        sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
+        id: pageConfig.id || null,
+        isIndex,
+        title: pageConfig.title || prettifySlug(pageName),
+        description: pageConfig.description || '',
+        label: pageConfig.label || null,
+        hidden: pageConfig.hidden || false,
+        hideInHeader: pageConfig.hideInHeader || false,
+        hideInFooter: pageConfig.hideInFooter || false,
+        layout: {},
+        seo: { noindex: true },
+        redirect: target,
+        sections: []
+      },
+      assetCollection: { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() },
+      iconCollection: { icons: new Set(), bySource: new Map() }
+    }
+  }
+
   let hierarchicalSections = []
   let pageAssetCollection = {
     assets: {},
