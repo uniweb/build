@@ -508,10 +508,12 @@ export async function prerenderSite(siteDir, options = {}) {
       // Redirect pages: emit a redirect HTML instead of rendering content
       if (page.redirect) {
         const redirectTarget = page.redirect
-        onProgress(`Redirect ${outputRoute} → ${redirectTarget}`)
+        onProgress(`  Redirect ${outputRoute} → ${redirectTarget}`)
         const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${redirectTarget}"><link rel="canonical" href="${redirectTarget}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${redirectTarget}">${redirectTarget}</a></p></body></html>`
-        const outputPath = outputRoute === '/' ? 'index.html' : `${outputRoute.slice(1)}/index.html`
-        renderedFiles.push({ path: outputPath, html: redirectHtml })
+        const outputPath = getOutputPath(distDir, outputRoute)
+        await mkdir(dirname(outputPath), { recursive: true })
+        await writeFile(outputPath, redirectHtml)
+        renderedFiles.push(outputPath)
         continue
       }
 
@@ -570,6 +572,27 @@ export async function prerenderSite(siteDir, options = {}) {
     await writeFile(join(fallbackDir, '404.html'), notFoundHtml)
     const fallbackNote = hasNotFoundPage ? '404 page + SPA fallback' : 'SPA fallback'
     onProgress(`  → ${routePrefix || ''}404.html (${fallbackNote})`)
+  }
+
+  // Generate _redirects file for Cloudflare Pages / Netlify
+  // Collect redirect entries from all pages across all locales
+  const redirectEntries = []
+  for (const localeConfig of localeConfigs) {
+    const siteContent = JSON.parse(await readFile(localeConfig.contentPath, 'utf8'))
+    const prefix = localeConfig.routePrefix || ''
+    for (const page of siteContent.pages || []) {
+      if (page.redirect) {
+        redirectEntries.push(`${prefix}${page.route} ${page.redirect} 302`)
+      }
+    }
+  }
+  if (redirectEntries.length > 0) {
+    const redirectsPath = join(distDir, '_redirects')
+    // Append to existing _redirects if the developer maintains one
+    const existing = existsSync(redirectsPath) ? await readFile(redirectsPath, 'utf8') : ''
+    const generated = `# Auto-generated from page.yml redirect: declarations\n${redirectEntries.join('\n')}\n`
+    await writeFile(redirectsPath, existing ? `${existing.trimEnd()}\n\n${generated}` : generated)
+    onProgress(`Generated _redirects (${redirectEntries.length} entries)`)
   }
 
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
