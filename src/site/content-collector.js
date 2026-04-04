@@ -1466,12 +1466,16 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       orderedMdPages = mdPageItems
     }
 
-    // In folder mode, determine index: pages: first item, or explicit index:
+    // In folder mode, determine index page (homepage only).
+    // Index promotion only happens at the site root — at deeper levels,
+    // pages: controls order only and every folder keeps its natural route.
     let indexName = null
-    if (pagesParsedFM && pagesParsedFM.before.length > 0) {
-      indexName = extractItemName(pagesParsedFM.before[0])
-    } else {
-      indexName = orderConfig?.index || null
+    if (parentRoute === '/') {
+      if (pagesParsedFM && pagesParsedFM.before.length > 0) {
+        indexName = extractItemName(pagesParsedFM.before[0])
+      } else {
+        indexName = orderConfig?.index || null
+      }
     }
 
     // Add md-file-pages
@@ -1608,12 +1612,16 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // --- Sections mode (default): existing behavior ---
 
-  // Determine which page is the index for this level
-  // A directory with its own .md content is a real page, not a container —
-  // never promote a child as index, even if explicit config says so
+  // Determine which page is the index for this level.
+  // Index promotion only happens at the site root (parentRoute === '/') — the
+  // homepage needs to live at '/'.  At all other levels, folders keep their
+  // natural route (1:1 folder-to-route mapping).  Content-less containers
+  // exist in the hierarchy with hasContent: false and auto-redirect at runtime.
   const hasExplicitOrder = orderConfig?.index || (Array.isArray(orderConfig?.pages) && orderConfig.pages.length > 0)
   const hasMdContent = entries.some(e => isMarkdownFile(e))
-  const indexPageName = hasMdContent ? null : determineIndexPage(orderConfig, orderedFolders)
+  const indexPageName = parentRoute === '/' && !hasMdContent
+    ? determineIndexPage(orderConfig, orderedFolders)
+    : null
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
@@ -1972,8 +1980,9 @@ export async function collectSiteContent(sitePath, options = {}) {
   const { pages, assetCollection, iconCollection, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts, siteLayoutName)
 
-  // Deduplicate: remove content-less container pages whose route duplicates
-  // a content-bearing page (e.g., a promoted index page)
+  // Deduplicate: at the root level, homepage promotion can create a route
+  // collision between the promoted page and a content-less container.
+  // At deeper levels, 1:1 mapping means collisions shouldn't happen — warn.
   const routeCounts = new Map()
   for (const page of pages) {
     const existing = routeCounts.get(page.route)
@@ -1985,6 +1994,9 @@ export async function collectSiteContent(sitePath, options = {}) {
   }
   for (const [route, group] of routeCounts) {
     if (group.length > 1) {
+      if (route !== '/') {
+        console.warn(`[content-collector] Unexpected route collision at '${route}' — ${group.length} pages share this route`)
+      }
       // Keep the page with content, remove content-less duplicates
       const withContent = group.filter(p => p.sections && p.sections.length > 0)
       const toRemove = withContent.length > 0
