@@ -527,6 +527,24 @@ export async function prerenderSite(siteDir, options = {}) {
         continue
       }
 
+      // Content-less containers: auto-redirect to first descendant with content.
+      // Mirrors the runtime's auto-redirect in PageRenderer.jsx so the redirect
+      // works without JS (via <meta http-equiv="refresh">).
+      if (!page.hasContent()) {
+        const target = page.getNavigableRoute()
+        if (target && target !== page.route) {
+          const base = website.basePath || ''
+          const targetPath = base + (target.startsWith('/') ? target : '/' + target)
+          onProgress(`  Auto-redirect ${outputRoute} → ${targetPath}`)
+          const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${targetPath}"><link rel="canonical" href="${targetPath}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${targetPath}">${targetPath}</a></p></body></html>`
+          const outputPath = getOutputPath(distDir, outputRoute)
+          await mkdir(dirname(outputPath), { recursive: true })
+          await writeFile(outputPath, redirectHtml)
+          renderedFiles.push(outputPath)
+          continue
+        }
+      }
+
       onProgress(`Rendering ${outputRoute}...`)
 
       const result = renderPage(page, website)
