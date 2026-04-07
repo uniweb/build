@@ -1210,6 +1210,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       hideInHeader: pageConfig.hideInHeader || false, // Hide from header nav
       hideInFooter: pageConfig.hideInFooter || false, // Hide from footer nav
 
+      // Knowledge page — content feeds AI pipeline instead of (or in addition to) rendering
+      ...(pageConfig.knowledge != null ? { knowledge: pageConfig.knowledge } : {}),
+
       // Layout options (named layout + per-page overrides)
       layout: {
         ...(resolvedLayoutName ? { name: resolvedLayoutName } : {}),
@@ -1565,6 +1568,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           hidden: dirConfig.hidden || false,
           hideInHeader: dirConfig.hideInHeader || false,
           hideInFooter: dirConfig.hideInFooter || false,
+          ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
           layout: {
             ...(effectiveLayout ? { name: effectiveLayout } : {}),
             ...(containerLayoutObj.hide ? { hide: containerLayoutObj.hide } : {}),
@@ -1657,6 +1661,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         hidden: dirConfig.hidden || false,
         hideInHeader: dirConfig.hideInHeader || false,
         hideInFooter: dirConfig.hideInFooter || false,
+        ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
         layout: {
           ...(effectiveLayout ? { name: effectiveLayout } : {}),
           ...(containerLayoutObj.hide ? { hide: containerLayoutObj.hide } : {}),
