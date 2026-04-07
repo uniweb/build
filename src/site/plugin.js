@@ -42,6 +42,36 @@ import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
 
+const FAVICON_AUTODETECT = ['favicon.svg', 'favicon.ico', 'favicon.png']
+
+function faviconTypeFor(href) {
+  const ext = href.split('?')[0].split('.').pop()?.toLowerCase()
+  if (ext === 'svg') return 'image/svg+xml'
+  if (ext === 'ico') return 'image/x-icon'
+  if (ext === 'png') return 'image/png'
+  return null
+}
+
+/**
+ * Resolve a favicon href for index.html injection.
+ *  - If config.favicon is a string, use it as-is.
+ *  - Otherwise, scan the public dir for favicon.{svg,ico,png} and link the first match.
+ *  - Returns null if nothing found.
+ */
+function resolveFaviconHref(configFavicon, publicDir, basePath) {
+  if (typeof configFavicon === 'string' && configFavicon.trim()) {
+    return configFavicon.trim()
+  }
+  if (!publicDir) return null
+  for (const name of FAVICON_AUTODETECT) {
+    if (existsSync(resolve(publicDir, name))) {
+      const base = (basePath || '/').replace(/\/$/, '')
+      return `${base}/${name}`
+    }
+  }
+  return null
+}
+
 /**
  * Execute all fetches for site content (used in dev mode)
  * Collects fetchedData for DataStore pre-population at runtime
@@ -372,6 +402,7 @@ export function siteContentPlugin(options = {}) {
 
   let siteContent = null
   let resolvedSitePath = null
+  let resolvedPublicDir = null
   let resolvedOutDir = null
   let isProduction = false
   let watcher = null
@@ -496,6 +527,7 @@ export function siteContentPlugin(options = {}) {
 
     async configResolved(config) {
       resolvedSitePath = resolve(config.root, sitePath)
+      resolvedPublicDir = config.publicDir || resolve(config.root, 'public')
       resolvedOutDir = resolve(config.root, config.build.outDir)
       isProduction = config.command === 'build'
       basePath = config.base || '/'
@@ -938,6 +970,16 @@ export function siteContentPlugin(options = {}) {
         if (metaTags) {
           headInjection += `    ${metaTags}\n`
         }
+      }
+
+      // Inject favicon link
+      // Source 1: contentToInject.config.favicon (matches Cloudflare publish schema)
+      // Source 2: auto-detect public/favicon.{ico,svg,png}
+      const faviconHref = resolveFaviconHref(contentToInject?.config?.favicon, resolvedPublicDir, basePath)
+      if (faviconHref) {
+        const type = faviconTypeFor(faviconHref)
+        const typeAttr = type ? ` type="${type}"` : ''
+        headInjection += `    <link rel="icon"${typeAttr} href="${faviconHref}">\n`
       }
 
       // Inject content as JSON script tag
