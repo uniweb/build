@@ -2056,10 +2056,15 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Convert versionedScopes Map to plain object for JSON serialization
   const versionedScopesObj = Object.fromEntries(versionedScopes)
 
+  // Read intelligence.yml if it exists (AI knowledge page settings)
+  const intelligenceConfig = await readYamlFile(join(sitePath, 'intelligence.yml'))
+  const hasIntelligence = intelligenceConfig && Object.keys(intelligenceConfig).length > 0
+
   return {
     config: {
       ...siteConfig,
       fetch: parseFetchConfig(siteConfig.fetch),
+      ...(hasIntelligence && { intelligence: intelligenceConfig }),
     },
     theme: {
       ...processedTheme,

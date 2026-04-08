@@ -154,6 +154,28 @@ export function readSiteConfig(siteRoot) {
 }
 
 /**
+ * Read and parse intelligence.yml configuration (AI knowledge page settings).
+ *
+ * Returns the non-secret fields. The `apiKey` field (if present) uses the
+ * `env:VAR_NAME` syntax for CLI/local dev — the actual key is never stored
+ * in artifacts or published content.
+ *
+ * @param {string} siteRoot - Path to site directory
+ * @returns {Object|null} Parsed intelligence config, or null if no file exists
+ */
+export function readIntelligenceConfig(siteRoot) {
+  const configPath = resolve(siteRoot, 'intelligence.yml')
+  if (!existsSync(configPath)) return null
+
+  try {
+    return yaml.load(readFileSync(configPath, 'utf8')) || {}
+  } catch (err) {
+    console.warn('[site-config] Failed to read intelligence.yml:', err.message)
+    return null
+  }
+}
+
+/**
  * Create a complete Vite configuration for a Uniweb site
  *
  * @param {Object} [options={}] - Configuration overrides
