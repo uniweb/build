@@ -1236,6 +1236,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
           : undefined)
       ),
 
+      hasContent: hierarchicalSections.length > 0,
       sections: hierarchicalSections
     },
     assetCollection: pageAssetCollection,
@@ -1581,6 +1582,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             priority: dirConfig.seo?.priority || null
           },
           fetch: parseFetchConfig(dirConfig.fetch) || null,
+          hasContent: false,
           sections: [],
           order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
         }
@@ -1674,6 +1676,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           priority: dirConfig.seo?.priority || null
         },
         fetch: null,
+        hasContent: false,
         sections: [],
         order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
       }

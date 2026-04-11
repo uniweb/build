@@ -12,6 +12,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
+import { shouldSplitContent } from './site/split-content.js'
 
 /**
  * Resolve an extension URL to a filesystem path for prerender.
@@ -302,9 +303,12 @@ async function discoverLocaleContents(distDir, defaultContent) {
  *
  * @param {string} html - HTML with prerendered content already injected
  * @param {Object} siteContent - Site content JSON
+ * @param {Object} [options]
+ * @param {boolean} [options.splitContent=false] - Whether split content mode is active
+ * @param {string|null} [options.currentRoute=null] - Route of the page this HTML is for
  * @returns {string} HTML with build-specific data injected
  */
-function injectBuildData(html, siteContent) {
+function injectBuildData(html, siteContent, { splitContent = false, currentRoute = null } = {}) {
   let result = html
 
   // Inject theme CSS if not already present
@@ -317,11 +321,26 @@ function injectBuildData(html, siteContent) {
 
   // Inject site content as JSON for hydration
   // Strip CSS from theme (it's already in a <style> tag)
-  const contentForJson = { ...siteContent }
+  let contentForJson = { ...siteContent }
   if (contentForJson.theme?.css) {
     contentForJson.theme = { ...contentForJson.theme }
     delete contentForJson.theme.css
   }
+
+  // Split mode: strip sections from all pages except the current one.
+  // Dynamic templates (isDynamic) keep their sections — needed by _createDynamicPage().
+  if (splitContent) {
+    contentForJson = {
+      ...contentForJson,
+      pages: contentForJson.pages.map(page => {
+        if (page.route === currentRoute) return page
+        if (page.isDynamic) return page
+        const { sections, ...metadata } = page
+        return metadata
+      })
+    }
+  }
+
   const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(contentForJson).replace(/</g, '\\u003c')}</script>`
   if (result.includes('__SITE_CONTENT__')) {
     // Replace existing site content with updated version (includes expanded dynamic routes)
@@ -462,6 +481,30 @@ export async function prerenderSite(siteDir, options = {}) {
       siteContent.pages = expandDynamicPages(siteContent.pages, pageFetchedData, onProgress)
     }
 
+    // Determine whether to split content (after dynamic expansion, after data fetches)
+    const splitContent = shouldSplitContent(
+      siteContent.config?.build?.splitContent,
+      siteContent.pages
+    )
+
+    // Emit per-page content files (after dynamic expansion so expanded pages get their own files)
+    if (splitContent) {
+      onProgress('Writing per-page content files...')
+      const pagesBaseDir = routePrefix
+        ? join(distDir, routePrefix.replace(/^\//, ''), '_pages')
+        : join(distDir, '_pages')
+
+      for (const page of siteContent.pages) {
+        if (!page.sections?.length) continue  // Skip content-less pages
+        if (page.isDynamic) continue           // Templates stay inline
+        const routePath = page.route === '/' ? '/index' : page.route
+        const outputPath = join(pagesBaseDir, `${routePath.replace(/^\//, '')}.json`)
+        await mkdir(dirname(outputPath), { recursive: true })
+        await writeFile(outputPath, JSON.stringify({ sections: page.sections }))
+        onProgress(`  → _pages${routePath}.json`)
+      }
+    }
+
     // Load the HTML shell for this locale
     const shellPath = existsSync(htmlPath) ? htmlPath : join(distDir, 'index.html')
     const htmlShell = await readFile(shellPath, 'utf8')
@@ -571,7 +614,10 @@ export async function prerenderSite(siteDir, options = {}) {
       })
 
       // Build-specific: theme CSS, __SITE_CONTENT__, icon cache
-      html = injectBuildData(html, siteContent)
+      html = injectBuildData(html, siteContent, {
+        splitContent,
+        currentRoute: page.route,
+      })
 
       // Output to the locale-prefixed route
       const outputPath = getOutputPath(distDir, outputRoute)
@@ -583,7 +629,10 @@ export async function prerenderSite(siteDir, options = {}) {
     }
 
     // Write 404.html — shared logic from @uniweb/runtime/ssr
-    const fallbackBaseHtml = injectBuildData(htmlShell, siteContent)
+    const fallbackBaseHtml = injectBuildData(htmlShell, siteContent, {
+      splitContent,
+      currentRoute: null,  // 404 has no current page — manifest only
+    })
     const { html: notFoundHtml, hasNotFoundPage } = generate404Html({
       baseHtml: fallbackBaseHtml,
       website,
@@ -595,6 +644,21 @@ export async function prerenderSite(siteDir, options = {}) {
     await writeFile(join(fallbackDir, '404.html'), notFoundHtml)
     const fallbackNote = hasNotFoundPage ? '404 page + SPA fallback' : 'SPA fallback'
     onProgress(`  → ${routePrefix || ''}404.html (${fallbackNote})`)
+
+    // Rewrite site-content.json as lightweight manifest (for shell/CF mode)
+    // Must happen after all HTML files are written since some code re-reads it.
+    if (splitContent) {
+      const manifest = {
+        ...siteContent,
+        pages: siteContent.pages.map(page => {
+          if (page.isDynamic) return page
+          const { sections, ...metadata } = page
+          return metadata
+        })
+      }
+      await writeFile(localeContentPath, JSON.stringify(manifest))
+      onProgress('Rewrote site-content.json as lightweight manifest')
+    }
   }
 
   // Generate _redirects file for Cloudflare Pages / Netlify

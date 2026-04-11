@@ -38,6 +38,7 @@ import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
+import { shouldSplitContent } from './split-content.js'
 
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
@@ -903,6 +904,18 @@ export function siteContentPlugin(options = {}) {
           }
         }
 
+        // Serve per-page content on demand (dev mode, split content)
+        if (siteContent && req.url.startsWith('/_pages/')) {
+          const routePath = req.url.replace(/^\/_pages/, '').replace(/\.json$/, '')
+          const route = routePath === '/index' ? '/' : routePath
+          const page = siteContent.pages.find(p => p.route === route)
+          if (page?.sections) {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ sections: page.sections }))
+            return
+          }
+        }
+
         next()
       })
     },
@@ -1090,7 +1103,29 @@ export function siteContentPlugin(options = {}) {
       // Note: theme.css is kept here so prerender can inject it into HTML
       // Prerender will strip it from the JSON it injects into each page
 
+      // Check if split content mode is active
+      const splitContent = shouldSplitContent(
+        finalContent.config?.build?.splitContent,
+        finalContent.pages
+      )
+
+      if (splitContent) {
+        // Emit per-page content files as baseline (prerender overwrites with post-fetch versions)
+        for (const page of finalContent.pages) {
+          if (!page.sections?.length) continue
+          if (page.isDynamic) continue
+          const routePath = page.route === '/' ? 'index' : page.route.replace(/^\//, '')
+          this.emitFile({
+            type: 'asset',
+            fileName: `_pages/${routePath}.json`,
+            source: JSON.stringify({ sections: page.sections })
+          })
+        }
+      }
+
       // Emit content as JSON file in production build
+      // Always emit full content — prerender needs sections to render pages.
+      // Prerender will rewrite this as a lightweight manifest when split mode is active.
       this.emitFile({
         type: 'asset',
         fileName: filename,
