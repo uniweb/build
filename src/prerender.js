@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { defaultCacheKey } from '@uniweb/core'
+import { deriveCacheKey } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 
@@ -537,7 +537,7 @@ export async function prerenderSite(siteDir, options = {}) {
     // Use the framework's default cache key so runtime probes hit the same entries.
     if (fetchedData.length > 0 && uniweb.activeWebsite?.dataStore) {
       for (const entry of fetchedData) {
-        uniweb.activeWebsite.dataStore.set(defaultCacheKey(entry.config), { data: entry.data })
+        uniweb.activeWebsite.dataStore.set(deriveCacheKey(entry.config), { data: entry.data })
       }
     }
 
