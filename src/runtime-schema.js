@@ -10,7 +10,18 @@
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
  * - initialState: initial values for mutable block state
- * - inheritData: boolean or array for cascaded data from page/site fetches
+ * - inheritData: internal flag for cascaded data delivery
+ *     true  → deliver all data available at ancestor levels (default)
+ *     false → deliver nothing (component opted out with `data: false`)
+ *
+ * Data delivery is default-on: a component without any `data:` field
+ * receives all data cascaded from its ancestor levels (block → page →
+ * parent page → site) via `content.data.{schema}`. A component that
+ * genuinely cannot tolerate ambient data declares `data: false`.
+ *
+ * `data: { entity: 'articles' }` is a **declaration**, not a gate. It
+ * tells the editor and prepare-props what shape the component expects,
+ * but does not restrict delivery.
  *
  * Full metadata (titles, descriptions, hints, etc.) stays in schema.json
  * for the visual editor.
@@ -202,39 +213,64 @@ export function extractRuntimeSchema(fullMeta) {
   }
 
   // Data binding (CMS entities)
-  // Supports both old format (data: 'person:6') and new consolidated format
-  // (data: { entity: 'person:6', schemas: {...}, inherit: [...] })
-  if (fullMeta.data) {
-    if (typeof fullMeta.data === 'string') {
-      // Old format: data: 'person:6'
-      const parsed = parseDataString(fullMeta.data)
+  //
+  // Supported forms:
+  //   data: false                            → explicit opt-out
+  //   data: { entity: 'person:6' }           → declaration + shape hints
+  //   data: { schemas: {...} }               → validation / default shapes
+  //   data: 'person:6'                       → legacy string form (declaration only)
+  //
+  // Deprecated forms (accepted with dev-mode warning, removed in next release):
+  //   data: { inherit: true | false | [...] }  — component-side gating is gone;
+  //                                              delivery is default-on
+  //   data: { detail, limit }                   — moved to block-level fetch
+  if (fullMeta.data === false) {
+    // Explicit opt-out — deliver nothing to this component.
+    runtime.inheritData = false
+  } else if (typeof fullMeta.data === 'string') {
+    // Legacy string form: data: 'person:6'
+    const parsed = parseDataString(fullMeta.data)
+    if (parsed) {
+      runtime.data = parsed
+    }
+  } else if (fullMeta.data && typeof fullMeta.data === 'object') {
+    if (fullMeta.data.entity) {
+      const parsed = parseDataString(fullMeta.data.entity)
       if (parsed) {
         runtime.data = parsed
       }
-    } else if (typeof fullMeta.data === 'object') {
-      // New format: data: { entity, schemas, inherit }
-      if (fullMeta.data.entity) {
-        const parsed = parseDataString(fullMeta.data.entity)
-        if (parsed) {
-          runtime.data = parsed
-        }
+    }
+    if (fullMeta.data.schemas) {
+      const schemas = extractSchemas(fullMeta.data.schemas)
+      if (schemas) {
+        runtime.schemas = schemas
       }
-      if (fullMeta.data.schemas) {
-        const schemas = extractSchemas(fullMeta.data.schemas)
-        if (schemas) {
-          runtime.schemas = schemas
-        }
+    }
+    // Deprecated: data.inherit is a no-op under default-on delivery. The
+    // only behavior we still honor is `inherit: false` → treat as opt-out,
+    // so existing foundations that wrote "don't deliver" still don't.
+    // Array and `true` forms are ignored — delivery happens regardless.
+    if (fullMeta.data.inherit === false) {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+        console.warn(
+          '[uniweb] `data: { inherit: false }` is deprecated; use `data: false` instead.'
+        )
       }
-      if (fullMeta.data.inherit !== undefined) {
-        runtime.inheritData = fullMeta.data.inherit
+      runtime.inheritData = false
+    } else if (fullMeta.data.inherit !== undefined) {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+        console.warn(
+          '[uniweb] `data: { inherit: ... }` is deprecated; delivery is default-on. Remove the `inherit` field.'
+        )
       }
-      // detail: false → opt out of single-item resolution on dynamic pages,
-      // returning the collection instead (minus the active item)
-      if (fullMeta.data.detail !== undefined) {
-        runtime.inheritDetail = fullMeta.data.detail
-      }
-      if (fullMeta.data.limit !== undefined) {
-        runtime.inheritLimit = fullMeta.data.limit
+    }
+    // Deprecated: detail/limit on the component side. Block-level
+    // `fetch: { inherit: true, detail, limit }` is where these belong now.
+    if (fullMeta.data.detail !== undefined || fullMeta.data.limit !== undefined) {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+        console.warn(
+          '[uniweb] `data: { detail, limit }` on the component side is deprecated; set these on a block-level `fetch: { inherit: true, ... }` instead.'
+        )
       }
     }
   }
@@ -267,18 +303,17 @@ export function extractRuntimeSchema(fullMeta) {
     }
   }
 
-  // Data inheritance - component receives cascaded data from page/site level fetches
-  // Can be: true (inherit all), false (inherit none), or ['schema1', 'schema2'] (selective)
-  // Top-level inheritData supported for backwards compat (lower priority than data.inherit)
-  if (fullMeta.inheritData !== undefined && runtime.inheritData === undefined) {
-    runtime.inheritData = fullMeta.inheritData
+  // Top-level inheritData (legacy, pre-`data.*` format) — honored only as opt-out.
+  // Truthy values and arrays are ignored; delivery is default-on.
+  if (fullMeta.inheritData === false && runtime.inheritData === undefined) {
+    runtime.inheritData = false
   }
 
-  // Auto-derive inheritData from entity type when no explicit inherit is set.
-  // data: { entity: 'articles' } implies inheritData: ['articles']
-  if (runtime.data && runtime.inheritData === undefined) {
-    runtime.inheritData = [runtime.data.type]
-  }
+  // Data delivery is default-on. `runtime.inheritData` stays undefined unless
+  // the component explicitly opts out (runtime.inheritData === false), in
+  // which case EntityStore delivers nothing. The declaration `data.entity`
+  // no longer implies a gate — it's a hint consumed by prepare-props and
+  // the editor.
 
   return Object.keys(runtime).length > 0 ? runtime : null
 }

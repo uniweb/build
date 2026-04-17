@@ -60,11 +60,12 @@ describe('extractRuntimeSchema', () => {
   })
 
   describe('data parsing', () => {
+    // `data.entity` is a declaration (shape hint), not a delivery gate.
+    // Delivery is default-on and does not need `inheritData` to be set.
     it('parses type only', () => {
       const meta = { data: 'events' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: null },
-        inheritData: ['events'],
       })
     })
 
@@ -72,7 +73,6 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: 'events:6' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
-        inheritData: ['events'],
       })
     })
 
@@ -80,7 +80,6 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: ' articles : 5 ' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'articles', limit: 5 },
-        inheritData: ['articles'],
       })
     })
 
@@ -88,7 +87,6 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: 'project:1' }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'project', limit: 1 },
-        inheritData: ['project'],
       })
     })
 
@@ -97,14 +95,22 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema({ data: 123 })).toBeNull()
       expect(extractRuntimeSchema({ data: '' })).toBeNull()
     })
+
+    it('`data: false` marks explicit opt-out', () => {
+      const meta = { data: false }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        inheritData: false,
+      })
+    })
   })
 
   describe('consolidated data object format', () => {
+    // With default-on delivery, `entity` is a declaration only — no
+    // `inheritData` is emitted for entity declarations.
     it('extracts entity from data object', () => {
       const meta = { data: { entity: 'events:6' } }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
-        inheritData: ['events'],
       })
     })
 
@@ -112,22 +118,6 @@ describe('extractRuntimeSchema', () => {
       const meta = { data: { entity: 'events' } }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: null },
-        inheritData: ['events'],
-      })
-    })
-
-    it('extracts all three subfields', () => {
-      const meta = {
-        data: {
-          entity: 'person:6',
-          schemas: { team: { name: 'string', role: 'string' } },
-          inherit: true,
-        },
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'person', limit: 6 },
-        schemas: { team: { name: 'string', role: 'string' } },
-        inheritData: true,
       })
     })
 
@@ -139,20 +129,6 @@ describe('extractRuntimeSchema', () => {
       }
       expect(extractRuntimeSchema(meta)).toEqual({
         schemas: { nav: { label: 'string', href: 'string' } },
-      })
-    })
-
-    it('extracts inherit without entity', () => {
-      const meta = { data: { inherit: ['team'] } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        inheritData: ['team'],
-      })
-    })
-
-    it('extracts inherit: false', () => {
-      const meta = { data: { inherit: false } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        inheritData: false,
       })
     })
 
@@ -177,26 +153,17 @@ describe('extractRuntimeSchema', () => {
       })
     })
 
-    it('data.inherit takes priority over top-level inheritData', () => {
-      const meta = {
-        data: { inherit: ['team'] },
-        inheritData: true,
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        inheritData: ['team'],
-      })
-    })
-
-    it('old top-level format still works', () => {
+    it('old top-level format: schemas + legacy inheritData: false', () => {
+      // Top-level inheritData is honored only as opt-out.
       const meta = {
         data: 'events:6',
         schemas: { event: { title: 'string' } },
-        inheritData: true,
+        inheritData: false,
       }
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
         schemas: { event: { title: 'string' } },
-        inheritData: true,
+        inheritData: false,
       })
     })
 
@@ -208,24 +175,51 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema(meta)).toEqual({
         data: { type: 'events', limit: 6 },
         schemas: { event: { title: 'string' } },
-        inheritData: ['events'],
-      })
-    })
-
-    it('top-level inheritData used when data object has no inherit', () => {
-      const meta = {
-        data: { entity: 'events:6' },
-        inheritData: ['event'],
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: 6 },
-        inheritData: ['event'],
       })
     })
 
     it('ignores eager (removed — BlockRenderer always renders immediately)', () => {
       const meta = { data: { eager: true } }
       expect(extractRuntimeSchema(meta)).toBeNull()
+    })
+  })
+
+  describe('deprecated inherit handling', () => {
+    // Delivery is default-on; component-side inherit is gone.
+    // The runtime schema accepts the old forms silently (with dev warning
+    // in non-production, suppressed here) but ignores everything except
+    // `inherit: false`.
+    const originalWarn = console.warn
+    beforeAll(() => {
+      console.warn = () => {}
+    })
+    afterAll(() => {
+      console.warn = originalWarn
+    })
+
+    it('ignores data: { inherit: true }', () => {
+      const meta = { data: { inherit: true } }
+      // `data: {}` with only ignored fields returns null
+      expect(extractRuntimeSchema(meta)).toBeNull()
+    })
+
+    it('ignores data: { inherit: ["x"] }', () => {
+      const meta = { data: { inherit: ['team'] } }
+      expect(extractRuntimeSchema(meta)).toBeNull()
+    })
+
+    it('honors data: { inherit: false } as opt-out', () => {
+      const meta = { data: { inherit: false } }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        inheritData: false,
+      })
+    })
+
+    it('ignores data.detail / data.limit on the component side', () => {
+      const meta = { data: { entity: 'articles', detail: false, limit: 3 } }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { type: 'articles', limit: null },
+      })
     })
   })
 
@@ -592,7 +586,6 @@ describe('extractRuntimeSchema', () => {
         background: true,
         data: { type: 'events', limit: 6 },
         defaults: { layout: 'grid', columns: 3 },
-        inheritData: ['events'],
       })
     })
 
@@ -621,22 +614,22 @@ describe('extractRuntimeSchema', () => {
   })
 })
 
-describe('inheritData extraction', () => {
-  it('extracts inheritData: true', () => {
-    const meta = { inheritData: true }
-    expect(extractRuntimeSchema(meta)).toEqual({ inheritData: true })
-  })
-
-  it('extracts inheritData: false', () => {
+describe('top-level inheritData (legacy)', () => {
+  // Delivery is default-on. Top-level `inheritData` is honored only as
+  // an opt-out (`false`). Truthy and array forms are ignored.
+  it('honors inheritData: false as opt-out', () => {
     const meta = { inheritData: false }
     expect(extractRuntimeSchema(meta)).toEqual({ inheritData: false })
   })
 
-  it('extracts inheritData as array', () => {
+  it('ignores inheritData: true', () => {
+    const meta = { inheritData: true }
+    expect(extractRuntimeSchema(meta)).toBeNull()
+  })
+
+  it('ignores inheritData as array', () => {
     const meta = { inheritData: ['person', 'config'] }
-    expect(extractRuntimeSchema(meta)).toEqual({
-      inheritData: ['person', 'config'],
-    })
+    expect(extractRuntimeSchema(meta)).toBeNull()
   })
 
   it('ignores undefined inheritData', () => {
@@ -646,64 +639,44 @@ describe('inheritData extraction', () => {
     expect(result.inheritData).toBeUndefined()
   })
 
-  it('combines with other runtime properties', () => {
+  it('combines inheritData: false with other runtime properties', () => {
     const meta = {
       background: true,
-      inheritData: true,
+      inheritData: false,
       params: { theme: { default: 'dark' } },
     }
     expect(extractRuntimeSchema(meta)).toEqual({
       background: true,
-      inheritData: true,
+      inheritData: false,
       defaults: { theme: 'dark' },
     })
   })
 })
 
-describe('auto-derive inheritData from entity', () => {
-  it('derives inheritData from string data format', () => {
+describe('entity is a declaration, not a delivery gate', () => {
+  // Under default-on delivery, `entity` no longer implies `inheritData`.
+  // EntityStore delivers everything unless the component opts out.
+  it('does not emit inheritData for string data format', () => {
     const meta = { data: 'articles:5' }
     const result = extractRuntimeSchema(meta)
-    expect(result.inheritData).toEqual(['articles'])
+    expect(result.data).toEqual({ type: 'articles', limit: 5 })
+    expect(result.inheritData).toBeUndefined()
   })
 
-  it('derives inheritData from object entity format', () => {
+  it('does not emit inheritData for object entity format', () => {
     const meta = { data: { entity: 'team' } }
     const result = extractRuntimeSchema(meta)
-    expect(result.inheritData).toEqual(['team'])
+    expect(result.data).toEqual({ type: 'team', limit: null })
+    expect(result.inheritData).toBeUndefined()
   })
 
-  it('explicit data.inherit array overrides auto-derive', () => {
-    const meta = { data: { entity: 'articles', inherit: ['articles', 'featured'] } }
-    const result = extractRuntimeSchema(meta)
-    expect(result.inheritData).toEqual(['articles', 'featured'])
-  })
-
-  it('explicit data.inherit: true overrides auto-derive', () => {
-    const meta = { data: { entity: 'articles', inherit: true } }
-    const result = extractRuntimeSchema(meta)
-    expect(result.inheritData).toBe(true)
-  })
-
-  it('explicit data.inherit: false overrides auto-derive', () => {
-    const meta = { data: { entity: 'articles', inherit: false } }
-    const result = extractRuntimeSchema(meta)
-    expect(result.inheritData).toBe(false)
-  })
-
-  it('top-level inheritData overrides auto-derive', () => {
-    const meta = { data: 'articles:5', inheritData: ['articles', 'featured'] }
-    const result = extractRuntimeSchema(meta)
-    expect(result.inheritData).toEqual(['articles', 'featured'])
-  })
-
-  it('does not derive when no entity is declared', () => {
+  it('does not emit inheritData when only schemas are declared', () => {
     const meta = { data: { schemas: { nav: { label: 'string' } } } }
     const result = extractRuntimeSchema(meta)
     expect(result.inheritData).toBeUndefined()
   })
 
-  it('does not derive for empty data object', () => {
+  it('returns null for empty data object', () => {
     const result = extractRuntimeSchema({ data: {} })
     expect(result).toBeNull()
   })
@@ -736,7 +709,6 @@ describe('extractAllRuntimeSchemas', () => {
       },
       Features: {
         data: { type: 'features', limit: 6 },
-        inheritData: ['features'],
       },
       // Text is excluded (no runtime properties)
     })
