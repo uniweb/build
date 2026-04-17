@@ -510,32 +510,34 @@ export async function prerenderSite(siteDir, options = {}) {
     const shellPath = existsSync(htmlPath) ? htmlPath : join(distDir, 'index.html')
     const htmlShell = await readFile(shellPath, 'utf8')
 
+    // Build-specific: load extensions (secondary foundations via URL) BEFORE
+    // initPrerender so the Website's FetcherDispatcher sees their routes.
+    const extensionSources = siteContent.config?.extensions
+    const loadedExtensions = []
+    if (extensionSources?.length) {
+      onProgress(`Loading ${extensionSources.length} extension(s)...`)
+      const projectRoot = join(siteDir, '..')
+      for (const ext of extensionSources) {
+        try {
+          const url = typeof ext === 'string' ? ext : ext.url
+          const extPath = resolveExtensionPath(url, distDir, projectRoot)
+          const extModule = await import(pathToFileURL(extPath).href)
+          loadedExtensions.push(extModule)
+          onProgress(`  Extension loaded: ${url}`)
+        } catch (err) {
+          onProgress(`  Warning: Extension failed to load: ${ext} (${err.message})`)
+        }
+      }
+    }
+
     // Initialize the Uniweb runtime using the shared SSR module
-    const uniweb = initPrerender(siteContent, foundation, { onProgress })
+    const uniweb = initPrerender(siteContent, foundation, loadedExtensions, { onProgress })
 
     // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender.
     // Use the framework's default cache key so runtime probes hit the same entries.
     if (fetchedData.length > 0 && uniweb.activeWebsite?.dataStore) {
       for (const entry of fetchedData) {
         uniweb.activeWebsite.dataStore.set(defaultCacheKey(entry.config), { data: entry.data })
-      }
-    }
-
-    // Build-specific: load extensions (secondary foundations via URL)
-    const extensions = siteContent.config?.extensions
-    if (extensions?.length) {
-      onProgress(`Loading ${extensions.length} extension(s)...`)
-      const projectRoot = join(siteDir, '..')
-      for (const ext of extensions) {
-        try {
-          const url = typeof ext === 'string' ? ext : ext.url
-          const extPath = resolveExtensionPath(url, distDir, projectRoot)
-          const extModule = await import(pathToFileURL(extPath).href)
-          uniweb.registerExtension(extModule)
-          onProgress(`  Extension loaded: ${url}`)
-        } catch (err) {
-          onProgress(`  Warning: Extension failed to load: ${ext} (${err.message})`)
-        }
       }
     }
 
