@@ -11,6 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { defaultCacheKey } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 
@@ -512,10 +513,11 @@ export async function prerenderSite(siteDir, options = {}) {
     // Initialize the Uniweb runtime using the shared SSR module
     const uniweb = initPrerender(siteContent, foundation, { onProgress })
 
-    // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender
+    // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender.
+    // Use the framework's default cache key so runtime probes hit the same entries.
     if (fetchedData.length > 0 && uniweb.activeWebsite?.dataStore) {
       for (const entry of fetchedData) {
-        uniweb.activeWebsite.dataStore.set(entry.config, entry.data)
+        uniweb.activeWebsite.dataStore.set(defaultCacheKey(entry.config), { data: entry.data })
       }
     }
 
