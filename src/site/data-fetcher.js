@@ -225,11 +225,25 @@ export function parseFetchConfig(fetch) {
   // Full config object
   if (typeof fetch !== 'object') return null
 
-  // Inherit-merge config: { inherit: true, detail: false, limit: 3 }
-  // No URL — merges with the parent fetch config at runtime; only carries override props.
-  if (fetch.inherit === true) {
+  // Refine config: { refine: true, detail: false, limit: 3 }
+  // No URL — merges with the parent fetch config at runtime; only carries
+  // override props. The legacy spelling `inherit: true` is accepted for one
+  // release with a warning, then removed.
+  //
+  // Note on build-vs-runtime scope: this parser passes `sort` and `filter`
+  // through on refine configs, but the runtime EntityStore only applies
+  // `detail`, `limit`, and `order` overrides. `sort` / `filter` on a refine
+  // block are currently accepted by the parser but not honored at runtime.
+  // Preserved as-is in this rename commit; revisit separately if needed.
+  if (fetch.refine === true || fetch.inherit === true) {
+    if (fetch.inherit === true && fetch.refine !== true) {
+      console.warn(
+        "[uniweb] 'fetch: { inherit: true }' is deprecated; rename to 'fetch: { refine: true }'. " +
+        'Accepted for one release; will be removed in the next minor.'
+      )
+    }
     return {
-      inherit: true,
+      refine: true,
       ...(fetch.detail !== undefined ? { detail: fetch.detail } : {}),
       ...(fetch.limit !== undefined ? { limit: fetch.limit } : {}),
       ...(fetch.sort !== undefined ? { sort: fetch.sort } : {}),
