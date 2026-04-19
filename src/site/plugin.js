@@ -556,7 +556,7 @@ export function siteContentPlugin(options = {}) {
           if (collectionsConfig) {
             console.log('[site-content] Processing content collections...')
             const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedCollectionsBase, basePath)
-            await writeCollectionFiles(resolvedSitePath, collections)
+            await writeCollectionFiles(resolvedSitePath, collections, collectionsConfig)
           }
         } catch (err) {
           console.warn('[site-content] Early collection processing failed:', err.message)
@@ -593,7 +593,7 @@ export function siteContentPlugin(options = {}) {
         if (isProduction && siteContent.config?.collections) {
           console.log('[site-content] Processing content collections...')
           const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedCollectionsBase, basePath)
-          await writeCollectionFiles(resolvedSitePath, collections)
+          await writeCollectionFiles(resolvedSitePath, collections, siteContent.config.collections)
         }
 
         // Execute data fetches in dev mode
@@ -656,7 +656,7 @@ export function siteContentPlugin(options = {}) {
               const collections = collectionsConfig || siteContent?.config?.collections
               if (collections) {
                 const processed = await processCollections(resolvedSitePath, collections, resolvedCollectionsBase, basePath)
-                await writeCollectionFiles(resolvedSitePath, processed)
+                await writeCollectionFiles(resolvedSitePath, processed, collections)
               }
               // Send full reload to client
               server.ws.send({ type: 'full-reload' })

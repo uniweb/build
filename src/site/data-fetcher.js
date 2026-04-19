@@ -20,6 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { matchWhere } from '@uniweb/core'
 
 /**
  * Infer schema name from path or URL
@@ -157,19 +158,52 @@ export function applySort(items, sortExpr) {
 }
 
 /**
- * Apply post-processing to fetched data (filter, sort, limit)
+ * Apply a where-object predicate to an array of items.
+ *
+ * The where-object is the new query language (see @uniweb/core's
+ * matchWhere and the architecture doc at
+ * kb/framework/architecture/data-fetching.md). Structured JSON
+ * predicate; the runtime evaluator walks the object against each
+ * record. Same shape ships to backends that declare `supports: [where]`.
+ *
+ * @param {Array} items - Items to filter
+ * @param {object} where - Where-object predicate
+ * @returns {Array} Filtered items in source order
+ */
+export function applyWhere(items, where) {
+  if (!where || !Array.isArray(items)) return items
+  return matchWhere(where, items)
+}
+
+/**
+ * Apply post-processing to fetched data (where, filter, sort, limit)
+ *
+ * Order of operations:
+ *   1. where (where-object predicate, new) — narrows the record set
+ *   2. filter (legacy DSL string) — narrows further if both are set; deprecated
+ *   3. sort
+ *   4. limit
+ *
+ * `where:` and `filter:` may both appear during the deprecation window
+ * but in practice authors should pick one. Using `filter:` emits a dev
+ * warning at parse time (see parseFetchConfig).
  *
  * @param {any} data - Fetched data
- * @param {object} config - Fetch config with optional filter, sort, limit
+ * @param {object} config - Fetch config with optional where, filter, sort, limit
  * @returns {any} Processed data
  */
 export function applyPostProcessing(data, config) {
   if (!data || !Array.isArray(data)) return data
-  if (!config.filter && !config.sort && !config.limit) return data
+  if (!config.where && !config.filter && !config.sort && !config.limit) return data
 
   let result = data
 
-  // Apply filter first
+  // Apply where-object predicate first (new path)
+  if (config.where) {
+    result = applyWhere(result, config.where)
+  }
+
+  // Apply legacy filter expression (deprecated)
   if (config.filter) {
     result = applyFilter(result, config.filter)
   }
@@ -242,17 +276,20 @@ export function parseFetchConfig(fetch) {
         'Accepted for one release; will be removed in the next minor.'
       )
     }
+    if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
       refine: true,
       ...(fetch.detail !== undefined ? { detail: fetch.detail } : {}),
       ...(fetch.limit !== undefined ? { limit: fetch.limit } : {}),
       ...(fetch.sort !== undefined ? { sort: fetch.sort } : {}),
+      ...(fetch.where !== undefined ? { where: fetch.where } : {}),
       ...(fetch.filter !== undefined ? { filter: fetch.filter } : {}),
     }
   }
 
   // Collection reference: { collection: 'articles', limit: 3 }
   if (fetch.collection) {
+    if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
       path: `/data/${fetch.collection}.json`,
       url: undefined,
@@ -260,9 +297,11 @@ export function parseFetchConfig(fetch) {
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
-      // Post-processing options
+      // Query operators
+      where: fetch.where,
       limit: fetch.limit,
       sort: fetch.sort,
+      // Legacy post-processing (deprecated, see warning above)
       filter: fetch.filter,
     }
   }
@@ -275,14 +314,18 @@ export function parseFetchConfig(fetch) {
     merge = false,
     transform,
     detail,
-    // Post-processing options (also supported for path/url fetches)
+    // Query operators
+    where,
     limit,
     sort,
+    // Legacy post-processing (deprecated)
     filter,
   } = fetch
 
   // Must have either path or url
   if (!path && !url) return null
+
+  if (filter !== undefined) warnFilterDeprecated()
 
   return {
     path,
@@ -292,11 +335,25 @@ export function parseFetchConfig(fetch) {
     merge,
     transform,
     detail,
-    // Post-processing options
+    // Query operators
+    where,
     limit,
     sort,
+    // Legacy post-processing (deprecated)
     filter,
   }
+}
+
+let filterDeprecationWarned = false
+function warnFilterDeprecated() {
+  if (filterDeprecationWarned) return
+  filterDeprecationWarned = true
+  console.warn(
+    "[uniweb] 'fetch: { filter: ... }' (DSL string) is deprecated; use 'where: { ... }' " +
+    'with a where-object. Example: where: { tags: \"featured\" } instead of ' +
+    "filter: 'tags contains featured'. " +
+    'Accepted for one release; will be removed in the next minor.'
+  )
 }
 
 /**

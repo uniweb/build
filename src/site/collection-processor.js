@@ -79,7 +79,8 @@ function parseCollectionConfig(name, config) {
       sort: null,
       filter: null,
       limit: 0,
-      excerpt: { maxLength: 160 }
+      excerpt: { maxLength: 160 },
+      deferred: null,
     }
   }
 
@@ -93,7 +94,24 @@ function parseCollectionConfig(name, config) {
     excerpt: {
       maxLength: config.excerpt?.maxLength || 160,
       field: config.excerpt?.field || null
-    }
+    },
+    // `deferred:` lists fields that are heavy (article body, full nested
+    // arrays). Those fields are stripped from the cascade payload that
+    // ships with `data: <name>` declarations, and per-record full files
+    // are emitted at public/data/<name>/<slug>.json. Components that
+    // need the full record fetch the per-record file on demand, either
+    // automatically on dynamic-route pages (entity-store routes the
+    // singular detail there) or via the kit's useEntityDetail hook.
+    deferred: Array.isArray(config.deferred) ? config.deferred.slice() : null,
+    // `queryable:` declares the queryable surface — which fields a
+    // foundation can offer for filtering UI, with their type and
+    // type-specific metadata (enum options, range bounds). Foundations
+    // read this metadata via the kit's useCollectionQueryable hook to
+    // render filter controls and compose where-objects from user
+    // interactions. The framework doesn't validate the shape here —
+    // foundations get whatever the author wrote; documentation defines
+    // the conventional types (enum/boolean/range/text).
+    queryable: (config.queryable && typeof config.queryable === 'object') ? config.queryable : null,
   }
 }
 
@@ -578,7 +596,7 @@ export async function processCollections(siteDir, collectionsConfig, collections
  * })
  * // Creates public/data/articles.json
  */
-export async function writeCollectionFiles(siteDir, collections) {
+export async function writeCollectionFiles(siteDir, collections, collectionsConfig = null) {
   if (!collections || Object.keys(collections).length === 0) {
     return
   }
@@ -587,9 +605,44 @@ export async function writeCollectionFiles(siteDir, collections) {
   await mkdir(dataDir, { recursive: true })
 
   for (const [name, items] of Object.entries(collections)) {
-    const filepath = join(dataDir, `${name}.json`)
-    await writeFile(filepath, JSON.stringify(items, null, 2))
-    console.log(`[collection-processor] Generated ${filepath} (${items.length} items)`)
+    const rawConfig = collectionsConfig?.[name]
+    const parsed = rawConfig ? parseCollectionConfig(name, rawConfig) : null
+    const deferred = parsed?.deferred
+
+    if (deferred && deferred.length > 0) {
+      // `deferred:` is set — emit two payloads:
+      //   1. The cascade JSON at /data/<name>.json with deferred fields stripped.
+      //      This is what `data: <name>` declarations deliver everywhere.
+      //   2. Per-record full files at /data/<name>/<slug>.json with every field.
+      //      Dynamic-route singular fetches and useEntityDetail hooks read these.
+      const recordsDir = join(dataDir, name)
+      await mkdir(recordsDir, { recursive: true })
+
+      let perRecordCount = 0
+      for (const item of items) {
+        if (!item || typeof item !== 'object' || !item.slug) continue
+        const recordPath = join(recordsDir, `${item.slug}.json`)
+        await writeFile(recordPath, JSON.stringify(item, null, 2))
+        perRecordCount++
+      }
+
+      const stripped = items.map((item) => {
+        if (!item || typeof item !== 'object') return item
+        const out = { ...item }
+        for (const field of deferred) delete out[field]
+        return out
+      })
+      const cascadePath = join(dataDir, `${name}.json`)
+      await writeFile(cascadePath, JSON.stringify(stripped, null, 2))
+      console.log(
+        `[collection-processor] Generated ${cascadePath} (${items.length} items, ` +
+        `deferred: [${deferred.join(', ')}]) + ${perRecordCount} per-record files`
+      )
+    } else {
+      const filepath = join(dataDir, `${name}.json`)
+      await writeFile(filepath, JSON.stringify(items, null, 2))
+      console.log(`[collection-processor] Generated ${filepath} (${items.length} items)`)
+    }
   }
 }
 
