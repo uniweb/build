@@ -103,6 +103,15 @@ function parseCollectionConfig(name, config) {
     // automatically on dynamic-route pages (entity-store routes the
     // singular detail there) or via the kit's useEntityDetail hook.
     deferred: Array.isArray(config.deferred) ? config.deferred.slice() : null,
+    // `detailUrl:` names the per-record endpoint pattern for API-backed
+    // collections (where the build emits no per-record files because
+    // there are no on-disk source files to materialize). Used by the
+    // runtime's auto-detail injection and the useEntityDetail kit hook.
+    // Pattern uses {slug} as the placeholder; substitution at runtime
+    // pulls from the dynamic-route param (entity-store) or the record's
+    // slug field (useEntityDetail). Markdown-backed collections leave
+    // this null and get the static-file default /data/<name>/<slug>.json.
+    detailUrl: typeof config.detailUrl === 'string' ? config.detailUrl : null,
     // `queryable:` declares the queryable surface — which fields a
     // foundation can offer for filtering UI, with their type and
     // type-specific metadata (enum options, range bounds). Foundations
