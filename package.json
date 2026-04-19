@@ -20,6 +20,9 @@
     "./search": "./src/search/index.js",
     "./import-map-plugin": "./src/import-map-plugin.js"
   },
+  "bin": {
+    "uniweb-dev-backend": "./src/dev-backend.js"
+  },
   "files": [
     "src"
   ],
