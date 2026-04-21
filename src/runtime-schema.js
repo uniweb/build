@@ -27,6 +27,8 @@
  * for the visual editor.
  */
 
+import { isRichSchema } from '@uniweb/core'
+
 /**
  * Parse data string into structured object
  * 'events' -> { type: 'events', limit: null }
@@ -119,7 +121,10 @@ function extractSchemaFields(schemaFields) {
 
 /**
  * Check if a schema value is in the full @uniweb/schemas format
- * Full format has: { name, version?, description?, fields: {...} }
+ * Full format has: { name, version?, description?, fields: { fieldName: fieldDef, ... } }
+ *
+ * The distinguishing feature is that `fields` is a *keyed object*, not an array.
+ * (A rich form schema also has `fields`, but as an array.)
  *
  * @param {Object} schema - Schema value to check
  * @returns {boolean}
@@ -129,8 +134,50 @@ function isFullSchemaFormat(schema) {
     schema &&
     typeof schema === 'object' &&
     typeof schema.fields === 'object' &&
-    schema.fields !== null
+    schema.fields !== null &&
+    !Array.isArray(schema.fields)
   )
+}
+
+/**
+ * Pass a rich form schema through with minimal normalization.
+ *
+ * Rich schemas are passed to the editor (for FormBlock UI rendering) and to
+ * the runtime (for default application). We keep all authored metadata so the
+ * editor has what it needs; we do not strip editor-only fields here because
+ * the same schema feeds both audiences.
+ *
+ * Normalizations:
+ *   - `type: 'string'` → `type: 'text'` (legacy alias; warn in dev)
+ *
+ * @param {Object} schema - Rich schema as authored
+ * @returns {Object} - Normalized rich schema
+ */
+function normalizeRichSchema(schema) {
+  return normalizeRichSchemaValue(schema)
+}
+
+function normalizeRichSchemaValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeRichSchemaValue)
+  }
+  if (!value || typeof value !== 'object') return value
+  const out = {}
+  for (const [key, v] of Object.entries(value)) {
+    if (key === 'type' && v === 'string') {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+        console.warn(
+          "[uniweb] form schema field type 'string' is a legacy alias; use 'text' instead."
+        )
+      }
+      out[key] = 'text'
+    } else if (v && typeof v === 'object') {
+      out[key] = normalizeRichSchemaValue(v)
+    } else {
+      out[key] = v
+    }
+  }
+  return out
 }
 
 /**
@@ -151,6 +198,13 @@ function extractSchemas(schemas) {
 
   const lean = {}
   for (const [schemaName, schemaValue] of Object.entries(schemas)) {
+    // Rich form schemas: pass through (with normalization). They drive both
+    // the FormBlock editor UI and the runtime default application.
+    if (isRichSchema(schemaValue)) {
+      lean[schemaName] = normalizeRichSchema(schemaValue)
+      continue
+    }
+
     // Handle full schema format (from @uniweb/schemas or npm packages)
     // Extract just the fields, discard name/version/description metadata
     const schemaFields = isFullSchemaFormat(schemaValue)
@@ -165,6 +219,7 @@ function extractSchemas(schemas) {
 
   return Object.keys(lean).length > 0 ? lean : null
 }
+
 
 /**
  * Extract param defaults from params object

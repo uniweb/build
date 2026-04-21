@@ -727,3 +727,100 @@ describe('extractAllRuntimeSchemas', () => {
   })
 })
 
+describe('rich form schemas (FormBlock + tagged-block unified)', () => {
+  it('passes a composite schema through with all editor metadata', () => {
+    const richSchema = {
+      name: { en: 'Stats', fr: 'Statistiques' },
+      isComposite: true,
+      childSchema: {
+        name: { en: 'Stat', fr: 'Statistique' },
+        fields: [
+          {
+            id: 'number',
+            type: 'text',
+            label: { en: 'Number', fr: 'Nombre' },
+            required: true,
+          },
+          { id: 'text', type: 'text', label: 'Text' },
+        ],
+      },
+    }
+    const meta = { data: { schemas: { stats: richSchema } } }
+    expect(extractRuntimeSchema(meta)).toEqual({
+      schemas: { stats: richSchema },
+    })
+  })
+
+  it('keeps rich and simple schemas side-by-side in the same map', () => {
+    const meta = {
+      data: {
+        schemas: {
+          'nav-links': { label: 'string', href: 'string' },
+          'stats': {
+            isComposite: true,
+            childSchema: { fields: [{ id: 'n', type: 'text' }] },
+          },
+        },
+      },
+    }
+    const result = extractRuntimeSchema(meta)
+    expect(result.schemas['nav-links']).toEqual({ label: 'string', href: 'string' })
+    expect(result.schemas.stats).toEqual({
+      isComposite: true,
+      childSchema: { fields: [{ id: 'n', type: 'text' }] },
+    })
+  })
+
+  it('normalizes legacy type:"string" to type:"text" in rich field definitions', () => {
+    const meta = {
+      data: {
+        schemas: {
+          item: {
+            fields: [{ id: 'date', type: 'string' }],
+          },
+        },
+      },
+    }
+    const result = extractRuntimeSchema(meta)
+    expect(result.schemas.item.fields[0].type).toBe('text')
+  })
+
+  it('preserves condition operators on rich fields', () => {
+    const fields = [
+      { id: 'for', type: 'select' },
+      { id: 'department', type: 'text', condition: { for: 'scholar' } },
+      { id: 'label', type: 'text', condition: { for: { $in: ['a', 'b'] } } },
+    ]
+    const meta = { data: { schemas: { form: { fields } } } }
+    const result = extractRuntimeSchema(meta)
+    expect(result.schemas.form.fields).toEqual(fields)
+  })
+
+  it('distinguishes rich schema (fields array) from full format (fields object)', () => {
+    const meta = {
+      data: {
+        schemas: {
+          rich: { fields: [{ id: 'a', type: 'text' }] },
+          full: { name: 's', fields: { a: 'string' } },
+        },
+      },
+    }
+    const result = extractRuntimeSchema(meta)
+    expect(result.schemas.rich.fields).toEqual([{ id: 'a', type: 'text' }])
+    expect(result.schemas.full).toEqual({ a: 'string' })
+  })
+
+  it('treats childSchema presence as a rich-schema marker even without isComposite', () => {
+    const meta = {
+      data: {
+        schemas: {
+          items: { childSchema: { fields: [{ id: 'n', type: 'text' }] } },
+        },
+      },
+    }
+    const result = extractRuntimeSchema(meta)
+    expect(result.schemas.items).toEqual({
+      childSchema: { fields: [{ id: 'n', type: 'text' }] },
+    })
+  })
+})
