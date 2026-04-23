@@ -1926,13 +1926,14 @@ async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
  * @param {string} sitePath - Path to site directory
  * @param {Object} options - Collection options
  * @param {string} options.foundationPath - Path to foundation directory (for theme vars)
+ * @param {string} [options.configFile='site.yml'] - Name of the top-level config file inside sitePath. Defaults to 'site.yml'. Document tools (unipress) pass 'document.yml'.
  * @returns {Promise<Object>} Site content object with assets manifest
  */
 export async function collectSiteContent(sitePath, options = {}) {
-  const { foundationPath } = options
+  const { foundationPath, configFile = 'site.yml' } = options
 
   // Read site config and raw theme config
-  const siteConfig = await readYamlFile(join(sitePath, 'site.yml'))
+  const siteConfig = await readYamlFile(join(sitePath, configFile))
 
   // Resolve content paths from site.yml paths: group, defaulting to standard locations
   const pagesPath = siteConfig.paths?.pages
