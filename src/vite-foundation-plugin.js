@@ -221,6 +221,16 @@ export function foundationBuildPlugin(options = {}) {
       // Build self-contained SSR bundle for edge rendering (Dynamic Workers)
       await buildSSRBundle(outDir)
     },
+
+    async closeBundle() {
+      // esbuild spawns a long-lived service child process on first build() and
+      // keeps it running. Its stop() is the documented teardown for hosts that
+      // need to exit cleanly. Best-effort — never fail the build over this.
+      try {
+        const { stop } = await import('esbuild')
+        await stop?.()
+      } catch {}
+    },
   }
 }
 
