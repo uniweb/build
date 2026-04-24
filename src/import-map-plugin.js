@@ -20,6 +20,7 @@
 const DEFAULT_EXTERNALS = [
   'react',
   'react-dom',
+  'react-dom/server',
   'react/jsx-runtime',
   'react/jsx-dev-runtime',
   '@uniweb/core',
