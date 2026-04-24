@@ -434,6 +434,29 @@ export async function prerenderSite(siteDir, options = {}) {
   }
   const defaultSiteContent = JSON.parse(await readFile(contentPath, 'utf8'))
 
+  // Link-mode detection: if site.yml's foundation is a registry scoped ref
+  // or a URL, the foundation lives on the hosting edge, not on disk. Static
+  // prerender (which writes dist/<route>/index.html) has no local JS to
+  // execute, so we skip cleanly here. This is the right call for CLI deploy
+  // (where the Worker SSRs from R2 at serve time) and for any site whose
+  // foundation is deliberately remote. Sites that still need prerender +
+  // registry foundation would need a fetch-and-execute path, tracked as
+  // future work.
+  const fndRef = defaultSiteContent?.config?.foundation
+  const isLinkModeFoundation = (
+    (typeof fndRef === 'string' && (
+      /^@[a-z0-9_-]+\/[a-z0-9_-]+@.+$/.test(fndRef) ||
+      fndRef.startsWith('http://') ||
+      fndRef.startsWith('https://')
+    )) ||
+    (fndRef && typeof fndRef === 'object' && fndRef.url)
+  )
+  if (isLinkModeFoundation) {
+    onProgress(`Link-mode foundation (${typeof fndRef === 'string' ? fndRef : fndRef.url || fndRef.name}) — skipping prerender.`)
+    onProgress('(HTML will be rendered by the serving worker / runtime.)')
+    return { pages: 0, files: [] }
+  }
+
   // Discover all locale content files
   const localeConfigs = await discoverLocaleContents(distDir, defaultSiteContent)
   if (localeConfigs.length > 1) {
