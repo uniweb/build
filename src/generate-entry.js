@@ -19,11 +19,77 @@
  * Foundation identity (name, description) comes from package.json in the editor schema.
  */
 
-import { writeFile, readFile, mkdir } from 'node:fs/promises'
+import { writeFile, readFile, mkdir, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, extname } from 'node:path'
 import { discoverComponents, discoverLayoutsInPath } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
+
+/**
+ * Packages that may be bundled inside a foundation but require single-instance
+ * access from a host environment (currently: unipress). When a foundation
+ * imports any of these, we re-export the named symbols from the generated
+ * entry so the host can reach the foundation's bundled copy instead of
+ * importing its own — avoiding the dual-instance trap (each side gets its
+ * own React.createContext, registrations land in a context the other side
+ * can't see).
+ *
+ * The export list is a public-API contract: removing a symbol here breaks
+ * hosts compiled against older built foundations that re-exported it. Add
+ * conservatively.
+ */
+const HOST_SHAREABLE_PACKAGES = {
+  '@uniweb/press': ['compileSubtree']
+}
+
+const SCAN_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Walk srcDir recursively, yielding paths to scannable JS/TS source files.
+ * Skips the auto-generated entry (we'd be reading our own output) and any
+ * stray node_modules.
+ */
+async function* walkSrcFiles(srcDir) {
+  const entries = await readdir(srcDir, { withFileTypes: true, recursive: true })
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    if (entry.name === '_entry.generated.js') continue
+    if (entry.parentPath?.includes('node_modules')) continue
+    if (!SCAN_EXTENSIONS.has(extname(entry.name))) continue
+    yield join(entry.parentPath ?? srcDir, entry.name)
+  }
+}
+
+/**
+ * Detect which HOST_SHAREABLE_PACKAGES the foundation actually imports.
+ * Lenient regex match on `from '<pkg>'` or `from '<pkg>/...'` — false
+ * positives only mean a re-export is added when the foundation could
+ * have skipped it (negligible, and the package was already in the
+ * bundle anyway).
+ */
+async function detectHostShareableImports(srcDir) {
+  const packages = Object.keys(HOST_SHAREABLE_PACKAGES)
+  if (packages.length === 0) return []
+
+  const patterns = packages.map(pkg => ({
+    pkg,
+    re: new RegExp(`from\\s+['"]${escapeRegex(pkg)}(?:/[^'"]*)?['"]`)
+  }))
+
+  const found = new Set()
+  for await (const file of walkSrcFiles(srcDir)) {
+    if (found.size === packages.length) break
+    const text = await readFile(file, 'utf-8')
+    for (const { pkg, re } of patterns) {
+      if (!found.has(pkg) && re.test(text)) found.add(pkg)
+    }
+  }
+  return [...found]
+}
 
 /**
  * Detect foundation config file (for props, vars, etc.)
@@ -79,6 +145,7 @@ function generateEntrySource(components, options = {}) {
     meta = {},
     layouts = {},
     layoutMeta = {},
+    hostShareableImports = [],
   } = options
 
   const componentNames = Object.keys(components).sort()
@@ -148,6 +215,18 @@ function generateEntrySource(components, options = {}) {
   // Default export — non-component data (naturally unforgeable key)
   lines.push('')
   lines.push('export default { meta, capabilities, layoutMeta }')
+
+  // Re-export host-shareable packages the foundation actually imports.
+  // Lets unipress reach the foundation's bundled copy instead of importing
+  // its own (which would create a dual-instance React-context trap).
+  if (hostShareableImports.length > 0) {
+    lines.push('')
+    for (const pkg of hostShareableImports) {
+      const symbols = HOST_SHAREABLE_PACKAGES[pkg]
+      lines.push(`export { ${symbols.join(', ')} } from '${pkg}'`)
+    }
+  }
+
   lines.push('')
 
   return lines.join('\n')
@@ -239,6 +318,9 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   // Extract per-layout runtime metadata from meta.js files
   const layoutMeta = extractAllLayoutRuntimeSchemas(layouts)
 
+  // Detect which host-shareable packages the foundation imports
+  const hostShareableImports = await detectHostShareableImports(srcDir)
+
   // Generate source
   const source = generateEntrySource(components, {
     cssPath,
@@ -246,6 +328,7 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     meta,
     layouts,
     layoutMeta,
+    hostShareableImports,
   })
 
   // Write to file (skip if content unchanged to avoid unnecessary watcher triggers)
@@ -272,6 +355,9 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   if (foundationExports) {
     console.log(`  - Foundation exports found: ${foundationExports.path}`)
   }
+  if (hostShareableImports.length > 0) {
+    console.log(`  - Host-shareable re-exports: ${hostShareableImports.join(', ')}`)
+  }
 
   return {
     outputPath: output,
@@ -280,6 +366,7 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     foundationExports,
     meta,
     layoutMeta,
+    hostShareableImports,
   }
 }
 
