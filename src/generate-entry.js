@@ -46,7 +46,7 @@ import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runt
  * conservatively.
  */
 const HOST_SHAREABLE_PACKAGES = {
-  '@uniweb/press': ['compileSubtree']
+  '@uniweb/press': ['compileSubtree', 'compileDocument']
 }
 
 /**
