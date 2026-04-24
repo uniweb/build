@@ -88,6 +88,24 @@ function detectFoundationType(foundation, siteRoot) {
     }
   }
 
+  // Registry scoped ref: "@namespace/name@version". By definition link-mode —
+  // the foundation lives on the hosting edge (R2) and is loaded at runtime.
+  // Surfacing this as `type: 'url'` makes Vite skip the local-foundation
+  // bundling path and use the noop virtual module (no need for VITE_FOUNDATION_MODE=runtime
+  // env var or a local foundation folder). Base URL defaults to the production
+  // worker but is overridable via UNIWEB_REGISTRY_URL for self-hosted / staging
+  // environments.
+  const scopedMatch = /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
+  if (scopedMatch) {
+    const [, ns, fn, ver] = scopedMatch
+    const base = process.env.UNIWEB_REGISTRY_URL || 'https://site-router.uniweb-edge.workers.dev'
+    return {
+      type: 'url',
+      url: `${base}/foundations/${ns}/${fn}/${ver}/foundation.js`,
+      cssUrl: `${base}/foundations/${ns}/${fn}/${ver}/assets/foundation.css`
+    }
+  }
+
   // Check if it's a local workspace sibling (directory name matches package name)
   const localPath = resolve(siteRoot, '..', name)
   if (existsSync(localPath)) {
