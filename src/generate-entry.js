@@ -19,20 +19,27 @@
  * Foundation identity (name, description) comes from package.json in the editor schema.
  */
 
-import { writeFile, readFile, mkdir, readdir } from 'node:fs/promises'
+import { writeFile, readFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, dirname, extname } from 'node:path'
+import { join, dirname } from 'node:path'
 import { discoverComponents, discoverLayoutsInPath } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
 
 /**
  * Packages that may be bundled inside a foundation but require single-instance
  * access from a host environment (currently: unipress). When a foundation
- * imports any of these, we re-export the named symbols from the generated
- * entry so the host can reach the foundation's bundled copy instead of
- * importing its own — avoiding the dual-instance trap (each side gets its
- * own React.createContext, registrations land in a context the other side
- * can't see).
+ * declares any of these as a dependency, we re-export the named symbols
+ * from the generated entry so the host can reach the foundation's bundled
+ * copy instead of importing its own — avoiding the dual-instance trap
+ * (each side gets its own React.createContext, registrations land in a
+ * context the other side can't see).
+ *
+ * Detection is by `dependencies` / `peerDependencies` declaration. Vite
+ * would fail to resolve an undeclared bare import anyway, so "declared"
+ * and "imported" stay aligned in practice. A foundation that declares one
+ * of these and never actually imports it pays the cost of bundling it (the
+ * re-export keeps the symbols alive) — minor and easily fixed by removing
+ * the unused dep.
  *
  * The export list is a public-API contract: removing a symbol here breaks
  * hosts compiled against older built foundations that re-exported it. Add
@@ -42,53 +49,27 @@ const HOST_SHAREABLE_PACKAGES = {
   '@uniweb/press': ['compileSubtree']
 }
 
-const SCAN_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
-
-function escapeRegex(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 /**
- * Walk srcDir recursively, yielding paths to scannable JS/TS source files.
- * Skips the auto-generated entry (we'd be reading our own output) and any
- * stray node_modules.
- */
-async function* walkSrcFiles(srcDir) {
-  const entries = await readdir(srcDir, { withFileTypes: true, recursive: true })
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    if (entry.name === '_entry.generated.js') continue
-    if (entry.parentPath?.includes('node_modules')) continue
-    if (!SCAN_EXTENSIONS.has(extname(entry.name))) continue
-    yield join(entry.parentPath ?? srcDir, entry.name)
-  }
-}
-
-/**
- * Detect which HOST_SHAREABLE_PACKAGES the foundation actually imports.
- * Lenient regex match on `from '<pkg>'` or `from '<pkg>/...'` — false
- * positives only mean a re-export is added when the foundation could
- * have skipped it (negligible, and the package was already in the
- * bundle anyway).
+ * Detect which HOST_SHAREABLE_PACKAGES the foundation declares as a dep.
+ * Reads the foundation's own package.json (one level above srcDir).
+ * Returns [] if package.json is missing or unreadable.
  */
 async function detectHostShareableImports(srcDir) {
   const packages = Object.keys(HOST_SHAREABLE_PACKAGES)
   if (packages.length === 0) return []
 
-  const patterns = packages.map(pkg => ({
-    pkg,
-    re: new RegExp(`from\\s+['"]${escapeRegex(pkg)}(?:/[^'"]*)?['"]`)
-  }))
+  const pkgPath = join(dirname(srcDir), 'package.json')
+  if (!existsSync(pkgPath)) return []
 
-  const found = new Set()
-  for await (const file of walkSrcFiles(srcDir)) {
-    if (found.size === packages.length) break
-    const text = await readFile(file, 'utf-8')
-    for (const { pkg, re } of patterns) {
-      if (!found.has(pkg) && re.test(text)) found.add(pkg)
-    }
+  let pkg
+  try {
+    pkg = JSON.parse(await readFile(pkgPath, 'utf-8'))
+  } catch {
+    return []
   }
-  return [...found]
+
+  const declared = { ...pkg.dependencies, ...pkg.peerDependencies }
+  return packages.filter(p => p in declared)
 }
 
 /**
