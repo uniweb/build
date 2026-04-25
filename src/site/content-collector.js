@@ -27,7 +27,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, parse, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { collectSectionAssets, mergeAssetCollections } from './assets.js'
+import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { parseFetchConfig, singularize } from './data-fetcher.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
@@ -2035,8 +2035,17 @@ export async function collectSiteContent(sitePath, options = {}) {
     : siteConfig.layout?.name || null
 
   // Recursively collect all pages
-  const { pages, assetCollection, iconCollection, notFound, versionedScopes } =
+  let { pages, assetCollection, iconCollection, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts, siteLayoutName)
+
+  // Merge top-level config assets (e.g. document.yml's book.covers.front,
+  // banner images, logos) into the manifest. The compile pipeline reads
+  // website.assets[<original src>] to resolve these to filesystem paths
+  // (Node) or URLs (browser) without doing its own I/O.
+  const configAssets = collectConfigAssets(siteConfig, sitePath)
+  if (Object.keys(configAssets).length > 0) {
+    assetCollection = mergeAssetCollections(assetCollection, { assets: configAssets })
+  }
 
   // Deduplicate: at the root level, homepage promotion can create a route
   // collision between the promoted page and a content-less container.

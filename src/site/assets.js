@@ -323,6 +323,68 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
 }
 
 /**
+ * Walk the top-level config object (site.yml / document.yml) for asset
+ * references and resolve each into a manifest entry. Catches things like
+ * book.covers.front, banner images, logos in metadata blocks — anything
+ * declared in the config that points at a local file by path.
+ *
+ * Result is keyed by the original source string (the value as it appears
+ * in the config). Foundations look up `website.assets[src]` at compile
+ * time and resolve `entry.resolved` to a filesystem path or `entry.url`
+ * to a URL, depending on the runtime context. This keeps foundations
+ * environment-agnostic — they don't need to know whether the compile
+ * pipeline runs in Node (unipress) or in the browser (editor).
+ *
+ * `walkDataAssets` already filters via `isLocalAssetPath` to skip
+ * non-asset strings (titles, descriptions, etc.).
+ *
+ * @param {Object} siteConfig - Parsed top-level config
+ * @param {string} siteRoot - Site/document root directory
+ * @returns {Object} Asset manifest keyed by original src string
+ */
+export function collectConfigAssets(siteConfig, siteRoot) {
+  const assets = {}
+  if (!siteConfig || typeof siteConfig !== 'object') return assets
+
+  // Anchor for relative-path resolution — `dirname(anchor)` must equal siteRoot
+  // so `assets/front.png` resolves to `<siteRoot>/assets/front.png`.
+  const anchor = `${siteRoot}/_config_anchor`
+
+  // Walk siteConfig with a more permissive filter than `isLocalAssetPath`:
+  // config asset paths often appear without a `./` prefix (e.g.
+  // `book.covers.front: assets/front.png`), which is the natural spelling
+  // for authors. Accept any string with a media extension that isn't an
+  // external URL.
+  const visit = (data) => {
+    if (typeof data === 'string') {
+      if (isExternalUrl(data)) return
+      if (!(isImagePath(data) || isVideoPath(data) || isPdfPath(data))) return
+      const result = resolveAssetPath(data, anchor, siteRoot)
+      if (!result.external && result.resolved) {
+        assets[data] = {
+          original: data,
+          resolved: result.resolved,
+          isImage: result.isImage,
+          isVideo: result.isVideo,
+          isPdf: result.isPdf
+        }
+      }
+      return
+    }
+    if (Array.isArray(data)) {
+      data.forEach(visit)
+      return
+    }
+    if (data && typeof data === 'object') {
+      Object.values(data).forEach(visit)
+    }
+  }
+
+  visit(siteConfig)
+  return assets
+}
+
+/**
  * Merge multiple asset collection results
  *
  * @param {...Object} collections - Asset collection results from collectSectionAssets
