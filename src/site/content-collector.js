@@ -257,6 +257,33 @@ function isIgnoredFolder(name) {
 }
 
 /**
+ * Workspace-root content profiles, dispatched on the top-level config filename.
+ *
+ * - `site.yml` → site profile: content under `pages/`, page mode (multiple
+ *   sections per page) by default, ordering field is `pages:`. The historical
+ *   default; used for websites.
+ * - `document.yml` → document profile: content under `content/`, folder mode
+ *   (each .md file is its own page/chapter) by default, ordering field is
+ *   `content:` (with `pages:` accepted as a fallback alias). Used by document
+ *   tools like unipress where the natural noun is "content" / "chapter."
+ *
+ * Per-folder folder.yml/page.yml overrides keep working in both profiles —
+ * the profile sets workspace-root defaults; per-folder configs take precedence.
+ * An explicit `paths: { pages: ... }` in either config also overrides the
+ * default content directory.
+ *
+ * Internal mode values match readFolderConfig: 'pages' (folder mode), 'sections' (page mode).
+ */
+const CONTENT_PROFILES = {
+  'site.yml':     { contentDir: 'pages',   defaultMode: 'sections', orderField: 'pages' },
+  'document.yml': { contentDir: 'content', defaultMode: 'pages',    orderField: 'content' }
+}
+
+function getContentProfile(configFile) {
+  return CONTENT_PROFILES[configFile] || CONTENT_PROFILES['site.yml']
+}
+
+/**
  * Read folder configuration, determining content mode from config file presence.
  *
  * - folder.yml present → folder mode (md files are child pages)
@@ -1935,10 +1962,25 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
 
-  // Resolve content paths from site.yml paths: group, defaulting to standard locations
-  const pagesPath = siteConfig.paths?.pages
-    ? resolve(sitePath, siteConfig.paths.pages)
-    : join(sitePath, 'pages')
+  // Profile selects workspace-root defaults: site.yml → pages/ + page mode +
+  // pages: ordering; document.yml → content/ + folder mode + content: ordering.
+  const profile = getContentProfile(configFile)
+
+  // Resolve content paths from <config>.paths: group, defaulting per profile.
+  // Backward compatibility: when the document profile's `content/` is missing
+  // but a `pages/` directory exists, fall back to `pages/` so existing unipress
+  // projects (and any document.yml-using setup that predates the profile)
+  // keep working without edits.
+  let pagesPath
+  if (siteConfig.paths?.pages) {
+    pagesPath = resolve(sitePath, siteConfig.paths.pages)
+  } else {
+    const profileDefault = join(sitePath, profile.contentDir)
+    const legacyFallback = join(sitePath, 'pages')
+    pagesPath = (profile.contentDir !== 'pages' && !existsSync(profileDefault) && existsSync(legacyFallback))
+      ? legacyFallback
+      : profileDefault
+  }
 
   const mounts = resolveMounts(siteConfig.paths, sitePath, pagesPath)
 
@@ -1969,14 +2011,21 @@ export async function collectSiteContent(sitePath, options = {}) {
     }
   }
 
-  // Extract page ordering config from site.yml
+  // Extract page ordering config from the top-level config.
+  // Document profile reads the `content:` field (with `pages:` as a back-compat
+  // alias); site profile reads `pages:`. Either way the internal field name is
+  // `pages` so collectPagesRecursive doesn't need to care about profile.
   const siteOrderConfig = {
-    pages: siteConfig.pages,
+    pages: profile.orderField === 'pages'
+      ? siteConfig.pages
+      : (siteConfig[profile.orderField] ?? siteConfig.pages),
     index: siteConfig.index
   }
 
-  // Determine root content mode from folder.yml/page.yml presence in pages directory
-  const { mode: rootContentMode } = await readFolderConfig(pagesPath, 'sections')
+  // Root content mode default comes from the profile (folder mode for
+  // documents, page mode for sites). A folder.yml/page.yml in the pages root
+  // overrides the profile default per readFolderConfig.
+  const { mode: rootContentMode } = await readFolderConfig(pagesPath, profile.defaultMode)
 
   // Collect layout areas from layout/ directory (including named layout subdirectories)
   const { layouts } = await collectLayouts(layoutPath, sitePath, layoutNames)
