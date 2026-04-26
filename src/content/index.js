@@ -30,3 +30,9 @@ export {
   mergeDataIntoContent,
   singularize,
 } from '../site/data-fetcher.js'
+
+// Cross-reference registry. Walks the document tree, finds every
+// block-level element with a {#id} attribute, registers the id with
+// its inferred kind + counter. Consumed by the framework's <Ref>
+// component to render `[#id]` cross-references.
+export { buildXrefRegistry } from '../site/xref-registry.js'
