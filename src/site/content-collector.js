@@ -181,13 +181,19 @@ async function readYamlFile(filePath) {
 /**
  * Extract inset references from a ProseMirror document.
  *
- * Walks top-level nodes for `inset_ref` (produced by content-reader
- * for `![alt](@ComponentName){params}` syntax). Each ref is removed from the
- * document and replaced with an `inset_placeholder` node carrying a
- * unique refId. The extracted refs are returned as an array.
+ * Walks the document recursively for `inset_ref` nodes (produced by
+ * content-reader for the `![alt](@ComponentName){params}` /
+ * `[text](@ComponentName){params}` / `[@key]{params}` forms). Each ref
+ * is removed and replaced in-place with an `inset_placeholder` node
+ * carrying a unique refId. The extracted refs are returned as an array.
+ *
+ * Inline insets (mid-paragraph) are kept as inline placeholders so the
+ * paragraph's text flow is preserved; block-level insets (own line)
+ * stay at the document root. Both share the same refId/getInset(refId)
+ * lookup machinery — only the position differs.
  *
  * @param {Object} doc - ProseMirror document (mutated in place)
- * @returns {Array} Array of { refId, type, params, description }
+ * @returns {Array} Array of { refId, type, params, description, embedKind }
  */
 function extractInsets(doc) {
   if (!doc?.content || !Array.isArray(doc.content)) return []
@@ -195,25 +201,34 @@ function extractInsets(doc) {
   const insets = []
   let refIndex = 0
 
-  for (let i = 0; i < doc.content.length; i++) {
-    const node = doc.content[i]
-    if (node.type === 'inset_ref') {
-      const { component, alt, ...params } = node.attrs || {}
-      const refId = `inset_${refIndex++}`
-      insets.push({
-        refId,
-        type: component,
-        params: Object.keys(params).length > 0 ? params : {},
-        title: alt || null,
-      })
-      // Replace in-place with placeholder
-      doc.content[i] = {
-        type: 'inset_placeholder',
-        attrs: { refId },
+  function visit(nodes) {
+    if (!Array.isArray(nodes)) return
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]
+      if (!node) continue
+      if (node.type === 'inset_ref') {
+        const { component, alt, embedKind, ...params } = node.attrs || {}
+        const refId = `inset_${refIndex++}`
+        insets.push({
+          refId,
+          type: component,
+          embedKind: embedKind || 'visual',
+          params: Object.keys(params).length > 0 ? params : {},
+          title: alt || null,
+        })
+        nodes[i] = {
+          type: 'inset_placeholder',
+          attrs: { refId, embedKind: embedKind || 'visual' },
+        }
+        continue
+      }
+      if (Array.isArray(node.content)) {
+        visit(node.content)
       }
     }
   }
 
+  visit(doc.content)
   return insets
 }
 
