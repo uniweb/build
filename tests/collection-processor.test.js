@@ -272,6 +272,206 @@ Content.
     })
   })
 
+  describe('YAML array-form items', () => {
+    it('should parse a top-level YAML array as multiple items', async () => {
+      const contentDir = join(testDir, 'collections', 'team')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'all.yml'), `- slug: alice
+  name: Alice
+  role: engineer
+- slug: bob
+  name: Bob
+  role: designer
+- slug: carol
+  name: Carol
+  role: writer
+`)
+
+      const collections = await processCollections(testDir, {
+        team: 'collections/team'
+      })
+
+      expect(collections.team).toHaveLength(3)
+      expect(collections.team.map(i => i.slug)).toEqual(['alice', 'bob', 'carol'])
+      expect(collections.team[0].name).toBe('Alice')
+      expect(collections.team[1].role).toBe('designer')
+    })
+
+    it('should mix array-form and mapping-form YAML in the same folder', async () => {
+      const contentDir = join(testDir, 'collections', 'team')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'core.yml'), `- slug: alice
+  name: Alice
+- slug: bob
+  name: Bob
+`)
+
+      writeFileSync(join(contentDir, 'carol.yml'), `name: Carol
+role: writer
+`)
+
+      const collections = await processCollections(testDir, {
+        team: 'collections/team'
+      })
+
+      expect(collections.team).toHaveLength(3)
+      const slugs = collections.team.map(i => i.slug).sort()
+      expect(slugs).toEqual(['alice', 'bob', 'carol'])
+      expect(collections.team.find(i => i.slug === 'carol').role).toBe('writer')
+    })
+
+    it('should preserve mapping-form YAML behavior (slug from filename)', async () => {
+      const contentDir = join(testDir, 'collections', 'team')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'alice.yml'), `name: Alice
+role: engineer
+`)
+
+      const collections = await processCollections(testDir, {
+        team: 'collections/team'
+      })
+
+      expect(collections.team).toHaveLength(1)
+      expect(collections.team[0].slug).toBe('alice')
+      expect(collections.team[0].name).toBe('Alice')
+    })
+  })
+
+  describe('BibTeX collections', () => {
+    it('should parse a .bib file into CSL-JSON items with id as slug', async () => {
+      const contentDir = join(testDir, 'collections', 'bibliography')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'refs.bib'), `@book{darwin1859,
+  author = {Darwin, Charles},
+  title = {On the Origin of Species},
+  publisher = {John Murray},
+  year = {1859}
+}
+
+@article{mendel1866,
+  author = {Mendel, Gregor},
+  title = {Versuche {\\"u}ber Pflanzenhybriden},
+  journal = {Verhandlungen},
+  year = {1866}
+}
+`)
+
+      const collections = await processCollections(testDir, {
+        bibliography: 'collections/bibliography'
+      })
+
+      expect(collections.bibliography).toHaveLength(2)
+
+      const byId = Object.fromEntries(collections.bibliography.map(i => [i.id, i]))
+
+      expect(byId.darwin1859.slug).toBe('darwin1859')
+      expect(byId.darwin1859.type).toBe('book')
+      expect(byId.darwin1859.title).toBe('On the Origin of Species')
+      expect(byId.darwin1859.publisher).toBe('John Murray')
+      expect(byId.darwin1859.author[0]).toEqual({ family: 'Darwin', given: 'Charles' })
+
+      expect(byId.mendel1866.slug).toBe('mendel1866')
+      expect(byId.mendel1866.type).toBe('article-journal')
+      expect(byId.mendel1866.title).toContain('über')
+    })
+
+    it('should merge .bib and .yml entries in the same collection folder', async () => {
+      const contentDir = join(testDir, 'collections', 'bibliography')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'main.bib'), `@book{darwin1859,
+  author = {Darwin, Charles},
+  title = {On the Origin of Species},
+  year = {1859}
+}
+`)
+
+      writeFileSync(join(contentDir, 'wallace1858.yml'), `id: wallace1858
+type: article-journal
+author: "Wallace, Alfred"
+title: "On the Tendency of Varieties"
+year: 1858
+`)
+
+      const collections = await processCollections(testDir, {
+        bibliography: 'collections/bibliography'
+      })
+
+      const slugs = collections.bibliography.map(i => i.slug).sort()
+      expect(slugs).toEqual(['darwin1859', 'wallace1858'])
+    })
+
+    it('should merge entries from multiple .bib files in the same folder', async () => {
+      const contentDir = join(testDir, 'collections', 'bibliography')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'primary.bib'), `@book{darwin1859,
+  author = {Darwin, Charles},
+  title = {On the Origin of Species},
+  year = {1859}
+}
+`)
+
+      writeFileSync(join(contentDir, 'secondary.bib'), `@article{wallace1858,
+  author = {Wallace, Alfred Russel},
+  title = {On the Tendency of Varieties},
+  journal = {Journal of the Linnean Society},
+  year = {1858}
+}
+
+@book{lyell1830,
+  author = {Lyell, Charles},
+  title = {Principles of Geology},
+  year = {1830}
+}
+`)
+
+      const collections = await processCollections(testDir, {
+        bibliography: 'collections/bibliography'
+      })
+
+      expect(collections.bibliography).toHaveLength(3)
+      const slugs = collections.bibliography.map(i => i.slug).sort()
+      expect(slugs).toEqual(['darwin1859', 'lyell1830', 'wallace1858'])
+    })
+
+    it('should treat the BibTeX cite key as slug for per-record file emission', async () => {
+      const contentDir = join(testDir, 'collections', 'bibliography')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'refs.bib'), `@book{darwin1859,
+  author = {Darwin, Charles},
+  title = {On the Origin of Species},
+  year = {1859}
+}
+`)
+
+      const collections = await processCollections(testDir, {
+        bibliography: {
+          path: 'collections/bibliography',
+          deferred: ['author']
+        }
+      })
+
+      await writeCollectionFiles(testDir, collections, {
+        bibliography: {
+          path: 'collections/bibliography',
+          deferred: ['author']
+        }
+      })
+
+      const recordPath = join(testDir, 'public', 'data', 'bibliography', 'darwin1859.json')
+      expect(existsSync(recordPath)).toBe(true)
+
+      const record = JSON.parse(readFileSync(recordPath, 'utf-8'))
+      expect(record.author[0].family).toBe('Darwin')
+    })
+  })
+
   describe('excerpt extraction', () => {
     it('should auto-extract excerpt from content', async () => {
       const contentDir = join(testDir, 'collections', 'posts')

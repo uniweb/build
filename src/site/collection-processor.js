@@ -5,8 +5,15 @@
  * Collections are defined in site.yml and processed at build time.
  *
  * Features:
- * - Discovers markdown (.md), data (.yml/.yaml), and JSON (.json) files in collection folders
- * - Parses frontmatter for metadata (markdown), full YAML (data items), or JSON (data items)
+ * - Discovers markdown (.md), data (.yml/.yaml), JSON (.json), and BibTeX (.bib)
+ *   files in collection folders
+ * - Parses frontmatter for metadata (markdown), full YAML or JSON (data items),
+ *   or BibTeX → CSL-JSON (bibliography items)
+ * - Pure-data formats (YAML, JSON, BibTeX) accept either one record per file
+ *   (mapping at the top, slug from filename) or many records per file (array
+ *   at the top, each item carries its own slug; BibTeX always produces an
+ *   array, with the cite key as slug). Multiple files in the same folder
+ *   merge — the loader flattens one level after collecting them.
  * - Converts markdown body to ProseMirror JSON
  * - Supports filtering, sorting, and limiting
  * - Auto-generates excerpts and extracts first images (markdown items only)
@@ -29,6 +36,7 @@ import { readFile, readdir, stat, writeFile, mkdir, copyFile } from 'node:fs/pro
 import { join, basename, extname, dirname, relative, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { parseBibtex } from '@citestyle/bibtex'
 import { applyFilter, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 
@@ -393,21 +401,35 @@ async function processDataItemAssets(data, itemPath, siteRoot, collectionName, b
  * Process a single data item from a YAML file
  *
  * YAML items are pure data — no ProseMirror conversion, no body, no excerpt,
- * no image extraction, no lastModified. The output is slug + YAML fields.
+ * no image extraction, no lastModified.
+ *
+ * A YAML file containing a top-level array returns all items (single-file
+ * collection); each item must carry its own `slug`. A YAML file containing
+ * a mapping returns a single item with `slug` derived from the filename.
+ * Mirrors `processJsonItem` for parity across pure-data formats.
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - YAML filename (.yml or .yaml)
- * @returns {Promise<Object|null>} Processed item or null if unpublished
+ * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
 async function processDataItem(dir, filename, siteRoot, collectionName, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
-  const slug = basename(filename, extname(filename))
   const data = yaml.load(raw) || {}
 
-  // Skip unpublished items
-  if (data.published === false) return null
+  // Array → multiple items (single-file collection)
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      if (item && typeof item === 'object') {
+        await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+      }
+    }
+    return data
+  }
 
+  // Mapping → single item
+  if (data.published === false) return null
+  const slug = basename(filename, extname(filename))
   const item = { slug, ...data }
   await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
   return item
@@ -445,6 +467,29 @@ async function processJsonItem(dir, filename, siteRoot, collectionName, basePath
   const item = { slug, ...data }
   await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
   return item
+}
+
+/**
+ * Process a single BibTeX file into an array of CSL-JSON bibliography items.
+ *
+ * Each `@entry{key, ...}` becomes one item. The BibTeX cite key is preserved
+ * as `id` (CSL-JSON convention) and copied to `slug` so per-record file
+ * emission and runtime lookups behave the same as for other formats.
+ *
+ * No asset processing — bibliography records reference URLs and DOIs, not
+ * local files.
+ *
+ * @param {string} dir - Collection directory path
+ * @param {string} filename - BibTeX filename (.bib)
+ * @returns {Promise<Array<Object>>} Array of CSL-JSON items, each with `slug`
+ */
+async function processBibtexItem(dir, filename) {
+  const filepath = join(dir, filename)
+  const raw = await readFile(filepath, 'utf-8')
+  const entries = parseBibtex(raw)
+  return entries
+    .filter(entry => entry && entry.id)
+    .map(entry => ({ slug: entry.id, ...entry }))
 }
 
 /**
@@ -512,12 +557,16 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
   const files = await readdir(collectionDir)
   const itemFiles = files.filter(f =>
     !f.startsWith('_') &&
-    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json'))
+    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json') || f.endsWith('.bib'))
   )
 
-  // Process all collection files (markdown → content items, YAML/JSON → data items)
+  // Process all collection files (markdown → content items, YAML/JSON → data
+  // items, BibTeX → CSL-JSON bibliography items).
   let items = await Promise.all(
     itemFiles.map(file => {
+      if (file.endsWith('.bib')) {
+        return processBibtexItem(collectionDir, file)
+      }
       if (file.endsWith('.json')) {
         return processJsonItem(collectionDir, file, siteDir, config.name, basePath)
       }
@@ -528,7 +577,8 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
     })
   )
 
-  // Flatten arrays from JSON files that contain multiple items
+  // Flatten one level: array-form YAML/JSON files and every .bib file
+  // contribute their entries individually.
   items = items.flat()
 
   // Filter out nulls (unpublished items)
@@ -673,7 +723,7 @@ export async function getCollectionLastModified(siteDir, config) {
   const files = await readdir(collectionDir)
   const itemFiles = files.filter(f =>
     !f.startsWith('_') &&
-    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json'))
+    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json') || f.endsWith('.bib'))
   )
 
   let lastModified = null
