@@ -33,9 +33,19 @@
  *         counter,       // number for flat kinds, dotted string for hierarchical
  *         counterText,   // displayable counter ('3', '3.2')
  *         sourcePath,    // page route the id was declared on (for back-refs)
+ *         caption,       // (figures, tables) caption attr, when set
+ *         text,          // (sections) heading's plain text content
+ *         latex,         // (equations) latex source for the equation
  *       },
  *     },
  *   }
+ *
+ * `caption`, `text`, and `latex` are populated only for the elements
+ * that carry them — they're undefined on other kinds. List sections
+ * (ListOfFigures / ListOfTables / TableOfContents) read these to render
+ * "Figure 3 — A diagram of mitosis ........ 47" entries without
+ * re-walking the document tree. Other consumers (the framework's <Ref>
+ * component, Typst / LaTeX cross-reference emitters) ignore them.
  */
 
 const KIND_BY_TYPE = {
@@ -82,6 +92,19 @@ export function buildXrefRegistry(siteContent, options = {}) {
     return sectionStack.slice().join('.')
   }
 
+  // Collect the plain text content of a node tree — used to capture a
+  // heading's displayable text for ListOfSections-style entries. Walks
+  // the standard ProseMirror text shape (text nodes carry `.text`;
+  // structural nodes recurse via `.content`).
+  function collectTextContent(node) {
+    if (!node || typeof node !== 'object') return ''
+    if (node.type === 'text' && typeof node.text === 'string') return node.text
+    if (Array.isArray(node.content)) {
+      return node.content.map(collectTextContent).join('')
+    }
+    return ''
+  }
+
   function inferKind(node) {
     // 1. Node-type-based: built-ins.
     const builtin = KIND_BY_TYPE[node.type]
@@ -125,7 +148,23 @@ export function buildXrefRegistry(siteContent, options = {}) {
           counter = nextFlat(kind)
           counterText = String(counter)
         }
-        entries[id] = { id, kind, counter, counterText, sourcePath: sourcePath || '' }
+        const entry = { id, kind, counter, counterText, sourcePath: sourcePath || '' }
+        // Per-kind metadata. List sections (ListOfFigures, ListOfTables,
+        // TableOfContents) read these directly so they don't have to
+        // re-walk the parsed tree to find captions and headings.
+        const captionAttr = node.attrs?.caption
+        if (kind === 'figure' || kind === 'table') {
+          if (captionAttr) entry.caption = String(captionAttr)
+        }
+        if (node.type === 'heading') {
+          const text = collectTextContent(node)
+          if (text) entry.text = text
+        }
+        if (node.type === 'math_display') {
+          const latex = node.attrs?.latex
+          if (latex) entry.latex = String(latex)
+        }
+        entries[id] = entry
       }
     } else if (node.type === 'heading') {
       // Heading without an id still advances the counter — but we don't
