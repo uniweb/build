@@ -64,7 +64,7 @@ let _buildingSSRBundle = false
  * file in, everything resolves. A future refactor can switch to side-
  * loading runtime + React + core into the modules map separately so
  * foundations stop carrying runtime in their bundles — see
- * `kb/platform/plans/edge-runtime-side-loading.md`. Until then, this
+ * `kb/platform/plans/edge-ssr-bundling-strategy.md`. Until then, this
  * build pre-bundles for the isolate's contract.
  *
  * @param {string} outDir - Path to dist/ directory containing foundation.js
