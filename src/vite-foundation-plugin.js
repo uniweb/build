@@ -118,8 +118,16 @@ async function buildSSRBundle(outDir) {
     // - @uniweb/theming (buildSectionOverrides, used by runtime/ssr)
     //
     // All in a single file so the Dynamic Worker isolate has one React instance.
+    // L2/L3 helpers from @uniweb/runtime/ssr that worker SSR + framework SSG
+    // both depend on. Keep this list in sync with runtime/src/ssr-renderer.js
+    // exports — missing one here makes the foundation bundle fail to import
+    // it ("module does not provide an export named X") inside the SSR isolate.
     const ssrExports = runtimeSSRPath
-      ? `export { initPrerender, renderPage, injectPageContent, prefetchIcons } from "${runtimeSSRPath.replace(/\\/g, '/')}";`
+      ? `export {
+          initPrerender, initPrerenderForLocale,
+          renderPage, injectPageContent, prefetchIcons,
+          sliceContentForLocale, hydrateDataStore,
+        } from "${runtimeSSRPath.replace(/\\/g, '/')}";`
       : ''
 
     // Resolve React to a single package directory to avoid duplicate instances
