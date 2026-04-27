@@ -156,30 +156,31 @@ async function emitRuntimePin(outDir, projectRoot) {
 }
 
 /**
- * Build a self-contained ESM bundle for edge SSR (Cloudflare Dynamic Workers).
+ * @deprecated 2026-04-27 — Strategy S Phase 2.
  *
+ * Foundations no longer carry their own runtime bundle. Runtime + React +
+ * core + theming now live in R2 under `runtime/{version}/worker-runtime.js`,
+ * published by the platform's `/deploy-runtime` skill, and side-loaded
+ * by the Cloudflare isolate alongside `dist/foundation.js`.
+ *
+ * The invocation in `writeBundle()` is commented out; this function
+ * definition is kept for the rollout window so it can be flipped back
+ * on with one line if Phase 1's edge dispatcher misbehaves in production.
+ * Phase 3 cleanup deletes this function entirely once the new path is
+ * proven healthy.
+ *
+ * See `kb/platform/plans/edge-ssr-bundling-strategy.md`.
+ *
+ * Original purpose (preserved for context):
+ * Build a self-contained ESM bundle for edge SSR (Cloudflare Dynamic Workers).
  * Produces `ssr-worker-bundle.js` — a single ESM file with React,
  * ReactDOM/server, `@uniweb/core`, `@uniweb/runtime/ssr`,
  * `@uniweb/theming`, and the foundation's components all inlined. No
- * external imports.
- *
- * This is **NOT a foundation**. The foundation is `dist/foundation.js`
- * — a foundation-shaped ESM module that externalizes runtime and links
- * to it at runtime, the same as in browser SPA / framework SSG / unipress
- * (Node SSR). This file is something different: a self-contained SSR
- * pipeline shaped for the Cloudflare Workers Dynamic Worker LOADER, with
- * the foundation embedded as one of several inputs. The size ratio
- * (typical ~12× larger than `foundation.js`) reflects what's actually
- * inside it.
- *
- * The artifact is bundled this way because the Dynamic Worker LOADER
- * accepts a closed `modules` map at isolate construction (no external
- * resolver, no path back to npm or R2 for transitive imports). One
- * file in, everything resolves. A future refactor can switch to side-
- * loading runtime + React + core into the modules map separately so
- * foundations stop carrying runtime in their bundles — see
- * `kb/platform/plans/edge-ssr-bundling-strategy.md`. Until then, this
- * build pre-bundles for the isolate's contract.
+ * external imports. The artifact was bundled this way because the
+ * Dynamic Worker LOADER accepts a closed `modules` map at isolate
+ * construction. The Phase -1 prototype (2026-04-27) verified the LOADER
+ * actually deduplicates shared modules across multiple ESM bundles, so
+ * a multi-entry modules map became viable — that's what Strategy S uses.
  *
  * @param {string} outDir - Path to dist/ directory containing foundation.js
  */
@@ -366,11 +367,18 @@ export function foundationBuildPlugin(options = {}) {
       // automatically once the edge is updated.
       await emitRuntimePin(outDir, resolvedRoot)
 
-      // Build self-contained SSR bundle for edge rendering (Dynamic Workers).
-      // Stays in the build until Strategy S Phase 2 — dual-mode edge
-      // resolver continues to fall back to it for foundations without
-      // a runtime pin.
-      await buildSSRBundle(outDir)
+      // Strategy S Phase 2: foundations no longer carry a self-contained
+      // SSR bundle. The runtime + React + core + theming live in R2 under
+      // runtime/{version}/worker-runtime.js (uploaded by the platform's
+      // /deploy-runtime skill); the Cloudflare isolate side-loads them
+      // alongside dist/foundation.js via the edge dual-mode dispatcher.
+      // See kb/platform/plans/edge-ssr-bundling-strategy.md.
+      //
+      // The buildSSRBundle() function is kept (just not invoked) so it
+      // can be flipped back on with one line if Phase 1's edge dispatcher
+      // misbehaves in production. Phase 3 cleanup deletes the function
+      // entirely once we're confident the new path is healthy.
+      // await buildSSRBundle(outDir)
     },
 
     async closeBundle() {
