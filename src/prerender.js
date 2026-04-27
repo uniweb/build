@@ -11,7 +11,6 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { deriveCacheKey } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 
@@ -420,6 +419,7 @@ export async function prerenderSite(siteDir, options = {}) {
   // Load shared SSR functions from runtime (lazy — only when prerendering)
   const {
     initPrerender,
+    hydrateDataStore,
     prefetchIcons,
     renderPage,
     injectPageContent,
@@ -557,12 +557,10 @@ export async function prerenderSite(siteDir, options = {}) {
     const uniweb = initPrerender(siteContent, foundation, loadedExtensions, { onProgress })
 
     // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender.
-    // Use the framework's default cache key so runtime probes hit the same entries.
-    if (fetchedData.length > 0 && uniweb.activeWebsite?.dataStore) {
-      for (const entry of fetchedData) {
-        uniweb.activeWebsite.dataStore.set(deriveCacheKey(entry.config), { data: entry.data })
-      }
-    }
+    // hydrateDataStore handles cache-key derivation + value-shape wrapping
+    // — same helper used by the browser SPA boot and by the Cloudflare
+    // Worker SSR isolate, so all three render paths agree on shape.
+    hydrateDataStore(uniweb.activeWebsite, fetchedData)
 
     // Pre-fetch icons for SSR embedding
     await prefetchIcons(siteContent, uniweb, onProgress)
