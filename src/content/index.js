@@ -31,8 +31,9 @@ export {
   singularize,
 } from '../site/data-fetcher.js'
 
-// Cross-reference registry. Walks the document tree, finds every
-// block-level element with a {#id} attribute, registers the id with
-// its inferred kind + counter. Consumed by the framework's <Ref>
-// component to render `[#id]` cross-references.
-export { buildXrefRegistry } from '../site/xref-registry.js'
+// Cross-reference registry moved out of build into kit
+// (@uniweb/kit/xref). Foundations that need cross-references import
+// `buildXrefRegistry` from there and re-export it via
+// `foundation.xref.build`; the runtime calls it during initialization
+// (setup.js / ssr-renderer.js). See framework/kit/src/xref/registry.js
+// for the implementation.
