@@ -42,13 +42,30 @@ async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPath
 let _buildingSSRBundle = false
 
 /**
- * Build a self-contained ESM bundle for edge SSR (Dynamic Workers).
+ * Build a self-contained ESM bundle for edge SSR (Cloudflare Dynamic Workers).
  *
- * Produces foundation.ssr.js — a single ESM file with React, ReactDOM/server,
- * @uniweb/core, and the foundation components all inlined. No external imports.
+ * Produces `ssr-worker-bundle.js` — a single ESM file with React,
+ * ReactDOM/server, `@uniweb/core`, `@uniweb/runtime/ssr`,
+ * `@uniweb/theming`, and the foundation's components all inlined. No
+ * external imports.
  *
- * This bundle is loaded into a Cloudflare Dynamic Worker isolate at request time
- * via env.LOADER.get(). The isolate caches the bundle per foundation version.
+ * This is **NOT a foundation**. The foundation is `dist/foundation.js`
+ * — a foundation-shaped ESM module that externalizes runtime and links
+ * to it at runtime, the same as in browser SPA / framework SSG / unipress
+ * (Node SSR). This file is something different: a self-contained SSR
+ * pipeline shaped for the Cloudflare Workers Dynamic Worker LOADER, with
+ * the foundation embedded as one of several inputs. The size ratio
+ * (typical ~12× larger than `foundation.js`) reflects what's actually
+ * inside it.
+ *
+ * The artifact is bundled this way because the Dynamic Worker LOADER
+ * accepts a closed `modules` map at isolate construction (no external
+ * resolver, no path back to npm or R2 for transitive imports). One
+ * file in, everything resolves. A future refactor can switch to side-
+ * loading runtime + React + core into the modules map separately so
+ * foundations stop carrying runtime in their bundles — see
+ * `kb/platform/plans/edge-runtime-side-loading.md`. Until then, this
+ * build pre-bundles for the isolate's contract.
  *
  * @param {string} outDir - Path to dist/ directory containing foundation.js
  */
@@ -142,7 +159,7 @@ async function buildSSRBundle(outDir) {
       bundle: true,
       format: 'esm',
       platform: 'browser',
-      outfile: join(outDir, 'foundation.ssr.js'),
+      outfile: join(outDir, 'ssr-worker-bundle.js'),
       minify: false,
       external: [],
       nodePaths,
@@ -151,9 +168,9 @@ async function buildSSRBundle(outDir) {
       logLevel: 'warning',
     })
 
-    const ssrFile = join(outDir, 'foundation.ssr.js')
+    const ssrFile = join(outDir, 'ssr-worker-bundle.js')
     const size = (statSync(ssrFile).size / 1024).toFixed(1)
-    console.log(`Generated foundation.ssr.js (${size} KB)`)
+    console.log(`Generated ssr-worker-bundle.js (${size} KB)`)
   } catch (err) {
     console.warn(`Warning: SSR bundle build failed: ${err.message}`)
   } finally {
