@@ -7,7 +7,8 @@
  * - Processing preview images for presets
  */
 
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { buildSchema } from './schema.js'
 import { generateEntryPoint, shouldRegenerateForFile } from './generate-entry.js'
@@ -40,6 +41,119 @@ async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPath
  * the foundation plugin's writeBundle hook.
  */
 let _buildingSSRBundle = false
+
+/**
+ * Emit dist/runtime-pin.json declaring the @uniweb/runtime version this
+ * foundation was built against. Read by the edge isolate (under the
+ * Strategy S split-bundle path) to decide which runtime/{ver}/ssr.js to
+ * side-load from R2. See kb/platform/plans/edge-ssr-bundling-strategy.md
+ * and kb/platform/operations/release-workflow.md.
+ *
+ * Reads the resolved version from the foundation's node_modules/@uniweb/
+ * runtime/package.json so the pin reflects what was actually linked at
+ * build time, not what the foundation's own package.json range happens
+ * to allow.
+ *
+ * Silently no-ops when @uniweb/runtime isn't resolvable (e.g., the
+ * foundation depends on the runtime via a workspace alias that puts it
+ * elsewhere). The edge resolver treats the absence of a pin as the
+ * legacy single-bundle path, so omitting the pin is harmless during the
+ * dual-mode window.
+ *
+ * Optional foundation-author override: a `uniweb.runtimePolicy` field
+ * in the foundation's own package.json gets recorded alongside the
+ * runtime version so the registry's semver resolver can apply it.
+ *
+ * @param {string} outDir - dist/ directory to write to.
+ * @param {string} projectRoot - foundation project root (where package.json lives).
+ */
+async function emitRuntimePin(outDir, projectRoot) {
+  // Resolve @uniweb/runtime via two strategies, in order:
+  //   1. createRequire from this plugin's location (catches the runtime
+  //      pulled in transitively through @uniweb/build, @uniweb/core, etc.).
+  //   2. Walk up node_modules from the project root (catches the case
+  //      where the foundation depends on runtime directly).
+  // The first covers the common case (foundations don't typically depend
+  // on runtime directly — it's the host environment, not a foundation
+  // import); the second is a safety net.
+  let runtimePkgPath = null
+
+  try {
+    // Resolve via an exported subpath, not 'package.json' directly —
+    // @uniweb/runtime's `exports` map doesn't include package.json, so
+    // require.resolve on it throws ERR_PACKAGE_PATH_NOT_EXPORTED.
+    // Walking back from the resolved subpath finds the package root.
+    const { createRequire } = await import('node:module')
+    const { dirname: pathDirname } = await import('node:path')
+    const pluginRequire = createRequire(import.meta.url)
+    const ssrEntry = pluginRequire.resolve('@uniweb/runtime/ssr')
+    let dir = pathDirname(ssrEntry)
+    for (let i = 0; i < 5; i++) {
+      const candidate = join(dir, 'package.json')
+      if (existsSync(candidate)) {
+        const pkg = JSON.parse(await readFile(candidate, 'utf-8'))
+        if (pkg.name === '@uniweb/runtime') {
+          runtimePkgPath = candidate
+          break
+        }
+      }
+      const parent = resolve(dir, '..')
+      if (parent === dir) break
+      dir = parent
+    }
+  } catch {
+    // Fall through to the walk-up search.
+  }
+
+  if (!runtimePkgPath) {
+    let dir = projectRoot
+    for (let i = 0; i < 10; i++) {
+      const candidate = join(dir, 'node_modules', '@uniweb', 'runtime', 'package.json')
+      if (existsSync(candidate)) {
+        runtimePkgPath = candidate
+        break
+      }
+      const parent = resolve(dir, '..')
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+
+  if (!runtimePkgPath) {
+    // No runtime resolvable. Skip emission — edge will treat as legacy.
+    return
+  }
+
+  let runtimeVersion
+  try {
+    const pkg = JSON.parse(await readFile(runtimePkgPath, 'utf-8'))
+    runtimeVersion = pkg.version
+  } catch {
+    return
+  }
+  if (!runtimeVersion) return
+
+  // Read foundation's own package.json for an optional runtimePolicy
+  // field. Default policy (auto-patch) lives at the registry layer; we
+  // only record the foundation's override if explicitly set.
+  let policy = null
+  try {
+    const foundationPkgPath = join(projectRoot, 'package.json')
+    if (existsSync(foundationPkgPath)) {
+      const foundationPkg = JSON.parse(await readFile(foundationPkgPath, 'utf-8'))
+      policy = foundationPkg?.uniweb?.runtimePolicy ?? null
+    }
+  } catch {
+    // Foundation package.json malformed; skip policy. Pin still emits.
+  }
+
+  const pin = { runtime: runtimeVersion }
+  if (policy) pin.policy = policy
+
+  const pinPath = join(outDir, 'runtime-pin.json')
+  await writeFile(pinPath, JSON.stringify(pin, null, 2) + '\n', 'utf-8')
+  console.log(`Generated runtime-pin.json (runtime ${runtimeVersion}${policy ? `, policy ${policy}` : ''})`)
+}
 
 /**
  * Build a self-contained ESM bundle for edge SSR (Cloudflare Dynamic Workers).
@@ -199,6 +313,7 @@ export function foundationBuildPlugin(options = {}) {
 
   let resolvedSrcDir
   let resolvedOutDir
+  let resolvedRoot
   let isProduction
 
   return {
@@ -217,6 +332,7 @@ export function foundationBuildPlugin(options = {}) {
     async configResolved(config) {
       resolvedSrcDir = resolve(config.root, srcDir)
       resolvedOutDir = config.build.outDir
+      resolvedRoot = config.root
       isProduction = config.mode === 'production'
     },
 
@@ -243,7 +359,17 @@ export function foundationBuildPlugin(options = {}) {
 
       console.log(`Generated meta/schema.json with ${Object.keys(schema).length - 1} components`)
 
-      // Build self-contained SSR bundle for edge rendering (Dynamic Workers)
+      // Emit runtime-pin.json so the edge isolate (under Strategy S) can
+      // side-load the matching runtime/{ver}/ssr.js. Lands silently before
+      // the dual-mode resolver ships; foundations published in the dual-mode
+      // window already have the pin and start using the split-bundle path
+      // automatically once the edge is updated.
+      await emitRuntimePin(outDir, resolvedRoot)
+
+      // Build self-contained SSR bundle for edge rendering (Dynamic Workers).
+      // Stays in the build until Strategy S Phase 2 — dual-mode edge
+      // resolver continues to fall back to it for foundations without
+      // a runtime pin.
       await buildSSRBundle(outDir)
     },
 
