@@ -134,8 +134,10 @@ async function emitRuntimePin(outDir, projectRoot) {
   if (!runtimeVersion) return
 
   // Read foundation's own package.json for an optional runtimePolicy
-  // field. Default policy (auto-patch) lives at the registry layer; we
-  // only record the foundation's override if explicitly set.
+  // field. Default policy (auto-minor) is applied platform-side when
+  // the field is omitted; we only record the foundation's override
+  // here if explicitly set. See framework/docs/reference/foundation-config.md
+  // for the full set of `uniweb.*` fields foundations can declare.
   let policy = null
   try {
     const foundationPkgPath = join(projectRoot, 'package.json')
