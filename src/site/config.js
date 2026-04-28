@@ -60,7 +60,7 @@ function normalizeBasePath(raw) {
  * @param {string|Object} foundation - Foundation config from site.yml
  * @returns {{ type: 'local'|'npm'|'url', name?: string, url?: string, cssUrl?: string, path?: string }}
  */
-function detectFoundationType(foundation, siteRoot) {
+export function detectFoundationType(foundation, siteRoot) {
   // Object form with explicit URL
   if (foundation && typeof foundation === 'object') {
     if (foundation.url) {
@@ -227,6 +227,16 @@ export async function defineSiteConfig(options = {}) {
 
   // Read site.yml
   const siteConfig = readSiteConfig(siteRoot)
+
+  // Allow callers to override `foundation:` without modifying site.yml on
+  // disk. Used by `uniweb deploy` to substitute a workspace-local file: ref
+  // with the resolved registry ref (`@ns/name@ver`) for the duration of the
+  // deploy build, so the site builds in runtime/link mode against the just-
+  // published artifact instead of bundling the local source.
+  const foundationOverride = process.env.UNIWEB_FOUNDATION_REF
+  if (foundationOverride) {
+    siteConfig.foundation = foundationOverride
+  }
 
   // Determine base path for deployment (priority: option > env > site.yml)
   // Normalize: ensure leading slash, collapse repeated slashes, add trailing slash for Vite

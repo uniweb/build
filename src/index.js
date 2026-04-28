@@ -48,7 +48,7 @@ export {
 export { defineFoundationConfig } from './foundation/config.js'
 
 // Site config
-export { defineSiteConfig } from './site/config.js'
+export { defineSiteConfig, detectFoundationType } from './site/config.js'
 
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'
