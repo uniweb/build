@@ -261,15 +261,15 @@ export async function defineSiteConfig(options = {}) {
   const rawBase = baseOption || process.env.UNIWEB_BASE || siteConfig.base
   const base = rawBase ? normalizeBasePath(String(rawBase)) : undefined
 
-  // Check for shell mode (no embedded content, for dynamic backend)
-  const isShellMode = process.env.UNIWEB_SHELL === 'true'
-
   // Detect foundation type
   const foundationInfo = detectFoundationType(siteConfig.foundation, siteRoot)
 
-  // Check for runtime mode (env variable, URL-based foundation, or shell mode)
+  // Check for runtime mode (env variable or URL-based foundation).
+  // Runtime mode means the foundation is loaded by URL at runtime; the
+  // site bundles only the runtime SPA + import-map bridges, not the
+  // foundation itself.
   const isRuntimeMode =
-    isShellMode || process.env.VITE_FOUNDATION_MODE === 'runtime' || foundationInfo.type === 'url'
+    process.env.VITE_FOUNDATION_MODE === 'runtime' || foundationInfo.type === 'url'
 
   // Extensions are always runtime-loaded via import(), so they need import maps
   // to resolve bare specifiers (react, @uniweb/core) even in bundled mode
@@ -361,8 +361,6 @@ export async function defineSiteConfig(options = {}) {
     // Site content collection and injection
     siteContentPlugin({
       sitePath: './',
-      inject: !isShellMode,
-      shell: isShellMode,
       seo,
       assets,
       search,
@@ -431,8 +429,7 @@ export async function defineSiteConfig(options = {}) {
   // In runtime mode, foundation JS is loaded via import() and CSS is injected
   // dynamically in JavaScript — the browser doesn't discover them until JS executes.
   // These <link> tags let the browser start fetching during HTML parsing.
-  // Shell mode is excluded: URLs come from __DATA__ at serve time (unicloud handles it).
-  if (isRuntimeMode && !isShellMode) {
+  if (isRuntimeMode) {
     plugins.push({
       name: 'uniweb:foundation-preload',
       transformIndexHtml: {
@@ -495,7 +492,7 @@ export async function defineSiteConfig(options = {}) {
     plugins,
 
     define: {
-      __FOUNDATION_CONFIG__: isShellMode ? 'null' : JSON.stringify(foundationConfig)
+      __FOUNDATION_CONFIG__: JSON.stringify(foundationConfig)
     },
 
     resolve: {
