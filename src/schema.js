@@ -19,8 +19,10 @@ import { inferTitle } from './utils/infer-title.js'
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
 
-// Foundation config file name
-const FOUNDATION_FILE_NAME = 'foundation.js'
+// Foundation authored-declarations file name. `main.js` is the canonical
+// new name; `foundation.js` is the legacy name kept for backward compat.
+// Whichever exists at the source root is loaded.
+const FOUNDATION_FILE_NAMES = ['main.js', 'foundation.js']
 
 // Default paths to scan for section types (relative to srcDir)
 const DEFAULT_SECTION_PATHS = ['sections']
@@ -94,22 +96,28 @@ export async function loadPackageJson(srcDir) {
 }
 
 /**
- * Load foundation-level config file (foundation.js)
+ * Load foundation-level config file (main.js, fallback foundation.js)
  *
  * Contains foundation-wide configuration:
  * - vars: CSS custom properties sites can override
- * - Layout: Custom layout component
+ * - defaultLayout: Default layout name
+ * - props: Foundation-wide props
  * - Future: providers, middleware, etc.
  */
 export async function loadFoundationConfig(srcDir) {
-  const filePath = join(srcDir, FOUNDATION_FILE_NAME)
-  if (!existsSync(filePath)) {
-    return {}
+  let filePath = null
+  for (const name of FOUNDATION_FILE_NAMES) {
+    const candidate = join(srcDir, name)
+    if (existsSync(candidate)) {
+      filePath = candidate
+      break
+    }
   }
+  if (!filePath) return {}
+
   try {
     const module = await import(pathToFileURL(filePath).href)
     // Support both default export and named exports
-    // Note: Layout/layouts no longer read from foundation.js — layouts come from src/layouts/ discovery
     return {
       ...module.default,
       vars: module.vars || module.default?.vars,

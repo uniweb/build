@@ -75,17 +75,23 @@ async function detectHostShareableImports(srcDir) {
 /**
  * Detect foundation config file (for props, vars, etc.)
  *
- * Looks for: foundation.js or foundation.jsx
+ * Looks for (in priority order): main.js, main.jsx, foundation.js, foundation.jsx
+ *
+ * The canonical name is `main.js` (the foundation package's main authored
+ * module). `foundation.js` is the legacy name and remains supported so
+ * existing foundations build without a rename.
  *
  * The file should export:
  * - props (optional) - Foundation-wide props
  * - vars (optional) - CSS custom properties (also read by schema builder)
  * - defaultLayout (optional) - Default layout name
  *
- * Note: Layout components are now discovered from src/layouts/
+ * Note: Layout components are now discovered from layouts/ at the source root.
  */
 function detectFoundationExports(srcDir) {
   const candidates = [
+    { path: 'main.js', ext: 'js' },
+    { path: 'main.jsx', ext: 'jsx' },
     { path: 'foundation.js', ext: 'js' },
     { path: 'foundation.jsx', ext: 'jsx' },
   ]
@@ -374,8 +380,9 @@ export function shouldRegenerateForFile(file, srcDir) {
     return 'meta.js changed'
   }
 
-  // foundation.js / foundation.jsx at root — affects capabilities import
-  if (/^foundation\.(js|jsx)$/.test(rel)) {
+  // main.js / main.jsx / foundation.js / foundation.jsx at root —
+  // the authored declarations file affects the capabilities import.
+  if (/^(main|foundation)\.(js|jsx)$/.test(rel)) {
     return 'foundation config changed'
   }
 
