@@ -25,6 +25,7 @@ import { watch } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { build } from 'vite'
+import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 
 /**
  * Create the foundation dev plugin
@@ -168,7 +169,7 @@ export function foundationDevPlugin(options = {}) {
 
       // Watch foundation source for changes
       if (shouldWatch) {
-        const srcPath = join(resolvedFoundationPath, 'src')
+        const srcPath = resolveFoundationSrcPath(resolvedFoundationPath)
 
         // Debounce rebuilds
         let rebuildTimeout = null

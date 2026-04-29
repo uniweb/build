@@ -25,6 +25,7 @@
 
 import { resolve } from 'node:path'
 import { foundationPlugin } from '../vite-foundation-plugin.js'
+import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 
 /**
  * Default externals for foundations
@@ -61,8 +62,16 @@ const DEFAULT_EXTERNALS = [
  * @returns {Promise<Object>} Vite configuration
  */
 export async function defineFoundationConfig(options = {}) {
+  // Determine foundation root (where vite.config.js is)
+  const foundationRoot = process.cwd()
+
+  // Source directory derived from package.json::main. `'src'` for legacy
+  // nested layouts, `'.'` for flat layouts. The default `entry` follows.
+  const srcDir = resolveFoundationSrcDir(foundationRoot)
+  const defaultEntry = srcDir === '.' ? '_entry.generated.js' : `${srcDir}/_entry.generated.js`
+
   const {
-    entry = 'src/_entry.generated.js',
+    entry = defaultEntry,
     fileName = 'foundation',
     sections: sectionPaths,
     externals: additionalExternals = [],
@@ -73,9 +82,6 @@ export async function defineFoundationConfig(options = {}) {
     build: buildOverrides = {},
     ...restOptions
   } = options
-
-  // Determine foundation root (where vite.config.js is)
-  const foundationRoot = process.cwd()
 
   // Build externals list
   const externals = includeDefaultExternals
@@ -109,7 +115,7 @@ export async function defineFoundationConfig(options = {}) {
   // Build the plugins array
   // foundationPlugin handles entry generation and schema building
   const plugins = [
-    foundationPlugin({ srcDir: 'src', sections: sectionPaths }),
+    foundationPlugin({ srcDir, sections: sectionPaths }),
     tailwind && tailwindcss(),
     react(),
     svgr(),

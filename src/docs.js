@@ -9,6 +9,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
 import { buildSchema } from './schema.js'
+import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 
 /**
  * Generate markdown documentation for a single component
@@ -174,7 +175,7 @@ export async function generateDocs(foundationDir, options = {}) {
     schema = JSON.parse(schemaContent)
   } else {
     // Build schema from source
-    const srcDir = join(foundationDir, 'src')
+    const srcDir = resolveFoundationSrcPath(foundationDir)
     if (!existsSync(srcDir)) {
       throw new Error(`Source directory not found: ${srcDir}`)
     }

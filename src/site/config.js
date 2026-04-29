@@ -25,6 +25,7 @@ import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
 import { generateEntryPoint, shouldRegenerateForFile } from '../generate-entry.js'
 import { importMapPlugin } from '../import-map-plugin.js'
+import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -293,7 +294,7 @@ export async function defineSiteConfig(options = {}) {
   const ensureFoundationEntryPlugin = !isRuntimeMode && foundationInfo.type === 'local' ? {
     name: 'uniweb:ensure-foundation-entry',
     async config() {
-      const srcDir = join(foundationInfo.path, 'src')
+      const srcDir = resolveFoundationSrcPath(foundationInfo.path)
       const entryPath = join(srcDir, '_entry.generated.js')
 
       // Always regenerate on dev start to ensure it's current
@@ -310,7 +311,7 @@ export async function defineSiteConfig(options = {}) {
 
     configureServer(server) {
       // Watch foundation src for structural changes that affect the entry
-      const srcDir = join(foundationInfo.path, 'src')
+      const srcDir = resolveFoundationSrcPath(foundationInfo.path)
       const entryPath = join(srcDir, '_entry.generated.js')
 
       server.watcher.add(srcDir)
