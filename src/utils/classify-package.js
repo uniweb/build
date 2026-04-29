@@ -35,14 +35,19 @@ export function classifyPackage(packagePath) {
   // 1. Strongest foundation marker: package.json::main points at the
   //    build-generated entry. Only Uniweb foundations have this shape.
   const pkgPath = join(packagePath, 'package.json')
+  let pkg = null
+  let pkgExists = false
   if (existsSync(pkgPath)) {
+    pkgExists = true
     try {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+      pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
       if (typeof pkg.main === 'string' && /_entry\.generated\.js$/.test(pkg.main)) {
         return 'foundation'
       }
     } catch {
-      // Malformed package.json — fall through to file-based signals.
+      // Malformed package.json — treat as if it weren't there for the
+      // file-based signals below.
+      pkgExists = false
     }
   }
 
@@ -52,12 +57,23 @@ export function classifyPackage(packagePath) {
     return 'site'
   }
 
-  // 3. Foundation fallback for unscaffolded directories: authored
-  //    declarations file at the resolved source root. Accept both the
-  //    new name (main.js) and the legacy name (foundation.js).
-  const srcDir = resolveFoundationSrcPath(packagePath)
-  if (existsSync(join(srcDir, 'main.js'))) return 'foundation'
-  if (existsSync(join(srcDir, 'foundation.js'))) return 'foundation'
+  // 3. Foundation fallback — ONLY for unscaffolded directories without a
+  //    package.json. Foundations created by the CLI always set
+  //    `main: "./_entry.generated.js"`, so a package.json that doesn't
+  //    match step 1 is by definition not a foundation. Falling through
+  //    here when package.json exists is what made `classifyPackage(<workspace
+  //    root>)` claim 'foundation' (the root's `src/main.js` is the
+  //    foundation subpackage's source, not the root's own source) — which
+  //    in turn made `uniweb build` at the workspace root run vite directly
+  //    against the workspace and fail with "Could not resolve entry module
+  //    'index.html'". Workspace roots also commonly carry a `workspaces`
+  //    field; treat that as a hard signal that this directory is not a
+  //    leaf package.
+  if (!pkgExists && !pkg?.workspaces) {
+    const srcDir = resolveFoundationSrcPath(packagePath)
+    if (existsSync(join(srcDir, 'main.js'))) return 'foundation'
+    if (existsSync(join(srcDir, 'foundation.js'))) return 'foundation'
+  }
 
   // 4. Site fallback: pages/ at root.
   if (existsSync(join(packagePath, 'pages'))) return 'site'
