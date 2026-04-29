@@ -89,21 +89,38 @@ export function detectFoundationType(foundation, siteRoot) {
     }
   }
 
-  // Registry scoped ref: "@namespace/name@version". By definition link-mode —
-  // the foundation lives on the hosting edge (R2) and is loaded at runtime.
-  // Surfacing this as `type: 'url'` makes Vite skip the local-foundation
-  // bundling path and use the noop virtual module (no need for VITE_FOUNDATION_MODE=runtime
-  // env var or a local foundation folder). Base URL defaults to the production
-  // worker but is overridable via UNIWEB_REGISTRY_URL for self-hosted / staging
-  // environments.
-  const scopedMatch = /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
-  if (scopedMatch) {
-    const [, ns, fn, ver] = scopedMatch
+  // Registry scoped ref. Two shapes:
+  //   `@org/name@version`  — org scope, namespace is a lowercase slug
+  //   `~uuid/name@version` — personal scope, namespace is a base58 memberUuid
+  //                          (mixed case allowed). Server-rewritten from
+  //                          empty-scope (bare-name) publishes.
+  // Both are link-mode by definition — the foundation lives on the hosting
+  // edge (R2) and is loaded at runtime. Surfacing this as `type: 'url'`
+  // makes Vite skip the local-foundation bundling path and use the noop
+  // virtual module. Base URL defaults to the production worker but is
+  // overridable via UNIWEB_REGISTRY_URL for self-hosted / staging.
+  const orgScopedMatch = /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
+  const personalScopedMatch = /^~([A-Za-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
+  if (orgScopedMatch || personalScopedMatch) {
     const base = process.env.UNIWEB_REGISTRY_URL || 'https://site-router.uniweb-edge.workers.dev'
+    if (orgScopedMatch) {
+      const [, ns, fn, ver] = orgScopedMatch
+      // Legacy plain-slash URL form (preserved — worker still accepts it
+      // for back-compat with sites built against earlier CLI releases).
+      return {
+        type: 'url',
+        url: `${base}/foundations/${ns}/${fn}/${ver}/foundation.js`,
+        cssUrl: `${base}/foundations/${ns}/${fn}/${ver}/assets/foundation.css`
+      }
+    }
+    // Personal-scope URL form — sigil + canonical `<name>@<version>` shape.
+    // The worker only accepts this exact form for personal scopes (the
+    // plain-slash form is org-scope-only).
+    const [, uuid, fn, ver] = personalScopedMatch
     return {
       type: 'url',
-      url: `${base}/foundations/${ns}/${fn}/${ver}/foundation.js`,
-      cssUrl: `${base}/foundations/${ns}/${fn}/${ver}/assets/foundation.css`
+      url: `${base}/foundations/~${uuid}/${fn}@${ver}/foundation.js`,
+      cssUrl: `${base}/foundations/~${uuid}/${fn}@${ver}/assets/foundation.css`
     }
   }
 
