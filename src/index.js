@@ -50,5 +50,8 @@ export { defineFoundationConfig } from './foundation/config.js'
 // Site config
 export { defineSiteConfig, detectFoundationType } from './site/config.js'
 
+// Foundation source root resolution (reads package.json::main)
+export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'
+
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'
