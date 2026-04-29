@@ -10,6 +10,7 @@ export { siteContentPlugin } from './plugin.js'
 export { defineSiteConfig, readSiteConfig, default } from './config.js'
 export { collectSiteContent } from './content-collector.js'
 export { buildSiteData } from './build-site-data.js'
+export { shouldSplitContent } from './split-content.js'
 export {
   resolveAssetPath,
   walkContentAssets,
