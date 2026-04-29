@@ -64,18 +64,26 @@ export async function loadComponentMeta(componentDir) {
 }
 
 /**
- * Load package.json from foundation root
- * Extracts identity fields: name, version, description
+ * Load package.json from a foundation's root.
+ * Extracts identity fields: name, version, description.
  *
- * @param {string} srcDir - Source directory (e.g., 'src')
+ * The foundation's `package.json` lives at the *foundation root*, not at
+ * the source root. For the legacy nested layout (`main: "./src/_entry.generated.js"`),
+ * foundation root is `dirname(srcDir)`. For the flat layout
+ * (`main: "./_entry.generated.js"`), `srcDir` IS the foundation root —
+ * so we check srcDir first, then fall back to its parent.
+ *
+ * @param {string} srcDir - Foundation source directory
  * @returns {Object} Identity fields from package.json
  */
 export async function loadPackageJson(srcDir) {
-  // package.json is in the foundation root (parent of srcDir)
-  const foundationRoot = dirname(srcDir)
-  const packagePath = join(foundationRoot, 'package.json')
+  const candidates = [
+    join(srcDir, 'package.json'),          // flat layout: srcDir IS the foundation root
+    join(dirname(srcDir), 'package.json'), // legacy nested layout
+  ]
+  const packagePath = candidates.find(p => existsSync(p))
 
-  if (!existsSync(packagePath)) {
+  if (!packagePath) {
     return {}
   }
 
