@@ -181,12 +181,16 @@ describe('extractInsets', () => {
       type: 'NetworkDiagram',
       params: { variant: 'compact' },
       title: 'diagram',
+      embedKind: 'visual',
     })
 
-    // Doc should be mutated: inset_ref → inset_placeholder
+    // Doc should be mutated: inset_ref → inset_placeholder. The
+    // placeholder carries `embedKind` alongside `refId` so the runtime
+    // can route inline vs block rendering without re-reading the inset
+    // record.
     expect(doc.content[1]).toEqual({
       type: 'inset_placeholder',
-      attrs: { refId: 'inset_0' },
+      attrs: { refId: 'inset_0', embedKind: 'visual' },
     })
     // Other nodes untouched
     expect(doc.content[0].type).toBe('heading')
