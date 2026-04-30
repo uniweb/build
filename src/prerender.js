@@ -289,7 +289,7 @@ async function discoverLocaleContents(distDir, defaultContent) {
     }
   } catch (err) {
     // Ignore errors reading directory
-    if (process.env.DEBUG) {
+    if (process.env.UNIWEB_DEBUG) {
       console.error('Error discovering locale contents:', err.message)
     }
   }
@@ -627,7 +627,7 @@ export async function prerenderSite(siteDir, options = {}) {
           console.warn(`  Warning: Failed to render ${outputRoute}: ${result.error.message}`)
         }
 
-        if (process.env.DEBUG) {
+        if (process.env.UNIWEB_DEBUG) {
           // renderPage swallows the stack, but the classification message is informative
         }
         continue
