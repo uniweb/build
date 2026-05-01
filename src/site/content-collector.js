@@ -678,6 +678,7 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
         priority: null
       },
       fetch: null,
+      hasContent: true,
       sections: [section],
       order: prefix ? parseFloat(prefix) : undefined
     },
