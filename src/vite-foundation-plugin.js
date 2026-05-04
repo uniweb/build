@@ -163,7 +163,7 @@ async function emitRuntimePin(outDir, projectRoot) {
  * Foundations no longer carry their own runtime bundle. Runtime + React +
  * core + theming now live in R2 under `runtime/{version}/worker-runtime.js`,
  * published by the platform's `/deploy-runtime` skill, and side-loaded
- * by the Cloudflare isolate alongside `dist/foundation.js`.
+ * by the Cloudflare isolate alongside `dist/entry.js`.
  *
  * The invocation in `writeBundle()` is commented out; this function
  * definition is kept for the rollout window so it can be flipped back
@@ -184,13 +184,13 @@ async function emitRuntimePin(outDir, projectRoot) {
  * actually deduplicates shared modules across multiple ESM bundles, so
  * a multi-entry modules map became viable — that's what Strategy S uses.
  *
- * @param {string} outDir - Path to dist/ directory containing foundation.js
+ * @param {string} outDir - Path to dist/ directory containing entry.js
  */
 async function buildSSRBundle(outDir) {
   if (_buildingSSRBundle) return
   _buildingSSRBundle = true
 
-  const entryPath = join(outDir, 'foundation.js')
+  const entryPath = join(outDir, 'entry.js')
   try {
     const { build: esbuild } = await import('esbuild')
     const { statSync } = await import('node:fs')
@@ -248,7 +248,7 @@ async function buildSSRBundle(outDir) {
       : ''
 
     // Resolve React to a single package directory to avoid duplicate instances
-    // (foundation.js and runtime/ssr may resolve to different copies)
+    // (entry.js and runtime/ssr may resolve to different copies)
     const { dirname } = await import('node:path')
     let reactDir
     try {

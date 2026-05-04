@@ -49,7 +49,7 @@ const DEFAULT_EXTERNALS = [
  *
  * @param {Object} [options={}] - Configuration options
  * @param {string} [options.entry] - Entry point path (default: 'src/_entry.generated.js')
- * @param {string} [options.fileName] - Output file name (default: 'foundation')
+ * @param {string} [options.fileName] - Output file name (default: 'entry')
  * @param {string[]} [options.sections] - Paths to scan for section types (relative to src/).
  *                                       Default: ['sections']
  *                                       Example: ['sections', 'sections/marketing']
@@ -72,7 +72,7 @@ export async function defineFoundationConfig(options = {}) {
 
   const {
     entry = defaultEntry,
-    fileName = 'foundation',
+    fileName = 'entry',
     sections: sectionPaths,
     externals: additionalExternals = [],
     includeDefaultExternals = true,
@@ -134,7 +134,13 @@ export async function defineFoundationConfig(options = {}) {
       rollupOptions: {
         external: externals,
         output: {
-          assetFileNames: 'assets/[name][extname]'
+          // CSS bundled by Vite (cssCodeSplit: false) lands as
+          // assets/style.css so the URL filename is stable across foundations.
+          // Other assets (images, fonts) keep their source name.
+          assetFileNames: (assetInfo) => {
+            if (assetInfo.name?.endsWith('.css')) return 'assets/style[extname]'
+            return 'assets/[name][extname]'
+          }
         }
       },
       sourcemap,
