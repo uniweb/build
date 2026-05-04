@@ -13,6 +13,7 @@ import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
+import { getAdapter } from './hosts/index.js'
 
 /**
  * Resolve an extension URL to a filesystem path for prerender.
@@ -401,12 +402,16 @@ function getOutputPath(distDir, route) {
  * @param {Object} options
  * @param {string} options.foundationDir - Path to foundation directory (default: ../foundation)
  * @param {function} options.onProgress - Progress callback
+ * @param {string} [options.host] - Override `site.yml`'s `deploy.host`. Selects
+ *   the host adapter whose postBuild hook runs after pages are written.
+ *   See kb/framework/plans/static-host-deploy-adapters.md.
  * @returns {Promise<{pages: number, files: string[]}>}
  */
 export async function prerenderSite(siteDir, options = {}) {
   const {
     foundationDir = join(siteDir, '..', 'foundation'),
-    onProgress = () => {}
+    onProgress = () => {},
+    host: hostOverride = null,
   } = options
 
   const distDir = join(siteDir, 'dist')
@@ -686,31 +691,23 @@ export async function prerenderSite(siteDir, options = {}) {
     }
   }
 
-  // Generate _redirects file for Cloudflare Pages / Netlify
-  // Format: source destination status
-  //   302 = redirect (browser URL changes)
-  //   200 = rewrite/proxy (browser URL stays, host proxies transparently)
-  const routingEntries = []
-  for (const localeConfig of localeConfigs) {
-    const siteContent = JSON.parse(await readFile(localeConfig.contentPath, 'utf8'))
-    const prefix = localeConfig.routePrefix || ''
-    for (const page of siteContent.pages || []) {
-      if (page.redirect) {
-        routingEntries.push(`${prefix}${page.route} ${page.redirect} 302`)
-      }
-      if (page.rewrite) {
-        routingEntries.push(`${prefix}${page.route}/* ${page.rewrite}/:splat 200`)
-      }
-    }
-  }
-  if (routingEntries.length > 0) {
-    const redirectsPath = join(distDir, '_redirects')
-    // Append to existing _redirects if the developer maintains one
-    const existing = existsSync(redirectsPath) ? await readFile(redirectsPath, 'utf8') : ''
-    const generated = `# Auto-generated from page.yml redirect: and rewrite: declarations\n${routingEntries.join('\n')}\n`
-    await writeFile(redirectsPath, existing ? `${existing.trimEnd()}\n\n${generated}` : generated)
-    onProgress(`Generated _redirects (${routingEntries.length} entries)`)
-  }
+  // Emit host-specific helper files via the selected host adapter.
+  // Default = 'cloudflare-pages' (preserves the historical `_redirects`
+  // output for sites without a deploy: block; same format also works on
+  // Netlify). CLI --host flag overrides site.yml's deploy.host, which
+  // overrides the default.
+  // See kb/framework/plans/static-host-deploy-adapters.md.
+  const deployConfig = defaultSiteContent.config?.deploy || {}
+  const hostName = hostOverride || deployConfig.host || 'cloudflare-pages'
+  const adapter = getAdapter(hostName)
+  onProgress(`Host adapter: ${adapter.name}`)
+  await adapter.postBuild({
+    distDir,
+    siteContent: defaultSiteContent,
+    localeConfigs,
+    deployConfig,
+    onProgress,
+  })
 
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
 

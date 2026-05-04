@@ -58,8 +58,30 @@ function normalizeBasePath(raw) {
 /**
  * Detect foundation type from the foundation config value
  *
+ * Foundations are runtime federated modules, never npm packages — there is
+ * no fall-through to `node_modules`. A foundation reference resolves to one
+ * of two types:
+ *
+ *   - `'local'` — workspace-local source (sibling directory, file: dep, or
+ *     `../../foundations/<name>/`). The build inlines or runtime-links it
+ *     depending on the operating mode.
+ *   - `'url'`  — loaded by URL at runtime. Three URL shapes:
+ *       - `@org/name@ver`   → catalog ref (resolves against the registry CDN)
+ *       - `~siteId/name@ver` → site-bound ref (resolves to per-site storage
+ *                              at `sites/{siteId}/_src/...` on uniweb-edge,
+ *                              never enters the catalog namespace)
+ *       - `https://...`    → arbitrary URL
+ *
+ * Versionless registry refs (`@org/name`, `~siteId/name`) are rejected with
+ * a specific error — they were a silent fall-through before. Versionless
+ * names that don't match any local resolution path are also rejected, with
+ * guidance toward the right shape.
+ *
  * @param {string|Object} foundation - Foundation config from site.yml
- * @returns {{ type: 'local'|'npm'|'url', name?: string, url?: string, cssUrl?: string, path?: string }}
+ * @param {string} siteRoot - Path to site directory
+ * @returns {{ type: 'local'|'url', name?: string, url?: string, cssUrl?: string, path?: string }}
+ * @throws {Error} when the declaration shape is invalid (versionless registry
+ *   ref, unknown name with no local match, etc.)
  */
 export function detectFoundationType(foundation, siteRoot) {
   // Object form with explicit URL
@@ -89,19 +111,19 @@ export function detectFoundationType(foundation, siteRoot) {
     }
   }
 
-  // Registry scoped ref. Two shapes:
-  //   `@org/name@version`  — org scope, namespace is a lowercase slug
-  //   `~uuid/name@version` — personal scope, namespace is a base58 memberUuid
-  //                          (mixed case allowed). Server-rewritten from
-  //                          empty-scope (bare-name) publishes.
+  // Two URL-resolved registry shapes:
+  //   `@org/name@version`     → catalog ref. Resolves via the registry CDN.
+  //   `~siteId/name@version`  → site-bound ref. Resolves to per-site storage
+  //                             on uniweb-edge (sites/{siteId}/_src/...);
+  //                             never reaches the catalog R2 namespace.
   // Both are link-mode by definition — the foundation lives on the hosting
-  // edge (R2) and is loaded at runtime. Surfacing this as `type: 'url'`
-  // makes Vite skip the local-foundation bundling path and use the noop
-  // virtual module. Base URL defaults to the production worker but is
-  // overridable via UNIWEB_REGISTRY_URL for self-hosted / staging.
+  // edge and is loaded at runtime. Surfacing this as `type: 'url'` makes
+  // Vite skip the local-foundation bundling path and use the noop virtual
+  // module. Base URL defaults to the production worker but is overridable
+  // via UNIWEB_REGISTRY_URL for self-hosted / staging.
   const orgScopedMatch = /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
-  const personalScopedMatch = /^~([A-Za-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
-  if (orgScopedMatch || personalScopedMatch) {
+  const siteBoundMatch = /^~([A-Za-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
+  if (orgScopedMatch || siteBoundMatch) {
     const base = process.env.UNIWEB_REGISTRY_URL || 'https://site-router.uniweb-edge.workers.dev'
     if (orgScopedMatch) {
       const [, ns, fn, ver] = orgScopedMatch
@@ -113,16 +135,26 @@ export function detectFoundationType(foundation, siteRoot) {
         cssUrl: `${base}/foundations/${ns}/${fn}/${ver}/assets/foundation.css`
       }
     }
-    // Personal-scope URL form — sigil + canonical `<name>@<version>` shape.
-    // The worker only accepts this exact form for personal scopes (the
-    // plain-slash form is org-scope-only).
-    const [, uuid, fn, ver] = personalScopedMatch
+    // Site-bound URL form — sigil + canonical `<name>@<version>` shape.
+    // The worker dispatches on the `~` sigil to per-site storage rather
+    // than the catalog namespace.
+    const [, siteId, fn, ver] = siteBoundMatch
     return {
       type: 'url',
-      url: `${base}/foundations/~${uuid}/${fn}@${ver}/foundation.js`,
-      cssUrl: `${base}/foundations/~${uuid}/${fn}@${ver}/assets/foundation.css`
+      url: `${base}/foundations/~${siteId}/${fn}@${ver}/foundation.js`,
+      cssUrl: `${base}/foundations/~${siteId}/${fn}@${ver}/assets/foundation.css`
     }
   }
+
+  // Versionless scoped names (`@org/name`, `~siteId/name`) are valid as
+  // *handles* — they resolve through the local checks below (file: dep,
+  // workspace sibling) when the developer is iterating locally on a
+  // foundation that will eventually be published as `@org/name@ver`.
+  // Tianyu's uniweb.io site uses this shape:
+  //   site.yml:     foundation: '@uniweb/io'
+  //   package.json: "@uniweb/io": "file:../../foundations/io"
+  // The file: dep check below picks it up. If no local resolution exists
+  // either, the function throws below with a "missing version" hint.
 
   // Check if it's a local workspace sibling (directory name matches package name)
   const localPath = resolve(siteRoot, '..', name)
@@ -161,12 +193,33 @@ export function detectFoundationType(foundation, siteRoot) {
     }
   }
 
-  // Assume npm package
-  return {
-    type: 'npm',
-    name,
-    path: resolve(siteRoot, 'node_modules', name)
+  // Versionless scoped name that didn't resolve locally — likely a typo
+  // or a missing file: dep. Give a specific hint distinguishing the two
+  // common causes (forgot @version vs. forgot to wire the file: dep).
+  if (/^@[a-z0-9_-]+\//.test(name) || name.startsWith('~')) {
+    throw new Error(
+      `site.yml foundation: '${name}' did not resolve to a local source and no version was specified.\n` +
+      `If this is a workspace-local foundation, add it to the site's package.json:\n` +
+      `  "dependencies": { "${name}": "file:../path/to/foundation" }\n` +
+      `If this is a published catalog ref, include the version: '${name}@<version>' (e.g. '${name}@0.1.2').`
+    )
   }
+
+  // Foundations are not npm packages. If we get here, the declaration
+  // didn't match a workspace sibling, a `file:` dep, a foundations/ entry,
+  // a registry ref, or a URL — none of the supported shapes. Fail with
+  // guidance rather than fall through to a node_modules lookup that will
+  // produce a confusing error later in the build.
+  throw new Error(
+    `site.yml foundation: '${name}' did not resolve.\n` +
+    `Foundations must be one of:\n` +
+    `  - a workspace-local sibling (a directory next to the site, named '${name}')\n` +
+    `  - a 'file:' dep in the site's package.json\n` +
+    `  - a directory in '../../foundations/${name}'\n` +
+    `  - a versioned registry ref: '@org/${name}@<version>' or '~<siteId>/${name}@<version>'\n` +
+    `  - a full URL: 'https://...'\n` +
+    `Foundations are runtime federated modules, not npm packages — there is no fall-through to node_modules.`
+  )
 }
 
 /**
