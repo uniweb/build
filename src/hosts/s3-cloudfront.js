@@ -109,17 +109,22 @@ function detectFoundationMode(siteContent) {
  * cache rules, invalidation patterns, and whether the site has a
  * runtime cross-origin dependency on the foundation URL (linked) or
  * is fully self-contained (standalone).
+ *
+ * postBuild has no access to deploy.yml, so config-shaped fields
+ * (bucket, distributionId, region, cacheRules, invalidationPaths)
+ * land null at build time. The deploy hook augments the manifest
+ * with the resolved target's config before uploading dist/.
  */
-function buildManifest(deployConfig, siteContent = null) {
+function buildManifest(siteContent = null) {
   return {
     host: 's3-cloudfront',
     generatedAt: new Date().toISOString(),
-    bucket: deployConfig.bucket || null,
-    distributionId: deployConfig.distributionId || null,
-    region: deployConfig.region || null,
+    bucket: null,
+    distributionId: null,
+    region: null,
     foundationMode: detectFoundationMode(siteContent),
-    cacheRules: deployConfig.cacheRules || DEFAULT_CACHE_RULES,
-    invalidationPaths: deployConfig.invalidationPaths || DEFAULT_INVALIDATION_PATHS,
+    cacheRules: null,
+    invalidationPaths: null,
     cloudfrontFunctionFile: FUNCTION_FILE,
     notes: [
       'Upload cloudfront-function.js to your CloudFront distribution as a viewer-request function on the default cache behavior.',
@@ -135,11 +140,11 @@ function buildManifest(deployConfig, siteContent = null) {
  * adapter left one behind — defense in depth so the same dist/ never
  * carries conflicting host outputs.
  */
-async function postBuild({ distDir, siteContent, deployConfig = {}, onProgress = () => {} }) {
+async function postBuild({ distDir, siteContent, onProgress = () => {} }) {
   await writeFile(join(distDir, FUNCTION_FILE), FUNCTION_SOURCE)
   onProgress(`Wrote ${FUNCTION_FILE} (CloudFront Function source)`)
 
-  const manifest = buildManifest(deployConfig, siteContent)
+  const manifest = buildManifest(siteContent)
   await writeFile(join(distDir, MANIFEST_FILE), JSON.stringify(manifest, null, 2))
   onProgress(`Wrote ${MANIFEST_FILE}`)
   onProgress(`Site mode: ${manifest.foundationMode.shape}` + (manifest.foundationMode.shape === 'linked' && manifest.foundationMode.url ? ` (foundation loaded from ${manifest.foundationMode.url})` : ''))
@@ -149,6 +154,28 @@ async function postBuild({ distDir, siteContent, deployConfig = {}, onProgress =
     await unlink(stale)
     onProgress(`Removed stale ${REDIRECTS_FILE} (Netlify-shaped, not used by CloudFront)`)
   }
+}
+
+/**
+ * Update the manifest written at build time with config from the
+ * resolved deploy.yml target. Called from the deploy hook before
+ * upload so the artifact-on-disk reflects what was actually deployed.
+ */
+async function augmentManifest(distDir, deployConfig) {
+  const path = join(distDir, MANIFEST_FILE)
+  let manifest
+  try {
+    manifest = JSON.parse(await readFile(path, 'utf8'))
+  } catch {
+    return // Build did not write a manifest — nothing to augment.
+  }
+  manifest.bucket = deployConfig.bucket ?? manifest.bucket
+  manifest.distributionId = deployConfig.distributionId ?? manifest.distributionId
+  manifest.region = deployConfig.region ?? manifest.region
+  manifest.cacheRules = deployConfig.cacheRules || DEFAULT_CACHE_RULES
+  manifest.invalidationPaths = deployConfig.invalidationPaths || DEFAULT_INVALIDATION_PATHS
+  manifest.deployedAt = new Date().toISOString()
+  await writeFile(path, JSON.stringify(manifest, null, 2))
 }
 
 /* ------------------------------------------------------------------ *
@@ -269,7 +296,7 @@ function translateAwsError(exitCode, stderr, args) {
   if (/NoSuchBucket/i.test(out)) {
     return new DeployError(
       `aws ${subcommand} failed: the configured S3 bucket does not exist.`,
-      { hint: 'Verify `deploy.bucket` in site.yml and that the bucket is in `deploy.region`.' }
+      { hint: 'Verify `bucket` and `region` on the resolved deploy.yml target.' }
     )
   }
 
@@ -296,15 +323,15 @@ function translateAwsError(exitCode, stderr, args) {
 }
 
 /**
- * Validate the deploy block from site.yml. Throws DeployError listing
+ * Validate the resolved deploy.yml target. Throws DeployError listing
  * every missing field at once (so the user fixes the whole block in
  * one pass instead of trial-and-error).
  */
 function validateDeployConfig(deployConfig) {
   const missing = []
-  if (!deployConfig.bucket)         missing.push('deploy.bucket')
-  if (!deployConfig.distributionId) missing.push('deploy.distributionId')
-  if (!deployConfig.region)         missing.push('deploy.region')
+  if (!deployConfig.bucket)         missing.push('bucket')
+  if (!deployConfig.distributionId) missing.push('distributionId')
+  if (!deployConfig.region)         missing.push('region')
 
   if (missing.length === 0) return
 
@@ -312,14 +339,15 @@ function validateDeployConfig(deployConfig) {
     `s3-cloudfront deploy is missing required configuration.`,
     {
       hint: [
-        `Add to site.yml:`,
+        `Add to deploy.yml under the resolved target:`,
         ``,
-        `  deploy:`,
-        `    host: s3-cloudfront`,
-        `    bucket: <your-bucket-name>`,
-        `    distributionId: <E1ABC...>`,
-        `    region: us-east-1`,
-        `    profile: <optional AWS_PROFILE>`,
+        `  targets:`,
+        `    production:`,
+        `      host: s3-cloudfront`,
+        `      bucket: <your-bucket-name>`,
+        `      distributionId: <E1ABC...>`,
+        `      region: us-east-1`,
+        `      profile: <optional AWS_PROFILE>`,
         ``,
         `Missing: ${missing.join(', ')}`,
       ].join('\n'),
@@ -330,8 +358,8 @@ function validateDeployConfig(deployConfig) {
 /**
  * Pick a cache-control header for a sync pass. The simplest split:
  * one rule for `assets/**`, another for everything else. Users who
- * need finer control can declare per-pattern rules in site.yml's
- * deploy.cacheRules.
+ * need finer control can declare per-pattern rules under their
+ * deploy.yml target's cacheRules.
  */
 function pickCacheControl(rules, kind) {
   if (kind === 'assets') {
@@ -344,6 +372,11 @@ function pickCacheControl(rules, kind) {
 
 async function deploy({ distDir, deployConfig = {}, env = process.env, log = () => {} }) {
   validateDeployConfig(deployConfig)
+
+  // Augment the manifest written at build time with the resolved
+  // target's bucket / distId / region / cache rules so the artifact
+  // on disk reflects what was actually deployed.
+  await augmentManifest(distDir, deployConfig)
 
   // Read the manifest the postBuild step wrote so the deploy can echo
   // the foundation packaging mode. Best-effort — manifest is optional.
@@ -360,7 +393,7 @@ async function deploy({ distDir, deployConfig = {}, env = process.env, log = () 
     if (shape === 'linked' && url) {
       log(`Site mode: linked — foundation loaded at runtime from ${url}`)
       log(`  ⚠ The deployed site has a runtime cross-origin dependency on this URL.`)
-      log(`  ⚠ For a fully self-contained site, point site.yml's foundation: at a workspace-local file: ref.`)
+      log(`  ⚠ For a fully self-contained site, point site.yml's foundation at a workspace-local file: ref.`)
     } else if (shape === 'linked') {
       log(`Site mode: linked — foundation loaded by URL at runtime`)
     } else {
@@ -436,6 +469,7 @@ export {
   DEFAULT_CACHE_RULES,
   DEFAULT_INVALIDATION_PATHS,
   buildManifest,
+  augmentManifest,
   detectFoundationMode,
   validateDeployConfig,
   translateAwsError,

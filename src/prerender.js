@@ -402,8 +402,8 @@ function getOutputPath(distDir, route) {
  * @param {Object} options
  * @param {string} options.foundationDir - Path to foundation directory (default: ../foundation)
  * @param {function} options.onProgress - Progress callback
- * @param {string} [options.host] - Override `site.yml`'s `deploy.host`. Selects
- *   the host adapter whose postBuild hook runs after pages are written.
+ * @param {string} [options.host] - Name of the host adapter whose postBuild
+ *   hook runs after pages are written. Default: 'cloudflare-pages'.
  *   See kb/framework/plans/static-host-deploy-adapters.md.
  * @returns {Promise<{pages: number, files: string[]}>}
  */
@@ -693,19 +693,20 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // Emit host-specific helper files via the selected host adapter.
   // Default = 'cloudflare-pages' (preserves the historical `_redirects`
-  // output for sites without a deploy: block; same format also works on
-  // Netlify). CLI --host flag overrides site.yml's deploy.host, which
-  // overrides the default.
+  // output; same format also works on Netlify). The CLI's --host flag
+  // is the only input here — the build does not read deploy.yml. When
+  // the orchestrator (uniweb deploy) needs adapter-specific config
+  // (bucket, distributionId, …) at deploy time, it passes deploy.yml's
+  // resolved target to the adapter's deploy hook directly. postBuild
+  // only consumes the host name.
   // See kb/framework/plans/static-host-deploy-adapters.md.
-  const deployConfig = defaultSiteContent.config?.deploy || {}
-  const hostName = hostOverride || deployConfig.host || 'cloudflare-pages'
+  const hostName = hostOverride || 'cloudflare-pages'
   const adapter = getAdapter(hostName)
   onProgress(`Host adapter: ${adapter.name}`)
   await adapter.postBuild({
     distDir,
     siteContent: defaultSiteContent,
     localeConfigs,
-    deployConfig,
     onProgress,
   })
 

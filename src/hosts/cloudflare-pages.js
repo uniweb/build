@@ -14,7 +14,7 @@
  * Preserves any `_redirects` the developer authored manually by appending.
  *
  * This is the framework's historical default postBuild output and remains
- * the default when `site.yml` declares no `deploy.host`.
+ * the default when no `--host` flag is passed to `uniweb build`.
  */
 
 import { readFile, writeFile } from 'node:fs/promises'

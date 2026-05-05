@@ -18,6 +18,7 @@ import s3Cloudfront, {
   DEFAULT_CACHE_RULES,
   DEFAULT_INVALIDATION_PATHS,
   buildManifest,
+  augmentManifest,
   detectFoundationMode,
   validateDeployConfig,
   translateAwsError,
@@ -59,7 +60,7 @@ describe('s3-cloudfront postBuild', () => {
   })
 
   test('drops cloudfront-function.js with the rewrite source', async () => {
-    await s3Cloudfront.postBuild({ distDir, deployConfig: {}, onProgress: () => {} })
+    await s3Cloudfront.postBuild({ distDir, onProgress: () => {} })
     const fnPath = join(distDir, 'cloudfront-function.js')
     expect(existsSync(fnPath)).toBe(true)
     const body = await readFile(fnPath, 'utf8')
@@ -67,42 +68,28 @@ describe('s3-cloudfront postBuild', () => {
     expect(body).toContain('function handler(event)')
   })
 
-  test('drops a deploy manifest describing the configured deploy', async () => {
-    const deployConfig = {
-      bucket: 'my-bucket',
-      distributionId: 'E1ABC',
-      region: 'us-east-1',
-    }
-    await s3Cloudfront.postBuild({ distDir, deployConfig, onProgress: () => {} })
+  test('drops a deploy manifest with config fields null at build time', async () => {
+    // postBuild has no access to deploy.yml — config-shaped fields land
+    // null. The deploy hook augments the manifest before upload.
+    await s3Cloudfront.postBuild({ distDir, onProgress: () => {} })
 
     const manifestPath = join(distDir, '.uniweb-deploy-manifest.json')
     expect(existsSync(manifestPath)).toBe(true)
 
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
     expect(manifest.host).toBe('s3-cloudfront')
-    expect(manifest.bucket).toBe('my-bucket')
-    expect(manifest.distributionId).toBe('E1ABC')
-    expect(manifest.region).toBe('us-east-1')
-    expect(manifest.cacheRules).toEqual(DEFAULT_CACHE_RULES)
-    expect(manifest.invalidationPaths).toEqual(DEFAULT_INVALIDATION_PATHS)
+    expect(manifest.bucket).toBeNull()
+    expect(manifest.distributionId).toBeNull()
+    expect(manifest.region).toBeNull()
+    expect(manifest.cacheRules).toBeNull()
+    expect(manifest.invalidationPaths).toBeNull()
     expect(manifest.cloudfrontFunctionFile).toBe('cloudfront-function.js')
     expect(typeof manifest.generatedAt).toBe('string')
   })
 
-  test('manifest preserves user-provided cacheRules and invalidationPaths', () => {
-    const deployConfig = {
-      bucket: 'b', distributionId: 'd', region: 'r',
-      cacheRules: [{ match: 'images/**', cacheControl: 'public, max-age=999' }],
-      invalidationPaths: ['/foo'],
-    }
-    const manifest = buildManifest(deployConfig)
-    expect(manifest.cacheRules).toEqual(deployConfig.cacheRules)
-    expect(manifest.invalidationPaths).toEqual(deployConfig.invalidationPaths)
-  })
-
   test('manifest records standalone foundationMode for a workspace-local foundation', () => {
     const siteContent = { config: { foundation: 'file:../foundation' } }
-    const manifest = buildManifest({}, siteContent)
+    const manifest = buildManifest(siteContent)
     expect(manifest.foundationMode).toEqual({
       shape: 'standalone',
       foundation: 'file:../foundation',
@@ -112,7 +99,7 @@ describe('s3-cloudfront postBuild', () => {
 
   test('manifest records linked foundationMode for a registry ref', () => {
     const siteContent = { config: { foundation: '@uniweb/app@0.1.0' } }
-    const manifest = buildManifest({}, siteContent)
+    const manifest = buildManifest(siteContent)
     expect(manifest.foundationMode).toEqual({
       shape: 'linked',
       foundation: '@uniweb/app@0.1.0',
@@ -122,7 +109,7 @@ describe('s3-cloudfront postBuild', () => {
 
   test('manifest records linked foundationMode with url for an https foundation', () => {
     const siteContent = { config: { foundation: 'https://cdn.example/foundation.js' } }
-    const manifest = buildManifest({}, siteContent)
+    const manifest = buildManifest(siteContent)
     expect(manifest.foundationMode).toEqual({
       shape: 'linked',
       foundation: 'https://cdn.example/foundation.js',
@@ -132,14 +119,67 @@ describe('s3-cloudfront postBuild', () => {
 
   test('removes a stale _redirects file (defense in depth)', async () => {
     await writeFile(join(distDir, '_redirects'), '# left behind by netlify adapter')
-    await s3Cloudfront.postBuild({ distDir, deployConfig: {}, onProgress: () => {} })
+    await s3Cloudfront.postBuild({ distDir, onProgress: () => {} })
     expect(existsSync(join(distDir, '_redirects'))).toBe(false)
   })
 
   test('does not fail when _redirects is absent', async () => {
     await expect(
-      s3Cloudfront.postBuild({ distDir, deployConfig: {}, onProgress: () => {} })
+      s3Cloudfront.postBuild({ distDir, onProgress: () => {} })
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('augmentManifest', () => {
+  let distDir
+
+  beforeEach(async () => {
+    distDir = await mkdtemp(join(tmpdir(), 'uniweb-s3cf-aug-'))
+  })
+
+  afterEach(async () => {
+    await rm(distDir, { recursive: true, force: true })
+  })
+
+  test('fills bucket/distId/region/cacheRules from deployConfig', async () => {
+    await s3Cloudfront.postBuild({ distDir, onProgress: () => {} })
+    await augmentManifest(distDir, {
+      bucket: 'my-bucket',
+      distributionId: 'E1ABC',
+      region: 'us-east-1',
+    })
+    const manifest = JSON.parse(
+      await readFile(join(distDir, '.uniweb-deploy-manifest.json'), 'utf8')
+    )
+    expect(manifest.bucket).toBe('my-bucket')
+    expect(manifest.distributionId).toBe('E1ABC')
+    expect(manifest.region).toBe('us-east-1')
+    expect(manifest.cacheRules).toEqual(DEFAULT_CACHE_RULES)
+    expect(manifest.invalidationPaths).toEqual(DEFAULT_INVALIDATION_PATHS)
+    expect(typeof manifest.deployedAt).toBe('string')
+  })
+
+  test('preserves user-provided cacheRules and invalidationPaths', async () => {
+    await s3Cloudfront.postBuild({ distDir, onProgress: () => {} })
+    await augmentManifest(distDir, {
+      bucket: 'b',
+      distributionId: 'd',
+      region: 'r',
+      cacheRules: [{ match: 'images/**', cacheControl: 'public, max-age=999' }],
+      invalidationPaths: ['/foo'],
+    })
+    const manifest = JSON.parse(
+      await readFile(join(distDir, '.uniweb-deploy-manifest.json'), 'utf8')
+    )
+    expect(manifest.cacheRules).toEqual([{ match: 'images/**', cacheControl: 'public, max-age=999' }])
+    expect(manifest.invalidationPaths).toEqual(['/foo'])
+  })
+
+  test('no-ops cleanly when manifest is missing', async () => {
+    await expect(
+      augmentManifest(distDir, { bucket: 'b', distributionId: 'd', region: 'r' })
+    ).resolves.toBeUndefined()
+    expect(existsSync(join(distDir, '.uniweb-deploy-manifest.json'))).toBe(false)
   })
 })
 
@@ -188,9 +228,9 @@ describe('validateDeployConfig', () => {
     try { validateDeployConfig({}) } catch (e) { err = e }
     expect(err).toBeInstanceOf(DeployError)
     expect(err.message).toMatch(/missing required configuration/)
-    expect(err.hint).toContain('deploy.bucket')
-    expect(err.hint).toContain('deploy.distributionId')
-    expect(err.hint).toContain('deploy.region')
+    expect(err.hint).toMatch(/Missing: bucket, distributionId, region/)
+    expect(err.hint).toContain('deploy.yml')
+    expect(err.hint).toContain('targets:')
   })
 
   test('mentions only the actually-missing field', () => {
@@ -198,8 +238,8 @@ describe('validateDeployConfig', () => {
     try {
       validateDeployConfig({ bucket: 'b', region: 'r' })
     } catch (e) { err = e }
-    expect(err.hint).toMatch(/Missing: deploy\.distributionId/)
-    expect(err.hint).not.toMatch(/Missing:.*deploy\.bucket/)
+    expect(err.hint).toMatch(/Missing: distributionId/)
+    expect(err.hint).not.toMatch(/Missing:.*bucket/)
   })
 })
 
@@ -225,9 +265,9 @@ describe('translateAwsError', () => {
     expect(err.hint).toContain('cloudfront:CreateInvalidation')
   })
 
-  test('NoSuchBucket → points at deploy.bucket', () => {
+  test('NoSuchBucket → points at the deploy.yml target bucket', () => {
     const err = translateAwsError(255, 'NoSuchBucket: The specified bucket does not exist', ['s3', 'sync'])
-    expect(err.hint).toMatch(/deploy\.bucket/)
+    expect(err.hint).toMatch(/bucket.*region.*deploy\.yml/)
   })
 
   test('NoSuchDistribution → points at deploy.distributionId', () => {

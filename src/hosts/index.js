@@ -8,21 +8,27 @@
  *
  * Adapter shape:
  *   {
- *     name: string,                                 // matches site.yml deploy.host
+ *     name: string,                                 // matches deploy.yml targets[*].host
  *     async postBuild({                             // build-time hook
  *       distDir,         // absolute path to dist/
  *       siteContent,     // parsed site-content.json (default locale)
  *       localeConfigs,   // [{locale, contentPath, htmlPath, isDefault, routePrefix}, ...]
- *       deployConfig,    // siteContent.config.deploy (may be undefined)
  *       onProgress,      // (msg) => void
  *     }) {},
  *     async deploy({                                // deploy-time hook (optional)
  *       distDir,
- *       deployConfig,
+ *       deployConfig,    // resolved target's adapter-specific config
+ *                        // (bucket, distributionId, region, cacheRules, …)
  *       env,             // process.env
  *       log,             // (msg) => void
  *     }) {},
  *   }
+ *
+ * postBuild does not receive deployConfig. The build pipeline never
+ * reads deploy.yml; only the deploy orchestrator does. If an adapter
+ * needs config-aware artifact metadata (e.g., the bucket name baked
+ * into a manifest), it can write a placeholder at build time and have
+ * its deploy hook augment it with the resolved target before upload.
  *
  * `postBuild` is required. `deploy` is optional — adapters like
  * 'netlify' don't need it (Netlify deploys from git).
