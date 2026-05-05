@@ -47,3 +47,5 @@ export {
   mergeDataIntoContent,
   singularize
 } from './data-fetcher.js'
+export { loadDeployYml, resolveTarget } from './deploy-config.js'
+export { recordLastDeploy } from './deploy-config-writer.js'
