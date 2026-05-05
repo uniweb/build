@@ -13,6 +13,7 @@
  *       distDir,         // absolute path to dist/
  *       siteContent,     // parsed site-content.json (default locale)
  *       localeConfigs,   // [{locale, contentPath, htmlPath, isDefault, routePrefix}, ...]
+ *       ciContext,       // detect-ci-context.js output, or null on local builds
  *       onProgress,      // (msg) => void
  *     }) {},
  *     async deploy({                                // deploy-time hook (optional)
@@ -29,6 +30,8 @@
  * needs config-aware artifact metadata (e.g., the bucket name baked
  * into a manifest), it can write a placeholder at build time and have
  * its deploy hook augment it with the resolved target before upload.
+ * ciContext is universally available so adapters can record artifact
+ * provenance (CI host, branch, sha) in their on-disk artifacts.
  *
  * `postBuild` is required. `deploy` is optional — adapters like
  * 'netlify' don't need it (Netlify deploys from git).

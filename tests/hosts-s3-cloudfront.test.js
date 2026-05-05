@@ -117,6 +117,43 @@ describe('s3-cloudfront postBuild', () => {
     })
   })
 
+  test('manifest carries ciContext when provided', () => {
+    const ciContext = {
+      host: 'vercel',
+      runner: 'vercel',
+      branch: 'main',
+      sha: 'abc123',
+      isProduction: true,
+      publicUrl: 'https://mysite.vercel.app',
+      deploymentId: 'dpl_xyz',
+    }
+    const manifest = buildManifest(null, ciContext)
+    expect(manifest.ciContext).toEqual(ciContext)
+  })
+
+  test('manifest carries ciContext: null on local builds', () => {
+    expect(buildManifest(null, null).ciContext).toBeNull()
+    // Default arg also lands null.
+    expect(buildManifest(null).ciContext).toBeNull()
+  })
+
+  test('postBuild persists ciContext to the manifest on disk', async () => {
+    const ciContext = {
+      host: 'vercel',
+      runner: 'vercel',
+      branch: 'main',
+      sha: 'abc123',
+      isProduction: true,
+      publicUrl: 'https://mysite.vercel.app',
+      deploymentId: null,
+    }
+    await s3Cloudfront.postBuild({ distDir, ciContext, onProgress: () => {} })
+    const manifest = JSON.parse(
+      await readFile(join(distDir, '.uniweb-deploy-manifest.json'), 'utf8')
+    )
+    expect(manifest.ciContext).toEqual(ciContext)
+  })
+
   test('removes a stale _redirects file (defense in depth)', async () => {
     await writeFile(join(distDir, '_redirects'), '# left behind by netlify adapter')
     await s3Cloudfront.postBuild({ distDir, onProgress: () => {} })

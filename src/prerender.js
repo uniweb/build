@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url'
 import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { getAdapter } from './hosts/index.js'
+import { detectCiContext } from './hosts/detect-ci-context.js'
 
 /**
  * Resolve an extension URL to a filesystem path for prerender.
@@ -692,21 +693,31 @@ export async function prerenderSite(siteDir, options = {}) {
   }
 
   // Emit host-specific helper files via the selected host adapter.
-  // Default = 'cloudflare-pages' (preserves the historical `_redirects`
-  // output; same format also works on Netlify). The CLI's --host flag
-  // is the only input here — the build does not read deploy.yml. When
-  // the orchestrator (uniweb deploy) needs adapter-specific config
-  // (bucket, distributionId, …) at deploy time, it passes deploy.yml's
-  // resolved target to the adapter's deploy hook directly. postBuild
-  // only consumes the host name.
+  //
+  // Resolution order:
+  //   1) CLI --host flag (hostOverride)
+  //   2) CI host detected from env vars (Vercel, CF Pages, Netlify)
+  //   3) 'cloudflare-pages' default (preserves the historical
+  //      `_redirects` output; same format also works on Netlify)
+  //
+  // The build does not read deploy.yml. When the orchestrator
+  // (uniweb deploy) needs adapter-specific config (bucket,
+  // distributionId, …) at deploy time, it passes deploy.yml's resolved
+  // target to the adapter's deploy hook directly. postBuild consumes
+  // only the host name and the ciContext (artifact provenance).
   // See kb/framework/plans/static-host-deploy-adapters.md.
-  const hostName = hostOverride || 'cloudflare-pages'
+  const ciContext = detectCiContext()
+  const hostName = hostOverride || ciContext?.host || 'cloudflare-pages'
   const adapter = getAdapter(hostName)
+  if (ciContext?.runner) {
+    onProgress(`CI runner: ${ciContext.runner}${ciContext.host ? '' : ' (host not implied)'}`)
+  }
   onProgress(`Host adapter: ${adapter.name}`)
   await adapter.postBuild({
     distDir,
     siteContent: defaultSiteContent,
     localeConfigs,
+    ciContext,
     onProgress,
   })
 

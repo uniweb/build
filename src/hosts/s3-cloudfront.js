@@ -114,8 +114,13 @@ function detectFoundationMode(siteContent) {
  * (bucket, distributionId, region, cacheRules, invalidationPaths)
  * land null at build time. The deploy hook augments the manifest
  * with the resolved target's config before uploading dist/.
+ *
+ * `ciContext` (detect-ci-context.js output, or null) is recorded
+ * verbatim so the manifest captures *where the artifact was built* —
+ * CI runner, branch, sha, isProduction signal. Useful for debugging
+ * a deployed bundle and for future audit / propagation use cases.
  */
-function buildManifest(siteContent = null) {
+function buildManifest(siteContent = null, ciContext = null) {
   return {
     host: 's3-cloudfront',
     generatedAt: new Date().toISOString(),
@@ -126,6 +131,7 @@ function buildManifest(siteContent = null) {
     cacheRules: null,
     invalidationPaths: null,
     cloudfrontFunctionFile: FUNCTION_FILE,
+    ciContext,
     notes: [
       'Upload cloudfront-function.js to your CloudFront distribution as a viewer-request function on the default cache behavior.',
       'See https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-functions.html',
@@ -140,11 +146,11 @@ function buildManifest(siteContent = null) {
  * adapter left one behind — defense in depth so the same dist/ never
  * carries conflicting host outputs.
  */
-async function postBuild({ distDir, siteContent, onProgress = () => {} }) {
+async function postBuild({ distDir, siteContent, ciContext = null, onProgress = () => {} }) {
   await writeFile(join(distDir, FUNCTION_FILE), FUNCTION_SOURCE)
   onProgress(`Wrote ${FUNCTION_FILE} (CloudFront Function source)`)
 
-  const manifest = buildManifest(siteContent)
+  const manifest = buildManifest(siteContent, ciContext)
   await writeFile(join(distDir, MANIFEST_FILE), JSON.stringify(manifest, null, 2))
   onProgress(`Wrote ${MANIFEST_FILE}`)
   onProgress(`Site mode: ${manifest.foundationMode.shape}` + (manifest.foundationMode.shape === 'linked' && manifest.foundationMode.url ? ` (foundation loaded from ${manifest.foundationMode.url})` : ''))
