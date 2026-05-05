@@ -12,9 +12,16 @@ import { getAdapter, listAdapters } from '../src/hosts/index.js'
 import { emitRedirectsFile } from '../src/hosts/cloudflare-pages.js'
 
 describe('host registry', () => {
-  test('lists built-in adapter names sorted', () => {
+  test('lists built-in adapter names and aliases sorted', () => {
     const names = listAdapters()
-    expect(names).toEqual(['cloudflare-pages', 'generic-static', 'github-pages', 's3-cloudfront'])
+    expect(names).toEqual([
+      'cloudflare-pages',
+      'generic-static',
+      'github-pages',
+      'netlify',
+      's3-cloudfront',
+      'vercel',
+    ])
   })
 
   test('getAdapter returns the named adapter', () => {
@@ -22,11 +29,14 @@ describe('host registry', () => {
     expect(getAdapter('github-pages').name).toBe('github-pages')
     expect(getAdapter('generic-static').name).toBe('generic-static')
     expect(getAdapter('s3-cloudfront').name).toBe('s3-cloudfront')
+    expect(getAdapter('vercel').name).toBe('vercel')
   })
 
-  test('getAdapter throws on unknown name with the list of known names', () => {
+  test('getAdapter throws on unknown name with the full list of known names', () => {
     expect(() => getAdapter('nope')).toThrow(/Unknown deploy host 'nope'/)
-    expect(() => getAdapter('nope')).toThrow(/cloudflare-pages, generic-static, github-pages, s3-cloudfront/)
+    expect(() => getAdapter('nope')).toThrow(
+      /cloudflare-pages, generic-static, github-pages, netlify, s3-cloudfront, vercel/
+    )
   })
 
   test('every adapter has the required interface', () => {
@@ -40,6 +50,32 @@ describe('host registry', () => {
         expect(typeof adapter.deploy).toBe('function')
       }
     }
+  })
+
+  test('aliases resolve to a canonical adapter but keep the requested name', () => {
+    // netlify aliases cloudflare-pages — same _redirects format.
+    const netlify = getAdapter('netlify')
+    const cfPages = getAdapter('cloudflare-pages')
+    expect(netlify.name).toBe('netlify')
+    expect(netlify.postBuild).toBe(cfPages.postBuild)
+  })
+
+  test('aliases do not mutate the canonical adapter object', () => {
+    getAdapter('netlify')
+    // Re-fetch the canonical adapter and confirm its name was not
+    // overwritten by the alias resolution.
+    expect(getAdapter('cloudflare-pages').name).toBe('cloudflare-pages')
+  })
+})
+
+describe('vercel adapter', () => {
+  test('postBuild is a no-op (Vercel handles directory-index natively)', async () => {
+    // Importing makeAdapter would be overkill; just call it.
+    await expect(getAdapter('vercel').postBuild({})).resolves.toBeUndefined()
+  })
+
+  test('does not implement a deploy hook (lifecycle: Git-driven)', () => {
+    expect(getAdapter('vercel').deploy).toBeUndefined()
   })
 })
 

@@ -42,12 +42,30 @@ import cloudflarePages from './cloudflare-pages.js'
 import githubPages from './github-pages.js'
 import genericStatic from './generic-static.js'
 import s3Cloudfront from './s3-cloudfront.js'
+import vercel from './vercel.js'
 
 const builtins = new Map([
   [cloudflarePages.name, cloudflarePages],
   [githubPages.name, githubPages],
   [genericStatic.name, genericStatic],
   [s3Cloudfront.name, s3Cloudfront],
+  [vercel.name, vercel],
+])
+
+/**
+ * Aliases mapping a user-facing host name to a canonical adapter that
+ * already implements the right behavior. Aliases exist when two hosts
+ * share an artifact contract (e.g., Netlify and Cloudflare Pages both
+ * consume `_redirects` in the same format) — one tested code path,
+ * multiple discoverable names.
+ *
+ * The returned adapter's `name` is rewritten to the *requested* name,
+ * so the deploy manifest, dry-run output, and lastDeploy entry record
+ * what the user picked. Adapters that need to *behave* differently per
+ * name should become canonical entries in `builtins`, not aliases.
+ */
+const aliases = new Map([
+  ['netlify', 'cloudflare-pages'],
 ])
 
 /**
@@ -55,20 +73,25 @@ const builtins = new Map([
  * the requested adapter doesn't exist.
  *
  * @param {string} name
- * @returns {object} The adapter.
+ * @returns {object} The adapter, with `name` set to the requested value
+ *                   even when resolved through an alias.
  */
 export function getAdapter(name) {
-  const adapter = builtins.get(name)
+  const canonicalName = aliases.get(name) || name
+  const adapter = builtins.get(canonicalName)
   if (!adapter) {
-    const known = [...builtins.keys()].sort().join(', ')
+    const known = listAdapters().join(', ')
     throw new Error(`Unknown deploy host '${name}'. Known: ${known}.`)
   }
-  return adapter
+  // Preserve the user-facing name when resolving an alias.
+  return name === canonicalName ? adapter : { ...adapter, name }
 }
 
 /**
- * @returns {string[]} Names of all registered adapters, sorted.
+ * @returns {string[]} Names of all registered adapters and aliases, sorted.
+ *                     Aliases appear alongside canonical names so the
+ *                     interactive picker and error messages surface them.
  */
 export function listAdapters() {
-  return [...builtins.keys()].sort()
+  return [...builtins.keys(), ...aliases.keys()].sort()
 }
