@@ -373,7 +373,7 @@ export function foundationBuildPlugin(options = {}) {
       // SSR bundle. The runtime + React + core + theming live in R2 under
       // runtime/{version}/worker-runtime.js (uploaded by the platform's
       // /deploy-runtime skill); the Cloudflare isolate side-loads them
-      // alongside dist/foundation.js via the edge dual-mode dispatcher.
+      // alongside dist/entry.js via the edge dual-mode dispatcher.
       // See kb/platform/plans/edge-ssr-bundling-strategy.md.
       //
       // The buildSSRBundle() function is kept (just not invoked) so it

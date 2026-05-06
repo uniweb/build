@@ -18,11 +18,11 @@ import { detectCiContext } from './hosts/detect-ci-context.js'
 
 /**
  * Resolve an extension URL to a filesystem path for prerender.
- * Browser URLs like "/effects/foundation.js" need mapping to local files.
+ * Browser URLs like "/effects/entry.js" need mapping to local files.
  *
  * Resolution order:
- * 1. dist directory (post-build copy target, e.g., site/dist/effects/foundation.js)
- * 2. Project root with dist subdir (dev layout, e.g., project/effects/dist/foundation.js)
+ * 1. dist directory (post-build copy target, e.g., site/dist/effects/entry.js)
+ * 2. Project root with dist subdir (dev layout, e.g., project/effects/dist/entry.js)
  * 3. Original URL (absolute or remote — let import() handle it)
  */
 function resolveExtensionPath(url, distDir, projectRoot) {
@@ -32,8 +32,8 @@ function resolveExtensionPath(url, distDir, projectRoot) {
     const distPath = join(distDir, url)
     if (existsSync(distPath)) return distPath
 
-    // Try project root with dist subdir (dev layout: effects/dist/foundation.js)
-    // "/effects/foundation.js" → "effects/dist/foundation.js"
+    // Try project root with dist subdir (dev layout: effects/dist/entry.js)
+    // "/effects/entry.js" → "effects/dist/entry.js"
     const parts = url.slice(1).split('/')
     if (parts.length >= 2) {
       const pkgName = parts[0]
@@ -471,7 +471,7 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // Load the foundation module (shared across all locales)
   onProgress('Loading foundation...')
-  const foundationPath = join(foundationDir, 'dist', 'foundation.js')
+  const foundationPath = join(foundationDir, 'dist', 'entry.js')
   if (!existsSync(foundationPath)) {
     throw new Error(`Foundation not found at: ${foundationPath}. Build foundation first.`)
   }
