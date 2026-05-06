@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { loadDeployYml, resolveTarget } from '../src/site/deploy-config.js'
-import { recordLastDeploy } from '../src/site/deploy-config-writer.js'
+import { recordLastDeploy, recordTarget } from '../src/site/deploy-config-writer.js'
 
 async function makeSiteDir() {
   return mkdtemp(join(tmpdir(), 'uniweb-deploy-yml-'))
@@ -292,6 +292,154 @@ describe('recordLastDeploy', () => {
       const doc = await loadDeployYml(dir)
       expect(doc.lastDeploy.production.url).toBe('https://prod')
       expect(doc.lastDeploy.preview.url).toBe('https://preview')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('recordTarget', () => {
+  test('first call scaffolds deploy.yml with this target as default and no lastDeploy block', async () => {
+    const dir = await makeSiteDir()
+    try {
+      const result = await recordTarget(dir, {
+        targetName: 'github-pages',
+        targetConfig: { host: 'github-pages', domain: 'mysite.com' },
+      })
+      expect(result).toEqual({
+        created: true,
+        path: join(dir, 'deploy.yml'),
+        action: 'scaffold',
+      })
+
+      const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
+      expect(text).toMatch(/default: github-pages/)
+      expect(text).toMatch(/host: github-pages/)
+      expect(text).toMatch(/domain: mysite\.com/)
+      expect(text).toMatch(/autoSave: lastDeploy/)
+      // No deploy has happened yet — lastDeploy block stays out.
+      expect(text).not.toMatch(/^lastDeploy:/m)
+
+      const doc = await loadDeployYml(dir)
+      expect(doc.default).toBe('github-pages')
+      expect(doc.targets['github-pages']).toEqual({
+        host: 'github-pages',
+        domain: 'mysite.com',
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects targetConfig without a host', async () => {
+    const dir = await makeSiteDir()
+    try {
+      await expect(
+        recordTarget(dir, {
+          targetName: 'github-pages',
+          targetConfig: { domain: 'mysite.com' },
+        })
+      ).rejects.toThrow(/targetConfig\.host/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('on existing file, merges into targets.<name> without changing default or other targets', async () => {
+    const dir = await makeSiteDir()
+    try {
+      const original = [
+        '# Header comment',
+        'default: production',
+        'targets:',
+        '  production:',
+        '    host: s3-cloudfront',
+        '    bucket: my-bucket',
+        '    region: us-east-1',
+        'autoSave: lastDeploy',
+        '',
+      ].join('\n')
+      await writeFile(join(dir, 'deploy.yml'), original)
+
+      const result = await recordTarget(dir, {
+        targetName: 'github-pages',
+        targetConfig: { host: 'github-pages', domain: 'mysite.com' },
+      })
+      expect(result.action).toBe('merge')
+      expect(result.created).toBe(false)
+
+      const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
+      // Comment + existing fields preserved
+      expect(text).toMatch(/# Header comment/)
+      expect(text).toMatch(/default: production/)
+      expect(text).toMatch(/bucket: my-bucket/)
+      expect(text).toMatch(/region: us-east-1/)
+      // New target added
+      expect(text).toMatch(/github-pages:/)
+      expect(text).toMatch(/domain: mysite\.com/)
+
+      const doc = await loadDeployYml(dir)
+      expect(doc.default).toBe('production')
+      expect(doc.targets.production.bucket).toBe('my-bucket')
+      expect(doc.targets['github-pages']).toEqual({
+        host: 'github-pages',
+        domain: 'mysite.com',
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('updating an existing target preserves hand-authored fields', async () => {
+    const dir = await makeSiteDir()
+    try {
+      const original = [
+        'default: github-pages',
+        'targets:',
+        '  github-pages:',
+        '    host: github-pages',
+        '    domain: old.com',
+        '    notes: hand-edited field',
+        'autoSave: lastDeploy',
+        '',
+      ].join('\n')
+      await writeFile(join(dir, 'deploy.yml'), original)
+
+      await recordTarget(dir, {
+        targetName: 'github-pages',
+        targetConfig: { host: 'github-pages', domain: 'new.com' },
+      })
+
+      const doc = await loadDeployYml(dir)
+      expect(doc.targets['github-pages'].domain).toBe('new.com')
+      // The hand-authored `notes` field survives the merge.
+      expect(doc.targets['github-pages'].notes).toBe('hand-edited field')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('does not touch lastDeploy when updating a target', async () => {
+    const dir = await makeSiteDir()
+    try {
+      // Pre-existing file with a real lastDeploy entry
+      await recordLastDeploy(dir, {
+        targetName: 'production',
+        targetConfig: { host: 's3-cloudfront', bucket: 'b' },
+        lastDeploy: { at: '2026-05-05T00:00:00Z', url: 'https://prod' },
+        autoSave: 'lastDeploy',
+      })
+
+      await recordTarget(dir, {
+        targetName: 'github-pages',
+        targetConfig: { host: 'github-pages', domain: 'mysite.com' },
+      })
+
+      const doc = await loadDeployYml(dir)
+      expect(doc.lastDeploy.production.url).toBe('https://prod')
+      expect(doc.targets['github-pages'].domain).toBe('mysite.com')
+      // Default unchanged
+      expect(doc.default).toBe('production')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

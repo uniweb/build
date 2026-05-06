@@ -91,3 +91,78 @@ function scaffold({ targetName, targetConfig, lastDeploy }) {
   doc.commentBefore = SCAFFOLD_HEADER
   return doc
 }
+
+/**
+ * Update or create deploy.yml with a target's adapter-specific config.
+ * Distinct from recordLastDeploy: that one records *deploy memory*
+ * (lastDeploy.<target>); this one records *adapter intent* (targets.<target>).
+ *
+ * Used at scaffold time by `uniweb add ci` so a target's config (host
+ * + adapter-specific fields like `domain`, `bucket`, etc.) is captured
+ * without waiting for a first deploy. github-pages deploys via GHA, not
+ * via the CLI, so its target config would otherwise never reach deploy.yml.
+ *
+ * @param {string} siteDir
+ * @param {object} opts
+ * @param {string} opts.targetName       e.g. 'github-pages'
+ * @param {object} opts.targetConfig     { host, ...adapter-specific }
+ * @returns {Promise<{ created: boolean, path: string, action: 'scaffold'|'merge' }>}
+ *
+ * Behavior:
+ *   - File missing: scaffold a fresh file with this target, set as
+ *     default, autoSave: lastDeploy. No lastDeploy block (no deploy
+ *     has happened yet).
+ *   - File exists: merge targetConfig into targets.<targetName>
+ *     (overlapping keys overwritten, other keys preserved). Never
+ *     touches `default`, `autoSave`, `lastDeploy`, or other targets,
+ *     so adding a CI workflow to a project that already deploys
+ *     elsewhere doesn't change its deploy semantics.
+ */
+export async function recordTarget(siteDir, opts) {
+  const { targetName, targetConfig } = opts
+
+  if (!targetName || typeof targetName !== 'string') {
+    throw new Error('recordTarget: opts.targetName is required.')
+  }
+  if (!targetConfig || !targetConfig.host) {
+    throw new Error('recordTarget: opts.targetConfig.host is required.')
+  }
+
+  const path = join(siteDir, 'deploy.yml')
+
+  if (!existsSync(path)) {
+    const doc = new Document({
+      default: targetName,
+      targets: { [targetName]: targetConfig },
+      autoSave: 'lastDeploy',
+    })
+    doc.commentBefore = SCAFFOLD_HEADER
+    await writeFile(path, doc.toString(), 'utf8')
+    return { created: true, path, action: 'scaffold' }
+  }
+
+  const text = await readFile(path, 'utf8')
+  const doc = parseDocument(text)
+
+  // Merge into targets.<targetName>, creating intermediate nodes as
+  // needed. We avoid `doc.set('targets', { ... })` because that would
+  // replace any sibling target the user authored.
+  let targetsNode = doc.get('targets', true)
+  if (!isMap(targetsNode)) {
+    doc.set('targets', { [targetName]: targetConfig })
+  } else {
+    let existing = targetsNode.get(targetName, true)
+    if (!isMap(existing)) {
+      targetsNode.set(targetName, targetConfig)
+    } else {
+      // Per-key merge: overwrite keys we're setting, leave others alone.
+      // Preserves any hand-authored fields the user added.
+      for (const [k, v] of Object.entries(targetConfig)) {
+        existing.set(k, v)
+      }
+    }
+  }
+
+  await writeFile(path, doc.toString(), 'utf8')
+  return { created: false, path, action: 'merge' }
+}
