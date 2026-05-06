@@ -188,8 +188,63 @@ describe('github-pages adapter', () => {
     expect(body).toBe('')
   })
 
-  test('has no deploy function (users push to gh-pages branch)', () => {
+  test('has no deploy function (deploy is driven by a GitHub Actions workflow, not the CLI)', () => {
     expect(getAdapter('github-pages').deploy).toBeUndefined()
+  })
+
+  describe('initCi', () => {
+    const adapter = getAdapter('github-pages')
+
+    test('returns one workflow file at .github/workflows/deploy-github-pages.yml', async () => {
+      const result = await adapter.initCi({
+        rootDir: '/fake/root',
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+        nodeVersion: '20',
+      })
+      expect(result.files).toHaveLength(1)
+      expect(result.files[0].path).toBe('.github/workflows/deploy-github-pages.yml')
+      expect(result.postInstructions.length).toBeGreaterThan(0)
+    })
+
+    test('workflow runs uniweb build with --host=github-pages and uploads <sitePath>/dist', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'sites/marketing' },
+        packageManager: 'pnpm',
+      })
+      const yaml = result.files[0].content
+      expect(yaml).toContain('pnpm exec uniweb build --host=github-pages')
+      expect(yaml).toContain('path: sites/marketing/dist')
+    })
+
+    test('workflow sets UNIWEB_BASE from the GitHub repo name (keeps site.yml clean)', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+      })
+      const yaml = result.files[0].content
+      expect(yaml).toContain('UNIWEB_BASE: /${{ github.event.repository.name }}/')
+    })
+
+    test('npm package manager produces an npm-shaped workflow (npx + npm ci)', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'npm',
+      })
+      const yaml = result.files[0].content
+      expect(yaml).toContain('npx uniweb build --host=github-pages')
+      expect(yaml).toContain('npm ci')
+      expect(yaml).not.toContain('pnpm')
+    })
+
+    test('uses the supplied node version in the setup-node step', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+        nodeVersion: '22',
+      })
+      expect(result.files[0].content).toContain("node-version: '22'")
+    })
   })
 })
 
