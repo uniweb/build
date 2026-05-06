@@ -288,6 +288,24 @@ describe('github-pages adapter', () => {
       })
       expect(result.postInstructions.join(' ')).toMatch(/DNS/)
     })
+
+    test('returns targetConfig for deploy.yml persistence', async () => {
+      const noDomain = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+      })
+      expect(noDomain.targetConfig).toEqual({ host: 'github-pages' })
+
+      const withDomain = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+        domain: 'mysite.com',
+      })
+      expect(withDomain.targetConfig).toEqual({
+        host: 'github-pages',
+        domain: 'mysite.com',
+      })
+    })
   })
 })
 

@@ -79,7 +79,15 @@ const adapter = {
           `re-run with --domain=<your-domain.com> to switch to root-served mode.`,
         ]
 
-    return { files, postInstructions }
+    // Adapter-specific config persisted into deploy.yml under
+    // `targets.github-pages`. Captures the developer's intent (host +
+    // optional custom domain) so re-running `add ci` later can read the
+    // remembered domain instead of asking again. host is required; the
+    // rest is up to each adapter.
+    const targetConfig = { host: 'github-pages' }
+    if (domain) targetConfig.domain = domain
+
+    return { files, postInstructions, targetConfig }
   },
 }
 
