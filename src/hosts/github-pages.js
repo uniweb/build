@@ -139,7 +139,12 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # Both names are listed so the workflow fires whether the repo
+    # uses 'main' (GitHub's current default) or 'master' (older repos
+    # and any not migrated). GHA only triggers on a branch that exists,
+    # so the unused name is a harmless no-op. Users on a different
+    # default (trunk, develop, release) edit this list directly.
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:

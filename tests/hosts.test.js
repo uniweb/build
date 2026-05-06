@@ -289,6 +289,18 @@ describe('github-pages adapter', () => {
       expect(result.postInstructions.join(' ')).toMatch(/DNS/)
     })
 
+    test('triggers on push to main or master (covers older repos)', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+      })
+      const yaml = result.files[0].content
+      // Listing both names handles the main/master default-branch
+      // divergence without a CLI flag. GHA only fires on branches that
+      // actually exist, so the unused name is a harmless no-op.
+      expect(yaml).toMatch(/branches:\s*\[main, master\]/)
+    })
+
     test('returns targetConfig for deploy.yml persistence', async () => {
       const noDomain = await adapter.initCi({
         site: { name: 'my-site', path: 'site' },
