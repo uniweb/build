@@ -332,8 +332,14 @@ function translateAwsError(exitCode, stderr, args) {
  * Validate the resolved deploy.yml target. Throws DeployError listing
  * every missing field at once (so the user fixes the whole block in
  * one pass instead of trial-and-error).
+ *
+ * When ALL required fields are missing (cold-start), the error includes
+ * a one-time AWS setup walkthrough so the user knows what to provision
+ * before filling in deploy.yml. When only some are missing (partial),
+ * the error stays terse — assume the user already provisioned and just
+ * needs to finish the config.
  */
-function validateDeployConfig(deployConfig) {
+function validateDeployConfig(deployConfig, distDir) {
   const missing = []
   if (!deployConfig.bucket)         missing.push('bucket')
   if (!deployConfig.distributionId) missing.push('distributionId')
@@ -341,21 +347,59 @@ function validateDeployConfig(deployConfig) {
 
   if (missing.length === 0) return
 
+  const isColdStart = missing.length === 3
+
+  // Compact message for partial config (user is mid-setup, just finish it).
+  if (!isColdStart) {
+    throw new DeployError(
+      `s3-cloudfront deploy is missing required configuration.`,
+      {
+        hint: [
+          `Add the missing fields to deploy.yml under the resolved target:`,
+          ``,
+          `  targets:`,
+          `    production:`,
+          `      host: s3-cloudfront`,
+          `      bucket: <your-bucket-name>`,
+          `      distributionId: <E1ABC...>`,
+          `      region: us-east-1`,
+          `      profile: <optional AWS_PROFILE>`,
+          ``,
+          `Missing: ${missing.join(', ')}`,
+        ].join('\n'),
+      }
+    )
+  }
+
+  // Cold-start: deploy.yml has no bucket/distributionId/region yet.
+  // The user is on their first deploy attempt — point them at the
+  // setup walkthrough rather than dumping a long inline checklist.
   throw new DeployError(
-    `s3-cloudfront deploy is missing required configuration.`,
+    `s3-cloudfront deploy needs one-time AWS setup before its first run.`,
     {
       hint: [
-        `Add to deploy.yml under the resolved target:`,
+        `One-time setup walkthrough (S3 bucket, CloudFront distribution,`,
+        `IAM user, directory-index Function, custom error responses):`,
         ``,
+        `  https://docs.uniweb.app/docs/reference/aws-s3-cloudfront-setup`,
+        ``,
+        `When done, fill these in deploy.yml next to site.yml:`,
+        ``,
+        `  default: production`,
         `  targets:`,
         `    production:`,
         `      host: s3-cloudfront`,
         `      bucket: <your-bucket-name>`,
         `      distributionId: <E1ABC...>`,
-        `      region: us-east-1`,
-        `      profile: <optional AWS_PROFILE>`,
+        `      region: <e.g. ca-central-1>`,
+        `      profile: <optional — use if you have multiple AWS profiles>`,
         ``,
-        `Missing: ${missing.join(', ')}`,
+        `Then re-run \`uniweb deploy\`. The build artifact in dist/ is ready;`,
+        `nothing else to rebuild between attempts.`,
+        ``,
+        `Prerequisites on this machine:`,
+        `  • aws CLI on PATH  (macOS: \`brew install awscli\`)`,
+        `  • AWS credentials reachable via env / ~/.aws / SSO / instance role`,
       ].join('\n'),
     }
   )
@@ -377,7 +421,7 @@ function pickCacheControl(rules, kind) {
 }
 
 async function deploy({ distDir, deployConfig = {}, env = process.env, log = () => {} }) {
-  validateDeployConfig(deployConfig)
+  validateDeployConfig(deployConfig, distDir)
 
   // Augment the manifest written at build time with the resolved
   // target's bucket / distId / region / cache rules so the artifact
