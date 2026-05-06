@@ -217,13 +217,16 @@ describe('github-pages adapter', () => {
       expect(yaml).toContain('path: sites/marketing/dist')
     })
 
-    test('workflow sets UNIWEB_BASE from the GitHub repo name (keeps site.yml clean)', async () => {
+    test('workflow derives UNIWEB_BASE from the GitHub repo name (keeps site.yml clean)', async () => {
       const result = await adapter.initCi({
         site: { name: 'my-site', path: 'site' },
         packageManager: 'pnpm',
       })
       const yaml = result.files[0].content
-      expect(yaml).toContain('UNIWEB_BASE: /${{ github.event.repository.name }}/')
+      // Without --domain, UNIWEB_BASE is computed at workflow runtime
+      // from the GitHub repo name.
+      expect(yaml).toContain("REPO='${{ github.event.repository.name }}'")
+      expect(yaml).toContain('UNIWEB_BASE=/$REPO/')
     })
 
     test('npm package manager produces an npm-shaped workflow (npx + npm ci)', async () => {
@@ -244,6 +247,46 @@ describe('github-pages adapter', () => {
         nodeVersion: '22',
       })
       expect(result.files[0].content).toContain("node-version: '22'")
+    })
+
+    test('without --domain: includes auto-detect for <user>.github.io profile repos', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+      })
+      const yaml = result.files[0].content
+      expect(yaml).toContain('Resolve UNIWEB_BASE for this repo shape')
+      expect(yaml).toContain('*.github.io')
+      expect(yaml).toContain('UNIWEB_BASE=/$REPO/')
+      // No CNAME file when --domain is not passed
+      expect(result.files.some(f => f.path.endsWith('CNAME'))).toBe(false)
+    })
+
+    test('with --domain: bakes UNIWEB_BASE=/ and emits a CNAME file', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+        domain: 'mysite.com',
+      })
+      const workflow = result.files.find(f => f.path.endsWith('.yml'))
+      const cname = result.files.find(f => f.path.endsWith('CNAME'))
+
+      expect(workflow.content).toContain('UNIWEB_BASE: /')
+      expect(workflow.content).not.toContain('Resolve UNIWEB_BASE')
+      expect(workflow.content).not.toContain('github.event.repository.name')
+
+      expect(cname).toBeDefined()
+      expect(cname.path).toBe('site/public/CNAME')
+      expect(cname.content).toBe('mysite.com\n')
+    })
+
+    test('with --domain: postInstructions mention DNS', async () => {
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+        domain: 'mysite.com',
+      })
+      expect(result.postInstructions.join(' ')).toMatch(/DNS/)
     })
   })
 })
