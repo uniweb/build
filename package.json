@@ -19,6 +19,7 @@
     "./hosts": "./src/hosts/index.js",
     "./i18n": "./src/i18n/index.js",
     "./search": "./src/search/index.js",
+    "./uwx": "./src/uwx/index.js",
     "./import-map-plugin": "./src/import-map-plugin.js"
   },
   "bin": {

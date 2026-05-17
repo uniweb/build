@@ -2162,13 +2162,26 @@ export async function collectSiteContent(sitePath, options = {}) {
   }
 }
 
-// Exported for testing
+// Shared pure / IO helpers. Exported for testing AND reused by
+// @uniweb/build/uwx, the .uwx exporter, which re-walks the source rather
+// than the flattened collector output but reuses these primitives so
+// markdown→ProseMirror, ordering, and mode detection stay consistent with a
+// normal build. Additive: no existing behavior changes.
 export {
   extractItemName,
   parseWildcardArray,
   applyWildcardOrder,
   getDirectChildName,
-  extractInsets
+  extractInsets,
+  readYamlFile,
+  readFolderConfig,
+  isMarkdownFile,
+  isChildSection,
+  stripAtPrefix,
+  isIgnoredFolder,
+  parseNumericPrefix,
+  compareFilenames,
+  processMarkdownFile,
 }
 
 export default collectSiteContent
