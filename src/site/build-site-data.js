@@ -18,7 +18,7 @@
  * consistent without forcing one path through the other's lifecycle.
  */
 
-import { writeFile, mkdir, cp } from 'node:fs/promises'
+import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -26,6 +26,8 @@ import { collectSiteContent } from './content-collector.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
+import { generateSearchIndex } from './search/generate.js'
+import { generateCollectionIndex } from './search/collections.js'
 
 /**
  * Build the site data outputs needed by `uniweb deploy` (link-mode).
@@ -183,6 +185,44 @@ export async function buildSiteData({
   //    this stage would silently break split-mode sites in production.
   const contentPath = join(resolvedDistDir, 'site-content.json')
   await writeFile(contentPath, JSON.stringify(finalContent, null, 2))
+
+  // 5. Generate `_search/{locale}/pages.json` and per-collection indexes.
+  //    Gated by `features: [search]` in site.yml — consistent with the billing
+  //    model where features: is the single declaration of intent. The hosting
+  //    worker has its own entitlement gate (searchEnabled) that decides whether
+  //    to store these files, but no point generating them when the site hasn't
+  //    declared the feature at all.
+  const siteFeatures = finalContent.config?.features || []
+  if (Array.isArray(siteFeatures) && siteFeatures.includes('search')) {
+    const defaultLocale =
+      finalContent.config?.defaultLanguage || finalContent.config?.activeLocale || 'en'
+    const searchDir = join(resolvedDistDir, '_search', defaultLocale)
+    await mkdir(searchDir, { recursive: true })
+
+    // pages.json — static pages + sections
+    const pagesIndex = generateSearchIndex(finalContent, {
+      locale: defaultLocale,
+      search: finalContent.config?.search,
+    })
+    const { version: _v, count: _c, ...pagesRest } = pagesIndex
+    await writeFile(join(searchDir, 'pages.json'), JSON.stringify({ type: 'pages', ...pagesRest }))
+
+    // Collection indexes — one per routed + search-configured collection
+    const collections = finalContent.config?.collections || {}
+    for (const [collName, collConfig] of Object.entries(collections)) {
+      if (!collConfig.search?.enabled || !collConfig.route) continue
+      const cascadeFile = join(resolvedDistDir, 'data', `${collName}.json`)
+      if (!existsSync(cascadeFile)) continue
+      let collectionData
+      try {
+        collectionData = JSON.parse(await readFile(cascadeFile, 'utf8'))
+      } catch {
+        continue
+      }
+      const collIndex = generateCollectionIndex(collName, collConfig, collectionData, defaultLocale)
+      await writeFile(join(searchDir, `${collName}.json`), JSON.stringify(collIndex))
+    }
+  }
 
   return { siteContent: finalContent, distDir: resolvedDistDir }
 }
