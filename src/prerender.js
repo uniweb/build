@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { executeFetch, mergeDataIntoContent, singularize } from './site/data-fetcher.js'
+import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
@@ -164,7 +164,6 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
 
     const items = parentData.data
     const schema = parentData.schema
-    const singularSchema = singularize(schema)
 
     onProgress(`  Expanding ${page.route} → ${items.length} pages from ${schema}`)
 
@@ -192,7 +191,6 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
         paramName,
         paramValue,
         schema,           // Plural: 'articles'
-        singularSchema,   // Singular: 'article'
         currentItem: item,    // The item for this specific route
         allItems: items,      // All items from parent
       }
