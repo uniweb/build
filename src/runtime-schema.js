@@ -181,42 +181,44 @@ function normalizeRichSchemaValue(value) {
 }
 
 /**
- * Extract lean schemas from meta.js schemas object
- * Strips editor-only fields while preserving structure
+ * Lean a single `data:` entry value into the runtime field structure that
+ * prepare-props.applySchemas applies. A `data:` value is one of:
+ *   - a named ref (`'@/member'`, or `{ schema: '@/member' }`) → resolved on
+ *     disk by the build's data-schema resolver; its fields are lean-extracted.
+ *   - an inline rich-form schema (`{ fields: [...] }`) → passed through
+ *     normalized (drives the FormBlock editor UI + default application).
+ *   - an inline full-format schema (`{ name, version, fields: {...} }`) or a
+ *     bare field map (`{ field: {...} }`) → lean-extracted.
  *
- * Supports two formats:
- * 1. Full @uniweb/schemas format: { name, version, fields: {...} }
- * 2. Inline fields format: { fieldName: fieldDef, ... }
+ * Source-agnostic: the same `content.data` key may be filled by a fetched
+ * collection, a tagged code block, or an editor form — the schema (and its
+ * defaults) is identical, so there is one declaration surface. Returns the
+ * lean structure, or null when there's nothing to apply.
  *
- * @param {Object} schemas - The schemas object from meta.js
- * @returns {Object|null} - Lean schemas or null if empty
+ * @param {string|Object} value - The `data:` entry value
+ * @param {Object} dataSchemaMap - Resolved schemas keyed by ref
+ * @returns {Object|null}
  */
-function extractSchemas(schemas) {
-  if (!schemas || typeof schemas !== 'object') {
-    return null
+function leanDataSchema(value, dataSchemaMap) {
+  // Named ref → the resolved schema's fields.
+  const ref = typeof value === 'string'
+    ? value
+    : (value && typeof value.schema === 'string' ? value.schema : null)
+  if (ref) {
+    const resolved = dataSchemaMap[ref]
+    if (!resolved?.fields) return null
+    const lean = extractSchemaFields(resolved.fields)
+    return Object.keys(lean).length > 0 ? lean : null
   }
 
-  const lean = {}
-  for (const [schemaName, schemaValue] of Object.entries(schemas)) {
-    // Rich form schemas: pass through (with normalization). They drive both
-    // the FormBlock editor UI and the runtime default application.
-    if (isRichSchema(schemaValue)) {
-      lean[schemaName] = normalizeRichSchema(schemaValue)
-      continue
-    }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
 
-    // Handle full schema format (from @uniweb/schemas or npm packages)
-    // Extract just the fields, discard name/version/description metadata
-    const schemaFields = isFullSchemaFormat(schemaValue)
-      ? schemaValue.fields
-      : schemaValue
+  // Inline rich-form schema (fields: array) — drives FormBlock + defaults.
+  if (isRichSchema(value)) return normalizeRichSchema(value)
 
-    const leanSchema = extractSchemaFields(schemaFields)
-    if (Object.keys(leanSchema).length > 0) {
-      lean[schemaName] = leanSchema
-    }
-  }
-
+  // Inline full-format schema or a bare field map.
+  const fields = isFullSchemaFormat(value) ? value.fields : value
+  const lean = extractSchemaFields(fields)
   return Object.keys(lean).length > 0 ? lean : null
 }
 
@@ -247,9 +249,12 @@ function extractParamDefaults(params) {
  * Extract lean runtime schema from a full meta.js object
  *
  * @param {Object} fullMeta - The full meta.js default export
+ * @param {Object} [dataSchemaMap] - Resolved data schemas keyed by ref (from
+ *                 resolve-data-schema.js), used to lean-extract field defaults
+ *                 for each `data:` binding.
  * @returns {Object|null} - Lean runtime schema or null if empty
  */
-export function extractRuntimeSchema(fullMeta) {
+export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
   if (!fullMeta || typeof fullMeta !== 'object') {
     return null
   }
@@ -267,67 +272,29 @@ export function extractRuntimeSchema(fullMeta) {
     runtime.background = fullMeta.background
   }
 
-  // Data binding (CMS entities)
-  //
-  // Supported forms:
-  //   data: false                            → explicit opt-out
-  //   data: { entity: 'person:6' }           → declaration + shape hints
-  //   data: { schemas: {...} }               → validation / default shapes
-  //   data: 'person:6'                       → legacy string form (declaration only)
-  //
-  // Deprecated forms (accepted with dev-mode warning, removed in next release):
-  //   data: { inherit: true | false | [...] }  — component-side gating is gone;
-  //                                              delivery is default-on
-  //   data: { detail, limit }                   — moved to block-level fetch
+  // Data schemas. `data:` is the single declaration surface for a section's
+  // structured data: it maps each `content.data` key to its schema. A value
+  // is a named ref (`'@/member'`), an inline field map, or an inline rich-form
+  // (`{ fields: [...] }`, an editor form). Source-agnostic — the data may
+  // arrive by fetch, tagged code block, or editor form; the schema and its
+  // defaults are identical. The schema is a hint (defaults + editor), not a
+  // delivery gate; delivery is default-on. `data: false` opts the section out
+  // of all ambient data.
   if (fullMeta.data === false) {
-    // Explicit opt-out — deliver nothing to this component.
     runtime.inheritData = false
-  } else if (typeof fullMeta.data === 'string') {
-    // Legacy string form: data: 'person:6'
-    const parsed = parseDataString(fullMeta.data)
-    if (parsed) {
-      runtime.data = parsed
-    }
-  } else if (fullMeta.data && typeof fullMeta.data === 'object') {
-    if (fullMeta.data.entity) {
-      const parsed = parseDataString(fullMeta.data.entity)
-      if (parsed) {
-        runtime.data = parsed
+  } else if (fullMeta.data && typeof fullMeta.data === 'object' && !Array.isArray(fullMeta.data)) {
+    for (const [key, value] of Object.entries(fullMeta.data)) {
+      const lean = leanDataSchema(value, dataSchemaMap)
+      if (lean) {
+        runtime.schemas = runtime.schemas || {}
+        runtime.schemas[key] = lean
       }
     }
-    if (fullMeta.data.schemas) {
-      const schemas = extractSchemas(fullMeta.data.schemas)
-      if (schemas) {
-        runtime.schemas = schemas
-      }
-    }
-    // Deprecated: data.inherit is a no-op under default-on delivery. The
-    // only behavior we still honor is `inherit: false` → treat as opt-out,
-    // so existing foundations that wrote "don't deliver" still don't.
-    // Array and `true` forms are ignored — delivery happens regardless.
-    if (fullMeta.data.inherit === false) {
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
-        console.warn(
-          '[uniweb] `data: { inherit: false }` is deprecated; use `data: false` instead.'
-        )
-      }
-      runtime.inheritData = false
-    } else if (fullMeta.data.inherit !== undefined) {
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
-        console.warn(
-          '[uniweb] `data: { inherit: ... }` is deprecated; delivery is default-on. Remove the `inherit` field.'
-        )
-      }
-    }
-    // Deprecated: detail/limit on the component side. Block-level
-    // `fetch: { inherit: true, detail, limit }` is where these belong now.
-    if (fullMeta.data.detail !== undefined || fullMeta.data.limit !== undefined) {
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
-        console.warn(
-          '[uniweb] `data: { detail, limit }` on the component side is deprecated; set these on a block-level `fetch: { inherit: true, ... }` instead.'
-        )
-      }
-    }
+  } else if (fullMeta.data !== undefined) {
+    throw new Error(
+      `[uniweb] Invalid 'data' in meta.js: expected false or { <key>: <schema> }, got ${JSON.stringify(fullMeta.data)}. ` +
+        "A <schema> is a named ref ('@/x'), an inline field map, or a rich-form { fields: [...] }."
+    )
   }
 
   const paramsObj = fullMeta.params
@@ -348,27 +315,13 @@ export function extractRuntimeSchema(fullMeta) {
     runtime.initialState = fullMeta.initialState
   }
 
-  // Schemas - lean version for runtime validation/defaults
-  // Strips editor-only fields (label, hint, description)
-  // Top-level schemas supported for backwards compat (lower priority than data.schemas)
-  if (fullMeta.schemas && !runtime.schemas) {
-    const schemas = extractSchemas(fullMeta.schemas)
-    if (schemas) {
-      runtime.schemas = schemas
-    }
-  }
-
-  // Top-level inheritData (legacy, pre-`data.*` format) — honored only as opt-out.
-  // Truthy values and arrays are ignored; delivery is default-on.
-  if (fullMeta.inheritData === false && runtime.inheritData === undefined) {
-    runtime.inheritData = false
-  }
+  // (Top-level `schemas:` is gone — inline field maps and rich-forms are now
+  // just `data:` entries with an inline value. See leanDataSchema.)
 
   // Data delivery is default-on. `runtime.inheritData` stays undefined unless
-  // the component explicitly opts out (runtime.inheritData === false), in
-  // which case EntityStore delivers nothing. The declaration `data.entity`
-  // no longer implies a gate — it's a hint consumed by prepare-props and
-  // the editor.
+  // the component opts out with `data: false`, in which case EntityStore
+  // delivers nothing. A `data:` binding is a hint (schema for defaults +
+  // editor), never a delivery gate.
 
   return Object.keys(runtime).length > 0 ? runtime : null
 }
@@ -379,11 +332,11 @@ export function extractRuntimeSchema(fullMeta) {
  * @param {Object} componentsMeta - Map of componentName -> meta.js content
  * @returns {Object} - Map of componentName -> runtime schema (excludes null entries)
  */
-export function extractAllRuntimeSchemas(componentsMeta) {
+export function extractAllRuntimeSchemas(componentsMeta, dataSchemaMap = {}) {
   const schemas = {}
 
   for (const [name, meta] of Object.entries(componentsMeta)) {
-    const schema = extractRuntimeSchema(meta)
+    const schema = extractRuntimeSchema(meta, dataSchemaMap)
     if (schema) {
       schemas[name] = schema
     }

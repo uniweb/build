@@ -24,6 +24,7 @@ import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { discoverComponents, discoverLayoutsInPath } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
+import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
 
 /**
  * Packages that may be bundled inside a foundation but require single-instance
@@ -299,8 +300,11 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   // Check for foundation exports (props, vars, etc.)
   const foundationExports = detectFoundationExports(srcDir)
 
-  // Extract per-component runtime metadata from meta.js files
-  const meta = extractAllRuntimeSchemas(components)
+  // Resolve the data schemas referenced by section bindings, then extract
+  // per-component runtime metadata (which lean-extracts field defaults from
+  // the resolved schemas into meta.schemas[<key>]).
+  const dataSchemaMap = await buildDataSchemaMap(collectSchemaRefs(components), { srcDir })
+  const meta = extractAllRuntimeSchemas(components, dataSchemaMap)
 
   // Extract per-layout runtime metadata from meta.js files
   const layoutMeta = extractAllLayoutRuntimeSchemas(layouts)

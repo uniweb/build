@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inferTitle } from './utils/infer-title.js'
+import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
 
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
@@ -492,6 +493,10 @@ export async function buildSchema(srcDir, sectionPaths) {
   // Discover section types
   const components = await discoverComponents(srcDir, sectionPaths)
 
+  // Resolve the data schemas referenced by section bindings (carried in
+  // schema.json for the editor/platform — see named-data-schemas.md).
+  const dataSchemas = await buildDataSchemaMap(collectSchemaRefs(components), { srcDir })
+
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
 
@@ -522,6 +527,7 @@ export async function buildSchema(srcDir, sectionPaths) {
       ...(isExtension && { role: 'extension' }),
     },
     // Layout metadata (full, for editor)
+    ...(Object.keys(dataSchemas).length > 0 && { dataSchemas }),
     ...(Object.keys(layouts).length > 0 && { _layouts: layouts }),
     ...components,
   }
