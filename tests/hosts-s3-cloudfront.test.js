@@ -260,14 +260,13 @@ describe('validateDeployConfig', () => {
     })).not.toThrow()
   })
 
-  test('throws DeployError listing every missing field at once', () => {
+  test('cold-start (all fields missing) points at the one-time AWS setup walkthrough', () => {
     let err
     try { validateDeployConfig({}) } catch (e) { err = e }
     expect(err).toBeInstanceOf(DeployError)
-    expect(err.message).toMatch(/missing required configuration/)
-    expect(err.hint).toMatch(/Missing: bucket, distributionId, region/)
+    expect(err.message).toMatch(/one-time AWS setup/)
+    expect(err.hint).toContain('aws-s3-cloudfront-setup')
     expect(err.hint).toContain('deploy.yml')
-    expect(err.hint).toContain('targets:')
   })
 
   test('mentions only the actually-missing field', () => {
