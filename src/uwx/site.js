@@ -12,7 +12,7 @@
 // by something that survives edits, so a sidecar-backed re-export UPDATES
 // rather than DUPLICATES (import is idempotent by uuid).
 //
-// Mapped to the @uniweb/site-content Model's six Sections: info · pages ·
+// Mapped to the @uniweb/site-content entity type's six Sections: info · pages ·
 // page_sections · layout_sections · extensions · collections.
 // `info.foundation_ref` carries the verbatim `site.yml::foundation` string
 // (the round-trip source of truth); the optional `foundation` entity_ref is
@@ -38,7 +38,7 @@ import {
   applyWildcardOrder,
   processMarkdownFile,
 } from '../site/content-collector.js'
-import { SITE_CONTENT_MODEL_UUID } from './models.js'
+import { SITE_CONTENT_TYPE_UUID } from './entity-types.js'
 import { emitEntityPackage } from './package.js'
 import { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { mintResolver, sidecarResolver, SIDECAR_RELPATH } from './identity.js'
@@ -52,7 +52,7 @@ function setIf(obj, key, value) {
 // page_sections and layout_sections share this content shape.
 // processMarkdownFile only destructures type/component/preset/input/props/
 // fetch/data/id out of frontmatter, so `background:` and `theme:` stay
-// inside section.params — lift them into the Model's dedicated fields.
+// inside section.params — lift them into the entity type's dedicated fields.
 function mapSectionData(section) {
   const params = { ...section.params }
   const background = params.background
@@ -60,7 +60,7 @@ function mapSectionData(section) {
   delete params.background
   delete params.theme
 
-  const data = { type: section.type || 'Content' } // Model requires `type`
+  const data = { type: section.type || 'Content' } // entity type requires `type`
   setIf(data, 'stable_id', section.stableId ?? undefined)
   setIf(data, 'preset', section.preset ?? undefined)
   setIf(data, 'input', section.input ?? undefined)
@@ -76,7 +76,7 @@ function mapSectionData(section) {
 function buildPageData(config, ctx) {
   const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale } =
     ctx
-  const data = { slug, mode } // both required by the Model
+  const data = { slug, mode } // both required by the entity type
   setIf(data, 'stable_id', config.id)
   setIf(data, 'title', localize(config.title, sourceLocale))
   setIf(data, 'description', localize(config.description, sourceLocale))
@@ -417,7 +417,7 @@ export async function siteProjectToEntity(siteRoot, opts = {}) {
 
   return {
     uuid: opts.entityUuid || id.entity(SITE_ENTITY_KEY),
-    model_uuid: SITE_CONTENT_MODEL_UUID,
+    model_uuid: SITE_CONTENT_TYPE_UUID,
     owner_uuid: opts.ownerUuid ?? null,
     unit_uuid: null,
     meta: {},
@@ -455,7 +455,7 @@ export async function emitSitePackage(siteRoot, opts = {}) {
   return emitEntityPackage({
     entities: [entity],
     modelsRequired: [
-      { uuid: SITE_CONTENT_MODEL_UUID, name_at_export: '@uniweb/site-content' },
+      { uuid: SITE_CONTENT_TYPE_UUID, name_at_export: '@uniweb/site-content' },
     ],
     exporter: opts.exporter,
     exportedAt: opts.exportedAt,

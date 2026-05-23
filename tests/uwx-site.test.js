@@ -5,7 +5,7 @@ import {
   siteProjectToEntity,
   emitSitePackage,
   readZip,
-  SITE_CONTENT_MODEL_UUID,
+  SITE_CONTENT_TYPE_UUID,
 } from '../src/uwx/index.js'
 
 let ROOT
@@ -84,7 +84,7 @@ afterAll(() => {
 describe('uwx/site siteProjectToEntity', () => {
   it('maps to the @uniweb/site-content Model shape', async () => {
     const e = await siteProjectToEntity(ROOT)
-    expect(e.model_uuid).toBe(SITE_CONTENT_MODEL_UUID)
+    expect(e.model_uuid).toBe(SITE_CONTENT_TYPE_UUID)
     expect(e.owner_uuid).toBeNull()
     const count = (s) => e.items.filter((i) => i.section === s).length
     expect(count('info')).toBe(1)
@@ -202,13 +202,13 @@ describe('uwx/site emitSitePackage', () => {
     const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
     expect(manifest.format).toBe('uwx/1')
     expect(manifest.subtype).toBe('entity')
-    expect(manifest.models_required[0].uuid).toBe(SITE_CONTENT_MODEL_UUID)
+    expect(manifest.models_required[0].uuid).toBe(SITE_CONTENT_TYPE_UUID)
     expect(manifest.package_sha256).toMatch(/^[0-9a-f]{64}$/)
 
     const entity = JSON.parse(
       files.get(`entities/${manifest.roots[0]}.json`).toString('utf8')
     )
-    expect(entity.model_uuid).toBe(SITE_CONTENT_MODEL_UUID)
+    expect(entity.model_uuid).toBe(SITE_CONTENT_TYPE_UUID)
     expect(
       entity.items.find((i) => i.section === 'info').data.foundation_ref
     ).toBe('@acme/marketing@1.2.3')

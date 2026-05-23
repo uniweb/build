@@ -12,7 +12,7 @@ import {
   mintResolver,
   sidecarResolver,
   emitSitePackage,
-  emitFoundationPackage,
+  emitFoundationSchemaPackage,
   readZip,
 } from '../src/uwx/index.js'
 
@@ -76,17 +76,30 @@ describe('uwx/identity sidecarResolver', () => {
     expect(readFileSync(path, 'utf8')).toBe(first)
   })
 
-  it('persists sorted { entities, items } JSON', () => {
+  it('persists sorted { entities, items, schemas } JSON', () => {
     const path = join(dir, 'ids.json')
     const r = sidecarResolver(path)
     r.item('z')
     r.item('a')
     r.entity('e')
+    r.schema('@/article')
     r.flush()
     const json = JSON.parse(readFileSync(path, 'utf8'))
-    expect(Object.keys(json)).toEqual(['entities', 'items'])
+    expect(Object.keys(json)).toEqual(['entities', 'items', 'schemas'])
     expect(Object.keys(json.items)).toEqual(['a', 'z']) // sorted
     expect(json.entities.e).toMatch(UUID_RE)
+    expect(json.schemas['@/article']).toMatch(UUID_RE)
+  })
+
+  it('data-schema-identity uuids are stable per ref across runs', () => {
+    const path = join(dir, 'm.json')
+    const r1 = sidecarResolver(path)
+    const a = r1.schema('@/article')
+    expect(r1.schema('@/article')).toBe(a) // stable within run
+    expect(r1.schema('@/member')).not.toBe(a)
+    r1.flush()
+    // Reused across foundation versions: a fresh resolver yields the same uuid.
+    expect(sidecarResolver(path).schema('@/article')).toBe(a)
   })
 
   it('throws on a corrupt sidecar (not silently reset)', () => {
@@ -167,25 +180,25 @@ describe('uwx/identity — foundation idempotency (keyed by name@version)', () =
     Hero: { name: 'Hero', title: 'Hero v1' },
   }
 
-  it('re-emitting the same version reuses uuids; a label edit keeps the components uuid', () => {
+  it('re-emitting the same version reuses uuids; a label edit keeps the schema Section uuid', () => {
     const path = join(tmpdir(), `fnd-${Date.now()}.json`)
-    const a = entityOf(emitFoundationPackage(schema, { sidecar: path }))
+    const a = entityOf(emitFoundationSchemaPackage(schema, { sidecar: path }))
     const edited = {
       _self: { name: '@acme/x', version: '2.0.0' },
       Hero: { name: 'Hero', title: 'Hero v2 (edited)' },
     }
-    const b = entityOf(emitFoundationPackage(edited, { sidecar: path }))
+    const b = entityOf(emitFoundationSchemaPackage(edited, { sidecar: path }))
 
     expect(b.uuid).toBe(a.uuid) // same name@version
-    const comp = (e) => e.items.find((i) => i.section === 'components')
-    expect(comp(b).uuid).toBe(comp(a).uuid) // keyed by ::components
-    expect(comp(b).data.schema.Hero.title).toBe('Hero v2 (edited)')
+    const sch = (e) => e.items.find((i) => i.section === 'schema')
+    expect(sch(b).uuid).toBe(sch(a).uuid) // keyed by ::schema
+    expect(sch(b).data.schema.Hero.title).toBe('Hero v2 (edited)')
     rmSync(path, { force: true })
   })
 
   it('without a sidecar, mints fresh (submit-once)', () => {
-    const a = entityOf(emitFoundationPackage(schema))
-    const b = entityOf(emitFoundationPackage(schema))
+    const a = entityOf(emitFoundationSchemaPackage(schema))
+    const b = entityOf(emitFoundationSchemaPackage(schema))
     expect(a.uuid).not.toBe(b.uuid)
   })
 })

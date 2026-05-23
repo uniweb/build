@@ -6,7 +6,7 @@
 // syncable round trip.
 //
 //   - the writer        — emitEntityPackage + uuid/zip/manifest primitives
-//   - foundation mapper  — schema.json -> @uniweb/foundation entity
+//   - foundation-schema mapper — schema.json -> @uniweb/foundation-schema entity
 //   - site mapper        — file site project -> @uniweb/site-content entity
 //   - identity           — stable uuids for the syncable round trip
 
@@ -22,9 +22,10 @@ export {
 } from './manifest.js'
 export { emitEntityPackage } from './package.js'
 export {
-  FOUNDATION_MODEL_UUID,
-  SITE_CONTENT_MODEL_UUID,
-} from './models.js'
+  FOUNDATION_SCHEMA_TYPE_UUID,
+  SITE_CONTENT_TYPE_UUID,
+  DATA_SCHEMA_TYPE_UUID,
+} from './entity-types.js'
 export { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 export {
   mintResolver,
@@ -33,6 +34,6 @@ export {
 } from './identity.js'
 export {
   foundationSchemaToEntity,
-  emitFoundationPackage,
+  emitFoundationSchemaPackage,
 } from './foundation-schema.js'
 export { siteProjectToEntity, emitSitePackage } from './site.js'

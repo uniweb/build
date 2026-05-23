@@ -1,8 +1,8 @@
 import {
   foundationSchemaToEntity,
-  emitFoundationPackage,
+  emitFoundationSchemaPackage,
   readZip,
-  FOUNDATION_MODEL_UUID,
+  FOUNDATION_SCHEMA_TYPE_UUID,
 } from '../src/uwx/index.js'
 
 // Shaped exactly like framework/build/src/schema.js::buildSchema output.
@@ -25,6 +25,19 @@ function sampleSchema(overrides = {}) {
         pdf: { extension: 'pdf', via: 'typst' },
       },
       // no `role` → primary foundation → must default to "foundation"
+    },
+    dataSchemas: {
+      '@/article': {
+        name: 'article',
+        version: '1.0.0',
+        description: 'A blog post',
+        fields: { title: { type: 'string', default: '' } },
+      },
+      '@uniweb/person': {
+        name: 'person',
+        version: '2.1.0',
+        fields: { name: { type: 'string', default: '' } },
+      },
     },
     _layouts: {
       marketing: {
@@ -54,36 +67,32 @@ function sampleSchema(overrides = {}) {
   }
 }
 
+const sectionData = (e, name) =>
+  e.items.find((i) => i.section === name).data
+
 describe('uwx/foundation foundationSchemaToEntity', () => {
-  it('maps to the @uniweb/foundation-schema Model shape (coarse Sections)', () => {
+  it('maps to the @uniweb/foundation-schema entity-type shape (4 coarse Sections)', () => {
     const e = foundationSchemaToEntity(sampleSchema())
-    expect(e.model_uuid).toBe(FOUNDATION_MODEL_UUID)
+    expect(e.model_uuid).toBe(FOUNDATION_SCHEMA_TYPE_UUID)
     expect(e.owner_uuid).toBeNull()
     expect(e.uuid).toMatch(/^[0-9a-f-]{36}$/)
 
-    // Five single-Item coarse Sections — no per-component/layout/output spread.
+    // Four single-Item Sections per foundation-schema.fixture.yaml — the old
+    // config/components/layouts/outputs collapsed into one `schema` blob.
     const sections = e.items.map((i) => i.section).sort()
-    expect(sections).toEqual([
-      'components',
-      'config',
-      'info',
-      'layouts',
-      'outputs',
-    ])
+    expect(sections).toEqual(['i18n', 'info', 'models', 'schema'])
     for (const s of sections) {
       expect(e.items.filter((i) => i.section === s)).toHaveLength(1)
     }
   })
 
-  it('info carries identity only; role defaults; config/outputs split out', () => {
-    const info = foundationSchemaToEntity(sampleSchema()).items.find(
-      (i) => i.section === 'info'
-    ).data
+  it('info carries identity only; role defaults', () => {
+    const info = sectionData(foundationSchemaToEntity(sampleSchema()), 'info')
     expect(info.name).toBe('@acme/marketing')
     expect(info.version).toBe('1.2.3')
     expect(info.description).toBe('Marketing foundation')
     expect(info.role).toBe('foundation') // defaulted (absent in schema)
-    // Config + outputs live in their own Sections, not info.
+    // Everything non-identity lives in the `schema` blob, not info.
     expect(info).not.toHaveProperty('defaultLayout')
     expect(info).not.toHaveProperty('vars')
     expect(info).not.toHaveProperty('outputs')
@@ -92,59 +101,64 @@ describe('uwx/foundation foundationSchemaToEntity', () => {
   it('passes through an explicit extension role', () => {
     const s = sampleSchema()
     s._self.role = 'extension'
-    const info = foundationSchemaToEntity(s).items.find(
-      (i) => i.section === 'info'
-    ).data
-    expect(info.role).toBe('extension')
+    expect(sectionData(foundationSchemaToEntity(s), 'info').role).toBe(
+      'extension'
+    )
   })
 
-  it('config ships _self minus identity + outputs, whole', () => {
-    const config = foundationSchemaToEntity(sampleSchema()).items.find(
-      (i) => i.section === 'config'
-    ).data.schema
-    expect(config.defaultLayout).toBe('marketing')
-    expect(config.defaultSection).toBe('Hero')
-    expect(config.vars).toEqual({ 'brand-color': { default: '#09f' } })
-    expect(config.viewTransitions).toEqual({ enabled: true })
-    expect(config.xref).toEqual({ registry: 'figures' })
-    // Identity + outputs are NOT in config (each has its own Section).
-    expect(config).not.toHaveProperty('name')
-    expect(config).not.toHaveProperty('version')
-    expect(config).not.toHaveProperty('outputs')
+  it('schema ships the whole renderable schema MINUS identity and dataSchemas', () => {
+    const blob = sectionData(foundationSchemaToEntity(sampleSchema()), 'schema')
+      .schema
+
+    // Foundation-wide config (formerly `config`) — under _self, identity stripped.
+    expect(blob._self.defaultLayout).toBe('marketing')
+    expect(blob._self.vars).toEqual({ 'brand-color': { default: '#09f' } })
+    expect(blob._self.xref).toEqual({ registry: 'figures' })
+    // Output formats (formerly `outputs`) ride along inside _self.
+    expect(blob._self.outputs.pdf).toEqual({ extension: 'pdf', via: 'typst' })
+    // Identity is stripped from _self.
+    expect(blob._self).not.toHaveProperty('name')
+    expect(blob._self).not.toHaveProperty('version')
+    expect(blob._self).not.toHaveProperty('description')
+    expect(blob._self).not.toHaveProperty('role')
+
+    // Components (formerly `components`) ship whole, authored labels intact.
+    expect(blob.Hero.title).toBe('Hero')
+    expect(blob.Hero.background).toBe('self')
+    expect(blob.Features.title).toBe('Features')
+
+    // Layouts (formerly `layouts`) ride along.
+    expect(blob._layouts.marketing.areas).toEqual(['hero', 'main'])
+
+    // dataSchemas is NOT in the blob — it becomes the `models` Section.
+    expect(blob).not.toHaveProperty('dataSchemas')
   })
 
-  it('components ships the section-type map whole, authored labels intact', () => {
-    const components = foundationSchemaToEntity(sampleSchema()).items.find(
-      (i) => i.section === 'components'
-    ).data.schema
-    expect(Object.keys(components).sort()).toEqual(['Features', 'Hero'])
-    // Labels stay single-language (NOT localized-wrapped); translations ride
-    // in the i18n Section later.
-    expect(components.Hero.title).toBe('Hero')
-    expect(components.Hero.description).toBe('Big banner')
-    expect(components.Hero.background).toBe('self')
-    // Underscore keys (_self, _layouts) are not components.
-    expect(components).not.toHaveProperty('_self')
-    expect(components).not.toHaveProperty('_layouts')
-  })
-
-  it('layouts ships _layouts whole', () => {
-    const layouts = foundationSchemaToEntity(sampleSchema()).items.find(
-      (i) => i.section === 'layouts'
-    ).data.schema
-    expect(layouts.marketing.areas).toEqual(['hero', 'main'])
-    expect(layouts.marketing.scroll).toBe('self')
-    expect(layouts.marketing.title).toBe('Marketing')
-  })
-
-  it('outputs ships _self.outputs whole', () => {
-    const outputs = foundationSchemaToEntity(sampleSchema()).items.find(
-      (i) => i.section === 'outputs'
-    ).data.schema
-    expect(outputs).toEqual({
-      typst: { extension: 'zip' },
-      pdf: { extension: 'pdf', via: 'typst' },
+  it('models carries the deduped data-schema refs, sorted, with stable uuids', () => {
+    const refs = sectionData(foundationSchemaToEntity(sampleSchema()), 'models')
+      .refs
+    expect(refs).toHaveLength(2)
+    // Sorted by ref.
+    expect(refs.map((r) => r.name)).toEqual(['@/article', '@uniweb/person'])
+    // Each ref: name verbatim, declared version (informational), uuid-shaped id.
+    expect(refs[0]).toEqual({
+      model_uuid: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      name: '@/article',
+      version: '1.0.0',
     })
+    expect(refs[1].version).toBe('2.1.0')
+  })
+
+  it('models is empty refs when the foundation declares no data schemas', () => {
+    const s = sampleSchema()
+    delete s.dataSchemas
+    expect(sectionData(foundationSchemaToEntity(s), 'models').refs).toEqual([])
+  })
+
+  it('i18n locales is empty without a foundationDir', () => {
+    expect(sectionData(foundationSchemaToEntity(sampleSchema()), 'i18n')).toEqual(
+      { locales: {} }
+    )
   })
 
   it('pins the Entity uuid when given (identity hook)', () => {
@@ -160,9 +174,9 @@ describe('uwx/foundation foundationSchemaToEntity', () => {
   })
 })
 
-describe('uwx/foundation emitFoundationPackage', () => {
+describe('uwx/foundation emitFoundationSchemaPackage', () => {
   it('produces a valid @uniweb/foundation-schema .uwx end-to-end', () => {
-    const zip = emitFoundationPackage(sampleSchema(), {
+    const zip = emitFoundationSchemaPackage(sampleSchema(), {
       exportedAt: '2026-01-01T00:00:00Z',
     })
     const files = readZip(zip)
@@ -170,7 +184,7 @@ describe('uwx/foundation emitFoundationPackage', () => {
 
     expect(manifest.format).toBe('uwx/1')
     expect(manifest.subtype).toBe('entity')
-    expect(manifest.models_required[0].uuid).toBe(FOUNDATION_MODEL_UUID)
+    expect(manifest.models_required[0].uuid).toBe(FOUNDATION_SCHEMA_TYPE_UUID)
     expect(manifest.models_required[0].name_at_export).toBe(
       '@uniweb/foundation-schema'
     )
@@ -178,15 +192,9 @@ describe('uwx/foundation emitFoundationPackage', () => {
 
     const entityFile = `entities/${manifest.roots[0]}.json`
     const entity = JSON.parse(files.get(entityFile).toString('utf8'))
-    expect(entity.model_uuid).toBe(FOUNDATION_MODEL_UUID)
+    expect(entity.model_uuid).toBe(FOUNDATION_SCHEMA_TYPE_UUID)
     expect(entity.owner_uuid).toBeNull()
     const sections = entity.items.map((i) => i.section).sort()
-    expect(sections).toEqual([
-      'components',
-      'config',
-      'info',
-      'layouts',
-      'outputs',
-    ])
+    expect(sections).toEqual(['i18n', 'info', 'models', 'schema'])
   })
 })
