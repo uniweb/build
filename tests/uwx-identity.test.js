@@ -167,7 +167,7 @@ describe('uwx/identity — foundation idempotency (keyed by name@version)', () =
     Hero: { name: 'Hero', title: 'Hero v1' },
   }
 
-  it('re-emitting the same version reuses uuids; title edit keeps the st uuid', () => {
+  it('re-emitting the same version reuses uuids; a label edit keeps the components uuid', () => {
     const path = join(tmpdir(), `fnd-${Date.now()}.json`)
     const a = entityOf(emitFoundationPackage(schema, { sidecar: path }))
     const edited = {
@@ -177,9 +177,9 @@ describe('uwx/identity — foundation idempotency (keyed by name@version)', () =
     const b = entityOf(emitFoundationPackage(edited, { sidecar: path }))
 
     expect(b.uuid).toBe(a.uuid) // same name@version
-    const st = (e) => e.items.find((i) => i.section === 'section_types')
-    expect(st(b).uuid).toBe(st(a).uuid) // keyed by st:Hero
-    expect(st(b).data.title).toEqual({ en: 'Hero v2 (edited)' })
+    const comp = (e) => e.items.find((i) => i.section === 'components')
+    expect(comp(b).uuid).toBe(comp(a).uuid) // keyed by ::components
+    expect(comp(b).data.schema.Hero.title).toBe('Hero v2 (edited)')
     rmSync(path, { force: true })
   })
 

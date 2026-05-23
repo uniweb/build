@@ -34,5 +34,5 @@ export {
 export {
   foundationSchemaToEntity,
   emitFoundationPackage,
-} from './foundation.js'
+} from './foundation-schema.js'
 export { siteProjectToEntity, emitSitePackage } from './site.js'
