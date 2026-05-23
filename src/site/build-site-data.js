@@ -26,8 +26,8 @@ import { collectSiteContent } from './content-collector.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
-import { generateSearchIndex } from './search/generate.js'
-import { generateCollectionIndex } from './search/collections.js'
+import { generateSearchIndex } from '../search/generate.js'
+import { generateCollectionIndex } from '../search/collections.js'
 
 /**
  * Build the site data outputs needed by `uniweb deploy` (link-mode).
