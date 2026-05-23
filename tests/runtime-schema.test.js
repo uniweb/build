@@ -59,76 +59,11 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
-  describe('data parsing', () => {
-    // `data.entity` is a declaration (shape hint), not a delivery gate.
-    // Delivery is default-on and does not need `inheritData` to be set.
-    it('parses type only', () => {
-      const meta = { data: 'events' }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: null },
-      })
-    })
-
-    it('parses type with limit', () => {
-      const meta = { data: 'events:6' }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: 6 },
-      })
-    })
-
-    it('trims whitespace', () => {
-      const meta = { data: ' articles : 5 ' }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'articles', limit: 5 },
-      })
-    })
-
-    it('handles single entity', () => {
-      const meta = { data: 'project:1' }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'project', limit: 1 },
-      })
-    })
-
-    it('ignores invalid data values', () => {
-      expect(extractRuntimeSchema({ data: null })).toBeNull()
-      expect(extractRuntimeSchema({ data: 123 })).toBeNull()
-      expect(extractRuntimeSchema({ data: '' })).toBeNull()
-    })
-
+  describe('data declaration', () => {
     it('`data: false` marks explicit opt-out', () => {
       const meta = { data: false }
       expect(extractRuntimeSchema(meta)).toEqual({
         inheritData: false,
-      })
-    })
-  })
-
-  describe('consolidated data object format', () => {
-    // With default-on delivery, `entity` is a declaration only — no
-    // `inheritData` is emitted for entity declarations.
-    it('extracts entity from data object', () => {
-      const meta = { data: { entity: 'events:6' } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: 6 },
-      })
-    })
-
-    it('extracts entity without limit', () => {
-      const meta = { data: { entity: 'events' } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: null },
-      })
-    })
-
-    it('extracts schemas without entity', () => {
-      const meta = {
-        data: {
-          schemas: { nav: { label: 'string', href: 'string' } },
-        },
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        schemas: { nav: { label: 'string', href: 'string' } },
       })
     })
 
@@ -136,89 +71,25 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema({ data: {} })).toBeNull()
     })
 
-    it('ignores empty entity string in data object', () => {
-      const meta = { data: { entity: '' } }
-      expect(extractRuntimeSchema(meta)).toBeNull()
-    })
-
-    it('data.schemas takes priority over top-level schemas', () => {
+    it('extracts an inline field-map schema keyed by data key', () => {
       const meta = {
-        data: {
-          schemas: { nav: { label: 'string' } },
-        },
+        data: { nav: { label: 'string', href: 'string' } },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
         schemas: { nav: { label: 'string', href: 'string' } },
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        schemas: { nav: { label: 'string' } },
       })
     })
 
-    it('old top-level format: schemas + legacy inheritData: false', () => {
-      // Top-level inheritData is honored only as opt-out.
-      const meta = {
-        data: 'events:6',
-        schemas: { event: { title: 'string' } },
-        inheritData: false,
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: 6 },
-        schemas: { event: { title: 'string' } },
-        inheritData: false,
+    it('resolves a named ref via dataSchemaMap', () => {
+      const meta = { data: { member: '@/member' } }
+      const result = extractRuntimeSchema(meta, {
+        '@/member': {
+          name: 'member',
+          fields: { name: 'string', role: { type: 'string', label: 'Role' } },
+        },
       })
-    })
-
-    it('top-level schemas used when data object has no schemas', () => {
-      const meta = {
-        data: { entity: 'events:6' },
-        schemas: { event: { title: 'string' } },
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'events', limit: 6 },
-        schemas: { event: { title: 'string' } },
-      })
-    })
-
-    it('ignores eager (removed — BlockRenderer always renders immediately)', () => {
-      const meta = { data: { eager: true } }
-      expect(extractRuntimeSchema(meta)).toBeNull()
-    })
-  })
-
-  describe('deprecated inherit handling', () => {
-    // Delivery is default-on; component-side inherit is gone.
-    // The runtime schema accepts the old forms silently (with dev warning
-    // in non-production, suppressed here) but ignores everything except
-    // `inherit: false`.
-    const originalWarn = console.warn
-    beforeAll(() => {
-      console.warn = () => {}
-    })
-    afterAll(() => {
-      console.warn = originalWarn
-    })
-
-    it('ignores data: { inherit: true }', () => {
-      const meta = { data: { inherit: true } }
-      // `data: {}` with only ignored fields returns null
-      expect(extractRuntimeSchema(meta)).toBeNull()
-    })
-
-    it('ignores data: { inherit: ["x"] }', () => {
-      const meta = { data: { inherit: ['team'] } }
-      expect(extractRuntimeSchema(meta)).toBeNull()
-    })
-
-    it('honors data: { inherit: false } as opt-out', () => {
-      const meta = { data: { inherit: false } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        inheritData: false,
-      })
-    })
-
-    it('ignores data.detail / data.limit on the component side', () => {
-      const meta = { data: { entity: 'articles', detail: false, limit: 3 } }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        data: { type: 'articles', limit: null },
+      expect(result).toEqual({
+        schemas: { member: { name: 'string', role: 'string' } },
       })
     })
   })
@@ -296,10 +167,10 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
-  describe('schemas extraction', () => {
+  describe('schemas extraction (inline field maps under data:)', () => {
     it('extracts schemas with shorthand notation', () => {
       const meta = {
-        schemas: {
+        data: {
           'nav-links': {
             label: 'string',
             href: 'string',
@@ -318,7 +189,7 @@ describe('extractRuntimeSchema', () => {
 
     it('strips editor-only fields (label, hint)', () => {
       const meta = {
-        schemas: {
+        data: {
           'nav-links': {
             label: {
               type: 'string',
@@ -344,7 +215,7 @@ describe('extractRuntimeSchema', () => {
 
     it('keeps runtime-relevant fields (default, options)', () => {
       const meta = {
-        schemas: {
+        data: {
           'nav-links': {
             type: {
               type: 'select',
@@ -370,7 +241,7 @@ describe('extractRuntimeSchema', () => {
 
     it('handles nested object schema', () => {
       const meta = {
-        schemas: {
+        data: {
           'card': {
             meta: {
               type: 'object',
@@ -400,7 +271,7 @@ describe('extractRuntimeSchema', () => {
 
     it('handles array with string of-type', () => {
       const meta = {
-        schemas: {
+        data: {
           'tags': {
             items: { type: 'array', of: 'string' },
           },
@@ -417,7 +288,7 @@ describe('extractRuntimeSchema', () => {
 
     it('handles array with schema reference', () => {
       const meta = {
-        schemas: {
+        data: {
           'nav-links': {
             children: { type: 'array', of: 'nav-links', label: 'Child Links' },
           },
@@ -434,7 +305,7 @@ describe('extractRuntimeSchema', () => {
 
     it('handles array with inline object of-type', () => {
       const meta = {
-        schemas: {
+        data: {
           'social': {
             links: {
               type: 'array',
@@ -462,14 +333,14 @@ describe('extractRuntimeSchema', () => {
       })
     })
 
-    it('returns null for empty schemas', () => {
-      expect(extractRuntimeSchema({ schemas: {} })).toBeNull()
-      expect(extractRuntimeSchema({ schemas: null })).toBeNull()
+    it('returns null for empty schema entries', () => {
+      expect(extractRuntimeSchema({ data: { nav: {} } })).toBeNull()
+      expect(extractRuntimeSchema({ data: {} })).toBeNull()
     })
 
     it('handles multiple schemas', () => {
       const meta = {
-        schemas: {
+        data: {
           'nav-links': {
             label: 'string',
             href: 'string',
@@ -490,7 +361,7 @@ describe('extractRuntimeSchema', () => {
 
     it('handles full @uniweb/schemas format (with name/version/fields)', () => {
       const meta = {
-        schemas: {
+        data: {
           team: {
             name: 'person',
             version: '1.0.0',
@@ -516,7 +387,7 @@ describe('extractRuntimeSchema', () => {
 
     it('handles mixed inline and full format schemas', () => {
       const meta = {
-        schemas: {
+        data: {
           // Full format (from @uniweb/schemas)
           team: {
             name: 'person',
@@ -548,7 +419,7 @@ describe('extractRuntimeSchema', () => {
 
     it('extracts defaults from full format schema fields', () => {
       const meta = {
-        schemas: {
+        data: {
           config: {
             name: 'config',
             fields: {
@@ -576,7 +447,7 @@ describe('extractRuntimeSchema', () => {
         description: 'Display events in a grid',
         category: 'showcase',
         background: true,
-        data: 'events:6',
+        data: { events: { title: 'string', date: 'string' } },
         params: {
           layout: { type: 'select', default: 'grid' },
           columns: { type: 'number', default: 3 },
@@ -584,7 +455,7 @@ describe('extractRuntimeSchema', () => {
       }
       expect(extractRuntimeSchema(meta)).toEqual({
         background: true,
-        data: { type: 'events', limit: 6 },
+        schemas: { events: { title: 'string', date: 'string' } },
         defaults: { layout: 'grid', columns: 3 },
       })
     })
@@ -596,7 +467,7 @@ describe('extractRuntimeSchema', () => {
         params: {
           theme: { type: 'select', default: 'dark' },
         },
-        schemas: {
+        data: {
           'nav-links': {
             label: 'string',
             href: 'string',
@@ -614,65 +485,20 @@ describe('extractRuntimeSchema', () => {
   })
 })
 
-describe('top-level inheritData (legacy)', () => {
-  // Delivery is default-on. Top-level `inheritData` is honored only as
-  // an opt-out (`false`). Truthy and array forms are ignored.
-  it('honors inheritData: false as opt-out', () => {
-    const meta = { inheritData: false }
-    expect(extractRuntimeSchema(meta)).toEqual({ inheritData: false })
-  })
-
-  it('ignores inheritData: true', () => {
-    const meta = { inheritData: true }
-    expect(extractRuntimeSchema(meta)).toBeNull()
-  })
-
-  it('ignores inheritData as array', () => {
-    const meta = { inheritData: ['person', 'config'] }
-    expect(extractRuntimeSchema(meta)).toBeNull()
-  })
-
-  it('ignores undefined inheritData', () => {
-    const meta = { background: true }
+describe('schema delivery is default-on (data: is a declaration, not a gate)', () => {
+  // EntityStore delivers everything unless the component opts out with
+  // `data: false`. A `data:` schema entry never implies `inheritData`.
+  it('does not emit inheritData when a schema is declared', () => {
+    const meta = { data: { team: { name: 'string' } } }
     const result = extractRuntimeSchema(meta)
-    expect(result).toEqual({ background: true })
+    expect(result.schemas.team).toEqual({ name: 'string' })
     expect(result.inheritData).toBeUndefined()
   })
 
-  it('combines inheritData: false with other runtime properties', () => {
-    const meta = {
-      background: true,
-      inheritData: false,
-      params: { theme: { default: 'dark' } },
-    }
-    expect(extractRuntimeSchema(meta)).toEqual({
-      background: true,
-      inheritData: false,
-      defaults: { theme: 'dark' },
-    })
-  })
-})
-
-describe('entity is a declaration, not a delivery gate', () => {
-  // Under default-on delivery, `entity` no longer implies `inheritData`.
-  // EntityStore delivers everything unless the component opts out.
-  it('does not emit inheritData for string data format', () => {
-    const meta = { data: 'articles:5' }
+  it('does not emit inheritData when only a nav schema is declared', () => {
+    const meta = { data: { nav: { label: 'string' } } }
     const result = extractRuntimeSchema(meta)
-    expect(result.data).toEqual({ type: 'articles', limit: 5 })
-    expect(result.inheritData).toBeUndefined()
-  })
-
-  it('does not emit inheritData for object entity format', () => {
-    const meta = { data: { entity: 'team' } }
-    const result = extractRuntimeSchema(meta)
-    expect(result.data).toEqual({ type: 'team', limit: null })
-    expect(result.inheritData).toBeUndefined()
-  })
-
-  it('does not emit inheritData when only schemas are declared', () => {
-    const meta = { data: { schemas: { nav: { label: 'string' } } } }
-    const result = extractRuntimeSchema(meta)
+    expect(result.schemas.nav).toEqual({ label: 'string' })
     expect(result.inheritData).toBeUndefined()
   })
 
@@ -692,7 +518,7 @@ describe('extractAllRuntimeSchemas', () => {
       },
       Features: {
         title: 'Features',
-        data: 'features:6',
+        data: { features: { title: 'string', summary: 'string' } },
       },
       Text: {
         title: 'Text Section',
@@ -708,7 +534,7 @@ describe('extractAllRuntimeSchemas', () => {
         defaults: { theme: 'gradient' },
       },
       Features: {
-        data: { type: 'features', limit: 6 },
+        schemas: { features: { title: 'string', summary: 'string' } },
       },
       // Text is excluded (no runtime properties)
     })
@@ -745,7 +571,7 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
         ],
       },
     }
-    const meta = { data: { schemas: { stats: richSchema } } }
+    const meta = { data: { stats: richSchema } }
     expect(extractRuntimeSchema(meta)).toEqual({
       schemas: { stats: richSchema },
     })
@@ -754,12 +580,10 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
   it('keeps rich and simple schemas side-by-side in the same map', () => {
     const meta = {
       data: {
-        schemas: {
-          'nav-links': { label: 'string', href: 'string' },
-          'stats': {
-            isComposite: true,
-            childSchema: { fields: [{ id: 'n', type: 'text' }] },
-          },
+        'nav-links': { label: 'string', href: 'string' },
+        'stats': {
+          isComposite: true,
+          childSchema: { fields: [{ id: 'n', type: 'text' }] },
         },
       },
     }
@@ -774,10 +598,8 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
   it('normalizes legacy type:"string" to type:"text" in rich field definitions', () => {
     const meta = {
       data: {
-        schemas: {
-          item: {
-            fields: [{ id: 'date', type: 'string' }],
-          },
+        item: {
+          fields: [{ id: 'date', type: 'string' }],
         },
       },
     }
@@ -791,7 +613,7 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
       { id: 'department', type: 'text', condition: { for: 'scholar' } },
       { id: 'label', type: 'text', condition: { for: { $in: ['a', 'b'] } } },
     ]
-    const meta = { data: { schemas: { form: { fields } } } }
+    const meta = { data: { form: { fields } } }
     const result = extractRuntimeSchema(meta)
     expect(result.schemas.form.fields).toEqual(fields)
   })
@@ -799,10 +621,8 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
   it('distinguishes rich schema (fields array) from full format (fields object)', () => {
     const meta = {
       data: {
-        schemas: {
-          rich: { fields: [{ id: 'a', type: 'text' }] },
-          full: { name: 's', fields: { a: 'string' } },
-        },
+        rich: { fields: [{ id: 'a', type: 'text' }] },
+        full: { name: 's', fields: { a: 'string' } },
       },
     }
     const result = extractRuntimeSchema(meta)
@@ -813,9 +633,7 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
   it('treats childSchema presence as a rich-schema marker even without isComposite', () => {
     const meta = {
       data: {
-        schemas: {
-          items: { childSchema: { fields: [{ id: 'n', type: 'text' }] } },
-        },
+        items: { childSchema: { fields: [{ id: 'n', type: 'text' }] } },
       },
     }
     const result = extractRuntimeSchema(meta)
