@@ -80,7 +80,7 @@ describe('uwx/foundation foundationSchemaToEntity', () => {
     // Four single-Item Sections per foundation-schema.fixture.yaml — the old
     // config/components/layouts/outputs collapsed into one `schema` blob.
     const sections = e.items.map((i) => i.section).sort()
-    expect(sections).toEqual(['i18n', 'info', 'models', 'schema'])
+    expect(sections).toEqual(['data-schemas', 'i18n', 'info', 'schema'])
     for (const s of sections) {
       expect(e.items.filter((i) => i.section === s)).toHaveLength(1)
     }
@@ -134,25 +134,21 @@ describe('uwx/foundation foundationSchemaToEntity', () => {
     expect(blob).not.toHaveProperty('dataSchemas')
   })
 
-  it('models carries the deduped data-schema refs, sorted, with stable uuids', () => {
-    const refs = sectionData(foundationSchemaToEntity(sampleSchema()), 'models')
-      .refs
-    expect(refs).toHaveLength(2)
-    // Sorted by ref.
-    expect(refs.map((r) => r.name)).toEqual(['@/article', '@uniweb/person'])
-    // Each ref: name verbatim, declared version (informational), uuid-shaped id.
-    expect(refs[0]).toEqual({
-      model_uuid: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      name: '@/article',
-      version: '1.0.0',
-    })
-    expect(refs[1].version).toBe('2.1.0')
+  it('data-schemas carries the deduped refs BY NAME, sorted, no uuid', () => {
+    const refs = sectionData(
+      foundationSchemaToEntity(sampleSchema()),
+      'data-schemas'
+    ).refs
+    // References are names only — the server resolves them to Models.
+    expect(refs).toEqual([{ name: '@/article' }, { name: '@uniweb/person' }])
   })
 
-  it('models is empty refs when the foundation declares no data schemas', () => {
+  it('data-schemas is empty refs when the foundation declares no data schemas', () => {
     const s = sampleSchema()
     delete s.dataSchemas
-    expect(sectionData(foundationSchemaToEntity(s), 'models').refs).toEqual([])
+    expect(
+      sectionData(foundationSchemaToEntity(s), 'data-schemas').refs
+    ).toEqual([])
   })
 
   it('i18n locales is empty without a foundationDir', () => {
@@ -195,6 +191,6 @@ describe('uwx/foundation emitFoundationSchemaPackage', () => {
     expect(entity.model_uuid).toBe(FOUNDATION_SCHEMA_TYPE_UUID)
     expect(entity.owner_uuid).toBeNull()
     const sections = entity.items.map((i) => i.section).sort()
-    expect(sections).toEqual(['i18n', 'info', 'models', 'schema'])
+    expect(sections).toEqual(['data-schemas', 'i18n', 'info', 'schema'])
   })
 })

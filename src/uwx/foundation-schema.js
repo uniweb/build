@@ -20,17 +20,17 @@
 //   i18n    single — ONE localized `locales` json field: the per-locale sidecar
 //                    map `{ en: <sidecar>, … }` assembled from the foundation's
 //                    `i18n/{locale}.json` bundles. `{}` when none.
-//   models  single — ONE `refs` json field: the deduped data-schema references
-//                    `[{ model_uuid, name, version }]`. The ONLY axis the
-//                    server traverses (to light its offer edge). Built from
-//                    schema.json's `dataSchemas` map; each ref's stable
-//                    schema-identity uuid comes from the id resolver's
-//                    `schema()` bag (sidecar — reused across foundation
-//                    versions). `name` is the ref verbatim
-//                    (`@/article` / `@uniweb/person`); org resolution to
-//                    `@org/article` is a downstream (register/backend) concern.
-//                    `version` is the schema's declared version, informational
-//                    (the backend resolves by uuid, latest-wins).
+//   data-schemas  single — ONE `refs` json field: the deduped data-schema
+//                    references the foundation renders, BY NAME:
+//                    `[{ name: '@/article' }, …]`. The ONLY axis the server
+//                    traverses (to light its offer edge). Built from
+//                    schema.json's `dataSchemas` map. References are NAMES, not
+//                    ids — the framework never mints or carries a data-schema
+//                    uuid; the server resolves the name to a Model and owns
+//                    that identity (publish-contract.md §3). Org resolution of
+//                    `@/article` → `@org/article` is a downstream (register/
+//                    backend) concern; an explicit version pin is optional and
+//                    not emitted from meta.js today (omit ⇒ latest).
 //
 // See kb/framework/plans/uniweb-register-contract.md for the full contract.
 //
@@ -104,23 +104,18 @@ export function foundationSchemaToEntity(schema, opts = {}) {
   } = rest._self || {}
   const schemaBlob = { ...rest, _self: selfConfig }
 
-  // ── models — the deduped data-schema references (sorted for stable output).
-  // (`models` is the server's Section name; `model_uuid` is the wire field —
-  // both fixed by the foundation-schema entity format. Our side speaks schema:
-  // the stable id comes from `id.schema(ref)`.)
-  const refs = Object.entries(dataSchemas || {})
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([ref, def]) => ({
-      model_uuid: id.schema(ref),
-      name: ref,
-      version: def?.version,
-    }))
+  // ── data-schemas — the deduped data-schema references, BY NAME (sorted for
+  // stable output). No uuid: the server resolves the name to a Model and owns
+  // that identity. `data-schemas` is the server's Section name.
+  const refs = Object.keys(dataSchemas || {})
+    .sort()
+    .map((ref) => ({ name: ref }))
 
   const items = [
     single('info', info),
     single('schema', { schema: schemaBlob }),
     single('i18n', { locales: loadI18nLocales(opts.foundationDir) }),
-    single('models', { refs }),
+    single('data-schemas', { refs }),
   ]
 
   return {

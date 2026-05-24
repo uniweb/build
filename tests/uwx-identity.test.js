@@ -76,30 +76,17 @@ describe('uwx/identity sidecarResolver', () => {
     expect(readFileSync(path, 'utf8')).toBe(first)
   })
 
-  it('persists sorted { entities, items, schemas } JSON', () => {
+  it('persists sorted { entities, items } JSON', () => {
     const path = join(dir, 'ids.json')
     const r = sidecarResolver(path)
     r.item('z')
     r.item('a')
     r.entity('e')
-    r.schema('@/article')
     r.flush()
     const json = JSON.parse(readFileSync(path, 'utf8'))
-    expect(Object.keys(json)).toEqual(['entities', 'items', 'schemas'])
+    expect(Object.keys(json)).toEqual(['entities', 'items'])
     expect(Object.keys(json.items)).toEqual(['a', 'z']) // sorted
     expect(json.entities.e).toMatch(UUID_RE)
-    expect(json.schemas['@/article']).toMatch(UUID_RE)
-  })
-
-  it('data-schema-identity uuids are stable per ref across runs', () => {
-    const path = join(dir, 'm.json')
-    const r1 = sidecarResolver(path)
-    const a = r1.schema('@/article')
-    expect(r1.schema('@/article')).toBe(a) // stable within run
-    expect(r1.schema('@/member')).not.toBe(a)
-    r1.flush()
-    // Reused across foundation versions: a fresh resolver yields the same uuid.
-    expect(sidecarResolver(path).schema('@/article')).toBe(a)
   })
 
   it('throws on a corrupt sidecar (not silently reset)', () => {

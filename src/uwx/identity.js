@@ -27,20 +27,13 @@ export function mintResolver() {
   return {
     entity: () => mintUuidV7(),
     item: () => mintUuidV7(),
-    schema: () => mintUuidV7(),
     flush() {},
   }
 }
 
 /**
  * Stable resolver backed by `<sidecarPath>` (JSON:
- * `{ entities: { key: uuid }, items: { key: uuid }, schemas: { key: uuid } }`).
- *
- * `schemas` is the data-schema-identity bag: a data schema's stable identity
- * (the value carried in the `@uniweb/data-schema` entity's wire `meta.model_uuid`),
- * keyed by its ref (e.g. `@/article`) so it's REUSED ACROSS FOUNDATION VERSIONS
- * — commit the sidecar and every republish references the same data schema.
- * (See kb/framework/plans/uniweb-register-contract.md §6.)
+ * `{ entities: { key: uuid }, items: { key: uuid } }`).
  *
  * - Existing key → its stored uuid (idempotent re-export).
  * - New key → mint, record, mark dirty.
@@ -52,13 +45,12 @@ export function mintResolver() {
  * @param {string} sidecarPath
  */
 export function sidecarResolver(sidecarPath) {
-  let store = { entities: {}, items: {}, schemas: {} }
+  let store = { entities: {}, items: {} }
   try {
     const parsed = JSON.parse(readFileSync(sidecarPath, 'utf8'))
     store = {
       entities: parsed?.entities ?? {},
       items: parsed?.items ?? {},
-      schemas: parsed?.schemas ?? {},
     }
   } catch (err) {
     if (err.code !== 'ENOENT') throw err // a corrupt sidecar is a real error
@@ -79,7 +71,6 @@ export function sidecarResolver(sidecarPath) {
   return {
     entity: (key) => get('entities', key),
     item: (key) => get('items', key),
-    schema: (key) => get('schemas', key),
     flush() {
       if (!dirty) return
       const sortObj = (o) =>
@@ -87,7 +78,6 @@ export function sidecarResolver(sidecarPath) {
       const out = {
         entities: sortObj(store.entities),
         items: sortObj(store.items),
-        schemas: sortObj(store.schemas),
       }
       mkdirSync(dirname(sidecarPath), { recursive: true })
       writeFileSync(sidecarPath, JSON.stringify(out, null, 2) + '\n')
