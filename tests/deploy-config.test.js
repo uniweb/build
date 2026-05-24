@@ -1,6 +1,5 @@
 /**
  * Tests for the deploy.yml loader and writer.
- * See kb/framework/plans/static-host-deploy-adapters.md.
  */
 
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'

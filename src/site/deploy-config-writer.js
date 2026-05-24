@@ -29,7 +29,7 @@ import { Document, parseDocument, isMap } from 'yaml'
 const SCAFFOLD_HEADER = [
   ' deploy.yml — operational config and last-deploy memory for this site.',
   ' Safe to commit. The `lastDeploy:` block is auto-managed by `uniweb deploy`;',
-  ' edit `targets:` freely. See: kb/framework/plans/static-host-deploy-adapters.md',
+  ' edit `targets:` freely.',
 ].join('\n')
 
 /**

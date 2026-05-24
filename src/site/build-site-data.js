@@ -6,8 +6,7 @@
  * vite (to produce a static-host JS bundle). For `uniweb build --link`,
  * the JS bundle is wasted CPU — the deployed Uniweb-hosted site is rendered
  * by the worker using its own runtime + the foundation served from the
- * registry; nothing from the site's vite output reaches the browser. See
- * `kb/framework/build/workspace-ergonomics.md` (link-mode deploy pipeline).
+ * registry; nothing from the site's vite output reaches the browser.
  *
  * This function is the shared data-emission core used by the link-mode
  * pipeline. The vite plugin keeps its own emission for the bundle-mode

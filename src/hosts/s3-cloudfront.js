@@ -23,8 +23,6 @@
  * CloudFront Function itself are out of scope (one-time IaC). The first
  * deploy explains what the user still needs to do; subsequent deploys
  * just push files and invalidate.
- *
- * See kb/framework/plans/static-host-deploy-adapters.md for the design.
  */
 
 import { writeFile, unlink, readFile } from 'node:fs/promises'
@@ -80,9 +78,6 @@ const REDIRECTS_FILE    = '_redirects'
  * to `uniweb deploy` against uniweb-edge), so the rule is:
  *   - registry ref ('@ns/name@ver'), https:// URL, or { url } object → linked
  *   - everything else (file: ref, workspace path) → standalone
- *
- * See kb/framework/architecture/site-foundation-runtime-model.md for
- * the standalone / linked vocabulary.
  */
 function detectFoundationMode(siteContent) {
   const foundation = siteContent?.config?.foundation

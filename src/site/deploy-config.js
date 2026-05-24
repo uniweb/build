@@ -3,8 +3,7 @@
  *
  * Loads a site's deploy.yml (sibling of site.yml) and resolves a target
  * by name. Read-only — never writes. See deploy-config-writer.js for
- * the write path. See kb/framework/plans/static-host-deploy-adapters.md
- * for the file format and the broader design.
+ * the write path.
  *
  * On-disk shape:
  *   default: production

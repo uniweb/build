@@ -36,7 +36,6 @@
  * `postBuild` is required. `deploy` is optional — adapters like
  * 'netlify' don't need it (Netlify deploys from git).
  *
- * See kb/framework/plans/static-host-deploy-adapters.md for the design.
  * Deferred (not in V1): user-defined adapters via `deploy.adapter:
  * ./my-adapter.js`. The current registry is a static built-in lookup.
  */

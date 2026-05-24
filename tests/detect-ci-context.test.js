@@ -1,6 +1,5 @@
 /**
  * Tests for the CI host context detector.
- * See kb/framework/plans/static-host-deploy-adapters.md.
  */
 
 import { detectCiContext } from '../src/hosts/detect-ci-context.js'

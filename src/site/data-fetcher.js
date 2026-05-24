@@ -161,10 +161,9 @@ export function applySort(items, sortExpr) {
  * Apply a where-object predicate to an array of items.
  *
  * The where-object is the new query language (see @uniweb/core's
- * matchWhere and the architecture doc at
- * kb/framework/architecture/data-fetching.md). Structured JSON
- * predicate; the runtime evaluator walks the object against each
- * record. Same shape ships to backends that declare `supports: [where]`.
+ * matchWhere). Structured JSON predicate; the runtime evaluator walks
+ * the object against each record. Same shape ships to backends that
+ * declare `supports: [where]`.
  *
  * @param {Array} items - Items to filter
  * @param {object} where - Where-object predicate

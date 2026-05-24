@@ -1,6 +1,5 @@
 /**
  * Tests for the host adapter registry and the V1 built-in adapters.
- * See kb/framework/plans/static-host-deploy-adapters.md.
  */
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises'

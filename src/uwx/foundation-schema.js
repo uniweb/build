@@ -1,38 +1,31 @@
 // Map a built foundation's `dist/meta/schema.json` to one
 // `@uniweb/foundation-schema` entity, then to a `subtype: entity` .uwx.
 //
-// SOURCE OF TRUTH for the entity shape is the server fixture
-// `apps/uniweb-rs/uniwebd/system-models/foundation-schema.fixture.yaml` — NOT
-// this comment. The foundation-schema entity type has FOUR Sections
-// (registry-redesign.md §5: "decompose only the axis the backend traverses;
-// keep coarse what is shipped whole"):
+// The entity has FOUR Sections — decompose only what a consumer needs to read
+// on its own; keep coarse what is shipped whole:
 //
 //   info    single, brief — identity ONLY: name, version, role, description.
-//                           Field-decomposed (the backend sorts/pins by
-//                           name/version). This IS the entity_ref card.
+//                           Field-decomposed so identity is readable without
+//                           opening the rest. This is the summary card.
 //   schema  single — ONE opaque `schema` json field: the whole renderable
 //                    schema.json MINUS identity and MINUS dataSchemas
 //                    (components, layouts, outputs, plus foundation-wide config
 //                    — vars, props, handlers, defaultLayout, …). Shipped WHOLE
-//                    to the frontend editor; the server never queries into it,
-//                    so the build owns its internal shape. (This collapses the
-//                    former config/components/layouts/outputs Sections.)
+//                    and not inspected, so the build owns its internal shape.
+//                    (Collapses the former config/components/layouts/outputs
+//                    Sections.)
 //   i18n    single — ONE localized `locales` json field: the per-locale sidecar
 //                    map `{ en: <sidecar>, … }` assembled from the foundation's
 //                    `i18n/{locale}.json` bundles. `{}` when none.
 //   data-schemas  single — ONE `refs` json field: the deduped data-schema
 //                    references the foundation renders, BY NAME:
-//                    `[{ name: '@/article' }, …]`. The ONLY axis the server
-//                    traverses (to light its offer edge). Built from
-//                    schema.json's `dataSchemas` map. References are NAMES, not
-//                    ids — the framework never mints or carries a data-schema
-//                    uuid; the server resolves the name to a Model and owns
-//                    that identity (publish-contract.md §3). Org resolution of
-//                    `@/article` → `@org/article` is a downstream (register/
-//                    backend) concern; an explicit version pin is optional and
-//                    not emitted from meta.js today (omit ⇒ latest).
-//
-// See kb/framework/plans/uniweb-register-contract.md for the full contract.
+//                    `[{ name: '@/article' }, …]`. Built from schema.json's
+//                    `dataSchemas` map. References are NAMES, not ids — the
+//                    framework never mints or carries a data-schema uuid;
+//                    resolving a name to its definition is a downstream concern.
+//                    Org resolution of `@/article` → `@org/article` and version
+//                    pinning are downstream too; a pin is optional and not
+//                    emitted from meta.js today (omit ⇒ latest).
 //
 // schema.json shape (see src/schema.js `buildSchema`):
 //   _self        : foundation.js/package.json config + identity
@@ -42,8 +35,8 @@
 //   <Pascal>     : section-type components { name, path, ...meta, title }
 //
 // A foundation version is immutable, so the entity is keyed by `name@version`:
-// a sidecar-backed re-publish of the same version reuses the uuid (idempotent
-// re-import); the library default is mint (submit-once).
+// a sidecar-backed re-export of the same version reuses the uuid (idempotent
+// re-import); the default resolver mints a fresh uuid.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -105,8 +98,8 @@ export function foundationSchemaToEntity(schema, opts = {}) {
   const schemaBlob = { ...rest, _self: selfConfig }
 
   // ── data-schemas — the deduped data-schema references, BY NAME (sorted for
-  // stable output). No uuid: the server resolves the name to a Model and owns
-  // that identity. `data-schemas` is the server's Section name.
+  // stable output). No uuid: a name resolves to its definition downstream.
+  // `data-schemas` is the Section name.
   const refs = Object.keys(dataSchemas || {})
     .sort()
     .map((ref) => ({ name: ref }))

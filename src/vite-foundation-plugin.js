@@ -46,8 +46,7 @@ let _buildingSSRBundle = false
  * Emit dist/runtime-pin.json declaring the @uniweb/runtime version this
  * foundation was built against. Read by the edge isolate (under the
  * Strategy S split-bundle path) to decide which runtime/{ver}/ssr.js to
- * side-load from R2. See kb/platform/plans/edge-ssr-bundling-strategy.md
- * and kb/platform/operations/release-workflow.md.
+ * side-load from R2.
  *
  * Reads the resolved version from the foundation's node_modules/@uniweb/
  * runtime/package.json so the pin reflects what was actually linked at
@@ -170,8 +169,6 @@ async function emitRuntimePin(outDir, projectRoot) {
  * on with one line if Phase 1's edge dispatcher misbehaves in production.
  * Phase 3 cleanup deletes this function entirely once the new path is
  * proven healthy.
- *
- * See `kb/platform/plans/edge-ssr-bundling-strategy.md`.
  *
  * Original purpose (preserved for context):
  * Build a self-contained ESM bundle for edge SSR (Cloudflare Dynamic Workers).
@@ -374,7 +371,6 @@ export function foundationBuildPlugin(options = {}) {
       // runtime/{version}/worker-runtime.js (uploaded by the platform's
       // /deploy-runtime skill); the Cloudflare isolate side-loads them
       // alongside dist/entry.js via the edge dual-mode dispatcher.
-      // See kb/platform/plans/edge-ssr-bundling-strategy.md.
       //
       // The buildSSRBundle() function is kept (just not invoked) so it
       // can be flipped back on with one line if Phase 1's edge dispatcher

@@ -403,7 +403,6 @@ function getOutputPath(distDir, route) {
  * @param {function} options.onProgress - Progress callback
  * @param {string} [options.host] - Name of the host adapter whose postBuild
  *   hook runs after pages are written. Default: 'cloudflare-pages'.
- *   See kb/framework/plans/static-host-deploy-adapters.md.
  * @returns {Promise<{pages: number, files: string[]}>}
  */
 export async function prerenderSite(siteDir, options = {}) {
@@ -703,7 +702,6 @@ export async function prerenderSite(siteDir, options = {}) {
   // distributionId, …) at deploy time, it passes deploy.yml's resolved
   // target to the adapter's deploy hook directly. postBuild consumes
   // only the host name and the ciContext (artifact provenance).
-  // See kb/framework/plans/static-host-deploy-adapters.md.
   const ciContext = detectCiContext()
   const hostName = hostOverride || ciContext?.host || 'cloudflare-pages'
   const adapter = getAdapter(hostName)

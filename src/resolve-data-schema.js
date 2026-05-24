@@ -13,10 +13,11 @@
  *                      FOUNDATION's node_modules
  *   '@scope/name'    → another publisher's namespace (not exercised this pass)
  *
- * The authoring format and its mapping to the server's Model/Section/Type is
- * `kb/framework/plans/data-schema-format.md`. This module validates that format
- * and normalizes the friendly type vocabulary to the canonical kinds; the
- * SERVER lowers the structure to Model/Section/Type (we don't).
+ * The authoring format and its canonical type vocabulary are documented in
+ * `data-schema-format.md`. This module validates that format and normalizes the
+ * friendly type aliases to the canonical kinds. Normalization is the only
+ * transformation it performs — it does not lower the structure to any storage
+ * model.
  */
 
 import { readFile } from 'node:fs/promises'

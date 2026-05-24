@@ -11,6 +11,5 @@ export const SITE_CONTENT_TYPE_UUID = '019e230f-de00-7069-b3cb-f5922bbd5cca'
 
 // @uniweb/data-schema — one published version of a reusable data schema, as one
 // entity. PROVISIONAL: this type is still in flux server-side (the entity
-// `package.payload` shape in particular). See
-// kb/framework/plans/uniweb-register-contract.md §3/§5.
+// `package.payload` shape in particular).
 export const DATA_SCHEMA_TYPE_UUID = '019e3929-fb7d-742c-8aff-1c26b9abfde7'
