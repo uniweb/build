@@ -239,14 +239,14 @@ describe('extractRuntimeSchema', () => {
       })
     })
 
-    it('handles nested object schema', () => {
+    it('handles a nested object via fields', () => {
       const meta = {
         data: {
-          'card': {
+          card: {
             meta: {
               type: 'object',
               label: 'Metadata',
-              schema: {
+              fields: {
                 author: { type: 'string', label: 'Author Name' },
                 date: 'string',
               },
@@ -256,10 +256,10 @@ describe('extractRuntimeSchema', () => {
       }
       expect(extractRuntimeSchema(meta)).toEqual({
         schemas: {
-          'card': {
+          card: {
             meta: {
               type: 'object',
-              schema: {
+              fields: {
                 author: 'string',
                 date: 'string',
               },
@@ -269,50 +269,36 @@ describe('extractRuntimeSchema', () => {
       })
     })
 
-    it('handles array with string of-type', () => {
+    it('handles an array with scalar items', () => {
       const meta = {
         data: {
-          'tags': {
-            items: { type: 'array', of: 'string' },
+          card: {
+            tags: { type: 'array', items: 'string' },
           },
         },
       }
       expect(extractRuntimeSchema(meta)).toEqual({
         schemas: {
-          'tags': {
-            items: { type: 'array', of: 'string' },
+          card: {
+            tags: { type: 'array', items: 'string' },
           },
         },
       })
     })
 
-    it('handles array with schema reference', () => {
+    it('handles an array of objects via items.fields', () => {
       const meta = {
         data: {
-          'nav-links': {
-            children: { type: 'array', of: 'nav-links', label: 'Child Links' },
-          },
-        },
-      }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        schemas: {
-          'nav-links': {
-            children: { type: 'array', of: 'nav-links' },
-          },
-        },
-      })
-    })
-
-    it('handles array with inline object of-type', () => {
-      const meta = {
-        data: {
-          'social': {
+          social: {
             links: {
               type: 'array',
               label: 'Social Links',
-              of: {
-                platform: { type: 'string', label: 'Platform' },
-                url: 'string',
+              items: {
+                type: 'object',
+                fields: {
+                  platform: { type: 'string', label: 'Platform' },
+                  url: 'string',
+                },
               },
             },
           },
@@ -320,12 +306,64 @@ describe('extractRuntimeSchema', () => {
       }
       expect(extractRuntimeSchema(meta)).toEqual({
         schemas: {
-          'social': {
+          social: {
             links: {
               type: 'array',
-              of: {
-                platform: 'string',
-                url: 'string',
+              items: {
+                type: 'object',
+                fields: {
+                  platform: 'string',
+                  url: 'string',
+                },
+              },
+            },
+          },
+        },
+      })
+    })
+
+    it('carries defaults through nested object and array-of-object fields', () => {
+      const meta = {
+        data: {
+          event: {
+            location: {
+              type: 'object',
+              fields: {
+                city: 'string',
+                virtual: { type: 'bool', default: false },
+              },
+            },
+            sessions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                fields: {
+                  name: 'string',
+                  published: { type: 'bool', default: true },
+                },
+              },
+            },
+          },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        schemas: {
+          event: {
+            location: {
+              type: 'object',
+              fields: {
+                city: 'string',
+                virtual: { type: 'bool', default: false },
+              },
+            },
+            sessions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                fields: {
+                  name: 'string',
+                  published: { type: 'bool', default: true },
+                },
               },
             },
           },

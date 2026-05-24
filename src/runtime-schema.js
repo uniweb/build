@@ -52,13 +52,19 @@ function parseDataString(dataString) {
 /**
  * Extract lean schema field for runtime
  * Strips editor-only fields (label, hint, description)
- * Keeps runtime fields (type, default, options, of, schema)
+ * Keeps runtime fields (type, default, enum, options, fields, items)
+ *
+ * Vocabulary is the data-schema format:
+ * an `object` field nests via `fields:` (a field map); an `array` field nests
+ * via `items:` (a single element field). This matches what
+ * resolve-data-schema.js normalizes named refs to, so named-ref and inline
+ * `data:` schemas share one shape.
  *
  * @param {string|Object} field - Schema field definition
  * @returns {string|Object} - Lean field definition
  */
 function extractSchemaField(field) {
-  // Shorthand: 'string', 'number', 'boolean'
+  // Shorthand: a bare type string ('string', 'decimal', …).
   if (typeof field === 'string') {
     return field
   }
@@ -69,29 +75,28 @@ function extractSchemaField(field) {
 
   const lean = {}
 
-  // Keep runtime-relevant fields
+  // Keep runtime-relevant fields: the default, plus the inline picklist
+  // (`enum`) used for value validation. `options` is a curated-ref string —
+  // inert at runtime but carried through.
   if (field.type) lean.type = field.type
   if (field.default !== undefined) lean.default = field.default
+  if (field.enum !== undefined) lean.enum = field.enum
   if (field.options) lean.options = field.options
 
-  // Handle array 'of' - can be string, schema name, or inline object
-  if (field.of !== undefined) {
-    if (typeof field.of === 'string') {
-      lean.of = field.of
-    } else if (typeof field.of === 'object') {
-      // Inline schema definition
-      lean.of = extractSchemaFields(field.of)
-    }
+  // Nested object → recurse into its field map.
+  if (field.type === 'object' && field.fields && typeof field.fields === 'object') {
+    lean.fields = extractSchemaFields(field.fields)
   }
 
-  // Handle nested object 'schema'
-  if (field.schema && typeof field.schema === 'object') {
-    lean.schema = extractSchemaFields(field.schema)
+  // Array → recurse into its single element field (which may itself be an
+  // object carrying nested `fields`).
+  if (field.type === 'array' && field.items !== undefined) {
+    lean.items = extractSchemaField(field.items)
   }
 
-  // If we only have 'type' and it's a simple type, use shorthand
+  // If the only thing left is `type`, collapse to the bare type string.
   const keys = Object.keys(lean)
-  if (keys.length === 1 && keys[0] === 'type' && ['string', 'number', 'boolean'].includes(lean.type)) {
+  if (keys.length === 1 && keys[0] === 'type') {
     return lean.type
   }
 
