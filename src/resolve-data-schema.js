@@ -8,10 +8,20 @@
  *
  *   '@/name'         → this foundation's own namespace:
  *                      <srcDir>/schemas/name.{js,json,yml,yaml}
- *   '@uniweb/name'   → the shared standards namespace: the schema named `name`
- *                      from the `@uniweb/schemas` package, resolved from the
- *                      FOUNDATION's node_modules
- *   '@scope/name'    → another publisher's namespace (not exercised this pass)
+ *   '@std/name'      → the shared standard schemas, shipped in the framework's
+ *                      `@uniweb/schemas` package (resolved from the FOUNDATION's
+ *                      node_modules)
+ *   '@org/name'      → an org's own schemas, resolved from that org's
+ *                      `@org/schemas` package — define schemas once and share
+ *                      them across foundations, locally, no backend. (The org
+ *                      becomes a real registry scope at publish time.)
+ *   '@uniweb/name'   → reserved: the platform system namespace, not a data
+ *                      schema source (rejected, with a pointer to '@std').
+ *
+ * Alias routing (`schemas.config.js`): a foundation may map a scope to a
+ * directory of schema files, so '@org/name' resolves to a bare folder anywhere
+ * on disk — no package, no install. The alias takes precedence over the
+ * '@org/schemas' package convention; see `loadSchemaAliases`.
  *
  * The authoring format and its canonical type vocabulary are documented in
  * `data-schema-format.md`. This module validates that format and normalizes the
@@ -22,7 +32,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
@@ -31,11 +41,13 @@ import yaml from 'js-yaml'
 const SCHEMA_EXTENSIONS = ['.js', '.json', '.yml', '.yaml']
 
 // The authoring type vocabulary. Scalars + structural; aliases fold in below.
-const SCALAR_KINDS = new Set([
+// Exported so a conformance checker can speak the same definition of each kind
+// that normalization produces — "normalizes" and "conforms" stay in lockstep.
+export const SCALAR_KINDS = new Set([
   'string', 'text', 'richtext', 'int', 'decimal', 'bool',
   'date', 'datetime', 'file', 'json',
 ])
-const STRUCTURAL_KINDS = new Set(['object', 'array', 'ref'])
+export const STRUCTURAL_KINDS = new Set(['object', 'array', 'ref'])
 // Friendly aliases → canonical kind.
 const TYPE_ALIASES = {
   markdown: 'richtext',
@@ -45,13 +57,23 @@ const TYPE_ALIASES = {
   image: 'file',
 }
 // Type aliases that lower to `string` + a `format` (semantic strings).
-const FORMAT_TYPES = new Set(['url', 'email'])
-const SECTION_KINDS = new Set(['single', 'multi', 'binder'])
+export const FORMAT_TYPES = new Set(['url', 'email'])
+export const SECTION_KINDS = new Set(['single', 'multi', 'binder'])
+
+// Scope → schema package resolution. The shared standard schemas are referenced
+// under '@std' but ship in the framework's '@uniweb/schemas' package; every
+// other '@org' maps by convention to that org's own '@org/schemas' package, so a
+// team can define org-scoped schemas once (a workspace package) and share them
+// across foundations — locally, with no backend. '@uniweb' is reserved for the
+// platform system namespace and is never a data-schema source.
+const SCOPE_PACKAGE = { std: '@uniweb/schemas' }
+const RESERVED_SYSTEM_SCOPE = 'uniweb'
+const packageForScope = (scope) => SCOPE_PACKAGE[scope] ?? `@${scope}/schemas`
 
 /**
  * Parse a data-schema ref into `{ scope, name }`.
- *   '@/member'       → { scope: '',       name: 'member' }   (self namespace)
- *   '@uniweb/person' → { scope: 'uniweb', name: 'person' }
+ *   '@/member'       → { scope: '',    name: 'member' }   (self namespace)
+ *   '@std/person'    → { scope: 'std', name: 'person' }
  */
 export function parseSchemaRef(ref) {
   if (typeof ref !== 'string' || ref[0] !== '@') {
@@ -100,7 +122,7 @@ export function collectSchemaRefs(components) {
  * @param {{ srcDir: string }} ctx - Foundation source root
  * @returns {Promise<Object>} normalized schema
  */
-export async function resolveSchemaRef(ref, { srcDir }) {
+export async function resolveSchemaRef(ref, { srcDir, aliases }) {
   const { scope, name } = parseSchemaRef(ref)
 
   if (scope === '') {
@@ -112,18 +134,41 @@ export async function resolveSchemaRef(ref, { srcDir }) {
     return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
   }
 
-  if (scope === 'uniweb') {
-    const schema = await resolveStandardSchema(name, srcDir)
-    if (!schema) {
-      throw new Error(`Unknown standard schema '${ref}': '@uniweb/schemas' exports no schema named '${name}'.`)
-    }
-    return validateAndNormalizeSchema(schema, ref)
+  if (scope === RESERVED_SYSTEM_SCOPE) {
+    throw new Error(
+      `'@${scope}' is the reserved platform system namespace and is not a data-schema source. ` +
+        `Use '@std/${name}' for the shared standard schemas.`
+    )
   }
 
-  throw new Error(
-    `Data-schema namespace '@${scope}' is not resolvable yet (ref '${ref}'). ` +
-      `This pass supports '@/<name>' (this foundation) and '@uniweb/<name>' (shared standards).`
-  )
+  // Alias routing (schemas.config.js): a scope mapped to a directory resolves to
+  // a bare schema FILE in that directory — no package, no install, no node_modules.
+  // This lets a foundation point '@agency' at a shared schema folder anywhere on
+  // disk. Takes precedence over the package convention below; '@/' (self) and the
+  // reserved '@uniweb' scope are handled above and are never aliasable.
+  const aliasDir = aliases?.[`@${scope}`]
+  if (aliasDir) {
+    const file = findSchemaFileInDir(aliasDir, name)
+    if (!file) {
+      const tried = SCHEMA_EXTENSIONS.map((e) => `${name}${e}`).join(', ')
+      throw new Error(
+        `Data schema '${ref}' not found in the directory '@${scope}' is aliased to ('${aliasDir}' ` +
+          `via schemas.config.js). Expected one of: ${tried}.`
+      )
+    }
+    return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
+  }
+
+  // Every other scope is an org namespace: '@org/name' resolves `name` from that
+  // org's '@org/schemas' package (the standards live under '@std', which ships in
+  // '@uniweb/schemas'). Resolved from the foundation's node_modules, so a
+  // workspace package shared across foundations works locally with no backend.
+  const pkg = packageForScope(scope)
+  const schema = await resolveScopedSchema(pkg, name, srcDir)
+  if (!schema) {
+    throw new Error(`Unknown data schema '${ref}': '${pkg}' exports no schema named '${name}'.`)
+  }
+  return validateAndNormalizeSchema(schema, ref)
 }
 
 /**
@@ -138,12 +183,18 @@ export async function resolveSchemaRef(ref, { srcDir }) {
  * @returns {Promise<Object>} `{ [ref]: normalizedSchema }`
  */
 export async function buildDataSchemaMap(refs, { srcDir }) {
+  // Load the foundation's optional schemas.config.js once; every ref (and every
+  // transitively-discovered ref) resolves against the same alias map. This is
+  // the single entry both schema discovery and the runtime-schema build go
+  // through, so editor schema.json, runtime defaults, and `uniweb validate` all
+  // resolve refs identically.
+  const aliases = await loadSchemaAliases(srcDir)
   const map = {}
   const queue = Array.from(refs)
   while (queue.length > 0) {
     const ref = queue.shift()
     if (map[ref]) continue
-    map[ref] = await resolveSchemaRef(ref, { srcDir })
+    map[ref] = await resolveSchemaRef(ref, { srcDir, aliases })
     for (const target of collectNestedRefs(map[ref])) {
       if (!map[target]) queue.push(target)
     }
@@ -357,11 +408,67 @@ export function collectNestedRefs(schema) {
 // --- internals --------------------------------------------------------------
 
 function findSelfSchemaFile(srcDir, name) {
+  return findSchemaFileInDir(join(srcDir, 'schemas'), name)
+}
+
+// Find a schema file named `name` (any supported extension) directly inside a
+// directory. Used for both '@/' self-schemas (in <srcDir>/schemas) and aliased
+// scopes (in the directory schemas.config.js maps the scope to).
+function findSchemaFileInDir(dir, name) {
   for (const ext of SCHEMA_EXTENSIONS) {
-    const candidate = join(srcDir, 'schemas', name + ext)
+    const candidate = join(dir, name + ext)
     if (existsSync(candidate)) return candidate
   }
   return null
+}
+
+/**
+ * Load a foundation's optional `schemas.config.js` and return a map of
+ * `'@scope' → absolute directory`. The file default-exports a plain object
+ * mapping a schema-ref scope to a directory of schema files:
+ *
+ *   // <foundation>/schemas.config.js
+ *   export default {
+ *     '@agency': '../shared/agency-schemas',   // relative to the foundation
+ *     '@brand':  process.env.BRAND_SCHEMAS,     // machine-specific, via env
+ *   }
+ *
+ * It's plain JS (consistent with main.js / vite.config.js), so paths compute
+ * natively — relative, absolute, env-based, or homedir — with no expansion DSL.
+ * Relative paths resolve against the foundation source dir. A scope whose value
+ * is null/undefined (e.g. an unset env var) is skipped — that scope falls back
+ * to the '@org/schemas' package convention. Returns `{}` when the file is absent.
+ *
+ * @param {string} srcDir - Foundation source root (where main.js lives).
+ * @returns {Promise<Record<string, string>>}
+ */
+async function loadSchemaAliases(srcDir) {
+  const file = join(srcDir, 'schemas.config.js')
+  if (!existsSync(file)) return {}
+
+  let raw
+  try {
+    const mod = await import(pathToFileURL(file).href)
+    raw = mod.default
+  } catch (err) {
+    throw new Error(`Failed to load schemas.config.js: ${err.message}`)
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`schemas.config.js must default-export a map of '@scope' → directory.`)
+  }
+
+  const out = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (value == null) continue // unset (e.g. missing env var) → not aliased
+    if (typeof value !== 'string') {
+      throw new Error(`schemas.config.js: alias '${key}' must be a directory path string, got ${typeof value}.`)
+    }
+    if (key[0] !== '@' || key === '@/' || key.includes('/')) {
+      throw new Error(`schemas.config.js: alias key '${key}' must be a scope like '@agency' (no slash, not '@/').`)
+    }
+    out[key] = isAbsolute(value) ? value : resolve(srcDir, value)
+  }
+  return out
 }
 
 async function loadSchemaFile(filePath) {
@@ -375,19 +482,22 @@ async function loadSchemaFile(filePath) {
 }
 
 /**
- * Load the `@uniweb/schemas` package from the FOUNDATION's context and pull the
- * named standard. Resolving from the foundation (not the build) lets each
- * foundation pin its own `@uniweb/schemas` version.
+ * Load an org's schema package from the FOUNDATION's context and pull the named
+ * schema. Resolving from the foundation (not the build) lets each foundation pin
+ * its own version of a shared schema package. The standard schemas ship in
+ * `@uniweb/schemas` (referenced as `@std`); an org's own schemas ship in its
+ * `@org/schemas` package — commonly a workspace package shared across the team's
+ * foundations during local development.
  */
-async function resolveStandardSchema(name, srcDir) {
+async function resolveScopedSchema(pkg, name, srcDir) {
   const req = createRequire(join(srcDir, 'package.json'))
   let entry
   try {
-    entry = req.resolve('@uniweb/schemas')
+    entry = req.resolve(pkg)
   } catch {
     throw new Error(
-      `'@uniweb/schemas' is not installed in this foundation, but a schema ref needs it. ` +
-        `Add '@uniweb/schemas' to the foundation's dependencies to use '@uniweb/<name>' refs.`
+      `'${pkg}' is not installed in this foundation, but a schema ref needs it. ` +
+        `Add '${pkg}' to the foundation's dependencies to resolve those refs.`
     )
   }
   const mod = await import(pathToFileURL(entry).href)

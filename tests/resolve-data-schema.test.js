@@ -5,6 +5,7 @@ import {
   validateAndNormalizeSchema,
   collectNestedRefs,
   buildDataSchemaMap,
+  resolveSchemaRef,
 } from '../src/resolve-data-schema.js'
 
 describe('validateAndNormalizeSchema — valid', () => {
@@ -132,12 +133,12 @@ describe('collectNestedRefs', () => {
         fields: {
           author: { type: 'ref', ref: '@/person' },
           currency: { type: 'string', options: '@/currencies' },
-          sessions: { type: 'array', items: { type: 'object', fields: { who: { type: 'ref', ref: '@uniweb/person' } } } },
+          sessions: { type: 'array', items: { type: 'object', fields: { who: { type: 'ref', ref: '@std/person' } } } },
         },
       },
       '@/event'
     )
-    expect(collectNestedRefs(schema).sort()).toEqual(['@/currencies', '@/person', '@uniweb/person'])
+    expect(collectNestedRefs(schema).sort()).toEqual(['@/currencies', '@/person', '@std/person'])
   })
 })
 
@@ -162,6 +163,67 @@ describe('buildDataSchemaMap — transitive resolution', () => {
     write('event', 'name: event\nfields:\n  speaker: { type: ref, ref: "@/missing" }\n')
     await expect(buildDataSchemaMap(new Set(['@/event']), { srcDir: dir })).rejects.toThrow(
       /Data schema '@\/missing' not found/
+    )
+  })
+})
+
+describe('resolveSchemaRef — org scope resolution', () => {
+  let dir
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ds-scope-'))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'test-foundation', version: '1.0.0' }))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  // Install a fake '@<scope>/schemas' package into a foundation's node_modules,
+  // exporting schemas the way '@uniweb/schemas' does (getSchema + schemas map).
+  const installSchemaPackage = (srcDir, pkgName, schemas) => {
+    const pkgDir = join(srcDir, 'node_modules', ...pkgName.split('/'))
+    mkdirSync(pkgDir, { recursive: true })
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({ name: pkgName, version: '1.0.0', type: 'module', main: 'index.js' })
+    )
+    writeFileSync(
+      join(pkgDir, 'index.js'),
+      `export const schemas = ${JSON.stringify(schemas)}\n` + `export function getSchema(n) { return schemas[n] }\n`
+    )
+  }
+
+  it("resolves '@org/name' from the org's '@org/schemas' package", async () => {
+    installSchemaPackage(dir, '@acme/schemas', {
+      person: { name: 'person', fields: { name: { type: 'string', required: true } } },
+    })
+    const out = await resolveSchemaRef('@acme/person', { srcDir: dir })
+    expect(out.name).toBe('person')
+    expect(out.fields.name).toEqual({ type: 'string', required: true })
+  })
+
+  it('lets multiple foundations share one org schema set (cross-foundation)', async () => {
+    const schemas = { event: { name: 'event', fields: { title: { type: 'string' } } } }
+    const foundationB = mkdtempSync(join(tmpdir(), 'ds-scope-b-'))
+    writeFileSync(join(foundationB, 'package.json'), JSON.stringify({ name: 'foundation-b', version: '1.0.0' }))
+    try {
+      installSchemaPackage(dir, '@acme/schemas', schemas)
+      installSchemaPackage(foundationB, '@acme/schemas', schemas)
+      const a = await resolveSchemaRef('@acme/event', { srcDir: dir })
+      const b = await resolveSchemaRef('@acme/event', { srcDir: foundationB })
+      expect(a).toEqual(b)
+      expect(a.name).toBe('event')
+    } finally {
+      rmSync(foundationB, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects '@uniweb/<name>' as the reserved system namespace, pointing to '@std'", async () => {
+    await expect(resolveSchemaRef('@uniweb/person', { srcDir: dir })).rejects.toThrow(
+      /reserved platform system namespace.*Use '@std\/person'/
+    )
+  })
+
+  it('throws a clear error when the org schema package is not installed', async () => {
+    await expect(resolveSchemaRef('@acme/person', { srcDir: dir })).rejects.toThrow(
+      /'@acme\/schemas' is not installed/
     )
   })
 })
