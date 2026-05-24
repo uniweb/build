@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.js",
     "./schema": "./src/schema.js",
+    "./validate": "./src/validate-data.js",
     "./images": "./src/images.js",
     "./generate-entry": "./src/generate-entry.js",
     "./vite-plugin": "./src/vite-foundation-plugin.js",

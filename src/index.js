@@ -14,6 +14,13 @@ export {
   getExposedComponents,
 } from './schema.js'
 
+// Data-conformance checking (your content vs the schemas your foundation declares)
+export {
+  validateItem,
+  validateDataInputs,
+  isStaticallyCheckable,
+} from './validate-data.js'
+
 // Entry point generation
 export {
   generateEntryPoint,
