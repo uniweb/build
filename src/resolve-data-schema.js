@@ -289,6 +289,21 @@ function normalizeSection(section, ref, path, briefState) {
     }
   }
   if (section.constraints !== undefined) out.constraints = section.constraints
+
+  // `nestable` — a self-nesting multi whose items form a tree among themselves.
+  // Carried into the IR so the submission lowering can map it to the model's
+  // `self_nesting`. The item parent/child link is internal to the backend
+  // (`parent_item_id`); no explicit field expresses it.
+  if (section.nestable !== undefined) {
+    if (typeof section.nestable !== 'boolean') {
+      throw new Error(`Data schema '${ref}': section '${path}' 'nestable' must be a boolean.`)
+    }
+    if (section.nestable && kind !== 'multi') {
+      throw new Error(`Data schema '${ref}': section '${path}' is 'nestable: true' but kind '${kind}' — only a 'multi' section can self-nest.`)
+    }
+    if (section.nestable) out.nestable = true
+  }
+
   return out
 }
 
