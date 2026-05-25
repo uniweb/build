@@ -114,6 +114,31 @@ describe('toDataSchemaDeclaration — references', () => {
     const d = toDataSchemaDeclaration(norm, { name: '@acme/doc', resolveName: () => '@registry/Person' })
     expect(d.sections[0].fields[0].models).toEqual(['@registry/Person'])
   })
+
+  it('uses resolveOptions for the full @/x/<section> item_ref path (§10.1)', () => {
+    const norm = validateAndNormalizeSchema({ fields: { c: { type: 'string', options: '@/colors' } } }, '@/x')
+    const d = toDataSchemaDeclaration(norm, { name: '@acme/doc', resolveOptions: (r) => `${r}/values` })
+    expect(d.sections[0].fields[0]).toEqual({ key: 'c', type: 'item_ref', options: '@/colors/values' })
+  })
+})
+
+describe('toDataSchemaDeclaration — brief & linkable', () => {
+  it('omits linkable when a single/brief section exists (default true)', () => {
+    const d = lower({ fields: { name: { type: 'string' } } }, '@/x', '@acme/x')
+    expect(d.brief).toBe('x')
+    expect(d.linkable).toBeUndefined()
+  })
+
+  it('emits linkable:false for a brief-less model (no single section)', () => {
+    const d = lower(
+      { sections: { items: { kind: 'multi', nestable: true, fields: { label: { type: 'string' } } } } },
+      '@/nav',
+      '@std/nav'
+    )
+    expect(d.brief).toBeUndefined()
+    expect(d.linkable).toBe(false)
+    expect(d.sections[0]).toMatchObject({ name: 'items', kind: 'multi', self_nesting: true })
+  })
 })
 
 describe('toDataSchemaDeclaration — nesting → sections', () => {

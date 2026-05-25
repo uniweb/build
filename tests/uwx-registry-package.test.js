@@ -88,4 +88,18 @@ describe('buildRegistryPackage', () => {
   it('requires schema._self with name + version', () => {
     expect(() => buildRegistryPackage({ schema: { _self: {} } })).toThrow(/name \+ version is required/)
   })
+
+  it('resolves item_ref options to the full @/x/<section> path (§10.1)', () => {
+    const schema = {
+      _self: { name: '@acme/f', version: '1.0.0' },
+      dataSchemas: {
+        '@/post': validateAndNormalizeSchema({ fields: { cat: { type: 'string', options: '@/categories' } } }, '@/post'),
+        '@/categories': validateAndNormalizeSchema({ fields: { label: { type: 'string' } } }, '@/categories'),
+      },
+    }
+    const post = buildRegistryPackage({ schema }).entities.find((e) => e.name === '@/post')
+    expect(post.sections[0].fields.find((f) => f.key === 'cat')).toEqual({
+      key: 'cat', type: 'item_ref', options: '@/categories/categories',
+    })
+  })
 })

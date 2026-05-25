@@ -46,14 +46,15 @@ export function buildRegistryPackage({ schema, foundationDir, exporter, exported
   // One @uniweb/data-schema entity per data schema this foundation DEFINES (its
   // own `@/x`). Shared refs (`@std/x`, `@other/x`) are named in the foundation's
   // data-schemas.refs but their declarations are not bundled — already published.
+  const resolveOptions = makeOptionsResolver(dataSchemas)
   const dataSchemaEntities = Object.entries(dataSchemas)
     .filter(([ref]) => ref.startsWith('@/'))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([ref, normalized]) => ({
       model: DATA_SCHEMA,
       // Namespace-relative name; the backend resolves @org. Refs pass through
-      // unchanged for the same reason.
-      ...toDataSchemaDeclaration(normalized, { name: ref, resolveName: (r) => r }),
+      // unchanged; item_ref `options` get the full `@/x/<section>` path (§10.1).
+      ...toDataSchemaDeclaration(normalized, { name: ref, resolveName: (r) => r, resolveOptions }),
     }))
 
   const foundationEntity = {
@@ -93,6 +94,29 @@ function buildSchemaBlob(schema) {
 // The data-schemas the foundation renders, by NAME (own + shared), sorted.
 function buildRefs(dataSchemas) {
   return Object.keys(dataSchemas).sort().map((ref) => ({ name: ref }))
+}
+
+// Resolve an item_ref `options: '@/x'` to the full `@/x/<section>` path the
+// backend needs (it splits on the last `/`; a bare model mis-resolves — §10.1).
+// The section is the options model's single item-bearing (single/multi) section.
+function makeOptionsResolver(dataSchemas) {
+  return (ref) => {
+    const model = dataSchemas[ref]
+    if (!model) return ref
+    const section = itemBearingSectionName(model, ref)
+    return section ? `${ref}/${section}` : ref
+  }
+}
+
+function itemBearingSectionName(normalized, ref) {
+  // fields-form → the synthesized single section (named by the ref's short segment)
+  if (normalized.fields) return String(ref).split('/').pop()
+  // sections-form → the first item-bearing (single/multi) section
+  for (const [name, sec] of Object.entries(normalized.sections || {})) {
+    const kind = sec.kind || 'single'
+    if (kind === 'single' || kind === 'multi') return name
+  }
+  return null
 }
 
 // Per-locale sidecar map from `<foundationDir>/i18n/<locale>.json`. `{}` when none.
