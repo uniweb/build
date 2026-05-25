@@ -103,3 +103,62 @@ describe('buildRegistryPackage', () => {
     })
   })
 })
+
+// ── Regression guard: the locked `uniweb register --scope` contract ──────────
+// `register` is NAME-IN — the name is the identity; the backend mints uuids and
+// integer versions. It is NOT the uuid-based `content export` / restore path. So
+// the scoped submission must carry concrete @org-scoped names, an exporter.version,
+// and NO identity-in fields (uuid / id / models_required).
+describe('register --scope output — locked contract (regression)', () => {
+  // A foundation with a BARE name + one DEFINED (@/) schema + one shared (@std)
+  // ref, registered under @acme — the shape `uniweb register --scope @acme` sends.
+  function bareNamedSchema() {
+    return {
+      _self: { name: 'src', version: '0.1.0', role: 'foundation' },
+      dataSchemas: {
+        '@/event': validateAndNormalizeSchema(
+          { fields: { title: { type: 'string', required: true } } },
+          '@/event'
+        ),
+        '@std/person': validateAndNormalizeSchema({ fields: { name: { type: 'string' } } }, '@std/person'),
+      },
+    }
+  }
+
+  const doc = buildRegistryPackage({
+    schema: bareNamedSchema(),
+    scope: '@acme',
+    exporter: { tool: 'uniweb', version: '9.9.9', instance: 'build' },
+  })
+
+  it('resolves the bare foundation name into the scope (src -> @acme/src)', () => {
+    const f = doc.entities.find((e) => e.model === '@uniweb/foundation-schema')
+    expect(f.info.name).toBe('@acme/src')
+  })
+
+  it('resolves DEFINED @/ schema names into the scope; leaves shared refs as-is', () => {
+    const defined = doc.entities.filter((e) => e.model === '@uniweb/data-schema')
+    expect(defined.map((e) => e.name)).toEqual(['@acme/event']) // @/event -> @acme/event; @std/person not bundled
+    const f = doc.entities.find((e) => e.model === '@uniweb/foundation-schema')
+    // foundation lists BOTH it renders, scoped: own (@acme/event) + shared (@std/person)
+    expect(f['data-schemas'].refs).toEqual([{ name: '@acme/event' }, { name: '@std/person' }])
+  })
+
+  it('carries an exporter.version string', () => {
+    expect(typeof doc.exporter.version).toBe('string')
+    expect(doc.exporter.version).toBe('9.9.9')
+  })
+
+  it('is name-in, not identity-in: no entity carries uuid / id / models_required', () => {
+    for (const entity of doc.entities) {
+      expect(entity).not.toHaveProperty('uuid')
+      expect(entity).not.toHaveProperty('id')
+      expect(entity).not.toHaveProperty('model_uuid')
+      expect(entity).not.toHaveProperty('models_required')
+    }
+    // belt-and-suspenders across the whole document (distinctive substrings)
+    const json = JSON.stringify(doc)
+    expect(json).not.toMatch(/uuid/i)
+    expect(json).not.toContain('models_required')
+  })
+})
