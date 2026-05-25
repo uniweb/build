@@ -93,10 +93,12 @@ describe('toDataSchemaDeclaration — references', () => {
     expect(fieldByKey(sec, 'author')).toEqual({ key: 'author', type: 'entity_ref', models: ['@acme/person'] })
   })
 
-  it('array-of-ref → array element_kind entity_ref', () => {
-    expect(fieldByKey(sec, 'editors')).toEqual({
-      key: 'editors', type: 'array', element_kind: 'entity_ref', models: ['@acme/person'],
-    })
+  it('array-of-ref → a child multi section (entity-store forbids ref array elements)', () => {
+    expect(fieldByKey(sec, 'editors')).toBeUndefined() // not a field
+    const editors = sec.sections.find((s) => s.name === 'editors') // child of the root section
+    expect(editors).toMatchObject({ name: 'editors', kind: 'multi' })
+    // one entity_ref field per item, keyed by the field's singular
+    expect(editors.fields).toEqual([{ key: 'editor', type: 'entity_ref', models: ['@acme/person'] }])
   })
 
   it('options → item_ref to the resolved model', () => {

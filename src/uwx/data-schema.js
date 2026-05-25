@@ -90,6 +90,13 @@ function lowerSection(name, def, resolve) {
     } else if (items && items.type === 'object') {
       // array of records → a child multi section
       childSections.push(lowerSection(key, { kind: 'multi', fields: items.fields }, resolve))
+    } else if (items && items.type === 'ref') {
+      // a list of references → a child multi section, one entity_ref per item.
+      // The entity-store forbids reference kinds as `array` element kinds
+      // (data-schema-design.md §10), so "many refs" is always a multi section.
+      childSections.push(
+        lowerSection(key, { kind: 'multi', fields: { [singular(key)]: { type: 'ref', ref: items.ref } } }, resolve)
+      )
     } else {
       fields.push(lowerField(key, field, resolve, constraints))
     }
@@ -126,15 +133,10 @@ function lowerField(key, field, resolve, constraints) {
     out.type = 'item_ref'
     out.options = resolve(field.options)
   } else if (field.type === 'array') {
+    // Array of scalars → element_kind. Arrays of refs/objects are intercepted in
+    // lowerSection (→ a multi section); the entity-store forbids ref array elements.
     const items = field.items ? asField(field.items) : null
-    if (items) {
-      if (items.type === 'ref') {
-        out.element_kind = 'entity_ref'
-        if (items.ref) out.models = [resolve(items.ref)]
-      } else {
-        out.element_kind = items.type
-      }
-    }
+    if (items) out.element_kind = items.type
   }
 
   // Closed value set → a section `one_of` constraint (the field keeps its base
@@ -155,6 +157,14 @@ function asField(def) {
 
 function shortName(name) {
   return String(name).split('/').pop()
+}
+
+// A list-of-refs field becomes a multi section; each item's single ref field is
+// keyed by the field's singular (editors → editor, coauthors → coauthor).
+function singular(name) {
+  if (/ies$/.test(name)) return name.slice(0, -3) + 'y'
+  if (/[^s]s$/.test(name)) return name.slice(0, -1)
+  return name
 }
 
 // `@/x` resolves into the schema's own org; other scopes pass through.
