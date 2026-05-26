@@ -148,14 +148,12 @@ function lowerField(key, field, resolve, optResolve, constraints) {
   }
 
   // Closed value set → a section `one_of` constraint (the field keeps its base
-  // type — there is no `enum` kind). `default` is intentionally dropped — it rides
-  // in the foundation-schema blob (render/editor pre-fill), not the content type.
-  // A `format` (url/email) is likewise NOT emitted as a constraint: `format` is not
-  // part of the data-schema constraint vocabulary, so it would be rejected on
-  // register. The format survives on the normalized schema as a render/editor hint
-  // (and still marks the field machine-ish above, so it isn't localized). If a
-  // `format`/`pattern` constraint is added to the vocabulary, re-add the push here.
+  // type — there is no `enum` kind). A `format` (url/email) → a section `format`
+  // constraint — a constrained string the backend validates on write. `default` is
+  // intentionally dropped — it rides in the foundation-schema blob (render/editor
+  // pre-fill), not the content type.
   if (Array.isArray(field.enum)) constraints.push({ kind: 'one_of', field: key, values: field.enum })
+  if (field.format) constraints.push({ kind: 'format', field: key, format: field.format })
 
   return out
 }

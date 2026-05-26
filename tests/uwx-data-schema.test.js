@@ -58,14 +58,14 @@ describe('toDataSchemaDeclaration — fields-form (flat)', () => {
     )
   })
 
-  it('drops a string format — not in the shipped v1 constraint vocab', () => {
-    // url/email lower to a plain string; the `format` is NOT emitted as a
-    // constraint — it's a proposed, not-yet-shipped backend constraint (the
-    // registry rejects `kind: format`, design §4.5; see data-schema-lowering.md
-    // §5). The format survives only as a render hint on the normalized schema,
-    // and still marks the field machine-ish (non-localized — asserted above).
+  it('lowers a string format → a section format constraint', () => {
+    // url/email lower to a plain `string` field + a section `format` constraint
+    // (a constrained string the backend validates on write) — `{ kind, field,
+    // format }` per uwx-format §3 / data-schema-design.md §4.5.
     expect(fieldByKey(sec(), 'site')).toEqual({ key: 'site', type: 'string' })
-    expect((sec().constraints || []).some((c) => c.kind === 'format')).toBe(false)
+    expect(sec().constraints).toEqual(
+      expect.arrayContaining([{ kind: 'format', field: 'site', format: 'url' }])
+    )
   })
 
   it('drops field defaults (they ride in the foundation blob)', () => {
