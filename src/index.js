@@ -60,8 +60,11 @@ export { defineSiteConfig, detectFoundationType } from './site/config.js'
 // Foundation source root resolution (reads package.json::main)
 export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 
-// Package classification (foundation vs site)
-export { classifyPackage, isExtensionPackage } from './utils/classify-package.js'
+// Package classification (foundation vs site vs standalone schemas package)
+export { classifyPackage, isExtensionPackage, isSchemasPackage } from './utils/classify-package.js'
+
+// Standalone schemas-package discovery (the foundation-less register input)
+export { collectStandaloneSchemas } from './resolve-data-schema.js'
 
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'

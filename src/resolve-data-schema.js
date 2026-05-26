@@ -31,8 +31,8 @@
  */
 
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { join, resolve, isAbsolute } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
+import { join, resolve, isAbsolute, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
@@ -200,6 +200,97 @@ export async function buildDataSchemaMap(refs, { srcDir }) {
     }
   }
   return map
+}
+
+/**
+ * Collect every data schema a STANDALONE schemas package defines, normalized and
+ * keyed by self-ref (`@/<name>`) — the input to a foundation-less registry
+ * publish (buildSchemaOnlyPackage). A schemas package exposes its schemas one of
+ * two ways, tried in order:
+ *
+ *   1. Module exports — the package entry exports `getSchemaNames()` + `getSchema()`
+ *      (or a `schemas` map / a default map). This is the same `@org/schemas`
+ *      package contract that foundations already consume through `@std/x` /
+ *      `@org/x` refs (`resolveScopedSchema` below), so a package registers exactly
+ *      the schemas it offers consumers (e.g. `@uniweb/schemas` → the standards).
+ *   2. A `schemas/` directory of `*.{js,json,yml,yaml}` files — one schema per
+ *      file, named by basename. For a bare folder of schema files with no index.
+ *
+ * Names only, no uuids; normalization only (no lowering to any storage model).
+ * Each schema is validated, so a malformed one throws a clear error before publish.
+ *
+ * @param {string} packageDir - the schemas package root.
+ * @returns {Promise<Record<string, object>>} `{ '@/<name>': normalizedSchema }`
+ */
+export async function collectStandaloneSchemas(packageDir) {
+  const fromExports = await collectSchemasFromExports(packageDir)
+  if (Object.keys(fromExports).length > 0) return fromExports
+  return collectSchemasFromDir(join(packageDir, 'schemas'))
+}
+
+// Source 1: a package whose entry exports schemas. Mirrors how a foundation
+// consumes an `@org/schemas` package (getSchema / schemas / default), plus
+// `getSchemaNames()` for enumeration. Returns `{}` when the package exports none.
+async function collectSchemasFromExports(packageDir) {
+  const pkgPath = join(packageDir, 'package.json')
+  if (!existsSync(pkgPath)) return {}
+  let pkg
+  try {
+    pkg = JSON.parse(await readFile(pkgPath, 'utf8'))
+  } catch {
+    return {}
+  }
+  const entry = resolvePackageEntryFile(packageDir, pkg)
+  if (!entry || !existsSync(entry)) return {}
+
+  let mod
+  try {
+    mod = await import(pathToFileURL(entry).href)
+  } catch (err) {
+    throw new Error(`Could not load the schemas package entry (${entry}): ${err.message}`)
+  }
+  const names =
+    typeof mod.getSchemaNames === 'function'
+      ? mod.getSchemaNames()
+      : Object.keys(mod.schemas ?? mod.default ?? {})
+  const get = (name) =>
+    typeof mod.getSchema === 'function' ? mod.getSchema(name) : (mod.schemas?.[name] ?? mod.default?.[name])
+
+  const out = {}
+  for (const name of names) {
+    const schema = get(name)
+    if (!schema || typeof schema !== 'object') continue
+    out[`@/${name}`] = validateAndNormalizeSchema(schema, `@/${name}`)
+  }
+  return out
+}
+
+// Source 2: a bare `schemas/` directory of schema files, one schema per file
+// (named by basename). Returns `{}` when the directory is absent.
+async function collectSchemasFromDir(dir) {
+  if (!existsSync(dir)) return {}
+  const out = {}
+  for (const file of readdirSync(dir).sort()) {
+    const ext = extname(file)
+    if (!SCHEMA_EXTENSIONS.includes(ext)) continue
+    const name = basename(file, ext)
+    out[`@/${name}`] = validateAndNormalizeSchema(await loadSchemaFile(join(dir, file)), `@/${name}`)
+  }
+  return out
+}
+
+// Resolve a package's module entry FILE (absolute) from its package.json —
+// `exports['.']` (string or a conditional import/default/node), else `main`, else
+// `index.js`. Loads a schemas package's own exports without self-resolution.
+function resolvePackageEntryFile(packageDir, pkg) {
+  let entry = typeof pkg.main === 'string' ? pkg.main : null
+  const exp = pkg.exports
+  if (exp) {
+    const dot = typeof exp === 'string' ? exp : (exp['.'] ?? exp['./index'])
+    const e = typeof dot === 'string' ? dot : (dot?.import ?? dot?.default ?? dot?.node)
+    if (typeof e === 'string') entry = e
+  }
+  return join(packageDir, entry || 'index.js')
 }
 
 // --- validation + normalization --------------------------------------------

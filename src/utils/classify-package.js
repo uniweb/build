@@ -23,7 +23,7 @@
  * (findFoundations, findSites) be plain `.filter()` calls.
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveFoundationSrcPath } from './foundation-source-root.js'
 
@@ -79,6 +79,50 @@ export function classifyPackage(packagePath) {
   if (existsSync(join(packagePath, 'pages'))) return 'site'
 
   return null
+}
+
+/**
+ * Is this directory a STANDALONE schemas package — one that defines data schemas
+ * but is neither a foundation nor a site? Two cheap signals (no import):
+ *
+ *   1. package.json `name` follows the `@org/schemas` convention (including the
+ *      framework's `@uniweb/schemas`, referenced as `@std`) — the same convention
+ *      `@org/x` data-schema refs already resolve through.
+ *   2. a `schemas/` directory at the package root holding ≥1 schema file
+ *      (`*.{js,json,yml,yaml}`) — a bare folder of schema files with no index.
+ *
+ * Gated on the directory NOT already classifying as a foundation/site, so a
+ * foundation that happens to carry schemas is never misread. The enumeration of
+ * the schemas themselves is `collectStandaloneSchemas` (resolve-data-schema.js).
+ *
+ * @param {string} packagePath - Absolute path to the package directory.
+ * @returns {boolean}
+ */
+export function isSchemasPackage(packagePath) {
+  if (classifyPackage(packagePath) !== null) return false
+
+  // 1. @org/schemas naming convention (covers @uniweb/schemas → @std).
+  const pkgPath = join(packagePath, 'package.json')
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+      const name = typeof pkg?.name === 'string' ? pkg.name : ''
+      if (/^@[^/]+\/schemas$/.test(name)) return true
+    } catch {
+      // Malformed package.json — fall through to the directory signal.
+    }
+  }
+
+  // 2. A schemas/ directory of schema files.
+  const dir = join(packagePath, 'schemas')
+  if (existsSync(dir)) {
+    try {
+      return readdirSync(dir).some((f) => /\.(js|json|ya?ml)$/.test(f))
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 /**

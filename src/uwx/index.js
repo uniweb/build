@@ -39,6 +39,8 @@ export {
 export { siteProjectToEntity, emitSitePackage } from './site.js'
 
 // Registry-publish (names-only) — the document `uniweb register` submits, and the
-// schema → @uniweb/data-schema declaration lowering it bundles.
-export { buildRegistryPackage } from './registry-package.js'
+// schema → @uniweb/data-schema declaration lowering it bundles. `buildRegistryPackage`
+// is the foundation publish (foundation + the schemas it renders); `buildSchemaOnlyPackage`
+// is the foundation-less variant (only data-schema entities) for a schemas-only package.
+export { buildRegistryPackage, buildSchemaOnlyPackage } from './registry-package.js'
 export { toDataSchemaDeclaration } from './data-schema.js'

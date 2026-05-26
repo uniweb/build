@@ -1,4 +1,4 @@
-import { buildRegistryPackage } from '../src/uwx/registry-package.js'
+import { buildRegistryPackage, buildSchemaOnlyPackage } from '../src/uwx/registry-package.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 // schema.json shape: _self (identity + config), dataSchemas (normalized, keyed by
@@ -101,6 +101,74 @@ describe('buildRegistryPackage', () => {
     expect(post.sections[0].fields.find((f) => f.key === 'cat')).toEqual({
       key: 'cat', type: 'item_ref', options: '@/categories/categories',
     })
+  })
+})
+
+// ── The foundation-LESS variant: a schemas-only package (uwx-format §2/§5) ────
+// `buildSchemaOnlyPackage` shares the data-schema lowering with the foundation
+// publish but emits NO foundation-schema entity — the shape `uniweb register`
+// submits for a schemas package (e.g. the standards under @std).
+describe('buildSchemaOnlyPackage (foundation-less — schemas only)', () => {
+  // The discovery output shape: { '@/<name>': normalizedSchema }.
+  function schemaMap() {
+    return {
+      '@/person': validateAndNormalizeSchema(
+        { fields: { name: { type: 'string', required: true }, email: { type: 'email' } } },
+        '@/person'
+      ),
+      '@/article': validateAndNormalizeSchema(
+        { fields: { title: { type: 'string', required: true }, body: { type: 'markdown' } } },
+        '@/article'
+      ),
+    }
+  }
+
+  const doc = buildSchemaOnlyPackage({
+    schemas: schemaMap(),
+    scope: '@std',
+    exporter: { tool: 'uniweb', version: '9.9.9', instance: 'build' },
+    exportedAt: '2026-05-26T00:00:00Z',
+  })
+
+  it('produces a uwx/1 envelope with an entities list', () => {
+    expect(doc.uwx).toBe(1)
+    expect(doc.exporter).toMatchObject({ tool: 'uniweb', version: '9.9.9' })
+    expect(doc.exported_at).toBe('2026-05-26T00:00:00Z')
+    expect(Array.isArray(doc.entities)).toBe(true)
+  })
+
+  it('emits ONLY @uniweb/data-schema entities — no foundation-schema', () => {
+    expect(doc.entities.every((e) => e.model === '@uniweb/data-schema')).toBe(true)
+    expect(doc.entities.some((e) => e.model === '@uniweb/foundation-schema')).toBe(false)
+  })
+
+  it('scopes each @/ name into the publish scope, sorted', () => {
+    expect(doc.entities.map((e) => e.name)).toEqual(['@std/article', '@std/person'])
+  })
+
+  it('runs the lowering (markdown→richtext, email→format constraint)', () => {
+    const article = doc.entities.find((e) => e.name === '@std/article')
+    expect(article.sections[0].fields.find((f) => f.key === 'body').type).toBe('richtext')
+    const person = doc.entities.find((e) => e.name === '@std/person')
+    expect(person.sections[0].constraints).toEqual(
+      expect.arrayContaining([{ kind: 'format', field: 'email', format: 'email' }])
+    )
+  })
+
+  it('carries NO uuids / identity-in fields (name-in, like the foundation publish)', () => {
+    const json = JSON.stringify(doc)
+    expect(json).not.toMatch(/uuid/i)
+    expect(json).not.toContain('models_required')
+  })
+
+  it('leaves @/ names unscoped when no scope is given (local preview)', () => {
+    const preview = buildSchemaOnlyPackage({ schemas: schemaMap() })
+    expect(preview.entities.map((e) => e.name)).toEqual(['@/article', '@/person'])
+  })
+
+  it('throws when there are no schemas to register', () => {
+    expect(() => buildSchemaOnlyPackage({ schemas: {} })).toThrow(/no data schemas to register/)
+    expect(() => buildSchemaOnlyPackage({})).toThrow(/no data schemas to register/)
   })
 })
 

@@ -13,6 +13,10 @@
  *       …the §3 declaration (from data-schema.js's lowering)…
  *     - model: "@uniweb/foundation-schema"   # the foundation (info/schema/i18n/data-schemas)
  *
+ * `buildSchemaOnlyPackage` (below) assembles the foundation-LESS variant — only
+ * `@uniweb/data-schema` entities, no foundation-schema — for a schemas-only
+ * package (the standard schemas under `@std`, or an org's own `@org/schemas`).
+ *
  * Scope: pass `scope` ('@acme' or 'acme') to resolve a schema's own `@/x` (and the
  * foundation's `data-schemas.refs`) to a concrete `@acme/x` for submission. With no
  * `scope`, names stay `@/x` (local preview / dry-run). See `uwx-format.md`.
@@ -53,25 +57,11 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
   }
   const dataSchemas = schema.dataSchemas || {}
 
-  // `scope` ('@acme' or 'acme') resolves the foundation's own `@/x` names to a
-  // concrete `@acme/x`. With no scope, `@/x` passes through (local preview).
-  const org = scope ? String(scope).replace(/^@/, '').replace(/\/.*$/, '') : null
-  const scoped = (ref) =>
-    org && typeof ref === 'string' && ref.startsWith('@/') ? `@${org}/${ref.slice(2)}` : ref
-
   // One @uniweb/data-schema entity per data schema this foundation DEFINES (its
-  // own `@/x`). Shared refs (`@std/x`, `@other/x`) are named in the foundation's
-  // data-schemas.refs but their declarations are not bundled — already published.
-  const resolveOptions = makeOptionsResolver(dataSchemas, scoped)
-  const dataSchemaEntities = Object.entries(dataSchemas)
-    .filter(([ref]) => ref.startsWith('@/'))
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([ref, normalized]) => ({
-      model: DATA_SCHEMA,
-      // `name` resolved to the concrete scope; entity_ref `models` resolve the same
-      // way; item_ref `options` get the full `@org/x/<section>` path (§10.1).
-      ...toDataSchemaDeclaration(normalized, { name: scoped(ref), resolveName: scoped, resolveOptions }),
-    }))
+  // own `@/x`), each resolved to the concrete publish scope. Shared refs
+  // (`@std/x`, `@other/x`) are named in the foundation's data-schemas.refs but
+  // their declarations are not bundled — already published.
+  const { entities: dataSchemaEntities, scoped, org } = buildDataSchemaEntities(dataSchemas, scope)
 
   const foundationEntity = {
     model: FOUNDATION_SCHEMA,
@@ -81,12 +71,66 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
     'data-schemas': { refs: buildRefs(dataSchemas, scoped) },
   }
 
+  // Data schemas first so the foundation's refs always resolve (§5 step 5).
+  return wrapEntities([...dataSchemaEntities, foundationEntity], exporter, exportedAt)
+}
+
+/**
+ * Assemble a foundation-LESS registry-publish `.uwx` — only `@uniweb/data-schema`
+ * entities, no foundation-schema. `uniweb register` submits this for a
+ * schemas-only package (the standard schemas under `@std`, or an org's own
+ * `@org/schemas`). A data-schema may be published on its own (`uwx-format.md` §2
+ * "A data-schema may also be published on its own", §5) — the wire shape is a
+ * names-only `.uwx` whose entities are all data-schemas.
+ *
+ * @param {Object} params
+ * @param {Object} params.schemas - map `{ '@/<name>': normalizedSchema }` of the
+ *   schemas the package defines (from `collectStandaloneSchemas`).
+ * @param {string} [params.scope] - org scope (`@std`/`std`) resolving `@/x` -> `@std/x`.
+ * @param {Object} [params.exporter] - `{ tool, version, instance }` envelope.
+ * @param {string} [params.exportedAt] - ISO timestamp (default: now).
+ * @returns {Object} the `.uwx` document (uwx/1; only data-schema entities, no uuids).
+ */
+export function buildSchemaOnlyPackage({ schemas, scope, exporter, exportedAt } = {}) {
+  const { entities } = buildDataSchemaEntities(schemas || {}, scope)
+  if (entities.length === 0) {
+    throw new Error('buildSchemaOnlyPackage: no data schemas to register (expected a map of "@/<name>" -> schema).')
+  }
+  return wrapEntities(entities, exporter, exportedAt)
+}
+
+// Lower a `{ '@/<name>': normalizedSchema }` map into the sorted
+// `@uniweb/data-schema` entity list, resolving each own `@/x` to the publish
+// scope. Shared by the foundation publish (buildRegistryPackage) and the
+// standalone schemas publish (buildSchemaOnlyPackage). Returns the entities plus
+// the `scoped`/`org` the foundation path also needs for its info/refs.
+function buildDataSchemaEntities(dataSchemas, scope) {
+  // `scope` ('@acme' or 'acme') resolves a defined schema's own `@/x` name to a
+  // concrete `@acme/x`. With no scope, `@/x` passes through (local preview).
+  const org = scope ? String(scope).replace(/^@/, '').replace(/\/.*$/, '') : null
+  const scoped = (ref) =>
+    org && typeof ref === 'string' && ref.startsWith('@/') ? `@${org}/${ref.slice(2)}` : ref
+
+  const resolveOptions = makeOptionsResolver(dataSchemas, scoped)
+  const entities = Object.entries(dataSchemas)
+    .filter(([ref]) => ref.startsWith('@/'))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([ref, normalized]) => ({
+      model: DATA_SCHEMA,
+      // `name` resolved to the concrete scope; entity_ref `models` resolve the same
+      // way; item_ref `options` get the full `@org/x/<section>` path (§10.1).
+      ...toDataSchemaDeclaration(normalized, { name: scoped(ref), resolveName: scoped, resolveOptions }),
+    }))
+  return { entities, scoped, org }
+}
+
+// The shared `.uwx` envelope (uwx/1 + exporter + timestamp) around an entity list.
+function wrapEntities(entities, exporter, exportedAt) {
   return {
     uwx: 1,
     exporter: exporter || { tool: 'uniweb', version: TOOL_VERSION, instance: 'build' },
     exported_at: exportedAt || new Date().toISOString(),
-    // Data schemas first so the foundation's refs always resolve (§5 step 5).
-    entities: [...dataSchemaEntities, foundationEntity],
+    entities,
   }
 }
 
