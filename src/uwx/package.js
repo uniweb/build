@@ -25,11 +25,16 @@ function defaultExporter() {
  * Build a `subtype: entity` .uwx package.
  *
  * @param {object}   opts
- * @param {object[]} opts.entities          - { uuid, model_uuid, owner_uuid?,
- *                                             unit_uuid?, meta?, items[] } each.
- * @param {object[]} opts.modelsRequired    - { uuid, name_at_export,
- *                                             policy_hint? }; the system Model
- *                                             uuid(s) the importer must have.
+ * @param {object[]} opts.entities          - { uuid, (model_uuid | model),
+ *                                             owner_uuid?, unit_uuid?, meta?,
+ *                                             items[] } each. `model_uuid` for a
+ *                                             uuid'd Model; `model` (a registry
+ *                                             name) when there is no uuid.
+ * @param {object[]} opts.modelsRequired    - { uuid?, name_at_export,
+ *                                             policy_hint? }; the Model(s) the
+ *                                             importer must resolve — by `uuid`,
+ *                                             or by `name_at_export` when uuid is
+ *                                             absent.
  * @param {string[]} [opts.roots]           - explicitly-exported entity uuids;
  *                                             defaults to every entity's uuid.
  * @param {object[]} [opts.referencedMembers]
@@ -60,6 +65,13 @@ export function emitEntityPackage({
   if (!Array.isArray(modelsRequired) || modelsRequired.length === 0) {
     throw new Error('uwx: emitEntityPackage requires modelsRequired')
   }
+  for (const e of entities) {
+    if (e.model_uuid == null && !e.model) {
+      throw new Error(
+        `uwx: entity ${e.uuid} needs a model_uuid or a model (name)`
+      )
+    }
+  }
 
   const files = []
   const entries = []
@@ -68,19 +80,20 @@ export function emitEntityPackage({
     const data = serializeEntityFile(entity)
     const file = `entities/${entity.uuid}.json`
     files.push({ name: file, data })
-    entries.push({
-      kind: 'entity',
-      uuid: entity.uuid,
-      model_uuid: entity.model_uuid,
-      owner_uuid: entity.owner_uuid ?? null,
-      unit_uuid: entity.unit_uuid ?? null,
-      // Derived columns the importer recomputes — preview only.
-      brief: entity.brief ?? null,
-      sort_date: entity.sort_date ?? null,
-      updated_at: entity.updated_at ?? null,
-      file,
-      sha256: sha256Hex(data),
-    })
+    const entry = { kind: 'entity', uuid: entity.uuid }
+    // Mirror the per-entity type pointer (by-uuid vs by-name); see
+    // serializeEntityFile. A by-uuid entry keeps its exact prior shape.
+    if (entity.model_uuid != null) entry.model_uuid = entity.model_uuid
+    else entry.model = entity.model
+    entry.owner_uuid = entity.owner_uuid ?? null
+    entry.unit_uuid = entity.unit_uuid ?? null
+    // Derived columns the importer recomputes — preview only.
+    entry.brief = entity.brief ?? null
+    entry.sort_date = entity.sort_date ?? null
+    entry.updated_at = entity.updated_at ?? null
+    entry.file = file
+    entry.sha256 = sha256Hex(data)
+    entries.push(entry)
   }
 
   const manifest = buildManifest({
@@ -88,7 +101,9 @@ export function emitEntityPackage({
     exporter,
     exportedAt,
     modelsRequired: modelsRequired.map((m) => ({
-      uuid: m.uuid,
+      // uuid is OPTIONAL — null when the importer must resolve the Model by
+      // `name_at_export` (used when the exporter has no uuid for the Model).
+      uuid: m.uuid ?? null,
       name_at_export: m.name_at_export ?? null,
       policy_hint: m.policy_hint ?? 'validate_existing',
     })),

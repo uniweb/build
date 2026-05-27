@@ -26,23 +26,28 @@ export function toJsonBuffer(obj) {
  * them in the manifest `entries[]` as a preview convenience.
  */
 export function serializeEntityFile(entity) {
-  return toJsonBuffer({
-    uuid: entity.uuid,
-    model_uuid: entity.model_uuid,
-    owner_uuid: entity.owner_uuid ?? null,
-    unit_uuid: entity.unit_uuid ?? null,
-    meta: entity.meta ?? {},
-    items: (entity.items ?? []).map((it) => ({
-      uuid: it.uuid,
-      section: it.section,
-      parent_section: it.parent_section ?? null,
-      parent_path: it.parent_path ?? null,
-      data: it.data ?? {},
-      meta: it.meta ?? {},
-      item_date: it.item_date ?? null,
-      order_number: it.order_number ?? null,
-    })),
-  })
+  const out = { uuid: entity.uuid }
+  // Type pointer. A uuid'd Model carries `model_uuid`; a Model referenced by
+  // NAME carries `model`, and the importer resolves the name — used when the
+  // exporter has no uuid for the Model. Exactly one is set; emitting `model`
+  // only when there is no uuid keeps a by-uuid entity's bytes (and the package
+  // digest) unchanged.
+  if (entity.model_uuid != null) out.model_uuid = entity.model_uuid
+  else out.model = entity.model
+  out.owner_uuid = entity.owner_uuid ?? null
+  out.unit_uuid = entity.unit_uuid ?? null
+  out.meta = entity.meta ?? {}
+  out.items = (entity.items ?? []).map((it) => ({
+    uuid: it.uuid,
+    section: it.section,
+    parent_section: it.parent_section ?? null,
+    parent_path: it.parent_path ?? null,
+    data: it.data ?? {},
+    meta: it.meta ?? {},
+    item_date: it.item_date ?? null,
+    order_number: it.order_number ?? null,
+  }))
+  return toJsonBuffer(out)
 }
 
 // Manifest field order is part of the format. Built in this exact order so

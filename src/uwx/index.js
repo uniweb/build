@@ -37,6 +37,10 @@ export {
   emitFoundationSchemaPackage,
 } from './foundation-schema.js'
 export { siteProjectToEntity, emitSitePackage } from './site.js'
+export {
+  collectionRecordsToEntities,
+  emitCollectionSyncPackage,
+} from './collections.js'
 
 // Registry-publish (names-only) — the document `uniweb register` submits, and the
 // schema → @uniweb/data-schema declaration lowering it bundles. `buildRegistryPackage`
