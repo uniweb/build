@@ -157,27 +157,26 @@ describe('uwx emitEntityPackage', () => {
     ])
   })
 
-  it('package_sha256 is provenance-free (snapshot-dedupe contract)', () => {
-    // Same content, different exporter + exported_at => SAME digest.
-    // This is the provenance-free property the recipe must hold.
+  it('package_sha256 is the manifest bytes with the field blanked (provenance-sensitive)', () => {
+    // The digest is sha256 of the written manifest bytes with only the
+    // package_sha256 value blanked — so provenance (exporter / exported_at) IS
+    // hashed: same content + different provenance => different digest. No
+    // dedupe contract; package_sha256 is pure bytes-integrity.
     const entity = sampleEntity()
-    const a = emitEntityPackage({
-      entities: [entity],
-      modelsRequired,
-      exporter: { tool: 'a', version: '1', instance: 'x' },
-      exportedAt: '2026-01-01T00:00:00Z',
-    })
-    const b = emitEntityPackage({
-      entities: [entity],
-      modelsRequired,
-      exporter: { tool: 'b', version: '2', instance: 'y' },
-      exportedAt: '2026-12-31T23:59:59Z',
-    })
-    const da = JSON.parse(readZip(a).get('manifest.json').toString('utf8'))
-      .package_sha256
-    const db = JSON.parse(readZip(b).get('manifest.json').toString('utf8'))
-      .package_sha256
-    expect(da).toBe(db)
+    const rawOf = (exporter, exportedAt) =>
+      readZip(emitEntityPackage({ entities: [entity], modelsRequired, exporter, exportedAt }))
+        .get('manifest.json')
+        .toString('utf8')
+    const rawA = rawOf({ tool: 'a', version: '1', instance: 'x' }, '2026-01-01T00:00:00Z')
+    const rawB = rawOf({ tool: 'b', version: '2', instance: 'y' }, '2026-12-31T23:59:59Z')
+    const da = JSON.parse(rawA).package_sha256
+    const db = JSON.parse(rawB).package_sha256
+    expect(da).not.toBe(db) // provenance-sensitive
+
+    // The consumer reproduces the digest by blanking package_sha256 in place in
+    // the received bytes, then hashing — no re-serialization.
+    const blanked = rawA.replace(/"package_sha256":"[0-9a-f]{64}"/, '"package_sha256":""')
+    expect(da).toBe(sha256Hex(Buffer.from(blanked, 'utf8')))
   })
 
   it('package_sha256 is content-sensitive (tamper detection)', () => {

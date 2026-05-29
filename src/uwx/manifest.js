@@ -82,49 +82,42 @@ export function buildManifest({
 }
 
 // ---------------------------------------------------------------------------
-// package_sha256 — a stable, provenance-free content key.
+// package_sha256 — bytes-integrity over the manifest as written.
 //
-// SHA-256 of the manifest with `package_sha256` zeroed AND `exported_at` /
-// `exporter` neutralized (provenance is not content identity), concatenated
-// with each entry's lowercase-hex `sha256` in `entries` order. Two exports
-// of identical content produce the same value (used for dedupe). It is
-// deliberately NOT reproducible via `unzip -p manifest.json | sha256sum`.
+// SHA-256 of the manifest.json bytes EXACTLY AS WRITTEN, with only the
+// `package_sha256` field's value blanked to "". Producer flow: build the
+// manifest with `package_sha256: ""`, serialize (that serialization IS the
+// preimage), hash, write the digest back into the field. The consumer
+// recomputes by taking the received bytes, blanking the `package_sha256` value
+// in place, and hashing — reproducing the producer's preimage exactly.
 //
-// An importer recomputes this to verify integrity, so the recipe must match
-// exactly. The ambiguous serialization choices are isolated below as
-// numbered assumptions, each independently flippable, and verified against a
-// reference vector:
+// PRODUCER BYTES ARE AUTHORITATIVE: the hash is over OUR serialization, so the
+// consumer never re-serializes and the manifest's field set / order / naming /
+// formatting never has to match anything on the consumer side. That is what
+// lets a JS producer and a non-JS consumer agree on the digest — an earlier
+// recipe re-serialized the manifest on the consumer side and could not
+// byte-match a different language's serializer.
 //
-//   A1. "zeroed" package_sha256        -> "" (empty string)
-//   A2. "neutralized" exporter         -> null
-//   A3. "neutralized" exported_at      -> "" (empty string)
-//   A4. manifest serialization         -> compact JSON, documented field
-//                                         order, default JSON.stringify
-//                                         escaping/number formatting
-//   A5. concatenation                  -> utf8(neutralizedJson) then each
-//                                         entry.sha256 as an ascii hex string,
-//                                         in entries order
-//   A6. output                         -> lowercase hex
+// NOT provenance-free: `exporter` / `exported_at` are hashed as-is (they are in
+// the written bytes), so two exports of the same content with different
+// provenance get different digests. `package_sha256` is pure integrity; a
+// content-dedupe key, if ever needed, is a separate provenance-excluded digest.
+//
+//   A1. blanked package_sha256  -> "" (empty string); the field keeps its place
+//   A4. serialization           -> compact JSON, documented field order,
+//                                  default JSON.stringify escaping/numbers
+//   A6. output                  -> lowercase hex
 // ---------------------------------------------------------------------------
 
 export const PACKAGE_SHA256_ASSUMPTIONS = Object.freeze({
-  zeroedPackageSha256: '', // A1
-  neutralizedExporter: null, // A2
-  neutralizedExportedAt: '', // A3
+  blankedPackageSha256: '', // A1
 })
 
 export function computePackageSha256(manifest) {
-  const neutralized = {
-    ...manifest,
-    exporter: PACKAGE_SHA256_ASSUMPTIONS.neutralizedExporter, // A2
-    exported_at: PACKAGE_SHA256_ASSUMPTIONS.neutralizedExportedAt, // A3
-    package_sha256: PACKAGE_SHA256_ASSUMPTIONS.zeroedPackageSha256, // A1
-  }
-  // A4: spreading preserves the original key insertion order; the three
-  // overridden keys keep their original positions.
-  const parts = [toJsonBuffer(neutralized)] // A5
-  for (const entry of manifest.entries) {
-    parts.push(Buffer.from(entry.sha256, 'ascii'))
-  }
-  return sha256Hex(Buffer.concat(parts)) // A6
+  // Hash the manifest bytes as written, with package_sha256 blanked. At call
+  // time the field is already "" (the build sets it before computing); forcing
+  // it keeps the function correct if ever called on a populated manifest. The
+  // spread preserves key insertion order, so package_sha256 keeps its position.
+  const preimage = { ...manifest, package_sha256: PACKAGE_SHA256_ASSUMPTIONS.blankedPackageSha256 }
+  return sha256Hex(toJsonBuffer(preimage)) // A4 + A6
 }
