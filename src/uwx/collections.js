@@ -1,22 +1,23 @@
 // Map a site's file-based collections to exchange (`.uwx`) ENTITIES of a Model
-// referenced BY NAME, each keyed by a stable uuid. A sidecar-backed re-export
-// reuses the same uuids so an idempotent import UPDATES rather than DUPLICATES.
+// referenced BY NAME, on the entity-content SYNC lane.
 //
-// The exporter is names-only: an entity points at its Model by NAME
-// (`model: "@acme/product"`), never a uuid — the importer resolves the name.
-// Identity split: this exporter owns ENTITY identity (the sidecar uuids); the
-// importer owns MODEL identity (resolved from the name).
+// Each record becomes a section-keyed `$`-document (docs/reference/entity-content.md):
+// `$id` (the slug — the producer-local handle), `$model` (the Model by name), and
+// the brief section keyed by its name. The backend MINTS `$uuid` on first sync and
+// returns it in the finalized response; the verb back-fills it into the source
+// file. A record that already carries `$uuid` (a prior back-fill) round-trips it
+// for restore-in-place. No id sidecar — identity is the file-embedded `$uuid` plus
+// the back-fill round-trip.
 //
 // To shape each record, the mapper needs the Model's declaration — the brief
-// section name and which fields are localized. The orchestrator reads that from
-// the LOCAL foundation's built `dist/meta/schema.json` (lowered via
-// `toDataSchemaDeclaration`, the same path `uniweb register` uses), so it stays
-// offline.
+// section name, its field order, and which fields are localized. The orchestrator
+// reads that from the LOCAL foundation's built `dist/meta/schema.json` (lowered
+// via `toDataSchemaDeclaration`, the same path `uniweb register` uses), so it
+// stays offline.
 //
-// v1 scope: a FLAT record → the Model's brief `single` section. Deferred:
-// multi / nested / non-brief sections, entity_ref / item_ref / file fields, a
-// rename-survival id anchor (v1 is slug-keyed), and remote (non-local)
-// foundations.
+// v1 scope: a FLAT record -> the Model's brief `single` section. Deferred:
+// multi / nested / non-brief sections (`$children` self-nesting), entity_ref /
+// item_ref / file fields, and remote (non-local) foundations.
 
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -24,13 +25,27 @@ import { join, resolve } from 'node:path'
 import { readYamlFile } from '../site/content-collector.js'
 import { processCollections } from '../site/collection-processor.js'
 import { toDataSchemaDeclaration } from './data-schema.js'
-import { emitEntityPackage } from './package.js'
-import { mintResolver, sidecarResolver, SIDECAR_RELPATH } from './identity.js'
+import { emitEntitySyncPackage } from './entity-document.js'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
-// Keys on a loaded record that are identity/transport, not Model field data.
-const NON_FIELD_KEYS = new Set(['slug'])
+// Keys on a loaded record that are identity/transport or framework-derived, not
+// Model field data. Used only to suppress spurious "unknown field" warnings — a
+// key that IS a declared field is still synced (the data loop reads by field).
+const NON_FIELD_KEYS = new Set([
+  'slug',
+  '$id',
+  '$uuid',
+  '$model',
+  '$owner',
+  '$unit',
+  '$meta',
+  'route',
+  'excerpt',
+  'image',
+  'content',
+  'published',
+])
 
 function encodeFieldValue(value, field, sourceLocale) {
   if (value == null) return value
@@ -43,24 +58,24 @@ function encodeFieldValue(value, field, sourceLocale) {
 }
 
 /**
- * Map one file-based collection's records to entities of `declaration`'s Model.
- * PURE — records + declaration in, entities out; no I/O, no foundation lookup.
- * (The orchestrator below supplies `declaration` from the local foundation.)
+ * Map one file-based collection's records to entity-content `$`-documents of
+ * `declaration`'s Model. PURE — records + declaration in, entity descriptors out;
+ * no I/O, no minting. The backend mints `$uuid` on first sync; a record that
+ * already carries `$uuid` (back-filled from a prior sync) round-trips it.
  *
  * @param {object} params
- * @param {string} params.collectionName       - the site.yml collection name
- * @param {object[]} params.records            - [{ slug, ...fields }]
- * @param {object} params.declaration          - the `@uniweb/data-schema`
- *        declaration (from toDataSchemaDeclaration): `{ name, brief, sections }`
- * @param {object} params.idResolver           - identity resolver (entity()/item())
- * @param {string} [params.sourceLocale]       - locale for localized-field wrap
- * @returns {{ entities: object[], warnings: string[] }}
+ * @param {string} params.collectionName  - the site.yml collection name
+ * @param {object[]} params.records        - [{ slug, ...fields }]
+ * @param {object} params.declaration      - the `@uniweb/data-schema` declaration
+ *        (from toDataSchemaDeclaration): `{ name, brief, sections }`
+ * @param {string} [params.sourceLocale]   - locale for localized-field wrap
+ * @returns {{ entities: object[], warnings: string[] }} each entity is
+ *   `{ id, uuid, model, file, document }` — `document` is the section-keyed body.
  */
 export function collectionRecordsToEntities({
   collectionName,
   records,
   declaration,
-  idResolver,
   sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale,
 }) {
   if (!declaration || !declaration.name) {
@@ -79,7 +94,8 @@ export function collectionRecordsToEntities({
       `uwx/collections: brief section "${briefName}" not found on ${declaration.name}`
     )
   }
-  const fieldByKey = new Map((brief.fields || []).map((f) => [f.key, f]))
+  const briefFields = brief.fields || []
+  const fieldByKey = new Map(briefFields.map((f) => [f.key, f]))
 
   const entities = []
   const warnings = []
@@ -89,37 +105,44 @@ export function collectionRecordsToEntities({
       warnings.push(`${collectionName}: a record without a slug was skipped`)
       continue
     }
-    const entityKey = `col:${collectionName}:${slug}`
+    const id = record.$id || slug
+    const uuid = record.$uuid || null
+
+    // Brief section data in schema-declared field order (the wire's canonical
+    // order). An absent field is simply omitted — an incomplete entity is a
+    // valid stored state; the foundation copes at render time.
     const data = {}
-    for (const [key, value] of Object.entries(record)) {
-      if (NON_FIELD_KEYS.has(key)) continue
-      const field = fieldByKey.get(key)
-      if (!field) {
-        warnings.push(
-          `${collectionName}/${slug}: field "${key}" is not on ` +
-            `${declaration.name}.${briefName} — not synced`
-        )
-        continue
-      }
+    for (const field of briefFields) {
+      const value = record[field.key]
+      if (value === undefined) continue
       const encoded = encodeFieldValue(value, field, sourceLocale)
-      if (encoded !== undefined) data[key] = encoded
+      if (encoded !== undefined) data[field.key] = encoded
     }
+    // Warn for author keys that aren't on the Model (framework-derived and
+    // identity/transport keys are expected — never warned).
+    for (const key of Object.keys(record)) {
+      if (NON_FIELD_KEYS.has(key) || fieldByKey.has(key)) continue
+      warnings.push(
+        `${collectionName}/${slug}: field "${key}" is not on ` +
+          `${declaration.name}.${briefName} — not synced`
+      )
+    }
+
+    // The `$`-document body, in canonical key order: `$uuid?`, `$id`, `$model`,
+    // then the brief section. `$owner`/`$unit`/`$meta` are omitted — the backend
+    // binds owner + unit on its side.
+    const document = {}
+    if (uuid) document.$uuid = uuid
+    document.$id = id
+    document.$model = declaration.name
+    document[briefName] = data
+
     entities.push({
-      uuid: idResolver.entity(entityKey),
-      model: declaration.name, // reference the Model BY NAME — the importer resolves it
-      owner_uuid: null, // the importer binds owner/unit on import; exporter leaves null
-      unit_uuid: null,
-      meta: {},
-      items: [
-        {
-          uuid: idResolver.item(`${entityKey}::${briefName}`),
-          section: briefName,
-          parent_section: null,
-          parent_path: null,
-          data,
-          order_number: null,
-        },
-      ],
+      id,
+      uuid,
+      model: declaration.name, // reference the Model BY NAME — importer resolves it
+      file: `entities/${collectionName}/${slug}.json`,
+      document,
     })
   }
   return { entities, warnings }
@@ -189,17 +212,14 @@ async function loadRecords(siteRoot, name, decl) {
 
 /**
  * Build the collection-sync package: a site's `model:`-mapped file collections
- * as uuid-stable, model-by-name entities. Sidecar-backed by default so a
- * re-export updates rather than duplicates.
+ * as model-by-name entity-content `$`-documents. First sync sends no `$uuid`
+ * (the backend mints); re-sync round-trips the back-filled `$uuid` for
+ * restore-in-place.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
- * @param {boolean|string} [opts.sidecar]   - stable round trip. `true` →
- *        `<siteRoot>/.uniweb/uwx-ids.json`; a string → that path. Default off
- *        (mint); the CLI defaults it on.
- * @param {object} [opts.idResolver]         - explicit resolver (overrides sidecar)
- * @param {string} [opts.foundationDir]      - explicit local foundation root
- * @param {string} [opts.sourceLocale]       - localized-field wrap locale
+ * @param {string} [opts.foundationDir]   - explicit local foundation root
+ * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{ buffer: Buffer, models: string[], entityCount: number,
  *        warnings: string[] }>}
@@ -231,22 +251,16 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
   }
   const schema = JSON.parse(readFileSync(schemaPath, 'utf8'))
 
-  let id = opts.idResolver
-  if (!id && opts.sidecar) {
-    const path =
-      typeof opts.sidecar === 'string'
-        ? opts.sidecar
-        : join(siteRoot, SIDECAR_RELPATH)
-    id = sidecarResolver(path)
-  }
-  if (!id) id = mintResolver()
-
   const sourceLocale =
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
 
   const entities = []
   const warnings = []
   const models = new Set()
+  // The sync response is keyed per ($model, $id), so the pair must be unique
+  // within one submission (two collections on the same Model could otherwise
+  // reuse a slug).
+  const seen = new Set()
   for (const { name, decl } of mapped) {
     const declaration = resolveDeclaration(schema, decl.model)
     if (!declaration) {
@@ -267,9 +281,19 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
       collectionName: name,
       records,
       declaration,
-      idResolver: id,
       sourceLocale,
     })
+    for (const e of mappedOut.entities) {
+      const dupKey = `${e.model} ${e.id}`
+      if (seen.has(dupKey)) {
+        throw new Error(
+          `uwx/collections: duplicate ($model, $id) in one sync — "${e.id}" of ` +
+            `${e.model} appears in more than one collection. Each ($model, $id) ` +
+            'must be unique within a sync; make the slugs unique.'
+        )
+      }
+      seen.add(dupKey)
+    }
     entities.push(...mappedOut.entities)
     warnings.push(...mappedOut.warnings)
     models.add(decl.model)
@@ -281,9 +305,7 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     )
   }
 
-  id.flush()
-
-  const buffer = emitEntityPackage({
+  const buffer = emitEntitySyncPackage({
     entities,
     // names-only: the importer resolves each Model by name (no uuids).
     modelsRequired: [...models].map((name) => ({ name_at_export: name })),

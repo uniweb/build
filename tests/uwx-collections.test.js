@@ -16,34 +16,18 @@ import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 const lower = (authored, ref, name) =>
   toDataSchemaDeclaration(validateAndNormalizeSchema(authored, ref), { name })
 
-// A stable in-memory resolver: same key → same uuid (mirrors the sidecar's
-// idempotency without touching the filesystem). Records the keys it was asked.
-function memoResolver() {
-  const e = new Map()
-  const i = new Map()
-  let n = 0
-  const get = (m, k) => {
-    if (!m.has(k)) m.set(k, `uuid-${n++}`)
-    return m.get(k)
-  }
-  return {
-    entity: (k) => get(e, k),
-    item: (k) => get(i, k),
-    flush() {},
-    entityKeys: () => [...e.keys()],
-    itemKeys: () => [...i.keys()],
-  }
-}
-
 const unzip = (buf) => {
   const files = readZip(buf)
   const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
+  // old `items[]` lane (emitEntityPackage): files are entities/<uuid>.json
   const entity = (uuid) =>
     JSON.parse(files.get(`entities/${uuid}.json`).toString('utf8'))
-  return { files, manifest, entity }
+  // sync lane: files are at an opaque path recorded in entries[].file
+  const byFile = (path) => JSON.parse(files.get(path).toString('utf8'))
+  return { files, manifest, entity, byFile }
 }
 
-// ── Step A: model-by-name in emitEntityPackage ──────────────────────────────
+// ── Step A: model-by-name in emitEntityPackage (legacy items[] lane) ─────────
 
 describe('emitEntityPackage — model-by-name', () => {
   it('serializes an entity by NAME (no model_uuid) + null-uuid models_required', () => {
@@ -100,9 +84,9 @@ describe('emitEntityPackage — model-by-name', () => {
   })
 })
 
-// ── Step B: collectionRecordsToEntities (pure mapper) ───────────────────────
+// ── Step B: collectionRecordsToEntities → `$`-document (pure mapper) ──────────
 
-describe('collectionRecordsToEntities — flat record → brief single section', () => {
+describe('collectionRecordsToEntities — flat record → brief section `$`-document', () => {
   const declaration = lower(
     {
       name: 'product',
@@ -123,45 +107,62 @@ describe('collectionRecordsToEntities — flat record → brief single section',
     expect(declaration.sections[0]).toMatchObject({ name: 'product', kind: 'single' })
   })
 
-  it('maps each record to one by-name entity with one brief item', () => {
-    const id = memoResolver()
+  it('maps each record to one by-name entity-content document (no $uuid on first sync)', () => {
     const { entities } = collectionRecordsToEntities({
       collectionName: 'products',
       records: [
         { slug: 'widget-x', title: 'Widget X', price: 9.99, published: '2026-01-01', sku: 'WX-1' },
       ],
       declaration,
-      idResolver: id,
     })
     expect(entities).toHaveLength(1)
     const [e] = entities
     expect(e.model).toBe('@acme/product')
-    expect(e.owner_uuid).toBeNull()
-    expect(e.unit_uuid).toBeNull()
-    expect(e.items).toHaveLength(1)
-    expect(e.items[0]).toMatchObject({
-      section: 'product',
-      parent_section: null,
-      parent_path: null,
-      order_number: null,
+    expect(e.id).toBe('widget-x')
+    expect(e.uuid).toBeNull() // first sync — backend mints
+    expect(e.file).toBe('entities/products/widget-x.json')
+    expect(e.document).not.toHaveProperty('items') // not the legacy items[] shape
+    expect(e.document.$id).toBe('widget-x')
+    expect(e.document.$model).toBe('@acme/product')
+    expect(e.document).not.toHaveProperty('$uuid')
+    // brief section keyed by its name; its value is the fields object.
+    expect(e.document.product).toMatchObject({ price: 9.99, published: '2026-01-01' })
+  })
+
+  it('canonical key order: $id, $model, then the section (no leading $uuid first sync)', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'a', title: 'A' }],
+      declaration,
     })
-    // identity keys: entity = col:<name>:<slug>, item = …::<briefSection>
-    expect(id.entityKeys()).toEqual(['col:products:widget-x'])
-    expect(id.itemKeys()).toEqual(['col:products:widget-x::product'])
+    expect(Object.keys(entities[0].document)).toEqual(['$id', '$model', 'product'])
+  })
+
+  it('emits the brief fields in schema-declared order', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'a', sku: 'S', published: '2026-01-01', price: 1, title: 'A' }],
+      declaration,
+    })
+    // declared order is title, price, published, sku — not the record's order.
+    expect(Object.keys(entities[0].document.product)).toEqual([
+      'title',
+      'price',
+      'published',
+      'sku',
+    ])
   })
 
   it('wraps localized fields, leaves scalars/dates raw, drops slug', () => {
-    const id = memoResolver()
     const { entities } = collectionRecordsToEntities({
       collectionName: 'products',
       records: [
         { slug: 'widget-x', title: 'Widget X', price: 9.99, published: '2026-01-01', sku: 'WX-1' },
       ],
       declaration,
-      idResolver: id,
       sourceLocale: 'en',
     })
-    const { data } = entities[0].items[0]
+    const data = entities[0].document.product
     expect(data.title).toEqual({ en: 'Widget X' }) // localized wrap
     expect(data.price).toBe(9.99) // raw scalar
     expect(data.published).toBe('2026-01-01') // date string passthrough
@@ -170,49 +171,53 @@ describe('collectionRecordsToEntities — flat record → brief single section',
   })
 
   it('normalizes a Date value to an ISO-8601 string', () => {
-    const id = memoResolver()
     const { entities } = collectionRecordsToEntities({
       collectionName: 'products',
       records: [{ slug: 'd', title: 'D', published: new Date('2026-03-01T00:00:00Z') }],
       declaration,
-      idResolver: id,
     })
-    expect(entities[0].items[0].data.published).toBe('2026-03-01T00:00:00.000Z')
+    expect(entities[0].document.product.published).toBe('2026-03-01T00:00:00.000Z')
+  })
+
+  it('round-trips a back-filled $uuid for re-sync (as the leading key)', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'widget-x', $uuid: 'abc-123', title: 'Widget X' }],
+      declaration,
+    })
+    const [e] = entities
+    expect(e.uuid).toBe('abc-123')
+    expect(e.document.$uuid).toBe('abc-123')
+    expect(Object.keys(e.document)).toEqual(['$uuid', '$id', '$model', 'product'])
+  })
+
+  it('honors an explicit $id over the slug', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'file-name', $id: 'explicit-id', title: 'X' }],
+      declaration,
+    })
+    expect(entities[0].id).toBe('explicit-id')
+    expect(entities[0].document.$id).toBe('explicit-id')
+    // file path still uses the slug (the on-disk anchor).
+    expect(entities[0].file).toBe('entities/products/file-name.json')
   })
 
   it('warns about + drops a field not on the Model', () => {
-    const id = memoResolver()
     const { entities, warnings } = collectionRecordsToEntities({
       collectionName: 'products',
       records: [{ slug: 'g', title: 'G', color: 'red' }],
       declaration,
-      idResolver: id,
     })
-    expect(entities[0].items[0].data).not.toHaveProperty('color')
+    expect(entities[0].document.product).not.toHaveProperty('color')
     expect(warnings.some((w) => w.includes('color'))).toBe(true)
   })
 
-  it('is idempotent by slug: same resolver → same uuids across runs', () => {
-    const id = memoResolver()
-    const args = {
-      collectionName: 'products',
-      records: [{ slug: 'widget-x', title: 'Widget X' }],
-      declaration,
-      idResolver: id,
-    }
-    const first = collectionRecordsToEntities(args)
-    const second = collectionRecordsToEntities(args)
-    expect(second.entities[0].uuid).toBe(first.entities[0].uuid)
-    expect(second.entities[0].items[0].uuid).toBe(first.entities[0].items[0].uuid)
-  })
-
   it('skips a record without a slug (with a warning)', () => {
-    const id = memoResolver()
     const { entities, warnings } = collectionRecordsToEntities({
       collectionName: 'products',
       records: [{ title: 'No slug' }],
       declaration,
-      idResolver: id,
     })
     expect(entities).toHaveLength(0)
     expect(warnings.some((w) => w.includes('without a slug'))).toBe(true)
@@ -230,7 +235,6 @@ describe('collectionRecordsToEntities — flat record → brief single section',
         collectionName: 'logs',
         records: [{ slug: 'a', msg: 'hi' }],
         declaration: declNoBrief,
-        idResolver: memoResolver(),
       })
     ).toThrow(/no brief section/)
   })
@@ -284,42 +288,65 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
 
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-  it('emits one by-name entity per record, all of the mapped Model', async () => {
+  it('emits one by-name `$`-document per record, all of the mapped Model', async () => {
     const { buffer, models, entityCount } = await emitCollectionSyncPackage(siteDir, {
       exportedAt: '2026-05-27T00:00:00Z',
     })
     expect(models).toEqual(['@acme/product'])
     expect(entityCount).toBe(2)
 
-    const files = readZip(buffer)
-    const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
+    const { manifest, byFile } = unzip(buffer)
     expect(manifest.subtype).toBe('entity')
     expect(manifest.models_required).toEqual([
       { uuid: null, name_at_export: '@acme/product', policy_hint: 'validate_existing' },
     ])
-    expect(manifest.roots).toHaveLength(2)
+    // sync lane: self-owned, so roots is empty (every node is writable).
+    expect(manifest.roots).toEqual([])
+    expect(manifest.package_sha256).toMatch(/^[0-9a-f]{64}$/)
 
-    const entities = manifest.roots.map((u) =>
-      JSON.parse(files.get(`entities/${u}.json`).toString('utf8'))
-    )
-    for (const e of entities) {
-      expect(e.model).toBe('@acme/product')
-      expect(e).not.toHaveProperty('model_uuid')
-      expect(e.owner_uuid).toBeNull()
-      expect(e.unit_uuid).toBeNull()
-      expect(e.items[0].section).toBe('product')
+    const entityEntries = manifest.entries.filter((e) => e.kind === 'entity')
+    expect(entityEntries).toHaveLength(2)
+    for (const entry of entityEntries) {
+      // entry.uuid is the `$id` handle label (v1); model is by name.
+      expect(entry.model).toBe('@acme/product')
+      expect(entry).not.toHaveProperty('model_uuid')
+      expect(entry.file).toMatch(/^entities\/products\/.+\.json$/)
+      expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
+
+      const doc = byFile(entry.file)
+      expect(doc.$model).toBe('@acme/product')
+      expect(doc.$id).toBe(entry.uuid) // entry.uuid mirrors the body's $id
+      expect(doc).not.toHaveProperty('$uuid') // first sync — backend mints
+      expect(doc).not.toHaveProperty('items')
       // human-text `title` lowers to localized → wrapped `{ en: ... }`; `price` raw.
-      expect(e.items[0].data.title).toHaveProperty('en')
-      expect(typeof e.items[0].data.price).toBe('number')
+      expect(doc.product.title).toHaveProperty('en')
+      expect(typeof doc.product.price).toBe('number')
     }
   })
 
-  it('is idempotent: a sidecar re-run yields the same entity uuids', async () => {
-    const a = await emitCollectionSyncPackage(siteDir, { sidecar: true })
-    const b = await emitCollectionSyncPackage(siteDir, { sidecar: true })
-    const roots = (buf) =>
-      JSON.parse(readZip(buf).get('manifest.json').toString('utf8')).roots.sort()
-    expect(roots(b.buffer)).toEqual(roots(a.buffer))
+  it('round-trips a back-filled $uuid on re-sync', async () => {
+    // A second site whose record already carries a $uuid (a prior back-fill).
+    const reSite = join(root, 'resync-site')
+    mkdirSync(join(reSite, 'data', 'products'), { recursive: true })
+    writeFileSync(
+      join(reSite, 'site.yml'),
+      'name: Re\nfoundation: "@acme/marketing"\ncollections:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+    )
+    writeFileSync(
+      join(reSite, 'package.json'),
+      JSON.stringify({ name: 're', dependencies: { foundation: 'file:../foundation' } })
+    )
+    writeFileSync(
+      join(reSite, 'data', 'products', 'widget-x.yml'),
+      '"$uuid": existing-uuid-1\ntitle: Widget X\n'
+    )
+
+    const { buffer } = await emitCollectionSyncPackage(reSite)
+    const { manifest, byFile } = unzip(buffer)
+    const entry = manifest.entries.find((e) => e.kind === 'entity')
+    const doc = byFile(entry.file)
+    expect(doc.$uuid).toBe('existing-uuid-1')
+    expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$model', 'product'])
   })
 
   it('errors when no collection declares `model:`', async () => {

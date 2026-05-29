@@ -21,6 +21,7 @@ export {
   PACKAGE_SHA256_ASSUMPTIONS,
 } from './manifest.js'
 export { emitEntityPackage } from './package.js'
+export { emitEntitySyncPackage } from './entity-document.js'
 export {
   FOUNDATION_SCHEMA_TYPE_UUID,
   SITE_CONTENT_TYPE_UUID,
