@@ -49,9 +49,11 @@ const SKIP_KEYS = new Set([
 function encodeFieldValue(value, field, sourceLocale) {
   if (value == null) return value
   if (field.localized) return localize(value, sourceLocale)
-  // ISO-8601 for date kinds; a YAML date may parse to a Date.
+  // A YAML scalar date parses to a Date. The backend validates `date` as
+  // `YYYY-MM-DD` and `datetime` as RFC3339 — emitting full ISO for a `date`
+  // field is rejected before storage, so split by kind.
   if (DATE_KINDS.has(field.type) && value instanceof Date) {
-    return value.toISOString()
+    return field.type === 'date' ? value.toISOString().slice(0, 10) : value.toISOString()
   }
   return value
 }

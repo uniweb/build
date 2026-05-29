@@ -170,13 +170,27 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
     expect(data).not.toHaveProperty('slug') // identity, not data
   })
 
-  it('normalizes a Date value to an ISO-8601 string', () => {
+  it('emits a `date` field as YYYY-MM-DD (not full ISO — backend rejects the latter)', () => {
     const { entities } = collectionRecordsToEntities({
       collectionName: 'products',
       records: [{ slug: 'd', title: 'D', published: new Date('2026-03-01T00:00:00Z') }],
-      declaration,
+      declaration, // `published` is type `date`
     })
-    expect(entities[0].document.product.published).toBe('2026-03-01T00:00:00.000Z')
+    expect(entities[0].document.product.published).toBe('2026-03-01')
+  })
+
+  it('emits a `datetime` field as full RFC3339', () => {
+    const dt = lower(
+      { name: 'event', fields: { title: { type: 'string' }, at: { type: 'datetime' } } },
+      '@/event',
+      '@acme/event'
+    )
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'events',
+      records: [{ slug: 'e', title: 'E', at: new Date('2026-03-01T12:30:00Z') }],
+      declaration: dt,
+    })
+    expect(entities[0].document.event.at).toBe('2026-03-01T12:30:00.000Z')
   })
 
   it('round-trips a back-filled $uuid for re-sync (as the leading key)', () => {
