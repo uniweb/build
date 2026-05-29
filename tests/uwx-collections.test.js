@@ -7,6 +7,7 @@ import {
   readZip,
   mintUuidV7,
   collectionRecordsToEntities,
+  entityContentHash,
 } from '../src/uwx/index.js'
 import { toDataSchemaDeclaration } from '../src/uwx/data-schema.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
@@ -515,5 +516,99 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
     const { models } = await emitCollectionSyncPackage(localSite, { resolveModel })
     expect(models).toEqual(['@acme/product'])
     expect(called).toBe(false)
+  })
+})
+
+// ── B4: send only changed (content-hash cache) ──────────────────────────────
+
+describe('entityContentHash', () => {
+  it('is identity-independent — stable across a back-filled $uuid', () => {
+    const first = entityContentHash({ $id: 'x', $model: '@a/m', m: { title: { en: 'Hi' } } })
+    const resync = entityContentHash({
+      $uuid: 'minted',
+      $id: 'x',
+      $model: '@a/m',
+      m: { $uuid: 'rec', title: { en: 'Hi' } },
+    })
+    expect(first).toBe(resync)
+  })
+  it('changes when field content changes', () => {
+    const a = entityContentHash({ $id: 'x', $model: '@a/m', m: { title: { en: 'Hi' } } })
+    const b = entityContentHash({ $id: 'x', $model: '@a/m', m: { title: { en: 'Bye' } } })
+    expect(a).not.toBe(b)
+  })
+})
+
+describe('emitCollectionSyncPackage — send only changed', () => {
+  let root
+  let siteDir
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'uwx-b4-'))
+    siteDir = join(root, 'site')
+    const fdn = join(root, 'foundation')
+    mkdirSync(join(siteDir, 'data', 'products'), { recursive: true })
+    mkdirSync(join(fdn, 'dist', 'meta'), { recursive: true })
+    writeFileSync(
+      join(siteDir, 'site.yml'),
+      'name: T\nfoundation: "@acme/marketing"\ncollections:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+    )
+    writeFileSync(
+      join(siteDir, 'package.json'),
+      JSON.stringify({ name: 's', dependencies: { foundation: 'file:../foundation' } })
+    )
+    writeFileSync(join(siteDir, 'data', 'products', 'a.yml'), 'title: A\nprice: 1\n')
+    writeFileSync(join(siteDir, 'data', 'products', 'b.yml'), 'title: B\nprice: 2\n')
+    writeFileSync(
+      join(fdn, 'dist', 'meta', 'schema.json'),
+      JSON.stringify({
+        _self: { name: '@acme/marketing', version: '1.0.0', role: 'foundation' },
+        dataSchemas: {
+          '@/product': validateAndNormalizeSchema(
+            { name: 'product', fields: { title: { type: 'string' }, price: { type: 'decimal' } } },
+            '@/product'
+          ),
+        },
+      })
+    )
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('first sync sends all + returns the full hash map', async () => {
+    const { entityCount, skipped, hashes } = await emitCollectionSyncPackage(siteDir)
+    expect(entityCount).toBe(2)
+    expect(skipped).toBe(0)
+    expect(Object.keys(hashes).sort()).toEqual(['@acme/product a', '@acme/product b'])
+  })
+
+  it('skips records whose content hash matches the prior cache (nothing to send)', async () => {
+    const first = await emitCollectionSyncPackage(siteDir)
+    const { entityCount, skipped, buffer } = await emitCollectionSyncPackage(siteDir, {
+      priorHashes: first.hashes,
+    })
+    expect(entityCount).toBe(0)
+    expect(skipped).toBe(2)
+    expect(buffer).toBeNull()
+  })
+
+  it('sends only the changed record after an edit (index correlates to the subset)', async () => {
+    const first = await emitCollectionSyncPackage(siteDir)
+    writeFileSync(join(siteDir, 'data', 'products', 'b.yml'), 'title: B2\nprice: 2\n')
+    const { entityCount, skipped, index } = await emitCollectionSyncPackage(siteDir, {
+      priorHashes: first.hashes,
+    })
+    expect(entityCount).toBe(1)
+    expect(skipped).toBe(1)
+    expect(index[0].id).toBe('b')
+  })
+
+  it('sendAll bypasses the cache', async () => {
+    const first = await emitCollectionSyncPackage(siteDir)
+    const { entityCount, skipped } = await emitCollectionSyncPackage(siteDir, {
+      priorHashes: first.hashes,
+      sendAll: true,
+    })
+    expect(entityCount).toBe(2)
+    expect(skipped).toBe(0)
   })
 })

@@ -41,6 +41,7 @@ export { siteProjectToEntity, emitSitePackage } from './site.js'
 export {
   collectionRecordsToEntities,
   emitCollectionSyncPackage,
+  entityContentHash,
 } from './collections.js'
 export { readCollectionRecords, parseFrontmatter } from './collection-source.js'
 export {

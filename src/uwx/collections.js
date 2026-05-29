@@ -26,6 +26,7 @@ import { readYamlFile } from '../site/content-collector.js'
 import { readCollectionRecords } from './collection-source.js'
 import { toDataSchemaDeclaration } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
+import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
@@ -45,6 +46,33 @@ const SKIP_KEYS = new Set([
   '$meta',
   '$body',
 ])
+
+// Recursively drop `$`-sigil keys (identity/transport, never field data — the
+// sigil-exclusivity invariant guarantees this) at every level.
+function stripSigils(value) {
+  if (Array.isArray(value)) return value.map(stripSigils)
+  if (value && typeof value === 'object') {
+    const out = {}
+    for (const [k, v] of Object.entries(value)) {
+      if (k.startsWith('$')) continue
+      out[k] = stripSigils(v)
+    }
+    return out
+  }
+  return value
+}
+
+/**
+ * Identity-INDEPENDENT content hash of an entity `$`-document: strip every
+ * `$`-sigil (so a back-filled `$uuid` doesn't change it), then sha256 the
+ * canonical content. An unchanged record hashes the same on first sync and every
+ * re-sync — the basis for the "send only changed" pre-filter (the producer's
+ * sync-cache, keyed by `<model> <id>`). Distinct from the manifest's
+ * `entries[].sha256`, which is over the whole document incl. `$uuid`.
+ */
+export function entityContentHash(document) {
+  return sha256Hex(toJsonBuffer(stripSigils(document)))
+}
 
 function encodeFieldValue(value, field, sourceLocale) {
   if (value == null) return value
@@ -280,9 +308,15 @@ async function loadSourceRecords(siteRoot, decl) {
  *        `@uniweb/data-schema` declaration (or null). The verb wires this to the
  *        backend's Model-read route. Without it, the local foundation is required.
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
+ * @param {Object<string,string>} [opts.priorHashes] - last-synced content hashes
+ *        keyed `<model> <id>` (the verb's sync-cache); entities whose current
+ *        content hash matches are skipped ("send only changed").
+ * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter (force all)
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
- * @returns {Promise<{ buffer: Buffer, models: string[], entityCount: number,
- *        warnings: string[] }>}
+ * @returns {Promise<{ buffer: Buffer|null, models: string[], entityCount: number,
+ *        warnings: string[], index: object[], hashes: Object<string,string>,
+ *        skipped: number }>} `buffer` is null + `entityCount` 0 when nothing
+ *        changed; `hashes` is the full current map for the caller to persist.
  */
 export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
@@ -317,7 +351,6 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
   const entities = []
   const index = []
   const warnings = []
-  const models = new Set()
   // The sync response is keyed per ($model, $id), so the pair must be unique
   // within one submission (two collections on the same Model could otherwise
   // reuse a slug).
@@ -396,7 +429,6 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     }
     entities.push(...mappedOut.entities)
     warnings.push(...mappedOut.warnings)
-    models.add(decl.model)
   }
 
   if (entities.length === 0) {
@@ -405,13 +437,45 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     )
   }
 
+  // "Send only changed": compute each entity's identity-independent content hash
+  // and skip those whose hash matches the prior sync (the verb's `.uniweb`
+  // sync-cache). `hashes` is the FULL current map (the verb persists it after a
+  // successful submit); `sendAll` bypasses the filter (force a full re-sync). The
+  // sent subset stays parallel (entities[i] ↔ index[i]) so the backend's `index`
+  // correlation holds for a partial send.
+  const priorHashes = opts.priorHashes || {}
+  const sendAll = !!opts.sendAll
+  const hashes = {}
+  const sendEntities = []
+  const sendIndex = []
+  let skipped = 0
+  for (let k = 0; k < entities.length; k++) {
+    const e = entities[k]
+    const key = `${e.model} ${e.id}`
+    const h = entityContentHash(e.document)
+    hashes[key] = h
+    if (!sendAll && priorHashes[key] === h) {
+      skipped++
+      continue
+    }
+    sendEntities.push(e)
+    sendIndex.push(index[k])
+  }
+
+  const sentModels = [...new Set(sendEntities.map((e) => e.model))]
+  if (sendEntities.length === 0) {
+    // Everything already in sync — nothing to submit. The caller refreshes the
+    // cache from `hashes` (a no-op) and reports the skip.
+    return { buffer: null, models: sentModels, entityCount: 0, warnings, index: [], hashes, skipped }
+  }
+
   const buffer = emitEntitySyncPackage({
-    entities,
+    entities: sendEntities,
     // names-only: the importer resolves each Model by name (no uuids).
-    modelsRequired: [...models].map((name) => ({ name_at_export: name })),
+    modelsRequired: sentModels.map((name) => ({ name_at_export: name })),
     exporter: opts.exporter,
     exportedAt: opts.exportedAt,
   })
 
-  return { buffer, models: [...models], entityCount: entities.length, warnings, index }
+  return { buffer, models: sentModels, entityCount: sendEntities.length, warnings, index: sendIndex, hashes, skipped }
 }
