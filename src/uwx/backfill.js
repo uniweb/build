@@ -12,14 +12,17 @@
 // canonical). It reads from the SOURCE file (not the backend's finalized document),
 // so field values round-trip untouched and no inverse decode is needed in v1.
 //
-// Single-record YAML/JSON/markdown files are handled. Array-form files (many
-// records in one file) and BibTeX are deferred — reported as 'deferred', never
-// silently skipped (no single-record file to rewrite in place).
+// Single-record YAML/JSON/markdown files are rendered/back-filled in place.
+// Multi-record files — array-form YAML/JSON and BibTeX (many records in one
+// file) — are grouped by file and written once, one `$uuid` per record keyed by
+// slug/cite-key. Anything genuinely unwritable is reported as 'deferred', never
+// silently skipped.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
+import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
 
 // Probed in this order to locate a single-record source file by slug.
 const SOURCE_EXTENSIONS = ['.yml', '.yaml', '.json', '.md', '.bib']
@@ -141,6 +144,45 @@ export function backfillArrayFile(filePath, uuidBySlug) {
   return { status: 'updated' }
 }
 
+/**
+ * Back-fill minted `$uuid`s into a BibTeX file (many entries in one file), keyed
+ * by each entry's cite key (the slug / `$id`). Parse → set `$uuid` on each matched
+ * entry → re-export canonically. `@citestyle/bibtex` (>=1.1.0) preserves `$`-sigil
+ * fields through parse↔export, so the uuid rides in the entry and a re-sync
+ * round-trips it. Sync owns the output, so comments/order are not preserved (by
+ * design); idempotent — re-exporting already-`$uuid`'d entries is byte-identical.
+ *
+ * @param {string} filePath
+ * @param {Map<string,string>} uuidBySlug - cite key → minted uuid for this file
+ * @returns {{ status: 'updated'|'unchanged'|'error', message?: string }}
+ */
+export function backfillBibFile(filePath, uuidBySlug) {
+  let text
+  try {
+    text = readFileSync(filePath, 'utf8')
+  } catch (err) {
+    return { status: 'error', message: `cannot read ${filePath}: ${err.message}` }
+  }
+  let entries
+  try {
+    entries = parseBibtex(text)
+  } catch (err) {
+    return { status: 'error', message: `invalid BibTeX in ${filePath}: ${err.message}` }
+  }
+  if (!Array.isArray(entries)) {
+    return { status: 'error', message: `expected BibTeX entries in ${filePath}` }
+  }
+  const next = entries.map((e) => {
+    const uuid = e && e.id ? uuidBySlug.get(e.id) : null
+    if (!uuid || e.$uuid === uuid) return e
+    return withUuidFirst(e, uuid)
+  })
+  const out = exportBibtex(next)
+  if (out === text) return { status: 'unchanged' }
+  writeFileSync(filePath, out)
+  return { status: 'updated' }
+}
+
 // Unwrap a localized wire value `{ <locale>: v }` back to the authored bare value
 // (the source locale, else the first present). Non-localized values pass through.
 function unwrapLocalized(value, sourceLocale) {
@@ -247,8 +289,9 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
   const unchanged = []
   const deferred = []
   const warnings = []
-  // Multi-record YAML/JSON files are written ONCE, applying every (slug → uuid).
-  const arrayFiles = new Map() // sourceFile -> Map(slug -> uuid)
+  // Multi-record files are written ONCE per file, applying every (slug → uuid).
+  const arrayFiles = new Map() // array-form YAML/JSON: sourceFile -> Map(slug -> uuid)
+  const bibFiles = new Map() // BibTeX: sourceFile -> Map(cite key -> uuid)
 
   for (const fin of finalized || []) {
     const uuid = fin.uuid
@@ -264,16 +307,14 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
       continue
     }
     if (entry.multiRecord) {
-      // BibTeX multi-record write-back is a follow-up (no serializer; per-entry
-      // insertion + re-export fragility). Array-form YAML/JSON is handled below.
-      if (entry.format === 'bib') {
-        deferred.push({ index: i, id: entry.id, file: entry.sourceFile, reason: 'BibTeX write-back is a follow-up' })
-        continue
-      }
-      let m = arrayFiles.get(entry.sourceFile)
+      // Many records in one file → group by file, written once. BibTeX and
+      // array-form YAML/JSON both re-render canonically (sync owns the output);
+      // the per-file writer is chosen by format below.
+      const group = entry.format === 'bib' ? bibFiles : arrayFiles
+      let m = group.get(entry.sourceFile)
       if (!m) {
         m = new Map()
-        arrayFiles.set(entry.sourceFile, m)
+        group.set(entry.sourceFile, m)
       }
       m.set(entry.slug, uuid)
       continue
@@ -314,6 +355,12 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     if (res.status === 'updated') updated.push(file)
     else if (res.status === 'unchanged') unchanged.push(file)
     else if (res.status === 'deferred') deferred.push({ file, reason: res.message })
+    else warnings.push(`${file}: ${res.message}`)
+  }
+  for (const [file, uuidBySlug] of bibFiles) {
+    const res = backfillBibFile(file, uuidBySlug)
+    if (res.status === 'updated') updated.push(file)
+    else if (res.status === 'unchanged') unchanged.push(file)
     else warnings.push(`${file}: ${res.message}`)
   }
 

@@ -48,6 +48,7 @@ export {
   findRecordFile,
   backfillUuid,
   backfillArrayFile,
+  backfillBibFile,
   renderEntityDocument,
   backfillEntityUuids,
 } from './backfill.js'

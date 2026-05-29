@@ -6,9 +6,11 @@ import {
   findRecordFile,
   backfillUuid,
   backfillArrayFile,
+  backfillBibFile,
   renderEntityDocument,
   backfillEntityUuids,
 } from '../src/uwx/index.js'
+import { parseBibtex } from '@citestyle/bibtex'
 
 let dir
 beforeEach(() => {
@@ -148,6 +150,27 @@ describe('backfillArrayFile — many records in one file', () => {
   })
 })
 
+describe('backfillBibFile — BibTeX', () => {
+  it('inserts $uuid per entry (by cite key) and re-parses; idempotent', () => {
+    const f = join(dir, 'refs.bib')
+    writeFileSync(f, '@article{a, title = {A}, year = {2024}}\n@book{b, title = {B}, year = {2025}}\n')
+    expect(backfillBibFile(f, new Map([['a', 'u-a'], ['b', 'u-b']])).status).toBe('updated')
+    const re = parseBibtex(readFileSync(f, 'utf8'))
+    expect(Object.fromEntries(re.map((e) => [e.id, e.$uuid]))).toEqual({ a: 'u-a', b: 'u-b' })
+    // re-run with the same uuids is a no-op (fixpoint)
+    expect(backfillBibFile(f, new Map([['a', 'u-a'], ['b', 'u-b']])).status).toBe('unchanged')
+  })
+
+  it('leaves entries without a minted uuid untouched', () => {
+    const f = join(dir, 'refs.bib')
+    writeFileSync(f, '@article{a, title = {A}}\n@book{b, title = {B}}\n')
+    backfillBibFile(f, new Map([['a', 'u-a']]))
+    const re = parseBibtex(readFileSync(f, 'utf8'))
+    expect(re.find((e) => e.id === 'a').$uuid).toBe('u-a')
+    expect(re.find((e) => e.id === 'b').$uuid).toBeUndefined()
+  })
+})
+
 describe('renderEntityDocument — variant A (document → authoring file)', () => {
   const articleDecl = {
     name: '@acme/article',
@@ -197,15 +220,19 @@ describe('backfillEntityUuids — correlate by index', () => {
     expect(yaml.load(readFileSync(f, 'utf8')).map((e) => e.$uuid)).toEqual(['u-a', 'u-b'])
   })
 
-  it('defers BibTeX (multiRecord, format bib)', () => {
+  it('BibTeX (multiRecord): writes per-entry $uuid by cite key, one file', () => {
     const f = join(dir, 'refs.bib')
-    writeFileSync(f, '@article{a, title={A}}\n')
+    writeFileSync(f, '@article{smith2026, title = {On Rust}, year = {2026}}\n@book{jones2025, title = {Systems}, year = {2025}}\n')
     const res = backfillEntityUuids({
-      index: [{ id: 'a', slug: 'a', sourceFile: f, format: 'bib', multiRecord: true }],
-      finalized: [{ index: 0, uuid: 'u' }],
+      index: [
+        { id: 'smith2026', slug: 'smith2026', sourceFile: f, format: 'bib', multiRecord: true },
+        { id: 'jones2025', slug: 'jones2025', sourceFile: f, format: 'bib', multiRecord: true },
+      ],
+      finalized: [{ index: 0, uuid: 'u-smith' }, { index: 1, uuid: 'u-jones' }],
     })
-    expect(res.deferred).toHaveLength(1)
-    expect(res.deferred[0].reason).toMatch(/BibTeX/)
+    expect(res.updated).toEqual([f])
+    const byId = Object.fromEntries(parseBibtex(readFileSync(f, 'utf8')).map((e) => [e.id, e.$uuid]))
+    expect(byId).toEqual({ smith2026: 'u-smith', jones2025: 'u-jones' })
   })
 
   it('variant B: back-fills the uuid in place when there is no document', () => {
@@ -222,17 +249,15 @@ describe('backfillEntityUuids — correlate by index', () => {
     writeFileSync(wx, 'title: Widget X\nprice: 9.99\n')
     const declaration = {
       name: '@acme/product',
-      brief: 'product',
-      sections: [
-        {
-          name: 'product',
-          kind: 'single',
-          fields: [
-            { key: 'title', type: 'string', localized: true },
-            { key: 'price', type: 'decimal' },
-          ],
+      sections: {
+        product: {
+          brief: true,
+          fields: {
+            title: { type: 'string', localized: true },
+            price: { type: 'decimal' },
+          },
         },
-      ],
+      },
     }
     const index = [{ id: 'widget-x', slug: 'widget-x', sourceFile: wx, format: 'yaml', declaration }]
     const finalized = [
