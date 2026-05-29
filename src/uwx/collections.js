@@ -23,17 +23,19 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { readYamlFile } from '../site/content-collector.js'
-import { processCollections } from '../site/collection-processor.js'
+import { readCollectionRecords } from './collection-source.js'
 import { toDataSchemaDeclaration } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { findRecordFile } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
-// Keys on a loaded record that are identity/transport or framework-derived, not
-// Model field data. Used only to suppress spurious "unknown field" warnings — a
-// key that IS a declared field is still synced (the data loop reads by field).
-const NON_FIELD_KEYS = new Set([
+const RICHTEXT_TYPE = 'richtext'
+// Identity/transport keys on a source record — never Model fields, never warned.
+// `$body` carries the markdown body (mapped to the brief's richtext field below).
+// Note: there is NO delivery-derived ignore list (route/excerpt/image/content) —
+// the source reader never produces those, and a real unknown key SHOULD warn (it
+// means the frontmatter doesn't match the collection's data schema).
+const SKIP_KEYS = new Set([
   'slug',
   '$id',
   '$uuid',
@@ -41,11 +43,7 @@ const NON_FIELD_KEYS = new Set([
   '$owner',
   '$unit',
   '$meta',
-  'route',
-  'excerpt',
-  'image',
-  'content',
-  'published',
+  '$body',
 ])
 
 function encodeFieldValue(value, field, sourceLocale) {
@@ -98,8 +96,20 @@ export function collectionRecordsToEntities({
   const briefFields = brief.fields || []
   const fieldByKey = new Map(briefFields.map((f) => [f.key, f]))
 
+  // The markdown body of a `.md` collection record is the value of the brief's
+  // `richtext` field (docs/reference/entity-content.md). One richtext field is the
+  // body target; zero means a `.md` body has nowhere to go (warn per record).
+  const richtextFields = briefFields.filter((f) => f.type === RICHTEXT_TYPE)
+  const bodyField = richtextFields[0] || null
+
   const entities = []
   const warnings = []
+  if (richtextFields.length > 1) {
+    warnings.push(
+      `${collectionName}: ${declaration.name}.${briefName} has more than one richtext ` +
+        `field — the markdown body maps to "${bodyField.key}"`
+    )
+  }
   for (const record of records || []) {
     const slug = record.slug
     if (!slug) {
@@ -108,24 +118,34 @@ export function collectionRecordsToEntities({
     }
     const id = record.$id || slug
     const uuid = record.$uuid || null
+    const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
     // Brief section data in schema-declared field order (the wire's canonical
     // order). An absent field is simply omitted — an incomplete entity is a
-    // valid stored state; the foundation copes at render time.
+    // valid stored state; the foundation copes at render time. The markdown body
+    // fills the richtext field unless the frontmatter already set it explicitly.
     const data = {}
     for (const field of briefFields) {
-      const value = record[field.key]
+      let value = record[field.key]
+      if (value === undefined && field === bodyField && hasBody) value = record.$body
       if (value === undefined) continue
       const encoded = encodeFieldValue(value, field, sourceLocale)
       if (encoded !== undefined) data[field.key] = encoded
     }
-    // Warn for author keys that aren't on the Model (framework-derived and
-    // identity/transport keys are expected — never warned).
+    // Warn for author keys that aren't on the Model. A real unknown key means the
+    // frontmatter doesn't match the collection's data schema — that SHOULD warn
+    // (only identity/transport keys in SKIP_KEYS are silent).
     for (const key of Object.keys(record)) {
-      if (NON_FIELD_KEYS.has(key) || fieldByKey.has(key)) continue
+      if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
       warnings.push(
         `${collectionName}/${slug}: field "${key}" is not on ` +
           `${declaration.name}.${briefName} — not synced`
+      )
+    }
+    if (hasBody && !bodyField) {
+      warnings.push(
+        `${collectionName}/${slug}: markdown body present but ` +
+          `${declaration.name}.${briefName} has no richtext field — body not synced`
       )
     }
 
@@ -203,13 +223,15 @@ function resolveDeclaration(schema, modelName) {
   return null
 }
 
-// Load a collection's records for export: every record (no render-time
-// filter/limit — export carries the whole collection). Only file-based (`path:`)
-// collections export; remote (`url:`) data is not a local file collection.
-async function loadRecords(siteRoot, name, decl) {
+// Load a collection's ORIGINAL source records for export — the author's files,
+// untouched (raw frontmatter + raw markdown body, raw YAML/JSON, raw BibTeX). This
+// is deliberately NOT `processCollections` (the delivery pipeline that builds
+// public/data, converts bodies to ProseMirror, and copies assets). Sync carries
+// the source. Only file-based (`path:`) collections export; remote (`url:`) data
+// is not a local file collection.
+async function loadSourceRecords(siteRoot, decl) {
   if (!decl.path) return null // not file-based — caller warns + skips
-  const loaded = await processCollections(siteRoot, { [name]: { path: decl.path } })
-  return loaded[name] || []
+  return readCollectionRecords(resolve(siteRoot, decl.path))
 }
 
 /**
@@ -273,17 +295,34 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
           'locally; shared/registry-only Models are not yet supported.'
       )
     }
-    const records = await loadRecords(siteRoot, name, decl)
-    if (records == null) {
+    const sourceRecords = await loadSourceRecords(siteRoot, decl)
+    if (sourceRecords == null) {
       warnings.push(
         `${name}: not a file-based (\`path:\`) collection — skipped`
       )
       continue
     }
-    const collectionDir = resolve(siteRoot, decl.path)
+    // Flatten source records into the mapper's flat shape; the markdown body
+    // rides under `$body` (the mapper maps it to the brief's richtext field).
+    // Keep a per-slug pointer back to the source file for `$uuid` write-back —
+    // null for array-form / BibTeX (multi-record) files, whose write-back is
+    // deferred (no single-record file to rewrite in place).
+    const flat = []
+    const sourceBySlug = new Map()
+    for (const r of sourceRecords) {
+      if (!r.slug) {
+        warnings.push(`${name}: a record without a slug was skipped`)
+        continue
+      }
+      const rec = { ...r.data, slug: r.slug }
+      if (r.body !== undefined) rec.$body = r.body
+      flat.push(rec)
+      sourceBySlug.set(r.slug, r)
+    }
+
     const mappedOut = collectionRecordsToEntities({
       collectionName: name,
-      records,
+      records: flat,
       declaration,
       sourceLocale,
     })
@@ -299,11 +338,12 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
       seen.add(dupKey)
       // The verb back-fills the minted `$uuid` into this source file, matched
       // back from the finalized response by ($model, $id).
+      const src = sourceBySlug.get(e.slug)
       index.push({
         id: e.id,
         model: e.model,
         slug: e.slug,
-        sourceFile: findRecordFile(collectionDir, e.slug),
+        sourceFile: src && !src.multiRecord ? src.sourceFile : null,
       })
     }
     entities.push(...mappedOut.entities)

@@ -78,15 +78,36 @@ describe('backfillUuid — JSON', () => {
   })
 })
 
-describe('backfillUuid — deferred formats', () => {
-  it('defers markdown frontmatter', () => {
+describe('backfillUuid — markdown frontmatter', () => {
+  it('inserts $uuid into the frontmatter and preserves the body verbatim', () => {
     const f = join(dir, 'a.md')
-    writeFileSync(f, '---\ntitle: A\n---\n')
-    expect(backfillUuid(f, 'u').status).toBe('deferred')
+    writeFileSync(f, '---\ntitle: A\n---\n\n# Heading\n\nBody text.\n')
+    expect(backfillUuid(f, '0192-mmmm').status).toBe('updated')
+
+    const text = readFileSync(f, 'utf8')
+    expect(text.startsWith('---\n$uuid: 0192-mmmm\n')).toBe(true)
+    // body survives untouched (no ProseMirror, no reflow)
+    expect(text.endsWith('---\n\n# Heading\n\nBody text.\n')).toBe(true)
   })
+
+  it('is idempotent on a canonical markdown file', () => {
+    const f = join(dir, 'a.md')
+    writeFileSync(f, '---\n$uuid: same\ntitle: A\n---\n\nBody.\n')
+    const before = readFileSync(f, 'utf8')
+    expect(backfillUuid(f, 'same').status).toBe('unchanged')
+    expect(readFileSync(f, 'utf8')).toBe(before)
+  })
+})
+
+describe('backfillUuid — deferred formats', () => {
   it('defers BibTeX', () => {
     const f = join(dir, 'a.bib')
     writeFileSync(f, '@article{a, title={A}}\n')
+    expect(backfillUuid(f, 'u').status).toBe('deferred')
+  })
+  it('defers array-form YAML (many records in one file)', () => {
+    const f = join(dir, 'all.yml')
+    writeFileSync(f, '- slug: a\n- slug: b\n')
     expect(backfillUuid(f, 'u').status).toBe('deferred')
   })
 })

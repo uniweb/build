@@ -2,18 +2,27 @@
 // files, so a re-sync round-trips them for update-in-place. The symmetric
 // write-side of the collection-sync emitter (collections.js): the emitter sends
 // `$id` with no `$uuid` on first sync; the backend mints `$uuid` and returns it;
-// this writes it next to the record in its source file (docs/reference/entity-content.md).
+// this writes it into the record in its source file (docs/reference/entity-content.md).
 //
-// v1 handles single-record YAML and JSON files (the flat-collection case). MD
-// frontmatter, BibTeX, and array-form files (many records in one file) are
-// deferred — reported as 'deferred', never silently skipped.
+// Write-back RE-RENDERS the parsed record with `$uuid` as the leading key, rather
+// than surgically patching the text. It does not preserve comments or incidental
+// formatting (accepted) — in exchange it is one uniform path across YAML, JSON, and
+// markdown frontmatter, and it converges to a fixpoint: a pristine file gains only
+// a `$uuid`, and a no-op re-sync is byte-identical (render(parse(x)) == x once
+// canonical). It reads from the SOURCE file (not the backend's finalized document),
+// so field values round-trip untouched and no inverse decode is needed in v1.
+//
+// Single-record YAML/JSON/markdown files are handled. Array-form files (many
+// records in one file) and BibTeX are deferred — reported as 'deferred', never
+// silently skipped (no single-record file to rewrite in place).
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
+import { parseFrontmatter } from './collection-source.js'
 
 // Probed in this order to locate a single-record source file by slug.
 const SOURCE_EXTENSIONS = ['.yml', '.yaml', '.json', '.md', '.bib']
-const DEFERRED_EXTENSIONS = new Set(['.md', '.bib'])
 
 /**
  * Locate the single-record source file for `slug` in a collection directory by
@@ -28,9 +37,17 @@ export function findRecordFile(collectionDir, slug) {
   return null
 }
 
+// `$uuid` as the leading key, the rest of the object after it in its existing
+// order. Re-used by every format renderer so key order is uniform.
+function withUuidFirst(obj, uuid) {
+  const { $uuid: _drop, ...rest } = obj
+  return { $uuid: uuid, ...rest }
+}
+
 /**
- * Insert `$uuid` into a single-record source file, preserving the rest of the
- * file. Idempotent — a file already carrying the same `$uuid` is left untouched.
+ * Insert `$uuid` into a single-record source file by re-rendering the parsed
+ * record with `$uuid` leading. Idempotent — if the render equals the file's
+ * current bytes, nothing is written.
  *
  * @param {string} filePath
  * @param {string} uuid
@@ -39,9 +56,7 @@ export function findRecordFile(collectionDir, slug) {
 export function backfillUuid(filePath, uuid) {
   const dot = filePath.lastIndexOf('.')
   const ext = dot === -1 ? '' : filePath.slice(dot).toLowerCase()
-  if (DEFERRED_EXTENSIONS.has(ext)) {
-    return { status: 'deferred', message: `${ext} back-fill is not yet implemented` }
-  }
+
   let text
   try {
     text = readFileSync(filePath, 'utf8')
@@ -49,43 +64,38 @@ export function backfillUuid(filePath, uuid) {
     return { status: 'error', message: `cannot read ${filePath}: ${err.message}` }
   }
 
-  if (ext === '.json') return backfillJson(filePath, text, uuid)
-  if (ext === '.yml' || ext === '.yaml') return backfillYaml(filePath, text, uuid)
-  return { status: 'deferred', message: `unsupported source format "${ext || '(none)'}"` }
-}
+  let next
+  if (ext === '.json') {
+    let obj
+    try {
+      obj = JSON.parse(text)
+    } catch (err) {
+      return { status: 'error', message: `invalid JSON in ${filePath}: ${err.message}` }
+    }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return { status: 'deferred', message: 'array-form / non-object JSON not handled in v1' }
+    }
+    next = JSON.stringify(withUuidFirst(obj, uuid), null, 2) + '\n'
+  } else if (ext === '.yml' || ext === '.yaml') {
+    let obj
+    try {
+      obj = yaml.load(text)
+    } catch (err) {
+      return { status: 'error', message: `invalid YAML in ${filePath}: ${err.message}` }
+    }
+    if (Array.isArray(obj)) {
+      return { status: 'deferred', message: 'array-form YAML (many records) not handled in v1' }
+    }
+    next = yaml.dump(withUuidFirst(obj && typeof obj === 'object' ? obj : {}, uuid))
+  } else if (ext === '.md') {
+    const { frontmatter, body } = parseFrontmatter(text)
+    next = `---\n${yaml.dump(withUuidFirst(frontmatter, uuid))}---\n${body}`
+  } else {
+    return { status: 'deferred', message: `${ext || '(no extension)'} back-fill is not yet implemented` }
+  }
 
-// YAML: a textual insert/replace so comments and formatting survive. A top-level
-// `$uuid:` line is replaced in place (re-sync); otherwise `$uuid:` is prepended
-// as the record's first key (first sync), matching the entity-content convention.
-function backfillYaml(filePath, text, uuid) {
-  const existing = /^\$uuid\s*:\s*(.*)$/m.exec(text)
-  if (existing) {
-    if (existing[1].trim() === uuid) return { status: 'unchanged' }
-    // Function replacer: avoids `$`-pattern interpretation in the replacement.
-    const next = text.replace(/^\$uuid\s*:.*$/m, () => `$uuid: ${uuid}`)
-    writeFileSync(filePath, next)
-    return { status: 'updated' }
-  }
-  writeFileSync(filePath, `$uuid: ${uuid}\n${text}`)
-  return { status: 'updated' }
-}
-
-// JSON: parse, set `$uuid` as the first key, re-serialize (2-space + newline).
-// JSON has no comments to preserve; key order is normalized with `$uuid` leading.
-function backfillJson(filePath, text, uuid) {
-  let obj
-  try {
-    obj = JSON.parse(text)
-  } catch (err) {
-    return { status: 'error', message: `invalid JSON in ${filePath}: ${err.message}` }
-  }
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-    return { status: 'deferred', message: 'array-form / non-object JSON not handled in v1' }
-  }
-  if (obj.$uuid === uuid) return { status: 'unchanged' }
-  const { $uuid: _drop, ...rest } = obj
-  const out = { $uuid: uuid, ...rest }
-  writeFileSync(filePath, JSON.stringify(out, null, 2) + '\n')
+  if (next === text) return { status: 'unchanged' }
+  writeFileSync(filePath, next)
   return { status: 'updated' }
 }
 
@@ -94,7 +104,8 @@ function backfillJson(filePath, text, uuid) {
  *
  * @param {object} params
  * @param {object[]} params.index     - the emitter's per-entity index:
- *        `{ id, model, slug, sourceFile }` (sourceFile null when not on disk).
+ *        `{ id, model, slug, sourceFile }` (sourceFile null when not a
+ *        single-record file — array-form / BibTeX).
  * @param {object[]} params.finalized - the response entities:
  *        `{ $id, $model, $uuid }` (only those carrying a `$uuid` are written).
  * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[] }}
@@ -117,7 +128,7 @@ export function backfillEntityUuids({ index, finalized }) {
       continue
     }
     if (!entry.sourceFile) {
-      deferred.push({ id, model, reason: 'no single-record source file (array-form?)' })
+      deferred.push({ id, model, reason: 'no single-record source file (array-form / BibTeX)' })
       continue
     }
     const res = backfillUuid(entry.sourceFile, uuid)

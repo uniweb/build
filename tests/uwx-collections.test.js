@@ -240,6 +240,61 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 })
 
+// ── Step B2: markdown body → the brief's richtext field ──────────────────────
+
+describe('collectionRecordsToEntities — markdown body → richtext field', () => {
+  const decl = lower(
+    { name: 'article', fields: { title: { type: 'string' }, body: { type: 'richtext' } } },
+    '@/article',
+    '@acme/article'
+  )
+
+  it('maps $body to the brief richtext field as the raw value (localized-wrapped, not ProseMirror)', () => {
+    const { entities, warnings } = collectionRecordsToEntities({
+      collectionName: 'articles',
+      records: [{ slug: 'hello', title: 'Hello', $body: '\n# Welcome\n' }],
+      declaration: decl,
+      sourceLocale: 'en',
+    })
+    expect(warnings).toEqual([])
+    const data = entities[0].document.article
+    expect(data.title).toEqual({ en: 'Hello' })
+    expect(data.body).toEqual({ en: '\n# Welcome\n' }) // raw markdown string
+  })
+
+  it('lets an explicit frontmatter value win over the body', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'articles',
+      records: [{ slug: 'h', title: 'H', body: 'explicit', $body: 'from-md-body' }],
+      declaration: decl,
+    })
+    expect(entities[0].document.article.body).toEqual({ en: 'explicit' })
+  })
+
+  it('never treats $body as an unknown field', () => {
+    const { warnings } = collectionRecordsToEntities({
+      collectionName: 'articles',
+      records: [{ slug: 'hello', title: 'Hello', $body: 'x' }],
+      declaration: decl,
+    })
+    expect(warnings.some((w) => w.includes('$body'))).toBe(false)
+  })
+
+  it('warns when a body is present but the Model has no richtext field', () => {
+    const noRich = lower(
+      { name: 'product', fields: { title: { type: 'string' } } },
+      '@/product',
+      '@acme/product'
+    )
+    const { warnings } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'p', title: 'P', $body: 'orphan body' }],
+      declaration: noRich,
+    })
+    expect(warnings.some((w) => w.includes('no richtext field'))).toBe(true)
+  })
+})
+
 // ── Step C: emitCollectionSyncPackage (orchestrator, real fs) ────────────────
 
 describe('emitCollectionSyncPackage — site + local foundation → .uwx', () => {

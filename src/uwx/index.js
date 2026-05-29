@@ -42,6 +42,7 @@ export {
   collectionRecordsToEntities,
   emitCollectionSyncPackage,
 } from './collections.js'
+export { readCollectionRecords, parseFrontmatter } from './collection-source.js'
 export {
   findRecordFile,
   backfillUuid,
