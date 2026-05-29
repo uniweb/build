@@ -5,6 +5,7 @@ import yaml from 'js-yaml'
 import {
   findRecordFile,
   backfillUuid,
+  backfillArrayFile,
   backfillEntityUuids,
 } from '../src/uwx/index.js'
 
@@ -109,6 +110,70 @@ describe('backfillUuid — deferred formats', () => {
     const f = join(dir, 'all.yml')
     writeFileSync(f, '- slug: a\n- slug: b\n')
     expect(backfillUuid(f, 'u').status).toBe('deferred')
+  })
+})
+
+describe('backfillArrayFile — many records in one file', () => {
+  it('inserts $uuid per element keyed by slug and re-renders YAML once', () => {
+    const f = join(dir, 'all.yml')
+    writeFileSync(f, '- slug: a\n  name: A\n- slug: b\n  name: B\n')
+    expect(backfillArrayFile(f, new Map([['a', 'u-a'], ['b', 'u-b']])).status).toBe('updated')
+
+    const arr = yaml.load(readFileSync(f, 'utf8'))
+    expect(arr.map((e) => e.$uuid)).toEqual(['u-a', 'u-b'])
+    // other data preserved (only $uuid added per element)
+    expect(arr.map(({ $uuid, ...rest }) => rest)).toEqual([
+      { slug: 'a', name: 'A' },
+      { slug: 'b', name: 'B' },
+    ])
+  })
+
+  it('is idempotent — a re-run with the same uuids leaves the file untouched', () => {
+    const f = join(dir, 'all.yml')
+    writeFileSync(f, '- slug: a\n  name: A\n')
+    backfillArrayFile(f, new Map([['a', 'u-a']]))
+    const before = readFileSync(f, 'utf8')
+    expect(backfillArrayFile(f, new Map([['a', 'u-a']])).status).toBe('unchanged')
+    expect(readFileSync(f, 'utf8')).toBe(before)
+  })
+
+  it('leaves elements without a minted uuid untouched (JSON)', () => {
+    const f = join(dir, 'all.json')
+    writeFileSync(f, JSON.stringify([{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }], null, 2) + '\n')
+    backfillArrayFile(f, new Map([['a', 'u-a']]))
+    const arr = JSON.parse(readFileSync(f, 'utf8'))
+    expect(arr[0].$uuid).toBe('u-a')
+    expect(arr[1]).not.toHaveProperty('$uuid')
+  })
+})
+
+describe('backfillEntityUuids — array-form (multiRecord) routing', () => {
+  it('writes per-entry uuids into one array file (single file write, not per record)', () => {
+    const f = join(dir, 'tags.yml')
+    writeFileSync(f, '- slug: a\n  name: A\n- slug: b\n  name: B\n')
+    const index = [
+      { id: 'a', model: '@acme/tag', slug: 'a', sourceFile: f, format: 'yaml', multiRecord: true },
+      { id: 'b', model: '@acme/tag', slug: 'b', sourceFile: f, format: 'yaml', multiRecord: true },
+    ]
+    const finalized = [
+      { $id: 'a', $model: '@acme/tag', $uuid: 'u-a' },
+      { $id: 'b', $model: '@acme/tag', $uuid: 'u-b' },
+    ]
+    const res = backfillEntityUuids({ index, finalized })
+    expect(res.updated).toEqual([f]) // one write covers both records
+    const arr = yaml.load(readFileSync(f, 'utf8'))
+    expect(arr.map((e) => e.$uuid)).toEqual(['u-a', 'u-b'])
+  })
+
+  it('defers BibTeX (multiRecord, format bib)', () => {
+    const f = join(dir, 'refs.bib')
+    writeFileSync(f, '@article{a, title={A}}\n')
+    const res = backfillEntityUuids({
+      index: [{ id: 'a', model: '@acme/ref', slug: 'a', sourceFile: f, format: 'bib', multiRecord: true }],
+      finalized: [{ $id: 'a', $model: '@acme/ref', $uuid: 'u' }],
+    })
+    expect(res.deferred).toHaveLength(1)
+    expect(res.deferred[0].reason).toMatch(/BibTeX/)
   })
 })
 

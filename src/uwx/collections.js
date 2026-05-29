@@ -343,7 +343,12 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
         id: e.id,
         model: e.model,
         slug: e.slug,
-        sourceFile: src && !src.multiRecord ? src.sourceFile : null,
+        // Single-record files render whole; multi-record YAML/JSON files get a
+        // per-entry `$uuid` write keyed by slug (see backfill.js). `format` lets
+        // the writer route (array-form vs BibTeX, the latter still deferred).
+        sourceFile: src ? src.sourceFile : null,
+        format: src ? src.format : null,
+        multiRecord: src ? src.multiRecord : false,
       })
     }
     entities.push(...mappedOut.entities)

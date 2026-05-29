@@ -46,6 +46,7 @@ export { readCollectionRecords, parseFrontmatter } from './collection-source.js'
 export {
   findRecordFile,
   backfillUuid,
+  backfillArrayFile,
   backfillEntityUuids,
 } from './backfill.js'
 

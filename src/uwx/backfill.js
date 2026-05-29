@@ -100,12 +100,55 @@ export function backfillUuid(filePath, uuid) {
 }
 
 /**
+ * Back-fill minted `$uuid`s into an array-form source file (many records in one
+ * YAML/JSON file), keyed by each record's slug. Each entry is its own entity, so
+ * this writes one `$uuid` per entry — a re-sync then round-trips them by uuid
+ * (no duplicate-on-resync). The whole file is parsed and re-rendered ONCE with
+ * `$uuid` set as the leading key on every matched element. Idempotent.
+ *
+ * @param {string} filePath
+ * @param {Map<string,string>} uuidBySlug - slug → minted uuid for this file
+ * @returns {{ status: 'updated'|'unchanged'|'deferred'|'error', message?: string }}
+ */
+export function backfillArrayFile(filePath, uuidBySlug) {
+  const dot = filePath.lastIndexOf('.')
+  const ext = dot === -1 ? '' : filePath.slice(dot).toLowerCase()
+  let text
+  try {
+    text = readFileSync(filePath, 'utf8')
+  } catch (err) {
+    return { status: 'error', message: `cannot read ${filePath}: ${err.message}` }
+  }
+  let arr
+  try {
+    arr = ext === '.json' ? JSON.parse(text) : yaml.load(text)
+  } catch (err) {
+    return { status: 'error', message: `invalid ${ext || '(no extension)'} in ${filePath}: ${err.message}` }
+  }
+  if (!Array.isArray(arr)) {
+    return { status: 'deferred', message: 'expected an array-form (multi-record) file' }
+  }
+  const next = arr.map((el) => {
+    if (!el || typeof el !== 'object' || Array.isArray(el)) return el
+    const uuid = uuidBySlug.get(el.slug)
+    if (!uuid || el.$uuid === uuid) return el
+    return withUuidFirst(el, uuid)
+  })
+  const out = ext === '.json' ? JSON.stringify(next, null, 2) + '\n' : yaml.dump(next)
+  if (out === text) return { status: 'unchanged' }
+  writeFileSync(filePath, out)
+  return { status: 'updated' }
+}
+
+/**
  * Back-fill every finalized entity's `$uuid` into its source file.
  *
  * @param {object} params
  * @param {object[]} params.index     - the emitter's per-entity index:
- *        `{ id, model, slug, sourceFile }` (sourceFile null when not a
- *        single-record file — array-form / BibTeX).
+ *        `{ id, model, slug, sourceFile, format?, multiRecord? }`. Single-record
+ *        files render whole; multi-record YAML/JSON files get a per-entry write
+ *        keyed by slug (grouped so each file is rewritten once); BibTeX stays
+ *        deferred.
  * @param {object[]} params.finalized - the response entities:
  *        `{ $id, $model, $uuid }` (only those carrying a `$uuid` are written).
  * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[] }}
@@ -116,6 +159,9 @@ export function backfillEntityUuids({ index, finalized }) {
   const unchanged = []
   const deferred = []
   const warnings = []
+  // Multi-record YAML/JSON files are written ONCE, applying every (slug → uuid)
+  // for that file together.
+  const arrayFiles = new Map() // sourceFile -> Map(slug -> uuid)
 
   for (const fin of finalized || []) {
     const id = fin.$id
@@ -128,7 +174,23 @@ export function backfillEntityUuids({ index, finalized }) {
       continue
     }
     if (!entry.sourceFile) {
-      deferred.push({ id, model, reason: 'no single-record source file (array-form / BibTeX)' })
+      deferred.push({ id, model, reason: 'no source file on disk' })
+      continue
+    }
+    if (entry.multiRecord) {
+      // BibTeX multi-record write-back is a follow-up (no serializer; per-entry
+      // $uuid insertion + reference-manager re-export fragility). Array-form
+      // YAML/JSON is handled below.
+      if (entry.format === 'bib') {
+        deferred.push({ id, model, file: entry.sourceFile, reason: 'BibTeX write-back is a follow-up' })
+        continue
+      }
+      let m = arrayFiles.get(entry.sourceFile)
+      if (!m) {
+        m = new Map()
+        arrayFiles.set(entry.sourceFile, m)
+      }
+      m.set(entry.slug, uuid)
       continue
     }
     const res = backfillUuid(entry.sourceFile, uuid)
@@ -137,5 +199,14 @@ export function backfillEntityUuids({ index, finalized }) {
     else if (res.status === 'deferred') deferred.push({ id, model, file: entry.sourceFile, reason: res.message })
     else warnings.push(`${entry.sourceFile}: ${res.message}`)
   }
+
+  for (const [file, uuidBySlug] of arrayFiles) {
+    const res = backfillArrayFile(file, uuidBySlug)
+    if (res.status === 'updated') updated.push(file)
+    else if (res.status === 'unchanged') unchanged.push(file)
+    else if (res.status === 'deferred') deferred.push({ file, reason: res.message })
+    else warnings.push(`${file}: ${res.message}`)
+  }
+
   return { updated, unchanged, deferred, warnings }
 }

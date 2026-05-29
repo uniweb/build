@@ -8,6 +8,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
 import { emitCollectionSyncPackage, backfillEntityUuids } from '../src/uwx/index.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
@@ -16,6 +17,8 @@ let siteDir
 
 const PRODUCT_YML = 'title: Widget X\nprice: 9.99\n' // already in canonical yaml.dump form
 const ARTICLE_MD = '---\ntitle: Hello\n---\n\n# Welcome\n\nThe body.\n'
+// array-form: many records in ONE file, each its own entity
+const TAGS_YML = '- slug: a\n  name: Alpha\n- slug: b\n  name: Beta\n'
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'uwx-rt-'))
@@ -23,6 +26,7 @@ beforeEach(() => {
   const foundationDir = join(root, 'foundation')
   mkdirSync(join(siteDir, 'collections', 'products'), { recursive: true })
   mkdirSync(join(siteDir, 'collections', 'articles'), { recursive: true })
+  mkdirSync(join(siteDir, 'collections', 'tags'), { recursive: true })
   mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
   writeFileSync(
@@ -37,6 +41,9 @@ beforeEach(() => {
       '  articles:',
       '    path: collections/articles',
       '    model: "@acme/article"',
+      '  tags:',
+      '    path: collections/tags',
+      '    model: "@acme/tag"',
       '',
     ].join('\n')
   )
@@ -46,6 +53,7 @@ beforeEach(() => {
   )
   writeFileSync(join(siteDir, 'collections', 'products', 'widget-x.yml'), PRODUCT_YML)
   writeFileSync(join(siteDir, 'collections', 'articles', 'hello.md'), ARTICLE_MD)
+  writeFileSync(join(siteDir, 'collections', 'tags', 'all.yml'), TAGS_YML)
 
   const schema = {
     _self: { name: '@acme/marketing', version: '1.0.0', role: 'foundation' },
@@ -58,6 +66,10 @@ beforeEach(() => {
       '@/article': validateAndNormalizeSchema(
         { name: 'article', fields: { title: { type: 'string' }, body: { type: 'richtext' } } },
         '@/article'
+      ),
+      '@/tag': validateAndNormalizeSchema(
+        { name: 'tag', fields: { name: { type: 'string' } } },
+        '@/tag'
       ),
     },
   }
@@ -77,6 +89,7 @@ async function syncCycle() {
 
 const ymlPath = () => join(siteDir, 'collections', 'products', 'widget-x.yml')
 const mdPath = () => join(siteDir, 'collections', 'articles', 'hello.md')
+const tagsPath = () => join(siteDir, 'collections', 'tags', 'all.yml')
 const stripUuidLine = (text) => text.replace(/^\$uuid: .*\n/m, '')
 
 describe('collection-sync fixpoint', () => {
@@ -85,9 +98,10 @@ describe('collection-sync fixpoint', () => {
     expect(warnings.filter((w) => /is not on/.test(w))).toEqual([])
   })
 
-  it('pass 1: a pristine file gains ONLY a $uuid (YAML and markdown)', async () => {
+  it('pass 1: a pristine single-record file gains ONLY a $uuid (YAML and markdown)', async () => {
     const { bf } = await syncCycle()
-    expect(bf.updated).toHaveLength(2)
+    // products.yml + hello.md + the tags array file (one write) = 3
+    expect(bf.updated).toHaveLength(3)
 
     const yml = readFileSync(ymlPath(), 'utf8')
     expect(yml).toMatch(/^\$uuid: uuid-widget-x\n/)
@@ -98,14 +112,30 @@ describe('collection-sync fixpoint', () => {
     expect(stripUuidLine(md)).toBe(ARTICLE_MD) // body + frontmatter otherwise intact
   })
 
-  it('pass 2: a no-op re-sync is byte-identical (fixpoint reached)', async () => {
+  it('pass 1: an array-form file gets one $uuid PER entry (each entry its own entity)', async () => {
+    await syncCycle()
+    const arr = yaml.load(readFileSync(tagsPath(), 'utf8'))
+    expect(arr.map((e) => e.$uuid)).toEqual(['uuid-a', 'uuid-b'])
+    // other data preserved per element
+    expect(arr.map(({ $uuid, ...rest }) => rest)).toEqual([
+      { slug: 'a', name: 'Alpha' },
+      { slug: 'b', name: 'Beta' },
+    ])
+  })
+
+  it('pass 2: a no-op re-sync is byte-identical (fixpoint reached, incl. array form)', async () => {
     await syncCycle() // pass 1 — adds $uuid
-    const afterPass1 = { yml: readFileSync(ymlPath(), 'utf8'), md: readFileSync(mdPath(), 'utf8') }
+    const afterPass1 = {
+      yml: readFileSync(ymlPath(), 'utf8'),
+      md: readFileSync(mdPath(), 'utf8'),
+      tags: readFileSync(tagsPath(), 'utf8'),
+    }
 
     const { bf } = await syncCycle() // pass 2 — no edits
     expect(bf.updated).toHaveLength(0)
-    expect(bf.unchanged).toHaveLength(2)
+    expect(bf.unchanged).toHaveLength(3)
     expect(readFileSync(ymlPath(), 'utf8')).toBe(afterPass1.yml)
     expect(readFileSync(mdPath(), 'utf8')).toBe(afterPass1.md)
+    expect(readFileSync(tagsPath(), 'utf8')).toBe(afterPass1.tags)
   })
 })
