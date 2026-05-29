@@ -42,6 +42,11 @@ export {
   collectionRecordsToEntities,
   emitCollectionSyncPackage,
 } from './collections.js'
+export {
+  findRecordFile,
+  backfillUuid,
+  backfillEntityUuids,
+} from './backfill.js'
 
 // Registry-publish (names-only) — the document `uniweb register` submits, and the
 // schema → @uniweb/data-schema declaration lowering it bundles. `buildRegistryPackage`

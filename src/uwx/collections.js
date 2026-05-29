@@ -26,6 +26,7 @@ import { readYamlFile } from '../site/content-collector.js'
 import { processCollections } from '../site/collection-processor.js'
 import { toDataSchemaDeclaration } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
+import { findRecordFile } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
@@ -140,6 +141,7 @@ export function collectionRecordsToEntities({
     entities.push({
       id,
       uuid,
+      slug,
       model: declaration.name, // reference the Model BY NAME — importer resolves it
       file: `entities/${collectionName}/${slug}.json`,
       document,
@@ -255,6 +257,7 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
 
   const entities = []
+  const index = []
   const warnings = []
   const models = new Set()
   // The sync response is keyed per ($model, $id), so the pair must be unique
@@ -277,6 +280,7 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
       )
       continue
     }
+    const collectionDir = resolve(siteRoot, decl.path)
     const mappedOut = collectionRecordsToEntities({
       collectionName: name,
       records,
@@ -293,6 +297,14 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
         )
       }
       seen.add(dupKey)
+      // The verb back-fills the minted `$uuid` into this source file, matched
+      // back from the finalized response by ($model, $id).
+      index.push({
+        id: e.id,
+        model: e.model,
+        slug: e.slug,
+        sourceFile: findRecordFile(collectionDir, e.slug),
+      })
     }
     entities.push(...mappedOut.entities)
     warnings.push(...mappedOut.warnings)
@@ -313,5 +325,5 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     exportedAt: opts.exportedAt,
   })
 
-  return { buffer, models: [...models], entityCount: entities.length, warnings }
+  return { buffer, models: [...models], entityCount: entities.length, warnings, index }
 }
