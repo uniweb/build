@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { emitCollectionSyncPackage, backfillEntityUuids } from '../src/uwx/index.js'
+import { emitCollectionSyncPackage, backfillEntityUuids, readZip } from '../src/uwx/index.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 let root
@@ -78,13 +78,32 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-// One sync cycle, backend simulated: build the package, mint a deterministic
-// uuid per record from the index, back-fill into the source files.
+// One sync cycle, backend simulated. Build the package; for each submitted entity
+// (entries order = index order), take the doc we sent, mint the entity `$uuid` +
+// the brief record `$uuid`, and return it as `finalized[].document` correlated by
+// `index` (the real response shape `{ index, uuid, changed, document }`). Then
+// back-fill, which renders each document over its source file (variant A).
 async function syncCycle() {
-  const { index, warnings } = await emitCollectionSyncPackage(siteDir)
-  const finalized = index.map((e) => ({ $id: e.id, $model: e.model, $uuid: `uuid-${e.slug}` }))
+  const { buffer, index, warnings } = await emitCollectionSyncPackage(siteDir)
+  const files = readZip(buffer)
+  const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
+  const finalized = manifest.entries.map((entry, i) => {
+    const doc = JSON.parse(files.get(entry.file).toString('utf8'))
+    const briefKey = Object.keys(doc).find((k) => !k.startsWith('$'))
+    const uuid = `uuid-${index[i].slug}`
+    return {
+      index: i,
+      uuid,
+      changed: true,
+      document: {
+        $uuid: uuid,
+        $model: doc.$model,
+        [briefKey]: { $uuid: `rec-${index[i].slug}`, ...doc[briefKey] },
+      },
+    }
+  })
   const bf = backfillEntityUuids({ index, finalized })
-  return { warnings, bf }
+  return { warnings, bf, finalized }
 }
 
 const ymlPath = () => join(siteDir, 'collections', 'products', 'widget-x.yml')

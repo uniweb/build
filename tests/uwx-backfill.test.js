@@ -6,6 +6,7 @@ import {
   findRecordFile,
   backfillUuid,
   backfillArrayFile,
+  renderEntityDocument,
   backfillEntityUuids,
 } from '../src/uwx/index.js'
 
@@ -147,79 +148,136 @@ describe('backfillArrayFile — many records in one file', () => {
   })
 })
 
-describe('backfillEntityUuids — array-form (multiRecord) routing', () => {
-  it('writes per-entry uuids into one array file (single file write, not per record)', () => {
+describe('renderEntityDocument — variant A (document → authoring file)', () => {
+  const articleDecl = {
+    name: '@acme/article',
+    brief: 'article',
+    sections: [
+      {
+        name: 'article',
+        kind: 'single',
+        fields: [
+          { key: 'title', type: 'string', localized: true },
+          { key: 'body', type: 'richtext', localized: true },
+        ],
+      },
+    ],
+  }
+
+  it('renders a markdown entity to frontmatter + body (richtext → body), dropping the record uuid', () => {
+    const doc = {
+      $uuid: 'E1',
+      $model: '@acme/article',
+      article: { $uuid: 'rec', title: { en: 'Hello' }, body: { en: '\n# Hi\n' } },
+    }
+    const text = renderEntityDocument({ document: doc, declaration: articleDecl, format: 'md' })
+    expect(text).toBe('---\n$uuid: E1\ntitle: Hello\n---\n\n# Hi\n')
+  })
+
+  it('renders a yaml entity to a flat mapping (richtext stays a field; $model/$id/record-uuid dropped)', () => {
+    const doc = {
+      $uuid: 'E1',
+      $model: '@acme/article',
+      article: { $uuid: 'rec', title: { en: 'Hello' }, body: { en: 'plain text' } },
+    }
+    const obj = yaml.load(renderEntityDocument({ document: doc, declaration: articleDecl, format: 'yaml' }))
+    expect(obj).toEqual({ $uuid: 'E1', title: 'Hello', body: 'plain text' })
+  })
+})
+
+describe('backfillEntityUuids — correlate by index', () => {
+  it('array-form: per-entry uuids into one file, single write, by index', () => {
     const f = join(dir, 'tags.yml')
     writeFileSync(f, '- slug: a\n  name: A\n- slug: b\n  name: B\n')
     const index = [
-      { id: 'a', model: '@acme/tag', slug: 'a', sourceFile: f, format: 'yaml', multiRecord: true },
-      { id: 'b', model: '@acme/tag', slug: 'b', sourceFile: f, format: 'yaml', multiRecord: true },
+      { id: 'a', slug: 'a', sourceFile: f, format: 'yaml', multiRecord: true },
+      { id: 'b', slug: 'b', sourceFile: f, format: 'yaml', multiRecord: true },
     ]
-    const finalized = [
-      { $id: 'a', $model: '@acme/tag', $uuid: 'u-a' },
-      { $id: 'b', $model: '@acme/tag', $uuid: 'u-b' },
-    ]
+    const finalized = [{ index: 0, uuid: 'u-a' }, { index: 1, uuid: 'u-b' }]
     const res = backfillEntityUuids({ index, finalized })
-    expect(res.updated).toEqual([f]) // one write covers both records
-    const arr = yaml.load(readFileSync(f, 'utf8'))
-    expect(arr.map((e) => e.$uuid)).toEqual(['u-a', 'u-b'])
+    expect(res.updated).toEqual([f])
+    expect(yaml.load(readFileSync(f, 'utf8')).map((e) => e.$uuid)).toEqual(['u-a', 'u-b'])
   })
 
   it('defers BibTeX (multiRecord, format bib)', () => {
     const f = join(dir, 'refs.bib')
     writeFileSync(f, '@article{a, title={A}}\n')
     const res = backfillEntityUuids({
-      index: [{ id: 'a', model: '@acme/ref', slug: 'a', sourceFile: f, format: 'bib', multiRecord: true }],
-      finalized: [{ $id: 'a', $model: '@acme/ref', $uuid: 'u' }],
+      index: [{ id: 'a', slug: 'a', sourceFile: f, format: 'bib', multiRecord: true }],
+      finalized: [{ index: 0, uuid: 'u' }],
     })
     expect(res.deferred).toHaveLength(1)
     expect(res.deferred[0].reason).toMatch(/BibTeX/)
   })
-})
 
-describe('backfillEntityUuids — correlate finalized → source files', () => {
-  it('writes each minted uuid into the file matched by ($model, $id)', () => {
+  it('variant B: back-fills the uuid in place when there is no document', () => {
     const wx = join(dir, 'widget-x.yml')
-    const gy = join(dir, 'gadget-y.yml')
     writeFileSync(wx, 'title: Widget X\n')
-    writeFileSync(gy, 'title: Gadget Y\n')
+    const index = [{ id: 'widget-x', slug: 'widget-x', sourceFile: wx, format: 'yaml' }]
+    const res = backfillEntityUuids({ index, finalized: [{ index: 0, uuid: '0192-aaaa' }] })
+    expect(res.updated).toEqual([wx])
+    expect(yaml.load(readFileSync(wx, 'utf8')).$uuid).toBe('0192-aaaa')
+  })
 
-    const index = [
-      { id: 'widget-x', model: '@acme/product', slug: 'widget-x', sourceFile: wx },
-      { id: 'gadget-y', model: '@acme/product', slug: 'gadget-y', sourceFile: gy },
-    ]
+  it('variant A: renders the finalized document over the file (entity uuid only)', () => {
+    const wx = join(dir, 'widget-x.yml')
+    writeFileSync(wx, 'title: Widget X\nprice: 9.99\n')
+    const declaration = {
+      name: '@acme/product',
+      brief: 'product',
+      sections: [
+        {
+          name: 'product',
+          kind: 'single',
+          fields: [
+            { key: 'title', type: 'string', localized: true },
+            { key: 'price', type: 'decimal' },
+          ],
+        },
+      ],
+    }
+    const index = [{ id: 'widget-x', slug: 'widget-x', sourceFile: wx, format: 'yaml', declaration }]
     const finalized = [
-      { $id: 'widget-x', $model: '@acme/product', $uuid: '0192-aaaa' },
-      { $id: 'gadget-y', $model: '@acme/product', $uuid: '0192-bbbb' },
+      {
+        index: 0,
+        uuid: 'E0',
+        changed: true,
+        document: {
+          $uuid: 'E0',
+          $model: '@acme/product',
+          product: { $uuid: 'rec', title: { en: 'Widget X' }, price: 9.99 },
+        },
+      },
     ]
     const res = backfillEntityUuids({ index, finalized })
-    expect(res.updated).toHaveLength(2)
-    expect(yaml.load(readFileSync(wx, 'utf8')).$uuid).toBe('0192-aaaa')
-    expect(yaml.load(readFileSync(gy, 'utf8')).$uuid).toBe('0192-bbbb')
+    expect(res.updated).toEqual([wx])
+    const out = yaml.load(readFileSync(wx, 'utf8'))
+    expect(out.$uuid).toBe('E0') // entity uuid persisted
+    expect(out.title).toBe('Widget X') // localized unwrapped
+    expect(out.price).toBe(9.99)
+    expect(out).not.toHaveProperty('product') // not the wire shape
+    expect(JSON.stringify(out)).not.toContain('rec') // brief record uuid dropped (singularity)
   })
 
-  it('warns on a finalized entity with no matching submitted record', () => {
-    const res = backfillEntityUuids({
-      index: [],
-      finalized: [{ $id: 'ghost', $model: '@acme/product', $uuid: 'u' }],
-    })
+  it('warns on a finalized index with no matching submitted entity', () => {
+    const res = backfillEntityUuids({ index: [], finalized: [{ index: 7, uuid: 'u' }] })
     expect(res.updated).toHaveLength(0)
-    expect(res.warnings.some((w) => w.includes('ghost'))).toBe(true)
+    expect(res.warnings.some((w) => w.includes('index 7'))).toBe(true)
   })
 
-  it('reports deferred when the matched record has no single-record source file', () => {
+  it('reports deferred when the matched entry has no source file', () => {
     const res = backfillEntityUuids({
-      index: [{ id: 'a', model: '@acme/product', slug: 'a', sourceFile: null }],
-      finalized: [{ $id: 'a', $model: '@acme/product', $uuid: 'u' }],
+      index: [{ id: 'a', slug: 'a', sourceFile: null }],
+      finalized: [{ index: 0, uuid: 'u' }],
     })
     expect(res.deferred).toHaveLength(1)
     expect(res.deferred[0].id).toBe('a')
   })
 
-  it('skips finalized entities that carry no $uuid', () => {
+  it('skips finalized entries that carry no uuid', () => {
     const res = backfillEntityUuids({
-      index: [{ id: 'a', model: '@acme/product', slug: 'a', sourceFile: join(dir, 'a.yml') }],
-      finalized: [{ $id: 'a', $model: '@acme/product' }],
+      index: [{ id: 'a', slug: 'a', sourceFile: join(dir, 'a.yml'), format: 'yaml' }],
+      finalized: [{ index: 0 }],
     })
     expect(res.updated).toHaveLength(0)
     expect(res.warnings).toHaveLength(0)

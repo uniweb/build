@@ -351,6 +351,10 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
         sourceFile: src ? src.sourceFile : null,
         format: src ? src.format : null,
         multiRecord: src ? src.multiRecord : false,
+        // The Model declaration, so the back-fill can render the finalized
+        // document → authoring shape (variant A): unwrap localized fields, route
+        // the richtext field to the md body, drop the brief record `$uuid`.
+        declaration,
       })
     }
     entities.push(...mappedOut.entities)

@@ -23,6 +23,7 @@ import { parseFrontmatter } from './collection-source.js'
 
 // Probed in this order to locate a single-record source file by slug.
 const SOURCE_EXTENSIONS = ['.yml', '.yaml', '.json', '.md', '.bib']
+const RICHTEXT_TYPE = 'richtext'
 
 /**
  * Locate the single-record source file for `slug` in a collection directory by
@@ -140,49 +141,129 @@ export function backfillArrayFile(filePath, uuidBySlug) {
   return { status: 'updated' }
 }
 
+// Unwrap a localized wire value `{ <locale>: v }` back to the authored bare value
+// (the source locale, else the first present). Non-localized values pass through.
+function unwrapLocalized(value, sourceLocale) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (Object.prototype.hasOwnProperty.call(value, sourceLocale)) return value[sourceLocale]
+    const keys = Object.keys(value)
+    if (keys.length) return value[keys[0]]
+  }
+  return value
+}
+
+function briefSectionOf(declaration) {
+  return (declaration?.sections || []).find((s) => s.name === declaration?.brief) || null
+}
+
+// Whether a Model's brief section declares a richtext field (the md-body target).
+// A markdown source file can only be safely rendered from the document when its
+// body is captured as a field — otherwise the body would be lost (variant B then).
+function briefHasRichtext(declaration) {
+  const brief = briefSectionOf(declaration)
+  return !!(brief?.fields || []).some((f) => f.type === RICHTEXT_TYPE)
+}
+
 /**
- * Back-fill every finalized entity's `$uuid` into its source file.
+ * Render a finalized entity `document` back to its source-file authoring shape
+ * (variant A — the file becomes a projection of backend state). For a flat/brief
+ * entity: the entity `$uuid` + the brief section's fields (localized unwrapped,
+ * date/scalars verbatim), with the brief record's own `$uuid` DROPPED (the backend
+ * matches a single-section item by singularity) and `$model`/`$id`/`$meta` omitted.
+ * For markdown, the richtext field becomes the body; for YAML/JSON it stays a field.
  *
  * @param {object} params
- * @param {object[]} params.index     - the emitter's per-entity index:
- *        `{ id, model, slug, sourceFile, format?, multiRecord? }`. Single-record
- *        files render whole; multi-record YAML/JSON files get a per-entry write
- *        keyed by slug (grouped so each file is rewritten once); BibTeX stays
- *        deferred.
- * @param {object[]} params.finalized - the response entities:
- *        `{ $id, $model, $uuid }` (only those carrying a `$uuid` are written).
+ * @param {object} params.document     - finalized `{ $uuid, $model, <brief>: {…} }`
+ * @param {object} params.declaration  - the Model declaration (`brief` + `sections`)
+ * @param {string} params.format       - 'yaml' | 'json' | 'md'
+ * @param {string} [params.sourceLocale]
+ * @returns {string} the source-file text
+ */
+export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en' }) {
+  const brief = briefSectionOf(declaration)
+  const section = brief ? document?.[brief.name] : null
+  if (!brief || !section || typeof section !== 'object') {
+    throw new Error('uwx/render: document has no resolvable brief section')
+  }
+  const fields = brief.fields || []
+  const richtextKey = (fields.find((f) => f.type === RICHTEXT_TYPE) || {}).key
+
+  const record = {}
+  if (document.$uuid) record.$uuid = document.$uuid
+  let body = ''
+  for (const field of fields) {
+    const raw = section[field.key]
+    if (raw === undefined) continue
+    const value = field.localized ? unwrapLocalized(raw, sourceLocale) : raw
+    if (format === 'md' && field.key === richtextKey) {
+      body = typeof value === 'string' ? value : String(value ?? '')
+      continue
+    }
+    record[field.key] = value
+  }
+
+  if (format === 'json') return JSON.stringify(record, null, 2) + '\n'
+  if (format === 'md') return `---\n${yaml.dump(record)}---\n${body}`
+  return yaml.dump(record) // yaml / yaml
+}
+
+// Write text only when it differs from what's on disk (idempotent).
+function writeIfChanged(filePath, text) {
+  let current = ''
+  try {
+    current = readFileSync(filePath, 'utf8')
+  } catch {
+    // new file / unreadable — treat as a change
+  }
+  if (text === current) return 'unchanged'
+  writeFileSync(filePath, text)
+  return 'updated'
+}
+
+/**
+ * Back-fill the sync response into the source files. Correlation is by **`index`**
+ * — `finalized[i].index` is the 0-based position of the entity in the submitted
+ * sequence, which equals the producer's `index` array order (the backend does not
+ * echo `$id`). Single-record files are rendered from the finalized `document`
+ * (variant A) when the document + declaration are present and lossless for the
+ * format (markdown needs a richtext field to carry the body); otherwise the
+ * entity `$uuid` is back-filled in place (variant B). Multi-record YAML/JSON files
+ * get a per-entry `$uuid` keyed by slug, grouped so each file is written once;
+ * BibTeX stays deferred.
+ *
+ * @param {object} params
+ * @param {object[]} params.index     - the emitter's per-entity index, in submit
+ *        order: `{ id, model, slug, sourceFile, format?, multiRecord?, declaration? }`.
+ * @param {object[]} params.finalized - response entries `{ index, uuid, changed?, document? }`.
+ * @param {string} [params.sourceLocale]
  * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[] }}
  */
-export function backfillEntityUuids({ index, finalized }) {
-  const byKey = new Map((index || []).map((e) => [`${e.model} ${e.id}`, e]))
+export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
   const updated = []
   const unchanged = []
   const deferred = []
   const warnings = []
-  // Multi-record YAML/JSON files are written ONCE, applying every (slug → uuid)
-  // for that file together.
+  // Multi-record YAML/JSON files are written ONCE, applying every (slug → uuid).
   const arrayFiles = new Map() // sourceFile -> Map(slug -> uuid)
 
   for (const fin of finalized || []) {
-    const id = fin.$id
-    const model = fin.$model
-    const uuid = fin.$uuid
+    const uuid = fin.uuid
     if (!uuid) continue // nothing minted/returned to write
-    const entry = byKey.get(`${model} ${id}`)
+    const i = fin.index
+    const entry = Number.isInteger(i) && i >= 0 ? (index || [])[i] : undefined
     if (!entry) {
-      warnings.push(`finalized ($model=${model}, $id=${id}) has no matching submitted record`)
+      warnings.push(`finalized index ${i} has no matching submitted entity`)
       continue
     }
     if (!entry.sourceFile) {
-      deferred.push({ id, model, reason: 'no source file on disk' })
+      deferred.push({ index: i, id: entry.id, reason: 'no source file on disk' })
       continue
     }
     if (entry.multiRecord) {
       // BibTeX multi-record write-back is a follow-up (no serializer; per-entry
-      // $uuid insertion + reference-manager re-export fragility). Array-form
-      // YAML/JSON is handled below.
+      // insertion + re-export fragility). Array-form YAML/JSON is handled below.
       if (entry.format === 'bib') {
-        deferred.push({ id, model, file: entry.sourceFile, reason: 'BibTeX write-back is a follow-up' })
+        deferred.push({ index: i, id: entry.id, file: entry.sourceFile, reason: 'BibTeX write-back is a follow-up' })
         continue
       }
       let m = arrayFiles.get(entry.sourceFile)
@@ -193,10 +274,34 @@ export function backfillEntityUuids({ index, finalized }) {
       m.set(entry.slug, uuid)
       continue
     }
-    const res = backfillUuid(entry.sourceFile, uuid)
+
+    // Variant A: render the finalized document over the file when we have it +
+    // the declaration, and it's lossless for the format (md needs a richtext field
+    // for its body). Otherwise variant B: back-fill the uuid in place.
+    const canRenderA =
+      fin.document &&
+      entry.declaration &&
+      (entry.format !== 'md' || briefHasRichtext(entry.declaration))
+    let res
+    if (canRenderA) {
+      try {
+        const text = renderEntityDocument({
+          document: fin.document,
+          declaration: entry.declaration,
+          format: entry.format,
+          sourceLocale,
+        })
+        res = { status: writeIfChanged(entry.sourceFile, text) }
+      } catch (err) {
+        warnings.push(`${entry.sourceFile}: ${err.message}; fell back to uuid back-fill`)
+        res = backfillUuid(entry.sourceFile, uuid)
+      }
+    } else {
+      res = backfillUuid(entry.sourceFile, uuid)
+    }
     if (res.status === 'updated') updated.push(entry.sourceFile)
     else if (res.status === 'unchanged') unchanged.push(entry.sourceFile)
-    else if (res.status === 'deferred') deferred.push({ id, model, file: entry.sourceFile, reason: res.message })
+    else if (res.status === 'deferred') deferred.push({ index: i, id: entry.id, file: entry.sourceFile, reason: res.message })
     else warnings.push(`${entry.sourceFile}: ${res.message}`)
   }
 
