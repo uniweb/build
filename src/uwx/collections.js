@@ -110,34 +110,32 @@ export function collectionRecordsToEntities({
   if (!declaration || !declaration.name) {
     throw new Error('uwx/collections: a declaration with a name is required')
   }
-  const briefName = declaration.brief
-  if (!briefName) {
+  // The brief is the section marked `brief: true` (the sections-tree has no
+  // schema-level `brief:` back-reference); its `fields` is a map keyed by name.
+  const briefEntry = Object.entries(declaration.sections || {}).find(([, s]) => s && s.brief === true)
+  const briefName = briefEntry?.[0]
+  const brief = briefEntry?.[1]
+  if (!brief) {
     throw new Error(
       `uwx/collections: Model ${declaration.name} has no brief section — ` +
         'v1 maps flat records to the brief single section only'
     )
   }
-  const brief = (declaration.sections || []).find((s) => s.name === briefName)
-  if (!brief) {
-    throw new Error(
-      `uwx/collections: brief section "${briefName}" not found on ${declaration.name}`
-    )
-  }
-  const briefFields = brief.fields || []
-  const fieldByKey = new Map(briefFields.map((f) => [f.key, f]))
+  const briefFields = brief.fields || {}
+  const fieldByKey = new Map(Object.entries(briefFields))
 
   // The markdown body of a `.md` collection record is the value of the brief's
   // `richtext` field (docs/reference/entity-content.md). One richtext field is the
   // body target; zero means a `.md` body has nowhere to go (warn per record).
-  const richtextFields = briefFields.filter((f) => f.type === RICHTEXT_TYPE)
-  const bodyField = richtextFields[0] || null
+  const richtextEntries = Object.entries(briefFields).filter(([, f]) => f.type === RICHTEXT_TYPE)
+  const bodyFieldKey = richtextEntries[0]?.[0] || null
 
   const entities = []
   const warnings = []
-  if (richtextFields.length > 1) {
+  if (richtextEntries.length > 1) {
     warnings.push(
       `${collectionName}: ${declaration.name}.${briefName} has more than one richtext ` +
-        `field — the markdown body maps to "${bodyField.key}"`
+        `field — the markdown body maps to "${bodyFieldKey}"`
     )
   }
   for (const record of records || []) {
@@ -155,12 +153,12 @@ export function collectionRecordsToEntities({
     // valid stored state; the foundation copes at render time. The markdown body
     // fills the richtext field unless the frontmatter already set it explicitly.
     const data = {}
-    for (const field of briefFields) {
-      let value = record[field.key]
-      if (value === undefined && field === bodyField && hasBody) value = record.$body
+    for (const [key, field] of Object.entries(briefFields)) {
+      let value = record[key]
+      if (value === undefined && key === bodyFieldKey && hasBody) value = record.$body
       if (value === undefined) continue
       const encoded = encodeFieldValue(value, field, sourceLocale)
-      if (encoded !== undefined) data[field.key] = encoded
+      if (encoded !== undefined) data[key] = encoded
     }
     // Warn for author keys that aren't on the Model. A real unknown key means the
     // frontmatter doesn't match the collection's data schema — that SHOULD warn
@@ -172,7 +170,7 @@ export function collectionRecordsToEntities({
           `${declaration.name}.${briefName} — not synced`
       )
     }
-    if (hasBody && !bodyField) {
+    if (hasBody && !bodyFieldKey) {
       warnings.push(
         `${collectionName}/${slug}: markdown body present but ` +
           `${declaration.name}.${briefName} has no richtext field — body not synced`

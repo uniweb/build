@@ -3,19 +3,25 @@
  *
  * The framework owns a DX-optimized authoring format (resolve-data-schema.js's
  * normalized output — the IR). At publish time it **translates** that to the
- * registry's `@uniweb/data-schema` declaration, the one the backend ingests and
- * materializes into a model. Keeping the translation in this one isolated module
- * means coupling to the backend's shape can't leak elsewhere.
+ * registry's `@uniweb/data-schema` declaration — the `sections:`-tree language the
+ * registry ingests and materializes into a model. Keeping the translation in this
+ * one isolated module means coupling to the registry's shape can't leak elsewhere.
  *
- * Contract: `kb/framework/build/data-schema-lowering.md` (producer view),
- * `uwx-format.md` §3 (the declaration), and `apps/uniweb-rs/docs/data-schema-design.md`
- * §10/§10.1 (backend-locked shapes). Pure — IR in, declaration out; no I/O, no
- * uuids, names only.
+ * The declaration shape: a Model's root is a MAP of `sections:`; within a section
+ * `fields:` is a MAP of leaves and nested sections (a nested section is a
+ * `type: section` field; root sections omit the implied marker). Cardinality is the
+ * one attribute `multiple:` — there is no `kind`, and the `array` meta-type is
+ * retired (a multi-valued field is `multiple: true`). `binder` is derived (a single
+ * section whose fields are all `type: section`). The brief and sort axis are inline
+ * (`brief: true` on a section, `sort_date: true` on a date field). Field-narrowing
+ * `enum`/`format` ride on the field; cross-cutting constraints stay a section-level
+ * `constraints:` array. `entity_ref` targets by `model:` (scalar or array); a
+ * curated picklist is `item_ref` via `options:`. No uuids; names only.
+ *
+ * Pure — IR in, declaration out; no I/O, no uuids.
  */
 
-// Text kinds carry per-locale values. The framework marks machine fields
-// `translatable: false`; everything else is translatable, which lowers to the
-// model's `localized` (opt-in there), so we set it explicitly unless opted out.
+// Text kinds carry per-locale values when localized.
 const TEXT_KINDS = new Set(['string', 'text', 'richtext'])
 
 /**
@@ -27,10 +33,9 @@ const TEXT_KINDS = new Set(['string', 'text', 'richtext'])
  * @param {(ref: string) => string} [opts.resolveName] - maps a `ref` target name.
  *   Defaults to resolving `@/x` into the schema's own org, passing others through.
  * @param {(ref: string) => string} [opts.resolveOptions] - maps an `options`
- *   (item_ref) ref to its full `@org/model/<section>` path. The backend splits on
- *   the last `/` and needs the section named (§10.1). Falls back to `resolveName`
- *   (model only) when not supplied — callers that bundle a foundation provide it.
- * @returns {Object} the declaration (model attrs + `brief`/`linkable` + `sections`).
+ *   (item_ref) ref to its full `@org/model/<section>` path. Falls back to
+ *   `resolveName` (model only) when not supplied.
+ * @returns {Object} the declaration (`{ name, description?, linkable?, sections }`).
  */
 export function toDataSchemaDeclaration(normalized, { name, resolveName, resolveOptions } = {}) {
   if (!name) throw new Error('toDataSchemaDeclaration: a registry name is required')
@@ -40,121 +45,143 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   const resolve = resolveName || defaultResolver(name)
   const optResolve = resolveOptions || resolve
 
-  const decl = { name }
-  if (normalized.description) decl.description = normalized.description
-  if (normalized.sortDate) decl.sort_date_field = normalized.sortDate
-
   const { sections, brief } = normalized.sections
     ? lowerSectionsForm(normalized.sections, resolve, optResolve)
     : lowerFieldsForm(normalized.fields || {}, shortName(name), resolve, optResolve)
 
-  if (brief) {
-    decl.brief = brief
-  } else {
-    // No `single`/brief section ⇒ no card to hydrate as an entity_ref target,
-    // so the model isn't linkable (backend §10.1.4 — brief-less models allowed).
-    decl.linkable = false
+  // The model-level sort axis is inline: `sort_date: true` on the brief's named
+  // date field (replaces the old schema-level `sort_date_field` back-reference).
+  if (normalized.sortDate && brief) {
+    const f = sections[brief]?.fields?.[normalized.sortDate]
+    if (f) f.sort_date = true
   }
+
+  const decl = { name }
+  if (normalized.description) decl.description = normalized.description
+  // A brief-less model has no card to hydrate as an entity_ref target, so it is
+  // not linkable; a model with a brief defaults to linkable (omit ⇒ true).
+  if (!brief) decl.linkable = false
   decl.sections = sections
   return decl
 }
 
 // --- shapes ------------------------------------------------------------------
 
-// A flat `fields:` schema is one `single` section — the brief. Nested
-// object/array-of-object fields within it become child sections (see lowerSection).
+// The `fields:` shorthand: a flat field set is ONE single brief section named the
+// model short-name. Our producer-side sugar — the registry's root is always
+// `sections:`; this expands to it.
 function lowerFieldsForm(fields, sectionName, resolve, optResolve) {
-  const section = lowerSection(sectionName, { kind: 'single', fields }, resolve, optResolve)
-  return { sections: [section], brief: sectionName }
+  return {
+    sections: { [sectionName]: lowerSection({ kind: 'single', brief: true, fields }, resolve, optResolve) },
+    brief: sectionName,
+  }
 }
 
-// An explicit `sections:` map → an ordered list. The brief is the section marked
-// `brief: true`, else the first top-level `single` (the framework's inference).
+// The explicit `sections:` map → a map of lowered section bodies. The brief is the
+// section marked `brief: true`, else the first `single` (the framework's inference).
 function lowerSectionsForm(sectionsMap, resolve, optResolve) {
-  const sections = []
-  let brief = null
+  const sections = {}
+  let explicit = null
   let firstSingle = null
   for (const [secName, def] of Object.entries(sectionsMap)) {
-    sections.push(lowerSection(secName, def, resolve, optResolve))
-    if (def.brief === true) brief = secName
+    sections[secName] = lowerSection(def, resolve, optResolve)
+    if (def.brief === true) explicit = secName
     if (!firstSingle && (def.kind || 'single') === 'single') firstSingle = secName
   }
-  return { sections, brief: brief || firstSingle }
+  // The brief is the section marked `brief: true`, else the first `single` (the
+  // framework's inference). Stamp it inline so the wire and the producer's own
+  // consumers (entity-shaping, back-fill render) find it the same way — the
+  // sections-tree has no schema-level `brief:` back-reference.
+  const brief = explicit || firstSingle
+  if (brief && sections[brief] && !sections[brief].brief) sections[brief].brief = true
+  return { sections, brief }
 }
 
-function lowerSection(name, def, resolve, optResolve) {
-  const out = { name, kind: def.kind || 'single' }
+// Lower one section to its declaration body (the caller keys it by name; a nested
+// section gets a `type: section` marker prepended in lowerField). `kind: multi` →
+// `multiple: true`; `binder` is derived (no marker — it falls out of "all fields
+// are type: section"); `nestable` → `self_nesting`; authored cross-cutting
+// `constraints` pass through as a bare array. Leaves and nested sections share one
+// ordered `fields:` namespace.
+function lowerSection(def, resolve, optResolve) {
+  const out = {}
+  if ((def.kind || 'single') === 'multi') out.multiple = true
+  if (def.brief === true) out.brief = true
   if (def.nestable) out.self_nesting = true
 
-  const fields = []
-  const childSections = []
-  const constraints = []
-
+  const fields = {}
   for (const [key, rawField] of Object.entries(def.fields || {})) {
-    const field = asField(rawField)
-    const items = field.type === 'array' && field.items ? asField(field.items) : null
-    if (field.type === 'object') {
-      // nested struct → a child single section (field name = section name)
-      childSections.push(lowerSection(key, { kind: 'single', fields: field.fields }, resolve, optResolve))
-    } else if (items && items.type === 'object') {
-      // array of records → a child multi section
-      childSections.push(lowerSection(key, { kind: 'multi', fields: items.fields }, resolve, optResolve))
-    } else if (items && items.type === 'ref') {
-      // a list of references → a child multi section, one entity_ref per item.
-      // The entity-store forbids reference kinds as `array` element kinds
-      // (data-schema-design.md §10), so "many refs" is always a multi section.
-      childSections.push(
-        lowerSection(key, { kind: 'multi', fields: { [singular(key)]: { type: 'ref', ref: items.ref } } }, resolve, optResolve)
-      )
-    } else {
-      fields.push(lowerField(key, field, resolve, optResolve, constraints))
-    }
+    fields[key] = lowerField(rawField, resolve, optResolve)
   }
-
-  // explicit child sections (sections-form), after the field-derived ones
+  // Explicit child sections (sections-form, e.g. under a binder) → `type: section`
+  // fields, in the same ordered namespace as the leaves.
   for (const [childName, childDef] of Object.entries(def.sections || {})) {
-    childSections.push(lowerSection(childName, childDef, resolve, optResolve))
+    fields[childName] = { type: 'section', ...lowerSection(childDef, resolve, optResolve) }
   }
-
-  if (fields.length) out.fields = fields
-  if (childSections.length) out.sections = childSections
-  const authored = Array.isArray(def.constraints) ? def.constraints : []
-  const all = [...authored, ...constraints]
-  if (all.length) out.constraints = all
+  if (Object.keys(fields).length) out.fields = fields
+  if (Array.isArray(def.constraints) && def.constraints.length) out.constraints = def.constraints
   return out
 }
 
-function lowerField(key, field, resolve, optResolve, constraints) {
-  const out = { key, type: field.type }
-  if (field.label) out.label = field.label
-  if (field.required) out.required = true
-  // `localized` = human-readable text only. A string that's an enum token, a
-  // url/email format, or a curated picklist is machine-ish — not localized.
-  const machineish = field.enum !== undefined || field.format !== undefined || field.options !== undefined
-  if (TEXT_KINDS.has(field.type) && field.translatable !== false && !machineish) out.localized = true
+// Lower one field to its declaration value. Leaves carry their kind + attributes;
+// structural kinds become sections or multi-valued leaves:
+//   object           → a single nested section
+//   array of object   → a multi nested section
+//   array of ref      → entity_ref + multiple
+//   array of scalar   → the scalar kind + multiple
+//   ref               → entity_ref (model by name)
+function lowerField(rawField, resolve, optResolve) {
+  const field = asField(rawField)
+  const type = field.type
 
-  if (field.type === 'ref') {
-    out.type = 'entity_ref'
-    if (field.ref) out.models = [resolve(field.ref)]
-  } else if (field.options !== undefined) {
-    // curated picklist → item_ref, full `@org/model/<section>` path (§10.1).
-    out.type = 'item_ref'
-    out.options = optResolve(field.options)
-  } else if (field.type === 'array') {
-    // Array of scalars → element_kind. Arrays of refs/objects are intercepted in
-    // lowerSection (→ a multi section); the entity-store forbids ref array elements.
+  if (type === 'object') {
+    return { type: 'section', ...lowerSection({ kind: 'single', fields: field.fields }, resolve, optResolve) }
+  }
+  if (type === 'array') {
     const items = field.items ? asField(field.items) : null
-    if (items) out.element_kind = items.type
+    if (items && items.type === 'object') {
+      return { type: 'section', ...lowerSection({ kind: 'multi', fields: items.fields }, resolve, optResolve) }
+    }
+    if (items && items.type === 'ref') {
+      // Multi-valued reference — the per-field `multiple` flag (the `array` Kind
+      // that once forced a child multi section is retired).
+      const out = { type: 'entity_ref', multiple: true }
+      if (items.ref) out.model = resolve(items.ref)
+      return out
+    }
+    // Array of scalars → a multi-valued leaf.
+    return { type: items ? items.type : 'string', multiple: true }
+  }
+  if (type === 'ref') {
+    const out = { type: 'entity_ref' }
+    if (field.ref) out.model = resolve(field.ref)
+    return out
   }
 
-  // Closed value set → a section `one_of` constraint (the field keeps its base
-  // type — there is no `enum` kind). A `format` (url/email) → a section `format`
-  // constraint — a constrained string the backend validates on write. `default` is
-  // intentionally dropped — it rides in the foundation-schema blob (render/editor
-  // pre-fill), not the content type.
-  if (Array.isArray(field.enum)) constraints.push({ kind: 'one_of', field: key, values: field.enum })
-  if (field.format) constraints.push({ kind: 'format', field: key, format: field.format })
+  // A leaf (scalar) kind.
+  const out = { type }
+  if (field.label) out.label = field.label
+  if (field.description) out.description = field.description
+  if (field.required) out.required = true
 
+  // A curated picklist is an item_ref (machine-ish — never localized).
+  if (field.options !== undefined) {
+    out.type = 'item_ref'
+    out.options = optResolve(field.options)
+    return out
+  }
+
+  // `localized` = human-readable text only — not enum tokens or format strings.
+  const machineish = field.enum !== undefined || field.format !== undefined
+  if (TEXT_KINDS.has(type) && field.translatable !== false && !machineish) out.localized = true
+
+  // Field-narrowing constraints ride on the field; the registry relocates them to
+  // the owning section's constraint records at ingest.
+  if (Array.isArray(field.enum)) out.enum = field.enum
+  if (field.format) out.format = field.format
+
+  // `default` is intentionally NOT emitted — it rides in the foundation-schema
+  // blob (render / editor pre-fill), not the content type.
   return out
 }
 
@@ -166,14 +193,6 @@ function asField(def) {
 
 function shortName(name) {
   return String(name).split('/').pop()
-}
-
-// A list-of-refs field becomes a multi section; each item's single ref field is
-// keyed by the field's singular (editors → editor, coauthors → coauthor).
-function singular(name) {
-  if (/ies$/.test(name)) return name.slice(0, -3) + 'y'
-  if (/[^s]s$/.test(name)) return name.slice(0, -1)
-  return name
 }
 
 // `@/x` resolves into the schema's own org; other scopes pass through.

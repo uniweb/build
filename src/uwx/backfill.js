@@ -152,8 +152,12 @@ function unwrapLocalized(value, sourceLocale) {
   return value
 }
 
+// The brief is the section marked `brief: true` in the declaration's sections map
+// (the sections-tree has no schema-level `brief:` back-reference). Returned with
+// its name attached (the map key) so callers can key the document by it.
 function briefSectionOf(declaration) {
-  return (declaration?.sections || []).find((s) => s.name === declaration?.brief) || null
+  const entry = Object.entries(declaration?.sections || {}).find(([, s]) => s && s.brief === true)
+  return entry ? { name: entry[0], ...entry[1] } : null
 }
 
 // Whether a Model's brief section declares a richtext field (the md-body target).
@@ -161,7 +165,7 @@ function briefSectionOf(declaration) {
 // body is captured as a field — otherwise the body would be lost (variant B then).
 function briefHasRichtext(declaration) {
   const brief = briefSectionOf(declaration)
-  return !!(brief?.fields || []).some((f) => f.type === RICHTEXT_TYPE)
+  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE)
 }
 
 /**
@@ -185,21 +189,21 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   if (!brief || !section || typeof section !== 'object') {
     throw new Error('uwx/render: document has no resolvable brief section')
   }
-  const fields = brief.fields || []
-  const richtextKey = (fields.find((f) => f.type === RICHTEXT_TYPE) || {}).key
+  const fields = brief.fields || {}
+  const richtextKey = Object.entries(fields).find(([, f]) => f.type === RICHTEXT_TYPE)?.[0]
 
   const record = {}
   if (document.$uuid) record.$uuid = document.$uuid
   let body = ''
-  for (const field of fields) {
-    const raw = section[field.key]
+  for (const [key, field] of Object.entries(fields)) {
+    const raw = section[key]
     if (raw === undefined) continue
     const value = field.localized ? unwrapLocalized(raw, sourceLocale) : raw
-    if (format === 'md' && field.key === richtextKey) {
+    if (format === 'md' && key === richtextKey) {
       body = typeof value === 'string' ? value : String(value ?? '')
       continue
     }
-    record[field.key] = value
+    record[key] = value
   }
 
   if (format === 'json') return JSON.stringify(record, null, 2) + '\n'

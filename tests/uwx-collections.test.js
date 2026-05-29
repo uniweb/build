@@ -104,8 +104,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   )
 
   it('lowers to a single brief section named by the short name', () => {
-    expect(declaration.brief).toBe('product')
-    expect(declaration.sections[0]).toMatchObject({ name: 'product', kind: 'single' })
+    expect(Object.keys(declaration.sections)).toEqual(['product'])
+    expect(declaration.sections.product.brief).toBe(true)
   })
 
   it('maps each record to one by-name entity-content document (no $uuid on first sync)', () => {
@@ -435,17 +435,15 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
 
   const productDecl = {
     name: '@std/product',
-    brief: 'product',
-    sections: [
-      {
-        name: 'product',
-        kind: 'single',
-        fields: [
-          { key: 'title', type: 'string', localized: true },
-          { key: 'price', type: 'decimal' },
-        ],
+    sections: {
+      product: {
+        brief: true,
+        fields: {
+          title: { type: 'string', localized: true },
+          price: { type: 'decimal' },
+        },
       },
-    ],
+    },
   }
 
   beforeAll(() => {

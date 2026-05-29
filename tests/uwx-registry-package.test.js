@@ -48,11 +48,11 @@ describe('buildRegistryPackage', () => {
     const dataSchemaEntities = doc.entities.filter((e) => e.model === '@uniweb/data-schema')
     expect(dataSchemaEntities).toHaveLength(1) // @/article only; @std/person not bundled
     expect(dataSchemaEntities[0]).toMatchObject({ model: '@uniweb/data-schema', name: '@/article' })
-    expect(dataSchemaEntities[0].sections[0].kind).toBe('single')
-    // the lowering ran: enum → a one_of constraint on the section
-    expect(dataSchemaEntities[0].sections[0].constraints).toEqual(
-      expect.arrayContaining([{ kind: 'one_of', field: 'status', values: ['draft', 'live'] }])
-    )
+    const article = Object.values(dataSchemaEntities[0].sections).find((s) => s.brief)
+    expect(article).toBeTruthy() // a single brief section
+    // the lowering ran: enum stays ON the field (the backend relocates it to a
+    // one_of section constraint at ingest).
+    expect(article.fields.status.enum).toEqual(['draft', 'live'])
   })
 
   it('lists the foundation last, with data schemas first (refs resolve)', () => {
@@ -98,9 +98,8 @@ describe('buildRegistryPackage', () => {
       },
     }
     const post = buildRegistryPackage({ schema }).entities.find((e) => e.name === '@/post')
-    expect(post.sections[0].fields.find((f) => f.key === 'cat')).toEqual({
-      key: 'cat', type: 'item_ref', options: '@/categories/categories',
-    })
+    const postBrief = Object.values(post.sections).find((s) => s.brief)
+    expect(postBrief.fields.cat).toEqual({ type: 'item_ref', options: '@/categories/categories' })
   })
 })
 
@@ -148,11 +147,12 @@ describe('buildSchemaOnlyPackage (foundation-less — schemas only)', () => {
 
   it('runs the lowering (markdown→richtext, email→format constraint)', () => {
     const article = doc.entities.find((e) => e.name === '@std/article')
-    expect(article.sections[0].fields.find((f) => f.key === 'body').type).toBe('richtext')
+    const articleBrief = Object.values(article.sections).find((s) => s.brief)
+    expect(articleBrief.fields.body.type).toBe('richtext')
     const person = doc.entities.find((e) => e.name === '@std/person')
-    expect(person.sections[0].constraints).toEqual(
-      expect.arrayContaining([{ kind: 'format', field: 'email', format: 'email' }])
-    )
+    const personBrief = Object.values(person.sections).find((s) => s.brief)
+    // format stays ON the field now (the backend relocates it to a constraint).
+    expect(personBrief.fields.email).toMatchObject({ type: 'string', format: 'email' })
   })
 
   it('carries NO uuids / identity-in fields (name-in, like the foundation publish)', () => {

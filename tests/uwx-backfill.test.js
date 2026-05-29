@@ -151,17 +151,15 @@ describe('backfillArrayFile — many records in one file', () => {
 describe('renderEntityDocument — variant A (document → authoring file)', () => {
   const articleDecl = {
     name: '@acme/article',
-    brief: 'article',
-    sections: [
-      {
-        name: 'article',
-        kind: 'single',
-        fields: [
-          { key: 'title', type: 'string', localized: true },
-          { key: 'body', type: 'richtext', localized: true },
-        ],
+    sections: {
+      article: {
+        brief: true,
+        fields: {
+          title: { type: 'string', localized: true },
+          body: { type: 'richtext', localized: true },
+        },
       },
-    ],
+    },
   }
 
   it('renders a markdown entity to frontmatter + body (richtext → body), dropping the record uuid', () => {

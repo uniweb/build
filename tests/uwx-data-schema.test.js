@@ -2,14 +2,19 @@ import { toDataSchemaDeclaration } from '../src/uwx/data-schema.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 // Drive the lowering off the real normalized IR, so the translation and the
-// normalizer stay in step. Each test authors a schema, normalizes it, lowers it
-// to the @uniweb/data-schema declaration, and asserts the §3 shape.
+// normalizer stay in step. Each test authors a schema, normalizes it, lowers it to
+// the @uniweb/data-schema `sections:`-tree declaration, and asserts that shape: a
+// root MAP of sections; within a section a `fields:` MAP of leaves + nested
+// (`type: section`) fields; cardinality via `multiple:`; brief + sort axis inline;
+// `enum`/`format` on the field; no `kind`, no schema-level `brief:`/`sort_date_field`.
 const lower = (authored, ref, name) =>
   toDataSchemaDeclaration(validateAndNormalizeSchema(authored, ref), { name })
 
-const fieldByKey = (section, key) => section.fields.find((f) => f.key === key)
+// The name of the brief section (the one marked `brief: true`), or undefined.
+const briefName = (decl) =>
+  Object.entries(decl.sections || {}).find(([, s]) => s.brief)?.[0]
 
-describe('toDataSchemaDeclaration — fields-form (flat)', () => {
+describe('toDataSchemaDeclaration — fields-form (flat shorthand)', () => {
   const decl = lower(
     {
       name: 'article',
@@ -28,52 +33,51 @@ describe('toDataSchemaDeclaration — fields-form (flat)', () => {
     '@acme/article'
   )
 
-  it('carries model attributes and synthesizes one single brief section', () => {
+  it('carries model attributes and synthesizes one single brief section (root map)', () => {
     expect(decl.name).toBe('@acme/article')
     expect(decl.description).toBe('A post')
-    expect(decl.sort_date_field).toBe('published')
-    expect(decl.brief).toBe('article')
-    expect(decl.sections).toHaveLength(1)
-    expect(decl.sections[0]).toMatchObject({ name: 'article', kind: 'single' })
+    // No schema-level brief / sort_date_field — both are inline now.
+    expect(decl).not.toHaveProperty('brief')
+    expect(decl).not.toHaveProperty('sort_date_field')
+    expect(Object.keys(decl.sections)).toEqual(['article'])
+    expect(decl.sections.article.brief).toBe(true)
+    expect(decl.sections.article).not.toHaveProperty('multiple') // single
   })
 
-  const sec = () => decl.sections[0]
+  const fields = () => decl.sections.article.fields
 
-  it('maps scalars 1:1 and required', () => {
-    expect(fieldByKey(sec(), 'title')).toMatchObject({ key: 'title', type: 'string', required: true })
-    expect(fieldByKey(sec(), 'published')).toEqual({ key: 'published', type: 'date' })
+  it('maps scalars 1:1 and required (no `key`, no `kind`)', () => {
+    expect(fields().title).toMatchObject({ type: 'string', required: true })
+    expect(fields().published).toMatchObject({ type: 'date' })
+  })
+
+  it('marks the brief date field with inline sort_date', () => {
+    expect(fields().published.sort_date).toBe(true)
   })
 
   it('marks human text localized; not machine strings', () => {
-    expect(fieldByKey(sec(), 'title').localized).toBe(true) // prose
-    expect(fieldByKey(sec(), 'slug').localized).toBeUndefined() // translatable:false
-    expect(fieldByKey(sec(), 'status').localized).toBeUndefined() // enum token
-    expect(fieldByKey(sec(), 'site').localized).toBeUndefined() // url format
+    expect(fields().title.localized).toBe(true) // prose
+    expect(fields().slug.localized).toBeUndefined() // translatable:false
+    expect(fields().status.localized).toBeUndefined() // enum token
+    expect(fields().site.localized).toBeUndefined() // url format
   })
 
-  it('lowers enum → a section one_of constraint, not a field property', () => {
-    expect(fieldByKey(sec(), 'status')).toEqual({ key: 'status', type: 'string' })
-    expect(sec().constraints).toEqual(
-      expect.arrayContaining([{ kind: 'one_of', field: 'status', values: ['draft', 'live'] }])
-    )
+  it('keeps enum on the field (the backend relocates it to a constraint at ingest)', () => {
+    expect(fields().status).toEqual({ type: 'string', enum: ['draft', 'live'] })
   })
 
-  it('lowers a string format → a section format constraint', () => {
-    // url/email lower to a plain `string` field + a section `format` constraint
-    // (a constrained string the backend validates on write) — `{ kind, field,
-    // format }` per uwx-format §3 / data-schema-design.md §4.5.
-    expect(fieldByKey(sec(), 'site')).toEqual({ key: 'site', type: 'string' })
-    expect(sec().constraints).toEqual(
-      expect.arrayContaining([{ kind: 'format', field: 'site', format: 'url' }])
-    )
+  it('keeps format on the field', () => {
+    // url/email lower to a plain `string` field carrying `format`; the backend
+    // relocates it to a section `format` constraint at ingest.
+    expect(fields().site).toEqual({ type: 'string', format: 'url' })
   })
 
   it('drops field defaults (they ride in the foundation blob)', () => {
     expect(JSON.stringify(decl)).not.toContain('default')
   })
 
-  it('lowers array-of-scalar → array + element_kind', () => {
-    expect(fieldByKey(sec(), 'tags')).toEqual({ key: 'tags', type: 'array', element_kind: 'string' })
+  it('lowers array-of-scalar → the scalar kind + multiple (no `array` type)', () => {
+    expect(fields().tags).toEqual({ type: 'string', multiple: true })
   })
 })
 
@@ -90,46 +94,43 @@ describe('toDataSchemaDeclaration — references', () => {
     '@/x',
     '@acme/doc'
   )
-  const sec = decl.sections[0]
+  const fields = decl.sections[briefName(decl)].fields
 
-  it('ref → entity_ref with the name resolved into the schema org', () => {
-    expect(fieldByKey(sec, 'author')).toEqual({ key: 'author', type: 'entity_ref', models: ['@acme/person'] })
+  it('ref → entity_ref with the name resolved into the schema org (scalar model)', () => {
+    expect(fields.author).toEqual({ type: 'entity_ref', model: '@acme/person' })
   })
 
-  it('array-of-ref → a child multi section (entity-store forbids ref array elements)', () => {
-    expect(fieldByKey(sec, 'editors')).toBeUndefined() // not a field
-    const editors = sec.sections.find((s) => s.name === 'editors') // child of the root section
-    expect(editors).toMatchObject({ name: 'editors', kind: 'multi' })
-    // one entity_ref field per item, keyed by the field's singular
-    expect(editors.fields).toEqual([{ key: 'editor', type: 'entity_ref', models: ['@acme/person'] }])
+  it('array-of-ref → entity_ref + multiple (the `array` Kind is retired)', () => {
+    expect(fields.editors).toEqual({ type: 'entity_ref', multiple: true, model: '@acme/person' })
   })
 
   it('options → item_ref to the resolved model', () => {
-    expect(fieldByKey(sec, 'country')).toEqual({ key: 'country', type: 'item_ref', options: '@acme/countries' })
+    expect(fields.country).toEqual({ type: 'item_ref', options: '@acme/countries' })
   })
 
   it('passes a non-self scope through unchanged', () => {
-    expect(fieldByKey(sec, 'crossorg').models).toEqual(['@std/person'])
+    expect(fields.crossorg.model).toBe('@std/person')
   })
 
   it('honors a custom resolveName', () => {
     const norm = validateAndNormalizeSchema({ fields: { a: { type: 'ref', ref: '@/person' } } }, '@/x')
     const d = toDataSchemaDeclaration(norm, { name: '@acme/doc', resolveName: () => '@registry/Person' })
-    expect(d.sections[0].fields[0].models).toEqual(['@registry/Person'])
+    expect(d.sections[briefName(d)].fields.a.model).toBe('@registry/Person')
   })
 
   it('uses resolveOptions for the full @/x/<section> item_ref path (§10.1)', () => {
     const norm = validateAndNormalizeSchema({ fields: { c: { type: 'string', options: '@/colors' } } }, '@/x')
     const d = toDataSchemaDeclaration(norm, { name: '@acme/doc', resolveOptions: (r) => `${r}/values` })
-    expect(d.sections[0].fields[0]).toEqual({ key: 'c', type: 'item_ref', options: '@/colors/values' })
+    expect(d.sections[briefName(d)].fields.c).toEqual({ type: 'item_ref', options: '@/colors/values' })
   })
 })
 
 describe('toDataSchemaDeclaration — brief & linkable', () => {
-  it('omits linkable when a single/brief section exists (default true)', () => {
+  it('omits linkable when a brief section exists (default true)', () => {
     const d = lower({ fields: { name: { type: 'string' } } }, '@/x', '@acme/x')
-    expect(d.brief).toBe('x')
-    expect(d.linkable).toBeUndefined()
+    expect(briefName(d)).toBe('x')
+    expect(d.sections.x.brief).toBe(true)
+    expect(d).not.toHaveProperty('linkable')
   })
 
   it('emits linkable:false for a brief-less model (no single section)', () => {
@@ -138,13 +139,13 @@ describe('toDataSchemaDeclaration — brief & linkable', () => {
       '@/nav',
       '@std/nav'
     )
-    expect(d.brief).toBeUndefined()
+    expect(briefName(d)).toBeUndefined()
     expect(d.linkable).toBe(false)
-    expect(d.sections[0]).toMatchObject({ name: 'items', kind: 'multi', self_nesting: true })
+    expect(d.sections.items).toMatchObject({ multiple: true, self_nesting: true })
   })
 })
 
-describe('toDataSchemaDeclaration — nesting → sections', () => {
+describe('toDataSchemaDeclaration — nesting → type: section fields', () => {
   const decl = lower(
     {
       fields: {
@@ -159,23 +160,21 @@ describe('toDataSchemaDeclaration — nesting → sections', () => {
     '@/x',
     '@acme/profile'
   )
-  const root = decl.sections[0]
+  const fields = decl.sections[briefName(decl)].fields
 
-  it('object field → a child single section (not a field)', () => {
-    expect(fieldByKey(root, 'social')).toBeUndefined()
-    const social = root.sections.find((s) => s.name === 'social')
-    expect(social).toMatchObject({ name: 'social', kind: 'single' })
-    expect(fieldByKey(social, 'handle')).toMatchObject({ key: 'handle', type: 'string' })
+  it('object field → a nested single section (type: section)', () => {
+    expect(fields.social.type).toBe('section')
+    expect(fields.social).not.toHaveProperty('multiple') // single
+    expect(fields.social.fields.handle).toMatchObject({ type: 'string' })
   })
 
-  it('array-of-object field → a child multi section', () => {
-    const results = root.sections.find((s) => s.name === 'results')
-    expect(results).toMatchObject({ name: 'results', kind: 'multi' })
-    expect(fieldByKey(results, 'value')).toEqual({ key: 'value', type: 'int' })
+  it('array-of-object field → a nested multi section', () => {
+    expect(fields.results).toMatchObject({ type: 'section', multiple: true })
+    expect(fields.results.fields.value).toEqual({ type: 'int' })
   })
 
-  it('keeps plain scalars as fields alongside child sections', () => {
-    expect(fieldByKey(root, 'name')).toMatchObject({ key: 'name', type: 'string', required: true })
+  it('keeps plain scalars as leaf fields alongside nested sections', () => {
+    expect(fields.name).toMatchObject({ type: 'string', required: true })
   })
 })
 
@@ -192,26 +191,28 @@ describe('toDataSchemaDeclaration — sections-form', () => {
     '@acme/doc'
   )
 
-  it('emits the section list in order', () => {
-    expect(decl.sections.map((s) => s.name)).toEqual(['card', 'outline', 'meta'])
+  it('emits the sections map in declared order', () => {
+    expect(Object.keys(decl.sections)).toEqual(['card', 'outline', 'meta'])
   })
 
-  it('hoists brief:true to the model-level brief', () => {
-    expect(decl.brief).toBe('meta')
+  it('marks the brief:true section inline (no schema-level back-reference)', () => {
+    expect(briefName(decl)).toBe('meta')
+    expect(decl.sections.meta.brief).toBe(true)
+    expect(decl.sections.card).not.toHaveProperty('brief')
   })
 
-  it('lowers nestable → self_nesting', () => {
-    const outline = decl.sections.find((s) => s.name === 'outline')
-    expect(outline).toMatchObject({ kind: 'multi', self_nesting: true })
+  it('lowers nestable → self_nesting on a multi section', () => {
+    expect(decl.sections.outline).toMatchObject({ multiple: true, self_nesting: true })
   })
 
-  it('infers the first single as brief when none is marked', () => {
+  it('infers + stamps the first single as brief when none is marked', () => {
     const d = lower(
       { sections: { a: { kind: 'multi', fields: { x: { type: 'string' } } }, b: { kind: 'single', fields: { y: { type: 'string' } } } } },
       '@/x',
       '@acme/d'
     )
-    expect(d.brief).toBe('b')
+    expect(briefName(d)).toBe('b')
+    expect(d.sections.b.brief).toBe(true)
   })
 })
 
