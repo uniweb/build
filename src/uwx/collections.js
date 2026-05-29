@@ -185,8 +185,9 @@ function syncableCollections(siteYml) {
   return out
 }
 
-// v1: the Model's schema must be available from a LOCAL foundation. Resolve the
-// foundation dir from an explicit opt, else the site's `file:` foundation dep.
+// Resolve the foundation dir from an explicit opt, else the site's `file:`
+// foundation dep. A local foundation supplies locally-defined Model declarations
+// offline; non-local Models are fetched via an injected resolver (see below).
 function resolveFoundationDir(siteRoot, opts) {
   if (opts.foundationDir) return resolve(opts.foundationDir)
   const pkgPath = join(siteRoot, 'package.json')
@@ -202,6 +203,35 @@ function resolveFoundationDir(siteRoot, opts) {
     }
   }
   return null
+}
+
+// Load the local foundation's built schema.json (the source of locally-defined
+// Model declarations), or null when there's no local foundation. `required` (set
+// when no remote resolver is available) turns "missing" into a helpful error
+// instead of null, preserving the offline-only behavior.
+function loadLocalFoundationSchema(siteRoot, opts, { required }) {
+  const foundationDir = resolveFoundationDir(siteRoot, opts)
+  if (!foundationDir) {
+    if (required) {
+      throw new Error(
+        'uwx/collections: could not locate a local foundation. Pass foundationDir, ' +
+          'use a `file:` foundation dependency, or run via `uniweb sync` so non-local ' +
+          'Models resolve from the registry.'
+      )
+    }
+    return null
+  }
+  const schemaPath = join(foundationDir, 'dist', 'meta', 'schema.json')
+  if (!existsSync(schemaPath)) {
+    if (required) {
+      throw new Error(
+        `uwx/collections: ${schemaPath} not found — build the foundation first ` +
+          '(`uniweb build`).'
+      )
+    }
+    return null
+  }
+  return JSON.parse(readFileSync(schemaPath, 'utf8'))
 }
 
 // Find the data-schema this foundation DEFINES that matches a fully-qualified
@@ -245,6 +275,10 @@ async function loadSourceRecords(siteRoot, decl) {
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
  * @param {string} [opts.foundationDir]   - explicit local foundation root
+ * @param {(name: string) => Promise<object|null>} [opts.resolveModel] - async
+ *        resolver for a Model NOT defined by the local foundation; returns the
+ *        `@uniweb/data-schema` declaration (or null). The verb wires this to the
+ *        backend's Model-read route. Without it, the local foundation is required.
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{ buffer: Buffer, models: string[], entityCount: number,
@@ -260,22 +294,22 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     )
   }
 
-  const foundationDir = resolveFoundationDir(siteRoot, opts)
-  if (!foundationDir) {
-    throw new Error(
-      'uwx/collections: could not locate a local foundation. v1 needs the ' +
-        "Model's schema locally — pass foundationDir, or use a `file:` foundation " +
-        'dependency. Remote foundations are not yet supported.'
-    )
+  // A Model declaration comes from a LOCAL foundation (offline) or, for a
+  // non-local Model, from the injected async `resolveModel(name)` — the verb wires
+  // that to the backend's Model-read route (declaration form). The local
+  // foundation is required ONLY when no resolver is provided.
+  const resolveModel = typeof opts.resolveModel === 'function' ? opts.resolveModel : null
+  const localSchema = loadLocalFoundationSchema(siteRoot, opts, { required: !resolveModel })
+
+  const declCache = new Map()
+  const declarationFor = async (modelName) => {
+    if (declCache.has(modelName)) return declCache.get(modelName)
+    let declaration = localSchema ? resolveDeclaration(localSchema, modelName) : null
+    if (!declaration && resolveModel) declaration = await resolveModel(modelName)
+    declaration = declaration || null
+    declCache.set(modelName, declaration)
+    return declaration
   }
-  const schemaPath = join(foundationDir, 'dist', 'meta', 'schema.json')
-  if (!existsSync(schemaPath)) {
-    throw new Error(
-      `uwx/collections: ${schemaPath} not found — build the foundation first ` +
-        '(`uniweb build`).'
-    )
-  }
-  const schema = JSON.parse(readFileSync(schemaPath, 'utf8'))
 
   const sourceLocale =
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
@@ -289,12 +323,15 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
   // reuse a slug).
   const seen = new Set()
   for (const { name, decl } of mapped) {
-    const declaration = resolveDeclaration(schema, decl.model)
+    const declaration = await declarationFor(decl.model)
     if (!declaration) {
       throw new Error(
-        `uwx/collections: Model "${decl.model}" (collection "${name}") is not ` +
-          'defined by the local foundation. v1 needs the Model declared ' +
-          'locally; shared/registry-only Models are not yet supported.'
+        `uwx/collections: Model "${decl.model}" (collection "${name}") could not be ` +
+          'resolved — not defined by a local foundation' +
+          (resolveModel
+            ? ', and the backend has no such Model (register it first).'
+            : '. Run via `uniweb sync` (which fetches non-local Models from the ' +
+              'registry), or provide a local foundation that defines it.')
       )
     }
     const sourceRecords = await loadSourceRecords(siteRoot, decl)

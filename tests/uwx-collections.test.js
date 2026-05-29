@@ -425,3 +425,95 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     await expect(emitCollectionSyncPackage(bare)).rejects.toThrow(/no collection declares/)
   })
 })
+
+// ── B3: non-local Model resolution via the injected resolveModel ─────────────
+
+describe('emitCollectionSyncPackage — non-local Model via resolveModel', () => {
+  let root
+  let siteDir
+
+  const productDecl = {
+    name: '@std/product',
+    brief: 'product',
+    sections: [
+      {
+        name: 'product',
+        kind: 'single',
+        fields: [
+          { key: 'title', type: 'string', localized: true },
+          { key: 'price', type: 'decimal' },
+        ],
+      },
+    ],
+  }
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'uwx-b3-'))
+    siteDir = join(root, 'site')
+    mkdirSync(join(siteDir, 'data', 'products'), { recursive: true })
+    // NO foundation dependency — the Model is non-local (e.g. a @std schema).
+    writeFileSync(
+      join(siteDir, 'site.yml'),
+      'name: T\ncollections:\n  products:\n    path: data/products\n    model: "@std/product"\n'
+    )
+    writeFileSync(join(siteDir, 'data', 'products', 'a.yml'), 'title: A\nprice: 5\n')
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('fetches the declaration for a Model not in any local foundation', async () => {
+    const calls = []
+    const resolveModel = async (name) => {
+      calls.push(name)
+      return name === '@std/product' ? productDecl : null
+    }
+    const { buffer, models, entityCount } = await emitCollectionSyncPackage(siteDir, { resolveModel })
+    expect(calls).toEqual(['@std/product'])
+    expect(models).toEqual(['@std/product'])
+    expect(entityCount).toBe(1)
+    const { manifest, byFile } = unzip(buffer)
+    const doc = byFile(manifest.entries[0].file)
+    expect(doc.$model).toBe('@std/product')
+    expect(doc.product.title).toEqual({ en: 'A' }) // declaration drove the localized wrap
+    expect(doc.product.price).toBe(5)
+  })
+
+  it('errors clearly when the resolver returns null (Model not registered)', async () => {
+    await expect(emitCollectionSyncPackage(siteDir, { resolveModel: async () => null })).rejects.toThrow(
+      /register it first/
+    )
+  })
+
+  it('prefers a local foundation when it defines the Model (resolver untouched)', async () => {
+    const localSite = join(root, 'local')
+    const foundationDir = join(root, 'local-foundation')
+    mkdirSync(join(localSite, 'data', 'products'), { recursive: true })
+    mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
+    writeFileSync(
+      join(localSite, 'site.yml'),
+      'name: L\nfoundation: "@acme/marketing"\ncollections:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+    )
+    writeFileSync(
+      join(localSite, 'package.json'),
+      JSON.stringify({ name: 'l', dependencies: { foundation: 'file:../local-foundation' } })
+    )
+    writeFileSync(join(localSite, 'data', 'products', 'a.yml'), 'title: A\n')
+    writeFileSync(
+      join(foundationDir, 'dist', 'meta', 'schema.json'),
+      JSON.stringify({
+        _self: { name: '@acme/marketing', version: '1.0.0', role: 'foundation' },
+        dataSchemas: {
+          '@/product': validateAndNormalizeSchema({ name: 'product', fields: { title: { type: 'string' } } }, '@/product'),
+        },
+      })
+    )
+
+    let called = false
+    const resolveModel = async () => {
+      called = true
+      throw new Error('resolver should not be called when the Model is local')
+    }
+    const { models } = await emitCollectionSyncPackage(localSite, { resolveModel })
+    expect(models).toEqual(['@acme/product'])
+    expect(called).toBe(false)
+  })
+})
