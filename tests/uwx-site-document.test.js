@@ -65,6 +65,15 @@ beforeAll(() => {
   w('pages/2-docs/1-intro/page.yml', 'id: intro\ntitle: Intro\n')
   w('pages/2-docs/1-intro/intro.md', '---\ntype: Prose\nid: body\n---\n# Intro\n')
 
+  // features (page) with @-prefix child sections attached via nest:
+  w(
+    'pages/3-features/page.yml',
+    ['id: features', 'title: Features', 'nest:', '  grid: [card-a, card-b]', ''].join('\n')
+  )
+  w('pages/3-features/1-grid.md', '---\ntype: Grid\nid: grid\n---\n# Our features\n')
+  w('pages/3-features/@card-a.md', '---\ntype: Card\nid: card-a\n---\n# A\n')
+  w('pages/3-features/@card-b.md', '---\ntype: Card\nid: card-b\n---\n# B\n')
+
   // layout areas: default + a named layout
   w('layout/header.md', '---\ntype: Header\n---\n# Site\n')
   w('layout/marketing/footer.md', '---\ntype: Footer\n---\n# Footer\n')
@@ -120,6 +129,22 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     expect(hero).not.toHaveProperty('parent_path')
     expect(hero).not.toHaveProperty('parent_section')
     expect(home).not.toHaveProperty('parent_path')
+  })
+
+  it('reconstructs @-prefix nest: children under a section’s $children', async () => {
+    const doc = await siteProjectToDocument(ROOT)
+    const features = doc.pages.find((p) => p.slug === 'features')
+    // The @-prefixed children are NOT top-level sections of the page.
+    expect(features.page_sections).toHaveLength(1)
+    const grid = features.page_sections[0]
+    expect(grid.$id).toBe('grid')
+    expect(grid.type).toBe('Grid')
+    // They ride under the parent's $children (page_sections self-nesting).
+    expect(Array.isArray(grid.$children)).toBe(true)
+    expect(grid.$children.map((c) => c.$id)).toEqual(['card-a', 'card-b'])
+    expect(grid.$children.map((c) => c.type)).toEqual(['Card', 'Card'])
+    // Children carry no parent_path / back-reference — pure structure.
+    expect(grid.$children[0]).not.toHaveProperty('parent_path')
   })
 
   it('nests a folder’s child pages under $children (same-section self-nesting)', async () => {

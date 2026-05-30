@@ -15,11 +15,13 @@
 // truth). Identity is `$id` (the stableId); `$uuid` is injected read-only from
 // the committed id sidecar — the backend mints it, never this producer.
 //
-// v0 scope (stated, not silent): deferred are `@`-prefix `nest:` *hierarchy*
-// (child sections land flat under their page — no data loss, only nesting
-// structure is not reconstructed), folder-mode `.md`-as-pages
-// (document/blog-list profile), `paths:` mounts, versioned scopes, and
-// media/asset bytes (favicon/assets — carried out of band).
+// `@`-prefix child sections declared in `page.yml::nest:` ARE reconstructed —
+// they ride under their parent section's `$children` (page_sections is
+// self_nesting), via the same `processNesting` the normal build uses.
+//
+// v0 scope (stated, not silent): folder-mode `.md`-as-pages (document/blog-list
+// profile), `paths:` mounts, versioned scopes, and media/asset bytes
+// (favicon/assets — carried out of band).
 
 import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -153,18 +155,15 @@ const DYNAMIC_RE = /^\[(.+)\]$/
 //     on each page record (the spec's cross-section rule: "a subsection is an
 //     inline field"), NOT a top-level array with a back-reference.
 //   - genuine self-nesting uses `$children`: a folder's child pages (within
-//     `pages`), and — when reconstructed — `@`-prefix child sections (within
+//     `pages`), and `@`-prefix child sections declared in `nest:` (within
 //     `page_sections`). Cross-section parentage is pure structure, never `$parent`.
 //   - identity is `$id` (the stableId — the in-file handle), with `$uuid` injected
 //     ONLY from the committed sidecar when known (read-only lookup; the backend
 //     mints, the verb records — uuids never touch authored files). §4 of the plan.
 //
-// v0 deferrals carry over: `@`-prefix child-section *hierarchy* still lands flat
-// under `page_sections` (no data loss, structure not yet reconstructed), plus the
-// folder-mode / paths / versioned-scope / asset-bytes gaps noted on the flat lane.
-//
-// Wiring this into a verb + the backend ingest/back-fill round-trip is the joint
-// Phase 1 follow-up; this is the producer + its shape, framework-solo.
+// v0 deferrals: folder-mode `.md`-as-pages, `paths:` mounts, versioned scopes, and
+// media/asset bytes (favicon/assets, carried out of band). `@`-prefix `nest:`
+// hierarchy is NOT deferred — it is reconstructed here, same as a normal build.
 // ===========================================================================
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
@@ -180,25 +179,51 @@ function withIdentity(id, uuid, fields) {
   return Object.assign(rec, fields)
 }
 
-// The content sections under one page, as an inline `page_sections` field array.
-// Flat for now (see the @-prefix deferral above); each is a section record.
-async function collectPageSectionsNested(pageDir, siteRoot, pageKey, lookup) {
-  const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
-  const out = []
-  for (let k = 0; k < mdFiles.length; k++) {
-    const file = mdFiles[k]
+// One collected section → its `$`-record, recursing `subsections` into `$children`
+// (page_sections is self_nesting). The sidecar key chains by stableId at every
+// depth, so a uuid stays bound to a section through a rename or a re-order.
+function sectionToRecord(section, keyPrefix, lookup, index) {
+  const secId = section.stableId || `s${index}`
+  const key = `${keyPrefix}:${secId}`
+  const rec = withIdentity(secId, lookup.item(key), mapSectionData(section))
+  if (Array.isArray(section.subsections) && section.subsections.length > 0) {
+    rec.$children = section.subsections.map((c, j) =>
+      sectionToRecord(c, `${key}::sec`, lookup, j)
+    )
+  }
+  return rec
+}
+
+// The content sections under one page, as the inline `page_sections` field.
+// Mirrors the normal build's processPage: `@`-prefixed files are children
+// (excluded from the top level), `page.yml::nest:` attaches them to their parent
+// (recursively), and the resulting subsection tree is emitted via `$children`.
+async function collectPageSectionsNested(pageDir, siteRoot, pageKey, lookup, pageConfig) {
+  const cachedFiles = await readdir(pageDir)
+  const mdFiles = cachedFiles.filter(isMarkdownFile).sort(compareFilenames)
+
+  // Top-level sections: every NON-`@` markdown file, in order. `@`-prefixed files
+  // are children, attached below via `nest:` (an orphaned `@` file with no parent
+  // is simply omitted — the normal build warns; here it stays out of the doc).
+  const sections = []
+  for (const file of mdFiles) {
+    if (isChildSection(file)) continue
     const stableDefault = parseNumericPrefix(parse(file).name).name
     const { section } = await processMarkdownFile(
       join(pageDir, file),
-      String(k + 1),
+      String(sections.length + 1),
       siteRoot,
       stableDefault
     )
-    const secId = section.stableId || `s${k}`
-    const uuid = lookup.item(`${pageKey}::sec:${secId}`)
-    out.push(withIdentity(secId, uuid, mapSectionData(section)))
+    sections.push(section)
   }
-  return out
+
+  // Reconstruct the parent→child tree (populates each parent's `.subsections`).
+  if (pageConfig?.nest) {
+    await processNesting(sections, pageConfig.nest, pageDir, siteRoot, cachedFiles)
+  }
+
+  return sections.map((s, i) => sectionToRecord(s, `${pageKey}::sec`, lookup, i))
 }
 
 // Recursively build the `pages` tree: each record carries its fields, its inline
@@ -232,7 +257,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     const record = withIdentity(id, lookup.item(pageKey), data)
 
     if (mode === 'page') {
-      const sections = await collectPageSectionsNested(f.path, siteRoot, pageKey, lookup)
+      const sections = await collectPageSectionsNested(f.path, siteRoot, pageKey, lookup, f.config)
       if (sections.length > 0) record.page_sections = sections
     }
 

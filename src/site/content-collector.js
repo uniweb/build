@@ -2182,6 +2182,8 @@ export {
   parseNumericPrefix,
   compareFilenames,
   processMarkdownFile,
+  findSectionFile,
+  processNesting,
 }
 
 export default collectSiteContent
