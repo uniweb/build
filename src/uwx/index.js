@@ -42,10 +42,7 @@ export {
 export {
   siteProjectToDocument,
   emitSiteSyncPackage,
-  collectSiteIdKeys,
-  recordSiteIdLedger,
   writeSiteEntityUuid,
-  SITE_ID_LEDGER_RELPATH,
 } from './site.js'
 export {
   resolveCollectionsConfig,
@@ -57,7 +54,7 @@ export {
   buildFolderEntity,
   writeFolderUuid,
 } from './folder.js'
-export { emitSyncPackage } from './sync-package.js'
+export { emitSyncPackages } from './sync-package.js'
 export {
   collectionRecordsToEntities,
   buildCollectionEntities,

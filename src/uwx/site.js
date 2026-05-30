@@ -14,12 +14,12 @@
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
 // truth).
 //
-// IDENTITY. The ENTITY `$uuid`
-// lives in `site.yml` (top-level `$uuid`); we read it, send it, and back-fill the
-// minted value there. Nested pages/sections carry a `$id` handle but NO per-item
-// `$uuid` — the backend takes site-content content wholesale (collision=force), so
-// there is no per-item uuid round-trip on the wire. Our own move-tracking local ids
-// (the `.uniweb/site-ids.json` ledger) stay off the wire entirely.
+// IDENTITY. The ENTITY `$uuid` lives in `site.yml` (top-level `$uuid`); we read it,
+// send it, and back-fill the minted value there. Nested pages/sections carry a `$id`
+// handle but NO per-item `$uuid` — the backend takes site-content content wholesale
+// (collision=force), so there is no per-item uuid round-trip on the wire. For the
+// eventual pull, per-item identity is recovered from the in-file `stableId` +
+// content-match, not a local id store.
 //
 // `@`-prefix child sections declared in `page.yml::nest:` ARE reconstructed —
 // they ride under their parent section's `$children` (page_sections is
@@ -47,19 +47,10 @@ import {
 } from '../site/content-collector.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { sidecarResolver } from './identity.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveCollectionsConfig } from './collections-config.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
-
-// Our OWN committed move-tracking ledger — local ids per page/section, keyed by the
-// structural key (stableId-chain, path fallback). Backend-invisible: it never crosses
-// the wire (site-content syncs wholesale under collision=force; the only backend uuid
-// for site-content is the ENTITY uuid, which lives in site.yml). The ledger is the seam
-// a future pull/reconcile reads to match returned content back to local files; minting
-// the ids now means they're already stable when that arrives. See recordSiteIdLedger.
-const SITE_ID_LEDGER_RELPATH = '.uniweb/site-ids.json'
 
 function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
@@ -186,26 +177,6 @@ const DYNAMIC_RE = /^\[(.+)\]$/
 // ===========================================================================
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
-
-// ---------------------------------------------------------------------------
-// Structural keys — the SINGLE source of truth for how an item maps to its
-// `.uniweb/site-ids.json` ledger slot (our local move-tracking, off the wire).
-// `collectSiteIdKeys` derives a key per item; the ledger mints/persists a local id
-// under it. They must never diverge, so callers use these — not inline templates.
-//
-//   - page    : `page:id:<stableId>`  when authored; else `page:path:<slugPath>`
-//               (path is a fallback only — a rename breaks it; recoverable later
-//               by content-match)
-//   - section : `<parentKey>::sec:<secId>`  (chains for self-nested @-children)
-//   - layout  : `layout:<layoutName>/<area>:<stable>`
-//   - ext     : `ext:<url>`            - col: `col:<name>`
-// ---------------------------------------------------------------------------
-const pageKeyFor = (stableId, slugPath) =>
-  stableId ? `page:id:${stableId}` : `page:path:${slugPath}`
-const sectionKeyFor = (parentKey, secId) => `${parentKey}::sec:${secId}`
-const layoutKeyFor = (layoutName, area, stable) => `layout:${layoutName}/${area}:${stable}`
-const extKeyFor = (url) => `ext:${url}`
-const colKeyFor = (name) => `col:${name}`
 
 // `$id` (the handle), then the record's fields — the wire's canonical key order.
 // `fields` already carries `stable_id` (the Model field); `$id` is the same value.
@@ -512,71 +483,14 @@ export async function emitSiteSyncPackage(siteRoot, opts = {}) {
 }
 
 // ===========================================================================
-// Identity back-fill + local move-tracking ledger.
+// Identity back-fill.
 //
-// Two distinct things, deliberately separate:
-//
-//  (1) The ENTITY `$uuid` (the backend's identity for the whole site-content
-//      entity) is back-filled into `site.yml::$uuid` after the first sync
-//      (writeSiteEntityUuid). That is the ONLY backend uuid for site-content.
-//
-//  (2) The per-page/section local ids are OUR OWN book-keeping — minted and
-//      persisted in the committed `.uniweb/site-ids.json` ledger, keyed by each
-//      item's structural key (stableId-chain, path fallback). They never cross the
-//      wire (the backend takes site-content content wholesale under
-//      collision=force, so there is no per-item uuid round-trip). The ledger is the
-//      seam a future pull/reconcile reads to match returned content back to files;
-//      minting the ids now keeps them stable for when that arrives.
+// The ENTITY `$uuid` (the backend's identity for the whole site-content entity) is
+// back-filled into `site.yml::$uuid` after the first sync. That is the ONLY backend
+// uuid for site-content — its nested pages/sections sync wholesale (collision=force),
+// so there is no per-item uuid round-trip. Per-item identity for the eventual PULL is
+// recovered by in-file `stableId` + content-match (Plan D), not a local id store.
 // ===========================================================================
-
-// Walk a producer document and collect the structural key for every nested item,
-// in document order. Same key derivation the wire used before per-item identity
-// moved off-wire (page by stableId/slugPath, section by parent-chain, etc.).
-export function collectSiteIdKeys(document) {
-  const keys = []
-  const visitSections = (secs, parentKey) => {
-    for (const s of secs || []) {
-      const key = sectionKeyFor(parentKey, s.$id)
-      keys.push(key)
-      if (Array.isArray(s.$children)) visitSections(s.$children, key)
-    }
-  }
-  const visitPages = (pages, parentSlugPath) => {
-    for (const p of pages || []) {
-      const slugPath = parentSlugPath ? `${parentSlugPath}/${p.slug}` : p.slug
-      const key = pageKeyFor(p.stable_id, slugPath)
-      keys.push(key)
-      if (Array.isArray(p.page_sections)) visitSections(p.page_sections, key)
-      if (Array.isArray(p.$children)) visitPages(p.$children, slugPath)
-    }
-  }
-  visitPages(document?.pages, '')
-  for (const l of document?.layout_sections || []) {
-    keys.push(layoutKeyFor(l.layout_name, l.area, l.$id))
-  }
-  for (const e of document?.extensions || []) keys.push(extKeyFor(e.url))
-  for (const c of document?.collections || []) keys.push(colKeyFor(c.name))
-  return keys
-}
-
-/**
- * Mint + persist a stable LOCAL id for every page/section/item in `document`, into
- * the committed `.uniweb/site-ids.json` ledger (key-sorted, idempotent). Backend-
- * invisible; never placed on the wire. Stable across re-exports (an unchanged item
- * keeps its id); the structural key is rename-stable for authored-`id:` items and
- * falls back to path for id-less ones (a documented v1 limit, recoverable later by
- * content-match). Returns the number of keys recorded.
- *
- * @param {string} ledgerPath  - `<siteRoot>/.uniweb/site-ids.json`
- * @param {object} document    - the producer's site-content `$`-document
- */
-export function recordSiteIdLedger(ledgerPath, document) {
-  const resolver = sidecarResolver(ledgerPath)
-  const keys = collectSiteIdKeys(document)
-  for (const key of keys) resolver.item(key) // mint-if-absent, reuse-if-present
-  resolver.flush() // writes only when something changed
-  return keys.length
-}
 
 /**
  * Back-fill the minted site-content entity `$uuid` into `site.yml` (top-level
@@ -588,5 +502,3 @@ export function recordSiteIdLedger(ledgerPath, document) {
 export function writeSiteEntityUuid(siteRoot, uuid) {
   return upsertYamlScalar(join(siteRoot, 'site.yml'), '$uuid', uuid)
 }
-
-export { SITE_ID_LEDGER_RELPATH }

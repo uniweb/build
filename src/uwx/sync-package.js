@@ -1,23 +1,24 @@
-// emitSyncPackage — ONE sync package for a whole site: its static content
-// (`@uniweb/site-content`, the nested `$`-document), its `schema:`-mapped collection
-// records, AND the one `@uniweb/folder` entity that organizes those records —
-// submitted together in a single `.uwx` to /api/sites/sync.
+// emitSyncPackages — build a whole site's sync as the backend's TWO directional
+// lanes, each its own `.uwx`:
 //
-// It composes three builders:
-//   - buildCollectionEntities (collections.js) → record entities + file-backfill index
-//   - buildFolderEntity       (folder.js)      → the one @uniweb/folder (references)
-//   - siteProjectToDocument   (site.js)        → the one site-content entity
-// then shares the "send only changed" filter and one emitEntitySyncPackage call.
+//   - site-content lane  → one `@uniweb/site-content` entity (the static half).
+//   - collections lane   → one `@uniweb/folder` entity + the collection records it
+//                          references (the dynamic half; the `$ref` closure rides
+//                          together so brand-new records resolve in one call).
 //
-// Submission order: collection records, then @uniweb/folder, then site-content
-// (`report.finalized[]` correlates by `index` = position). Identity back-fill differs
-// by facet, and the per-entity `index` says which:
-//   - record entities → write `$uuid` into the source FILE (backfill.js).
-//   - the folder       → write the minted `$uuid` into collections.yml (verb).
-//   - the site entity  → write the minted `$uuid` into site.yml + record the local
-//                        move-tracking ledger (verb). No per-item uuids on the wire.
+// The verb POSTs each to its own route (site-content first — the site is born there;
+// then collections, binding to that site via `?site=<siteContentUuid>` on the first
+// collections push). Returning two separable packages keeps the producer pure of the
+// HTTP/ordering concern.
+//
+// "Send only changed" spans both lanes via one content-hash map (the sync-cache):
+//   - site-content lane fires iff the site entity changed.
+//   - collections lane fires iff the folder changed OR any record changed — and when
+//     it fires it carries the FULL folder (for the `$ref` closure + binding) plus the
+//     changed records. An untouched site with collections pushes nothing on either
+//     lane (the idempotent no-op).
 
-import { buildCollectionEntities, filterChanged } from './collections.js'
+import { buildCollectionEntities, entityContentHash } from './collections.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
 import { emitEntitySyncPackage } from './entity-document.js'
@@ -25,8 +26,21 @@ import { emitEntitySyncPackage } from './entity-document.js'
 const SITE_MODEL_NAME = '@uniweb/site-content'
 const SITE_ENTITY_KEY = 'site-content'
 
+const cacheKey = (entity) => `${entity.model} ${entity.id}`
+
+function emitLane(entities, exporter, exportedAt) {
+  const models = [...new Set(entities.map((e) => e.model))]
+  const buffer = emitEntitySyncPackage({
+    entities,
+    modelsRequired: models.map((name) => ({ name_at_export: name })),
+    exporter,
+    exportedAt,
+  })
+  return { buffer, entityCount: entities.length, models }
+}
+
 /**
- * Build the combined site-content + folder + collections sync package.
+ * Build the two sync packages for a site.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
@@ -35,81 +49,79 @@ const SITE_ENTITY_KEY = 'site-content'
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
  * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter
- * @param {boolean} [opts.includeSite]    - include the site-content entity (default true)
+ * @param {boolean} [opts.includeSite]    - include the site-content lane (default true)
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
- * @returns {Promise<{ buffer: Buffer|null, models: string[], entityCount: number,
- *   siteIncluded: boolean, warnings: string[], index: object[],
- *   hashes: Object<string,string>, skipped: number }>} `buffer` is null +
- *   `entityCount` 0 when nothing changed; `hashes` is the full current map.
+ * @returns {Promise<{
+ *   siteContent: { buffer, entityCount, index, models }|null,
+ *   collections: { buffer, entityCount, index, models, bind: boolean }|null,
+ *   hashes: Object<string,string>, warnings: string[], skipped: number }>}
+ *   `bind` is true when the folder has no uuid yet (first collections push → bind to
+ *   the site). Each lane is null when it has nothing to push.
  */
-export async function emitSyncPackage(siteRoot, opts = {}) {
+export async function emitSyncPackages(siteRoot, opts = {}) {
   const includeSite = opts.includeSite !== false
   const sourceLocale = opts.sourceLocale
+  const priorHashes = opts.priorHashes || {}
+  const sendAll = !!opts.sendAll
+  const exporter = opts.exporter
+  const exportedAt = opts.exportedAt
 
-  // Collections are OPTIONAL here (unlike the collection-only verb): a site with
-  // no syncable collections still syncs its content. A declared-but-unresolvable
-  // EXPLICIT Model still throws (inside buildCollectionEntities) — a real error.
   const col = await buildCollectionEntities(siteRoot, {
     ...(opts.foundationDir ? { foundationDir: opts.foundationDir } : {}),
     ...(opts.resolveModel ? { resolveModel: opts.resolveModel } : {}),
     ...(sourceLocale ? { sourceLocale } : {}),
   })
-
-  const entities = [...col.entities]
-  const index = [...col.index]
   const warnings = [...col.warnings]
 
-  // The folder rides over the FULL record set (before send-only-changed filtering)
-  // so its references are complete — new records by `$ref`, already-minted ones by
-  // `entry: <uuid>`. Built only when the site has collection records.
+  // The folder rides over the FULL record set (before filtering) so its references
+  // are complete — new records by `$ref`, already-minted ones by `entry: <uuid>`.
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     folders: col.colConfig?.folders ?? null,
     folderUuid: col.colConfig?.folderUuid,
   })
-  if (folder) {
-    entities.push(folder)
-    index.push({ kind: 'folder' })
+
+  const siteDoc = includeSite ? await siteProjectToDocument(siteRoot, { sourceLocale }) : null
+  const siteEntity = siteDoc
+    ? { id: siteDoc.$id, model: siteDoc.$model, file: 'entities/site-content.json', document: siteDoc }
+    : null
+
+  // One hash map over every entity (both lanes) — the sync-cache the caller persists.
+  const hashes = {}
+  let skipped = 0
+  const changed = (entity) => {
+    const key = cacheKey(entity)
+    const h = entityContentHash(entity.document)
+    hashes[key] = h
+    const isChanged = sendAll || priorHashes[key] !== h
+    if (!isChanged) skipped++
+    return isChanged
   }
 
-  if (includeSite) {
-    // The entity `$uuid` comes from site.yml (read inside siteProjectToDocument);
-    // the document carries no per-item uuids. The verb back-fills the minted entity
-    // uuid into site.yml and records the local move-tracking ledger.
-    const document = await siteProjectToDocument(siteRoot, { sourceLocale })
-    entities.push({
-      id: SITE_ENTITY_KEY,
-      model: SITE_MODEL_NAME,
-      file: 'entities/site-content.json',
-      document,
-    })
-    index.push({ kind: 'site', document })
+  // --- collections lane --------------------------------------------------------
+  // changed() has side effects (hashes/skipped), so evaluate every entity exactly
+  // once, in a stable order: folder, then each record.
+  const folderChanged = folder ? changed(folder) : false
+  const recordChanged = col.entities.map((e, i) => ({ entity: e, index: col.index[i], changed: changed(e) }))
+  const changedRecords = recordChanged.filter((r) => r.changed)
+
+  let collections = null
+  if (folder && (folderChanged || changedRecords.length > 0)) {
+    // Folder first (always, for the `$ref` closure + binding), then changed records.
+    const entities = [folder, ...changedRecords.map((r) => r.entity)]
+    const index = [{ kind: 'folder' }, ...changedRecords.map((r) => r.index)]
+    collections = { ...emitLane(entities, exporter, exportedAt), index, bind: !col.colConfig?.folderUuid }
   }
 
-  if (entities.length === 0) {
-    return {
-      buffer: null, models: [], entityCount: 0, siteIncluded: false,
-      warnings, index: [], hashes: {}, skipped: 0,
-    }
+  // --- site-content lane -------------------------------------------------------
+  let siteContent = null
+  if (siteEntity && changed(siteEntity)) {
+    siteContent = { ...emitLane([siteEntity], exporter, exportedAt), index: [{ kind: 'site' }] }
   }
 
-  const { sendEntities, sendIndex, hashes, skipped } = filterChanged(entities, index, {
-    priorHashes: opts.priorHashes,
-    sendAll: opts.sendAll,
-  })
+  // The site's current uuid (from site.yml), so the verb can bind a first-push
+  // collections folder to it via `?site=` even when site-content didn't change.
+  const siteContentUuid = siteDoc?.$uuid
 
-  const models = [...new Set(sendEntities.map((e) => e.model))]
-  const siteIncluded = sendEntities.some((e) => e.model === SITE_MODEL_NAME)
-  if (sendEntities.length === 0) {
-    return { buffer: null, models, entityCount: 0, siteIncluded, warnings, index: [], hashes, skipped }
-  }
-
-  const buffer = emitEntitySyncPackage({
-    entities: sendEntities,
-    modelsRequired: models.map((name) => ({ name_at_export: name })),
-    exporter: opts.exporter,
-    exportedAt: opts.exportedAt,
-  })
-
-  return { buffer, models, entityCount: sendEntities.length, siteIncluded, warnings, index: sendIndex, hashes, skipped }
+  return { siteContent, collections, siteContentUuid, hashes, warnings, skipped }
 }
