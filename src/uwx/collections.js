@@ -47,13 +47,22 @@ const SKIP_KEYS = new Set([
   '$body',
 ])
 
-// Recursively drop `$`-sigil keys (identity/transport, never field data — the
-// sigil-exclusivity invariant guarantees this) at every level.
+// Recursively drop IDENTITY `$`-sigil keys (`$uuid`/`$id`/`$model`/… — never
+// field data; the sigil-exclusivity invariant guarantees this) at every level,
+// so a back-filled `$uuid` doesn't change the hash. `$children` is the exception:
+// it is STRUCTURAL content (a self-nesting record's subtree, e.g. site-content's
+// nested pages/sections), so it is KEPT and recursed into — otherwise a nesting
+// change would be invisible to "send only changed". Flat records carry no
+// `$children`, so this is a no-op for the collection lane.
 function stripSigils(value) {
   if (Array.isArray(value)) return value.map(stripSigils)
   if (value && typeof value === 'object') {
     const out = {}
     for (const [k, v] of Object.entries(value)) {
+      if (k === '$children') {
+        out[k] = stripSigils(v)
+        continue
+      }
       if (k.startsWith('$')) continue
       out[k] = stripSigils(v)
     }
@@ -293,10 +302,13 @@ async function loadSourceRecords(siteRoot, decl) {
 }
 
 /**
- * Build the collection-sync package: a site's `model:`-mapped file collections
- * as model-by-name entity-content `$`-documents. First sync sends no `$uuid`
- * (the backend mints); re-sync round-trips the back-filled `$uuid` for
- * restore-in-place.
+ * Build the collection entity descriptors + back-fill index for a site's
+ * `model:`-mapped file collections — PURE assembly (no hashing, no emit), so it
+ * composes with other entity sources (e.g. site-content) into one sync package.
+ * First sync sends no `$uuid` (the backend mints); re-sync round-trips the
+ * back-filled `$uuid`. `mappedCount` lets a caller tell "no `model:` collections
+ * declared" (0) from "declared but empty". Throws on an unresolvable Model or a
+ * duplicate ($model, $id) within the submission.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
@@ -306,25 +318,12 @@ async function loadSourceRecords(siteRoot, decl) {
  *        `@uniweb/data-schema` declaration (or null). The verb wires this to the
  *        backend's Model-read route. Without it, the local foundation is required.
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
- * @param {Object<string,string>} [opts.priorHashes] - last-synced content hashes
- *        keyed `<model> <id>` (the verb's sync-cache); entities whose current
- *        content hash matches are skipped ("send only changed").
- * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter (force all)
- * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
- * @returns {Promise<{ buffer: Buffer|null, models: string[], entityCount: number,
- *        warnings: string[], index: object[], hashes: Object<string,string>,
- *        skipped: number }>} `buffer` is null + `entityCount` 0 when nothing
- *        changed; `hashes` is the full current map for the caller to persist.
+ * @returns {Promise<{ entities: object[], index: object[], warnings: string[], mappedCount: number }>}
  */
-export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
+export async function buildCollectionEntities(siteRoot, opts = {}) {
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
   const mapped = syncableCollections(siteYml)
-  if (mapped.length === 0) {
-    throw new Error(
-      'uwx/collections: no collection declares `model:` — nothing to export. ' +
-        'Add `model: "@org/name"` to a collection in site.yml.'
-    )
-  }
+  if (mapped.length === 0) return { entities: [], index: [], warnings: [], mappedCount: 0 }
 
   // A Model declaration comes from a LOCAL foundation (offline) or, for a
   // non-local Model, from the injected async `resolveModel(name)` — the verb wires
@@ -429,20 +428,20 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     warnings.push(...mappedOut.warnings)
   }
 
-  if (entities.length === 0) {
-    throw new Error(
-      'uwx/collections: no records to export (mapped collections were empty or skipped)'
-    )
-  }
+  return { entities, index, warnings, mappedCount: mapped.length }
+}
 
-  // "Send only changed": compute each entity's identity-independent content hash
-  // and skip those whose hash matches the prior sync (the verb's `.uniweb`
-  // sync-cache). `hashes` is the FULL current map (the verb persists it after a
-  // successful submit); `sendAll` bypasses the filter (force a full re-sync). The
-  // sent subset stays parallel (entities[i] ↔ index[i]) so the backend's `index`
-  // correlation holds for a partial send.
-  const priorHashes = opts.priorHashes || {}
-  const sendAll = !!opts.sendAll
+/**
+ * "Send only changed" filter, shared by the collection and combined sync paths.
+ * Hashes each entity's content (identity-independent — `$uuid`/`$id` stripped,
+ * `$children` kept) and drops those whose hash matches `priorHashes`. The sent
+ * subset stays parallel (sendEntities[i] ↔ sendIndex[i]) so the backend's `index`
+ * correlation holds for a partial send. `hashes` is the FULL current map (the
+ * caller persists it to the sync-cache).
+ *
+ * @returns {{ sendEntities: object[], sendIndex: object[], hashes: Object<string,string>, skipped: number }}
+ */
+export function filterChanged(entities, index, { priorHashes = {}, sendAll = false } = {}) {
   const hashes = {}
   const sendEntities = []
   const sendIndex = []
@@ -459,11 +458,43 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
     sendEntities.push(e)
     sendIndex.push(index[k])
   }
+  return { sendEntities, sendIndex, hashes, skipped }
+}
+
+/**
+ * Build a collection-only sync package. Thin composition over
+ * `buildCollectionEntities` + `filterChanged` + `emitEntitySyncPackage`, kept for
+ * the collection-only callers/tests. The combined site+collections path is
+ * `emitSyncPackage` (sync-package.js).
+ *
+ * @param {string} siteRoot
+ * @param {object} [opts] - buildCollectionEntities opts, plus `priorHashes`,
+ *        `sendAll`, `exporter`, `exportedAt`.
+ * @returns {Promise<{ buffer: Buffer|null, models: string[], entityCount: number,
+ *        warnings: string[], index: object[], hashes: Object<string,string>,
+ *        skipped: number }>}
+ */
+export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
+  const { entities, index, warnings, mappedCount } = await buildCollectionEntities(siteRoot, opts)
+  if (mappedCount === 0) {
+    throw new Error(
+      'uwx/collections: no collection declares `model:` — nothing to export. ' +
+        'Add `model: "@org/name"` to a collection in site.yml.'
+    )
+  }
+  if (entities.length === 0) {
+    throw new Error(
+      'uwx/collections: no records to export (mapped collections were empty or skipped)'
+    )
+  }
+
+  const { sendEntities, sendIndex, hashes, skipped } = filterChanged(entities, index, {
+    priorHashes: opts.priorHashes,
+    sendAll: opts.sendAll,
+  })
 
   const sentModels = [...new Set(sendEntities.map((e) => e.model))]
   if (sendEntities.length === 0) {
-    // Everything already in sync — nothing to submit. The caller refreshes the
-    // cache from `hashes` (a no-op) and reports the skip.
     return { buffer: null, models: sentModels, entityCount: 0, warnings, index: [], hashes, skipped }
   }
 
