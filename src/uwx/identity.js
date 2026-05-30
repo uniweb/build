@@ -73,17 +73,46 @@ export function sidecarResolver(sidecarPath) {
     item: (key) => get('items', key),
     flush() {
       if (!dirty) return
-      const sortObj = (o) =>
-        Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]))
-      const out = {
-        entities: sortObj(store.entities),
-        items: sortObj(store.items),
-      }
-      mkdirSync(dirname(sidecarPath), { recursive: true })
-      writeFileSync(sidecarPath, JSON.stringify(out, null, 2) + '\n')
+      writeSortedSidecar(sidecarPath, store)
       dirty = false
     },
   }
+}
+
+// Write `{ entities, items }` key-sorted (clean git diffs), creating the dir.
+function writeSortedSidecar(sidecarPath, store) {
+  const sortObj = (o) =>
+    Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]))
+  const out = {
+    entities: sortObj(store.entities || {}),
+    items: sortObj(store.items || {}),
+  }
+  mkdirSync(dirname(sidecarPath), { recursive: true })
+  writeFileSync(sidecarPath, JSON.stringify(out, null, 2) + '\n')
+}
+
+/**
+ * Merge `additions` ({ entities?, items? }) into the sidecar at `sidecarPath` and
+ * write it back, key-sorted. Existing keys are PRESERVED (stale keys are kept, not
+ * pruned — a temporarily-removed-then-re-added record must not lose its uuid;
+ * matches sidecarResolver). Used by the site-content sync back-fill, where the
+ * BACKEND mints uuids and the verb records them here (vs sidecarResolver, which
+ * mints locally for the register lane).
+ *
+ * @param {string} sidecarPath
+ * @param {{ entities?: object, items?: object }} additions
+ */
+export function writeSidecarStore(sidecarPath, additions) {
+  let store = { entities: {}, items: {} }
+  try {
+    const parsed = JSON.parse(readFileSync(sidecarPath, 'utf8'))
+    store = { entities: parsed?.entities ?? {}, items: parsed?.items ?? {} }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err // a corrupt sidecar is a real error
+  }
+  Object.assign(store.entities, additions?.entities || {})
+  Object.assign(store.items, additions?.items || {})
+  writeSortedSidecar(sidecarPath, store)
 }
 
 /**

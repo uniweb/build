@@ -32,15 +32,24 @@ export {
   mintResolver,
   sidecarResolver,
   sidecarLookup,
+  writeSidecarStore,
   SIDECAR_RELPATH,
 } from './identity.js'
 export {
   foundationSchemaToEntity,
   emitFoundationSchemaPackage,
 } from './foundation-schema.js'
-export { siteProjectToDocument, emitSiteSyncPackage } from './site.js'
+export {
+  siteProjectToDocument,
+  emitSiteSyncPackage,
+  siteSidecarEntries,
+  writeSiteSidecar,
+} from './site.js'
+export { emitSyncPackage } from './sync-package.js'
 export {
   collectionRecordsToEntities,
+  buildCollectionEntities,
+  filterChanged,
   emitCollectionSyncPackage,
   entityContentHash,
 } from './collections.js'
