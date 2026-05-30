@@ -4,16 +4,16 @@ import { join } from 'node:path'
 import {
   emitSyncPackage,
   siteProjectToDocument,
-  siteSidecarEntries,
-  writeSiteSidecar,
+  writeSiteEntityUuid,
+  recordSiteIdLedger,
+  SITE_ID_LEDGER_RELPATH,
   readZip,
 } from '../src/uwx/index.js'
 
-// The combined site-content + collections sync package, and the site-content
-// sidecar back-fill round trip. The load-bearing property under test: the keys
-// the PRODUCER reads uuids by (sidecarLookup) are exactly the keys the back-fill
-// WRITES uuids to (siteSidecarEntries) — derived from the same helpers, walked in
-// lockstep. If they ever drift, a re-sync stops finding prior uuids and dupes.
+// The combined site-content (+ folder + collections) sync package, and the revised
+// identity model: the site-content ENTITY uuid lives in site.yml; nested items carry
+// `$id` but no `$uuid` (they sync wholesale); per-page/section local ids live in our
+// own committed, backend-invisible move-tracking ledger (.uniweb/site-ids.json).
 
 let ROOT
 function w(rel, body) {
@@ -52,37 +52,14 @@ afterEach(() => {
   if (ROOT) rmSync(ROOT, { recursive: true, force: true })
 })
 
-// Simulate the backend: deep-clone the submitted document and inject a `$uuid`
-// at every record level (entity, pages, page_sections, $children, layout,
-// extensions, collections) — exactly what the restore lane echoes in
-// finalized[].document. Deterministic uuids so assertions are stable.
-function fakeBackendFinalize(doc) {
-  let n = 0
-  const uuid = () => `u-${String(++n).padStart(4, '0')}`
-  const clone = (v) => JSON.parse(JSON.stringify(v))
-  const out = clone(doc)
-  out.$uuid = uuid()
-  const stampRecords = (arr) => {
-    for (const r of arr || []) {
-      r.$uuid = uuid()
-      if (Array.isArray(r.page_sections)) stampRecords(r.page_sections)
-      if (Array.isArray(r.$children)) stampRecords(r.$children)
-    }
-  }
-  stampRecords(out.pages)
-  stampRecords(out.layout_sections)
-  stampRecords(out.extensions)
-  stampRecords(out.collections)
-  return out
-}
-
 describe('uwx/sync-package emitSyncPackage', () => {
-  it('includes the site-content entity even with no model: collections', async () => {
-    // `articles` has no `model:`, so it is NOT a record entity — but the site
-    // itself still syncs.
+  it('includes the site-content entity even with no syncable collections', async () => {
+    // `articles` has no resolvable schema here, so it is NOT a record entity (and
+    // there is no @uniweb/folder) — but the site itself still syncs.
     const pkg = await emitSyncPackage(ROOT)
     expect(pkg.siteIncluded).toBe(true)
     expect(pkg.models).toContain('@uniweb/site-content')
+    expect(pkg.models).not.toContain('@uniweb/folder')
     expect(pkg.entityCount).toBe(1) // just the site entity
     const idx = pkg.index.find((e) => e.kind === 'site')
     expect(idx).toBeTruthy()
@@ -92,7 +69,6 @@ describe('uwx/sync-package emitSyncPackage', () => {
   it('send-only-changed skips an unchanged site on the second build', async () => {
     const first = await emitSyncPackage(ROOT)
     expect(first.entityCount).toBe(1)
-    // Feed the prior hashes back: nothing changed → nothing to send.
     const second = await emitSyncPackage(ROOT, { priorHashes: first.hashes })
     expect(second.entityCount).toBe(0)
     expect(second.buffer).toBeNull()
@@ -101,90 +77,73 @@ describe('uwx/sync-package emitSyncPackage', () => {
 
   it('a content edit re-sends the site (hash includes nested $children)', async () => {
     const first = await emitSyncPackage(ROOT)
-    // Edit the @-nested child's body — a change buried in $children.
     w('pages/1-home/@detail.md', '---\ntype: Detail\nid: detail\n---\n# Much more\n')
     const second = await emitSyncPackage(ROOT, { priorHashes: first.hashes })
     expect(second.entityCount).toBe(1) // nesting change was NOT invisible
   })
 
-  it('the .uwx body is the nested site document', async () => {
+  it('the .uwx body is the nested site document, items carry $id but no $uuid', async () => {
     const pkg = await emitSyncPackage(ROOT)
     const files = readZip(pkg.buffer)
     const body = JSON.parse(files.get('entities/site-content.json').toString('utf8'))
     expect(body.$model).toBe('@uniweb/site-content')
+    expect(body).not.toHaveProperty('$uuid') // first sync — no entity uuid yet
     const home = body.pages.find((p) => p.slug === 'home')
+    expect(home.$id).toBe('home')
+    expect(home).not.toHaveProperty('$uuid')
     expect(home.page_sections[0].$id).toBe('hero')
+    expect(home.page_sections[0]).not.toHaveProperty('$uuid')
     expect(home.page_sections[0].$children[0].$id).toBe('detail') // @-nested
   })
 })
 
-describe('uwx/site sidecar back-fill round trip', () => {
-  it('records a minted $uuid for every record under the producer key', async () => {
-    const producer = await siteProjectToDocument(ROOT)
-    const finalized = fakeBackendFinalize(producer)
-    const { entities, items } = siteSidecarEntries(producer, finalized)
-
-    // entity
-    expect(entities['site-content']).toBe(finalized.$uuid)
-    // a page (by stable_id), its section, the @-nested child, a folder child page
-    expect(items['page:id:home']).toBeTruthy()
-    expect(items['page:id:home::sec:hero']).toBeTruthy()
-    expect(items['page:id:home::sec:hero::sec:detail']).toBeTruthy()
-    expect(items['page:id:intro']).toBeTruthy()
-    expect(items['page:id:intro::sec:body']).toBeTruthy()
-    // layout, extension, collection
-    expect(items['layout:default/header:header']).toBeTruthy()
-    expect(items['ext:https://cdn.example.com/x/entry.js']).toBeTruthy()
-    expect(items['col:articles']).toBeTruthy()
-
-    // every recorded uuid is one the fake backend minted (no key→uuid drift)
-    const minted = new Set()
-    const collect = (v) => {
-      if (Array.isArray(v)) v.forEach(collect)
-      else if (v && typeof v === 'object') {
-        if (v.$uuid) minted.add(v.$uuid)
-        Object.values(v).forEach(collect)
-      }
-    }
-    collect(finalized)
-    for (const u of Object.values(items)) expect(minted.has(u)).toBe(true)
+describe('uwx/site identity — entity uuid → site.yml, local move-tracking ledger', () => {
+  it('writeSiteEntityUuid records the entity uuid in site.yml, preserving the file', async () => {
+    writeSiteEntityUuid(ROOT, 'u-entity-1')
+    const after = readFileSync(join(ROOT, 'site.yml'), 'utf8')
+    expect(after).toMatch(/^\$uuid: u-entity-1$/m)
+    expect(after).toContain('name: Acme') // the rest is untouched
+    expect(after).toContain('foundation: "@acme/marketing@1"')
+    // a re-read carries that entity uuid; nested items stay uuid-less
+    const doc = await siteProjectToDocument(ROOT)
+    expect(doc.$uuid).toBe('u-entity-1')
+    const home = doc.pages.find((p) => p.slug === 'home')
+    expect(home).not.toHaveProperty('$uuid')
   })
 
-  it('CLOSED LOOP: back-filled sidecar makes the next producer doc carry those $uuids', async () => {
-    // 1. first sync — producer has no uuids
-    const producer1 = await siteProjectToDocument(ROOT)
-    expect(producer1).not.toHaveProperty('$uuid')
-    // 2. backend mints; verb records into the sidecar
-    const finalized = fakeBackendFinalize(producer1)
-    const sidecarPath = join(ROOT, '.uniweb', 'uwx-ids.json')
-    writeSiteSidecar(sidecarPath, producer1, finalized)
-    expect(existsSync(sidecarPath)).toBe(true)
-    // 3. re-sync — producer reads the sidecar and carries the SAME uuids back
-    const producer2 = await siteProjectToDocument(ROOT, { sidecar: true })
-    expect(producer2.$uuid).toBe(finalized.$uuid)
-    const home2 = producer2.pages.find((p) => p.slug === 'home')
-    const home1f = finalized.pages.find((p) => p.slug === 'home')
-    expect(home2.$uuid).toBe(home1f.$uuid) // page uuid round-trips
-    expect(home2.page_sections[0].$uuid).toBe(home1f.page_sections[0].$uuid) // section
-    expect(home2.page_sections[0].$children[0].$uuid).toBe(
-      home1f.page_sections[0].$children[0].$uuid
-    ) // @-nested child — the deepest round trip
-    // authored files never gained a uuid (it lives only in the sidecar)
+  it('updates an existing $uuid in place (single home, idempotent)', () => {
+    writeSiteEntityUuid(ROOT, 'u-1')
+    writeSiteEntityUuid(ROOT, 'u-2')
+    const text = readFileSync(join(ROOT, 'site.yml'), 'utf8')
+    expect(text.match(/\$uuid:/g)).toHaveLength(1) // not duplicated
+    expect(text).toMatch(/^\$uuid: u-2$/m)
+  })
+
+  it('recordSiteIdLedger writes a committed, key-sorted, backend-invisible ledger', async () => {
+    const doc = await siteProjectToDocument(ROOT)
+    const ledgerPath = join(ROOT, SITE_ID_LEDGER_RELPATH)
+    const n = recordSiteIdLedger(ledgerPath, doc)
+    expect(n).toBeGreaterThan(0)
+    expect(existsSync(ledgerPath)).toBe(true)
+    const store = JSON.parse(readFileSync(ledgerPath, 'utf8'))
+    // one local id per page / section / @-nested child / folder child / layout / ext
+    expect(store.items['page:id:home']).toBeTruthy()
+    expect(store.items['page:id:home::sec:hero']).toBeTruthy()
+    expect(store.items['page:id:home::sec:hero::sec:detail']).toBeTruthy()
+    expect(store.items['page:id:intro::sec:body']).toBeTruthy()
+    expect(store.items['layout:default/header:header']).toBeTruthy()
+    expect(store.items['ext:https://cdn.example.com/x/entry.js']).toBeTruthy()
+    // key-sorted for clean diffs
+    const keys = Object.keys(store.items)
+    expect(keys).toEqual([...keys].sort())
+  })
+
+  it('ledger is byte-stable across re-records; authored files never gain $uuid', async () => {
+    const ledgerPath = join(ROOT, SITE_ID_LEDGER_RELPATH)
+    recordSiteIdLedger(ledgerPath, await siteProjectToDocument(ROOT))
+    const first = readFileSync(ledgerPath, 'utf8')
+    recordSiteIdLedger(ledgerPath, await siteProjectToDocument(ROOT))
+    expect(readFileSync(ledgerPath, 'utf8')).toBe(first) // fixpoint — same ids reused
     expect(readFileSync(join(ROOT, 'pages/1-home/1-hero.md'), 'utf8')).not.toMatch(/\$uuid/)
-  })
-
-  it('preserves existing sidecar keys when merging new ones', async () => {
-    const sidecarPath = join(ROOT, '.uniweb', 'uwx-ids.json')
-    mkdirSync(join(ROOT, '.uniweb'), { recursive: true })
-    writeFileSync(
-      sidecarPath,
-      JSON.stringify({ entities: { 'old-key': 'keep-me' }, items: { 'old:item': 'keep-too' } })
-    )
-    const producer = await siteProjectToDocument(ROOT)
-    writeSiteSidecar(sidecarPath, producer, fakeBackendFinalize(producer))
-    const store = JSON.parse(readFileSync(sidecarPath, 'utf8'))
-    expect(store.entities['old-key']).toBe('keep-me') // preserved
-    expect(store.items['old:item']).toBe('keep-too')
-    expect(store.entities['site-content']).toBeTruthy() // and the new one added
   })
 })

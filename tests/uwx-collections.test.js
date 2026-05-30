@@ -119,11 +119,13 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
     expect(entities).toHaveLength(1)
     const [e] = entities
     expect(e.model).toBe('@acme/product')
-    expect(e.id).toBe('widget-x')
+    expect(e.id).toBe('products/widget-x') // path-style payload-local handle
+    expect(e.slug).toBe('widget-x')
+    expect(e.collection).toBe('products')
     expect(e.uuid).toBeNull() // first sync — backend mints
     expect(e.file).toBe('entities/products/widget-x.json')
     expect(e.document).not.toHaveProperty('items') // not the legacy items[] shape
-    expect(e.document.$id).toBe('widget-x')
+    expect(e.document.$id).toBe('products/widget-x')
     expect(e.document.$model).toBe('@acme/product')
     expect(e.document).not.toHaveProperty('$uuid')
     // brief section keyed by its name; its value is the fields object.
@@ -137,6 +139,7 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
       declaration,
     })
     expect(Object.keys(entities[0].document)).toEqual(['$id', '$model', 'product'])
+    expect(entities[0].document.$id).toBe('products/a')
   })
 
   it('emits the brief fields in schema-declared order', () => {
@@ -419,11 +422,13 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$model', 'product'])
   })
 
-  it('errors when no collection declares `model:`', async () => {
+  it('errors when no records are syncable (convention schema unresolved, soft-skipped)', async () => {
+    // `posts` has no explicit schema; the subfolder-name convention defaults it to
+    // `@/post`, which doesn't resolve (no foundation) → soft-skipped → no records.
     const bare = join(root, 'bare')
     mkdirSync(bare, { recursive: true })
     writeFileSync(join(bare, 'site.yml'), 'name: Bare\ncollections:\n  posts:\n    path: data/posts\n')
-    await expect(emitCollectionSyncPackage(bare)).rejects.toThrow(/no collection declares/)
+    await expect(emitCollectionSyncPackage(bare)).rejects.toThrow(/no records to export/)
   })
 })
 
@@ -576,7 +581,10 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     const { entityCount, skipped, hashes } = await emitCollectionSyncPackage(siteDir)
     expect(entityCount).toBe(2)
     expect(skipped).toBe(0)
-    expect(Object.keys(hashes).sort()).toEqual(['@acme/product a', '@acme/product b'])
+    expect(Object.keys(hashes).sort()).toEqual([
+      '@acme/product products/a',
+      '@acme/product products/b',
+    ])
   })
 
   it('skips records whose content hash matches the prior cache (nothing to send)', async () => {
@@ -597,7 +605,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     })
     expect(entityCount).toBe(1)
     expect(skipped).toBe(1)
-    expect(index[0].id).toBe('b')
+    expect(index[0].id).toBe('products/b')
   })
 
   it('sendAll bypasses the cache', async () => {

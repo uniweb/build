@@ -22,7 +22,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { readYamlFile } from '../site/content-collector.js'
+import { resolveCollectionsConfig } from './collections-config.js'
 import { readCollectionRecords } from './collection-source.js'
 import { toDataSchemaDeclaration } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
@@ -59,7 +59,10 @@ function stripSigils(value) {
   if (value && typeof value === 'object') {
     const out = {}
     for (const [k, v] of Object.entries(value)) {
-      if (k === '$children') {
+      // `$children` (a self-nesting subtree) and `$ref` (the @uniweb/folder leaf's
+      // reference target) are structural CONTENT, not identity sigils — keep them so
+      // a nesting or reference change is visible to "send only changed".
+      if (k === '$children' || k === '$ref') {
         out[k] = stripSigils(v)
         continue
       }
@@ -153,7 +156,10 @@ export function collectionRecordsToEntities({
       warnings.push(`${collectionName}: a record without a slug was skipped`)
       continue
     }
-    const id = record.$id || slug
+    // `$id` is the payload-local handle = the record's path under collections/
+    // (`<collection>/<slug>`), globally unique within one sync so the @uniweb/folder
+    // entity can point a leaf at it via `$ref`. An explicit frontmatter `$id` wins.
+    const id = record.$id || `${collectionName}/${slug}`
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
@@ -199,6 +205,7 @@ export function collectionRecordsToEntities({
       id,
       uuid,
       slug,
+      collection: collectionName, // the @uniweb/folder groups leaves by this
       model: declaration.name, // reference the Model BY NAME — importer resolves it
       file: `entities/${collectionName}/${slug}.json`,
       document,
@@ -210,12 +217,14 @@ export function collectionRecordsToEntities({
 // --- orchestration (file I/O) ------------------------------------------------
 
 // The collections in site.yml that opt into export (an object decl with `model:`).
-function syncableCollections(siteYml) {
-  const col = siteYml.collections
-  if (!col || typeof col !== 'object' || Array.isArray(col)) return []
+// The declared collections that opt into sync: a resolvable data schema present
+// (explicit or convention-defaulted) and not opted out (`sync: false`). Takes the
+// merged declarations from resolveCollectionsConfig (collections.yml over
+// site.yml::collections), so collections.yml is honored without re-reading.
+function syncableCollections(declarations) {
   const out = []
-  for (const [name, decl] of Object.entries(col)) {
-    if (decl && typeof decl === 'object' && decl.model) out.push({ name, decl })
+  for (const decl of Object.values(declarations)) {
+    if ((decl.schema || decl.model) && decl.sync !== false) out.push({ name: decl.name, decl })
   }
   return out
 }
@@ -321,16 +330,28 @@ async function loadSourceRecords(siteRoot, decl) {
  * @returns {Promise<{ entities: object[], index: object[], warnings: string[], mappedCount: number }>}
  */
 export async function buildCollectionEntities(siteRoot, opts = {}) {
-  const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
-  const mapped = syncableCollections(siteYml)
-  if (mapped.length === 0) return { entities: [], index: [], warnings: [], mappedCount: 0 }
+  // Merged collections config (collections.yml over site.yml::collections). Reused
+  // from the caller when provided (sync-package shares it with the folder builder).
+  const colConfig = opts.collectionsConfig || (await resolveCollectionsConfig(siteRoot))
+  if (!colConfig.folderSync) {
+    return { entities: [], index: [], warnings: [], mappedCount: 0, colConfig }
+  }
+  const mapped = syncableCollections(colConfig.declarations)
+  if (mapped.length === 0) return { entities: [], index: [], warnings: [], mappedCount: 0, colConfig }
 
   // A Model declaration comes from a LOCAL foundation (offline) or, for a
   // non-local Model, from the injected async `resolveModel(name)` — the verb wires
   // that to the backend's Model-read route (declaration form). The local
   // foundation is required ONLY when no resolver is provided.
   const resolveModel = typeof opts.resolveModel === 'function' ? opts.resolveModel : null
-  const localSchema = loadLocalFoundationSchema(siteRoot, opts, { required: !resolveModel })
+  // The local foundation is REQUIRED only when at least one collection asked for a
+  // schema EXPLICITLY (and there's no remote resolver). Collections that only got a
+  // schema from the subfolder-name convention soft-skip when nothing resolves, so a
+  // delivery-only site with no foundation must not be forced to have one.
+  const hasExplicit = mapped.some((m) => m.decl.schemaExplicit)
+  const localSchema = loadLocalFoundationSchema(siteRoot, opts, {
+    required: !resolveModel && hasExplicit,
+  })
 
   const declCache = new Map()
   const declarationFor = async (modelName) => {
@@ -353,10 +374,20 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   // reuse a slug).
   const seen = new Set()
   for (const { name, decl } of mapped) {
-    const declaration = await declarationFor(decl.model)
+    const modelName = decl.schema || decl.model
+    const declaration = await declarationFor(modelName)
     if (!declaration) {
+      // A convention-defaulted schema (subfolder-name) that doesn't resolve is a
+      // soft skip — the collection is delivery-only, not a sync target. Only an
+      // EXPLICIT schema/model the author asked for is a hard error.
+      if (!decl.schemaExplicit) {
+        warnings.push(
+          `${name}: no data schema "${modelName}" (subfolder-name default) — not synced`
+        )
+        continue
+      }
       throw new Error(
-        `uwx/collections: Model "${decl.model}" (collection "${name}") could not be ` +
+        `uwx/collections: Model "${modelName}" (collection "${name}") could not be ` +
           'resolved — not defined by a local foundation' +
           (resolveModel
             ? ', and the backend has no such Model (register it first).'
@@ -428,7 +459,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     warnings.push(...mappedOut.warnings)
   }
 
-  return { entities, index, warnings, mappedCount: mapped.length }
+  return { entities, index, warnings, mappedCount: mapped.length, colConfig }
 }
 
 /**

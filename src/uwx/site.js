@@ -12,8 +12,14 @@
 // (self-nesting; each page carries its `page_sections` as an inline field) ·
 // `layout_sections` · `extensions` · `collections`. `info.foundation_name`
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
-// truth). Identity is `$id` (the stableId); `$uuid` is injected read-only from
-// the committed id sidecar — the backend mints it, never this producer.
+// truth).
+//
+// IDENTITY. The ENTITY `$uuid`
+// lives in `site.yml` (top-level `$uuid`); we read it, send it, and back-fill the
+// minted value there. Nested pages/sections carry a `$id` handle but NO per-item
+// `$uuid` — the backend takes site-content content wholesale (collision=force), so
+// there is no per-item uuid round-trip on the wire. Our own move-tracking local ids
+// (the `.uniweb/site-ids.json` ledger) stay off the wire entirely.
 //
 // `@`-prefix child sections declared in `page.yml::nest:` ARE reconstructed —
 // they ride under their parent section's `$children` (page_sections is
@@ -41,9 +47,19 @@ import {
 } from '../site/content-collector.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { sidecarLookup, writeSidecarStore, SIDECAR_RELPATH } from './identity.js'
+import { sidecarResolver } from './identity.js'
+import { upsertYamlScalar } from './yaml-upsert.js'
+import { resolveCollectionsConfig } from './collections-config.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
+
+// Our OWN committed move-tracking ledger — local ids per page/section, keyed by the
+// structural key (stableId-chain, path fallback). Backend-invisible: it never crosses
+// the wire (site-content syncs wholesale under collision=force; the only backend uuid
+// for site-content is the ENTITY uuid, which lives in site.yml). The ledger is the seam
+// a future pull/reconcile reads to match returned content back to local files; minting
+// the ids now means they're already stable when that arrives. See recordSiteIdLedger.
+const SITE_ID_LEDGER_RELPATH = '.uniweb/site-ids.json'
 
 function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
@@ -159,9 +175,10 @@ const DYNAMIC_RE = /^\[(.+)\]$/
 //   - genuine self-nesting uses `$children`: a folder's child pages (within
 //     `pages`), and `@`-prefix child sections declared in `nest:` (within
 //     `page_sections`). Cross-section parentage is pure structure, never `$parent`.
-//   - identity is `$id` (the stableId — the in-file handle), with `$uuid` injected
-//     ONLY from the committed sidecar when known (read-only lookup; the backend
-//     mints, the verb records — uuids never touch authored files). §4 of the plan.
+//   - identity on the wire is `$id` (the stableId — the in-file handle) at every
+//     item level, with NO per-item `$uuid` (the entity `$uuid` lives in site.yml;
+//     the backend takes site-content content wholesale). See the IDENTITY note in
+//     the file header.
 //
 // v0 deferrals: folder-mode `.md`-as-pages, `paths:` mounts, versioned scopes, and
 // media/asset bytes (favicon/assets, carried out of band). `@`-prefix `nest:`
@@ -171,14 +188,14 @@ const DYNAMIC_RE = /^\[(.+)\]$/
 const SITE_MODEL_NAME = '@uniweb/site-content'
 
 // ---------------------------------------------------------------------------
-// Sidecar keys — the SINGLE source of truth for how a record maps to its
-// `.uniweb/uwx-ids.json` slot. Used on BOTH sides of the round trip: the
-// producer (`siteProjectToDocument`) reads a uuid by key; the back-fill
-// (`siteSidecarEntries`) writes the minted uuid back under the SAME key. They
-// must never diverge, so they call these — not inline template strings.
+// Structural keys — the SINGLE source of truth for how an item maps to its
+// `.uniweb/site-ids.json` ledger slot (our local move-tracking, off the wire).
+// `collectSiteIdKeys` derives a key per item; the ledger mints/persists a local id
+// under it. They must never diverge, so callers use these — not inline templates.
 //
 //   - page    : `page:id:<stableId>`  when authored; else `page:path:<slugPath>`
-//               (path is a fallback only — a rename breaks it; §4)
+//               (path is a fallback only — a rename breaks it; recoverable later
+//               by content-match)
 //   - section : `<parentKey>::sec:<secId>`  (chains for self-nested @-children)
 //   - layout  : `layout:<layoutName>/<area>:<stable>`
 //   - ext     : `ext:<url>`            - col: `col:<name>`
@@ -190,28 +207,23 @@ const layoutKeyFor = (layoutName, area, stable) => `layout:${layoutName}/${area}
 const extKeyFor = (url) => `ext:${url}`
 const colKeyFor = (name) => `col:${name}`
 
-// `$uuid?` then `$id`, then the record's fields — the wire's canonical key order
-// (mirrors collections.js). `fields` already carries `stable_id` (the Model field);
-// `$id` is the same value as the identity sigil. Both are kept: `$id` is the sync
-// handle, `stable_id` is the declared content field the editor/render reads.
-function withIdentity(id, uuid, fields) {
-  const rec = {}
-  if (uuid) rec.$uuid = uuid
-  rec.$id = id
-  return Object.assign(rec, fields)
+// `$id` (the handle), then the record's fields — the wire's canonical key order.
+// `fields` already carries `stable_id` (the Model field); `$id` is the same value.
+// Both are kept: `$id` is the sync handle, `stable_id` is the declared content field
+// the editor/render reads. No per-item `$uuid` on the wire (see the IDENTITY note in
+// the file header) — items are content of the one site-content entity.
+function withIdentity(id, fields) {
+  return Object.assign({ $id: id }, fields)
 }
 
 // One collected section → its `$`-record, recursing `subsections` into `$children`
-// (page_sections is self_nesting). The sidecar key chains by stableId at every
-// depth, so a uuid stays bound to a section through a rename or a re-order.
-function sectionToRecord(section, parentKey, lookup, index) {
+// (page_sections is self_nesting). `$id` is the section's stableId (rename-stable),
+// falling back to a positional handle only for a truly anonymous section.
+function sectionToRecord(section, index) {
   const secId = section.stableId || `s${index}`
-  const key = sectionKeyFor(parentKey, secId)
-  const rec = withIdentity(secId, lookup.item(key), mapSectionData(section))
+  const rec = withIdentity(secId, mapSectionData(section))
   if (Array.isArray(section.subsections) && section.subsections.length > 0) {
-    rec.$children = section.subsections.map((c, j) =>
-      sectionToRecord(c, key, lookup, j)
-    )
+    rec.$children = section.subsections.map((c, j) => sectionToRecord(c, j))
   }
   return rec
 }
@@ -235,7 +247,7 @@ function findSectionFileName(mdFiles, sectionName) {
 // We reconstruct the parent→child tree ourselves (rather than the build's
 // `processNesting`) so this stays a pure read of the source — no shared
 // mutable-warning paths — and the nesting is keyed by the section's stableId.
-async function collectPageSectionsNested(pageDir, siteRoot, pageKey, lookup, pageConfig) {
+async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const nest = pageConfig?.nest && typeof pageConfig.nest === 'object' ? pageConfig.nest : {}
 
@@ -272,13 +284,13 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageKey, lookup, pag
     sections.push(await buildSection(file, seen))
   }
 
-  return sections.map((s, i) => sectionToRecord(s, pageKey, lookup, i))
+  return sections.map((s, i) => sectionToRecord(s, i))
 }
 
 // Recursively build the `pages` tree: each record carries its fields, its inline
 // `page_sections` (page mode only), and its child pages under `$children`.
 async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot) {
-  const { siteRoot, lookup, siteIndex, sourceLocale } = ctx
+  const { siteRoot, siteIndex, sourceLocale } = ctx
   const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig)
   const out = []
   for (let i = 0; i < folders.length; i++) {
@@ -298,15 +310,12 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
       sourceLocale,
     })
     // `$id` is the stableId when authored (rename-stable), else the slug (the
-    // natural handle — spec default). The path is NEVER the identity; the sidecar
-    // key falls back to slugPath only to locate a prior uuid for a still-id-less
-    // page, which "make stableId authoritative" (§4) removes by minting an id.
+    // natural handle — spec default). The path is NEVER the identity.
     const id = data.stable_id || slug
-    const pageKey = pageKeyFor(data.stable_id, slugPath)
-    const record = withIdentity(id, lookup.item(pageKey), data)
+    const record = withIdentity(id, data)
 
     if (mode === 'page') {
-      const sections = await collectPageSectionsNested(f.path, siteRoot, pageKey, lookup, f.config)
+      const sections = await collectPageSectionsNested(f.path, siteRoot, f.config)
       if (sections.length > 0) record.page_sections = sections
     }
 
@@ -320,16 +329,15 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
 
 // layout_sections: top-level self-nesting, keyed by (layout_name, area) in data.
 // Same per-area walk as collectLayoutSections, emitted as `$`-records.
-async function collectLayoutNested(layoutDir, siteRoot, lookup) {
+async function collectLayoutNested(layoutDir, siteRoot) {
   if (!existsSync(layoutDir)) return []
   const items = []
   let order = 0
   async function addArea(filePath, layoutName, area) {
     const { section } = await processMarkdownFile(filePath, String(order + 1), siteRoot, area)
     const stable = section.stableId || String(order)
-    const uuid = lookup.item(layoutKeyFor(layoutName, area, stable))
     items.push(
-      withIdentity(stable, uuid, { layout_name: layoutName, area, ...mapSectionData(section) })
+      withIdentity(stable, { layout_name: layoutName, area, ...mapSectionData(section) })
     )
     order++
   }
@@ -352,26 +360,27 @@ async function collectLayoutNested(layoutDir, siteRoot, lookup) {
   return items
 }
 
-function extensionsNested(siteYml, lookup) {
+function extensionsNested(siteYml) {
   const ext = siteYml.extensions
   if (!Array.isArray(ext)) return []
   const out = []
   for (const url of ext) {
     if (typeof url !== 'string') continue // object form deferred (v0)
-    out.push(withIdentity(url, lookup.item(extKeyFor(url)), { url }))
+    out.push(withIdentity(url, { url }))
   }
   return out
 }
 
-function collectionsNested(siteYml, lookup) {
-  const col = siteYml.collections
-  if (!col || typeof col !== 'object' || Array.isArray(col)) return []
+// The collection DECLARATIONS carried inside site-content `info`-adjacent metadata.
+// Merges the co-located `collections.yml` (the home for file-based decls) over the
+// legacy `site.yml::collections` (kept for remote `url:` sources + back-compat).
+function collectionsNested(declarations) {
   const out = []
-  for (const [name, decl] of Object.entries(col)) {
-    const d = decl && typeof decl === 'object' ? decl : {}
+  for (const [name, d] of Object.entries(declarations)) {
     const data = {}
     const source = d.path ? { path: d.path } : d.url ? { url: d.url } : d.source
     setIf(data, 'source', source)
+    setIf(data, 'schema', d.schema)
     setIf(data, 'sort', d.sort)
     setIf(data, 'filter', d.filter)
     setIf(data, 'where', d.where)
@@ -380,21 +389,21 @@ function collectionsNested(siteYml, lookup) {
     setIf(data, 'deferred', d.deferred)
     setIf(data, 'detail_url', d.detailUrl)
     setIf(data, 'queryable', d.queryable)
-    out.push(withIdentity(name, lookup.item(colKeyFor(name)), { name, ...data }))
+    out.push(withIdentity(name, { name, ...data }))
   }
   return out
 }
 
 /**
  * Map a file site project to the nested `@uniweb/site-content` `$`-document
- * (Phase 0 shape — see the lane header above). PURE except for the read-only
- * sidecar lookup; never mints, never writes.
+ * (see the lane header above). PURE — reads the project, never mints, never writes.
+ * The entity `$uuid` comes from `site.yml::$uuid` (back-filled after first sync);
+ * nested items carry `$id` only.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
- * @param {boolean|string} [opts.sidecar] - read uuids from this sidecar (`true` →
- *        `<siteRoot>/.uniweb/uwx-ids.json`; a string → that path). Default: none
- *        (first-sync shape — `$id` only, no `$uuid`).
+ * @param {string} [opts.entityUuid] - override the entity `$uuid` (tests); default
+ *        is `site.yml::$uuid` (absent on first sync — `$id`-only document).
  * @param {string} [opts.sourceLocale] - localized-field wrap locale (default "en").
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, collections }`
@@ -402,11 +411,6 @@ function collectionsNested(siteYml, lookup) {
 export async function siteProjectToDocument(siteRoot, opts = {}) {
   const sourceLocale =
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
-  const lookup = opts.sidecar
-    ? sidecarLookup(
-        typeof opts.sidecar === 'string' ? opts.sidecar : join(siteRoot, SIDECAR_RELPATH)
-      )
-    : { entity: () => undefined, item: () => undefined }
 
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
   if (!siteYml.name) {
@@ -446,7 +450,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'paths_config', siteYml.paths)
   setIf(info, 'data_config', siteYml.data ?? siteYml.fetch)
 
-  const ctx = { siteRoot, lookup, siteIndex: siteYml.index, sourceLocale }
+  const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale }
   const pagesPath = siteYml.paths?.pages
     ? join(siteRoot, siteYml.paths.pages)
     : join(siteRoot, 'pages')
@@ -457,19 +461,25 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   const layoutDir = siteYml.paths?.layout
     ? join(siteRoot, siteYml.paths.layout)
     : join(siteRoot, 'layout')
-  const layoutSections = await collectLayoutNested(layoutDir, siteRoot, lookup)
+  const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
 
-  // `$uuid?` then `$id` `$model`, then sections in Model-declared order.
+  // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
+  // config (the records themselves are separate entities; this is just the config).
+  const colConfig = await resolveCollectionsConfig(siteRoot, { siteYml })
+
+  // `$uuid?` then `$id` `$model`, then sections in Model-declared order. The entity
+  // `$uuid` lives in site.yml (back-filled after first sync); absent on first sync.
   const doc = {}
-  const entityUuid = opts.entityUuid || lookup.entity(SITE_ENTITY_KEY)
+  const entityUuid =
+    opts.entityUuid || (typeof siteYml.$uuid === 'string' ? siteYml.$uuid : undefined)
   if (entityUuid) doc.$uuid = entityUuid
   doc.$id = SITE_ENTITY_KEY // one site-content entity per project (stable handle)
   doc.$model = SITE_MODEL_NAME
   doc.info = info
   doc.pages = pages
   doc.layout_sections = layoutSections
-  doc.extensions = extensionsNested(siteYml, lookup)
-  doc.collections = collectionsNested(siteYml, lookup)
+  doc.extensions = extensionsNested(siteYml)
+  doc.collections = collectionsNested(colConfig.declarations)
   return doc
 }
 
@@ -502,78 +512,81 @@ export async function emitSiteSyncPackage(siteRoot, opts = {}) {
 }
 
 // ===========================================================================
-// Sidecar back-fill — record the minted `$uuid`s from a sync response.
+// Identity back-fill + local move-tracking ledger.
 //
-// The backend mints a `$uuid` for the entity and every nested record, and echoes
-// the full document back with those uuids injected at every level (the sync
-// lane's `finalized[].document`; see entity-content.md and the backend's
-// `content::build`). We derive each record's sidecar KEY from the PRODUCER
-// document (it has the complete structure + the `$id`/field data the keys need —
-// including the positional `s<n>` fallback), and read the matching `$uuid` from
-// the FINALIZED document by a lockstep structural walk. Keys come from the side
-// we fully control; uuids from the side the backend filled in. Same structure on
-// both (the backend echoes what it stored), so the walk aligns; a shape mismatch
-// is skipped, never mis-bound.
+// Two distinct things, deliberately separate:
+//
+//  (1) The ENTITY `$uuid` (the backend's identity for the whole site-content
+//      entity) is back-filled into `site.yml::$uuid` after the first sync
+//      (writeSiteEntityUuid). That is the ONLY backend uuid for site-content.
+//
+//  (2) The per-page/section local ids are OUR OWN book-keeping — minted and
+//      persisted in the committed `.uniweb/site-ids.json` ledger, keyed by each
+//      item's structural key (stableId-chain, path fallback). They never cross the
+//      wire (the backend takes site-content content wholesale under
+//      collision=force, so there is no per-item uuid round-trip). The ledger is the
+//      seam a future pull/reconcile reads to match returned content back to files;
+//      minting the ids now keeps them stable for when that arrives.
 // ===========================================================================
 
-// Build { entities, items } sidecar additions from a producer↔finalized doc pair.
-export function siteSidecarEntries(producerDoc, finalizedDoc) {
-  const entities = {}
-  const items = {}
-  if (finalizedDoc?.$uuid) entities[SITE_ENTITY_KEY] = finalizedDoc.$uuid
-
-  const visitSections = (prod, fin, parentKey) => {
-    for (let i = 0; i < (prod?.length || 0); i++) {
-      const p = prod[i]
-      const f = fin?.[i]
-      const key = sectionKeyFor(parentKey, p.$id)
-      if (f?.$uuid) items[key] = f.$uuid
-      if (Array.isArray(p.$children)) visitSections(p.$children, f?.$children, key)
+// Walk a producer document and collect the structural key for every nested item,
+// in document order. Same key derivation the wire used before per-item identity
+// moved off-wire (page by stableId/slugPath, section by parent-chain, etc.).
+export function collectSiteIdKeys(document) {
+  const keys = []
+  const visitSections = (secs, parentKey) => {
+    for (const s of secs || []) {
+      const key = sectionKeyFor(parentKey, s.$id)
+      keys.push(key)
+      if (Array.isArray(s.$children)) visitSections(s.$children, key)
     }
   }
-  const visitPages = (prod, fin, parentSlugPath) => {
-    for (let i = 0; i < (prod?.length || 0); i++) {
-      const p = prod[i]
-      const f = fin?.[i]
+  const visitPages = (pages, parentSlugPath) => {
+    for (const p of pages || []) {
       const slugPath = parentSlugPath ? `${parentSlugPath}/${p.slug}` : p.slug
       const key = pageKeyFor(p.stable_id, slugPath)
-      if (f?.$uuid) items[key] = f.$uuid
-      if (Array.isArray(p.page_sections)) visitSections(p.page_sections, f?.page_sections, key)
-      if (Array.isArray(p.$children)) visitPages(p.$children, f?.$children, slugPath)
+      keys.push(key)
+      if (Array.isArray(p.page_sections)) visitSections(p.page_sections, key)
+      if (Array.isArray(p.$children)) visitPages(p.$children, slugPath)
     }
   }
-
-  visitPages(producerDoc?.pages, finalizedDoc?.pages, '')
-
-  const prodLayout = producerDoc?.layout_sections || []
-  const finLayout = finalizedDoc?.layout_sections || []
-  for (let i = 0; i < prodLayout.length; i++) {
-    const p = prodLayout[i]
-    const f = finLayout[i]
-    if (f?.$uuid) items[layoutKeyFor(p.layout_name, p.area, p.$id)] = f.$uuid
+  visitPages(document?.pages, '')
+  for (const l of document?.layout_sections || []) {
+    keys.push(layoutKeyFor(l.layout_name, l.area, l.$id))
   }
-  const prodExt = producerDoc?.extensions || []
-  const finExt = finalizedDoc?.extensions || []
-  for (let i = 0; i < prodExt.length; i++) {
-    if (finExt[i]?.$uuid) items[extKeyFor(prodExt[i].url)] = finExt[i].$uuid
-  }
-  const prodCol = producerDoc?.collections || []
-  const finCol = finalizedDoc?.collections || []
-  for (let i = 0; i < prodCol.length; i++) {
-    if (finCol[i]?.$uuid) items[colKeyFor(prodCol[i].name)] = finCol[i].$uuid
-  }
-  return { entities, items }
+  for (const e of document?.extensions || []) keys.push(extKeyFor(e.url))
+  for (const c of document?.collections || []) keys.push(colKeyFor(c.name))
+  return keys
 }
 
 /**
- * Merge the minted site-content `$uuid`s into the committed sidecar.
- * @param {string} sidecarPath   - `.uniweb/uwx-ids.json`
- * @param {object} producerDoc   - the document we submitted (key source)
- * @param {object} finalizedDoc  - the backend's echoed document (uuid source)
- * @returns {{ entities: object, items: object }} the additions written
+ * Mint + persist a stable LOCAL id for every page/section/item in `document`, into
+ * the committed `.uniweb/site-ids.json` ledger (key-sorted, idempotent). Backend-
+ * invisible; never placed on the wire. Stable across re-exports (an unchanged item
+ * keeps its id); the structural key is rename-stable for authored-`id:` items and
+ * falls back to path for id-less ones (a documented v1 limit, recoverable later by
+ * content-match). Returns the number of keys recorded.
+ *
+ * @param {string} ledgerPath  - `<siteRoot>/.uniweb/site-ids.json`
+ * @param {object} document    - the producer's site-content `$`-document
  */
-export function writeSiteSidecar(sidecarPath, producerDoc, finalizedDoc) {
-  const additions = siteSidecarEntries(producerDoc, finalizedDoc)
-  writeSidecarStore(sidecarPath, additions)
-  return additions
+export function recordSiteIdLedger(ledgerPath, document) {
+  const resolver = sidecarResolver(ledgerPath)
+  const keys = collectSiteIdKeys(document)
+  for (const key of keys) resolver.item(key) // mint-if-absent, reuse-if-present
+  resolver.flush() // writes only when something changed
+  return keys.length
 }
+
+/**
+ * Back-fill the minted site-content entity `$uuid` into `site.yml` (top-level
+ * `$uuid`), preserving the file's comments and key order.
+ * @param {string} siteRoot
+ * @param {string} uuid - the entity uuid the backend minted/echoed
+ * @returns {boolean} true if site.yml changed
+ */
+export function writeSiteEntityUuid(siteRoot, uuid) {
+  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$uuid', uuid)
+}
+
+export { SITE_ID_LEDGER_RELPATH }

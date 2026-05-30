@@ -181,27 +181,36 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     expect(col.sort).toBe('date desc')
   })
 
-  it('injects $uuid from a committed sidecar (read-only), never minting', async () => {
-    // Simulate a post-first-sync sidecar: the backend minted, the verb recorded.
-    const sidecar = join(ROOT, '.uniweb', 'uwx-ids.json')
-    mkdirSync(join(ROOT, '.uniweb'), { recursive: true })
-    writeFileSync(
-      sidecar,
-      JSON.stringify({
-        entities: { 'site-content': '019e0000-0000-7000-8000-0000000000ee' },
-        items: { 'page:id:home': '019e0000-0000-7000-8000-000000000001' },
-      })
-    )
-    const doc = await siteProjectToDocument(ROOT, { sidecar: true })
+  it('the ENTITY $uuid leads the document; nested items never carry $uuid', async () => {
+    // First sync: site.yml has no $uuid → no entity uuid, no item uuids anywhere.
+    const first = await siteProjectToDocument(ROOT)
+    expect(first).not.toHaveProperty('$uuid')
+    const home0 = first.pages.find((p) => p.slug === 'home')
+    expect(home0).not.toHaveProperty('$uuid')
+    expect(home0.page_sections[0]).not.toHaveProperty('$uuid')
+
+    // The entity uuid (back-filled into site.yml; here via opts.entityUuid) leads the
+    // document in canonical key order — but no item ever gets a $uuid on the wire.
+    const doc = await siteProjectToDocument(ROOT, {
+      entityUuid: '019e0000-0000-7000-8000-0000000000ee',
+    })
     expect(doc.$uuid).toBe('019e0000-0000-7000-8000-0000000000ee')
+    expect(Object.keys(doc).slice(0, 3)).toEqual(['$uuid', '$id', '$model'])
     const home = doc.pages.find((p) => p.slug === 'home')
-    expect(home.$uuid).toBe('019e0000-0000-7000-8000-000000000001')
-    // $uuid leads, then $id — canonical key order
-    expect(Object.keys(home).slice(0, 2)).toEqual(['$uuid', '$id'])
-    // a record with no sidecar entry stays uuid-less (no local mint)
-    const docsFolder = doc.pages.find((p) => p.slug === 'docs')
-    expect(docsFolder).not.toHaveProperty('$uuid')
-    rmSync(join(ROOT, '.uniweb'), { recursive: true, force: true })
+    expect(home).not.toHaveProperty('$uuid')
+    expect(home.$id).toBe('home') // identity handle stays
+    expect(home.page_sections[0]).not.toHaveProperty('$uuid')
+  })
+
+  it('reads the entity $uuid from site.yml::$uuid', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'uwx-site-uuid-'))
+    writeFileSync(
+      join(dir, 'site.yml'),
+      '$uuid: 019e0000-0000-7000-8000-00000000abcd\nname: X\nfoundation: "@a/b@1"\n'
+    )
+    const doc = await siteProjectToDocument(dir)
+    expect(doc.$uuid).toBe('019e0000-0000-7000-8000-00000000abcd')
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('requires name and foundation', async () => {

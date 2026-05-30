@@ -42,9 +42,21 @@ export {
 export {
   siteProjectToDocument,
   emitSiteSyncPackage,
-  siteSidecarEntries,
-  writeSiteSidecar,
+  collectSiteIdKeys,
+  recordSiteIdLedger,
+  writeSiteEntityUuid,
+  SITE_ID_LEDGER_RELPATH,
 } from './site.js'
+export {
+  resolveCollectionsConfig,
+  collectionsYmlPath,
+  COLLECTIONS_YML_RELPATH,
+} from './collections-config.js'
+export { upsertYamlScalar } from './yaml-upsert.js'
+export {
+  buildFolderEntity,
+  writeFolderUuid,
+} from './folder.js'
 export { emitSyncPackage } from './sync-package.js'
 export {
   collectionRecordsToEntities,
