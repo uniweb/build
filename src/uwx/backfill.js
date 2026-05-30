@@ -302,9 +302,10 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
       warnings.push(`finalized index ${i} has no matching submitted entity`)
       continue
     }
-    // The site-content entity backs-fills into the sidecar, not a source file —
-    // the caller handles it (writeSiteSidecar); skip it here.
-    if (entry.kind === 'site') continue
+    // The site-content and folder entities back-fill into their own files (site.yml
+    // and collections.yml), which the caller handles (writeSiteEntityUuid /
+    // writeFolderUuid) — they have no record source file, so skip them here.
+    if (entry.kind === 'site' || entry.kind === 'folder') continue
     if (!entry.sourceFile) {
       deferred.push({ index: i, id: entry.id, reason: 'no source file on disk' })
       continue
