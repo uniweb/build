@@ -2,7 +2,7 @@
  * Tests for locale resolution utilities
  */
 
-import { jest, describe, it, expect, beforeAll, afterAll } from '@jest/globals'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { getAvailableLocales, resolveLocales } from '../../src/i18n/index.js'

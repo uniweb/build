@@ -22,8 +22,8 @@ beforeAll(() => {
   // --- foundation (flat layout: srcDir === foundation root) ---
   mkdirSync(join(foundationPath, 'schemas'), { recursive: true })
   mkdirSync(join(foundationPath, 'sections', 'DataDump'), { recursive: true })
-  // `type: module` is mandatory — `meta.js` is ESM, and without it jest's
-  // VM-module loader treats the `.js` as CommonJS and fails to import it (real
+  // `type: module` is mandatory — `meta.js` is ESM, and without it the module
+  // loader treats the `.js` as CommonJS and fails to import it (real
   // foundations are always ESM-only).
   writeFileSync(
     join(foundationPath, 'package.json'),
