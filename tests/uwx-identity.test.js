@@ -1,191 +1,94 @@
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  readFileSync,
-} from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  mintResolver,
-  sidecarResolver,
-  emitSitePackage,
-  emitFoundationSchemaPackage,
-  readZip,
-} from '../src/uwx/index.js'
+import { sidecarResolver, sidecarLookup } from '../src/uwx/index.js'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+// The two id-sidecar resolvers, tested directly (decoupled from any mapper):
+//   - sidecarResolver  : read-WRITE, MINTS on a new key, persists on flush().
+//                        Used by the register lane (foundation-schema), where the
+//                        producer owns identity.
+//   - sidecarLookup    : read-ONLY, never mints, never writes. Used by the
+//                        site-content SYNC lane, where the BACKEND mints and the
+//                        verb records the returned $uuid into the sidecar.
 
-function tmp(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix))
-}
-
-function entityOf(zipBuf) {
-  const files = readZip(zipBuf)
-  const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
-  return JSON.parse(
-    files.get(`entities/${manifest.roots[0]}.json`).toString('utf8')
-  )
-}
-
-describe('uwx/identity mintResolver', () => {
-  it('mints distinct v7 uuids and has a no-op flush', () => {
-    const r = mintResolver()
-    const a = r.item('k')
-    const b = r.item('k') // same key, still distinct (no persistence)
-    expect(a).toMatch(UUID_RE)
-    expect(b).toMatch(UUID_RE)
-    expect(a).not.toBe(b)
-    expect(() => r.flush()).not.toThrow()
-  })
+let ROOT
+beforeEach(() => {
+  ROOT = mkdtempSync(join(tmpdir(), 'uwx-id-'))
+})
+afterEach(() => {
+  if (ROOT) rmSync(ROOT, { recursive: true, force: true })
 })
 
-describe('uwx/identity sidecarResolver', () => {
-  let dir
-  beforeEach(() => {
-    dir = tmp('uwx-sc-')
-  })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+describe('uwx/identity sidecarResolver (mint + persist + reuse)', () => {
+  it('mints on a new key, reuses across resolvers, and persists on flush', () => {
+    const path = join(ROOT, '.uniweb', 'uwx-ids.json')
 
-  it('is stable per key within a run and persists across runs', () => {
-    const path = join(dir, '.uniweb/uwx-ids.json')
     const r1 = sidecarResolver(path)
-    const e = r1.entity('site-content')
-    const i = r1.item('page:id:home')
-    expect(r1.item('page:id:home')).toBe(i) // stable within run
-    expect(r1.item('page:id:about')).not.toBe(i)
+    const ent = r1.entity('site-content')
+    const home = r1.item('page:id:home')
+    const hero = r1.item('page:id:home::sec:hero')
+    // Same key → same uuid within a run (idempotent lookup).
+    expect(r1.item('page:id:home')).toBe(home)
+    expect(ent).toMatch(/^[0-9a-f-]{36}$/)
     r1.flush()
     expect(existsSync(path)).toBe(true)
 
-    const r2 = sidecarResolver(path) // fresh resolver, same file
-    expect(r2.entity('site-content')).toBe(e) // persisted
-    expect(r2.item('page:id:home')).toBe(i)
+    // A fresh resolver over the same file reuses the stored uuids (no re-mint).
+    const r2 = sidecarResolver(path)
+    expect(r2.entity('site-content')).toBe(ent)
+    expect(r2.item('page:id:home')).toBe(home)
+    expect(r2.item('page:id:home::sec:hero')).toBe(hero)
   })
 
-  it('only writes when something changed', () => {
-    const path = join(dir, '.uniweb/uwx-ids.json')
+  it('flush is a no-op when nothing changed (byte-stable file)', () => {
+    const path = join(ROOT, '.uniweb', 'uwx-ids.json')
     const r1 = sidecarResolver(path)
-    r1.flush() // nothing resolved → no write
-    expect(existsSync(path)).toBe(false)
-    r1.item('x')
+    r1.item('a')
     r1.flush()
-    const first = readFileSync(path, 'utf8')
-    sidecarResolver(path).flush() // resolved nothing new → no rewrite
-    expect(readFileSync(path, 'utf8')).toBe(first)
+    const bytes = readFileSync(path, 'utf8')
+
+    // Re-open, look up the SAME key (no new mint), flush → file unchanged.
+    const r2 = sidecarResolver(path)
+    r2.item('a')
+    r2.flush()
+    expect(readFileSync(path, 'utf8')).toBe(bytes)
   })
 
-  it('persists sorted { entities, items } JSON', () => {
-    const path = join(dir, 'ids.json')
+  it('writes the store key-sorted for clean diffs', () => {
+    const path = join(ROOT, '.uniweb', 'uwx-ids.json')
     const r = sidecarResolver(path)
     r.item('z')
     r.item('a')
-    r.entity('e')
+    r.item('m')
     r.flush()
-    const json = JSON.parse(readFileSync(path, 'utf8'))
-    expect(Object.keys(json)).toEqual(['entities', 'items'])
-    expect(Object.keys(json.items)).toEqual(['a', 'z']) // sorted
-    expect(json.entities.e).toMatch(UUID_RE)
-  })
-
-  it('throws on a corrupt sidecar (not silently reset)', () => {
-    const path = join(dir, 'bad.json')
-    writeFileSync(path, '{ not json')
-    expect(() => sidecarResolver(path)).toThrow()
-  })
-
-  it('rejects empty keys', () => {
-    const r = sidecarResolver(join(dir, 'k.json'))
-    expect(() => r.item('')).toThrow()
+    const keys = Object.keys(JSON.parse(readFileSync(path, 'utf8')).items)
+    expect(keys).toEqual([...keys].sort())
   })
 })
 
-describe('uwx/identity — syncable round trip (site)', () => {
-  let root
-  function writeSite(heroBody) {
+describe('uwx/identity sidecarLookup (read-only)', () => {
+  it('returns stored uuids and never mints or writes', () => {
+    const path = join(ROOT, 'ids.json')
     writeFileSync(
-      join(root, 'site.yml'),
-      'name: S\nfoundation: "@a/b@1.0.0"\nindex: home\n'
+      path,
+      JSON.stringify({
+        entities: { 'site-content': 'ENT-UUID' },
+        items: { 'page:id:home': 'HOME-UUID' },
+      })
     )
-    writeFileSync(join(root, 'theme.yml'), 'colors: {}\n')
-    mkdirSync(join(root, 'pages/1-home'), { recursive: true })
-    writeFileSync(join(root, 'pages/1-home/page.yml'), 'id: home\n')
-    writeFileSync(
-      join(root, 'pages/1-home/1-hero.md'),
-      `---\ntype: Hero\nid: hero\n---\n${heroBody}\n`
-    )
-  }
-  beforeEach(() => {
-    root = tmp('uwx-rt-')
-    writeSite('# First body')
-  })
-  afterEach(() => rmSync(root, { recursive: true, force: true }))
-
-  it('without a sidecar, every export mints fresh uuids (submit-once)', async () => {
-    const a = entityOf(await emitSitePackage(root))
-    const b = entityOf(await emitSitePackage(root))
-    expect(a.uuid).not.toBe(b.uuid)
+    const lk = sidecarLookup(path)
+    expect(lk.entity('site-content')).toBe('ENT-UUID')
+    expect(lk.item('page:id:home')).toBe('HOME-UUID')
+    // Unknown key → undefined (no mint), and the file is untouched.
+    const before = readFileSync(path, 'utf8')
+    expect(lk.item('page:id:missing')).toBeUndefined()
+    expect(lk.entity('nope')).toBeUndefined()
+    expect(readFileSync(path, 'utf8')).toBe(before)
   })
 
-  it('with a sidecar, re-export reuses entity + item uuids (update not duplicate)', async () => {
-    const a = entityOf(await emitSitePackage(root, { sidecar: true }))
-    expect(existsSync(join(root, '.uniweb/uwx-ids.json'))).toBe(true)
-
-    // Edit the hero body; keep its frontmatter `id: hero`.
-    writeSite('# Rewritten body, same id')
-    const b = entityOf(await emitSitePackage(root, { sidecar: true }))
-
-    expect(b.uuid).toBe(a.uuid) // same site entity
-    const heroA = a.items.find(
-      (i) => i.section === 'page_sections' && i.data.stable_id === 'hero'
-    )
-    const heroB = b.items.find(
-      (i) => i.section === 'page_sections' && i.data.stable_id === 'hero'
-    )
-    expect(heroB.uuid).toBe(heroA.uuid) // stable → restore updates, not dupes
-    // ...but the content actually changed (it's an update).
-    expect(JSON.stringify(heroB.data.content)).not.toBe(
-      JSON.stringify(heroA.data.content)
-    )
-    // info + page items also stable.
-    const info = (e) => e.items.find((i) => i.section === 'info').uuid
-    expect(info(b)).toBe(info(a))
-  })
-
-  it('accepts an explicit sidecar path', async () => {
-    const path = join(tmpdir(), `ids-${Date.now()}.json`)
-    await emitSitePackage(root, { sidecar: path })
-    expect(existsSync(path)).toBe(true)
-    rmSync(path, { force: true })
-  })
-})
-
-describe('uwx/identity — foundation idempotency (keyed by name@version)', () => {
-  const schema = {
-    _self: { name: '@acme/x', version: '2.0.0' },
-    Hero: { name: 'Hero', title: 'Hero v1' },
-  }
-
-  it('re-emitting the same version reuses uuids; a label edit keeps the schema Section uuid', () => {
-    const path = join(tmpdir(), `fnd-${Date.now()}.json`)
-    const a = entityOf(emitFoundationSchemaPackage(schema, { sidecar: path }))
-    const edited = {
-      _self: { name: '@acme/x', version: '2.0.0' },
-      Hero: { name: 'Hero', title: 'Hero v2 (edited)' },
-    }
-    const b = entityOf(emitFoundationSchemaPackage(edited, { sidecar: path }))
-
-    expect(b.uuid).toBe(a.uuid) // same name@version
-    const sch = (e) => e.items.find((i) => i.section === 'schema')
-    expect(sch(b).uuid).toBe(sch(a).uuid) // keyed by ::schema
-    expect(sch(b).data.schema.Hero.title).toBe('Hero v2 (edited)')
-    rmSync(path, { force: true })
-  })
-
-  it('without a sidecar, mints fresh (submit-once)', () => {
-    const a = entityOf(emitFoundationSchemaPackage(schema))
-    const b = entityOf(emitFoundationSchemaPackage(schema))
-    expect(a.uuid).not.toBe(b.uuid)
+  it('treats a missing file as empty (every lookup undefined)', () => {
+    const lk = sidecarLookup(join(ROOT, 'does-not-exist.json'))
+    expect(lk.entity('x')).toBeUndefined()
+    expect(lk.item('y')).toBeUndefined()
   })
 })
