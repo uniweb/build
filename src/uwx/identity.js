@@ -86,5 +86,35 @@ export function sidecarResolver(sidecarPath) {
   }
 }
 
+/**
+ * Read-only sidecar lookup — `{ entity(key), item(key) }` returning a stored uuid
+ * or `undefined`, never minting and never writing.
+ *
+ * The site-content SYNC lane (unlike the register lane's `sidecarResolver`, which
+ * mints locally) follows the collection lane: the BACKEND mints `$uuid` on first
+ * sync and the verb records it back into this sidecar. So the producer only READS
+ * uuids it already knows — first sync finds none (uuid-less `$`-document, `$id`
+ * only), and a later sync injects the `$uuid`s the backend previously returned.
+ * A missing file is empty (every lookup → undefined), not an error.
+ *
+ * @param {string} sidecarPath
+ */
+export function sidecarLookup(sidecarPath) {
+  let store = { entities: {}, items: {} }
+  try {
+    const parsed = JSON.parse(readFileSync(sidecarPath, 'utf8'))
+    store = {
+      entities: parsed?.entities ?? {},
+      items: parsed?.items ?? {},
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err // a corrupt sidecar is a real error
+  }
+  return {
+    entity: (key) => store.entities[key],
+    item: (key) => store.items[key],
+  }
+}
+
 // Where a site / foundation project keeps its CLI-owned id sidecar.
 export const SIDECAR_RELPATH = '.uniweb/uwx-ids.json'

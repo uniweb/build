@@ -31,13 +31,19 @@ export { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 export {
   mintResolver,
   sidecarResolver,
+  sidecarLookup,
   SIDECAR_RELPATH,
 } from './identity.js'
 export {
   foundationSchemaToEntity,
   emitFoundationSchemaPackage,
 } from './foundation-schema.js'
-export { siteProjectToEntity, emitSitePackage } from './site.js'
+export {
+  siteProjectToEntity,
+  emitSitePackage,
+  siteProjectToDocument,
+  emitSiteSyncPackage,
+} from './site.js'
 export {
   collectionRecordsToEntities,
   emitCollectionSyncPackage,

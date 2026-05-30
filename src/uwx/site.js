@@ -40,8 +40,14 @@ import {
 } from '../site/content-collector.js'
 import { SITE_CONTENT_TYPE_UUID } from './entity-types.js'
 import { emitEntityPackage } from './package.js'
+import { emitEntitySyncPackage } from './entity-document.js'
 import { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { mintResolver, sidecarResolver, SIDECAR_RELPATH } from './identity.js'
+import {
+  mintResolver,
+  sidecarResolver,
+  sidecarLookup,
+  SIDECAR_RELPATH,
+} from './identity.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
 
@@ -457,6 +463,289 @@ export async function emitSitePackage(siteRoot, opts = {}) {
     modelsRequired: [
       { uuid: SITE_CONTENT_TYPE_UUID, name_at_export: '@uniweb/site-content' },
     ],
+    exporter: opts.exporter,
+    exportedAt: opts.exportedAt,
+  })
+}
+
+// ===========================================================================
+// NESTED ($-document) lane — Phase 0 de-flatten (bidirectional-sync §8).
+//
+// The flat `siteProjectToEntity` above emits `items[]` with positional
+// `parent_path` tuple-chains (the register lane, package.js). This lane emits the
+// section-keyed `$`-document the backend's @uniweb/site-content Model actually
+// declares (apps/uniweb-rs/.../system-models/site-content.fixture.yaml) and that
+// docs/reference/entity-content.md specifies:
+//
+//   - `page_sections` is a CHILD section of `pages` → it rides as an INLINE FIELD
+//     on each page record (the spec's cross-section rule: "a subsection is an
+//     inline field"), NOT a top-level array with a back-reference.
+//   - genuine self-nesting uses `$children`: a folder's child pages (within
+//     `pages`), and — when reconstructed — `@`-prefix child sections (within
+//     `page_sections`). Cross-section parentage is pure structure, never `$parent`.
+//   - identity is `$id` (the stableId — the in-file handle), with `$uuid` injected
+//     ONLY from the committed sidecar when known (read-only lookup; the backend
+//     mints, the verb records — uuids never touch authored files). §4 of the plan.
+//
+// v0 deferrals carry over: `@`-prefix child-section *hierarchy* still lands flat
+// under `page_sections` (no data loss, structure not yet reconstructed), plus the
+// folder-mode / paths / versioned-scope / asset-bytes gaps noted on the flat lane.
+//
+// Wiring this into a verb + the backend ingest/back-fill round-trip is the joint
+// Phase 1 follow-up; this is the producer + its shape, framework-solo.
+// ===========================================================================
+
+const SITE_MODEL_NAME = '@uniweb/site-content'
+
+// `$uuid?` then `$id`, then the record's fields — the wire's canonical key order
+// (mirrors collections.js). `fields` already carries `stable_id` (the Model field);
+// `$id` is the same value as the identity sigil. Both are kept: `$id` is the sync
+// handle, `stable_id` is the declared content field the editor/render reads.
+function withIdentity(id, uuid, fields) {
+  const rec = {}
+  if (uuid) rec.$uuid = uuid
+  rec.$id = id
+  return Object.assign(rec, fields)
+}
+
+// The content sections under one page, as an inline `page_sections` field array.
+// Flat for now (see the @-prefix deferral above); each is a section record.
+async function collectPageSectionsNested(pageDir, siteRoot, pageKey, lookup) {
+  const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
+  const out = []
+  for (let k = 0; k < mdFiles.length; k++) {
+    const file = mdFiles[k]
+    const stableDefault = parseNumericPrefix(parse(file).name).name
+    const { section } = await processMarkdownFile(
+      join(pageDir, file),
+      String(k + 1),
+      siteRoot,
+      stableDefault
+    )
+    const secId = section.stableId || `s${k}`
+    const uuid = lookup.item(`${pageKey}::sec:${secId}`)
+    out.push(withIdentity(secId, uuid, mapSectionData(section)))
+  }
+  return out
+}
+
+// Recursively build the `pages` tree: each record carries its fields, its inline
+// `page_sections` (page mode only), and its child pages under `$children`.
+async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot) {
+  const { siteRoot, lookup, siteIndex, sourceLocale } = ctx
+  const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig)
+  const out = []
+  for (let i = 0; i < folders.length; i++) {
+    const f = folders[i]
+    const dyn = f.dirName.match(DYNAMIC_RE)
+    const slug = dyn ? dyn[1] : f.name
+    const mode = f.source === 'folder.yml' ? 'folder' : 'page'
+    const slugPath = parentSlugPath ? `${parentSlugPath}/${slug}` : slug
+
+    const data = buildPageData(f.config, {
+      slug,
+      mode,
+      isDynamic: !!dyn,
+      paramName: dyn ? dyn[1] : undefined,
+      isRoot,
+      siteIndex,
+      sourceLocale,
+    })
+    // `$id` is the stableId when authored (rename-stable), else the slug (the
+    // natural handle — spec default). The path is NEVER the identity; the sidecar
+    // key falls back to slugPath only to locate a prior uuid for a still-id-less
+    // page, which "make stableId authoritative" (§4) removes by minting an id.
+    const id = data.stable_id || slug
+    const pageKey = data.stable_id ? `page:id:${data.stable_id}` : `page:path:${slugPath}`
+    const record = withIdentity(id, lookup.item(pageKey), data)
+
+    if (mode === 'page') {
+      const sections = await collectPageSectionsNested(f.path, siteRoot, pageKey, lookup)
+      if (sections.length > 0) record.page_sections = sections
+    }
+
+    const children = await walkPagesNested(ctx, f.path, slugPath, f.internalMode, f.config, false)
+    if (children.length > 0) record.$children = children
+
+    out.push(record)
+  }
+  return out
+}
+
+// layout_sections: top-level self-nesting, keyed by (layout_name, area) in data.
+// Same per-area walk as collectLayoutSections, emitted as `$`-records.
+async function collectLayoutNested(layoutDir, siteRoot, lookup) {
+  if (!existsSync(layoutDir)) return []
+  const items = []
+  let order = 0
+  async function addArea(filePath, layoutName, area) {
+    const { section } = await processMarkdownFile(filePath, String(order + 1), siteRoot, area)
+    const stable = section.stableId || String(order)
+    const uuid = lookup.item(`layout:${layoutName}/${area}:${stable}`)
+    items.push(
+      withIdentity(stable, uuid, { layout_name: layoutName, area, ...mapSectionData(section) })
+    )
+    order++
+  }
+  const entries = await readdir(layoutDir, { withFileTypes: true })
+  const rootMd = entries
+    .filter((e) => e.isFile() && isMarkdownFile(e.name))
+    .map((e) => e.name)
+    .sort(compareFilenames)
+  for (const file of rootMd) {
+    await addArea(join(layoutDir, file), 'default', parseNumericPrefix(parse(file).name).name)
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || isIgnoredFolder(e.name)) continue
+    const sub = join(layoutDir, e.name)
+    const md = (await readdir(sub)).filter(isMarkdownFile).sort(compareFilenames)
+    for (const file of md) {
+      await addArea(join(sub, file), e.name, parseNumericPrefix(parse(file).name).name)
+    }
+  }
+  return items
+}
+
+function extensionsNested(siteYml, lookup) {
+  const ext = siteYml.extensions
+  if (!Array.isArray(ext)) return []
+  const out = []
+  for (const url of ext) {
+    if (typeof url !== 'string') continue // object form deferred (v0)
+    out.push(withIdentity(url, lookup.item(`ext:${url}`), { url }))
+  }
+  return out
+}
+
+function collectionsNested(siteYml, lookup) {
+  const col = siteYml.collections
+  if (!col || typeof col !== 'object' || Array.isArray(col)) return []
+  const out = []
+  for (const [name, decl] of Object.entries(col)) {
+    const d = decl && typeof decl === 'object' ? decl : {}
+    const data = {}
+    const source = d.path ? { path: d.path } : d.url ? { url: d.url } : d.source
+    setIf(data, 'source', source)
+    setIf(data, 'sort', d.sort)
+    setIf(data, 'filter', d.filter)
+    setIf(data, 'where', d.where)
+    setIf(data, 'limit', d.limit)
+    setIf(data, 'excerpt', d.excerpt)
+    setIf(data, 'deferred', d.deferred)
+    setIf(data, 'detail_url', d.detailUrl)
+    setIf(data, 'queryable', d.queryable)
+    out.push(withIdentity(name, lookup.item(`col:${name}`), { name, ...data }))
+  }
+  return out
+}
+
+/**
+ * Map a file site project to the nested `@uniweb/site-content` `$`-document
+ * (Phase 0 shape — see the lane header above). PURE except for the read-only
+ * sidecar lookup; never mints, never writes.
+ *
+ * @param {string} siteRoot - directory containing site.yml
+ * @param {object} [opts]
+ * @param {boolean|string} [opts.sidecar] - read uuids from this sidecar (`true` →
+ *        `<siteRoot>/.uniweb/uwx-ids.json`; a string → that path). Default: none
+ *        (first-sync shape — `$id` only, no `$uuid`).
+ * @param {string} [opts.sourceLocale] - localized-field wrap locale (default "en").
+ * @returns {Promise<object>} the section-keyed `$`-document:
+ *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, collections }`
+ */
+export async function siteProjectToDocument(siteRoot, opts = {}) {
+  const sourceLocale =
+    opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
+  const lookup = opts.sidecar
+    ? sidecarLookup(
+        typeof opts.sidecar === 'string' ? opts.sidecar : join(siteRoot, SIDECAR_RELPATH)
+      )
+    : { entity: () => undefined, item: () => undefined }
+
+  const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
+  if (!siteYml.name) {
+    throw new Error('uwx/site: site.yml::name is required')
+  }
+  if (!siteYml.foundation || typeof siteYml.foundation !== 'string') {
+    throw new Error(
+      'uwx/site: site.yml::foundation (a reference string) is required — ' +
+        'it maps to the required @uniweb/site-content info.foundation_ref'
+    )
+  }
+
+  const themeYml = await readYamlFile(join(siteRoot, 'theme.yml'))
+  let headHtml
+  try {
+    headHtml = await readFile(join(siteRoot, 'head.html'), 'utf8')
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+  }
+
+  const info = {}
+  info.name = localize(siteYml.name, sourceLocale)
+  setIf(info, 'description', localize(siteYml.description, sourceLocale))
+  if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
+  setIf(info, 'locales', siteYml.languages)
+  setIf(info, 'default_locale', siteYml.defaultLanguage)
+  info.foundation_ref = siteYml.foundation // the round-trip source of truth
+  setIf(info, 'base_path', siteYml.base)
+  setIf(info, 'head_html', headHtml)
+  setIf(info, 'fetcher_config', siteYml.fetcher)
+  setIf(info, 'build_options', siteYml.build)
+  setIf(info, 'search_config', siteYml.search)
+  setIf(info, 'paths_config', siteYml.paths)
+  setIf(info, 'data_config', siteYml.data ?? siteYml.fetch)
+
+  const ctx = { siteRoot, lookup, siteIndex: siteYml.index, sourceLocale }
+  const pagesPath = siteYml.paths?.pages
+    ? join(siteRoot, siteYml.paths.pages)
+    : join(siteRoot, 'pages')
+  const pages = existsSync(pagesPath)
+    ? await walkPagesNested(ctx, pagesPath, '', 'sections', siteYml, true)
+    : []
+
+  const layoutDir = siteYml.paths?.layout
+    ? join(siteRoot, siteYml.paths.layout)
+    : join(siteRoot, 'layout')
+  const layoutSections = await collectLayoutNested(layoutDir, siteRoot, lookup)
+
+  // `$uuid?` then `$id` `$model`, then sections in Model-declared order.
+  const doc = {}
+  const entityUuid = opts.entityUuid || lookup.entity(SITE_ENTITY_KEY)
+  if (entityUuid) doc.$uuid = entityUuid
+  doc.$id = SITE_ENTITY_KEY // one site-content entity per project (stable handle)
+  doc.$model = SITE_MODEL_NAME
+  doc.info = info
+  doc.pages = pages
+  doc.layout_sections = layoutSections
+  doc.extensions = extensionsNested(siteYml, lookup)
+  doc.collections = collectionsNested(siteYml, lookup)
+  return doc
+}
+
+/**
+ * Site project -> a one-entity `@uniweb/site-content` `.uwx` Buffer on the SYNC
+ * lane (the nested `$`-document; Model resolved BY NAME). Parallel to
+ * `emitSitePackage` (the flat register lane) — both remain until the backend
+ * confirms which lane site-content sync ingests (bidirectional-sync §8/§9).
+ *
+ * @param {string} siteRoot
+ * @param {object} [opts] - same as siteProjectToDocument, plus `exporter`,
+ *        `exportedAt`.
+ * @returns {Promise<Buffer>}
+ */
+export async function emitSiteSyncPackage(siteRoot, opts = {}) {
+  const document = await siteProjectToDocument(siteRoot, opts)
+  return emitEntitySyncPackage({
+    entities: [
+      {
+        id: document.$id,
+        model: document.$model,
+        file: 'entities/site-content.json',
+        document,
+      },
+    ],
+    modelsRequired: [{ name_at_export: SITE_MODEL_NAME }],
     exporter: opts.exporter,
     exportedAt: opts.exportedAt,
   })
