@@ -10,7 +10,7 @@
 //
 // The document mirrors the @uniweb/site-content Model: `info` (brief) · `pages`
 // (self-nesting; each page carries its `page_sections` as an inline field) ·
-// `layout_sections` · `extensions` · `collections`. `info.foundation_ref`
+// `layout_sections` · `extensions` · `collections`. `info.foundation_name`
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
 // truth). Identity is `$id` (the stableId); `$uuid` is injected read-only from
 // the committed id sidecar — the backend mints it, never this producer.
@@ -415,7 +415,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   if (!siteYml.foundation || typeof siteYml.foundation !== 'string') {
     throw new Error(
       'uwx/site: site.yml::foundation (a reference string) is required — ' +
-        'it maps to the required @uniweb/site-content info.foundation_ref'
+        'it maps to the required @uniweb/site-content info.foundation_name'
     )
   }
 
@@ -433,7 +433,11 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
   setIf(info, 'locales', siteYml.languages)
   setIf(info, 'default_locale', siteYml.defaultLanguage)
-  info.foundation_ref = siteYml.foundation // the round-trip source of truth
+  // Backend Model field is `foundation_name` (required) — the verbatim
+  // `site.yml::foundation` string (registry ref / URL / local path), the
+  // round-trip source of truth. (Renamed from `foundation_ref` at the
+  // foundation-schema level.)
+  info.foundation_name = siteYml.foundation
   setIf(info, 'base_path', siteYml.base)
   setIf(info, 'head_html', headHtml)
   setIf(info, 'fetcher_config', siteYml.fetcher)
