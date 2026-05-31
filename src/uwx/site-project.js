@@ -23,7 +23,7 @@
 // doesn't churn config it didn't carry, and deletion is out of scope here.
 
 import { join } from 'node:path'
-import { writeSiteConfig, writeThemeFile, writeIfChanged } from './project-writer.js'
+import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile } from './project-writer.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -87,4 +87,78 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   }
 
   return result
+}
+
+// ---------------------------------------------------------------------------
+// Section records → section .md files
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-inline a section's extracted insets back into its ProseMirror content —
+ * the exact inverse of content-collector's `extractInsets`. The producer pulls
+ * each `![alt](@Component){params}` ref out of the body into an `insets[]` array
+ * and leaves an `inset_placeholder` behind; content-writer only serializes
+ * `inset_ref` nodes, so we restore them before serializing or the inset would
+ * be reported as unmappable and dropped.
+ *
+ * @param {object} content - the section's ProseMirror document (placeholders in)
+ * @param {Array} insets - `[{ refId, type, params, title, embedKind }]`
+ * @returns {object} a content document with `inset_ref` nodes restored
+ */
+function reinlineInsets(content, insets) {
+  if (!content || !Array.isArray(content.content) || !Array.isArray(insets) || insets.length === 0) {
+    return content
+  }
+  const byRef = new Map(insets.map((i) => [i.refId, i]))
+
+  const visit = (nodes) =>
+    nodes.map((node) => {
+      if (!node) return node
+      if (node.type === 'inset_placeholder') {
+        const inset = byRef.get(node.attrs?.refId)
+        if (!inset) return node // no match → leave the placeholder (the guard reports it)
+        const attrs = { component: inset.type, ...(inset.params || {}) }
+        if (inset.title != null) attrs.alt = inset.title
+        // `visual` is the extractor's default — omit it so the projected markdown
+        // doesn't gain a spurious `{embedKind=visual}` the source never had.
+        if (inset.embedKind && inset.embedKind !== 'visual') attrs.embedKind = inset.embedKind
+        return { type: 'inset_ref', attrs }
+      }
+      if (Array.isArray(node.content)) return { ...node, content: visit(node.content) }
+      return node
+    })
+
+  return { ...content, content: visit(content.content) }
+}
+
+/**
+ * Project one section `$`-record (from `page_sections` / `layout_sections`) to a
+ * section `.md` file — the inverse of site.js `mapSectionData`. Frontmatter is
+ * `type` + the flat `params` + `background` / `theme` (`theme_override`) /
+ * `preset` / `input` / `fetch` / `id` (`stable_id`); the body is the section's
+ * content (insets re-inlined) serialized to markdown. Idempotent.
+ *
+ * Note: `$children` (the `@`-nested child sections) are NOT written here — the
+ * page walk places them as `@`-files plus a `nest:` map. This writes one section.
+ *
+ * @param {object} params
+ * @param {string} params.filePath
+ * @param {object} params.record - a section `$`-record
+ * @returns {'updated'|'unchanged'}
+ */
+export function sectionRecordToFile({ filePath, record }) {
+  const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
+
+  const frontmatter = {}
+  if (type !== undefined) frontmatter.type = type
+  if (params && typeof params === 'object') Object.assign(frontmatter, params)
+  if (background !== undefined) frontmatter.background = background
+  if (theme_override !== undefined) frontmatter.theme = theme_override
+  if (preset !== undefined) frontmatter.preset = preset
+  if (input !== undefined) frontmatter.input = input
+  if (fetch !== undefined) frontmatter.fetch = fetch
+  if (stable_id !== undefined) frontmatter.id = stable_id
+
+  const body = insets ? reinlineInsets(content, insets) : content
+  return writeSectionFile({ filePath, content: body, params: frontmatter })
 }

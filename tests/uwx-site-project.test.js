@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { siteInfoToConfig, siteProjectToDocument } from '../src/uwx/index.js'
+import { siteInfoToConfig, sectionRecordToFile, siteProjectToDocument } from '../src/uwx/index.js'
 
 let dir
 beforeEach(() => {
@@ -79,6 +79,54 @@ describe('siteInfoToConfig — info → config files', () => {
     siteInfoToConfig({ document: { info: { name: { en: 'S' }, foundation_name: '@acme/base' } }, siteRoot: dir })
     expect(existsSync(join(dir, 'theme.yml'))).toBe(false)
     expect(existsSync(join(dir, 'head.html'))).toBe(false)
+  })
+})
+
+describe('sectionRecordToFile — section record → .md', () => {
+  const para = (text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+
+  it('writes frontmatter (type + flat params + background/theme/id) and a markdown body', () => {
+    const record = {
+      type: 'Hero',
+      stable_id: 'hero',
+      params: { align: 'center', cta: 'Start' },
+      background: '/bg.jpg',
+      theme_override: 'dark',
+      content: { type: 'doc', content: [para('Hello world')] },
+    }
+    const f = join(dir, 'hero.md')
+    expect(sectionRecordToFile({ filePath: f, record })).toBe('updated')
+
+    const text = readFileSync(f, 'utf8')
+    expect(text).toMatch(/^---\n/)
+    const fm = yaml.load(text.slice(4, text.indexOf('\n---', 4)))
+    expect(fm).toEqual({ type: 'Hero', align: 'center', cta: 'Start', background: '/bg.jpg', theme: 'dark', id: 'hero' })
+    expect(text.trimEnd().endsWith('Hello world')).toBe(true)
+  })
+
+  it('re-inlines a block-level inset back to ![](@Component){params}', () => {
+    const record = {
+      type: 'Section',
+      content: {
+        type: 'doc',
+        content: [para('Intro'), { type: 'inset_placeholder', attrs: { refId: 'inset_0', embedKind: 'visual' } }],
+      },
+      insets: [{ refId: 'inset_0', type: 'Chart', embedKind: 'visual', params: { variant: 'compact' }, title: 'A chart' }],
+    }
+    const f = join(dir, 'with-inset.md')
+    sectionRecordToFile({ filePath: f, record })
+
+    const text = readFileSync(f, 'utf8')
+    expect(text).toContain('![A chart](@Chart){variant=compact}')
+    // embedKind=visual (the extractor default) is omitted — no spurious attr.
+    expect(text).not.toContain('embedKind')
+  })
+
+  it('is idempotent', () => {
+    const record = { type: 'Hero', content: { type: 'doc', content: [para('Hi')] } }
+    const f = join(dir, 'hero.md')
+    sectionRecordToFile({ filePath: f, record })
+    expect(sectionRecordToFile({ filePath: f, record })).toBe('unchanged')
   })
 })
 
