@@ -72,6 +72,21 @@ export {
   backfillEntityUuids,
 } from './backfill.js'
 
+// Project writer — the pull-side file-projection primitives (shared with the
+// app's site-writer; framework-owned so the public package never depends on the
+// private app). See pull-projection.md §3/§10 (P0).
+export {
+  DEFAULT_RESERVED_FRONTMATTER,
+  writeIfChanged,
+  resolveSectionFile,
+  resolveSectionDir,
+  resolveSectionPath,
+  writeSectionFile,
+  writeSiteConfig,
+  writeThemeFile,
+  writeRecordFile,
+} from './project-writer.js'
+
 // Registry-publish (names-only) — the document `uniweb register` submits, and the
 // schema → @uniweb/data-schema declaration lowering it bundles. `buildRegistryPackage`
 // is the foundation publish (foundation + the schemas it renders); `buildSchemaOnlyPackage`
