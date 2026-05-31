@@ -316,28 +316,40 @@ function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
   }
 }
 
-// Recursively project the pages tree: a directory per page (slug, or `[param]/`
-// for a dynamic page), its `page.yml`/`folder.yml`, its section files, and its
-// child pages. Matches incoming items to files by stableId-name (clean overwrite),
-// with the `.uniweb/` uuid index as the rename anchor (a uuid now at a new slug →
-// the whole page dir is moved in place). When `prune` is set, orphaned section
-// files and page dirs are deleted (git-pull-like) — guarded so an EMPTY incoming
-// set never nukes an existing level (a malformed/partial payload can't wipe it).
+// Project the pages tree. TWO PASSES so a section (or page) moved across pages or
+// levels is a relocation, not a delete + recreate: pass 1 writes + relocates the
+// WHOLE tree (no deletes), pass 2 prunes orphans. If pruning ran inline per page,
+// page A's prune would delete a section's file before page B (its new home) got
+// to relocate it by uuid — making every cross-page move churn. Deferring prune to
+// after the whole tree is relocated keeps the old file alive until its new owner
+// claims it (renameInPlace), so pass 2 then sees no orphan.
+//
+// Matches incoming items to files by stableId-name (clean overwrite), with the
+// `.uniweb/` uuid index as the rename anchor. Pruning is guarded so an EMPTY
+// incoming level never nukes an existing one (a malformed/partial payload can't
+// wipe it).
 function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
-  const incomingDirs = new Set()
+  writePagesTree(pages, pagesDir, sourceLocale, report, ctx)
+  if (prune) prunePagesTree(pages, pagesDir, report)
+}
+
+// The directory name for a page record (slug, or `[param]/` for a dynamic page).
+function pageDirName(record) {
+  return record.is_dynamic ? `[${record.param_name || record.slug}]` : record.slug
+}
+
+// Pass 1 — write + relocate every page dir, its page.yml/folder.yml, and its
+// section files, recursing into children. No deletes happen here.
+function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
   for (const record of pages || []) {
-    const dirName = record.is_dynamic ? `[${record.param_name || record.slug}]` : record.slug
-    incomingDirs.add(dirName)
-    const pageDir = join(pagesDir, dirName)
+    const pageDir = join(pagesDir, pageDirName(record))
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
     placeByUuid(ctx, record.$uuid, pageDir)
 
     let sectionsArray = []
-    let written = []
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
       const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx })
       sectionsArray = r.sections
-      written = r.written
       report.sections.push(...r.written)
     }
 
@@ -346,17 +358,39 @@ function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
     writeYamlFile(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale))
     report.pages.push(ymlPath)
 
-    if (prune && record.mode === 'page') {
-      const keep = new Set(written.map((p) => basename(p, extname(p))))
+    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx)
+  }
+}
+
+// Every stableId in a page's section tree. Nested children are written as flat
+// `<stableId>.md` files in the SAME page dir, so all are kept on prune.
+function collectSectionStableIds(pageSections) {
+  const ids = new Set()
+  const walk = (records) => {
+    for (const record of records || []) {
+      const id = recordStableId(record)
+      if (id) ids.add(id)
+      if (Array.isArray(record.$children)) walk(record.$children)
+    }
+  }
+  walk(pageSections)
+  return ids
+}
+
+// Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per
+// level), AFTER every relocation in pass 1. Guarded against wiping an empty level.
+function prunePagesTree(pages, pagesDir, report) {
+  const incomingDirs = new Set()
+  for (const record of pages || []) {
+    incomingDirs.add(pageDirName(record))
+    const pageDir = join(pagesDir, pageDirName(record))
+    if (record.mode === 'page') {
+      const keep = collectSectionStableIds(record.page_sections)
       if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
-
-    // Recurse (children || [] so an emptied child level is still visited; the
-    // empty-set guard below decides whether to prune it).
-    projectPages(record.$children || [], pageDir, sourceLocale, report, prune, ctx)
+    prunePagesTree(record.$children || [], pageDir, report)
   }
-
-  if (prune && incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
+  if (incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }
 
 // layout_sections → layout/<area>.md (the 'default' layout) or

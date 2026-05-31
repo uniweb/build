@@ -338,6 +338,30 @@ describe('siteContentDocumentToProject — uuid-anchored rename detection', () =
     expect(pageYml.ids).toBeUndefined() // identity lives in .uniweb/, not page.yml
   })
 
+  it('relocates a section moved across pages (A→B) instead of delete + create (A7)', () => {
+    const pg = (slug, uuid, sections) => ({ $id: slug, $uuid: uuid, slug, mode: 'page', stable_id: slug, page_sections: sections })
+
+    // v1: home has hero + features; about has intro.
+    siteContentDocumentToProject({
+      document: { info, pages: [pg('home', 'P1', [sec('hero', 'S1', 'Hi'), sec('features', 'S2', 'F')]), pg('about', 'P2', [sec('intro', 'S3', 'X')])] },
+      siteRoot: dir,
+    })
+    assert_exists('pages/home/features.md')
+
+    // v2: the app moved section S2 (features) from home to about. Same uuid.
+    const report = siteContentDocumentToProject({
+      document: { info, pages: [pg('home', 'P1', [sec('hero', 'S1', 'Hi')]), pg('about', 'P2', [sec('intro', 'S3', 'X'), sec('features', 'S2', 'F')])] },
+      siteRoot: dir,
+      prune: true,
+    })
+
+    expect(existsSync(join(dir, 'pages/home/features.md'))).toBe(false)
+    expect(existsSync(join(dir, 'pages/about/features.md'))).toBe(true)
+    expect(report.renamed).toContainEqual({ from: join(dir, 'pages/home/features.md'), to: join(dir, 'pages/about/features.md') })
+    expect(report.deleted).toEqual([]) // a cross-page move is a relocation, not a delete
+    expect(yaml.load(readFileSync(join(dir, 'pages/about/page.yml'), 'utf8')).sections).toEqual(['intro', 'features'])
+  })
+
   it('renames a page directory in place when its uuid maps to a new slug', () => {
     siteContentDocumentToProject({ document: { info, pages: [homePage([sec('hero', 'S1', 'Hi')])] }, siteRoot: dir })
     assert_exists('pages/home/hero.md')
