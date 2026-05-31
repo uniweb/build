@@ -185,7 +185,7 @@ export function backfillBibFile(filePath, uuidBySlug) {
 
 // Unwrap a localized wire value `{ <locale>: v }` back to the authored bare value
 // (the source locale, else the first present). Non-localized values pass through.
-function unwrapLocalized(value, sourceLocale) {
+export function unwrapLocalized(value, sourceLocale) {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     if (Object.prototype.hasOwnProperty.call(value, sourceLocale)) return value[sourceLocale]
     const keys = Object.keys(value)

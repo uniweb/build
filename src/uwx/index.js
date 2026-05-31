@@ -58,6 +58,7 @@ export {
   collectionsToProject,
   findRecordFileByUuid,
 } from './collections-project.js'
+export { siteInfoToConfig } from './site-project.js'
 export { emitSyncPackages } from './sync-package.js'
 export {
   collectionRecordsToEntities,
