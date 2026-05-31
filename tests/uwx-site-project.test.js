@@ -875,4 +875,50 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
     // the projected source markdown carries the inline cite, not a dropped inset
     expect(readFileSync(join(dest, 'pages/home/hero.md'), 'utf8')).toContain('As shown [@darwin] in the literature.')
   })
+
+  it('round-trips a MULTI-LOCALE whole site (scalars + content + nesting + layout)', async () => {
+    const seed = {
+      info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@acme/base@3.0.0', languages: ['en', 'es'] },
+      pages: [
+        {
+          $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', is_index: true,
+          title: { en: 'Home', es: 'Inicio' },
+          page_sections: [
+            { $id: 'hero', stable_id: 'hero', type: 'Hero', content: { en: docOf('Welcome'), es: { Welcome: 'Bienvenido' } } },
+            {
+              $id: 'features', stable_id: 'features', type: 'Features', content: { en: docOf('Features'), es: { Features: 'Caracteristicas' } },
+              $children: [{ $id: 'card', stable_id: 'card', type: 'Card', content: { en: docOf('Card'), es: { Card: 'Tarjeta' } } }],
+            },
+          ],
+        },
+      ],
+      layout_sections: [
+        { $id: 'header', stable_id: 'header', area: 'header', layout_name: 'default', type: 'Header', content: { en: docOf('Nav'), es: { Nav: 'Navegacion' } } },
+      ],
+    }
+
+    // Bootstrap multi-locale source files: the projection writes the source bodies
+    // + scalars AND locales/es.json (target translations by hash).
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    siteContentDocumentToProject({ document: seed, siteRoot: src })
+    const es = JSON.parse(readFileSync(join(src, 'locales/es.json'), 'utf8'))
+    expect(es[computeHash('Welcome')]).toBe('Bienvenido')
+    expect(es[computeHash('Atlas')]).toBe('Atlas ES')
+    expect(es[computeHash('Nav')]).toBe('Navegacion')
+
+    // produce → project → produce is a fixed point with all locales intact.
+    const doc1 = await siteProjectToDocument(src)
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteContentDocumentToProject({ document: doc1, siteRoot: dest })
+    const doc2 = await siteProjectToDocument(dest)
+    expect(doc2).toEqual(doc1)
+
+    // and the multi-locale shape is what we expect (not just self-consistent)
+    expect(doc1.info.name).toEqual({ en: 'Atlas', es: 'Atlas ES' })
+    const hero = doc1.pages[0].page_sections.find((s) => s.stable_id === 'hero')
+    expect(hero.content.es).toEqual({ Welcome: 'Bienvenido' })
+    expect(doc1.layout_sections[0].content.es).toEqual({ Nav: 'Navegacion' })
+  })
 })
