@@ -35,6 +35,50 @@ export function isLocalizedMap(value) {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
+/**
+ * Read `locales/{locale}.json` for each target locale into `{ locale: { hash: tgt } }`.
+ * The producer's counterpart to writeLocaleTranslations — used to wrap source values
+ * back into per-locale form on push. Missing / unreadable files are skipped.
+ */
+export function loadLocaleTranslations(siteRoot, locales) {
+  const out = {}
+  for (const locale of locales || []) {
+    const filePath = localeFilePath(siteRoot, locale)
+    if (!existsSync(filePath)) continue
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) out[locale] = parsed
+    } catch {
+      // unreadable / invalid → skip
+    }
+  }
+  return out
+}
+
+/**
+ * Wrap a SCALAR field value into its localized `{ <lang>: value }` form: the source
+ * locale plus any target locales whose `locales/{locale}.json` carries a translation
+ * for this exact source text (`hash(value)`). The inverse of the projector's scalar
+ * collector. An already-localized object passes through; null/undefined → undefined.
+ *
+ * @param {*} value
+ * @param {string} sourceLocale
+ * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
+ */
+export function localizeScalar(value, sourceLocale, translations) {
+  if (value == null) return undefined
+  if (typeof value === 'object') return value // already a { lang: value } map
+  const out = { [sourceLocale]: value }
+  if (translations && typeof value === 'string') {
+    const hash = computeHash(value)
+    for (const [locale, table] of Object.entries(translations)) {
+      const tgt = table?.[hash]
+      if (typeof tgt === 'string') out[locale] = tgt
+    }
+  }
+  return out
+}
+
 // True for a ProseMirror document node (`{ type: 'doc', content: [...] }`).
 export function isProseMirrorDoc(value) {
   return value != null && typeof value === 'object' && value.type === 'doc'

@@ -613,6 +613,34 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
   })
 })
 
+describe('localized scalar round-trip: producer ⇄ projector (B)', () => {
+  it('produce → project → produce recovers multi-locale scalars', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(join(src, 'locales'), { recursive: true })
+    mkdirSync(join(src, 'pages/home'), { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: Atlas\nfoundation: '@a/base'\nlanguages: [en, es]\n")
+    writeFileSync(join(src, 'pages/home/page.yml'), 'title: Home\nindex: true\n')
+    writeFileSync(
+      join(src, 'locales/es.json'),
+      JSON.stringify({ [computeHash('Atlas')]: 'Atlas ES', [computeHash('Home')]: 'Inicio' })
+    )
+
+    // Producer wraps scalars per-locale by reading locales/es.json.
+    const doc1 = await siteProjectToDocument(src)
+    expect(doc1.info.name).toEqual({ en: 'Atlas', es: 'Atlas ES' })
+    const home1 = doc1.pages.find((p) => p.$id === 'home')
+    expect(home1.title).toEqual({ en: 'Home', es: 'Inicio' })
+
+    // Project to a fresh dir, then re-produce — the multi-locale scalars survive.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteContentDocumentToProject({ document: doc1, siteRoot: dest })
+    const doc2 = await siteProjectToDocument(dest)
+    expect(doc2.info.name).toEqual(doc1.info.name)
+    expect(doc2.pages.find((p) => p.$id === 'home').title).toEqual(home1.title)
+  })
+})
+
 describe('info.favicon / info.assets (A5)', () => {
   it('round-trips site.yml::favicon and never produces or projects assets', async () => {
     const src = join(dir, 'src')

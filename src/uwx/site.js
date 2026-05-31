@@ -46,7 +46,8 @@ import {
   processMarkdownFile,
 } from '../site/content-collector.js'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { localize, LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+import { loadLocaleTranslations, localizeScalar } from './locale-sync.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveCollectionsConfig } from './collections-config.js'
 
@@ -81,13 +82,13 @@ function mapSectionData(section) {
 }
 
 function buildPageData(config, ctx) {
-  const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale } =
+  const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations } =
     ctx
   const data = { slug, mode } // both required by the entity type
   setIf(data, 'stable_id', config.id)
-  setIf(data, 'title', localize(config.title, sourceLocale))
-  setIf(data, 'description', localize(config.description, sourceLocale))
-  setIf(data, 'label', localize(config.label, sourceLocale))
+  setIf(data, 'title', localizeScalar(config.title, sourceLocale, translations))
+  setIf(data, 'description', localizeScalar(config.description, sourceLocale, translations))
+  setIf(data, 'label', localizeScalar(config.label, sourceLocale, translations))
   setIf(data, 'keywords', config.keywords)
   const indexed =
     config.index === true || (isRoot && siteIndex && siteIndex === slug)
@@ -315,7 +316,7 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
 // Recursively build the `pages` tree: each record carries its fields, its inline
 // `page_sections` (page mode only), and its child pages under `$children`.
 async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot) {
-  const { siteRoot, siteIndex, sourceLocale } = ctx
+  const { siteRoot, siteIndex, sourceLocale, translations } = ctx
   const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig)
   const out = []
   for (let i = 0; i < folders.length; i++) {
@@ -333,6 +334,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
       isRoot,
       siteIndex,
       sourceLocale,
+      translations,
     })
     // `$id` is the stableId when authored (rename-stable), else the slug (the
     // natural handle — spec default). The path is NEVER the identity.
@@ -457,9 +459,17 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     if (err.code !== 'ENOENT') throw err
   }
 
+  // Target-locale translations (locales/{locale}.json) for wrapping localized
+  // scalars back into per-locale form. Source-locale-only when no target locales /
+  // no locale files exist (single-locale sites are unaffected).
+  const targetLocales = (Array.isArray(siteYml.languages) ? siteYml.languages : []).filter(
+    (l) => l !== sourceLocale
+  )
+  const translations = targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales) : null
+
   const info = {}
-  info.name = localize(siteYml.name, sourceLocale)
-  setIf(info, 'description', localize(siteYml.description, sourceLocale))
+  info.name = localizeScalar(siteYml.name, sourceLocale, translations)
+  setIf(info, 'description', localizeScalar(siteYml.description, sourceLocale, translations))
   if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
   setIf(info, 'languages', siteYml.languages)
   setIf(info, 'default_language', siteYml.defaultLanguage)
@@ -478,7 +488,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
 
-  const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale }
+  const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
   const pagesPath = siteYml.paths?.pages
     ? join(siteRoot, siteYml.paths.pages)
     : join(siteRoot, 'pages')
