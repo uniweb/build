@@ -228,7 +228,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toBe(before)
   })
 
-  it('persists per-item uuids as a page.yml sidecar (uuid: + ids:), keeping .md bodies clean', () => {
+  it('persists per-item uuids in the gitignored .uniweb/ index, NOT in authored files', () => {
     const withUuids = {
       info: { name: { en: 'S' }, foundation_name: '@a/base' },
       pages: [
@@ -254,11 +254,18 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     }
     siteContentDocumentToProject({ document: withUuids, siteRoot: dir })
 
+    // page.yml is clean — no uuid, no ids map.
     const pageYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
-    expect(pageYml.uuid).toBe('0192-page')
-    expect(pageYml.ids).toEqual({ hero: '0192-hero', features: '0192-feat', 'card-a': '0192-card' })
-    // the .md body carries no uuid
+    expect(pageYml.uuid).toBeUndefined()
+    expect(pageYml.ids).toBeUndefined()
+    // the .md body carries no uuid either
     expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).not.toContain('0192-hero')
+
+    // the uuid → relative-path map lives in the gitignored .uniweb/ index.
+    const index = JSON.parse(readFileSync(join(dir, '.uniweb/pull-index.json'), 'utf8'))
+    expect(index.items['0192-page']).toBe(join('pages', 'home'))
+    expect(index.items['0192-hero']).toBe(join('pages', 'home', 'hero.md'))
+    expect(index.items['0192-card']).toBe(join('pages', 'home', 'card-a.md'))
   })
 })
 
@@ -327,7 +334,7 @@ describe('siteContentDocumentToProject — uuid-anchored rename detection', () =
     expect(report.deleted).toEqual([]) // a rename is NOT a delete
     const pageYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
     expect(pageYml.sections).toEqual(['hero', 'capabilities'])
-    expect(pageYml.ids).toEqual({ hero: 'S1', capabilities: 'S2' })
+    expect(pageYml.ids).toBeUndefined() // identity lives in .uniweb/, not page.yml
   })
 
   it('renames a page directory in place when its uuid maps to a new slug', () => {
