@@ -229,6 +229,52 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
   })
 })
 
+describe('pages lane fixed point — project → re-produce', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+
+  // The section tree as the `sections:` nested shape, for comparison.
+  const treeOf = (sections) =>
+    (sections || []).map((s) => {
+      const id = s.stable_id || s.$id
+      const kids = Array.isArray(s.$children) ? treeOf(s.$children) : []
+      return kids.length ? { [id]: kids } : id
+    })
+
+  it('projecting page sections to page.yml::sections: round-trips through the producer (order + nesting)', async () => {
+    const document = {
+      info: { name: { en: 'S' }, foundation_name: '@a/base' },
+      pages: [
+        {
+          $id: 'home',
+          slug: 'home',
+          mode: 'page',
+          stable_id: 'home',
+          is_index: true,
+          page_sections: [
+            { $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') },
+            {
+              $id: 'features',
+              stable_id: 'features',
+              type: 'Features',
+              content: docOf('F'),
+              $children: [{ $id: 'card-a', stable_id: 'card-a', type: 'Card', content: docOf('A') }],
+            },
+          ],
+        },
+      ],
+    }
+
+    const site = join(dir, 'site')
+    mkdirSync(site, { recursive: true })
+    siteContentDocumentToProject({ document, siteRoot: site })
+
+    // The producer must read page.yml::sections: to recover order + nesting.
+    const reproduced = await siteProjectToDocument(site)
+    const home = reproduced.pages.find((p) => p.$id === 'home')
+    expect(treeOf(home.page_sections)).toEqual(['hero', { features: ['card-a'] }])
+  })
+})
+
 describe('siteInfoToConfig — round-trip against the real producer', () => {
   it('a site.yml/theme.yml/head.html projected from the produced document matches the source config', async () => {
     // Author a source site, with no pages (the producer tolerates an absent pages/).

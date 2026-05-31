@@ -218,7 +218,61 @@ function findSectionFileName(mdFiles, sectionName) {
 // We reconstruct the parent→child tree ourselves (rather than the build's
 // `processNesting`) so this stays a pure read of the source — no shared
 // mutable-warning paths — and the nesting is keyed by the section's stableId.
+// True when `page.yml::sections:` is a fully explicit array — strings and/or
+// single-key nesting objects, with no `*`/`...` wildcard. In that form it is
+// authoritative for BOTH order and nesting (the same contract the normal build
+// honors via processExplicitSections), and section files need no numeric/`@`
+// prefix. This is the form the pull projector emits, so reading it here closes
+// the pull→push round trip — and aligns the producer with the build, which has
+// always honored `sections:` (the producer previously ignored it, ordering by
+// filename + nesting only via `nest:`). Wildcard or absent `sections:` falls
+// through to the directory-order + `nest:` path below, unchanged.
+function isFullyExplicitSections(sectionsConfig) {
+  if (!Array.isArray(sectionsConfig) || sectionsConfig.length === 0) return false
+  return sectionsConfig.every(
+    (item) =>
+      (typeof item === 'string' && item !== '...' && item !== '*') ||
+      (item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === 1)
+  )
+}
+
+// Build the page_sections tree from an explicit `sections:` array: each item is
+// a section name (string) or `{ name: [children…] }`, resolved to its file by
+// name (bare / `@` / numeric-prefix tolerant) and recursed. Order and nesting
+// come from the array, not the directory.
+async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig) {
+  const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
+  const seen = new Set()
+
+  const buildItem = async (item) => {
+    const name = typeof item === 'string' ? item : Object.keys(item)[0]
+    const children = typeof item === 'string' ? null : item[name]
+    const file = findSectionFileName(mdFiles, name)
+    if (!file || seen.has(file)) return null // missing / already used → skip
+    seen.add(file)
+    const { section } = await processMarkdownFile(join(pageDir, file), String(seen.size), siteRoot, name)
+    section.subsections = []
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        const sub = await buildItem(child)
+        if (sub) section.subsections.push(sub)
+      }
+    }
+    return section
+  }
+
+  const sections = []
+  for (const item of sectionsConfig) {
+    const s = await buildItem(item)
+    if (s) sections.push(s)
+  }
+  return sections.map((s, i) => sectionToRecord(s, i))
+}
+
 async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
+  if (isFullyExplicitSections(pageConfig?.sections)) {
+    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections)
+  }
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const nest = pageConfig?.nest && typeof pageConfig.nest === 'object' ? pageConfig.nest : {}
 
