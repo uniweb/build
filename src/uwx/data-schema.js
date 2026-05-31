@@ -25,6 +25,17 @@
 const TEXT_KINDS = new Set(['string', 'text', 'richtext'])
 
 /**
+ * A `json` field constrained to ProseMirror content (`format: prosemirror`):
+ * authored as markdown on the file side, carried as a ProseMirror document on the
+ * sync wire (the common language with the visual app). The single predicate the
+ * sync producer/projector use to decide md⇄ProseMirror conversion + structural-map
+ * localization. See framework/CLAUDE.md gotcha #21 and uwx-format.md.
+ */
+export function isProseMirrorField(field) {
+  return field?.type === 'json' && field?.format === 'prosemirror'
+}
+
+/**
  * Lower a normalized data schema to its `@uniweb/data-schema` declaration.
  *
  * @param {Object} normalized - the IR from `validateAndNormalizeSchema`.
@@ -171,9 +182,15 @@ function lowerField(rawField, resolve, optResolve) {
     return out
   }
 
-  // `localized` = human-readable text only — not enum tokens or format strings.
-  const machineish = field.enum !== undefined || field.format !== undefined
-  if (TEXT_KINDS.has(type) && field.translatable !== false && !machineish) out.localized = true
+  // A `format: prosemirror` json field is rich CONTENT (authored as markdown,
+  // carried as a ProseMirror doc on sync) — localizable like a text kind, NOT a
+  // machine-ish format-string constraint (email/url). Treat it as a content kind.
+  const isProseMirror = type === 'json' && field.format === 'prosemirror'
+  // `localized` = human-readable content — not enum tokens or format-string constraints.
+  const machineish = field.enum !== undefined || (field.format !== undefined && !isProseMirror)
+  if ((TEXT_KINDS.has(type) || isProseMirror) && field.translatable !== false && !machineish) {
+    out.localized = true
+  }
 
   // Field-narrowing constraints ride on the field; the registry relocates them to
   // the owning section's constraint records at ingest.

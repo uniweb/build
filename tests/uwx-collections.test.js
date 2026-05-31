@@ -334,6 +334,47 @@ describe('collectionRecordsToEntities — markdown body → richtext field', () 
   })
 })
 
+describe('collectionRecordsToEntities — markdown body → prosemirror content field (B)', () => {
+  // The declaration form a `format: prosemirror` constraint lowers to. Hand-built —
+  // the producer consumes the declaration, independent of the authoring sugar.
+  const decl = {
+    name: '@acme/article',
+    sections: {
+      article: {
+        brief: true,
+        fields: {
+          title: { type: 'string', localized: true },
+          body: { type: 'json', format: 'prosemirror', localized: true },
+        },
+      },
+    },
+  }
+
+  it('converts the markdown body to a ProseMirror doc on the wire (not the raw string)', () => {
+    const { entities, warnings } = collectionRecordsToEntities({
+      collectionName: 'articles',
+      records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
+      declaration: decl,
+    })
+    expect(warnings).toEqual([])
+    const body = entities[0].document.article.body
+    expect(body.type).toBe('doc') // ProseMirror, converted from markdown
+    expect(JSON.stringify(body)).toContain('Hello world')
+  })
+
+  it('wraps per-locale (source doc + structural map) from translations', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'articles',
+      records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
+      declaration: decl,
+      translations: { es: { [computeHash('Hello world')]: 'Hola mundo' } },
+    })
+    const body = entities[0].document.article.body
+    expect(body.en.type).toBe('doc') // source doc
+    expect(body.es).toEqual({ 'Hello world': 'Hola mundo' }) // structural map (same as a section)
+  })
+})
+
 // ── Step C: emitCollectionSyncPackage (orchestrator, real fs) ────────────────
 
 describe('emitCollectionSyncPackage — site + local foundation → .uwx', () => {

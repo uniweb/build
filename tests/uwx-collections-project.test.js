@@ -152,6 +152,40 @@ describe('collectionsToProject — folder identity + no silent skips', () => {
   })
 })
 
+describe('collectionsToProject — prosemirror content field (B)', () => {
+  const pmDecl = {
+    name: '@acme/article',
+    sections: {
+      article: {
+        brief: true,
+        fields: {
+          title: { type: 'string', localized: true },
+          body: { type: 'json', format: 'prosemirror', localized: true },
+        },
+      },
+    },
+  }
+  const resolvePm = (n) => (n === '@acme/article' ? pmDecl : null)
+  const pmDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello world' }] }] }
+
+  it('renders a PM-doc body to markdown (.md) and flushes its structural map to locales/collections', () => {
+    const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
+    const recordDocs = [
+      { $uuid: 'U1', $model: '@acme/article', article: { title: { en: 'Hello' }, body: { en: pmDoc, es: { 'Hello world': 'Hola mundo' } } } },
+    ]
+
+    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: resolvePm } })
+
+    // body field (prosemirror) → markdown body in a .md file (briefHasContentBody → md format)
+    const f = join(dir, 'collections/articles/hello.md')
+    expect(report.placed).toContain(f)
+    expect(readFileSync(f, 'utf8')).toContain('Hello world')
+    // the target structural map → locales/collections/es.json by source-text hash
+    const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
+    expect(es[computeHash('Hello world')]).toBe('Hola mundo')
+  })
+})
+
 describe('collectionsToProject — localized record scalars (B)', () => {
   it('writes the source field inline and target locales to locales/collections/{locale}.json', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')

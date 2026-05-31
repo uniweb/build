@@ -21,7 +21,10 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './collection-source.js'
+import { isProseMirrorField } from './data-schema.js'
+import { unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
 
 // Probed in this order to locate a single-record source file by slug.
@@ -202,12 +205,13 @@ function briefSectionOf(declaration) {
   return entry ? { name: entry[0], ...entry[1] } : null
 }
 
-// Whether a Model's brief section declares a richtext field (the md-body target).
-// A markdown source file can only be safely rendered from the document when its
-// body is captured as a field — otherwise the body would be lost (variant B then).
-function briefHasRichtext(declaration) {
+// Whether a Model's brief section declares a CONTENT body field (richtext, or a
+// `format: prosemirror` json field) — the md-body target. A markdown source file
+// can only be safely rendered from the document when its body has a field home —
+// otherwise the body would be lost (variant B then).
+function briefHasContentBody(declaration) {
   const brief = briefSectionOf(declaration)
-  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE)
+  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE || isProseMirrorField(f))
 }
 
 /**
@@ -236,7 +240,11 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
     throw new Error('uwx/render: document has no resolvable brief section')
   }
   const fields = brief.fields || {}
-  const richtextKey = Object.entries(fields).find(([, f]) => f.type === RICHTEXT_TYPE)?.[0]
+  // The body target is the CONTENT field — a `richtext` field or a `format:
+  // prosemirror` json field (the latter is a ProseMirror doc on the wire).
+  const contentKey = Object.entries(fields).find(
+    ([, f]) => f.type === RICHTEXT_TYPE || isProseMirrorField(f)
+  )?.[0]
 
   const record = {}
   if (document.$uuid) record.$uuid = document.$uuid
@@ -244,11 +252,23 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   for (const [key, field] of Object.entries(fields)) {
     const raw = section[key]
     if (raw === undefined) continue
+
+    // A `format: prosemirror` field is a ProseMirror doc (or localized doc+maps)
+    // on the wire → markdown on disk. unwrapLocalizedContent yields the source doc
+    // and captures target-locale structural maps into the collector.
+    if (isProseMirrorField(field)) {
+      const sourceDoc = field.localized ? unwrapLocalizedContent(raw, sourceLocale, collector) : raw
+      const md = sourceDoc ? proseMirrorToMarkdown(sourceDoc) : ''
+      if (format === 'md' && key === contentKey) body = md
+      else record[key] = md
+      continue
+    }
+
     // Capture target-locale translations of localized SCALAR fields (not the
-    // richtext body) into the collector when one is supplied.
-    if (field.localized && key !== richtextKey) collector?.add(raw)
+    // content body) into the collector when one is supplied.
+    if (field.localized && key !== contentKey) collector?.add(raw)
     const value = field.localized ? unwrapLocalized(raw, sourceLocale) : raw
-    if (format === 'md' && key === richtextKey) {
+    if (format === 'md' && key === contentKey) {
       body = typeof value === 'string' ? value : String(value ?? '')
       continue
     }
@@ -337,7 +357,7 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     const canRenderA =
       fin.document &&
       entry.declaration &&
-      (entry.format !== 'md' || briefHasRichtext(entry.declaration))
+      (entry.format !== 'md' || briefHasContentBody(entry.declaration))
     let res
     if (canRenderA) {
       try {

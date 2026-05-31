@@ -36,6 +36,7 @@ import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
 import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
 import { defaultSchema } from './collections-config.js'
+import { isProseMirrorField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations } from './locale-sync.js'
 import { writeFolderUuid } from './folder.js'
 
@@ -88,7 +89,7 @@ export function findRecordFileByUuid(collectionDir, uuid) {
 
 // The format to give a NEW record file in a collection: match the collection's
 // existing single-record files, else markdown when the Model's brief carries a
-// richtext field (so the body has a home), else YAML.
+// content body field (so the body has a home), else YAML.
 function defaultFormat(collectionDir, declaration) {
   if (existsSync(collectionDir)) {
     for (const entry of readdirSync(collectionDir)) {
@@ -97,14 +98,14 @@ function defaultFormat(collectionDir, declaration) {
       if (format) return format
     }
   }
-  return briefHasRichtext(declaration) ? 'md' : 'yaml'
+  return briefHasContentBody(declaration) ? 'md' : 'yaml'
 }
 
-// Whether the declaration's brief section declares a richtext field (the md-body
-// target). Mirrors the same check in backfill.js (kept local — not exported there).
-function briefHasRichtext(declaration) {
+// Whether the declaration's brief section declares a content body field — a
+// `richtext` field or a `format: prosemirror` json field (the md-body target).
+function briefHasContentBody(declaration) {
   const brief = Object.values(declaration?.sections || {}).find((s) => s && s.brief === true)
-  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE)
+  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE || isProseMirrorField(f))
 }
 
 // Build `uuid → { collection, slug }` from the folder document's ref leaves. A

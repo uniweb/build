@@ -81,6 +81,34 @@ describe('toDataSchemaDeclaration — fields-form (flat shorthand)', () => {
   })
 })
 
+describe('toDataSchemaDeclaration — json + format: prosemirror (content fields)', () => {
+  const decl = lower(
+    {
+      name: 'doc',
+      fields: {
+        body: { type: 'json', format: 'prosemirror' }, // rich content
+        meta: { type: 'json' }, // plain structured json
+        site: { type: 'url' }, // string + format: url (machine-ish)
+      },
+    },
+    '@/doc',
+    '@acme/doc'
+  )
+  const f = () => decl.sections.doc.fields
+
+  it('marks a format: prosemirror json field localized (content, not machine-ish)', () => {
+    expect(f().body).toEqual({ type: 'json', format: 'prosemirror', localized: true })
+  })
+
+  it('leaves a plain json field non-localized', () => {
+    expect(f().meta.localized).toBeUndefined()
+  })
+
+  it('keeps a string format (url/email) non-localized', () => {
+    expect(f().site.localized).toBeUndefined()
+  })
+})
+
 describe('toDataSchemaDeclaration — references', () => {
   const decl = lower(
     {

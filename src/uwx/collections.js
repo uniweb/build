@@ -24,11 +24,12 @@ import { join, resolve } from 'node:path'
 
 import { resolveCollectionsConfig } from './collections-config.js'
 import { readCollectionRecords } from './collection-source.js'
-import { toDataSchemaDeclaration } from './data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
+import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
-import { localizeScalar, loadLocaleTranslations, discoverLocales } from './locale-sync.js'
+import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLocales } from './locale-sync.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 const RICHTEXT_TYPE = 'richtext'
@@ -89,10 +90,16 @@ export function entityContentHash(document) {
 
 function encodeFieldValue(value, field, sourceLocale, translations) {
   if (value == null) return value
+  if (isProseMirrorField(field)) {
+    // markdown source → ProseMirror doc. When localized, wrap per-locale exactly
+    // like a page section's content (source doc + target structural maps) — same
+    // path, flushed to locales/collections/{locale}.json by the caller.
+    const doc = typeof value === 'string' ? markdownToProseMirror(value) : value
+    if (!field.localized) return doc
+    return localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations)
+  }
   if (field.localized) {
-    // A localized SCALAR wraps per-locale from locales/collections/{locale}.json;
-    // the richtext BODY stays source-only for now (its per-locale structural-map
-    // round-trip is a later increment).
+    // A localized SCALAR wraps per-locale from locales/collections/{locale}.json.
     return field.type === RICHTEXT_TYPE
       ? localize(value, sourceLocale)
       : localizeScalar(value, sourceLocale, translations)
@@ -148,17 +155,20 @@ export function collectionRecordsToEntities({
   const fieldByKey = new Map(Object.entries(briefFields))
 
   // The markdown body of a `.md` collection record is the value of the brief's
-  // `richtext` field (docs/reference/entity-content.md). One richtext field is the
-  // body target; zero means a `.md` body has nowhere to go (warn per record).
-  const richtextEntries = Object.entries(briefFields).filter(([, f]) => f.type === RICHTEXT_TYPE)
-  const bodyFieldKey = richtextEntries[0]?.[0] || null
+  // CONTENT field — a `richtext` field or a `format: prosemirror` json field
+  // (docs/reference/entity-content.md). One content field is the body target;
+  // zero means a `.md` body has nowhere to go (warn per record).
+  const contentEntries = Object.entries(briefFields).filter(
+    ([, f]) => f.type === RICHTEXT_TYPE || isProseMirrorField(f)
+  )
+  const bodyFieldKey = contentEntries[0]?.[0] || null
 
   const entities = []
   const warnings = []
-  if (richtextEntries.length > 1) {
+  if (contentEntries.length > 1) {
     warnings.push(
-      `${collectionName}: ${declaration.name}.${briefName} has more than one richtext ` +
-        `field — the markdown body maps to "${bodyFieldKey}"`
+      `${collectionName}: ${declaration.name}.${briefName} has more than one content ` +
+        `(richtext / prosemirror) field — the markdown body maps to "${bodyFieldKey}"`
     )
   }
   for (const record of records || []) {
