@@ -12,6 +12,7 @@ import {
   collectionsToProject,
   findRecordFileByUuid,
 } from '../src/uwx/index.js'
+import { computeHash } from '../src/i18n/hash.js'
 
 let dir
 beforeEach(() => {
@@ -148,5 +149,25 @@ describe('collectionsToProject — folder identity + no silent skips', () => {
     })
     expect(report.skipped).toHaveLength(1)
     expect(report.skipped[0]).toMatchObject({ uuid: 'M1', reason: expect.stringContaining('@acme/unknown') })
+  })
+})
+
+describe('collectionsToProject — localized record scalars (B)', () => {
+  it('writes the source field inline and target locales to locales/collections/{locale}.json', () => {
+    const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
+    // A record with a multi-locale title scalar (and a source-only richtext body).
+    const recordDocs = [
+      { $uuid: 'U1', $model: '@acme/article', article: { $uuid: 'rec', title: { en: 'Hello', es: 'Hola' }, body: { en: '\nHi\n' } } },
+    ]
+
+    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
+
+    // source-locale title stays inline in the record file
+    const f = join(dir, 'collections/articles/hello.md')
+    expect(readFileSync(f, 'utf8')).toContain('title: Hello')
+    // target locale → locales/collections/es.json keyed by hash(source)
+    const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
+    expect(es[computeHash('Hello')]).toBe('Hola')
+    expect(report.locales.es).toBe('updated')
   })
 })

@@ -36,6 +36,7 @@ import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
 import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
 import { defaultSchema } from './collections-config.js'
+import { createTranslationCollector, writeLocaleTranslations } from './locale-sync.js'
 import { writeFolderUuid } from './folder.js'
 
 const RICHTEXT_TYPE = 'richtext'
@@ -252,7 +253,7 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
  * @param {object} [params.opts.collectionsConfig] - from resolveCollectionsConfig
  *        (for `path:` overrides); optional — defaults to `collections/<name>`.
  * @param {string} [params.opts.sourceLocale]
- * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[] }}
+ * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
   const { resolveDeclaration, collectionsConfig, sourceLocale = 'en' } = opts
@@ -261,6 +262,10 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
   }
 
   const folderIndex = indexFolder(folderDoc)
+  // Captures target-locale translations of localized record SCALAR fields; flushed
+  // to locales/collections/{locale}.json (the records lane's manifest stays
+  // derivable too). The richtext BODY's per-locale round-trip is a later increment.
+  const collector = createTranslationCollector(sourceLocale)
   const updated = []
   const placed = []
   const unchanged = []
@@ -297,7 +302,7 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
 
     let status
     try {
-      status = writeRecordFile({ filePath, document, declaration, format, sourceLocale })
+      status = writeRecordFile({ filePath, document, declaration, format, sourceLocale, collector })
     } catch (err) {
       warnings.push(`${where.collection}/${where.slug}: ${err.message}`)
       continue
@@ -312,5 +317,8 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
   // introduced collections are a later, comment-sensitive rewrite (header).
   if (folderDoc?.$uuid) writeFolderUuid(siteRoot, folderDoc.$uuid)
 
-  return { updated, placed, unchanged, skipped, warnings }
+  // Flush localized record-field translations to locales/collections/{locale}.json.
+  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'collections')
+
+  return { updated, placed, unchanged, skipped, warnings, locales }
 }

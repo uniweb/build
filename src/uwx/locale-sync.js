@@ -23,12 +23,14 @@ import { extractUnitsFromDoc } from '../i18n/extract.js'
 
 // The `locales/` directory for a site (the i18n localesDir default; `paths` can
 // override it, but the default is `locales` — keep this the single place to change).
-export function localesDir(siteRoot) {
-  return join(siteRoot, 'locales')
+// `subdir` scopes a lane: '' → site-content (locales/), 'collections' → collection
+// records (locales/collections/), matching the i18n manifest layout.
+export function localesDir(siteRoot, subdir = '') {
+  return subdir ? join(siteRoot, 'locales', subdir) : join(siteRoot, 'locales')
 }
 
-export function localeFilePath(siteRoot, locale) {
-  return join(localesDir(siteRoot), `${locale}.json`)
+export function localeFilePath(siteRoot, locale, subdir = '') {
+  return join(localesDir(siteRoot, subdir), `${locale}.json`)
 }
 
 // True for a `{ <lang>: value }` localized map (vs a bare scalar / array / null).
@@ -41,10 +43,10 @@ export function isLocalizedMap(value) {
  * The producer's counterpart to writeLocaleTranslations — used to wrap source values
  * back into per-locale form on push. Missing / unreadable files are skipped.
  */
-export function loadLocaleTranslations(siteRoot, locales) {
+export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
   const out = {}
   for (const locale of locales || []) {
-    const filePath = localeFilePath(siteRoot, locale)
+    const filePath = localeFilePath(siteRoot, locale, subdir)
     if (!existsSync(filePath)) continue
     try {
       const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
@@ -199,11 +201,11 @@ export function unwrapLocalizedContent(content, sourceLocale, collector) {
  *
  * @returns {{ [locale: string]: 'updated' | 'unchanged' }}
  */
-export function writeLocaleTranslations(siteRoot, byLocale) {
+export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
   const report = {}
   for (const [locale, entries] of Object.entries(byLocale || {})) {
     if (!entries || Object.keys(entries).length === 0) continue
-    const filePath = localeFilePath(siteRoot, locale)
+    const filePath = localeFilePath(siteRoot, locale, subdir)
 
     let existing = {}
     if (existsSync(filePath)) {

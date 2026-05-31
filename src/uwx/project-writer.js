@@ -290,9 +290,10 @@ export function writeThemeFile(siteRoot, theme) {
  * @param {object} opts.declaration - the record's data-schema declaration
  * @param {'yaml'|'json'|'md'} opts.format
  * @param {string} [opts.sourceLocale]
+ * @param {object} [opts.collector] - translation collector for localized scalar fields
  * @returns {'updated'|'unchanged'}
  */
-export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en' }) {
-  const text = renderEntityDocument({ document, declaration, format, sourceLocale })
+export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en', collector }) {
+  const text = renderEntityDocument({ document, declaration, format, sourceLocale, collector })
   return writeIfChanged(filePath, text)
 }

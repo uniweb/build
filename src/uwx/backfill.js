@@ -223,9 +223,13 @@ function briefHasRichtext(declaration) {
  * @param {object} params.declaration  - the Model declaration (`brief` + `sections`)
  * @param {string} params.format       - 'yaml' | 'json' | 'md'
  * @param {string} [params.sourceLocale]
+ * @param {object} [params.collector]  - translation collector; target locales of
+ *        localized SCALAR fields are captured into it (→ locales/collections/{locale}.json).
+ *        The localized richtext BODY is unwrapped to source only (its per-locale
+ *        round-trip is a later increment).
  * @returns {string} the source-file text
  */
-export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en' }) {
+export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector }) {
   const brief = briefSectionOf(declaration)
   const section = brief ? document?.[brief.name] : null
   if (!brief || !section || typeof section !== 'object') {
@@ -240,6 +244,9 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   for (const [key, field] of Object.entries(fields)) {
     const raw = section[key]
     if (raw === undefined) continue
+    // Capture target-locale translations of localized SCALAR fields (not the
+    // richtext body) into the collector when one is supplied.
+    if (field.localized && key !== richtextKey) collector?.add(raw)
     const value = field.localized ? unwrapLocalized(raw, sourceLocale) : raw
     if (format === 'md' && key === richtextKey) {
       body = typeof value === 'string' ? value : String(value ?? '')
