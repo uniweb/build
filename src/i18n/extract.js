@@ -143,6 +143,21 @@ function extractFromSection(section, pageRoute, units) {
  * @param {Object} context - Current context (page, section)
  * @param {Object} units - Units accumulator
  */
+/**
+ * Extract the translatable units from a SINGLE ProseMirror content doc, keyed by
+ * the same 8-char hash the site-wide extractor uses. Reused by the sync producer
+ * to build a section's per-locale structural translation map (so there is one
+ * extraction implementation, not a second copy).
+ *
+ * @param {Object} doc - a ProseMirror document (`{ type: 'doc', content: [...] }`)
+ * @returns {Object} `{ [hash]: { source, field, contexts } }`
+ */
+export function extractUnitsFromDoc(doc) {
+  const units = {}
+  if (doc && doc.content) extractFromProseMirrorDoc(doc, { page: '', section: '' }, units)
+  return units
+}
+
 function extractFromProseMirrorDoc(doc, context, units) {
   if (!doc.content) return
 

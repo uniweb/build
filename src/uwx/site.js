@@ -47,7 +47,7 @@ import {
 } from '../site/content-collector.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { loadLocaleTranslations, localizeScalar } from './locale-sync.js'
+import { loadLocaleTranslations, localizeScalar, localizeContentDoc } from './locale-sync.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveCollectionsConfig } from './collections-config.js'
 
@@ -61,6 +61,26 @@ function setIf(obj, key, value) {
 // processMarkdownFile only destructures type/component/preset/input/props/
 // fetch/data/id out of frontmatter, so `background:` and `theme:` stay
 // inside section.params — lift them into the entity type's dedicated fields.
+// Post-pass: wrap every section's `content` (page sections + their `$children`,
+// recursing into child pages, plus layout sections) into per-locale form. Mutates
+// the records in place. Only called for multi-locale sites with locale files.
+function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations) {
+  const visitSections = (sections) => {
+    for (const s of sections || []) {
+      if (s.content) s.content = localizeContentDoc(s.content, sourceLocale, targetLocales, translations)
+      if (Array.isArray(s.$children)) visitSections(s.$children)
+    }
+  }
+  const visitPages = (pgs) => {
+    for (const p of pgs || []) {
+      if (Array.isArray(p.page_sections)) visitSections(p.page_sections)
+      if (Array.isArray(p.$children)) visitPages(p.$children)
+    }
+  }
+  visitPages(pages)
+  visitSections(layoutSections)
+}
+
 function mapSectionData(section) {
   const params = { ...section.params }
   const background = params.background
@@ -500,6 +520,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     ? join(siteRoot, siteYml.paths.layout)
     : join(siteRoot, 'layout')
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
+
+  // Wrap each section's content into its per-locale form (source doc + target
+  // structural maps) when the site is multi-locale and has locale files. A
+  // non-invasive post-pass over the built tree — single-locale sites are untouched.
+  if (translations && targetLocales.length > 0) {
+    localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations)
+  }
 
   // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
   // config (the records themselves are separate entities; this is just the config).

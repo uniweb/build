@@ -18,7 +18,8 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { computeHash } from '../i18n/hash.js'
+import { computeHash, stripInlineTags } from '../i18n/hash.js'
+import { extractUnitsFromDoc } from '../i18n/extract.js'
 
 // The `locales/` directory for a site (the i18n localesDir default; `paths` can
 // override it, but the default is `locales` — keep this the single place to change).
@@ -53,6 +54,42 @@ export function loadLocaleTranslations(siteRoot, locales) {
     }
   }
   return out
+}
+
+/**
+ * Wrap a section's source-locale content DOC into its localized `content` form: the
+ * source locale stays the doc; each target locale becomes a structural
+ * `{ source-text: target }` map built from the doc's translatable units joined with
+ * `locales/{locale}.json`. The map is keyed by the cleaned (inline-tag-stripped)
+ * source text, so the projector's `computeHash(key)` matches the unit hash —
+ * closing the round trip. Reuses the i18n extractor (extractUnitsFromDoc).
+ *
+ * Returns the bare doc unchanged when there are no target locales / no translations
+ * for any of them (single-locale and pre-localization sites are untouched).
+ *
+ * @param {object} doc - the source-locale ProseMirror content doc
+ * @param {string} sourceLocale
+ * @param {string[]} targetLocales
+ * @param {object} translations - `{ locale: { hash: tgt } }` from loadLocaleTranslations
+ */
+export function localizeContentDoc(doc, sourceLocale, targetLocales, translations) {
+  if (!isProseMirrorDoc(doc) || !targetLocales || targetLocales.length === 0 || !translations) {
+    return doc
+  }
+  const units = extractUnitsFromDoc(doc)
+  const result = { [sourceLocale]: doc }
+  for (const locale of targetLocales) {
+    const table = translations[locale]
+    if (!table) continue
+    const map = {}
+    for (const [hash, unit] of Object.entries(units)) {
+      const tgt = table[hash]
+      if (typeof tgt === 'string') map[stripInlineTags(unit.source)] = tgt
+    }
+    if (Object.keys(map).length > 0) result[locale] = map
+  }
+  // Only wrap when at least one target carried a translation — else stay a bare doc.
+  return Object.keys(result).length > 1 ? result : doc
 }
 
 /**

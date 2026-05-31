@@ -641,6 +641,34 @@ describe('localized scalar round-trip: producer ⇄ projector (B)', () => {
   })
 })
 
+describe('localized content body round-trip: producer ⇄ projector (B)', () => {
+  it('round-trips a multi-locale section content body via the structural map', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(join(src, 'pages/home'), { recursive: true })
+    mkdirSync(join(src, 'locales'), { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\nlanguages: [en, es]\n")
+    writeFileSync(join(src, 'pages/home/page.yml'), 'index: true\nsections: [hero]\n')
+    writeFileSync(join(src, 'pages/home/hero.md'), '---\ntype: Hero\n---\n\nHello world\n')
+    writeFileSync(join(src, 'locales/es.json'), JSON.stringify({ [computeHash('Hello world')]: 'Hola mundo' }))
+
+    // Producer wraps the content: source doc + an es structural map from locales/es.json.
+    const doc1 = await siteProjectToDocument(src)
+    const hero1 = doc1.pages.find((p) => p.$id === 'home').page_sections.find((s) => s.stable_id === 'hero')
+    expect(hero1.content.en.type).toBe('doc')
+    expect(hero1.content.es).toEqual({ 'Hello world': 'Hola mundo' })
+
+    // Project, then re-produce — the whole document is a fixed point.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteContentDocumentToProject({ document: doc1, siteRoot: dest })
+    expect(readFileSync(join(dest, 'pages/home/hero.md'), 'utf8')).toContain('Hello world')
+    expect(JSON.parse(readFileSync(join(dest, 'locales/es.json'), 'utf8'))[computeHash('Hello world')]).toBe('Hola mundo')
+
+    const doc2 = await siteProjectToDocument(dest)
+    expect(doc2).toEqual(doc1)
+  })
+})
+
 describe('info.favicon / info.assets (A5)', () => {
   it('round-trips site.yml::favicon and never produces or projects assets', async () => {
     const src = join(dir, 'src')
