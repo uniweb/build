@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToCollectionsYml } from './collections-project.js'
+import { createTranslationCollector, writeLocaleTranslations } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -112,11 +113,14 @@ const INFO_TO_SITE_YML = {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale }) {
+export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector }) {
   const info = document?.info || {}
 
   const siteChanges = {}
-  // Localized text fields → unwrapped to the source locale.
+  // Localized text fields → unwrapped to the source locale (the target locales are
+  // captured into the locales/ collector when one is supplied).
+  collector?.add(info.name)
+  collector?.add(info.description)
   const name = unwrapLocalized(info.name, sourceLocale)
   if (name !== undefined) siteChanges.name = name
   const description = unwrapLocalized(info.description, sourceLocale)
@@ -387,6 +391,12 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
     placeByUuid(ctx, record.$uuid, pageDir)
 
+    // Capture target-locale translations of the page's localized scalars; the
+    // source value goes inline into page.yml below (pageRecordToYml unwraps it).
+    ctx.collector?.add(record.title)
+    ctx.collector?.add(record.label)
+    ctx.collector?.add(record.description)
+
     let sectionsArray = []
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
       const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx })
@@ -517,17 +527,23 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  *        files that have no corresponding incoming item (git-pull-like). Off by
  *        default; `uniweb pull` opts in. Guarded against wiping a level on an
  *        empty set.
- * @returns {{ config: object, collections: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
+ * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
-  const report = { config: null, collections: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
-  report.config = siteInfoToConfig({ document, siteRoot, sourceLocale })
+  const report = { config: null, collections: null, locales: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
+
+  // Collects target-locale translations of localized scalars as they're projected;
+  // flushed to locales/{locale}.json at the end (the manifest stays derivable).
+  const collector = createTranslationCollector(sourceLocale)
+
+  report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector })
   report.collections = declarationsToCollectionsYml({ document, siteRoot })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not
-  // re-projected (deleted) drop out naturally.
-  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report }
+  // re-projected (deleted) drop out naturally. `collector` rides along to capture
+  // localized scalars during the page walk.
+  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector }
 
   const paths = document?.info?.paths || {}
   const pagesDir = paths.pages ? join(siteRoot, paths.pages) : join(siteRoot, 'pages')
@@ -536,6 +552,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   const layoutBaseDir = paths.layout ? join(siteRoot, paths.layout) : join(siteRoot, 'layout')
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
+  report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)
   writePullIndex(siteRoot, ctx.newIndex)
   return report
 }

@@ -15,6 +15,7 @@ import {
   siteProjectToDocument,
   declarationsToCollectionsYml,
 } from '../src/uwx/index.js'
+import { computeHash } from '../src/i18n/hash.js'
 
 let dir
 beforeEach(() => {
@@ -530,6 +531,49 @@ describe('collection declarations — round-trip against the real producer', () 
     // the incoming `articles` is added; the pre-existing `old` is left in place
     expect(out.collections.articles).toEqual({})
     expect(out.collections.old).toEqual({ schema: 'stale' })
+  })
+})
+
+describe('localized scalar projection → locales/{locale}.json (B)', () => {
+  const info = (extra) => ({ name: { en: 'Atlas', es: 'Atlas ES', fr: 'Atlas FR' }, foundation: '@a/base', ...extra })
+
+  it('writes the source value inline and target locales to locales/{locale}.json keyed by source hash', () => {
+    const document = {
+      info: info(),
+      pages: [
+        { $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', title: { en: 'Home', es: 'Inicio' }, page_sections: [] },
+      ],
+    }
+    const report = siteContentDocumentToProject({ document, siteRoot: dir })
+
+    // source locale stays inline in the config files
+    expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8')).name).toBe('Atlas')
+    expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).title).toBe('Home')
+
+    // target locales → locales/{locale}.json keyed by hash(source)
+    const es = JSON.parse(readFileSync(join(dir, 'locales/es.json'), 'utf8'))
+    expect(es[computeHash('Atlas')]).toBe('Atlas ES')
+    expect(es[computeHash('Home')]).toBe('Inicio')
+    const fr = JSON.parse(readFileSync(join(dir, 'locales/fr.json'), 'utf8'))
+    expect(fr[computeHash('Atlas')]).toBe('Atlas FR')
+    expect(fr[computeHash('Home')]).toBeUndefined() // 'Home' only had an es translation
+    expect(report.locales.es).toBe('updated')
+  })
+
+  it('merges into an existing locales/{locale}.json, preserving other entries', () => {
+    mkdirSync(join(dir, 'locales'), { recursive: true })
+    writeFileSync(join(dir, 'locales/es.json'), JSON.stringify({ existinghash: 'kept' }))
+
+    siteContentDocumentToProject({ document: { info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@a/base' } }, siteRoot: dir })
+
+    const es = JSON.parse(readFileSync(join(dir, 'locales/es.json'), 'utf8'))
+    expect(es.existinghash).toBe('kept')
+    expect(es[computeHash('Atlas')]).toBe('Atlas ES')
+  })
+
+  it('a source-only document writes no locale files (backward compatible)', () => {
+    siteContentDocumentToProject({ document: { info: { name: { en: 'Atlas' }, foundation: '@a/base' } }, siteRoot: dir })
+    expect(existsSync(join(dir, 'locales'))).toBe(false)
   })
 })
 

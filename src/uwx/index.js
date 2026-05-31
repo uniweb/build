@@ -65,6 +65,11 @@ export {
   pageSectionsToFiles,
   siteContentDocumentToProject,
 } from './site-project.js'
+export {
+  createTranslationCollector,
+  writeLocaleTranslations,
+  localeFilePath,
+} from './locale-sync.js'
 export { emitSyncPackages } from './sync-package.js'
 export {
   collectionRecordsToEntities,
