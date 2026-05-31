@@ -54,6 +54,10 @@ export {
   buildFolderEntity,
   writeFolderUuid,
 } from './folder.js'
+export {
+  collectionsToProject,
+  findRecordFileByUuid,
+} from './collections-project.js'
 export { emitSyncPackages } from './sync-package.js'
 export {
   collectionRecordsToEntities,
