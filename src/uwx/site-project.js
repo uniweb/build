@@ -7,22 +7,28 @@
 //
 //   - `info`        → site.yml / theme.yml / head.html        (siteInfoToConfig)
 //   - `extensions`  → site.yml::extensions                    (siteInfoToConfig)
-//   - `pages`       → pages/**                                (later increment)
-//   - `layout_sections` → layout/**                           (later increment)
+//   - `pages`       → pages/**                                (siteContentDocumentToProject)
+//   - `layout_sections` → layout/**                           (siteContentDocumentToProject)
 //   - `collections` → collections.yml                         (collections-project)
 //
-// This increment lands the config half (`info` + `extensions`) — the bounded,
-// decision-light slice that reuses the project-writer's config merges. The
-// pages/layout tree (section files, `nest:` reconstruction, dynamic-route
-// folders, and stableId identity-matching) is the larger surface and lands
-// next.
+// Section files are clean `<stableId>.md`; section order + nesting live in
+// `page.yml::sections:` (the nested-array form). Each page/section's backend
+// uuid is persisted as a `page.yml` sidecar (`uuid:` + `ids:` map) so the next
+// pull can match by uuid, keeping the .md bodies free of identity noise. The
+// stableId is user-facing (URL hash targets) and must survive round trips, so
+// it is preserved as the filename and a secondary match key.
+//
+// Reconcile (opt-in `prune`): write the incoming set, then DELETE files/dirs that
+// no longer correspond to any incoming item (git-pull-like). Matching is by
+// stableId today (which round-trips), with the persisted uuid as the durable
+// anchor for richer future matching; content-similarity is a later fallback.
 //
 // Localized fields (`name`, `description`) are wired as `{ <locale>: value }`;
 // we unwrap to the source locale for the file surface (other locales stay in
-// the i18n pipeline). Absent `info` keys are left untouched on disk — a pull
-// doesn't churn config it didn't carry, and deletion is out of scope here.
+// the i18n pipeline). Absent `info` keys are left untouched on disk.
 
-import { join } from 'node:path'
+import { join, extname, basename } from 'node:path'
+import { readdirSync, statSync, existsSync, unlinkSync, rmSync } from 'node:fs'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeYamlFile } from './project-writer.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
@@ -187,6 +193,7 @@ function recordStableId(record) {
  */
 export function pageSectionsToFiles({ pageDir, pageSections }) {
   const written = []
+  const ids = {} // stableId → backend uuid (the distributed sidecar for page.yml)
   const buildEntries = (records) => {
     const entries = []
     for (const record of records || []) {
@@ -195,20 +202,27 @@ export function pageSectionsToFiles({ pageDir, pageSections }) {
       const filePath = join(pageDir, `${stableId}.md`)
       sectionRecordToFile({ filePath, record })
       written.push(filePath)
+      // Persist the backend uuid keyed by the (URL-relevant, round-trip-stable)
+      // stableId, so the next pull can match this section by uuid — keeping the
+      // .md body itself free of identity noise.
+      if (record.$uuid) ids[stableId] = record.$uuid
       const children = Array.isArray(record.$children) ? record.$children : []
       entries.push(children.length > 0 ? { [stableId]: buildEntries(children) } : stableId)
     }
     return entries
   }
-  return { sections: buildEntries(pageSections), written }
+  return { sections: buildEntries(pageSections), written, ids }
 }
 
 // Inverse of site.js buildPageData → the `page.yml` / `folder.yml` object.
 // `slug`/`mode`/`is_dynamic`/`param_name` are NOT keys here — they shape the
 // directory (name, page.yml vs folder.yml, `[param]/`), not the config body.
-function pageRecordToYml(record, sectionsArray, sourceLocale) {
+function pageRecordToYml(record, sectionsArray, sectionIds, sourceLocale) {
   const y = {}
   if (record.stable_id !== undefined) y.id = record.stable_id
+  // The page's own backend uuid (machine-owned; persisted so the next pull can
+  // match this page by uuid even if its slug/title changes).
+  if (record.$uuid !== undefined) y.uuid = record.$uuid
   const title = unwrapLocalized(record.title, sourceLocale)
   if (title !== undefined) y.title = title
   const description = unwrapLocalized(record.description, sourceLocale)
@@ -226,34 +240,75 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (record.seo !== undefined) y.seo = record.seo
   if (record.fetch !== undefined) y.fetch = record.fetch
   if (sectionsArray && sectionsArray.length > 0) y.sections = sectionsArray
+  // The distributed sidecar: stableId → section uuid, kept out of the .md files.
+  if (sectionIds && Object.keys(sectionIds).length > 0) y.ids = sectionIds
   return y
+}
+
+// Delete `<name>.md` files in `pageDir` whose stableId isn't in `keep`.
+function pruneOrphanSectionFiles(pageDir, keep, report) {
+  if (!existsSync(pageDir)) return
+  for (const entry of readdirSync(pageDir)) {
+    if (extname(entry).toLowerCase() !== '.md') continue
+    if (keep.has(basename(entry, extname(entry)))) continue
+    const p = join(pageDir, entry)
+    unlinkSync(p)
+    report.deleted.push(p)
+  }
+}
+
+// Delete subdirectories of `pagesDir` whose name isn't an incoming page dir.
+function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
+  if (!existsSync(pagesDir)) return
+  for (const entry of readdirSync(pagesDir)) {
+    const p = join(pagesDir, entry)
+    if (!statSync(p).isDirectory() || keepDirs.has(entry)) continue
+    rmSync(p, { recursive: true, force: true })
+    report.deleted.push(p)
+  }
 }
 
 // Recursively project the pages tree: a directory per page (slug, or `[param]/`
 // for a dynamic page), its `page.yml`/`folder.yml`, its section files, and its
 // child pages. Matches incoming items to files by stableId-name (clean
-// overwrite). Deletion of orphaned files/dirs is the reconcile layer.
-function projectPages(pages, pagesDir, sourceLocale, report) {
+// overwrite); the persisted uuid sidecar is the durable anchor for future
+// matching. When `prune` is set, orphaned section files and page dirs are
+// deleted (git-pull-like) — guarded so an EMPTY incoming set never nukes an
+// existing level (a malformed/partial payload can't wipe the tree).
+function projectPages(pages, pagesDir, sourceLocale, report, prune) {
+  const incomingDirs = new Set()
   for (const record of pages || []) {
     const dirName = record.is_dynamic ? `[${record.param_name || record.slug}]` : record.slug
+    incomingDirs.add(dirName)
     const pageDir = join(pagesDir, dirName)
 
     let sectionsArray = []
+    let sectionIds = {}
+    let written = []
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
       const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections })
       sectionsArray = r.sections
+      sectionIds = r.ids
+      written = r.written
       report.sections.push(...r.written)
     }
 
     const ymlName = record.mode === 'folder' ? 'folder.yml' : 'page.yml'
     const ymlPath = join(pageDir, ymlName)
-    writeYamlFile(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale))
+    writeYamlFile(ymlPath, pageRecordToYml(record, sectionsArray, sectionIds, sourceLocale))
     report.pages.push(ymlPath)
 
-    if (Array.isArray(record.$children) && record.$children.length > 0) {
-      projectPages(record.$children, pageDir, sourceLocale, report)
+    if (prune && record.mode === 'page') {
+      const keep = new Set(written.map((p) => basename(p, extname(p))))
+      if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
+
+    // Recurse (children || [] so an emptied child level is still visited; the
+    // empty-set guard below decides whether to prune it).
+    projectPages(record.$children || [], pageDir, sourceLocale, report, prune)
   }
+
+  if (prune && incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }
 
 // layout_sections → layout/<area>.md (the 'default' layout) or
@@ -282,15 +337,18 @@ function projectLayout(layoutSections, layoutBaseDir, report) {
  * @param {object} params.document - the `@uniweb/site-content` `$`-document
  * @param {string} params.siteRoot
  * @param {string} [params.sourceLocale]
- * @returns {{ config: object, pages: string[], sections: string[], layout: string[] }}
+ * @param {boolean} [params.prune=false] - delete orphaned pages/sections that
+ *        have no corresponding incoming item (git-pull-like). Off by default;
+ *        `uniweb pull` opts in. Guarded against wiping a level on an empty set.
+ * @returns {{ config: object, pages: string[], sections: string[], layout: string[], deleted: string[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale }) {
-  const report = { config: null, pages: [], sections: [], layout: [] }
+export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
+  const report = { config: null, pages: [], sections: [], layout: [], deleted: [] }
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale })
 
   const paths = document?.info?.paths_config || {}
   const pagesDir = paths.pages ? join(siteRoot, paths.pages) : join(siteRoot, 'pages')
-  projectPages(document?.pages, pagesDir, sourceLocale, report)
+  projectPages(document?.pages, pagesDir, sourceLocale, report, prune)
 
   const layoutBaseDir = paths.layout ? join(siteRoot, paths.layout) : join(siteRoot, 'layout')
   projectLayout(document?.layout_sections, layoutBaseDir, report)

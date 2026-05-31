@@ -227,6 +227,81 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     siteContentDocumentToProject({ document, siteRoot: dir })
     expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toBe(before)
   })
+
+  it('persists per-item uuids as a page.yml sidecar (uuid: + ids:), keeping .md bodies clean', () => {
+    const withUuids = {
+      info: { name: { en: 'S' }, foundation_name: '@a/base' },
+      pages: [
+        {
+          $id: 'home',
+          $uuid: '0192-page',
+          slug: 'home',
+          mode: 'page',
+          stable_id: 'home',
+          page_sections: [
+            { $id: 'hero', $uuid: '0192-hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') },
+            {
+              $id: 'features',
+              $uuid: '0192-feat',
+              stable_id: 'features',
+              type: 'Features',
+              content: docOf('F'),
+              $children: [{ $id: 'card-a', $uuid: '0192-card', stable_id: 'card-a', type: 'Card', content: docOf('A') }],
+            },
+          ],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document: withUuids, siteRoot: dir })
+
+    const pageYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
+    expect(pageYml.uuid).toBe('0192-page')
+    expect(pageYml.ids).toEqual({ hero: '0192-hero', features: '0192-feat', 'card-a': '0192-card' })
+    // the .md body carries no uuid
+    expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).not.toContain('0192-hero')
+  })
+})
+
+describe('siteContentDocumentToProject — reconcile (prune)', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const info = { name: { en: 'S' }, foundation_name: '@a/base' }
+  const section = (id, text) => ({ $id: id, stable_id: id, type: 'Sec', content: docOf(text) })
+  const page = (slug, sections) => ({ $id: slug, slug, mode: 'page', stable_id: slug, page_sections: sections })
+
+  it('deletes an orphaned section file and drops it from page.yml::sections:', () => {
+    const v1 = { info, pages: [page('home', [section('hero', 'Hi'), section('features', 'F')])] }
+    siteContentDocumentToProject({ document: v1, siteRoot: dir })
+    expect(existsSync(join(dir, 'pages/home/features.md'))).toBe(true)
+
+    const v2 = { info, pages: [page('home', [section('hero', 'Hi')])] }
+    const report = siteContentDocumentToProject({ document: v2, siteRoot: dir, prune: true })
+
+    expect(existsSync(join(dir, 'pages/home/features.md'))).toBe(false)
+    expect(report.deleted).toContain(join(dir, 'pages/home/features.md'))
+    expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).sections).toEqual(['hero'])
+  })
+
+  it('deletes an orphaned page directory', () => {
+    const v1 = { info, pages: [page('home', [section('hero', 'Hi')]), page('about', [section('intro', 'X')])] }
+    siteContentDocumentToProject({ document: v1, siteRoot: dir })
+    expect(existsSync(join(dir, 'pages/about'))).toBe(true)
+
+    const v2 = { info, pages: [page('home', [section('hero', 'Hi')])] }
+    siteContentDocumentToProject({ document: v2, siteRoot: dir, prune: true })
+    expect(existsSync(join(dir, 'pages/about'))).toBe(false)
+  })
+
+  it('without prune, orphans are left in place', () => {
+    siteContentDocumentToProject({ document: { info, pages: [page('home', [section('hero', 'Hi'), section('features', 'F')])] }, siteRoot: dir })
+    siteContentDocumentToProject({ document: { info, pages: [page('home', [section('hero', 'Hi')])] }, siteRoot: dir, prune: false })
+    expect(existsSync(join(dir, 'pages/home/features.md'))).toBe(true)
+  })
+
+  it('safety: an empty incoming set does not wipe an existing level', () => {
+    siteContentDocumentToProject({ document: { info, pages: [page('home', [section('hero', 'Hi')])] }, siteRoot: dir })
+    siteContentDocumentToProject({ document: { info, pages: [] }, siteRoot: dir, prune: true })
+    expect(existsSync(join(dir, 'pages/home'))).toBe(true) // guard: not nuked
+  })
 })
 
 describe('pages lane fixed point — project → re-produce', () => {
