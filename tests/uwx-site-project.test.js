@@ -532,3 +532,81 @@ describe('collection declarations — round-trip against the real producer', () 
     expect(out.collections.old).toEqual({ schema: 'stale' })
   })
 })
+
+describe('whole-site framework-dialect round-trip is a producer fixed point (A10)', () => {
+  // Bootstrap valid source files by projecting a seed document, then assert the
+  // canonical loop — produce → project → produce — recovers the SAME wire
+  // document. Combines config, collection declarations, a nested section tree, an
+  // inline inset (an inline cite — exercising the inline-inset codec end to end),
+  // a second page, and a layout section. Single-locale; the multi-locale facet
+  // joins once the localization round-trip (B) lands.
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  // A body with an inline cite — the construct the inline-inset fix restored.
+  const bodyWithCite = {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'As shown ' },
+          { type: 'inset_ref', attrs: { component: 'Cite', embedKind: 'text', key: '@darwin', alt: null } },
+          { type: 'text', text: ' in the literature.' },
+        ],
+      },
+    ],
+  }
+
+  it('produce → project → produce recovers the same document', async () => {
+    const seed = {
+      info: { name: { en: 'Atlas' }, foundation: '@acme/base@3.0.0', languages: ['en'], base: '/atlas/' },
+      collections: [
+        { $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/article', sort: '-date' },
+      ],
+      pages: [
+        {
+          $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', is_index: true,
+          page_sections: [
+            { $id: 'hero', stable_id: 'hero', type: 'Hero', content: bodyWithCite },
+            {
+              $id: 'features', stable_id: 'features', type: 'Features', content: docOf('Our features'),
+              $children: [{ $id: 'card-a', stable_id: 'card-a', type: 'Card', content: docOf('Card A') }],
+            },
+          ],
+        },
+        {
+          $id: 'about', slug: 'about', mode: 'page', stable_id: 'about', title: { en: 'About' },
+          page_sections: [{ $id: 'intro', stable_id: 'intro', type: 'Text', content: docOf('Hello') }],
+        },
+      ],
+      layout_sections: [
+        { $id: 'header', stable_id: 'header', area: 'header', layout_name: 'default', type: 'Header', content: docOf('Nav') },
+      ],
+    }
+
+    // Bootstrap valid files from the seed.
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    siteContentDocumentToProject({ document: seed, siteRoot: src })
+
+    // The canonical loop: first produce is the reference; project it to a fresh
+    // dir; second produce must equal the first.
+    const doc1 = await siteProjectToDocument(src)
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteContentDocumentToProject({ document: doc1, siteRoot: dest })
+    const doc2 = await siteProjectToDocument(dest)
+
+    expect(doc2).toEqual(doc1)
+
+    // And the inline cite survived: the producer extracts it to an inline
+    // inset_placeholder + an insets[] entry; projection re-inlines it and the
+    // (A1) inline-inset serializer writes `[@darwin]` — recovered identically.
+    const home = doc1.pages.find((p) => p.$id === 'home')
+    const hero = home.page_sections.find((s) => s.stable_id === 'hero')
+    const placeholder = hero.content.content[0].content.find((n) => n.type === 'inset_placeholder')
+    expect(placeholder).toBeDefined()
+    expect(hero.insets).toContainEqual(expect.objectContaining({ type: 'Cite', embedKind: 'text', params: { key: '@darwin' } }))
+    // the projected source markdown carries the inline cite, not a dropped inset
+    expect(readFileSync(join(dest, 'pages/home/hero.md'), 'utf8')).toContain('As shown [@darwin] in the literature.')
+  })
+})
