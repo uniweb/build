@@ -27,11 +27,11 @@ describe('siteInfoToConfig — info → config files', () => {
       info: {
         name: { en: 'My Site' },
         description: { en: 'A description' },
-        foundation_name: '@acme/base@1.2.3',
-        locales: ['en', 'fr'],
-        default_locale: 'en',
-        base_path: '/docs/',
-        build_options: { split: true },
+        foundation: '@acme/base@1.2.3',
+        languages: ['en', 'fr'],
+        default_language: 'en',
+        base: '/docs/',
+        build: { split: true },
       },
       extensions: [{ $id: 'https://cdn.example.com/fx/entry.js', url: 'https://cdn.example.com/fx/entry.js' }],
     }
@@ -55,7 +55,7 @@ describe('siteInfoToConfig — info → config files', () => {
     const document = {
       info: {
         name: { en: 'S' },
-        foundation_name: '@acme/base',
+        foundation: '@acme/base',
         theme: { vars: { accent: 'red' }, mode: 'dark' },
         head_html: '<meta name="x" content="y">\n',
       },
@@ -70,7 +70,7 @@ describe('siteInfoToConfig — info → config files', () => {
 
   it('preserves untouched site.yml keys and is idempotent', () => {
     writeFileSync(join(dir, 'site.yml'), "foundation: '@acme/base'\npaths:\n  pages: content\nname: Old\n")
-    const document = { info: { name: { en: 'New' }, foundation_name: '@acme/base' } }
+    const document = { info: { name: { en: 'New' }, foundation: '@acme/base' } }
 
     siteInfoToConfig({ document, siteRoot: dir })
     const obj = yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8'))
@@ -82,7 +82,7 @@ describe('siteInfoToConfig — info → config files', () => {
   })
 
   it('does not write theme.yml / head.html when the document omits them', () => {
-    siteInfoToConfig({ document: { info: { name: { en: 'S' }, foundation_name: '@acme/base' } }, siteRoot: dir })
+    siteInfoToConfig({ document: { info: { name: { en: 'S' }, foundation: '@acme/base' } }, siteRoot: dir })
     expect(existsSync(join(dir, 'theme.yml'))).toBe(false)
     expect(existsSync(join(dir, 'head.html'))).toBe(false)
   })
@@ -165,7 +165,7 @@ describe('pageSectionsToFiles — clean files + nested sections: array', () => {
 describe('siteContentDocumentToProject — pages tree + layout', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
   const document = {
-    info: { name: { en: 'Site' }, foundation_name: '@a/base' },
+    info: { name: { en: 'Site' }, foundation: '@a/base' },
     pages: [
       {
         $id: 'home',
@@ -230,7 +230,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
 
   it('persists per-item uuids in the gitignored .uniweb/ index, NOT in authored files', () => {
     const withUuids = {
-      info: { name: { en: 'S' }, foundation_name: '@a/base' },
+      info: { name: { en: 'S' }, foundation: '@a/base' },
       pages: [
         {
           $id: 'home',
@@ -271,7 +271,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
 
 describe('siteContentDocumentToProject — reconcile (prune)', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
-  const info = { name: { en: 'S' }, foundation_name: '@a/base' }
+  const info = { name: { en: 'S' }, foundation: '@a/base' }
   const section = (id, text) => ({ $id: id, stable_id: id, type: 'Sec', content: docOf(text) })
   const page = (slug, sections) => ({ $id: slug, slug, mode: 'page', stable_id: slug, page_sections: sections })
 
@@ -313,7 +313,7 @@ describe('siteContentDocumentToProject — reconcile (prune)', () => {
 
 describe('siteContentDocumentToProject — uuid-anchored rename detection', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
-  const info = { name: { en: 'S' }, foundation_name: '@a/base' }
+  const info = { name: { en: 'S' }, foundation: '@a/base' }
   const sec = (id, uuid, text) => ({ $id: id, $uuid: uuid, stable_id: id, type: 'Sec', content: docOf(text) })
   const homePage = (sections) => ({ $id: 'home', $uuid: 'P1', slug: 'home', mode: 'page', stable_id: 'home', page_sections: sections })
 
@@ -369,7 +369,7 @@ describe('pages lane fixed point — project → re-produce', () => {
 
   it('projecting page sections to page.yml::sections: round-trips through the producer (order + nesting)', async () => {
     const document = {
-      info: { name: { en: 'S' }, foundation_name: '@a/base' },
+      info: { name: { en: 'S' }, foundation: '@a/base' },
       pages: [
         {
           $id: 'home',

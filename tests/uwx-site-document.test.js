@@ -102,13 +102,12 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     ])
   })
 
-  it('carries info with foundation_name (the round-trip source of truth)', async () => {
+  it('carries info with foundation (the round-trip source of truth)', async () => {
     const { info } = await siteProjectToDocument(ROOT)
     expect(info.name).toEqual({ en: 'Acme Site' }) // localized wrap
-    expect(info.foundation_name).toBe('@acme/marketing@1.2.3')
-    expect(info).not.toHaveProperty('foundation')
+    expect(info.foundation).toBe('@acme/marketing@1.2.3')
     expect(info.theme).toEqual({ colors: { primary: '#0099ff' } })
-    expect(info.locales).toEqual(['en', 'fr'])
+    expect(info.languages).toEqual(['en', 'fr'])
   })
 
   it('nests page_sections as an INLINE field on the page record (no top-level page_sections, no parent_path)', async () => {
@@ -239,7 +238,7 @@ describe('uwx/site emitSiteSyncPackage', () => {
 
     const body = JSON.parse(files.get('entities/site-content.json').toString('utf8'))
     expect(body.$model).toBe('@uniweb/site-content')
-    expect(body.info.foundation_name).toBe('@acme/marketing@1.2.3')
+    expect(body.info.foundation).toBe('@acme/marketing@1.2.3')
     expect(body.pages.find((p) => p.slug === 'home').page_sections[0].type).toBe('Hero')
   })
 })

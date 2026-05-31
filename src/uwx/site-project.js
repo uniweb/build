@@ -81,17 +81,19 @@ function placeByUuid(ctx, uuid, targetAbs) {
   ctx.newIndex[uuid] = relative(ctx.siteRoot, targetAbs)
 }
 
-// info field → site.yml key. Plain (non-localized, verbatim) mappings.
+// info field → site.yml key. The backend field names mirror the file keys, so
+// most are identity; only `default_language` differs (the file key is camelCase
+// `defaultLanguage`).
 const INFO_TO_SITE_YML = {
-  foundation_name: 'foundation',
-  locales: 'languages',
-  default_locale: 'defaultLanguage',
-  base_path: 'base',
-  fetcher_config: 'fetcher',
-  build_options: 'build',
-  search_config: 'search',
-  paths_config: 'paths',
-  data_config: 'data',
+  foundation: 'foundation',
+  languages: 'languages',
+  default_language: 'defaultLanguage',
+  base: 'base',
+  fetcher: 'fetcher',
+  build: 'build',
+  search: 'search',
+  paths: 'paths',
+  data: 'data',
 }
 
 /**
@@ -396,7 +398,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   // re-projected (deleted) drop out naturally.
   const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report }
 
-  const paths = document?.info?.paths_config || {}
+  const paths = document?.info?.paths || {}
   const pagesDir = paths.pages ? join(siteRoot, paths.pages) : join(siteRoot, 'pages')
   projectPages(document?.pages, pagesDir, sourceLocale, report, prune, ctx)
 

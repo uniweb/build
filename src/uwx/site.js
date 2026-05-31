@@ -10,7 +10,7 @@
 //
 // The document mirrors the @uniweb/site-content Model: `info` (brief) · `pages`
 // (self-nesting; each page carries its `page_sections` as an inline field) ·
-// `layout_sections` · `extensions` · `collections`. `info.foundation_name`
+// `layout_sections` · `extensions` · `collections`. `info.foundation`
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
 // truth).
 //
@@ -407,7 +407,8 @@ function collectionsNested(declarations) {
     setIf(data, 'source', source)
     setIf(data, 'schema', d.schema)
     setIf(data, 'sort', d.sort)
-    setIf(data, 'filter', d.filter)
+    // Legacy `filter:` is not synced — it is translated to `where` upstream
+    // (the canonical predicate). No legacy fields on the wire.
     setIf(data, 'where', d.where)
     setIf(data, 'limit', d.limit)
     setIf(data, 'excerpt', d.excerpt)
@@ -444,7 +445,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   if (!siteYml.foundation || typeof siteYml.foundation !== 'string') {
     throw new Error(
       'uwx/site: site.yml::foundation (a reference string) is required — ' +
-        'it maps to the required @uniweb/site-content info.foundation_name'
+        'it maps to the required @uniweb/site-content info.foundation'
     )
   }
 
@@ -460,20 +461,18 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   info.name = localize(siteYml.name, sourceLocale)
   setIf(info, 'description', localize(siteYml.description, sourceLocale))
   if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
-  setIf(info, 'locales', siteYml.languages)
-  setIf(info, 'default_locale', siteYml.defaultLanguage)
-  // Backend Model field is `foundation_name` (required) — the verbatim
-  // `site.yml::foundation` string (registry ref / URL / local path), the
-  // round-trip source of truth. (Renamed from `foundation_ref` at the
-  // foundation-schema level.)
-  info.foundation_name = siteYml.foundation
-  setIf(info, 'base_path', siteYml.base)
+  setIf(info, 'languages', siteYml.languages)
+  setIf(info, 'default_language', siteYml.defaultLanguage)
+  // `foundation` (required) — the verbatim `site.yml::foundation` string
+  // (registry ref / URL / local path), the round-trip source of truth.
+  info.foundation = siteYml.foundation
+  setIf(info, 'base', siteYml.base)
   setIf(info, 'head_html', headHtml)
-  setIf(info, 'fetcher_config', siteYml.fetcher)
-  setIf(info, 'build_options', siteYml.build)
-  setIf(info, 'search_config', siteYml.search)
-  setIf(info, 'paths_config', siteYml.paths)
-  setIf(info, 'data_config', siteYml.data ?? siteYml.fetch)
+  setIf(info, 'fetcher', siteYml.fetcher)
+  setIf(info, 'build', siteYml.build)
+  setIf(info, 'search', siteYml.search)
+  setIf(info, 'paths', siteYml.paths)
+  setIf(info, 'data', siteYml.data ?? siteYml.fetch)
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale }
   const pagesPath = siteYml.paths?.pages
