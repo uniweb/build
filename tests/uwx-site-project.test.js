@@ -533,6 +533,36 @@ describe('collection declarations — round-trip against the real producer', () 
   })
 })
 
+describe('siteContentDocumentToProject — page.yml surgical merge (A9)', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const info = { name: { en: 'S' }, foundation: '@a/base' }
+
+  it('preserves author-added keys and drops removed managed keys', () => {
+    const home = join(dir, 'pages/home')
+    mkdirSync(home, { recursive: true })
+    // An existing page.yml: a managed key (hidden), a managed key being updated
+    // (title), an author-added unknown key (customNote), and sections.
+    writeFileSync(join(home, 'page.yml'), 'title: Old\nhidden: true\ncustomNote: keep-me\nsections:\n  - stale\n')
+
+    const document = {
+      info,
+      pages: [
+        {
+          $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', title: { en: 'New Title' },
+          page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') }],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document, siteRoot: dir })
+
+    const yml = yaml.load(readFileSync(join(home, 'page.yml'), 'utf8'))
+    expect(yml.customNote).toBe('keep-me') // author-added key preserved
+    expect(yml.title).toBe('New Title') // managed key updated
+    expect(yml.sections).toEqual(['hero']) // managed sections replaced wholesale
+    expect(yml.hidden).toBeUndefined() // managed key absent from the record → dropped
+  })
+})
+
 describe('siteContentDocumentToProject — layout reconcile (A6)', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
   const info = { name: { en: 'S' }, foundation: '@a/base' }

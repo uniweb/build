@@ -35,7 +35,7 @@
 import { join, relative, extname, basename } from 'node:path'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeYamlFile } from './project-writer.js'
+import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToCollectionsYml } from './collections-project.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
@@ -265,6 +265,16 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx }) {
   return { sections: buildEntries(pageSections), written }
 }
 
+// Every key pageRecordToYml can emit — the keys the projector OWNS in a
+// page.yml/folder.yml. On a merge write these are replaced wholesale (a managed
+// key the record no longer carries is dropped); any other key is author-authored
+// and preserved. Keep in sync with pageRecordToYml below.
+const PAGE_YML_MANAGED_KEYS = new Set([
+  'id', 'title', 'description', 'label', 'keywords', 'index', 'hidden',
+  'hideInHeader', 'hideInFooter', 'redirect', 'rewrite', 'layout', 'seo',
+  'fetch', 'sections',
+])
+
 // Inverse of site.js buildPageData → the `page.yml` / `folder.yml` object.
 // `slug`/`mode`/`is_dynamic`/`param_name` are NOT keys here — they shape the
 // directory (name, page.yml vs folder.yml, `[param]/`), not the config body.
@@ -355,7 +365,9 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
 
     const ymlName = record.mode === 'folder' ? 'folder.yml' : 'page.yml'
     const ymlPath = join(pageDir, ymlName)
-    writeYamlFile(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale))
+    // Merge (not full-dump) so author-added keys survive a pull; the projector
+    // owns only PAGE_YML_MANAGED_KEYS.
+    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale), PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
     writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx)

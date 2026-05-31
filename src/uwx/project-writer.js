@@ -229,6 +229,36 @@ export function writeYamlFile(filePath, obj) {
 }
 
 /**
+ * Write a YAML config file, replacing the projector-MANAGED keys with `projected`
+ * while preserving any OTHER (author-authored) keys already on disk. A managed key
+ * absent from `projected` is removed (the projector owns the managed set
+ * wholesale); unknown keys keep their value and relative order. Idempotent.
+ *
+ * Same key-preserving (comment-dropping) bar as `writeSiteConfig` — for the
+ * hand-authored `page.yml`/`folder.yml`, whose author-added keys must survive a
+ * pull rather than being clobbered by a full re-dump.
+ *
+ * @param {string} filePath
+ * @param {object} projected   - the managed keys + values to write (only keys the
+ *                               record carries; absent managed keys are dropped)
+ * @param {Set<string>|string[]} managedKeys - every key the projector owns
+ * @returns {'updated'|'unchanged'}
+ */
+export function writeMergedYaml(filePath, projected, managedKeys) {
+  let existing = {}
+  try {
+    existing = yaml.load(readFileSync(filePath, 'utf8')) || {}
+  } catch {
+    // missing / invalid → start fresh
+  }
+  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) existing = {}
+  const out = { ...existing }
+  for (const key of managedKeys) delete out[key]
+  Object.assign(out, projected)
+  return writeIfChanged(filePath, yaml.dump(out, YAML_DUMP_OPTS))
+}
+
+/**
  * Merge `config` into `collections/collections.yml` (shallow). Preserves sibling
  * keys the update doesn't touch — the folder `$uuid`, `sync`, `folders`, and any
  * collections not in the incoming set. A `collections:` object value is merged one
