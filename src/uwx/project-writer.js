@@ -217,6 +217,17 @@ export function writeSiteConfig(siteRoot, config) {
 }
 
 /**
+ * Write a YAML object to a file (full dump, idempotent) — for machine-owned
+ * config the projector authors wholesale, e.g. a projected `page.yml`/`folder.yml`.
+ * (Comment/unknown-key preservation is a later refinement; `site.yml`/
+ * `collections.yml` use the merging writers instead.)
+ * @returns {'updated'|'unchanged'}
+ */
+export function writeYamlFile(filePath, obj) {
+  return writeIfChanged(filePath, yaml.dump(obj || {}, YAML_DUMP_OPTS))
+}
+
+/**
  * Merge `theme` into `theme.yml` (shallow, one level deep per top-level key).
  * @returns {'updated'|'unchanged'}
  */

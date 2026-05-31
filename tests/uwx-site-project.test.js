@@ -7,7 +7,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { siteInfoToConfig, sectionRecordToFile, siteProjectToDocument } from '../src/uwx/index.js'
+import {
+  siteInfoToConfig,
+  sectionRecordToFile,
+  pageSectionsToFiles,
+  siteContentDocumentToProject,
+  siteProjectToDocument,
+} from '../src/uwx/index.js'
 
 let dir
 beforeEach(() => {
@@ -127,6 +133,99 @@ describe('sectionRecordToFile — section record → .md', () => {
     const f = join(dir, 'hero.md')
     sectionRecordToFile({ filePath: f, record })
     expect(sectionRecordToFile({ filePath: f, record })).toBe('unchanged')
+  })
+})
+
+describe('pageSectionsToFiles — clean files + nested sections: array', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+
+  it('writes <stableId>.md files and a nested sections: array (no prefixes)', () => {
+    const dirP = join(dir, 'home')
+    const pageSections = [
+      { $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Welcome') },
+      {
+        $id: 'features',
+        stable_id: 'features',
+        type: 'Features',
+        content: docOf('Things'),
+        $children: [{ $id: 'card-a', stable_id: 'card-a', type: 'Card', content: docOf('A') }],
+      },
+    ]
+    const { sections } = pageSectionsToFiles({ pageDir: dirP, pageSections })
+
+    expect(sections).toEqual(['hero', { features: ['card-a'] }])
+    expect(existsSync(join(dirP, 'hero.md'))).toBe(true)
+    expect(existsSync(join(dirP, 'features.md'))).toBe(true)
+    expect(existsSync(join(dirP, 'card-a.md'))).toBe(true) // child is a clean sibling file
+    // no numeric-prefixed files
+    expect(existsSync(join(dirP, '1-hero.md'))).toBe(false)
+  })
+})
+
+describe('siteContentDocumentToProject — pages tree + layout', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const document = {
+    info: { name: { en: 'Site' }, foundation_name: '@a/base' },
+    pages: [
+      {
+        $id: 'home',
+        slug: 'home',
+        mode: 'page',
+        stable_id: 'home',
+        is_index: true,
+        title: { en: 'Home' },
+        page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') }],
+      },
+      {
+        $id: 'blog',
+        slug: 'blog',
+        mode: 'folder',
+        title: { en: 'Blog' },
+        $children: [
+          {
+            $id: 'post',
+            slug: 'slug',
+            mode: 'page',
+            is_dynamic: true,
+            param_name: 'slug',
+            page_sections: [{ $id: 'article', stable_id: 'article', type: 'Article', content: docOf('Body') }],
+          },
+        ],
+      },
+    ],
+    layout_sections: [{ $id: 'header', area: 'header', layout_name: 'default', type: 'Header', content: docOf('Nav') }],
+  }
+
+  it('projects pages (with sections:), a folder, a dynamic [param] page, and layout', () => {
+    const report = siteContentDocumentToProject({ document, siteRoot: dir })
+
+    // home page (page mode): page.yml with index + sections, + the section file
+    const homeYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
+    expect(homeYml).toMatchObject({ id: 'home', index: true, title: 'Home', sections: ['hero'] })
+    expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
+
+    // blog (folder mode): folder.yml, no page.yml
+    expect(existsSync(join(dir, 'pages/blog/folder.yml'))).toBe(true)
+    expect(existsSync(join(dir, 'pages/blog/page.yml'))).toBe(false)
+
+    // dynamic child page → [slug]/ directory
+    expect(existsSync(join(dir, 'pages/blog/[slug]/page.yml'))).toBe(true)
+    expect(existsSync(join(dir, 'pages/blog/[slug]/article.md'))).toBe(true)
+
+    // layout (default layout) → layout/<area>.md
+    expect(existsSync(join(dir, 'layout/header.md'))).toBe(true)
+
+    // and site.yml was written from info
+    expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8'))).toMatchObject({ name: 'Site', foundation: '@a/base' })
+    expect(report.pages.length).toBe(3) // home, blog (folder), [slug]
+  })
+
+  it('is idempotent across a second projection', () => {
+    siteContentDocumentToProject({ document, siteRoot: dir })
+    // second run changes nothing on disk (spot-check the section file)
+    const before = readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')
+    siteContentDocumentToProject({ document, siteRoot: dir })
+    expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toBe(before)
   })
 })
 

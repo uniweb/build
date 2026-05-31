@@ -23,7 +23,7 @@
 // doesn't churn config it didn't carry, and deletion is out of scope here.
 
 import { join } from 'node:path'
-import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile } from './project-writer.js'
+import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeYamlFile } from './project-writer.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -161,4 +161,139 @@ export function sectionRecordToFile({ filePath, record }) {
 
   const body = insets ? reinlineInsets(content, insets) : content
   return writeSectionFile({ filePath, content: body, params: frontmatter })
+}
+
+// ---------------------------------------------------------------------------
+// Pages tree → pages/**  (+ layout_sections → layout/**)
+// ---------------------------------------------------------------------------
+
+// A section/page record's durable handle: the `stable_id` content field (which
+// survives the round trip), falling back to the `$id` transport handle.
+function recordStableId(record) {
+  return record?.stable_id || record?.$id || null
+}
+
+/**
+ * Write a page's `page_sections` tree to clean `<stableId>.md` files in `pageDir`
+ * and return the `page.yml::sections:` array that captures order + nesting — the
+ * verified nested form (`processExplicitSections`): a string per leaf section, a
+ * single-key object `{ <stableId>: [children…] }` per nested one. No numeric or
+ * `@` prefixes — `sections:` is the canonical projected form.
+ *
+ * @param {object} params
+ * @param {string} params.pageDir
+ * @param {object[]} params.pageSections - the page's section `$`-records
+ * @returns {{ sections: Array, written: string[] }}
+ */
+export function pageSectionsToFiles({ pageDir, pageSections }) {
+  const written = []
+  const buildEntries = (records) => {
+    const entries = []
+    for (const record of records || []) {
+      const stableId = recordStableId(record)
+      if (!stableId) continue // anonymous and id-less → cannot place; skip
+      const filePath = join(pageDir, `${stableId}.md`)
+      sectionRecordToFile({ filePath, record })
+      written.push(filePath)
+      const children = Array.isArray(record.$children) ? record.$children : []
+      entries.push(children.length > 0 ? { [stableId]: buildEntries(children) } : stableId)
+    }
+    return entries
+  }
+  return { sections: buildEntries(pageSections), written }
+}
+
+// Inverse of site.js buildPageData → the `page.yml` / `folder.yml` object.
+// `slug`/`mode`/`is_dynamic`/`param_name` are NOT keys here — they shape the
+// directory (name, page.yml vs folder.yml, `[param]/`), not the config body.
+function pageRecordToYml(record, sectionsArray, sourceLocale) {
+  const y = {}
+  if (record.stable_id !== undefined) y.id = record.stable_id
+  const title = unwrapLocalized(record.title, sourceLocale)
+  if (title !== undefined) y.title = title
+  const description = unwrapLocalized(record.description, sourceLocale)
+  if (description !== undefined) y.description = description
+  const label = unwrapLocalized(record.label, sourceLocale)
+  if (label !== undefined) y.label = label
+  if (record.keywords !== undefined) y.keywords = record.keywords
+  if (record.is_index) y.index = true
+  if (record.hidden !== undefined) y.hidden = record.hidden
+  if (record.hide_in_header !== undefined) y.hideInHeader = record.hide_in_header
+  if (record.hide_in_footer !== undefined) y.hideInFooter = record.hide_in_footer
+  if (record.redirect !== undefined) y.redirect = record.redirect
+  if (record.rewrite !== undefined) y.rewrite = record.rewrite
+  if (record.layout !== undefined) y.layout = record.layout
+  if (record.seo !== undefined) y.seo = record.seo
+  if (record.fetch !== undefined) y.fetch = record.fetch
+  if (sectionsArray && sectionsArray.length > 0) y.sections = sectionsArray
+  return y
+}
+
+// Recursively project the pages tree: a directory per page (slug, or `[param]/`
+// for a dynamic page), its `page.yml`/`folder.yml`, its section files, and its
+// child pages. Matches incoming items to files by stableId-name (clean
+// overwrite). Deletion of orphaned files/dirs is the reconcile layer.
+function projectPages(pages, pagesDir, sourceLocale, report) {
+  for (const record of pages || []) {
+    const dirName = record.is_dynamic ? `[${record.param_name || record.slug}]` : record.slug
+    const pageDir = join(pagesDir, dirName)
+
+    let sectionsArray = []
+    if (record.mode === 'page' && Array.isArray(record.page_sections)) {
+      const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections })
+      sectionsArray = r.sections
+      report.sections.push(...r.written)
+    }
+
+    const ymlName = record.mode === 'folder' ? 'folder.yml' : 'page.yml'
+    const ymlPath = join(pageDir, ymlName)
+    writeYamlFile(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale))
+    report.pages.push(ymlPath)
+
+    if (Array.isArray(record.$children) && record.$children.length > 0) {
+      projectPages(record.$children, pageDir, sourceLocale, report)
+    }
+  }
+}
+
+// layout_sections → layout/<area>.md (the 'default' layout) or
+// layout/<layout_name>/<area>.md. Inverse of site.js collectLayoutNested.
+function projectLayout(layoutSections, layoutBaseDir, report) {
+  for (const record of layoutSections || []) {
+    const area = record.area || recordStableId(record)
+    if (!area) continue
+    const named = record.layout_name && record.layout_name !== 'default' ? record.layout_name : null
+    const filePath = named ? join(layoutBaseDir, named, `${area}.md`) : join(layoutBaseDir, `${area}.md`)
+    sectionRecordToFile({ filePath, record })
+    report.layout.push(filePath)
+  }
+}
+
+/**
+ * Project a whole `@uniweb/site-content` document to a site's files: `info` →
+ * config (siteInfoToConfig), `pages[]` → `pages/**`, `layout_sections` →
+ * `layout/**`. Idempotent. Matches by stableId-name (clean overwrite); orphan
+ * deletion + content-similarity matching is the reconcile layer.
+ *
+ * Not yet here: `collections[]` declarations → `collections.yml::collections`
+ * (the collection RECORDS are the separate collections lane, collectionsToProject).
+ *
+ * @param {object} params
+ * @param {object} params.document - the `@uniweb/site-content` `$`-document
+ * @param {string} params.siteRoot
+ * @param {string} [params.sourceLocale]
+ * @returns {{ config: object, pages: string[], sections: string[], layout: string[] }}
+ */
+export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale }) {
+  const report = { config: null, pages: [], sections: [], layout: [] }
+  report.config = siteInfoToConfig({ document, siteRoot, sourceLocale })
+
+  const paths = document?.info?.paths_config || {}
+  const pagesDir = paths.pages ? join(siteRoot, paths.pages) : join(siteRoot, 'pages')
+  projectPages(document?.pages, pagesDir, sourceLocale, report)
+
+  const layoutBaseDir = paths.layout ? join(siteRoot, paths.layout) : join(siteRoot, 'layout')
+  projectLayout(document?.layout_sections, layoutBaseDir, report)
+
+  return report
 }
