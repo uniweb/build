@@ -20,18 +20,73 @@
 //
 // Reconcile (opt-in `prune`): write the incoming set, then DELETE files/dirs that
 // no longer correspond to any incoming item (git-pull-like). Matching is by
-// stableId today (which round-trips), with the persisted uuid as the durable
-// anchor for richer future matching; content-similarity is a later fallback.
+// stableId, with the persisted uuid as the rename anchor: when an item's uuid now
+// maps to a DIFFERENT stableId/slug than the on-disk sidecar recorded, its file
+// (`<stableId>.md`) or directory is RENAMED in place — a git-mv-style move — so an
+// app-side rename is minimal churn, not a delete + recreate. Content-similarity
+// matching (for items with no uuid) is a later fallback.
 //
 // Localized fields (`name`, `description`) are wired as `{ <locale>: value }`;
 // we unwrap to the source locale for the file surface (other locales stay in
 // the i18n pipeline). Absent `info` keys are left untouched on disk.
 
 import { join, extname, basename } from 'node:path'
-import { readdirSync, statSync, existsSync, unlinkSync, rmSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, existsSync, unlinkSync, renameSync, rmSync } from 'node:fs'
+import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeYamlFile } from './project-writer.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+
+// Read the existing `page.yml::ids` sidecar (stableId → uuid) for a page dir, or
+// an empty map. Used for uuid-anchored section rename detection.
+function readSectionIds(pageDir) {
+  const p = join(pageDir, 'page.yml')
+  if (!existsSync(p)) return {}
+  try {
+    const o = yaml.load(readFileSync(p, 'utf8'))
+    return o && typeof o.ids === 'object' && o.ids ? o.ids : {}
+  } catch {
+    return {}
+  }
+}
+
+// Map `uuid → existing page-dir name` across a pages directory (reading each
+// child's `page.yml`/`folder.yml` `uuid:`). Used for uuid-anchored page renames.
+function readPageDirUuids(pagesDir) {
+  const map = new Map()
+  if (!existsSync(pagesDir)) return map
+  for (const entry of readdirSync(pagesDir)) {
+    let isDir
+    try {
+      isDir = statSync(join(pagesDir, entry)).isDirectory()
+    } catch {
+      continue
+    }
+    if (!isDir) continue
+    for (const name of ['page.yml', 'folder.yml']) {
+      const p = join(pagesDir, entry, name)
+      if (!existsSync(p)) continue
+      try {
+        const uuid = yaml.load(readFileSync(p, 'utf8'))?.uuid
+        if (uuid) map.set(uuid, entry)
+      } catch {
+        // unreadable → skip
+      }
+      break
+    }
+  }
+  return map
+}
+
+// Rename `<from>` to `<to>` in place when both differ, the source exists, and the
+// target is free (a collision falls back to write-new + prune-old). Records the
+// move so callers can report it.
+function renameInPlace(from, to, report) {
+  if (from === to || !existsSync(from) || existsSync(to)) return false
+  renameSync(from, to)
+  report.renamed.push({ from, to })
+  return true
+}
 
 // info field → site.yml key. Plain (non-localized, verbatim) mappings.
 const INFO_TO_SITE_YML = {
@@ -191,14 +246,27 @@ function recordStableId(record) {
  * @param {object[]} params.pageSections - the page's section `$`-records
  * @returns {{ sections: Array, written: string[] }}
  */
-export function pageSectionsToFiles({ pageDir, pageSections }) {
+export function pageSectionsToFiles({ pageDir, pageSections, report }) {
+  const rep = report || { renamed: [] }
   const written = []
   const ids = {} // stableId → backend uuid (the distributed sidecar for page.yml)
+  // Reverse the EXISTING sidecar (uuid → old stableId) for rename detection: a
+  // section whose uuid now maps to a different stableId was renamed in the app —
+  // move its `.md` in place (a git-mv-style rename) rather than letting prune
+  // delete the old file and a new one appear.
+  const uuidToOld = new Map()
+  for (const [sid, uuid] of Object.entries(readSectionIds(pageDir))) {
+    if (uuid) uuidToOld.set(uuid, sid)
+  }
   const buildEntries = (records) => {
     const entries = []
     for (const record of records || []) {
       const stableId = recordStableId(record)
       if (!stableId) continue // anonymous and id-less → cannot place; skip
+      if (record.$uuid) {
+        const old = uuidToOld.get(record.$uuid)
+        if (old && old !== stableId) renameInPlace(join(pageDir, `${old}.md`), join(pageDir, `${stableId}.md`), rep)
+      }
       const filePath = join(pageDir, `${stableId}.md`)
       sectionRecordToFile({ filePath, record })
       written.push(filePath)
@@ -211,7 +279,7 @@ export function pageSectionsToFiles({ pageDir, pageSections }) {
     }
     return entries
   }
-  return { sections: buildEntries(pageSections), written, ids }
+  return { sections: buildEntries(pageSections), written, ids, renamed: rep.renamed }
 }
 
 // Inverse of site.js buildPageData → the `page.yml` / `folder.yml` object.
@@ -277,16 +345,24 @@ function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
 // existing level (a malformed/partial payload can't wipe the tree).
 function projectPages(pages, pagesDir, sourceLocale, report, prune) {
   const incomingDirs = new Set()
+  // uuid → existing page-dir name, for uuid-anchored page renames: a page whose
+  // uuid now maps to a different slug was renamed — move its whole directory in
+  // place (preserving its sections + child pages) rather than delete + recreate.
+  const uuidToOldDir = readPageDirUuids(pagesDir)
   for (const record of pages || []) {
     const dirName = record.is_dynamic ? `[${record.param_name || record.slug}]` : record.slug
     incomingDirs.add(dirName)
+    if (record.$uuid) {
+      const oldDir = uuidToOldDir.get(record.$uuid)
+      if (oldDir && oldDir !== dirName) renameInPlace(join(pagesDir, oldDir), join(pagesDir, dirName), report)
+    }
     const pageDir = join(pagesDir, dirName)
 
     let sectionsArray = []
     let sectionIds = {}
     let written = []
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
-      const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections })
+      const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, report })
       sectionsArray = r.sections
       sectionIds = r.ids
       written = r.written
@@ -340,10 +416,10 @@ function projectLayout(layoutSections, layoutBaseDir, report) {
  * @param {boolean} [params.prune=false] - delete orphaned pages/sections that
  *        have no corresponding incoming item (git-pull-like). Off by default;
  *        `uniweb pull` opts in. Guarded against wiping a level on an empty set.
- * @returns {{ config: object, pages: string[], sections: string[], layout: string[], deleted: string[] }}
+ * @returns {{ config: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
-  const report = { config: null, pages: [], sections: [], layout: [], deleted: [] }
+  const report = { config: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale })
 
   const paths = document?.info?.paths_config || {}

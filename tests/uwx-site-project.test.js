@@ -304,6 +304,51 @@ describe('siteContentDocumentToProject — reconcile (prune)', () => {
   })
 })
 
+describe('siteContentDocumentToProject — uuid-anchored rename detection', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const info = { name: { en: 'S' }, foundation_name: '@a/base' }
+  const sec = (id, uuid, text) => ({ $id: id, $uuid: uuid, stable_id: id, type: 'Sec', content: docOf(text) })
+  const homePage = (sections) => ({ $id: 'home', $uuid: 'P1', slug: 'home', mode: 'page', stable_id: 'home', page_sections: sections })
+
+  it('renames a section .md in place when its uuid maps to a new stable_id (not delete + create)', () => {
+    siteContentDocumentToProject({ document: { info, pages: [homePage([sec('hero', 'S1', 'Hi'), sec('features', 'S2', 'F')])] }, siteRoot: dir })
+    assert_exists('pages/home/features.md')
+
+    // The app renamed section S2: features → capabilities (same uuid).
+    const report = siteContentDocumentToProject({
+      document: { info, pages: [homePage([sec('hero', 'S1', 'Hi'), sec('capabilities', 'S2', 'F')])] },
+      siteRoot: dir,
+      prune: true,
+    })
+
+    expect(existsSync(join(dir, 'pages/home/features.md'))).toBe(false)
+    expect(existsSync(join(dir, 'pages/home/capabilities.md'))).toBe(true)
+    expect(report.renamed).toContainEqual({ from: join(dir, 'pages/home/features.md'), to: join(dir, 'pages/home/capabilities.md') })
+    expect(report.deleted).toEqual([]) // a rename is NOT a delete
+    const pageYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
+    expect(pageYml.sections).toEqual(['hero', 'capabilities'])
+    expect(pageYml.ids).toEqual({ hero: 'S1', capabilities: 'S2' })
+  })
+
+  it('renames a page directory in place when its uuid maps to a new slug', () => {
+    siteContentDocumentToProject({ document: { info, pages: [homePage([sec('hero', 'S1', 'Hi')])] }, siteRoot: dir })
+    assert_exists('pages/home/hero.md')
+
+    // The app renamed the page slug: home → start (same uuid P1).
+    const renamed = { $id: 'home', $uuid: 'P1', slug: 'start', mode: 'page', stable_id: 'home', page_sections: [sec('hero', 'S1', 'Hi')] }
+    const report = siteContentDocumentToProject({ document: { info, pages: [renamed] }, siteRoot: dir, prune: true })
+
+    expect(existsSync(join(dir, 'pages/home'))).toBe(false)
+    expect(existsSync(join(dir, 'pages/start/hero.md'))).toBe(true) // sections moved with the dir
+    expect(report.renamed).toContainEqual({ from: join(dir, 'pages/home'), to: join(dir, 'pages/start') })
+    expect(report.deleted).toEqual([])
+  })
+
+  function assert_exists(rel) {
+    expect(existsSync(join(dir, rel))).toBe(true)
+  }
+})
+
 describe('pages lane fixed point — project → re-produce', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
 
