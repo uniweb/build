@@ -11,6 +11,7 @@ import {
 } from '../src/uwx/index.js'
 import { toDataSchemaDeclaration } from '../src/uwx/data-schema.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
+import { computeHash } from '../src/i18n/hash.js'
 
 // Drive the mapper off a REAL declaration (author → normalize → lower), so the
 // schema lowering and the mapper stay in step.
@@ -130,6 +131,26 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
     expect(e.document).not.toHaveProperty('$uuid')
     // brief section keyed by its name; its value is the fields object.
     expect(e.document.product).toMatchObject({ price: 9.99, published: '2026-01-01' })
+  })
+
+  it('wraps a localized scalar field per-locale from translations (B)', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'a', title: 'Hello' }],
+      declaration,
+      translations: { es: { [computeHash('Hello')]: 'Hola' } },
+    })
+    // localized scalar → { source, ...targets }; a non-localized (machine) field is untouched.
+    expect(entities[0].document.product.title).toEqual({ en: 'Hello', es: 'Hola' })
+  })
+
+  it('without translations a localized scalar stays source-only (backward compatible)', () => {
+    const { entities } = collectionRecordsToEntities({
+      collectionName: 'products',
+      records: [{ slug: 'a', title: 'Hello' }],
+      declaration,
+    })
+    expect(entities[0].document.product.title).toEqual({ en: 'Hello' })
   })
 
   it('canonical key order: $id, $model, then the section (no leading $uuid first sync)', () => {

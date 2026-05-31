@@ -28,6 +28,7 @@ import { toDataSchemaDeclaration } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
+import { localizeScalar, loadLocaleTranslations, discoverLocales } from './locale-sync.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 const RICHTEXT_TYPE = 'richtext'
@@ -86,9 +87,16 @@ export function entityContentHash(document) {
   return sha256Hex(toJsonBuffer(stripSigils(document)))
 }
 
-function encodeFieldValue(value, field, sourceLocale) {
+function encodeFieldValue(value, field, sourceLocale, translations) {
   if (value == null) return value
-  if (field.localized) return localize(value, sourceLocale)
+  if (field.localized) {
+    // A localized SCALAR wraps per-locale from locales/collections/{locale}.json;
+    // the richtext BODY stays source-only for now (its per-locale structural-map
+    // round-trip is a later increment).
+    return field.type === RICHTEXT_TYPE
+      ? localize(value, sourceLocale)
+      : localizeScalar(value, sourceLocale, translations)
+  }
   // A YAML scalar date parses to a Date. The backend validates `date` as
   // `YYYY-MM-DD` and `datetime` as RFC3339 — emitting full ISO for a `date`
   // field is rejected before storage, so split by kind.
@@ -110,6 +118,8 @@ function encodeFieldValue(value, field, sourceLocale) {
  * @param {object} params.declaration      - the `@uniweb/data-schema` declaration
  *        (from toDataSchemaDeclaration): `{ name, brief, sections }`
  * @param {string} [params.sourceLocale]   - locale for localized-field wrap
+ * @param {object} [params.translations]   - `{ locale: { hash: tgt } }` for wrapping
+ *        localized scalar fields per-locale (from loadLocaleTranslations)
  * @returns {{ entities: object[], warnings: string[] }} each entity is
  *   `{ id, uuid, model, file, document }` — `document` is the section-keyed body.
  */
@@ -118,6 +128,7 @@ export function collectionRecordsToEntities({
   records,
   declaration,
   sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale,
+  translations,
 }) {
   if (!declaration || !declaration.name) {
     throw new Error('uwx/collections: a declaration with a name is required')
@@ -172,7 +183,7 @@ export function collectionRecordsToEntities({
       let value = record[key]
       if (value === undefined && key === bodyFieldKey && hasBody) value = record.$body
       if (value === undefined) continue
-      const encoded = encodeFieldValue(value, field, sourceLocale)
+      const encoded = encodeFieldValue(value, field, sourceLocale, translations)
       if (encoded !== undefined) data[key] = encoded
     }
     // Warn for author keys that aren't on the Model. A real unknown key means the
@@ -366,6 +377,12 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   const sourceLocale =
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
 
+  // Target-locale translations for wrapping localized record scalars per-locale,
+  // read from locales/collections/{locale}.json (discovered from the files present).
+  const targetLocales = discoverLocales(siteRoot, 'collections').filter((l) => l !== sourceLocale)
+  const translations =
+    targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'collections') : null
+
   const entities = []
   const index = []
   const warnings = []
@@ -425,6 +442,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
       records: flat,
       declaration,
       sourceLocale,
+      translations,
     })
     for (const e of mappedOut.entities) {
       const dupKey = `${e.model} ${e.id}`

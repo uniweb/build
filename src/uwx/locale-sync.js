@@ -16,7 +16,7 @@
 // surface, used by the projector (pull → files) and, later, the producer
 // (files → push).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { computeHash, stripInlineTags } from '../i18n/hash.js'
 import { extractUnitsFromDoc } from '../i18n/extract.js'
@@ -43,6 +43,25 @@ export function isLocalizedMap(value) {
  * The producer's counterpart to writeLocaleTranslations — used to wrap source values
  * back into per-locale form on push. Missing / unreadable files are skipped.
  */
+/**
+ * Discover the target locales present on disk for a lane — the `{locale}.json`
+ * files in `locales/[subdir]/` (excluding the derived `manifest.json` and dotfiles).
+ * Lets the producer wrap exactly the locales that have translation files, without
+ * re-reading the site's declared language list (a declared-but-empty locale has
+ * nothing to wrap anyway).
+ */
+export function discoverLocales(siteRoot, subdir = '') {
+  const dir = localesDir(siteRoot, subdir)
+  if (!existsSync(dir)) return []
+  try {
+    return readdirSync(dir)
+      .filter((f) => f.endsWith('.json') && f !== 'manifest.json' && !f.startsWith('.'))
+      .map((f) => f.slice(0, -'.json'.length))
+  } catch {
+    return []
+  }
+}
+
 export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
   const out = {}
   for (const locale of locales || []) {
