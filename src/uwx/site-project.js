@@ -393,17 +393,65 @@ function prunePagesTree(pages, pagesDir, report) {
   if (incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }
 
-// layout_sections → layout/<area>.md (the 'default' layout) or
-// layout/<layout_name>/<area>.md. Inverse of site.js collectLayoutNested.
-function projectLayout(layoutSections, layoutBaseDir, report) {
+// The file a layout section maps to: `layout/<area>.md` (the 'default' layout) or
+// `layout/<layout_name>/<area>.md`. Inverse of site.js collectLayoutNested.
+function layoutFilePath(layoutBaseDir, record) {
+  const area = record.area || recordStableId(record)
+  if (!area) return null
+  const named = record.layout_name && record.layout_name !== 'default' ? record.layout_name : null
+  return named ? join(layoutBaseDir, named, `${area}.md`) : join(layoutBaseDir, `${area}.md`)
+}
+
+// A layout subdir the producer treats as a named layout (not an `_`-prefixed
+// organizational folder, the only thing collectLayoutNested skips).
+function isNamedLayoutDir(name) {
+  return !name.startsWith('_')
+}
+
+// Delete orphan layout `.md` files (default-layout files in layoutBaseDir and
+// named-layout files in its subdirs) not in `keep`, and remove a named-layout dir
+// left empty. `_`-prefixed organizational folders are never touched.
+function pruneOrphanLayout(layoutBaseDir, keep, report) {
+  if (!existsSync(layoutBaseDir)) return
+  for (const entry of readdirSync(layoutBaseDir)) {
+    const p = join(layoutBaseDir, entry)
+    const st = statSync(p)
+    if (st.isFile()) {
+      if (extname(entry).toLowerCase() === '.md' && !keep.has(p)) {
+        unlinkSync(p)
+        report.deleted.push(p)
+      }
+    } else if (st.isDirectory() && isNamedLayoutDir(entry)) {
+      for (const f of readdirSync(p)) {
+        const fp = join(p, f)
+        if (statSync(fp).isFile() && extname(f).toLowerCase() === '.md' && !keep.has(fp)) {
+          unlinkSync(fp)
+          report.deleted.push(fp)
+        }
+      }
+      if (readdirSync(p).length === 0) {
+        rmSync(p, { recursive: true, force: true })
+        report.deleted.push(p)
+      }
+    }
+  }
+}
+
+// Project layout_sections → layout/**. TWO PASSES (like projectPages): pass 1
+// writes + relocates each file (uuid-anchored, so an app-side (layout_name, area)
+// change is a move, not delete + create); pass 2 prunes orphan files + emptied
+// named-layout dirs. Pruning is guarded against an empty incoming set.
+function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
+  const written = []
   for (const record of layoutSections || []) {
-    const area = record.area || recordStableId(record)
-    if (!area) continue
-    const named = record.layout_name && record.layout_name !== 'default' ? record.layout_name : null
-    const filePath = named ? join(layoutBaseDir, named, `${area}.md`) : join(layoutBaseDir, `${area}.md`)
+    const filePath = layoutFilePath(layoutBaseDir, record)
+    if (!filePath) continue
+    placeByUuid(ctx, record.$uuid, filePath)
     sectionRecordToFile({ filePath, record })
     report.layout.push(filePath)
+    written.push(filePath)
   }
+  if (prune && written.length > 0) pruneOrphanLayout(layoutBaseDir, new Set(written), report)
 }
 
 /**
@@ -421,9 +469,10 @@ function projectLayout(layoutSections, layoutBaseDir, report) {
  * @param {object} params.document - the `@uniweb/site-content` `$`-document
  * @param {string} params.siteRoot
  * @param {string} [params.sourceLocale]
- * @param {boolean} [params.prune=false] - delete orphaned pages/sections that
- *        have no corresponding incoming item (git-pull-like). Off by default;
- *        `uniweb pull` opts in. Guarded against wiping a level on an empty set.
+ * @param {boolean} [params.prune=false] - delete orphaned pages/sections/layout
+ *        files that have no corresponding incoming item (git-pull-like). Off by
+ *        default; `uniweb pull` opts in. Guarded against wiping a level on an
+ *        empty set.
  * @returns {{ config: object, collections: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
@@ -441,7 +490,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   projectPages(document?.pages, pagesDir, sourceLocale, report, prune, ctx)
 
   const layoutBaseDir = paths.layout ? join(siteRoot, paths.layout) : join(siteRoot, 'layout')
-  projectLayout(document?.layout_sections, layoutBaseDir, report)
+  projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
   writePullIndex(siteRoot, ctx.newIndex)
   return report

@@ -533,6 +533,46 @@ describe('collection declarations — round-trip against the real producer', () 
   })
 })
 
+describe('siteContentDocumentToProject — layout reconcile (A6)', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const info = { name: { en: 'S' }, foundation: '@a/base' }
+  const lsec = (area, layoutName, uuid, text) => ({ $id: area, $uuid: uuid, stable_id: area, layout_name: layoutName, area, type: 'L', content: docOf(text) })
+
+  it('prunes an orphaned default-layout file and an emptied named-layout dir', () => {
+    const v1 = { info, layout_sections: [lsec('header', 'default', 'L1', 'H'), lsec('footer', 'default', 'L2', 'F'), lsec('nav', 'mobile', 'L3', 'N')] }
+    siteContentDocumentToProject({ document: v1, siteRoot: dir })
+    expect(existsSync(join(dir, 'layout/footer.md'))).toBe(true)
+    expect(existsSync(join(dir, 'layout/mobile/nav.md'))).toBe(true)
+
+    // v2 keeps only the default header; footer + the whole mobile layout are gone.
+    const report = siteContentDocumentToProject({ document: { info, layout_sections: [lsec('header', 'default', 'L1', 'H')] }, siteRoot: dir, prune: true })
+
+    expect(existsSync(join(dir, 'layout/header.md'))).toBe(true)
+    expect(existsSync(join(dir, 'layout/footer.md'))).toBe(false)
+    expect(existsSync(join(dir, 'layout/mobile'))).toBe(false) // emptied named-layout dir removed
+    expect(report.deleted).toContain(join(dir, 'layout/footer.md'))
+  })
+
+  it('renames a layout file in place when its uuid maps to a new area (not delete + create)', () => {
+    siteContentDocumentToProject({ document: { info, layout_sections: [lsec('header', 'default', 'L1', 'H')] }, siteRoot: dir })
+    expect(existsSync(join(dir, 'layout/header.md'))).toBe(true)
+
+    // The app renamed the layout area header → topbar (same uuid L1).
+    const report = siteContentDocumentToProject({ document: { info, layout_sections: [lsec('topbar', 'default', 'L1', 'H')] }, siteRoot: dir, prune: true })
+
+    expect(existsSync(join(dir, 'layout/header.md'))).toBe(false)
+    expect(existsSync(join(dir, 'layout/topbar.md'))).toBe(true)
+    expect(report.renamed).toContainEqual({ from: join(dir, 'layout/header.md'), to: join(dir, 'layout/topbar.md') })
+    expect(report.deleted).toEqual([])
+  })
+
+  it('safety: an empty incoming layout set does not wipe existing layout files', () => {
+    siteContentDocumentToProject({ document: { info, layout_sections: [lsec('header', 'default', 'L1', 'H')] }, siteRoot: dir })
+    siteContentDocumentToProject({ document: { info, layout_sections: [] }, siteRoot: dir, prune: true })
+    expect(existsSync(join(dir, 'layout/header.md'))).toBe(true) // guard: not nuked
+  })
+})
+
 describe('whole-site framework-dialect round-trip is a producer fixed point (A10)', () => {
   // Bootstrap valid source files by projecting a seed document, then assert the
   // canonical loop — produce → project → produce — recovers the SAME wire
