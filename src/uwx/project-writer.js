@@ -17,6 +17,7 @@ import yaml from 'js-yaml'
 import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-writer'
 import { parseFrontmatter } from './collection-source.js'
 import { renderEntityDocument } from './backfill.js'
+import { collectionsYmlPath } from './collections-config.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
 // authoring, not to externally-editable params. On a section write an existing
@@ -225,6 +226,19 @@ export function writeSiteConfig(siteRoot, config) {
  */
 export function writeYamlFile(filePath, obj) {
   return writeIfChanged(filePath, yaml.dump(obj || {}, YAML_DUMP_OPTS))
+}
+
+/**
+ * Merge `config` into `collections/collections.yml` (shallow). Preserves sibling
+ * keys the update doesn't touch — the folder `$uuid`, `sync`, `folders`, and any
+ * collections not in the incoming set. A `collections:` object value is merged one
+ * level deep (per-collection), so each declaration is replaced wholesale while
+ * untouched collections stay. Same key-preserving (comment-dropping) bar as
+ * `writeSiteConfig`.
+ * @returns {'updated'|'unchanged'}
+ */
+export function writeCollectionsConfig(siteRoot, config) {
+  return mergeYamlConfig(collectionsYmlPath(siteRoot), config)
 }
 
 /**

@@ -34,7 +34,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve, extname, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
-import { writeRecordFile } from './project-writer.js'
+import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
+import { defaultSchema } from './collections-config.js'
 import { writeFolderUuid } from './folder.js'
 
 const RICHTEXT_TYPE = 'richtext'
@@ -143,6 +144,99 @@ function locate(document, folderIndex) {
     return { collection, slug: rest.join('/') }
   }
   return fromFolder || null
+}
+
+const COLLECTIONS_PREFIX = 'collections/'
+
+// Skip undefined when copying optional fields into a projected declaration.
+function setIf(obj, key, value) {
+  if (value !== undefined) obj[key] = value
+}
+
+// Invert one wire declaration (`collectionsNested` output) back to its file-side
+// shape, and decide its home. Returns `{ target: 'col'|'site', name, decl }`.
+//
+//  - A `path:` under `collections/` is the canonical collections.yml home; the
+//    prefix is stripped (collections.yml `path:` is relative to `collections/`)
+//    and omitted entirely when it equals the default (the collection name).
+//  - A `path:` NOT under `collections/` is a legacy `site.yml::collections` local
+//    path (kept verbatim there — collections.yml can't express it), so it routes
+//    back to site.yml to round-trip faithfully.
+//  - `url:` (remote source) and a bare `source:` object go to collections.yml.
+//  - `schema:` is dropped when it only restates the subfolder-name convention
+//    default, so a terse author file stays terse.
+function declToFileShape(d) {
+  const name = d.name || d.$id
+  const decl = {}
+  let target = 'col'
+
+  const source = d.source || {}
+  if (typeof source.url === 'string') {
+    decl.url = source.url
+  } else if (typeof source.path === 'string') {
+    if (source.path.startsWith(COLLECTIONS_PREFIX)) {
+      const rel = source.path.slice(COLLECTIONS_PREFIX.length)
+      if (rel !== name) decl.path = rel
+    } else {
+      target = 'site'
+      decl.path = source.path
+    }
+  } else if (source && typeof source === 'object' && Object.keys(source).length > 0) {
+    decl.source = source
+  }
+
+  if (d.schema && d.schema !== defaultSchema(name)) decl.schema = d.schema
+  setIf(decl, 'sort', d.sort)
+  setIf(decl, 'where', d.where)
+  setIf(decl, 'limit', d.limit)
+  setIf(decl, 'excerpt', d.excerpt)
+  setIf(decl, 'deferred', d.deferred)
+  // wire `detail_url` → file-side `detailUrl` (the key the producer reads).
+  if (d.detail_url !== undefined) decl.detailUrl = d.detail_url
+  setIf(decl, 'queryable', d.queryable)
+
+  return { target, name, decl }
+}
+
+/**
+ * Project the collection DECLARATIONS carried in a site-content document
+ * (`document.collections`, the inverse of site.js `collectionsNested`) back to
+ * their config home — `collections/collections.yml::collections` for the canonical
+ * file-based + remote sources, `site.yml::collections` for legacy local paths
+ * outside `collections/`. Sibling keys (`$uuid`, `sync`, `folders`, untouched
+ * collections) are preserved via the shallow-merge writers. The record FILES and
+ * the folder `$uuid` are written elsewhere (collectionsToProject); this is only
+ * the declaration config.
+ *
+ * Idempotent and non-destructive: with no declarations it writes nothing (so a
+ * pull that doesn't carry collections never clobbers a hand-authored file).
+ *
+ * @param {object} params
+ * @param {object} params.document - a site-content `$`-document (`{ collections }`)
+ * @param {string} params.siteRoot
+ * @returns {{ collections?: 'updated'|'unchanged', site?: 'updated'|'unchanged' }}
+ */
+export function declarationsToCollectionsYml({ document, siteRoot }) {
+  const decls = Array.isArray(document?.collections) ? document.collections : []
+  const report = {}
+  if (decls.length === 0) return report
+
+  const colCollections = {}
+  const siteCollections = {}
+  for (const d of decls) {
+    const { target, name, decl } = declToFileShape(d)
+    if (!name) continue
+    if (target === 'site') siteCollections[name] = decl
+    else colCollections[name] = decl
+  }
+
+  if (Object.keys(colCollections).length > 0) {
+    report.collections = writeCollectionsConfig(siteRoot, { collections: colCollections })
+  }
+  if (Object.keys(siteCollections).length > 0) {
+    report.site = writeSiteConfig(siteRoot, { collections: siteCollections })
+  }
+  return report
 }
 
 /**

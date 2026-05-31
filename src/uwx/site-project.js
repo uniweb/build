@@ -36,6 +36,7 @@ import { join, relative, extname, basename } from 'node:path'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeYamlFile } from './project-writer.js'
+import { declarationsToCollectionsYml } from './collections-project.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -373,12 +374,14 @@ function projectLayout(layoutSections, layoutBaseDir, report) {
 
 /**
  * Project a whole `@uniweb/site-content` document to a site's files: `info` →
- * config (siteInfoToConfig), `pages[]` → `pages/**`, `layout_sections` →
- * `layout/**`. Idempotent. Matches by stableId-name (clean overwrite); orphan
- * deletion + content-similarity matching is the reconcile layer.
+ * config (siteInfoToConfig), `collections[]` declarations →
+ * `collections.yml::collections` (declarationsToCollectionsYml), `pages[]` →
+ * `pages/**`, `layout_sections` → `layout/**`. Idempotent. Matches by
+ * stableId-name (clean overwrite); orphan deletion + content-similarity matching
+ * is the reconcile layer.
  *
- * Not yet here: `collections[]` declarations → `collections.yml::collections`
- * (the collection RECORDS are the separate collections lane, collectionsToProject).
+ * The collection RECORDS are the separate collections lane (collectionsToProject);
+ * this writes only their config declarations.
  *
  * @param {object} params
  * @param {object} params.document - the `@uniweb/site-content` `$`-document
@@ -387,11 +390,12 @@ function projectLayout(layoutSections, layoutBaseDir, report) {
  * @param {boolean} [params.prune=false] - delete orphaned pages/sections that
  *        have no corresponding incoming item (git-pull-like). Off by default;
  *        `uniweb pull` opts in. Guarded against wiping a level on an empty set.
- * @returns {{ config: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
+ * @returns {{ config: object, collections: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
-  const report = { config: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
+  const report = { config: null, collections: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale })
+  report.collections = declarationsToCollectionsYml({ document, siteRoot })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

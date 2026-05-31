@@ -31,8 +31,10 @@ function singularize(name) {
 
 // Default data-schema ref for a collection with no explicit `schema:` — the
 // self-scope (`@/`) singular of its name. `@/` resolves to the local foundation's
-// `schemas/` (named-data-schemas), so this stays backend-independent.
-function defaultSchema(name) {
+// `schemas/` (named-data-schemas), so this stays backend-independent. Exported so
+// the inverse (projection) can drop a `schema:` that merely restates this default,
+// keeping a projected collections.yml as terse as the author would have left it.
+export function defaultSchema(name) {
   return `@/${singularize(name)}`
 }
 

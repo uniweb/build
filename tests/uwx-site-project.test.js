@@ -13,6 +13,7 @@ import {
   pageSectionsToFiles,
   siteContentDocumentToProject,
   siteProjectToDocument,
+  declarationsToCollectionsYml,
 } from '../src/uwx/index.js'
 
 let dir
@@ -431,5 +432,79 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
     })
     expect(yaml.load(readFileSync(join(dest, 'theme.yml'), 'utf8'))).toEqual({ vars: { accent: 'blue' } })
     expect(readFileSync(join(dest, 'head.html'), 'utf8')).toBe('<link rel="icon" href="/f.ico">\n')
+  })
+})
+
+describe('collection declarations — round-trip against the real producer', () => {
+  const SITE_YML =
+    "name: Decls\nfoundation: '@acme/base@1.0.0'\n"
+
+  // A source collections.yml exercising: a default-schema collection (no schema
+  // key, default path), an explicit-schema collection with a path override, and a
+  // full set of query/display fields incl. detailUrl (camelCase on the file side).
+  const COLLECTIONS_YML =
+    'collections:\n' +
+    '  articles:\n' +
+    '    where:\n' +
+    '      published: true\n' +
+    '    sort: -date\n' +
+    '    deferred:\n' +
+    '      - body\n' +
+    '    detailUrl: /api/articles/{slug}\n' +
+    '  products:\n' +
+    '    path: items\n' +
+    "    schema: '@acme/product'\n" +
+    '    limit: 20\n' +
+    '    queryable:\n' +
+    '      category:\n' +
+    '        type: enum\n'
+
+  it('projecting document.collections back to collections.yml is a producer fixed point', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(join(src, 'collections'), { recursive: true })
+    writeFileSync(join(src, 'site.yml'), SITE_YML)
+    writeFileSync(join(src, 'collections', 'collections.yml'), COLLECTIONS_YML)
+
+    const document = await siteProjectToDocument(src)
+    expect(document.collections.length).toBe(2)
+
+    // Project into a fresh destination, then re-produce and compare the wire decls.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    writeFileSync(join(dest, 'site.yml'), SITE_YML)
+    siteContentDocumentToProject({ document, siteRoot: dest })
+
+    const reproduced = await siteProjectToDocument(dest)
+    expect(reproduced.collections).toEqual(document.collections)
+
+    // The projected file stays terse: the default-schema collection gains no
+    // explicit schema, and the default-path collection gains no path.
+    const projected = yaml.load(readFileSync(join(dest, 'collections', 'collections.yml'), 'utf8'))
+    expect(projected.collections.articles.schema).toBeUndefined()
+    expect(projected.collections.articles.path).toBeUndefined()
+    expect(projected.collections.articles.detailUrl).toBe('/api/articles/{slug}')
+    expect(projected.collections.products).toMatchObject({ path: 'items', schema: '@acme/product', limit: 20 })
+  })
+
+  it('preserves sibling keys ($uuid, sync) when rewriting the collections: block', () => {
+    const site = join(dir, 'site')
+    mkdirSync(join(site, 'collections'), { recursive: true })
+    writeFileSync(
+      join(site, 'collections', 'collections.yml'),
+      '$uuid: F-123\nsync: false\ncollections:\n  old:\n    schema: stale\n'
+    )
+
+    const document = {
+      collections: [{ $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/article' }],
+    }
+    const report = declarationsToCollectionsYml({ document, siteRoot: site })
+    expect(report.collections).toBe('updated')
+
+    const out = yaml.load(readFileSync(join(site, 'collections', 'collections.yml'), 'utf8'))
+    expect(out.$uuid).toBe('F-123')
+    expect(out.sync).toBe(false)
+    // the incoming `articles` is added; the pre-existing `old` is left in place
+    expect(out.collections.articles).toEqual({})
+    expect(out.collections.old).toEqual({ schema: 'stale' })
   })
 })

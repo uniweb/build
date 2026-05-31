@@ -56,6 +56,7 @@ export {
 } from './folder.js'
 export {
   collectionsToProject,
+  declarationsToCollectionsYml,
   findRecordFileByUuid,
 } from './collections-project.js'
 export {
