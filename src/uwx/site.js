@@ -467,6 +467,10 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // (registry ref / URL / local path), the round-trip source of truth.
   info.foundation = siteYml.foundation
   setIf(info, 'base', siteYml.base)
+  // favicon — a verbatim URL/path string (the kit resolves it, like other media
+  // refs). `assets` is a build-DERIVED upload manifest, not authored config, so it
+  // is never produced from / projected to the site files.
+  setIf(info, 'favicon', siteYml.favicon)
   setIf(info, 'head_html', headHtml)
   setIf(info, 'fetcher', siteYml.fetcher)
   setIf(info, 'build', siteYml.build)

@@ -3,9 +3,9 @@
 // Includes a round-trip against the REAL producer (siteProjectToDocument) so the
 // inverse is exercised against the exact document shape it inverts.
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import yaml from 'js-yaml'
 import {
   siteInfoToConfig,
@@ -530,6 +530,66 @@ describe('collection declarations — round-trip against the real producer', () 
     // the incoming `articles` is added; the pre-existing `old` is left in place
     expect(out.collections.articles).toEqual({})
     expect(out.collections.old).toEqual({ schema: 'stale' })
+  })
+})
+
+describe('info.favicon / info.assets (A5)', () => {
+  it('round-trips site.yml::favicon and never produces or projects assets', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\nfavicon: /assets/icon.png\n")
+
+    const document = await siteProjectToDocument(src)
+    expect(document.info.favicon).toBe('/assets/icon.png')
+    expect(document.info.assets).toBeUndefined() // assets are build-derived, never produced
+
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({ document, siteRoot: dest })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).favicon).toBe('/assets/icon.png')
+
+    // an info.assets on a pulled document is ignored (not written anywhere)
+    siteInfoToConfig({ document: { info: { assets: { 'v1/x.jpg': {} } } }, siteRoot: dest })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).assets).toBeUndefined()
+  })
+})
+
+describe('siteContentDocumentToProject — unsafe stable_id filename safety (A8)', () => {
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const info = { name: { en: 'S' }, foundation: '@a/base' }
+
+  it('uses a safe filename, keeps the true id in frontmatter, and round-trips the real stable_id', async () => {
+    const document = {
+      info,
+      pages: [
+        {
+          $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
+          page_sections: [{ $id: 'odd', stable_id: 'odd id/with spaces', type: 'Sec', content: docOf('X') }],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document, siteRoot: dir })
+
+    // Exactly one section file, with a filesystem-safe name (no space, no slash).
+    const files = readdirSync(join(dir, 'pages/home')).filter((f) => f.endsWith('.md'))
+    expect(files.length).toBe(1)
+    const fname = files[0]
+    expect(fname).toMatch(/^[A-Za-z0-9._-]+\.md$/)
+
+    // The page.yml::sections leaf is the safe base (so producer resolution matches).
+    const pageYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
+    expect(pageYml.sections[0]).toBe(basename(fname, '.md'))
+
+    // Round trip: the producer recovers the TRUE stable_id from frontmatter id:.
+    const reproduced = await siteProjectToDocument(dir)
+    const sec = reproduced.pages.find((p) => p.$id === 'home').page_sections[0]
+    expect(sec.stable_id).toBe('odd id/with spaces')
+  })
+
+  it('leaves an already-safe stable_id as its filename (backward compatible)', () => {
+    const document = { info, pages: [{ $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Sec', content: docOf('X') }] }] }
+    siteContentDocumentToProject({ document, siteRoot: dir })
+    expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
   })
 })
 

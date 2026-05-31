@@ -34,6 +34,7 @@
 
 import { join, relative, extname, basename } from 'node:path'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToCollectionsYml } from './collections-project.js'
@@ -90,6 +91,7 @@ const INFO_TO_SITE_YML = {
   languages: 'languages',
   default_language: 'defaultLanguage',
   base: 'base',
+  favicon: 'favicon',
   fetcher: 'fetcher',
   build: 'build',
   search: 'search',
@@ -142,6 +144,10 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   if (info.head_html != null) {
     result.headHtml = writeIfChanged(join(siteRoot, 'head.html'), info.head_html)
   }
+
+  // `info.favicon` rides the verbatim INFO_TO_SITE_YML map above (→ site.yml).
+  // `info.assets` is intentionally NOT projected: it is a build-derived upload
+  // manifest, not authored config, so a pull never writes it back to the site.
 
   return result
 }
@@ -230,6 +236,27 @@ function recordStableId(record) {
   return record?.stable_id || record?.$id || null
 }
 
+// A section's `stable_id` doubles as its `.md` filename. The schema leaves it a
+// free string, so an app-set value may carry filesystem-unsafe characters (spaces,
+// `/`, …). We DECOUPLE: the file gets a safe name while the true stable_id is kept
+// in the section frontmatter `id:` — which the producer reads in preference to the
+// filename (content-collector: `stableId = frontmatterId || filenameDerived`), so
+// the round trip recovers the real value. A safe stable_id is returned UNCHANGED
+// (the common case — byte-for-byte backward compatible). An unsafe one is sanitized
+// and given a short hash suffix of the original, so two distinct unsafe ids never
+// collide on one filename (a collision would silently drop a section). The
+// `page.yml::sections:` leaf uses this same safe base so file resolution matches.
+const SAFE_STABLE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/
+function safeStableIdFilename(stableId) {
+  if (SAFE_STABLE_ID.test(stableId)) return stableId
+  const base = stableId
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+  const hash = createHash('sha256').update(stableId).digest('hex').slice(0, 6)
+  return base ? `${base}-${hash}` : `s-${hash}`
+}
+
 /**
  * Write a page's `page_sections` tree to clean `<stableId>.md` files in `pageDir`
  * and return the `page.yml::sections:` array that captures order + nesting — the
@@ -251,14 +278,18 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx }) {
     for (const record of records || []) {
       const stableId = recordStableId(record)
       if (!stableId) continue // anonymous and id-less → cannot place; skip
-      const filePath = join(pageDir, `${stableId}.md`)
+      // Filesystem-safe filename (= stableId when already safe); the true stableId
+      // rides in frontmatter `id:`. The sections: leaf uses the same base so the
+      // producer's filename-based resolution matches.
+      const fileBase = safeStableIdFilename(stableId)
+      const filePath = join(pageDir, `${fileBase}.md`)
       // If this uuid's section moved (an app-side stableId rename), relocate its
       // `.md` in place before writing; then record its current path in the index.
       placeByUuid(ctx, record.$uuid, filePath)
       sectionRecordToFile({ filePath, record })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
-      entries.push(children.length > 0 ? { [stableId]: buildEntries(children) } : stableId)
+      entries.push(children.length > 0 ? { [fileBase]: buildEntries(children) } : fileBase)
     }
     return entries
   }
@@ -374,19 +405,20 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
   }
 }
 
-// Every stableId in a page's section tree. Nested children are written as flat
-// `<stableId>.md` files in the SAME page dir, so all are kept on prune.
-function collectSectionStableIds(pageSections) {
-  const ids = new Set()
+// Every section FILE base in a page's section tree. Nested children are written as
+// flat `<base>.md` files in the SAME page dir, so all are kept on prune. Uses the
+// safe filename (= stableId when safe) so the keep-set matches the files on disk.
+function collectSectionFileBases(pageSections) {
+  const bases = new Set()
   const walk = (records) => {
     for (const record of records || []) {
       const id = recordStableId(record)
-      if (id) ids.add(id)
+      if (id) bases.add(safeStableIdFilename(id))
       if (Array.isArray(record.$children)) walk(record.$children)
     }
   }
   walk(pageSections)
-  return ids
+  return bases
 }
 
 // Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per
@@ -397,7 +429,7 @@ function prunePagesTree(pages, pagesDir, report) {
     incomingDirs.add(pageDirName(record))
     const pageDir = join(pagesDir, pageDirName(record))
     if (record.mode === 'page') {
-      const keep = collectSectionStableIds(record.page_sections)
+      const keep = collectSectionFileBases(record.page_sections)
       if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
     prunePagesTree(record.$children || [], pageDir, report)
