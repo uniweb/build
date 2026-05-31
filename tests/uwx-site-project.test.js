@@ -575,6 +575,42 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
     siteContentDocumentToProject({ document: { info: { name: { en: 'Atlas' }, foundation: '@a/base' } }, siteRoot: dir })
     expect(existsSync(join(dir, 'locales'))).toBe(false)
   })
+
+  it('projects a section content structural map to locales/{locale}.json and writes the source body', () => {
+    const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello world' }] }] }
+    const document = {
+      info: { name: { en: 'S' }, foundation: '@a/base' },
+      pages: [
+        {
+          $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
+          page_sections: [
+            { $id: 'hero', stable_id: 'hero', type: 'Hero', content: { en: srcDoc, es: { 'Hello world': 'Hola mundo' } } },
+          ],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document, siteRoot: dir })
+
+    // source-locale doc → the .md body
+    expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toContain('Hello world')
+    // structural map → locales/es.json keyed by hash(source text)
+    const es = JSON.parse(readFileSync(join(dir, 'locales/es.json'), 'utf8'))
+    expect(es[computeHash('Hello world')]).toBe('Hola mundo')
+  })
+
+  it('tracks (does not silently drop) a target-locale free-form body override', () => {
+    const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi' }] }] }
+    const ffDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto' }] }] }
+    const report = siteContentDocumentToProject({
+      document: {
+        info: { name: { en: 'S' }, foundation: '@a/base' },
+        pages: [{ $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: { en: srcDoc, es: ffDoc } }] }],
+      },
+      siteRoot: dir,
+    })
+    expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toContain('Hi') // source body still written
+    expect(report.freeformPending).toContain('es') // freeform target surfaced, not dropped
+  })
 })
 
 describe('info.favicon / info.assets (A5)', () => {

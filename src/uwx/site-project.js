@@ -38,7 +38,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToCollectionsYml } from './collections-project.js'
-import { createTranslationCollector, writeLocaleTranslations } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -211,10 +211,19 @@ function reinlineInsets(content, insets) {
  * @param {object} params
  * @param {string} params.filePath
  * @param {object} params.record - a section `$`-record
+ * @param {string} [params.sourceLocale] - locale to unwrap a localized `content`
+ *        field to (its source doc → the `.md` body)
+ * @param {object} [params.collector] - translation collector; target-locale
+ *        structural maps on a localized `content` field are captured into it
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector }) {
   const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
+
+  // A localized `content` field unwraps to the source-locale doc for the body; its
+  // target-locale structural maps are captured into the locales/ collector. A bare
+  // doc (source-only / pre-localization) passes through unchanged.
+  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector)
 
   const frontmatter = {}
   if (type !== undefined) frontmatter.type = type
@@ -226,7 +235,7 @@ export function sectionRecordToFile({ filePath, record }) {
   if (fetch !== undefined) frontmatter.fetch = fetch
   if (stable_id !== undefined) frontmatter.id = stable_id
 
-  const body = insets ? reinlineInsets(content, insets) : content
+  const body = insets ? reinlineInsets(sourceContent, insets) : sourceContent
   return writeSectionFile({ filePath, content: body, params: frontmatter })
 }
 
@@ -290,7 +299,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx }) {
       // If this uuid's section moved (an app-side stableId rename), relocate its
       // `.md` in place before writing; then record its current path in the index.
       placeByUuid(ctx, record.$uuid, filePath)
-      sectionRecordToFile({ filePath, record })
+      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
       entries.push(children.length > 0 ? { [fileBase]: buildEntries(children) } : fileBase)
@@ -501,7 +510,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
     const filePath = layoutFilePath(layoutBaseDir, record)
     if (!filePath) continue
     placeByUuid(ctx, record.$uuid, filePath)
-    sectionRecordToFile({ filePath, record })
+    sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector })
     report.layout.push(filePath)
     written.push(filePath)
   }
@@ -543,7 +552,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   // rename detection, build a fresh one as we project, then persist it. Items not
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
-  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector }
+  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale }
 
   const paths = document?.info?.paths || {}
   const pagesDir = paths.pages ? join(siteRoot, paths.pages) : join(siteRoot, 'pages')
@@ -553,6 +562,11 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)
+  // Target-locale FREE-FORM bodies aren't written yet (locales/freeform/** is the
+  // next increment); surface them rather than dropping silently.
+  if (collector.freeformPending.length > 0) {
+    report.freeformPending = collector.freeformPending.map((f) => f.locale)
+  }
   writePullIndex(siteRoot, ctx.newIndex)
   return report
 }

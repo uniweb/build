@@ -35,6 +35,19 @@ export function isLocalizedMap(value) {
   return value != null && typeof value === 'object' && !Array.isArray(value)
 }
 
+// True for a ProseMirror document node (`{ type: 'doc', content: [...] }`).
+export function isProseMirrorDoc(value) {
+  return value != null && typeof value === 'object' && value.type === 'doc'
+}
+
+// A localized `content` field carries one value per locale: the SOURCE locale is a
+// ProseMirror doc, a TARGET locale is either a structural `{ src-text: target }`
+// map (the default) or a full doc (free-form override). A bare doc (no locale wrap)
+// is the source-only / pre-localization shape — left as-is.
+export function isLocalizedContent(value) {
+  return isLocalizedMap(value) && !isProseMirrorDoc(value)
+}
+
 /**
  * Accumulate target-locale translations for localized SCALAR fields across a
  * projection, then flush them to `locales/{locale}.json`. The source-locale value
@@ -46,7 +59,9 @@ export function isLocalizedMap(value) {
  */
 export function createTranslationCollector(sourceLocale) {
   const byLocale = {} // { locale: { hash: target } }
+  const freeformPending = [] // [{ locale, content }] — target-locale free-form bodies
 
+  // Record a localized SCALAR field's target locales (hash of the source scalar).
   function add(localizedValue) {
     if (!isLocalizedMap(localizedValue)) return
     const source = localizedValue[sourceLocale]
@@ -59,7 +74,40 @@ export function createTranslationCollector(sourceLocale) {
     }
   }
 
-  return { add, byLocale }
+  // Record a structural translation MAP for one target locale: `{ src-text: target }`
+  // keyed by the source text exactly as `i18n extract` keys it (hash of the source).
+  function addStructuralMap(locale, map) {
+    if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map)) return
+    for (const [src, target] of Object.entries(map)) {
+      if (typeof src !== 'string' || typeof target !== 'string') continue
+      ;(byLocale[locale] ||= {})[computeHash(src)] = target
+    }
+  }
+
+  // Note a target-locale FREE-FORM body (a full doc override). Writing these to
+  // locales/freeform/** is a later increment; tracked here so they aren't silently
+  // dropped — the caller can surface the count.
+  function noteFreeform(locale, content) {
+    freeformPending.push({ locale, content })
+  }
+
+  return { add, addStructuralMap, noteFreeform, byLocale, freeformPending }
+}
+
+/**
+ * Unwrap a (possibly localized) `content` field to the SOURCE-locale ProseMirror
+ * doc for the `.md` body, capturing target locales into `collector`: a structural
+ * `{ src: target }` map → hash entries; a free-form doc override → noted (deferred).
+ * A bare doc (no locale wrap) is returned unchanged.
+ */
+export function unwrapLocalizedContent(content, sourceLocale, collector) {
+  if (!isLocalizedContent(content)) return content
+  for (const [locale, value] of Object.entries(content)) {
+    if (locale === sourceLocale) continue
+    if (isProseMirrorDoc(value)) collector?.noteFreeform?.(locale, value)
+    else collector?.addStructuralMap?.(locale, value)
+  }
+  return content[sourceLocale]
 }
 
 /**
