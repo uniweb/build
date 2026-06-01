@@ -669,6 +669,34 @@ describe('localized content body round-trip: producer ⇄ projector (B)', () => 
   })
 })
 
+describe('free-form body localization round-trip: producer ⇄ projector (B)', () => {
+  it('reads a free-form override on produce and writes it back on project (fixed point)', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(join(src, 'pages/home'), { recursive: true })
+    mkdirSync(join(src, 'locales/freeform/es/page-ids/home'), { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\nlanguages: [en, es]\n")
+    writeFileSync(join(src, 'pages/home/page.yml'), 'id: home\nindex: true\nsections: [hero]\n')
+    writeFileSync(join(src, 'pages/home/hero.md'), '---\ntype: Hero\n---\n\nSource body\n')
+    // A free-form override (a full per-locale body, not a structural map).
+    writeFileSync(join(src, 'locales/freeform/es/page-ids/home/hero.md'), 'Cuerpo libre distinto\n')
+
+    // Producer: the es value is the free-form DOC (not a {src:tgt} map).
+    const doc1 = await siteProjectToDocument(src)
+    const hero1 = doc1.pages.find((p) => p.$id === 'home').page_sections.find((s) => s.stable_id === 'hero')
+    expect(hero1.content.en.type).toBe('doc')
+    expect(hero1.content.es.type).toBe('doc') // a full body, not a map
+    expect(JSON.stringify(hero1.content.es)).toContain('Cuerpo libre distinto')
+
+    // Project, then re-produce — fixed point, and the override file is written back.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteContentDocumentToProject({ document: doc1, siteRoot: dest })
+    expect(readFileSync(join(dest, 'locales/freeform/es/page-ids/home/hero.md'), 'utf8')).toContain('Cuerpo libre distinto')
+    const doc2 = await siteProjectToDocument(dest)
+    expect(doc2).toEqual(doc1)
+  })
+})
+
 describe('info.favicon / info.assets (A5)', () => {
   it('round-trips site.yml::favicon and never produces or projects assets', async () => {
     const src = join(dir, 'src')

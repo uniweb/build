@@ -47,7 +47,8 @@ import {
 } from '../site/content-collector.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { loadLocaleTranslations, localizeScalar, localizeContentDoc } from './locale-sync.js'
+import { loadLocaleTranslations, localizeScalar, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
+import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveCollectionsConfig } from './collections-config.js'
 
@@ -63,22 +64,47 @@ function setIf(obj, key, value) {
 // inside section.params — lift them into the entity type's dedicated fields.
 // Post-pass: wrap every section's `content` (page sections + their `$children`,
 // recursing into child pages, plus layout sections) into per-locale form. Mutates
-// the records in place. Only called for multi-locale sites with locale files.
-function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations) {
-  const visitSections = (sections) => {
+// the records in place. Only called for multi-locale sites. Each target locale is
+// either a STRUCTURAL map (from locales/{locale}.json, via localizeContentDoc) or,
+// when a FREE-FORM override file exists for that section+locale, the full body
+// (loadFreeformTranslation) — the override wins. Async because the free-form read
+// hits the filesystem.
+async function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot) {
+  const freeformBase = localesDir(siteRoot)
+
+  const localizeSection = async (record, page) => {
+    if (!record.content) return
+    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations)
+    if (page) {
+      const section = { stableId: record.stable_id || record.$id }
+      for (const locale of targetLocales) {
+        const body = await loadFreeformTranslation(section, page, locale, freeformBase)
+        if (!body) continue
+        // Promote a bare source doc to the localized-map form before adding the
+        // override (isLocalizedContent excludes a PM doc, which is also an object).
+        if (!isLocalizedContent(localized)) localized = { [sourceLocale]: record.content }
+        localized[locale] = body // free-form full body overrides the structural map
+      }
+    }
+    record.content = localized
+  }
+
+  const visitSections = async (sections, page) => {
     for (const s of sections || []) {
-      if (s.content) s.content = localizeContentDoc(s.content, sourceLocale, targetLocales, translations)
-      if (Array.isArray(s.$children)) visitSections(s.$children)
+      await localizeSection(s, page)
+      if (Array.isArray(s.$children)) await visitSections(s.$children, page)
     }
   }
-  const visitPages = (pgs) => {
+  const visitPages = async (pgs, routePrefix) => {
     for (const p of pgs || []) {
-      if (Array.isArray(p.page_sections)) visitSections(p.page_sections)
-      if (Array.isArray(p.$children)) visitPages(p.$children)
+      const route = routePrefix ? `${routePrefix}/${p.slug}` : p.slug
+      const page = { route, id: p.stable_id }
+      if (Array.isArray(p.page_sections)) await visitSections(p.page_sections, page)
+      if (Array.isArray(p.$children)) await visitPages(p.$children, route)
     }
   }
-  visitPages(pages)
-  visitSections(layoutSections)
+  await visitPages(pages, '')
+  await visitSections(layoutSections, null) // layout sections have no free-form home
 }
 
 function mapSectionData(section) {
@@ -522,10 +548,11 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
 
   // Wrap each section's content into its per-locale form (source doc + target
-  // structural maps) when the site is multi-locale and has locale files. A
-  // non-invasive post-pass over the built tree — single-locale sites are untouched.
-  if (translations && targetLocales.length > 0) {
-    localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations)
+  // structural maps from locales/{locale}.json, or a free-form body override from
+  // locales/freeform/**) when the site is multi-locale. A non-invasive post-pass
+  // over the built tree — single-locale sites are untouched.
+  if (targetLocales.length > 0) {
+    await localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot)
   }
 
   // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
