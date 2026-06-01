@@ -58,7 +58,7 @@ afterEach(() => {
 })
 
 describe('emitSyncPackages — two directional lanes', () => {
-  it('first build: both lanes fire; collections binds (no folder uuid yet)', async () => {
+  it('first build: both lanes fire (folder + records, folder first)', async () => {
     const pkg = await emitSyncPackages(SITE)
 
     // site-content lane: one entity
@@ -67,17 +67,19 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(pkg.siteContent.models).toEqual(['@uniweb/site-content'])
     expect(pkg.siteContent.index).toEqual([{ kind: 'site' }])
 
-    // collections lane: folder + 2 records, folder first
+    // collections lane: folder + 2 records, folder first (the leading { kind: 'folder' }
+    // is a positional placeholder so record back-fill stays aligned)
     expect(pkg.collections).toBeTruthy()
     expect(pkg.collections.entityCount).toBe(3)
     expect(pkg.collections.models).toContain('@uniweb/folder')
     expect(pkg.collections.index[0]).toEqual({ kind: 'folder' })
     expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['articles/hello', 'articles/world'])
-    expect(pkg.collections.bind).toBe(true) // first push → bind to the site
 
-    // the folder references both records by $ref (uuid-less first push)
+    // the folder references both records by $ref (uuid-less first push) and carries no
+    // $uuid of its own (the backend owns it, keyed by the site-content uuid)
     const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder.$model).toBe('@uniweb/folder')
+    expect(folder).not.toHaveProperty('$uuid')
     const leaves = folder.entries[0].entries
     expect(leaves.map((l) => l.$ref)).toEqual(['articles/hello', 'articles/world'])
   })
@@ -119,10 +121,14 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(second.collections).toBeNull()
   })
 
-  it('bind is false once the folder has a uuid (collections.yml)', async () => {
+  it('the folder never carries a $uuid, even when collections.yml has one', async () => {
+    // A stray collections.yml::$uuid (e.g. left over from an old project) is ignored —
+    // the backend owns the folder, keyed by the site-content uuid.
     w('collections/collections.yml', '$uuid: folder-existing\ncollections:\n  articles:\n    schema: "@/article"\n')
     const pkg = await emitSyncPackages(SITE)
-    expect(pkg.collections.bind).toBe(false)
+    expect(pkg.collections).not.toHaveProperty('bind')
+    const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
+    expect(folder).not.toHaveProperty('$uuid')
   })
 })
 

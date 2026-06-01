@@ -1,11 +1,10 @@
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { buildFolderEntity, writeFolderUuid } from '../src/uwx/folder.js'
+import { buildFolderEntity } from '../src/uwx/folder.js'
 
 // The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the
 // collection-record entities. A brand-new record is pointed at by `$ref` (its
 // payload-local `<collection>/<slug>` handle); an already-minted one by `entry: uuid`.
+// The folder carries NO `$uuid` of its own — the backend owns the site's folder,
+// keyed by the site-content uuid, so the framework never holds a folder uuid.
 
 // Minimal record-entity descriptors (the shape buildCollectionEntities emits).
 function rec(collection, slug, uuid = null) {
@@ -24,7 +23,7 @@ describe('buildFolderEntity', () => {
     })
     expect(folder.model).toBe('@uniweb/folder')
     expect(folder.document.$id).toBe('@folder')
-    expect(folder.document).not.toHaveProperty('$uuid') // first sync
+    expect(folder.document).not.toHaveProperty('$uuid') // the framework holds no folder uuid
     const branches = folder.document.entries
     expect(branches.map((b) => b.path_segment)).toEqual(['articles', 'team'])
     const articles = branches[0]
@@ -44,14 +43,11 @@ describe('buildFolderEntity', () => {
     expect(leaves[1]).toEqual({ kind: 'ref', path_segment: 'world', $ref: 'articles/world' })
   })
 
-  it('carries the folder $uuid when known (collections.yml)', () => {
-    const folder = buildFolderEntity({
-      recordEntities: [rec('articles', 'hello')],
-      folderUuid: 'folder-uuid-9',
-    })
-    expect(folder.uuid).toBe('folder-uuid-9')
-    expect(folder.document.$uuid).toBe('folder-uuid-9')
-    expect(Object.keys(folder.document).slice(0, 3)).toEqual(['$uuid', '$id', '$model'])
+  it('carries no folder $uuid — the backend owns it (keyed by the site-content uuid)', () => {
+    const folder = buildFolderEntity({ recordEntities: [rec('articles', 'hello')] })
+    expect(folder.uuid).toBeNull()
+    expect(folder.document).not.toHaveProperty('$uuid')
+    expect(Object.keys(folder.document)).toEqual(['$id', '$model', 'entries'])
   })
 
   it('virtual org: collections.yml folders build a branch tree, decoupled from layout', () => {
@@ -75,35 +71,5 @@ describe('buildFolderEntity', () => {
       path_segment: 'ada',
       $ref: 'team/ada',
     })
-  })
-})
-
-describe('writeFolderUuid', () => {
-  let dir
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'uwx-folder-'))
-  })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
-
-  it('creates collections.yml with the folder $uuid when none exists', () => {
-    const changed = writeFolderUuid(dir, 'folder-uuid-1')
-    expect(changed).toBe(true)
-    const path = join(dir, 'collections', 'collections.yml')
-    expect(existsSync(path)).toBe(true)
-    expect(readFileSync(path, 'utf8')).toMatch(/^\$uuid: folder-uuid-1$/m)
-  })
-
-  it('updates the $uuid in place, preserving the rest of collections.yml', () => {
-    mkdirSync(join(dir, 'collections'), { recursive: true })
-    writeFileSync(
-      join(dir, 'collections', 'collections.yml'),
-      'sync: true\ncollections:\n  articles:\n    schema: "@/article"\n'
-    )
-    writeFolderUuid(dir, 'folder-uuid-2')
-    const text = readFileSync(join(dir, 'collections', 'collections.yml'), 'utf8')
-    expect(text).toMatch(/^\$uuid: folder-uuid-2$/m)
-    expect(text).toContain('sync: true')
-    expect(text).toContain('schema: "@/article"')
-    expect(text.match(/\$uuid:/g)).toHaveLength(1)
   })
 })

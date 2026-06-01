@@ -26,9 +26,10 @@
 // later nicety); deriving an on-disk collection from a deeply NESTED virtual
 // folder org when the record carries no `$id`; and rewriting `collections.yml`'s
 // `folders:` organization + synthesizing declarations for newly-introduced collections
-// (only the folder `$uuid` is written here, via writeFolderUuid — the
-// comment-preserving config rewrite is a separate quality bar). Nothing is
-// silently dropped: an unplaceable or unresolvable record is reported.
+// (a comment-preserving config rewrite is a separate quality bar). The folder itself
+// carries no `$uuid` — the backend owns it, keyed by the site-content uuid — so
+// nothing is written into `collections.yml` here. Nothing is silently dropped: an
+// unplaceable or unresolvable record is reported.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve, extname, basename } from 'node:path'
@@ -39,7 +40,6 @@ import { defaultSchema } from './collections-config.js'
 import { isProseMirrorField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformCollectionPath } from '../i18n/freeform.js'
-import { writeFolderUuid } from './folder.js'
 
 const RICHTEXT_TYPE = 'richtext'
 // Single-record source extensions we scan + place (BibTeX is multi-record → out).
@@ -318,10 +318,10 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
     else updated.push(filePath)
   }
 
-  // Write the folder identity into collections.yml (idempotent, comment-preserving
-  // top-level scalar). The virtual `folders:` org + declarations for newly-
-  // introduced collections are a later, comment-sensitive rewrite (header).
-  if (folderDoc?.$uuid) writeFolderUuid(siteRoot, folderDoc.$uuid)
+  // The folder carries no `$uuid` we persist — the backend owns the site's folder,
+  // keyed by the site-content uuid (the folder pull lane is keyed by `site.yml::$uuid`).
+  // The virtual `folders:` org + declarations for newly-introduced collections are a
+  // later, comment-sensitive rewrite.
 
   // Flush localized record-field translations to locales/collections/{locale}.json,
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.

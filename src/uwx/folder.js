@@ -13,11 +13,9 @@
 // the on-disk layout) when present; otherwise the default is one branch per
 // collection, its records as leaves — mirroring the `collections/` subfolders.
 //
-// The folder's own `$uuid` lives in `collections.yml`; we read it, send it, and
-// back-fill the minted value there (writeFolderUuid).
-
-import { upsertYamlScalar } from './yaml-upsert.js'
-import { collectionsYmlPath } from './collections-config.js'
+// The folder carries NO `$uuid` of its own: the backend owns the site's
+// `@uniweb/folder` and resolves it from the site-content uuid (the folder sync lane
+// is keyed by `site.yml::$uuid`). The framework never holds a folder uuid.
 
 export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'
@@ -90,40 +88,32 @@ function virtualEntries(folders, groups) {
 /**
  * Build the `@uniweb/folder` entity descriptor, or null when there are no records.
  *
+ * Carries no `$uuid`: the backend owns the site's folder (resolved from the
+ * site-content uuid), so the framework never mints, holds, or sends a folder uuid.
+ *
  * @param {object} params
  * @param {object[]} params.recordEntities - the collection-record entities (full
  *        set, BEFORE send-only-changed filtering), each `{ id, uuid, slug, collection? }`
  * @param {Array|null} [params.folders] - `collections.yml::folders` virtual org
- * @param {string} [params.folderUuid] - the folder entity `$uuid` (collections.yml)
  * @returns {{ id, uuid, model, file, document, collection: '@folder' }|null}
  */
-export function buildFolderEntity({ recordEntities, folders = null, folderUuid }) {
+export function buildFolderEntity({ recordEntities, folders = null }) {
   if (!Array.isArray(recordEntities) || recordEntities.length === 0) return null
   const groups = groupByCollection(recordEntities)
   const entries = folders ? virtualEntries(folders, groups) : defaultEntries(groups)
 
-  const document = {}
-  if (folderUuid) document.$uuid = folderUuid
-  document.$id = FOLDER_ENTITY_KEY
-  document.$model = FOLDER_MODEL_NAME
-  document.entries = entries
+  const document = {
+    $id: FOLDER_ENTITY_KEY,
+    $model: FOLDER_MODEL_NAME,
+    entries,
+  }
 
   return {
     id: FOLDER_ENTITY_KEY,
-    uuid: folderUuid || null,
+    uuid: null,
     slug: FOLDER_ENTITY_KEY,
     model: FOLDER_MODEL_NAME,
     file: 'entities/folder.json',
     document,
   }
-}
-
-/**
- * Back-fill the minted folder `$uuid` into `collections.yml` (top-level `$uuid`),
- * creating the file if absent (a project that synced collections needs a home for
- * the folder identity even with no explicit collections.yml authored yet).
- * @returns {boolean} true if collections.yml changed
- */
-export function writeFolderUuid(siteRoot, uuid) {
-  return upsertYamlScalar(collectionsYmlPath(siteRoot), '$uuid', uuid)
 }

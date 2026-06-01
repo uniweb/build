@@ -44,9 +44,10 @@ const articleDoc = (uuid, title, body) => ({
   article: { $uuid: 'rec', title: { en: title }, body: { en: body } },
 })
 
-// A faithful folder document from the real producer, given record placements.
-const folderFor = (records, folderUuid) =>
-  buildFolderEntity({ recordEntities: records, folderUuid }).document
+// A faithful folder document from the real producer, given record placements. (The
+// folder carries no $uuid — the backend owns it, keyed by the site-content uuid — so a
+// second arg some call sites still pass is ignored.)
+const folderFor = (records) => buildFolderEntity({ recordEntities: records }).document
 
 describe('collectionsToProject — placement', () => {
   it('places a new markdown record under collections/<collection>/<slug>.md (slug+collection from the folder)', () => {
@@ -131,12 +132,13 @@ describe('collectionsToProject — update in place by $uuid', () => {
 })
 
 describe('collectionsToProject — folder identity + no silent skips', () => {
-  it('writes the folder $uuid into collections.yml', () => {
-    const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F7')
+  it('does not persist a folder $uuid — the backend owns the folder (keyed by the site-content uuid)', () => {
+    const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }])
     collectionsToProject({ folderDoc, recordDocs: [articleDoc('U1', 'Hi', '\nx\n')], siteRoot: dir, opts: { resolveDeclaration } })
 
-    const colYml = readFileSync(join(dir, 'collections/collections.yml'), 'utf8')
-    expect(colYml).toContain('$uuid: F7')
+    // the record is placed, but no folder identity is written to collections.yml
+    expect(existsSync(join(dir, 'collections/articles/hello.md'))).toBe(true)
+    expect(existsSync(join(dir, 'collections/collections.yml'))).toBe(false)
   })
 
   it('skips (does not crash on) a record whose model cannot be resolved', () => {

@@ -50,10 +50,7 @@ export {
   COLLECTIONS_YML_RELPATH,
 } from './collections-config.js'
 export { upsertYamlScalar } from './yaml-upsert.js'
-export {
-  buildFolderEntity,
-  writeFolderUuid,
-} from './folder.js'
+export { buildFolderEntity } from './folder.js'
 export {
   collectionsToProject,
   declarationsToCollectionsYml,

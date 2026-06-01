@@ -7,8 +7,9 @@
 //                          together so brand-new records resolve in one call).
 //
 // The verb POSTs each to its own route (site-content first — the site is born there;
-// then collections, binding to that site via `?site=<siteContentUuid>` on the first
-// collections push). Returning two separable packages keeps the producer pure of the
+// then the folder, keyed by the site-content uuid). The folder carries no uuid of its
+// own: the backend owns the site's `@uniweb/folder` and resolves it from the
+// site-content uuid. Returning two separable packages keeps the producer pure of the
 // HTTP/ordering concern.
 //
 // "Send only changed" spans both lanes via one content-hash map (the sync-cache):
@@ -53,10 +54,12 @@ function emitLane(entities, exporter, exportedAt) {
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
- *   collections: { buffer, entityCount, index, models, bind: boolean }|null,
+ *   collections: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], skipped: number }>}
- *   `bind` is true when the folder has no uuid yet (first collections push → bind to
- *   the site). Each lane is null when it has nothing to push.
+ *   Each lane is null when it has nothing to push. The collections `index` keeps a
+ *   leading `{ kind: 'folder' }` placeholder (submission position 0 → the folder
+ *   entity) so record back-fill stays positionally aligned; the folder itself has no
+ *   uuid to back-fill.
  */
 export async function emitSyncPackages(siteRoot, opts = {}) {
   const includeSite = opts.includeSite !== false
@@ -78,7 +81,6 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     folders: col.colConfig?.folders ?? null,
-    folderUuid: col.colConfig?.folderUuid,
   })
 
   const siteDoc = includeSite ? await siteProjectToDocument(siteRoot, { sourceLocale }) : null
@@ -107,10 +109,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
 
   let collections = null
   if (folder && (folderChanged || changedRecords.length > 0)) {
-    // Folder first (always, for the `$ref` closure + binding), then changed records.
+    // Folder first (always, for the `$ref` closure), then changed records. The
+    // leading `{ kind: 'folder' }` keeps submission position 0 aligned for record
+    // back-fill (backfillEntityUuids skips it — the folder has no uuid to write).
     const entities = [folder, ...changedRecords.map((r) => r.entity)]
     const index = [{ kind: 'folder' }, ...changedRecords.map((r) => r.index)]
-    collections = { ...emitLane(entities, exporter, exportedAt), index, bind: !col.colConfig?.folderUuid }
+    collections = { ...emitLane(entities, exporter, exportedAt), index }
   }
 
   // --- site-content lane -------------------------------------------------------
@@ -119,8 +123,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     siteContent = { ...emitLane([siteEntity], exporter, exportedAt), index: [{ kind: 'site' }] }
   }
 
-  // The site's current uuid (from site.yml), so the verb can bind a first-push
-  // collections folder to it via `?site=` even when site-content didn't change.
+  // The site's current uuid (from site.yml): the verb keys the folder push route on
+  // it (`/dev/site/folder/push/{siteContentUuid}`), and decides CREATE vs UPDATE for
+  // the content lane by its presence/absence.
   const siteContentUuid = siteDoc?.$uuid
 
   return { siteContent, collections, siteContentUuid, hashes, warnings, skipped }
