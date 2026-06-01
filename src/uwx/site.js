@@ -47,7 +47,7 @@ import {
 } from '../site/content-collector.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { loadLocaleTranslations, localizeScalar, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
+import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveCollectionsConfig } from './collections-config.js'
@@ -136,7 +136,7 @@ function buildPageData(config, ctx) {
   setIf(data, 'title', localizeScalar(config.title, sourceLocale, translations))
   setIf(data, 'description', localizeScalar(config.description, sourceLocale, translations))
   setIf(data, 'label', localizeScalar(config.label, sourceLocale, translations))
-  setIf(data, 'keywords', config.keywords)
+  setIf(data, 'keywords', localizeScalarList(config.keywords, sourceLocale, translations))
   const indexed =
     config.index === true || (isRoot && siteIndex && siteIndex === slug)
   if (indexed) data.is_index = true

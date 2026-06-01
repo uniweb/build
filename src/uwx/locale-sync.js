@@ -141,6 +141,23 @@ export function localizeScalar(value, sourceLocale, translations) {
   return out
 }
 
+/**
+ * Wrap a `multiple: true` + `localized: true` field (e.g. page `keywords` — "array
+ * of localized strings") into per-locale form by localizing each element. Container
+ * shape is preserved so the round-trip is a fixed point: an array authored as an
+ * array stays an array of `{ <lang>: value }` maps; a bare scalar (the degenerate
+ * single-value authoring) wraps as one localized scalar. null/undefined → undefined.
+ *
+ * @param {*} value
+ * @param {string} sourceLocale
+ * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
+ */
+export function localizeScalarList(value, sourceLocale, translations) {
+  if (value == null) return undefined
+  if (!Array.isArray(value)) return localizeScalar(value, sourceLocale, translations)
+  return value.map((item) => localizeScalar(item, sourceLocale, translations))
+}
+
 // True for a ProseMirror document node (`{ type: 'doc', content: [...] }`).
 export function isProseMirrorDoc(value) {
   return value != null && typeof value === 'object' && value.type === 'doc'

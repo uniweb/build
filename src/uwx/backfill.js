@@ -197,6 +197,14 @@ export function unwrapLocalized(value, sourceLocale) {
   return value
 }
 
+// Inverse of locale-sync's localizeScalarList: unwrap a `multiple: true` localized
+// field element-wise. An array unwraps each element; a bare localized map unwraps to
+// one value. The container shape is preserved (mirrors how the producer built it).
+export function unwrapLocalizedList(value, sourceLocale) {
+  if (Array.isArray(value)) return value.map((v) => unwrapLocalized(v, sourceLocale))
+  return unwrapLocalized(value, sourceLocale)
+}
+
 // The brief is the section marked `brief: true` in the declaration's sections map
 // (the sections-tree has no schema-level `brief:` back-reference). Returned with
 // its name attached (the map key) so callers can key the document by it.

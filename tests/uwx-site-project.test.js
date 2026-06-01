@@ -643,6 +643,62 @@ describe('localized scalar round-trip: producer ⇄ projector (B)', () => {
   })
 })
 
+describe('localized keywords array: producer ⇄ projector (B-2)', () => {
+  it('projects a localized keywords array: source elements inline, targets to locales/{locale}.json', () => {
+    const document = {
+      info: { name: { en: 'S' }, foundation: '@a/base' },
+      pages: [
+        {
+          $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
+          keywords: [
+            { en: 'alpha', es: 'alfa' },
+            { en: 'beta', es: 'beta-es' },
+          ],
+          page_sections: [],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document, siteRoot: dir })
+
+    // source elements stay inline in page.yml as a plain string array
+    expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).keywords).toEqual([
+      'alpha',
+      'beta',
+    ])
+    // each element's target locale → locales/es.json keyed by hash(source element)
+    const es = JSON.parse(readFileSync(join(dir, 'locales/es.json'), 'utf8'))
+    expect(es[computeHash('alpha')]).toBe('alfa')
+    expect(es[computeHash('beta')]).toBe('beta-es')
+  })
+
+  it('produce → project → produce recovers multi-locale keywords', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(join(src, 'locales'), { recursive: true })
+    mkdirSync(join(src, 'pages/home'), { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\nlanguages: [en, es]\n")
+    writeFileSync(join(src, 'pages/home/page.yml'), 'title: Home\nindex: true\nkeywords: [alpha, beta]\n')
+    writeFileSync(
+      join(src, 'locales/es.json'),
+      JSON.stringify({ [computeHash('alpha')]: 'alfa', [computeHash('beta')]: 'beta-es' })
+    )
+
+    // Producer wraps each keyword element per-locale by reading locales/es.json.
+    const doc1 = await siteProjectToDocument(src)
+    const home1 = doc1.pages.find((p) => p.$id === 'home')
+    expect(home1.keywords).toEqual([
+      { en: 'alpha', es: 'alfa' },
+      { en: 'beta', es: 'beta-es' },
+    ])
+
+    // Project to a fresh dir, then re-produce — the multi-locale keywords survive.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteContentDocumentToProject({ document: doc1, siteRoot: dest })
+    const doc2 = await siteProjectToDocument(dest)
+    expect(doc2.pages.find((p) => p.$id === 'home').keywords).toEqual(home1.keywords)
+  })
+})
+
 describe('localized content body round-trip: producer ⇄ projector (B)', () => {
   it('round-trips a multi-locale section content body via the structural map', async () => {
     const src = join(dir, 'src')

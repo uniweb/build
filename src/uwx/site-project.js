@@ -40,7 +40,7 @@ import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writ
 import { declarationsToCollectionsYml } from './collections-project.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath } from '../i18n/freeform.js'
-import { unwrapLocalized } from './backfill.js'
+import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
@@ -340,7 +340,7 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (description !== undefined) y.description = description
   const label = unwrapLocalized(record.label, sourceLocale)
   if (label !== undefined) y.label = label
-  if (record.keywords !== undefined) y.keywords = record.keywords
+  if (record.keywords !== undefined) y.keywords = unwrapLocalizedList(record.keywords, sourceLocale)
   if (record.is_index) y.index = true
   if (record.hidden !== undefined) y.hidden = record.hidden
   if (record.hide_in_header !== undefined) y.hideInHeader = record.hide_in_header
@@ -414,6 +414,9 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     ctx.collector?.add(record.title)
     ctx.collector?.add(record.label)
     ctx.collector?.add(record.description)
+    // keywords is a localized ARRAY — capture each element's target locales.
+    if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw))
+    else ctx.collector?.add(record.keywords)
 
     const route = routePrefix ? `${routePrefix}/${record.slug}` : record.slug
     const pageContext = { route, id: record.stable_id }
