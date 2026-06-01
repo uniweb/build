@@ -78,7 +78,8 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
     if (page) {
       const section = { stableId: record.stable_id || record.$id }
       for (const locale of targetLocales) {
-        const body = await loadFreeformTranslation(section, page, locale, freeformBase)
+        // loadFreeformTranslation returns { content, frontmatter, … } — the doc is `.content`.
+        const body = (await loadFreeformTranslation(section, page, locale, freeformBase))?.content
         if (!body) continue
         // Promote a bare source doc to the localized-map form before adding the
         // override (isLocalizedContent excludes a PM doc, which is also an object).

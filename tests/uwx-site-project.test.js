@@ -598,7 +598,7 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
     expect(es[computeHash('Hello world')]).toBe('Hola mundo')
   })
 
-  it('tracks (does not silently drop) a target-locale free-form body override', () => {
+  it('writes a target-locale free-form body override to locales/freeform/', () => {
     const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi' }] }] }
     const ffDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto' }] }] }
     const report = siteContentDocumentToProject({
@@ -609,7 +609,9 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
       siteRoot: dir,
     })
     expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toContain('Hi') // source body still written
-    expect(report.freeformPending).toContain('es') // freeform target surfaced, not dropped
+    const ff = join(dir, 'locales/freeform/es/page-ids/home/hero.md')
+    expect(report.freeform.written).toContain(ff)
+    expect(readFileSync(ff, 'utf8')).toContain('Hola distinto')
   })
 })
 

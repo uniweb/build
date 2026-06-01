@@ -18,8 +18,12 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { computeHash, stripInlineTags } from '../i18n/hash.js'
 import { extractUnitsFromDoc } from '../i18n/extract.js'
+import { computeSourceHash } from '../i18n/freeform-manifest.js'
+
+const FREEFORM_MANIFEST = '.manifest.json'
 
 // The `locales/` directory for a site (the i18n localesDir default; `paths` can
 // override it, but the default is `locales` — keep this the single place to change).
