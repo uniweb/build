@@ -49,7 +49,8 @@ describe('resolveCollectionsConfig', () => {
     w('collections/collections.yml', '$uuid: folder-9\ncollections:\n  team:\n    schema: "@/person"\n  posts:\n    path: blog\n')
     const cfg = await resolveCollectionsConfig(ROOT)
     expect(cfg.hasCollectionsYml).toBe(true)
-    expect(cfg.folderUuid).toBe('folder-9')
+    // a stray `$uuid` in collections.yml is ignored — the framework holds no folder uuid
+    expect(cfg).not.toHaveProperty('folderUuid')
     expect(cfg.declarations.team.schema).toBe('@/person')
     expect(cfg.declarations.team.schemaExplicit).toBe(true)
     // path default = the collection name, lifted to a site-root-relative path

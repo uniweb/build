@@ -5,8 +5,9 @@
 // `collections.yml` is the co-located home for FILE-BASED collection declarations
 // (it sits with the data it describes). It is useful with NO backend at all — it
 // maps each subfolder to a data schema, declares query/display config, and can lay
-// out a VIRTUAL folder organization decoupled from the on-disk layout. When a
-// project syncs, it additionally carries the `@uniweb/folder` entity `$uuid`.
+// out a VIRTUAL folder organization decoupled from the on-disk layout. (Sync holds no
+// folder uuid here — the backend owns the site's `@uniweb/folder`, keyed by the
+// site-content uuid.)
 //
 // Precedence (per-collection, per-key): collections.yml  >  site.yml::collections.
 // `site.yml::collections` stays valid for remote `url:` sources and back-compat.
@@ -62,7 +63,6 @@ function normalizeYmlDecl(name, decl) {
  * @param {object} [opts]
  * @param {object} [opts.siteYml] - an already-read site.yml (avoids a re-read)
  * @returns {Promise<{
- *   folderUuid: string|undefined,   // collections.yml `$uuid` (the @uniweb/folder id)
  *   folderSync: boolean,            // collections.yml `sync` (whole-folder opt-out)
  *   hasCollectionsYml: boolean,
  *   declarations: object,           // { name: decl }  — merged, schema-defaulted
@@ -112,7 +112,6 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
 
   const folderSync = colYml?.sync !== false
   return {
-    folderUuid: typeof colYml?.$uuid === 'string' ? colYml.$uuid : undefined,
     folderSync,
     hasCollectionsYml,
     declarations,
