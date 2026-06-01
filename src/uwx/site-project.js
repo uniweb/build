@@ -38,7 +38,8 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToCollectionsYml } from './collections-project.js'
-import { createTranslationCollector, writeLocaleTranslations, unwrapLocalizedContent } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
+import { buildFreeformPath } from '../i18n/freeform.js'
 import { unwrapLocalized } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -217,13 +218,14 @@ function reinlineInsets(content, insets) {
  *        structural maps on a localized `content` field are captured into it
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath }) {
   const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
-  // target-locale structural maps are captured into the locales/ collector. A bare
-  // doc (source-only / pre-localization) passes through unchanged.
-  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector)
+  // target-locale structural maps are captured into the locales/ collector, and any
+  // free-form target body is captured with `freeformRelPath` for writing under
+  // locales/freeform/. A bare doc (source-only / pre-localization) passes through.
+  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath)
 
   const frontmatter = {}
   if (type !== undefined) frontmatter.type = type
@@ -284,7 +286,7 @@ function safeStableIdFilename(stableId) {
  *        newIndex, report }`; enables uuid-anchored relocation + index recording.
  * @returns {{ sections: Array, written: string[] }}
  */
-export function pageSectionsToFiles({ pageDir, pageSections, ctx }) {
+export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext }) {
   const written = []
   const buildEntries = (records) => {
     const entries = []
@@ -299,7 +301,12 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx }) {
       // If this uuid's section moved (an app-side stableId rename), relocate its
       // `.md` in place before writing; then record its current path in the index.
       placeByUuid(ctx, record.$uuid, filePath)
-      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector })
+      // The free-form translation path for this section (locale-independent); a
+      // target-locale free-form body is written under locales/freeform/{locale}/here.
+      const freeformRelPath = pageContext
+        ? buildFreeformPath({ stableId }, pageContext)
+        : null
+      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, freeformRelPath })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
       entries.push(children.length > 0 ? { [fileBase]: buildEntries(children) } : fileBase)
@@ -393,8 +400,10 @@ function pageDirName(record) {
 }
 
 // Pass 1 — write + relocate every page dir, its page.yml/folder.yml, and its
-// section files, recursing into children. No deletes happen here.
-function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
+// section files, recursing into children. No deletes happen here. `routePrefix`
+// accumulates the slug-path route (for the free-form translation path; matches the
+// producer's slugPath, normalizeRouteForPath strips any leading slash on both).
+function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '') {
   for (const record of pages || []) {
     const pageDir = join(pagesDir, pageDirName(record))
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
@@ -406,9 +415,12 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
     ctx.collector?.add(record.label)
     ctx.collector?.add(record.description)
 
+    const route = routePrefix ? `${routePrefix}/${record.slug}` : record.slug
+    const pageContext = { route, id: record.stable_id }
+
     let sectionsArray = []
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
-      const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx })
+      const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx, pageContext })
       sectionsArray = r.sections
       report.sections.push(...r.written)
     }
@@ -420,7 +432,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx) {
     writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale), PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
-    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx)
+    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route)
   }
 }
 
@@ -562,11 +574,8 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)
-  // Target-locale FREE-FORM bodies aren't written yet (locales/freeform/** is the
-  // next increment); surface them rather than dropping silently.
-  if (collector.freeformPending.length > 0) {
-    report.freeformPending = collector.freeformPending.map((f) => f.locale)
-  }
+  // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
+  report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
   writePullIndex(siteRoot, ctx.newIndex)
   return report
 }

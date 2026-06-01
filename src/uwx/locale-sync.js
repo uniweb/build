@@ -186,11 +186,13 @@ export function createTranslationCollector(sourceLocale) {
     }
   }
 
-  // Note a target-locale FREE-FORM body (a full doc override). Writing these to
-  // locales/freeform/** is a later increment; tracked here so they aren't silently
-  // dropped — the caller can surface the count.
-  function noteFreeform(locale, content) {
-    freeformPending.push({ locale, content })
+  // Note a target-locale FREE-FORM body (a full doc override): `target` is the
+  // translated doc, `source` is the source-locale doc (for the staleness hash), and
+  // `relpath` is the freeform file path (locale-independent, from buildFreeformPath)
+  // — null when the caller can't place it (e.g. layout sections have no freeform
+  // home), so it's surfaced rather than dropped.
+  function noteFreeform(locale, target, source, relpath) {
+    freeformPending.push({ locale, target, source, relpath: relpath || null })
   }
 
   return { add, addStructuralMap, noteFreeform, byLocale, freeformPending }
@@ -199,17 +201,90 @@ export function createTranslationCollector(sourceLocale) {
 /**
  * Unwrap a (possibly localized) `content` field to the SOURCE-locale ProseMirror
  * doc for the `.md` body, capturing target locales into `collector`: a structural
- * `{ src: target }` map → hash entries; a free-form doc override → noted (deferred).
- * A bare doc (no locale wrap) is returned unchanged.
+ * `{ src: target }` map → hash entries; a free-form doc override → noted with its
+ * freeform path (`freeformRelPath`, from buildFreeformPath) so it can be written to
+ * `locales/freeform/{locale}/…`. A bare doc (no locale wrap) is returned unchanged.
  */
-export function unwrapLocalizedContent(content, sourceLocale, collector) {
+export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath) {
   if (!isLocalizedContent(content)) return content
+  const source = content[sourceLocale]
   for (const [locale, value] of Object.entries(content)) {
     if (locale === sourceLocale) continue
-    if (isProseMirrorDoc(value)) collector?.noteFreeform?.(locale, value)
+    if (isProseMirrorDoc(value)) collector?.noteFreeform?.(locale, value, source, freeformRelPath)
     else collector?.addStructuralMap?.(locale, value)
   }
-  return content[sourceLocale]
+  return source
+}
+
+/**
+ * Write captured target-locale FREE-FORM bodies to `locales/freeform/{locale}/<relpath>`
+ * (markdown, body-only) and record each one's SOURCE hash in that locale's
+ * `.manifest.json` for staleness tracking. Sync + idempotent: a body is rewritten
+ * only when its markdown changes, and a manifest `recorded` date is (re)stamped only
+ * when the source hash changes — so a no-op re-projection is byte-stable. Entries
+ * with no `relpath` (unplaceable, e.g. a layout section) are surfaced as `skipped`.
+ *
+ * @returns {{ written: string[], skipped: object[] }}
+ */
+export function writeFreeformTranslations(siteRoot, freeformPending) {
+  const report = { written: [], skipped: [] }
+  if (!Array.isArray(freeformPending) || freeformPending.length === 0) return report
+
+  const byLocale = new Map() // locale → entries[]
+  for (const entry of freeformPending) {
+    if (!entry?.relpath) {
+      report.skipped.push(entry)
+      continue
+    }
+    if (!byLocale.has(entry.locale)) byLocale.set(entry.locale, [])
+    byLocale.get(entry.locale).push(entry)
+  }
+
+  for (const [locale, entries] of byLocale) {
+    const localeDir = join(localesDir(siteRoot), 'freeform', locale)
+    const manifestPath = join(localeDir, FREEFORM_MANIFEST)
+    let manifest = {}
+    if (existsSync(manifestPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(manifestPath, 'utf8'))
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) manifest = parsed
+      } catch {
+        // unreadable → start fresh
+      }
+    }
+
+    let manifestChanged = false
+    for (const { relpath, target, source } of entries) {
+      const filePath = join(localeDir, relpath)
+      const md = proseMirrorToMarkdown(target)
+      const text = md.endsWith('\n') ? md : md + '\n'
+      let current = null
+      try {
+        current = readFileSync(filePath, 'utf8')
+      } catch {
+        // absent
+      }
+      if (current !== text) {
+        mkdirSync(dirname(filePath), { recursive: true })
+        writeFileSync(filePath, text)
+        report.written.push(filePath)
+      }
+      // Staleness hash of the SOURCE; re-stamp `recorded` only when it changes.
+      const hash = computeSourceHash(source)
+      const existing = manifest[relpath]
+      if (!existing || existing.hash !== hash) {
+        manifest[relpath] = { hash, recorded: new Date().toISOString().slice(0, 10) }
+        manifestChanged = true
+      }
+    }
+
+    if (manifestChanged) {
+      mkdirSync(localeDir, { recursive: true })
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+    }
+  }
+
+  return report
 }
 
 /**
