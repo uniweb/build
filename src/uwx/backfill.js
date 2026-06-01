@@ -236,12 +236,15 @@ function briefHasContentBody(declaration) {
  * @param {string} params.format       - 'yaml' | 'json' | 'md'
  * @param {string} [params.sourceLocale]
  * @param {object} [params.collector]  - translation collector; target locales of
- *        localized SCALAR fields are captured into it (→ locales/collections/{locale}.json).
- *        The localized richtext BODY is unwrapped to source only (its per-locale
- *        round-trip is a later increment).
+ *        localized SCALAR fields are captured into it (→ locales/collections/{locale}.json),
+ *        and a localized prosemirror BODY's target locales are captured as either a
+ *        structural map or, when `freeformRelPath` is given, a free-form body override.
+ * @param {string} [params.freeformRelPath] - the free-form path for this record's
+ *        content body (buildFreeformCollectionPath); lets a target-locale full-doc
+ *        body be written under locales/freeform/{locale}/ instead of being dropped.
  * @returns {string} the source-file text
  */
-export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector }) {
+export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector, freeformRelPath }) {
   const brief = briefSectionOf(declaration)
   const section = brief ? document?.[brief.name] : null
   if (!brief || !section || typeof section !== 'object') {
@@ -265,7 +268,7 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
     // on the wire → markdown on disk. unwrapLocalizedContent yields the source doc
     // and captures target-locale structural maps into the collector.
     if (isProseMirrorField(field)) {
-      const sourceDoc = field.localized ? unwrapLocalizedContent(raw, sourceLocale, collector) : raw
+      const sourceDoc = field.localized ? unwrapLocalizedContent(raw, sourceLocale, collector, freeformRelPath) : raw
       const md = sourceDoc ? proseMirrorToMarkdown(sourceDoc) : ''
       if (format === 'md' && key === contentKey) body = md
       else record[key] = md

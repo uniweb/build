@@ -66,6 +66,22 @@ export function discoverLocales(siteRoot, subdir = '') {
   }
 }
 
+// Locales that have a free-form override directory (`locales/freeform/{locale}/`),
+// across all lanes. A section or collection record may be localized ONLY by a
+// free-form body, with no structural-translation `{locale}.json` to discover it
+// from — so the collections producer unions these with discoverLocales.
+export function discoverFreeformLocales(siteRoot) {
+  const dir = join(localesDir(siteRoot), 'freeform')
+  if (!existsSync(dir)) return []
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+  } catch {
+    return []
+  }
+}
+
 export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
   const out = {}
   for (const locale of locales || []) {

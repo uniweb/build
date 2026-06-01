@@ -37,7 +37,8 @@ import { parseFrontmatter } from './collection-source.js'
 import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
 import { defaultSchema } from './collections-config.js'
 import { isProseMirrorField } from './data-schema.js'
-import { createTranslationCollector, writeLocaleTranslations } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
+import { buildFreeformCollectionPath } from '../i18n/freeform.js'
 import { writeFolderUuid } from './folder.js'
 
 const RICHTEXT_TYPE = 'richtext'
@@ -263,9 +264,9 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
   }
 
   const folderIndex = indexFolder(folderDoc)
-  // Captures target-locale translations of localized record SCALAR fields; flushed
-  // to locales/collections/{locale}.json (the records lane's manifest stays
-  // derivable too). The richtext BODY's per-locale round-trip is a later increment.
+  // Captures target-locale translations of localized record fields: SCALARs →
+  // locales/collections/{locale}.json (structural maps too), and a prosemirror
+  // BODY's free-form per-locale override → locales/freeform/{locale}/collections/.
   const collector = createTranslationCollector(sourceLocale)
   const updated = []
   const placed = []
@@ -301,9 +302,13 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
       isNew = true
     }
 
+    // The free-form home for this record's content body (locale-independent); a
+    // target-locale full-doc body is written under locales/freeform/{locale}/here.
+    const freeformRelPath = buildFreeformCollectionPath(where.collection, where.slug)
+
     let status
     try {
-      status = writeRecordFile({ filePath, document, declaration, format, sourceLocale, collector })
+      status = writeRecordFile({ filePath, document, declaration, format, sourceLocale, collector, freeformRelPath })
     } catch (err) {
       warnings.push(`${where.collection}/${where.slug}: ${err.message}`)
       continue
@@ -318,8 +323,10 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
   // introduced collections are a later, comment-sensitive rewrite (header).
   if (folderDoc?.$uuid) writeFolderUuid(siteRoot, folderDoc.$uuid)
 
-  // Flush localized record-field translations to locales/collections/{locale}.json.
+  // Flush localized record-field translations to locales/collections/{locale}.json,
+  // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
   const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'collections')
+  const freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
 
-  return { updated, placed, unchanged, skipped, warnings, locales }
+  return { updated, placed, unchanged, skipped, warnings, locales, freeform }
 }

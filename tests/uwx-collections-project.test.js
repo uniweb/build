@@ -205,3 +205,53 @@ describe('collectionsToProject — localized record scalars (B)', () => {
     expect(report.locales.es).toBe('updated')
   })
 })
+
+describe('collectionsToProject — prosemirror body free-form override (B-1)', () => {
+  // A Model whose brief body is a `format: prosemirror` json field (a PM doc on the
+  // wire), so a target locale can carry a full free-form body, not just a map.
+  const pmDecl = {
+    name: '@acme/pmarticle',
+    sections: {
+      article: {
+        brief: true,
+        fields: {
+          title: { type: 'string', localized: true },
+          body: { type: 'json', format: 'prosemirror', localized: true },
+        },
+      },
+    },
+  }
+  const pmResolve = (name) => (name === '@acme/pmarticle' ? pmDecl : null)
+  const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi there' }] }] }
+  const ffDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto' }] }] }
+
+  it('writes a target-locale full-doc body to locales/freeform/{locale}/collections/', () => {
+    const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
+    const recordDocs = [
+      { $uuid: 'U1', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: ffDoc } } },
+    ]
+
+    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
+
+    // source-locale body → the record .md
+    expect(readFileSync(join(dir, 'collections/articles/hello.md'), 'utf8')).toContain('Hi there')
+    // target-locale full body → locales/freeform/es/collections/articles/hello.md
+    const ff = join(dir, 'locales/freeform/es/collections/articles/hello.md')
+    expect(report.freeform.written).toContain(ff)
+    expect(readFileSync(ff, 'utf8')).toContain('Hola distinto')
+  })
+
+  it('a structural-map target stays a map in locales/collections (no free-form file)', () => {
+    const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U2', slug: 'hello', collection: 'articles' }], 'F1')
+    const recordDocs = [
+      { $uuid: 'U2', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: { 'Hi there': 'Hola ahi' } } } },
+    ]
+
+    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
+
+    const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
+    expect(es[computeHash('Hi there')]).toBe('Hola ahi')
+    expect(report.freeform.written).toEqual([])
+    expect(existsSync(join(dir, 'locales/freeform/es/collections/articles/hello.md'))).toBe(false)
+  })
+})

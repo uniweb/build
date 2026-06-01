@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   emitEntityPackage,
   emitCollectionSyncPackage,
+  buildCollectionEntities,
   readZip,
   mintUuidV7,
   collectionRecordsToEntities,
@@ -678,5 +679,66 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     })
     expect(entityCount).toBe(2)
     expect(skipped).toBe(0)
+  })
+})
+
+// ── B-1: free-form per-locale body override on a prosemirror content field ────
+
+describe('buildCollectionEntities — free-form collection body override (B-1)', () => {
+  let root
+  let siteDir
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'uwx-ff-'))
+    siteDir = join(root, 'site')
+    const foundationDir = join(root, 'foundation')
+    mkdirSync(join(siteDir, 'collections', 'articles'), { recursive: true })
+    // The free-form override lives in the parallel locales/ tree, body-only markdown.
+    mkdirSync(join(siteDir, 'locales', 'freeform', 'es', 'collections', 'articles'), { recursive: true })
+    mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
+
+    writeFileSync(
+      join(siteDir, 'site.yml'),
+      'name: S\nfoundation: "@acme/blog"\ncollections:\n  articles:\n    path: collections/articles\n    model: "@acme/article"\n'
+    )
+    writeFileSync(
+      join(siteDir, 'package.json'),
+      JSON.stringify({ name: 'site', dependencies: { foundation: 'file:../foundation' } })
+    )
+    // Source record: a markdown body that maps to the prosemirror content field.
+    writeFileSync(
+      join(siteDir, 'collections', 'articles', 'hello.md'),
+      '---\ntitle: Hello\n---\nHello world\n'
+    )
+    // Free-form Spanish body — a full rewrite, not a per-string map.
+    writeFileSync(
+      join(siteDir, 'locales', 'freeform', 'es', 'collections', 'articles', 'hello.md'),
+      'Hola mundo distinto\n'
+    )
+
+    // Foundation schema: @/article with a prosemirror content body.
+    const schema = {
+      _self: { name: '@acme/blog', version: '1.0.0', role: 'foundation' },
+      dataSchemas: {
+        '@/article': validateAndNormalizeSchema(
+          { name: 'article', fields: { title: { type: 'string' }, body: { type: 'json', format: 'prosemirror' } } },
+          '@/article'
+        ),
+      },
+    }
+    writeFileSync(join(foundationDir, 'dist', 'meta', 'schema.json'), JSON.stringify(schema))
+  })
+
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('reads the free-form body as the per-locale value (override wins) even with no structural translations', async () => {
+    const { entities } = await buildCollectionEntities(siteDir)
+    expect(entities).toHaveLength(1)
+    const body = entities[0].document.article.body
+    // Wrapped per-locale: source doc + the free-form Spanish doc (not a map).
+    expect(body.en.type).toBe('doc')
+    expect(JSON.stringify(body.en)).toContain('Hello world')
+    expect(body.es.type).toBe('doc')
+    expect(JSON.stringify(body.es)).toContain('Hola mundo distinto')
   })
 })

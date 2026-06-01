@@ -29,7 +29,8 @@ import { emitEntitySyncPackage } from './entity-document.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
-import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLocales } from './locale-sync.js'
+import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
+import { loadFreeformCollectionItem } from '../i18n/freeform.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 const RICHTEXT_TYPE = 'richtext'
@@ -235,6 +236,45 @@ export function collectionRecordsToEntities({
   return { entities, warnings }
 }
 
+// Post-pass: override a collection record's localized CONTENT body with a per-locale
+// FREE-FORM body when `locales/freeform/{locale}/collections/<col>/<slug>.md` exists
+// — the override wins over the structural map, exactly like site-content sections
+// (site.js localizeContentTree). Only a `format: prosemirror` localized field can
+// take it (it is a PM doc on the wire; richtext stays a raw string). Mutates the
+// entity documents in place. Async because the free-form read hits the filesystem.
+async function applyFreeformCollectionOverrides({
+  entities,
+  collectionName,
+  declaration,
+  sourceLocale,
+  targetLocales,
+  localesBase,
+}) {
+  const briefEntry = Object.entries(declaration.sections || {}).find(([, s]) => s && s.brief === true)
+  const briefName = briefEntry?.[0]
+  const fields = briefEntry?.[1]?.fields || {}
+  // The body target for a free-form override is the prosemirror CONTENT field.
+  const contentKey = Object.entries(fields).find(([, f]) => isProseMirrorField(f) && f.localized)?.[0]
+  if (!briefName || !contentKey) return
+
+  for (const entity of entities) {
+    const data = entity.document?.[briefName]
+    if (!data || data[contentKey] === undefined) continue
+    let localized = data[contentKey]
+    // The source-locale doc to promote to the localized-map form (when the field is
+    // still a bare doc because no structural translation was present).
+    const sourceDoc = isLocalizedContent(localized) ? localized[sourceLocale] : localized
+    for (const locale of targetLocales) {
+      // loadFreeformCollectionItem returns { content, frontmatter, … } — doc is `.content`.
+      const body = (await loadFreeformCollectionItem({ slug: entity.slug }, collectionName, locale, localesBase))?.content
+      if (!body) continue
+      if (!isLocalizedContent(localized)) localized = { [sourceLocale]: sourceDoc }
+      localized[locale] = body // free-form full body overrides the structural map
+    }
+    data[contentKey] = localized
+  }
+}
+
 // --- orchestration (file I/O) ------------------------------------------------
 
 // The collections in site.yml that opt into export (an object decl with `model:`).
@@ -387,9 +427,13 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   const sourceLocale =
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
 
-  // Target-locale translations for wrapping localized record scalars per-locale,
-  // read from locales/collections/{locale}.json (discovered from the files present).
-  const targetLocales = discoverLocales(siteRoot, 'collections').filter((l) => l !== sourceLocale)
+  // Target locales for wrapping localized record fields per-locale: those with a
+  // structural-translation file (locales/collections/{locale}.json) UNIONED with
+  // those that only have a free-form override dir (locales/freeform/{locale}/) — a
+  // record localized solely by a free-form body would otherwise go undiscovered.
+  const targetLocales = [
+    ...new Set([...discoverLocales(siteRoot, 'collections'), ...discoverFreeformLocales(siteRoot)]),
+  ].filter((l) => l !== sourceLocale)
   const translations =
     targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'collections') : null
 
@@ -454,6 +498,18 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
       sourceLocale,
       translations,
     })
+    // Free-form per-locale body overrides (a full localized doc beats the structural
+    // map) — only meaningful for a multi-locale site with a prosemirror content field.
+    if (targetLocales.length > 0) {
+      await applyFreeformCollectionOverrides({
+        entities: mappedOut.entities,
+        collectionName: name,
+        declaration,
+        sourceLocale,
+        targetLocales,
+        localesBase: localesDir(siteRoot),
+      })
+    }
     for (const e of mappedOut.entities) {
       const dupKey = `${e.model} ${e.id}`
       if (seen.has(dupKey)) {
