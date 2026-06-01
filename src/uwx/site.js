@@ -45,6 +45,7 @@ import {
   applyWildcardOrder,
   processMarkdownFile,
 } from '../site/content-collector.js'
+import { normalizeHideIn } from '../site/nav-visibility.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
@@ -141,8 +142,8 @@ function buildPageData(config, ctx) {
     config.index === true || (isRoot && siteIndex && siteIndex === slug)
   if (indexed) data.is_index = true
   setIf(data, 'hidden', config.hidden)
-  setIf(data, 'hide_in_header', config.hideInHeader)
-  setIf(data, 'hide_in_footer', config.hideInFooter)
+  const hideIn = normalizeHideIn(config)
+  if (hideIn.length) data.hide_in = hideIn
   setIf(data, 'redirect', config.redirect)
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)

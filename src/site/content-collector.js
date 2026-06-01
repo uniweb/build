@@ -29,6 +29,7 @@ import { existsSync, statSync, realpathSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
+import { normalizeHideIn } from './nav-visibility.js'
 import { parseFetchConfig, singularize } from './data-fetcher.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 
@@ -668,8 +669,7 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
       versionMeta: null,
       versionScope: null,
       hidden: false,
-      hideInHeader: false,
-      hideInFooter: false,
+      hideIn: [],
       layout: {},
       seo: {
         noindex: false,
@@ -966,8 +966,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         description: pageConfig.description || '',
         label: pageConfig.label || null,
         hidden: pageConfig.hidden || false,
-        hideInHeader: pageConfig.hideInHeader || false,
-        hideInFooter: pageConfig.hideInFooter || false,
+        hideIn: normalizeHideIn(pageConfig),
         layout: {},
         seo: { noindex: true },
         redirect: target,
@@ -993,8 +992,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         description: pageConfig.description || '',
         label: pageConfig.label || null,
         hidden: pageConfig.hidden || false,
-        hideInHeader: pageConfig.hideInHeader || false,
-        hideInFooter: pageConfig.hideInFooter || false,
+        hideIn: normalizeHideIn(pageConfig),
         layout: {},
         seo: { noindex: true },
         rewrite: pageConfig.rewrite,
@@ -1250,8 +1248,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
       // Navigation options
       hidden: pageConfig.hidden || false, // Hide from all navigation
-      hideInHeader: pageConfig.hideInHeader || false, // Hide from header nav
-      hideInFooter: pageConfig.hideInFooter || false, // Hide from footer nav
+      hideIn: normalizeHideIn(pageConfig), // Named nav areas to suppress this page from
 
       // Knowledge page — content feeds AI pipeline instead of (or in addition to) rendering
       ...(pageConfig.knowledge != null ? { knowledge: pageConfig.knowledge } : {}),
@@ -1610,8 +1607,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           versionMeta: versionContext?.versionMeta || null,
           versionScope: versionContext?.scope || null,
           hidden: dirConfig.hidden || false,
-          hideInHeader: dirConfig.hideInHeader || false,
-          hideInFooter: dirConfig.hideInFooter || false,
+          hideIn: normalizeHideIn(dirConfig),
           ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
           layout: {
             ...(effectiveLayout ? { name: effectiveLayout } : {}),
@@ -1704,8 +1700,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         versionMeta: versionContext?.versionMeta || null,
         versionScope: versionContext?.scope || null,
         hidden: dirConfig.hidden || false,
-        hideInHeader: dirConfig.hideInHeader || false,
-        hideInFooter: dirConfig.hideInFooter || false,
+        hideIn: normalizeHideIn(dirConfig),
         ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
         layout: {
           ...(effectiveLayout ? { name: effectiveLayout } : {}),
