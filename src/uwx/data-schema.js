@@ -192,8 +192,11 @@ function lowerField(rawField, resolve, optResolve) {
     out.localized = true
   }
 
-  // Field-narrowing constraints ride on the field; the registry relocates them to
-  // the owning section's constraint records at ingest.
+  // Field-narrowing attributes ride on the field. The backend treats them by kind:
+  // `enum` and a string `format` (email/url, a value validator) it relocates to the
+  // owning section's constraint records at ingest; `format: prosemirror` on a json
+  // field it carries as a durable type marker surfaced in schema reads (NOT a
+  // validator, NOT relocated — it tells the app to render a rich-text editor).
   if (Array.isArray(field.enum)) out.enum = field.enum
   if (field.format) out.format = field.format
 

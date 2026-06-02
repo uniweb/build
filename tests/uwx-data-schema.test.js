@@ -97,6 +97,10 @@ describe('toDataSchemaDeclaration — json + format: prosemirror (content fields
   const f = () => decl.sections.doc.fields
 
   it('marks a format: prosemirror json field localized (content, not machine-ish)', () => {
+    // Like url/email, `format` rides on the field — but prosemirror is a MARKER,
+    // not a validator: the backend carries it and surfaces it in schema reads (so
+    // the app mounts a rich-text editor), it does NOT relocate it to a section
+    // constraint the way it does the email/url/enum validators.
     expect(f().body).toEqual({ type: 'json', format: 'prosemirror', localized: true })
   })
 
