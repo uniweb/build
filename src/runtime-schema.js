@@ -355,7 +355,8 @@ export function extractAllRuntimeSchemas(componentsMeta, dataSchemaMap = {}) {
  *
  * Layout runtime metadata:
  * - areas: Array of area names this layout supports
- * - transitions: View transition name mapping (stored but not acted on yet)
+ * - transitions: View transition name overrides (the runtime auto-names areas;
+ *   this overrides per region, or `false` opts the layout out)
  * - defaults: Param default values
  * - scroll: Scroll management mode ('self' or CSS selector)
  *
