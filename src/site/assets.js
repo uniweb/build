@@ -72,6 +72,36 @@ export function isLocalAssetPath(value) {
 }
 
 /**
+ * Check whether a frontmatter media-field value (`background`, `image`,
+ * `poster`, …) is an asset *reference* rather than a CSS value.
+ *
+ * `background` is dual-use: it can be an image/video path OR a CSS color
+ * (`gray`, `#fff`, `oklch(…)`), a gradient (`linear-gradient(…)`), or a palette
+ * token (`primary-900`). The runtime's `Block.normalizeBackground` already
+ * classifies these — a string is image/video only when it's path-like or
+ * carries a media extension; everything else is a color/gradient. The build
+ * must apply the SAME rule, otherwise a bare color like `gray` gets resolved as
+ * a relative path (`<page-dir>/gray`) and the asset-processor logs a spurious
+ * "Source not found" for a file that was never meant to exist.
+ *
+ * Looser than `isLocalAssetPath` (which requires BOTH a `./`/`../`/`/` prefix
+ * AND an extension): a bare relative `hero.jpg` is a valid asset reference, so a
+ * media extension alone qualifies.
+ *
+ * @param {*} value - Frontmatter field value
+ * @returns {boolean} True if it should be resolved as a local asset
+ */
+export function isMediaFieldReference(value) {
+  if (typeof value !== 'string' || !value) return false
+  // External media is loaded at runtime from its URL, not processed here.
+  if (isExternalUrl(value)) return false
+  // Path-like values are asset references (even without an extension).
+  if (value.startsWith('./') || value.startsWith('../') || value.startsWith('/')) return true
+  // Otherwise only a media extension makes it an asset (vs. a color/token).
+  return isImagePath(value) || isVideoPath(value) || isPdfPath(value)
+}
+
+/**
  * Recursively walk a parsed data object and collect asset paths
  *
  * @param {any} data - Parsed JSON/YAML data
@@ -268,7 +298,9 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
 
   for (const field of mediaFields) {
     const value = section.params?.[field]
-    if (typeof value === 'string' && value) {
+    // Only resolve values that are actually asset references. A dual-use field
+    // like `background: gray` (a CSS color) must not be treated as a file path.
+    if (isMediaFieldReference(value)) {
       const result = resolveAssetPath(value, markdownPath, siteRoot)
       if (!result.external && result.resolved) {
         assets[value] = {
