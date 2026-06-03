@@ -145,10 +145,10 @@ describe('buildSchemaOnlyPackage (foundation-less — schemas only)', () => {
     expect(doc.entities.map((e) => e.name)).toEqual(['@std/article', '@std/person'])
   })
 
-  it('runs the lowering (markdown→richtext, email→format constraint)', () => {
+  it('runs the lowering (markdown→text+format, email→format constraint)', () => {
     const article = doc.entities.find((e) => e.name === '@std/article')
     const articleBrief = Object.values(article.sections).find((s) => s.brief)
-    expect(articleBrief.fields.body.type).toBe('richtext')
+    expect(articleBrief.fields.body).toMatchObject({ type: 'text', format: 'markdown' })
     const person = doc.entities.find((e) => e.name === '@std/person')
     const personBrief = Object.values(person.sections).find((s) => s.brief)
     // format stays ON the field now (the backend relocates it to a constraint).

@@ -179,13 +179,13 @@ describe('renderEntityDocument — variant A (document → authoring file)', () 
         brief: true,
         fields: {
           title: { type: 'string', localized: true },
-          body: { type: 'richtext', localized: true },
+          body: { type: 'text', format: 'markdown', localized: true },
         },
       },
     },
   }
 
-  it('renders a markdown entity to frontmatter + body (richtext → body), dropping the record uuid', () => {
+  it('renders a markdown entity to frontmatter + body (content body → body), dropping the record uuid', () => {
     const doc = {
       $uuid: 'E1',
       $model: '@acme/article',
@@ -195,7 +195,7 @@ describe('renderEntityDocument — variant A (document → authoring file)', () 
     expect(text).toBe('---\n$uuid: E1\ntitle: Hello\n---\n\n# Hi\n')
   })
 
-  it('renders a yaml entity to a flat mapping (richtext stays a field; $model/$id/record-uuid dropped)', () => {
+  it('renders a yaml entity to a flat mapping (content body stays a field; $model/$id/record-uuid dropped)', () => {
     const doc = {
       $uuid: 'E1',
       $model: '@acme/article',

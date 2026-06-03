@@ -46,7 +46,7 @@ beforeEach(() => {
         '@/article': {
           name: 'article',
           sections: {
-            main: { brief: true, fields: { title: { type: 'string' }, date: { type: 'date' }, body: { type: 'richtext' } } },
+            main: { brief: true, fields: { title: { type: 'string' }, date: { type: 'date' }, body: { type: 'text', format: 'markdown' } } },
           },
         },
       },

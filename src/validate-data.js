@@ -154,7 +154,7 @@ function validateValue(def, value, path) {
 // adding a kind to the shared vocabulary without teaching the checker throws at
 // module load, rather than silently passing everything via the default branch.
 const KNOWN_SCALAR_KINDS = new Set([
-  'string', 'text', 'richtext', 'file',
+  'string', 'text', 'file',
   'int', 'decimal', 'bool', 'date', 'datetime', 'json',
 ])
 
@@ -165,7 +165,6 @@ function isKind(kind, value) {
   switch (kind) {
     case 'string':
     case 'text':
-    case 'richtext':
     case 'file':
       return typeof value === 'string'
     case 'int':
@@ -313,7 +312,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
           continue
         }
 
-        const pairKey = `${input.path} ${ref}`
+        const pairKey = `${input.path} ${ref}`
         let entry = work.get(pairKey)
         if (!entry) {
           entry = { path: input.path, ref, schema, users: [] }

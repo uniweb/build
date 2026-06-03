@@ -62,9 +62,9 @@ beforeEach(() => {
         { name: 'product', fields: { title: { type: 'string' }, price: { type: 'decimal' } } },
         '@/product'
       ),
-      // a richtext `body` field — the markdown body's target
+      // a markdown `body` field — the markdown body's target (text + format: markdown)
       '@/article': validateAndNormalizeSchema(
-        { name: 'article', fields: { title: { type: 'string' }, body: { type: 'richtext' } } },
+        { name: 'article', fields: { title: { type: 'string' }, body: { type: 'markdown' } } },
         '@/article'
       ),
       '@/tag': validateAndNormalizeSchema(

@@ -44,20 +44,34 @@ const SCHEMA_EXTENSIONS = ['.js', '.json', '.yml', '.yaml']
 // Exported so a conformance checker can speak the same definition of each kind
 // that normalization produces — "normalizes" and "conforms" stay in lockstep.
 export const SCALAR_KINDS = new Set([
-  'string', 'text', 'richtext', 'int', 'decimal', 'bool',
+  'string', 'text', 'int', 'decimal', 'bool',
   'date', 'datetime', 'file', 'json',
 ])
 export const STRUCTURAL_KINDS = new Set(['object', 'array', 'ref'])
 // Friendly aliases → canonical kind.
 const TYPE_ALIASES = {
-  markdown: 'richtext',
   number: 'decimal',
   integer: 'int',
   boolean: 'bool',
   image: 'file',
 }
-// Type aliases that lower to `string` + a `format` (semantic strings).
-export const FORMAT_TYPES = new Set(['url', 'email'])
+// Friendly type aliases that lower to a base kind + a carried `format` marker.
+// `url`/`email` → `string` (server-validated value subtypes). `markdown`/`html` →
+// `text` (the file-based rich-content body — round-trips as the raw source string,
+// what the retired `richtext` kind used to be: 2026-06-02 / uwx-format.md).
+const FORMAT_TYPE_ALIASES = {
+  url: { type: 'string', format: 'url' },
+  email: { type: 'string', format: 'email' },
+  markdown: { type: 'text', format: 'markdown' },
+  html: { type: 'text', format: 'html' },
+  // Deprecated back-compat alias: `richtext` was a kind before 2026-06-02; it is
+  // now just sugar for the canonical `text` + `format: markdown`. Not a kind, and
+  // intentionally left out of the advertised set below.
+  richtext: { type: 'text', format: 'markdown' },
+}
+// The advertised format-aliasing type words (drives the "Known types" hint).
+// `richtext` is accepted (above) but omitted here — no longer recommended.
+export const FORMAT_TYPES = new Set(['url', 'email', 'markdown', 'html'])
 export const SECTION_KINDS = new Set(['single', 'multi', 'binder'])
 
 // Scope → schema package resolution. The shared standard schemas are referenced
@@ -426,10 +440,12 @@ function normalizeField(field, ref, path) {
     if (field[k] !== undefined) out[k] = field[k]
   }
 
-  // Resolve the type: format-aliases (url/email) → string + format; else alias map.
-  if (FORMAT_TYPES.has(rawType)) {
-    out.type = 'string'
-    out.format = field.format ?? rawType
+  // Resolve the type: format-aliases (url/email → string; markdown/html/richtext →
+  // text) carry a `format` marker; else the plain alias map; else verbatim.
+  const formatAlias = FORMAT_TYPE_ALIASES[rawType]
+  if (formatAlias) {
+    out.type = formatAlias.type
+    out.format = field.format ?? formatAlias.format
   } else {
     out.type = TYPE_ALIASES[rawType] ?? rawType
   }
@@ -438,6 +454,21 @@ function normalizeField(field, ref, path) {
     throw new Error(
       `Data schema '${ref}': field '${path}' has unknown type '${rawType}'. ` +
         `Known: ${[...SCALAR_KINDS, ...STRUCTURAL_KINDS, ...Object.keys(TYPE_ALIASES), ...FORMAT_TYPES].sort().join(', ')}.`
+    )
+  }
+
+  // Content `format` markers are registered per-shape (uwx-format.md §3): the
+  // rich-content markers `markdown`/`html` belong on a `text` field, `prosemirror`
+  // on a `json` field. Catch a mismatch at build time, not at publish (the backend
+  // rejects it). Value-validator formats (email/url) are unrestricted here.
+  if ((out.format === 'markdown' || out.format === 'html') && out.type !== 'text') {
+    throw new Error(
+      `Data schema '${ref}': field '${path}' has format '${out.format}', valid only on a 'text' field (got '${out.type}').`
+    )
+  }
+  if (out.format === 'prosemirror' && out.type !== 'json') {
+    throw new Error(
+      `Data schema '${ref}': field '${path}' has format 'prosemirror', valid only on a 'json' field (got '${out.type}').`
     )
   }
 

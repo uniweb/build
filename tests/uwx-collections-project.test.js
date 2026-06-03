@@ -20,17 +20,17 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-// An article Model: brief section with a localized title + a richtext body.
+// An article Model: brief section with a localized title + a markup-text body.
 const articleDecl = {
   name: '@acme/article',
   sections: {
     article: {
       brief: true,
-      fields: { title: { type: 'string', localized: true }, body: { type: 'richtext', localized: true } },
+      fields: { title: { type: 'string', localized: true }, body: { type: 'text', format: 'markdown', localized: true } },
     },
   },
 }
-// A widget Model: brief section, no richtext (→ YAML default format).
+// A widget Model: brief section, no content body (→ YAML default format).
 const widgetDecl = {
   name: '@acme/widget',
   sections: { widget: { brief: true, fields: { title: { type: 'string' }, price: { type: 'number' } } } },
@@ -61,7 +61,7 @@ describe('collectionsToProject — placement', () => {
     expect(readFileSync(f, 'utf8')).toBe('---\n$uuid: U1\ntitle: Hello\n---\n\n# Hi\n')
   })
 
-  it('defaults a no-richtext Model to a YAML file', () => {
+  it('defaults a no-content-body Model to a YAML file', () => {
     const folderDoc = folderFor([{ id: 'widgets/w1', uuid: 'W1', slug: 'w1', collection: 'widgets' }], 'F1')
     const recordDocs = [{ $uuid: 'W1', $model: '@acme/widget', widget: { title: 'Gear', price: 9.99 } }]
 
@@ -191,7 +191,7 @@ describe('collectionsToProject — prosemirror content field (B)', () => {
 describe('collectionsToProject — localized record scalars (B)', () => {
   it('writes the source field inline and target locales to locales/collections/{locale}.json', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
-    // A record with a multi-locale title scalar (and a source-only richtext body).
+    // A record with a multi-locale title scalar (and a source-only markup-text body).
     const recordDocs = [
       { $uuid: 'U1', $model: '@acme/article', article: { $uuid: 'rec', title: { en: 'Hello', es: 'Hola' }, body: { en: '\nHi\n' } } },
     ]

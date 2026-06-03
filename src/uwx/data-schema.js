@@ -22,7 +22,21 @@
  */
 
 // Text kinds carry per-locale values when localized.
-const TEXT_KINDS = new Set(['string', 'text', 'richtext'])
+const TEXT_KINDS = new Set(['string', 'text'])
+
+// Rich-content `format` markers on a `text` field — the file-based body shape that
+// replaced the retired `richtext` kind (2026-06-02 / uwx-format.md). A `text` field
+// carrying one round-trips as the RAW source string (no ProseMirror conversion).
+const CONTENT_TEXT_FORMATS = new Set(['markdown', 'html'])
+
+/**
+ * A `text` field marked as rich content (`format: markdown` or `html`): the
+ * file-based body target. Round-trips as the raw source string — what the retired
+ * `richtext` kind used to be. See framework/CLAUDE.md gotcha #21 and uwx-format.md.
+ */
+export function isMarkupTextField(field) {
+  return field?.type === 'text' && CONTENT_TEXT_FORMATS.has(field?.format)
+}
 
 /**
  * A `json` field constrained to ProseMirror content (`format: prosemirror`):
@@ -33,6 +47,16 @@ const TEXT_KINDS = new Set(['string', 'text', 'richtext'])
  */
 export function isProseMirrorField(field) {
   return field?.type === 'json' && field?.format === 'prosemirror'
+}
+
+/**
+ * A content BODY field — the markdown-body target of a `.md` record: a markup
+ * `text` field (raw source string on the wire) or a `format: prosemirror` json
+ * field (a ProseMirror doc on the wire). Replaces the old `richtext`-or-prosemirror
+ * test now that `richtext` is retired (2026-06-02).
+ */
+export function isContentBodyField(field) {
+  return isMarkupTextField(field) || isProseMirrorField(field)
 }
 
 /**
@@ -169,8 +193,18 @@ function lowerField(rawField, resolve, optResolve) {
     return out
   }
 
-  // A leaf (scalar) kind.
-  const out = { type }
+  // A leaf (scalar) kind. `richtext` is retired (2026-06-02 / uwx-format.md): a
+  // leftover `richtext` in the IR (e.g. a foundation built before the migration)
+  // lowers to the file-based body shape — `text` + `format: markdown` — so the wire
+  // never carries the kind the backend now rejects.
+  let leafType = type
+  let leafFormat = field.format
+  if (leafType === 'richtext') {
+    leafType = 'text'
+    leafFormat = leafFormat ?? 'markdown'
+  }
+
+  const out = { type: leafType }
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
   if (field.required) out.required = true
@@ -182,23 +216,25 @@ function lowerField(rawField, resolve, optResolve) {
     return out
   }
 
-  // A `format: prosemirror` json field is rich CONTENT (authored as markdown,
-  // carried as a ProseMirror doc on sync) — localizable like a text kind, NOT a
-  // machine-ish format-string constraint (email/url). Treat it as a content kind.
-  const isProseMirror = type === 'json' && field.format === 'prosemirror'
-  // `localized` = human-readable content — not enum tokens or format-string constraints.
-  const machineish = field.enum !== undefined || (field.format !== undefined && !isProseMirror)
-  if ((TEXT_KINDS.has(type) || isProseMirror) && field.translatable !== false && !machineish) {
+  // A CONTENT field — a markup `text` (format markdown|html) or a `format:
+  // prosemirror` json — is rich CONTENT (authored as markdown; carried as a raw
+  // source string or a ProseMirror doc on sync). Localizable like a text kind, NOT
+  // a machine-ish value-validator format-string (email/url).
+  const isContent = isContentBodyField({ type: leafType, format: leafFormat })
+  // `localized` = human-readable content — not enum tokens or value-validator formats.
+  const machineish = field.enum !== undefined || (leafFormat !== undefined && !isContent)
+  if ((TEXT_KINDS.has(leafType) || isContent) && field.translatable !== false && !machineish) {
     out.localized = true
   }
 
   // Field-narrowing attributes ride on the field. The backend treats them by kind:
-  // `enum` and a string `format` (email/url, a value validator) it relocates to the
-  // owning section's constraint records at ingest; `format: prosemirror` on a json
-  // field it carries as a durable type marker surfaced in schema reads (NOT a
-  // validator, NOT relocated — it tells the app to render a rich-text editor).
+  // `enum` and a value-validator string `format` (email/url) it relocates to the
+  // owning section's constraint records at ingest; a content format (`markdown`/
+  // `html` on text, `prosemirror` on json) it carries as a durable type marker
+  // surfaced in schema reads (NOT a validator, NOT relocated — it tells the app to
+  // render a rich-text editor).
   if (Array.isArray(field.enum)) out.enum = field.enum
-  if (field.format) out.format = field.format
+  if (leafFormat) out.format = leafFormat
 
   // `default` is intentionally NOT emitted — it rides in the foundation-schema
   // blob (render / editor pre-fill), not the content type.

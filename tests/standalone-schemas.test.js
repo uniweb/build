@@ -85,8 +85,8 @@ describe('collectStandaloneSchemas', () => {
     await makeExportsPackage(root)
     const map = await collectStandaloneSchemas(root)
     expect(Object.keys(map).sort()).toEqual(['@/gadget', '@/widget'])
-    // normalization ran: the 'markdown' alias folds to the canonical 'richtext' kind
-    expect(map['@/gadget'].fields.body.type).toBe('richtext')
+    // normalization ran: the 'markdown' alias folds to text + format: markdown
+    expect(map['@/gadget'].fields.body).toEqual({ type: 'text', format: 'markdown' })
     expect(map['@/widget'].fields.label).toMatchObject({ type: 'string', required: true })
   })
 

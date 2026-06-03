@@ -30,7 +30,8 @@ describe('validateAndNormalizeSchema — valid', () => {
     expect(out.fields.price.type).toBe('decimal')
     expect(out.fields.rank.type).toBe('int')
     expect(out.fields.live.type).toBe('bool')
-    expect(out.fields.body.type).toBe('richtext')
+    // `markdown` lowers to text + format (the retired `richtext` kind's replacement)
+    expect(out.fields.body).toEqual({ type: 'text', format: 'markdown' })
     expect(out.fields.photo.type).toBe('file')
     // url/email lower to string + format
     expect(out.fields.site).toEqual({ type: 'string', format: 'url' })
@@ -38,6 +39,27 @@ describe('validateAndNormalizeSchema — valid', () => {
     // carry-through preserved
     expect(out.fields.name.required).toBe(true)
     expect(out.fields.price.default).toBe(0)
+  })
+
+  it('lowers the rich-content aliases (markdown/html) and the retired richtext to text + format', () => {
+    const out = validateAndNormalizeSchema(
+      {
+        fields: {
+          md: { type: 'markdown' },
+          page: { type: 'html' },
+          // `richtext` is retired as a kind (2026-06-02) but kept as a back-compat
+          // alias → text + format: markdown (so pre-migration schemas still register).
+          legacy: { type: 'richtext' },
+          // an explicit text + format passes through verbatim
+          prose: { type: 'text', format: 'markdown' },
+        },
+      },
+      '@/x'
+    )
+    expect(out.fields.md).toEqual({ type: 'text', format: 'markdown' })
+    expect(out.fields.page).toEqual({ type: 'text', format: 'html' })
+    expect(out.fields.legacy).toEqual({ type: 'text', format: 'markdown' })
+    expect(out.fields.prose).toEqual({ type: 'text', format: 'markdown' })
   })
 
   it('accepts a bare type-string shorthand and inline enum', () => {
@@ -99,6 +121,15 @@ describe('validateAndNormalizeSchema — errors', () => {
   })
   it('rejects an unknown field type', () => {
     expect(bad({ fields: { x: { type: 'colour' } } })).toThrow(/unknown type 'colour'/)
+  })
+  it('rejects a content format on the wrong base kind (per-shape registration)', () => {
+    // markdown/html only on text; prosemirror only on json (uwx-format.md §3).
+    expect(bad({ fields: { x: { type: 'string', format: 'markdown' } } })).toThrow(
+      /format 'markdown', valid only on a 'text' field/
+    )
+    expect(bad({ fields: { x: { type: 'string', format: 'prosemirror' } } })).toThrow(
+      /format 'prosemirror', valid only on a 'json' field/
+    )
   })
   it('requires nested fields on an object', () => {
     expect(bad({ fields: { x: { type: 'object' } } })).toThrow(/object field 'x' must declare nested 'fields'/)

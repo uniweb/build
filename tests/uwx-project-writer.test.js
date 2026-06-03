@@ -153,7 +153,7 @@ describe('writeRecordFile', () => {
         brief: true,
         fields: {
           title: { type: 'string', localized: true },
-          body: { type: 'richtext', localized: true },
+          body: { type: 'text', format: 'markdown', localized: true },
         },
       },
     },

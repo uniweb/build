@@ -16,10 +16,10 @@
 //   - an existing local file carrying the same `$uuid` is re-rendered in place;
 //     otherwise a new single-record file is placed at `<slug>.<ext>`, its format
 //     matched to the collection's existing files, else markdown when the Model's
-//     brief has a richtext field (a body), else YAML.
+//     brief has a content body field, else YAML.
 //
 // Field rendering reuses renderEntityDocument (via writeRecordFile) — localized
-// unwrap, date handling, richtext→body are already inverted there.
+// unwrap, date handling, content-body→body are already inverted there.
 //
 // v1 scope / deferred: array-form & BibTeX multi-record files (a pulled record is
 // placed as its own single-record file; merging into an existing array file is a
@@ -37,11 +37,10 @@ import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
 import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
 import { defaultSchema } from './collections-config.js'
-import { isProseMirrorField } from './data-schema.js'
+import { isContentBodyField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformCollectionPath } from '../i18n/freeform.js'
 
-const RICHTEXT_TYPE = 'richtext'
 // Single-record source extensions we scan + place (BibTeX is multi-record → out).
 const SINGLE_RECORD_EXTS = ['.md', '.yml', '.yaml', '.json']
 const EXT_FOR_FORMAT = { md: '.md', yaml: '.yml', json: '.json' }
@@ -102,11 +101,11 @@ function defaultFormat(collectionDir, declaration) {
   return briefHasContentBody(declaration) ? 'md' : 'yaml'
 }
 
-// Whether the declaration's brief section declares a content body field — a
-// `richtext` field or a `format: prosemirror` json field (the md-body target).
+// Whether the declaration's brief section declares a content body field — a markup
+// `text` field or a `format: prosemirror` json field (the md-body target).
 function briefHasContentBody(declaration) {
   const brief = Object.values(declaration?.sections || {}).find((s) => s && s.brief === true)
-  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE || isProseMirrorField(f))
+  return Object.values(brief?.fields || {}).some((f) => isContentBodyField(f))
 }
 
 // Build `uuid → { collection, slug }` from the folder document's ref leaves. A

@@ -24,7 +24,7 @@ import { join, resolve } from 'node:path'
 
 import { resolveCollectionsConfig } from './collections-config.js'
 import { readCollectionRecords } from './collection-source.js'
-import { toDataSchemaDeclaration, isProseMirrorField } from './data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isContentBodyField } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
@@ -33,9 +33,8 @@ import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLoc
 import { loadFreeformCollectionItem } from '../i18n/freeform.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
-const RICHTEXT_TYPE = 'richtext'
 // Identity/transport keys on a source record — never Model fields, never warned.
-// `$body` carries the markdown body (mapped to the brief's richtext field below).
+// `$body` carries the markdown body (mapped to the brief's content body field below).
 // Note: there is NO delivery-derived ignore list (route/excerpt/image/content) —
 // the source reader never produces those, and a real unknown key SHOULD warn (it
 // means the frontmatter doesn't match the collection's data schema).
@@ -100,8 +99,11 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     return localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations)
   }
   if (field.localized) {
-    // A localized SCALAR wraps per-locale from locales/collections/{locale}.json.
-    return field.type === RICHTEXT_TYPE
+    // A markup `text` BODY (format markdown|html) rides as a RAW string, wrapped
+    // per-locale wholesale (its per-string translations live in the i18n manifest /
+    // free-form, not the scalar map). Other localized scalars wrap per-string from
+    // locales/collections/{locale}.json.
+    return isMarkupTextField(field)
       ? localize(value, sourceLocale)
       : localizeScalar(value, sourceLocale, translations)
   }
@@ -156,12 +158,10 @@ export function collectionRecordsToEntities({
   const fieldByKey = new Map(Object.entries(briefFields))
 
   // The markdown body of a `.md` collection record is the value of the brief's
-  // CONTENT field — a `richtext` field or a `format: prosemirror` json field
-  // (docs/reference/entity-content.md). One content field is the body target;
-  // zero means a `.md` body has nowhere to go (warn per record).
-  const contentEntries = Object.entries(briefFields).filter(
-    ([, f]) => f.type === RICHTEXT_TYPE || isProseMirrorField(f)
-  )
+  // CONTENT field — a markup `text` field (raw source string) or a `format:
+  // prosemirror` json field (docs/reference/entity-content.md). One content field is
+  // the body target; zero means a `.md` body has nowhere to go (warn per record).
+  const contentEntries = Object.entries(briefFields).filter(([, f]) => isContentBodyField(f))
   const bodyFieldKey = contentEntries[0]?.[0] || null
 
   const entities = []
@@ -169,7 +169,7 @@ export function collectionRecordsToEntities({
   if (contentEntries.length > 1) {
     warnings.push(
       `${collectionName}: ${declaration.name}.${briefName} has more than one content ` +
-        `(richtext / prosemirror) field — the markdown body maps to "${bodyFieldKey}"`
+        `(markdown / html / prosemirror) field — the markdown body maps to "${bodyFieldKey}"`
     )
   }
   for (const record of records || []) {
@@ -188,7 +188,7 @@ export function collectionRecordsToEntities({
     // Brief section data in schema-declared field order (the wire's canonical
     // order). An absent field is simply omitted — an incomplete entity is a
     // valid stored state; the foundation copes at render time. The markdown body
-    // fills the richtext field unless the frontmatter already set it explicitly.
+    // fills the content body field unless the frontmatter already set it explicitly.
     const data = {}
     for (const [key, field] of Object.entries(briefFields)) {
       let value = record[key]
@@ -210,7 +210,7 @@ export function collectionRecordsToEntities({
     if (hasBody && !bodyFieldKey) {
       warnings.push(
         `${collectionName}/${slug}: markdown body present but ` +
-          `${declaration.name}.${briefName} has no richtext field — body not synced`
+          `${declaration.name}.${briefName} has no content body field — body not synced`
       )
     }
 
@@ -240,8 +240,8 @@ export function collectionRecordsToEntities({
 // FREE-FORM body when `locales/freeform/{locale}/collections/<col>/<slug>.md` exists
 // — the override wins over the structural map, exactly like site-content sections
 // (site.js localizeContentTree). Only a `format: prosemirror` localized field can
-// take it (it is a PM doc on the wire; richtext stays a raw string). Mutates the
-// entity documents in place. Async because the free-form read hits the filesystem.
+// take it (it is a PM doc on the wire; a markup `text` body stays a raw string).
+// Mutates the entity documents in place. Async — the free-form read hits the disk.
 async function applyFreeformCollectionOverrides({
   entities,
   collectionName,
@@ -474,7 +474,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
       continue
     }
     // Flatten source records into the mapper's flat shape; the markdown body
-    // rides under `$body` (the mapper maps it to the brief's richtext field).
+    // rides under `$body` (the mapper maps it to the brief's content body field).
     // Keep a per-slug pointer back to the source file for `$uuid` write-back —
     // null for array-form / BibTeX (multi-record) files, whose write-back is
     // deferred (no single-record file to rewrite in place).
@@ -511,7 +511,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
       })
     }
     for (const e of mappedOut.entities) {
-      const dupKey = `${e.model} ${e.id}`
+      const dupKey = `${e.model} ${e.id}`
       if (seen.has(dupKey)) {
         throw new Error(
           `uwx/collections: duplicate ($model, $id) in one sync — "${e.id}" of ` +
@@ -535,7 +535,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
         multiRecord: src ? src.multiRecord : false,
         // The Model declaration, so the back-fill can render the finalized
         // document → authoring shape (variant A): unwrap localized fields, route
-        // the richtext field to the md body, drop the brief record `$uuid`.
+        // the content body field to the md body, drop the brief record `$uuid`.
         declaration,
       })
     }

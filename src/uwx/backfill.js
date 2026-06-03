@@ -23,13 +23,12 @@ import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './collection-source.js'
-import { isProseMirrorField } from './data-schema.js'
+import { isProseMirrorField, isContentBodyField } from './data-schema.js'
 import { unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
 
 // Probed in this order to locate a single-record source file by slug.
 const SOURCE_EXTENSIONS = ['.yml', '.yaml', '.json', '.md', '.bib']
-const RICHTEXT_TYPE = 'richtext'
 
 /**
  * Locate the single-record source file for `slug` in a collection directory by
@@ -213,13 +212,13 @@ function briefSectionOf(declaration) {
   return entry ? { name: entry[0], ...entry[1] } : null
 }
 
-// Whether a Model's brief section declares a CONTENT body field (richtext, or a
-// `format: prosemirror` json field) — the md-body target. A markdown source file
-// can only be safely rendered from the document when its body has a field home —
-// otherwise the body would be lost (variant B then).
+// Whether a Model's brief section declares a CONTENT body field (a markup `text`
+// field, or a `format: prosemirror` json field) — the md-body target. A markdown
+// source file can only be safely rendered from the document when its body has a
+// field home — otherwise the body would be lost (variant B then).
 function briefHasContentBody(declaration) {
   const brief = briefSectionOf(declaration)
-  return Object.values(brief?.fields || {}).some((f) => f.type === RICHTEXT_TYPE || isProseMirrorField(f))
+  return Object.values(brief?.fields || {}).some((f) => isContentBodyField(f))
 }
 
 /**
@@ -228,7 +227,7 @@ function briefHasContentBody(declaration) {
  * entity: the entity `$uuid` + the brief section's fields (localized unwrapped,
  * date/scalars verbatim), with the brief record's own `$uuid` DROPPED (the backend
  * matches a single-section item by singularity) and `$model`/`$id`/`$meta` omitted.
- * For markdown, the richtext field becomes the body; for YAML/JSON it stays a field.
+ * For markdown, the content body field becomes the body; for YAML/JSON it stays a field.
  *
  * @param {object} params
  * @param {object} params.document     - finalized `{ $uuid, $model, <brief>: {…} }`
@@ -251,11 +250,9 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
     throw new Error('uwx/render: document has no resolvable brief section')
   }
   const fields = brief.fields || {}
-  // The body target is the CONTENT field — a `richtext` field or a `format:
-  // prosemirror` json field (the latter is a ProseMirror doc on the wire).
-  const contentKey = Object.entries(fields).find(
-    ([, f]) => f.type === RICHTEXT_TYPE || isProseMirrorField(f)
-  )?.[0]
+  // The body target is the CONTENT field — a markup `text` field (raw source
+  // string) or a `format: prosemirror` json field (a ProseMirror doc on the wire).
+  const contentKey = Object.entries(fields).find(([, f]) => isContentBodyField(f))?.[0]
 
   const record = {}
   if (document.$uuid) record.$uuid = document.$uuid
@@ -310,7 +307,7 @@ function writeIfChanged(filePath, text) {
  * sequence, which equals the producer's `index` array order (the backend does not
  * echo `$id`). Single-record files are rendered from the finalized `document`
  * (variant A) when the document + declaration are present and lossless for the
- * format (markdown needs a richtext field to carry the body); otherwise the
+ * format (markdown needs a content body field to carry the body); otherwise the
  * entity `$uuid` is back-filled in place (variant B). Multi-record YAML/JSON files
  * get a per-entry `$uuid` keyed by slug, grouped so each file is written once;
  * BibTeX stays deferred.
@@ -364,8 +361,8 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     }
 
     // Variant A: render the finalized document over the file when we have it +
-    // the declaration, and it's lossless for the format (md needs a richtext field
-    // for its body). Otherwise variant B: back-fill the uuid in place.
+    // the declaration, and it's lossless for the format (md needs a content body
+    // field for its body). Otherwise variant B: back-fill the uuid in place.
     const canRenderA =
       fin.document &&
       entry.declaration &&
