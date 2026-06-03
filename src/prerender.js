@@ -25,21 +25,29 @@ import { detectCiContext } from './hosts/detect-ci-context.js'
  * 2. Project root with dist subdir (dev layout, e.g., project/effects/dist/entry.js)
  * 3. Original URL (absolute or remote — let import() handle it)
  */
-function resolveExtensionPath(url, distDir, projectRoot) {
+export function resolveExtensionPath(url, distDir, projectRoot) {
   // Only resolve URLs that look like root-relative paths
   if (url.startsWith('/')) {
     // Try dist directory first (production: files copied to site/dist/)
     const distPath = join(distDir, url)
     if (existsSync(distPath)) return distPath
 
-    // Try project root with dist subdir (dev layout: effects/dist/entry.js)
-    // "/effects/entry.js" → "effects/dist/entry.js"
+    // Workspace layouts: "/effects/entry.js" → "<pkg>/dist/entry.js", checked
+    // both at the project root and under an `extensions/` parent — the standard
+    // multi-foundation layout puts extensions in `extensions/<name>/`, so the
+    // bare-root candidate alone misses the built module and prerender can't load
+    // the extension.
     const parts = url.slice(1).split('/')
     if (parts.length >= 2) {
       const pkgName = parts[0]
       const rest = parts.slice(1).join('/')
-      const devPath = join(projectRoot, pkgName, 'dist', rest)
-      if (existsSync(devPath)) return devPath
+      const candidates = [
+        join(projectRoot, pkgName, 'dist', rest),
+        join(projectRoot, 'extensions', pkgName, 'dist', rest),
+      ]
+      for (const devPath of candidates) {
+        if (existsSync(devPath)) return devPath
+      }
     }
   }
 
