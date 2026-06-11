@@ -458,17 +458,19 @@ function normalizeField(field, ref, path) {
   }
 
   // Content `format` markers are registered per-shape (uwx-format.md §3): the
-  // rich-content markers `markdown`/`html` belong on a `text` field, `prosemirror`
-  // on a `json` field. Catch a mismatch at build time, not at publish (the backend
+  // rich-content markers `markdown`/`html` belong on a `text` field; `prosemirror`
+  // (a ProseMirror doc) and `scene` (a Scene Composition Format payload — an opaque
+  // structured blob the app edits via the Designer / visual canvas) both belong on
+  // a `json` field. Catch a mismatch at build time, not at publish (the backend
   // rejects it). Value-validator formats (email/url) are unrestricted here.
   if ((out.format === 'markdown' || out.format === 'html') && out.type !== 'text') {
     throw new Error(
       `Data schema '${ref}': field '${path}' has format '${out.format}', valid only on a 'text' field (got '${out.type}').`
     )
   }
-  if (out.format === 'prosemirror' && out.type !== 'json') {
+  if ((out.format === 'prosemirror' || out.format === 'scene') && out.type !== 'json') {
     throw new Error(
-      `Data schema '${ref}': field '${path}' has format 'prosemirror', valid only on a 'json' field (got '${out.type}').`
+      `Data schema '${ref}': field '${path}' has format '${out.format}', valid only on a 'json' field (got '${out.type}').`
     )
   }
 
