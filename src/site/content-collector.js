@@ -1234,6 +1234,12 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       title: pageConfig.title || extractH1(hierarchicalSections[0]?.content) || prettifySlug(pageName),
       description: pageConfig.description || '',
       label: pageConfig.label || null, // Short label for navigation (defaults to title)
+      // Localized URL slug overrides: { <locale>: <segment> }. Compiled into
+      // config.i18n.routeTranslations by collectSiteContent, then stripped from
+      // the page payload (build is authoritative; runtime hydrates the map).
+      ...(pageConfig.slug && typeof pageConfig.slug === 'object' && !Array.isArray(pageConfig.slug)
+        ? { slug: pageConfig.slug }
+        : {}),
       lastModified: lastModified?.toISOString(),
 
       // Dynamic route metadata
@@ -2133,11 +2139,33 @@ export async function collectSiteContent(sitePath, options = {}) {
   const intelligenceConfig = await readYamlFile(join(sitePath, 'intelligence.yml'))
   const hasIntelligence = intelligenceConfig && Object.keys(intelligenceConfig).length > 0
 
+  // Compile per-page `slug:` maps into config.i18n.routeTranslations
+  // (canonical route → per-locale display route). Producer-only: the runtime
+  // (@uniweb/core website.js) and the sitemap generator already consume this
+  // map; nothing else produces it on the file-based lane. The default locale
+  // keeps the canonical (folder-based) route. Strip the build-time `slug` from
+  // pages afterward — the runtime hydrates the precomputed map, not per-page
+  // slugs (see "Minimize Runtime Payload").
+  const defaultLocale =
+    siteConfig.defaultLanguage ||
+    (Array.isArray(siteConfig.languages) ? siteConfig.languages[0] : null) ||
+    'en'
+  const routeTranslations = buildRouteTranslations(pages, {
+    defaultLocale,
+    languages: Array.isArray(siteConfig.languages) ? siteConfig.languages : null,
+  })
+  for (const page of pages) {
+    if (page.slug) delete page.slug
+  }
+
   return {
     config: {
       ...siteConfig,
       fetch: parseFetchConfig(siteConfig.fetch),
       ...(hasIntelligence && { intelligence: intelligenceConfig }),
+      ...(routeTranslations
+        ? { i18n: { ...(siteConfig.i18n || {}), routeTranslations } }
+        : {}),
     },
     theme: {
       ...processedTheme,
@@ -2162,7 +2190,115 @@ export async function collectSiteContent(sitePath, options = {}) {
 // than the flattened collector output but reuses these primitives so
 // markdown→ProseMirror, ordering, and mode detection stay consistent with a
 // normal build. Additive: no existing behavior changes.
+/**
+ * Whether a value is a usable single URL path segment (no slashes, no
+ * whitespace). Localized slug segments must satisfy this to be applied.
+ */
+function isValidSlugSegment(s) {
+  return typeof s === 'string' && s.length > 0 && !s.includes('/') && !/\s/.test(s)
+}
+
+/**
+ * Compose the full localized display route for a canonical route in a locale,
+ * substituting the localized segment for any ancestor (or self) that declares
+ * one in `slugByRoute`. Falls back to the canonical segment where no valid
+ * localized slug exists. E.g. with /blog→blogue and /blog/my-post→mon-article,
+ * `/blog/my-post` (fr) → `/blogue/mon-article`.
+ */
+function composeLocalizedRoute(canonicalRoute, locale, slugByRoute) {
+  if (!canonicalRoute || canonicalRoute === '/') return canonicalRoute || '/'
+  const segments = canonicalRoute.split('/').filter(Boolean)
+  let cumulative = ''
+  const out = []
+  for (const seg of segments) {
+    cumulative += `/${seg}`
+    const localized = slugByRoute.get(cumulative)?.[locale]
+    out.push(isValidSlugSegment(localized) ? localized : seg)
+  }
+  return '/' + out.join('/')
+}
+
+/**
+ * Build `config.i18n.routeTranslations` from per-page `slug:` maps.
+ *
+ * Author surface: a page declares `slug: { <locale>: <segment> }` in its
+ * page.yml. The canonical route stays the folder name; for each non-default
+ * locale the localized URL substitutes the declared segment(s). The runtime
+ * (`@uniweb/core` website.js: translateRoute/getLocaleUrl/getPageHierarchy) and
+ * the build sitemap already consume this map — this is its only producer on the
+ * file-based lane. Children without their own slug inherit a localized ancestor
+ * via the runtime's prefix-cascade, so only pages that declare a slug get an
+ * explicit entry.
+ *
+ * Pure + non-mutating. Returns `{ [locale]: { [canonicalRoute]: displayRoute } }`,
+ * or null when no page declares a usable localized slug.
+ *
+ * @param {Array} pages - Flat page list (each with canonical `route` + optional `slug`).
+ * @param {Object} [opts]
+ * @param {string} [opts.defaultLocale='en'] - Default locale; its routes are the
+ *   canonical keys, so default-locale slugs are skipped (renaming the default
+ *   URL away from the folder name is a separate, heavier concern).
+ * @param {string[]|null} [opts.languages=null] - Declared site locales; when an
+ *   array, slug locales outside it are skipped with a warning. null = no filter.
+ * @returns {Object|null}
+ */
+function buildRouteTranslations(pages, { defaultLocale = 'en', languages = null } = {}) {
+  if (!Array.isArray(pages)) return null
+
+  // Index canonical route → { locale: segment } for pages declaring a slug map.
+  const slugByRoute = new Map()
+  for (const page of pages) {
+    const slug = page?.slug
+    if (slug && typeof slug === 'object' && !Array.isArray(slug) && page.route) {
+      slugByRoute.set(page.route, slug)
+    }
+  }
+  if (slugByRoute.size === 0) return null
+
+  const langSet = Array.isArray(languages) ? new Set(languages) : null
+  const result = {}
+
+  for (const [canonicalRoute, localeMap] of slugByRoute) {
+    for (const [locale, segment] of Object.entries(localeMap)) {
+      // Default locale keeps the canonical (folder-based) route.
+      if (locale === defaultLocale) continue
+      if (langSet && !langSet.has(locale)) {
+        console.warn(
+          `[content-collector] slug locale '${locale}' on '${canonicalRoute}' is not in site languages — skipping`
+        )
+        continue
+      }
+      if (!isValidSlugSegment(segment)) {
+        console.warn(
+          `[content-collector] invalid slug '${segment}' for '${canonicalRoute}' (${locale}) — must be a single URL-safe path segment`
+        )
+        continue
+      }
+      const display = composeLocalizedRoute(canonicalRoute, locale, slugByRoute)
+      ;(result[locale] ||= {})[canonicalRoute] = display
+    }
+  }
+
+  // Warn on within-locale display collisions (two canonical routes → same URL).
+  for (const [locale, map] of Object.entries(result)) {
+    const seen = new Map()
+    for (const [canon, disp] of Object.entries(map)) {
+      const prev = seen.get(disp)
+      if (prev) {
+        console.warn(
+          `[content-collector] localized route collision in '${locale}': '${canon}' and '${prev}' both map to '${disp}'`
+        )
+      } else {
+        seen.set(disp, canon)
+      }
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null
+}
+
 export {
+  buildRouteTranslations,
   extractItemName,
   parseWildcardArray,
   applyWildcardOrder,
