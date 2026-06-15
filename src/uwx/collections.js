@@ -143,33 +143,52 @@ export function collectionRecordsToEntities({
   if (!declaration || !declaration.name) {
     throw new Error('uwx/collections: a declaration with a name is required')
   }
-  // The brief is the section marked `brief: true` (the sections-tree has no
-  // schema-level `brief:` back-reference); its `fields` is a map keyed by name.
-  const briefEntry = Object.entries(declaration.sections || {}).find(([, s]) => s && s.brief === true)
+  // A record (one source file) maps to the Model's SINGLE sections in declared
+  // order — the brief (the card) plus any sibling single sections, e.g. a body
+  // section like `article_body`. Multi-section Models are the norm for `@std/*`
+  // types; the markdown body lands in the designated content field WHEREVER it is
+  // declared (the brief, or a non-brief body section). `multi` sections (repeating
+  // items) can't be expressed by one flat record and are skipped. The brief is the
+  // section marked `brief: true` (the sections-tree has no schema-level back-ref).
+  const sectionEntries = Object.entries(declaration.sections || {})
+  const briefEntry = sectionEntries.find(([, s]) => s && s.brief === true)
   const briefName = briefEntry?.[0]
-  const brief = briefEntry?.[1]
-  if (!brief) {
-    throw new Error(
-      `uwx/collections: Model ${declaration.name} has no brief section — ` +
-        'v1 maps flat records to the brief single section only'
-    )
+  if (!briefName) {
+    throw new Error(`uwx/collections: Model ${declaration.name} has no brief section`)
   }
-  const briefFields = brief.fields || {}
-  const fieldByKey = new Map(Object.entries(briefFields))
+  // The single sections a flat record can populate (the brief + sibling singles),
+  // and a global field→section map across them — for distributing frontmatter and
+  // flagging unknown keys. Field names are unique across a Model's sections (the
+  // declaration's own convention); a collision keeps the first occurrence.
+  const recordSections = sectionEntries.filter(([, s]) => s && s.multiple !== true)
+  const fieldByKey = new Map()
+  for (const [, sec] of recordSections) {
+    for (const [key, field] of Object.entries(sec.fields || {})) {
+      if (!fieldByKey.has(key)) fieldByKey.set(key, field)
+    }
+  }
 
-  // The markdown body of a `.md` collection record is the value of the brief's
-  // CONTENT field — a markup `text` field (raw source string) or a `format:
-  // prosemirror` json field (docs/reference/entity-content.md). One content field is
-  // the body target; zero means a `.md` body has nowhere to go (warn per record).
-  const contentEntries = Object.entries(briefFields).filter(([, f]) => isContentBodyField(f))
-  const bodyFieldKey = contentEntries[0]?.[0] || null
+  // The markdown body of a `.md` record is the value of the Model's CONTENT body
+  // field — a markup `text` field (raw source string) or a `format: prosemirror`
+  // json field (docs/reference/entity-content.md) — wherever it is declared (the
+  // brief, or a non-brief body section like `article_body.content`). encodeFieldValue
+  // does the md→ProseMirror conversion per field kind. One content field is the body
+  // target; zero means a `.md` body has nowhere to go (warn per record).
+  const contentMatches = []
+  for (const [secName, sec] of recordSections) {
+    for (const [key, field] of Object.entries(sec.fields || {})) {
+      if (isContentBodyField(field)) contentMatches.push({ secName, key })
+    }
+  }
+  const bodyTarget = contentMatches[0] || null
 
   const entities = []
   const warnings = []
-  if (contentEntries.length > 1) {
+  if (contentMatches.length > 1) {
     warnings.push(
-      `${collectionName}: ${declaration.name}.${briefName} has more than one content ` +
-        `(markdown / html / prosemirror) field — the markdown body maps to "${bodyFieldKey}"`
+      `${collectionName}: ${declaration.name} has more than one content ` +
+        `(markdown / html / prosemirror) field — the markdown body maps to ` +
+        `"${bodyTarget.secName}.${bodyTarget.key}"`
     )
   }
   for (const record of records || []) {
@@ -185,43 +204,53 @@ export function collectionRecordsToEntities({
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
-    // Brief section data in schema-declared field order (the wire's canonical
-    // order). An absent field is simply omitted — an incomplete entity is a
-    // valid stored state; the foundation copes at render time. The markdown body
-    // fills the content body field unless the frontmatter already set it explicitly.
-    const data = {}
-    for (const [key, field] of Object.entries(briefFields)) {
-      let value = record[key]
-      if (value === undefined && key === bodyFieldKey && hasBody) value = record.$body
-      if (value === undefined) continue
-      const encoded = encodeFieldValue(value, field, sourceLocale, translations)
-      if (encoded !== undefined) data[key] = encoded
+    // Per-section data in schema-declared field order (the wire's canonical order).
+    // Frontmatter keys land in their declaring section; the markdown body fills the
+    // designated content field (in whatever section declares it) unless frontmatter
+    // already set it explicitly. An absent field is simply omitted — an incomplete
+    // entity is a valid stored state; the foundation copes at render time.
+    const sectionData = {}
+    for (const [secName, sec] of recordSections) {
+      const data = {}
+      for (const [key, field] of Object.entries(sec.fields || {})) {
+        let value = record[key]
+        if (value === undefined && bodyTarget && secName === bodyTarget.secName && key === bodyTarget.key && hasBody) {
+          value = record.$body
+        }
+        if (value === undefined) continue
+        const encoded = encodeFieldValue(value, field, sourceLocale, translations)
+        if (encoded !== undefined) data[key] = encoded
+      }
+      if (Object.keys(data).length) sectionData[secName] = data
     }
-    // Warn for author keys that aren't on the Model. A real unknown key means the
+    // Warn for author keys not on ANY record section. A real unknown key means the
     // frontmatter doesn't match the collection's data schema — that SHOULD warn
     // (only identity/transport keys in SKIP_KEYS are silent).
     for (const key of Object.keys(record)) {
       if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
       warnings.push(
         `${collectionName}/${slug}: field "${key}" is not on ` +
-          `${declaration.name}.${briefName} — not synced`
+          `${declaration.name} — not synced`
       )
     }
-    if (hasBody && !bodyFieldKey) {
+    if (hasBody && !bodyTarget) {
       warnings.push(
         `${collectionName}/${slug}: markdown body present but ` +
-          `${declaration.name}.${briefName} has no content body field — body not synced`
+          `${declaration.name} has no content body field — body not synced`
       )
     }
 
-    // The `$`-document body, in canonical key order: `$uuid?`, `$id`, `$model`,
-    // then the brief section. `$owner`/`$unit`/`$meta` are omitted — the backend
-    // binds owner + unit on its side.
+    // The `$`-document, in canonical key order: `$uuid?`, `$id`, `$model`, then each
+    // populated section in declared order (the brief always present as the card).
+    // `$owner`/`$unit`/`$meta` are omitted — the backend binds owner + unit on its side.
     const document = {}
     if (uuid) document.$uuid = uuid
     document.$id = id
     document.$model = declaration.name
-    document[briefName] = data
+    document[briefName] = sectionData[briefName] || {}
+    for (const [secName] of recordSections) {
+      if (secName !== briefName && sectionData[secName]) document[secName] = sectionData[secName]
+    }
 
     entities.push({
       id,

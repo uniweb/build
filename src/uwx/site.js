@@ -132,7 +132,12 @@ function mapSectionData(section) {
 function buildPageData(config, ctx) {
   const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations } =
     ctx
-  const data = { slug, mode } // both required by the entity type
+  // The page `slug` is the localized route source — a `{lang: slug}` map (the
+  // site-content Model declares it localized; greenlit 2026-06-13). A single-locale
+  // site emits one entry (`{ en: "home" }`); per-locale slug overrides for
+  // multi-locale localized routes (from i18n.routeTranslations) are follow-on
+  // producer work. `mode` is the plain delivery mode.
+  const data = { slug: { [sourceLocale]: slug }, mode } // both required by the entity type
   setIf(data, 'stable_id', config.id)
   setIf(data, 'title', localizeScalar(config.title, sourceLocale, translations))
   setIf(data, 'description', localizeScalar(config.description, sourceLocale, translations))
