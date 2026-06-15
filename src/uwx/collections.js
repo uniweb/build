@@ -96,7 +96,12 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     // path, flushed to locales/collections/{locale}.json by the caller.
     const doc = typeof value === 'string' ? markdownToProseMirror(value) : value
     if (!field.localized) return doc
-    return localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations)
+    const localized = localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations)
+    // localizeContentDoc returns a BARE doc when there are no target locales. A
+    // localized field MUST ride as a `{ lang: value }` map on the wire — the
+    // schema-driven projector drops a localized field whose value isn't a map — so
+    // wrap the source doc, consistent with localizeScalar (which always wraps).
+    return isLocalizedContent(localized) ? localized : { [sourceLocale]: localized }
   }
   if (field.localized) {
     // A markup `text` BODY (format markdown|html) rides as a RAW string, wrapped

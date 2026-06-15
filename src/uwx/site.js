@@ -153,11 +153,25 @@ function buildPageData(config, ctx) {
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)
   setIf(data, 'seo', config.seo)
-  const fetch =
+  let fetch =
     config.fetch ??
     (config.data
       ? { collection: Array.isArray(config.data) ? config.data[0] : config.data }
       : undefined)
+  // Resolve the build-time `collection:` shorthand to the runtime-fetchable
+  // `path: /data/<name>.json` (the static convention the default-fetcher uses).
+  // A shell/backend-hosted site renders client-side with NO prerender, so the
+  // runtime fetches this decl directly — and `collection:` is build-time-only, so
+  // it would never resolve at render (the static build resolves it the same way
+  // in site/data-fetcher.js parseFetchConfig). The gateway serves the collection
+  // at `<base>/data/<name>.json`.
+  if (fetch && typeof fetch.collection === 'string') {
+    const { collection, ...rest } = fetch
+    // `schema` (the collection name) is BOTH the content.data key and part of the
+    // dataStore cache key (deriveCacheKey hashes {path,url,schema,…}; `collection`
+    // is ignored). Mirrors the static build's parseFetchConfig resolution.
+    fetch = { path: `/data/${collection}.json`, schema: collection, ...rest }
+  }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {
     data.is_dynamic = true
