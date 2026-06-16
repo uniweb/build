@@ -13,6 +13,7 @@ import { join, resolve } from 'node:path'
 import { buildSchema } from './schema.js'
 import { generateEntryPoint, shouldRegenerateForFile } from './generate-entry.js'
 import { processAllPreviews } from './images.js'
+import { generateFoundationVars } from './theme/index.js'
 
 /**
  * Build schema.json with preview image references
@@ -301,6 +302,45 @@ async function buildSSRBundle(outDir) {
 }
 
 /**
+ * Append the foundation's theme-variable DEFAULTS as a `:root{}` baseline to the
+ * built CSS (`assets/style.css`), so a runtime-loaded foundation carries its own
+ * var defaults wherever it loads (registry ref / URL — where the site build can't
+ * read them). Context-aware vars (color/gradient) are excluded: those are applied
+ * per light/dark context by the site theme, not as a flat default. Idempotent
+ * (marker-guarded), and a no-op when the foundation declares no vars or ships no
+ * stylesheet to carry them.
+ */
+async function emitFoundationVarsCss(outDir, schema) {
+  const rawVars = schema?._self?.vars
+  if (!rawVars || Object.keys(rawVars).length === 0) return
+
+  const CONTEXT_AWARE = new Set(['color', 'gradient'])
+  const flatVars = Object.fromEntries(
+    Object.entries(rawVars).filter(
+      ([, cfg]) => !(cfg && typeof cfg === 'object' && CONTEXT_AWARE.has(cfg.type))
+    )
+  )
+
+  const rootCss = generateFoundationVars(flatVars)
+  if (!rootCss) return
+
+  const cssPath = join(outDir, 'assets', 'style.css')
+  if (!existsSync(cssPath)) {
+    console.warn(
+      `Foundation declares ${Object.keys(flatVars).length} theme var(s) but has no assets/style.css to carry their defaults — skipped.`
+    )
+    return
+  }
+
+  const marker = '/* uniweb:foundation-var-defaults */'
+  const existing = await readFile(cssPath, 'utf-8')
+  if (existing.includes(marker)) return
+
+  await writeFile(cssPath, `${existing.trimEnd()}\n\n${marker}\n${rootCss}\n`, 'utf-8')
+  console.log(`Emitted ${Object.keys(flatVars).length} foundation theme-var default(s) to assets/style.css`)
+}
+
+/**
  * Vite plugin for foundation builds
  */
 export function foundationBuildPlugin(options = {}) {
@@ -358,6 +398,18 @@ export function foundationBuildPlugin(options = {}) {
       await writeFile(schemaPath, JSON.stringify(schema, null, 2), 'utf-8')
 
       console.log(`Generated meta/schema.json with ${Object.keys(schema).length - 1} components`)
+
+      // Emit the foundation's theme-variable DEFAULTS as a :root{} baseline into
+      // the delivered CSS. A runtime-loaded foundation (registry ref / URL) is
+      // loaded with only its dist/ — the site build can't read these defaults
+      // (they live in schema._self.vars, which the site never sees), so without
+      // this the foundation renders with its theme vars undefined (e.g. collapsed
+      // section spacing where components use py-[var(--section-padding-y)]).
+      // Shipping the defaults in the foundation's own CSS makes it self-sufficient
+      // in every load mode; a site's theme.yml overrides still win (the site theme
+      // loads after the foundation CSS). Bundled sites already get these via the
+      // site build's theme.css — this is harmless redundancy there.
+      await emitFoundationVarsCss(outDir, schema)
 
       // Emit runtime-pin.json so the edge isolate (under Strategy S) can
       // side-load the matching runtime/{ver}/ssr.js. Lands silently before
