@@ -99,6 +99,7 @@ const INFO_TO_SITE_YML = {
   search: 'search',
   paths: 'paths',
   data: 'data',
+  template: 'template',
 }
 
 /**

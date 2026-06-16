@@ -554,6 +554,10 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'search', siteYml.search)
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
+  // `template: true` designates this site as a clonable SITE-TEMPLATE: on push the
+  // backend applies a clonability designation to this site-content entity (it is
+  // NOT a registry artifact). Verbatim; absent → a normal (non-template) site.
+  setIf(info, 'template', siteYml.template)
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
   const pagesPath = siteYml.paths?.pages
