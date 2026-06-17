@@ -1269,6 +1269,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       seo: {
         noindex: seo.noindex || false,
         image: seo.image || null,
+        ogTitle: seo.ogTitle || null,
+        ogDescription: seo.ogDescription || null,
+        canonical: seo.canonical || null,
         changefreq: seo.changefreq || null,
         priority: seo.priority || null
       },

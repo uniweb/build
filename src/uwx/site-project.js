@@ -100,6 +100,7 @@ const INFO_TO_SITE_YML = {
   paths: 'paths',
   data: 'data',
   template: 'template',
+  seo: 'seo',
 }
 
 /**
@@ -128,7 +129,13 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   const description = unwrapLocalized(info.description, sourceLocale)
   if (description !== undefined) siteChanges.description = description
 
-  // Verbatim fields.
+  // `keywords` is a localized list (mirrors page keywords) → unwrap to the
+  // source locale; the target locales are captured into the locales/ collector.
+  if (Array.isArray(info.keywords)) info.keywords.forEach((kw) => collector?.add(kw))
+  const keywords = unwrapLocalizedList(info.keywords, sourceLocale)
+  if (keywords !== undefined) siteChanges.keywords = keywords
+
+  // Verbatim fields (includes `seo` — the site-level social/SEO block).
   for (const [infoKey, ymlKey] of Object.entries(INFO_TO_SITE_YML)) {
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
   }

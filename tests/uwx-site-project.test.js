@@ -34,6 +34,8 @@ describe('siteInfoToConfig — info → config files', () => {
         default_language: 'en',
         base: '/docs/',
         build: { split: true },
+        keywords: ['saas', 'tools'],
+        seo: { image: '/og.png', ogTitle: 'My Site OG' },
       },
       extensions: [{ $id: 'https://cdn.example.com/fx/entry.js', url: 'https://cdn.example.com/fx/entry.js' }],
     }
@@ -49,6 +51,8 @@ describe('siteInfoToConfig — info → config files', () => {
       defaultLanguage: 'en',
       base: '/docs/',
       build: { split: true },
+      keywords: ['saas', 'tools'], // site-level keywords (unwrapped to source locale)
+      seo: { image: '/og.png', ogTitle: 'My Site OG' }, // site-level social/SEO block (verbatim)
       extensions: ['https://cdn.example.com/fx/entry.js'],
     })
   })
@@ -435,7 +439,7 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
     mkdirSync(src, { recursive: true })
     writeFileSync(
       join(src, 'site.yml'),
-      "name: Round Trip\nfoundation: '@acme/base@2.0.0'\nlanguages:\n  - en\n  - fr\ndefaultLanguage: en\nbase: /app/\n"
+      "name: Round Trip\nfoundation: '@acme/base@2.0.0'\nlanguages:\n  - en\n  - fr\ndefaultLanguage: en\nbase: /app/\nkeywords:\n  - marketing\n  - docs\nseo:\n  image: /og-default.png\n  ogTitle: Round Trip Social\n"
     )
     writeFileSync(join(src, 'theme.yml'), 'vars:\n  accent: blue\n')
     writeFileSync(join(src, 'head.html'), '<link rel="icon" href="/f.ico">\n')
@@ -454,6 +458,8 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
       languages: ['en', 'fr'],
       defaultLanguage: 'en',
       base: '/app/',
+      keywords: ['marketing', 'docs'], // localized list survives produce → project
+      seo: { image: '/og-default.png', ogTitle: 'Round Trip Social' }, // verbatim social/SEO block
     })
     expect(yaml.load(readFileSync(join(dest, 'theme.yml'), 'utf8'))).toEqual({ vars: { accent: 'blue' } })
     expect(readFileSync(join(dest, 'head.html'), 'utf8')).toBe('<link rel="icon" href="/f.ico">\n')

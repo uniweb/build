@@ -558,6 +558,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // refs). `assets` is a build-DERIVED upload manifest, not authored config, so it
   // is never produced from / projected to the site files.
   setIf(info, 'favicon', siteYml.favicon)
+  // Site-level SEO/social metadata — the same shape as page.yml's `seo:` + the
+  // top-level `keywords`, hoisted to the site root so the homepage social card
+  // and default keywords exist for any share/SSR/crawler. `seo` rides verbatim
+  // as authored config (round-trips like favicon); `keywords` is a localized
+  // list (like page keywords).
+  setIf(info, 'seo', siteYml.seo)
+  setIf(info, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
   setIf(info, 'head_html', headHtml)
   setIf(info, 'fetcher', siteYml.fetcher)
   setIf(info, 'build', siteYml.build)
