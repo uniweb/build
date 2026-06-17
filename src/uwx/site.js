@@ -49,6 +49,7 @@ import { normalizeHideIn } from '../site/nav-visibility.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
+import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveCollectionsConfig } from './collections-config.js'
@@ -99,7 +100,10 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
   }
   const visitPages = async (pgs, routePrefix) => {
     for (const p of pgs || []) {
-      const route = routePrefix ? `${routePrefix}/${p.slug}` : p.slug
+      // `slug` is a localized `{lang:value}` map; the free-form route is the
+      // canonical (source-locale) path, so unwrap before building it.
+      const slug = unwrapLocalized(p.slug, sourceLocale)
+      const route = routePrefix ? `${routePrefix}/${slug}` : slug
       const page = { route, id: p.stable_id }
       if (Array.isArray(p.page_sections)) await visitSections(p.page_sections, page)
       if (Array.isArray(p.$children)) await visitPages(p.$children, route)

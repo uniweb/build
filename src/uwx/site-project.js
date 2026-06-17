@@ -391,12 +391,16 @@ function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
 // wipe it).
 function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
   writePagesTree(pages, pagesDir, sourceLocale, report, ctx)
-  if (prune) prunePagesTree(pages, pagesDir, report)
+  if (prune) prunePagesTree(pages, pagesDir, sourceLocale, report)
 }
 
 // The directory name for a page record (slug, or `[param]/` for a dynamic page).
-function pageDirName(record) {
-  return record.is_dynamic ? `[${record.param_name || record.slug}]` : record.slug
+// `slug` is a localized `{lang: value}` map on the wire (a page route stays
+// localized); the directory uses the canonical SOURCE-locale slug. `param_name`
+// is already a plain string.
+function pageDirName(record, sourceLocale) {
+  const slug = unwrapLocalized(record.slug, sourceLocale)
+  return record.is_dynamic ? `[${record.param_name || slug}]` : slug
 }
 
 // Pass 1 — write + relocate every page dir, its page.yml/folder.yml, and its
@@ -405,7 +409,8 @@ function pageDirName(record) {
 // producer's slugPath, normalizeRouteForPath strips any leading slash on both).
 function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '') {
   for (const record of pages || []) {
-    const pageDir = join(pagesDir, pageDirName(record))
+    const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
+    const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
     placeByUuid(ctx, record.$uuid, pageDir)
 
@@ -418,7 +423,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw))
     else ctx.collector?.add(record.keywords)
 
-    const route = routePrefix ? `${routePrefix}/${record.slug}` : record.slug
+    const route = routePrefix ? `${routePrefix}/${slug}` : slug
     const pageContext = { route, id: record.stable_id }
 
     let sectionsArray = []
@@ -457,16 +462,16 @@ function collectSectionFileBases(pageSections) {
 
 // Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per
 // level), AFTER every relocation in pass 1. Guarded against wiping an empty level.
-function prunePagesTree(pages, pagesDir, report) {
+function prunePagesTree(pages, pagesDir, sourceLocale, report) {
   const incomingDirs = new Set()
   for (const record of pages || []) {
-    incomingDirs.add(pageDirName(record))
-    const pageDir = join(pagesDir, pageDirName(record))
+    incomingDirs.add(pageDirName(record, sourceLocale))
+    const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
     if (record.mode === 'page') {
       const keep = collectSectionFileBases(record.page_sections)
       if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
-    prunePagesTree(record.$children || [], pageDir, report)
+    prunePagesTree(record.$children || [], pageDir, sourceLocale, report)
   }
   if (incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }

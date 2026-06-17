@@ -113,7 +113,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
   it('nests page_sections as an INLINE field on the page record (no top-level page_sections, no parent_path)', async () => {
     const doc = await siteProjectToDocument(ROOT)
     expect(doc).not.toHaveProperty('page_sections') // not a top-level section
-    const home = doc.pages.find((p) => p.slug === 'home')
+    const home = doc.pages.find((p) => p.slug?.en === 'home')
     expect(home.$id).toBe('home') // stableId from page.yml id:
     expect(home.is_index).toBe(true) // site.yml index: home
     expect(Array.isArray(home.page_sections)).toBe(true)
@@ -132,7 +132,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
 
   it('reconstructs @-prefix nest: children under a section’s $children', async () => {
     const doc = await siteProjectToDocument(ROOT)
-    const features = doc.pages.find((p) => p.slug === 'features')
+    const features = doc.pages.find((p) => p.slug?.en === 'features')
     // The @-prefixed children are NOT top-level sections of the page.
     expect(features.page_sections).toHaveLength(1)
     const grid = features.page_sections[0]
@@ -148,7 +148,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
 
   it('nests a folder’s child pages under $children (same-section self-nesting)', async () => {
     const doc = await siteProjectToDocument(ROOT)
-    const docs = doc.pages.find((p) => p.slug === 'docs')
+    const docs = doc.pages.find((p) => p.slug?.en === 'docs')
     expect(docs.mode).toBe('folder')
     expect(docs).not.toHaveProperty('page_sections') // folders host no sections
     expect(Array.isArray(docs.$children)).toBe(true)
@@ -184,7 +184,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     // First sync: site.yml has no $uuid → no entity uuid, no item uuids anywhere.
     const first = await siteProjectToDocument(ROOT)
     expect(first).not.toHaveProperty('$uuid')
-    const home0 = first.pages.find((p) => p.slug === 'home')
+    const home0 = first.pages.find((p) => p.slug?.en === 'home')
     expect(home0).not.toHaveProperty('$uuid')
     expect(home0.page_sections[0]).not.toHaveProperty('$uuid')
 
@@ -195,7 +195,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     })
     expect(doc.$uuid).toBe('019e0000-0000-7000-8000-0000000000ee')
     expect(Object.keys(doc).slice(0, 3)).toEqual(['$uuid', '$id', '$model'])
-    const home = doc.pages.find((p) => p.slug === 'home')
+    const home = doc.pages.find((p) => p.slug?.en === 'home')
     expect(home).not.toHaveProperty('$uuid')
     expect(home.$id).toBe('home') // identity handle stays
     expect(home.page_sections[0]).not.toHaveProperty('$uuid')
@@ -239,6 +239,6 @@ describe('uwx/site emitSiteSyncPackage', () => {
     const body = JSON.parse(files.get('entities/site-content.json').toString('utf8'))
     expect(body.$model).toBe('@uniweb/site-content')
     expect(body.info.foundation).toBe('@acme/marketing@1.2.3')
-    expect(body.pages.find((p) => p.slug === 'home').page_sections[0].type).toBe('Hero')
+    expect(body.pages.find((p) => p.slug?.en === 'home').page_sections[0].type).toBe('Hero')
   })
 })
