@@ -1,11 +1,12 @@
 // Minimal, zero-dependency ZIP writer/reader for .uwx containers.
 //
-// DESIGN DECISION: Stored only (compression method 0), no Deflate. A .uwx
-// container is a ZIP; compression is an optimization, not part of the
-// contract, and every standard ZIP reader handles Stored entries. Staying
-// Stored-only removes a class of cross-tool byte asymmetry and needs no
-// zlib. If package size ever matters, a Deflate path can be added later via
-// Node's built-in `zlib.deflateRawSync` without changing callers.
+// DESIGN DECISION: our WRITER (`createZip`) emits Stored only (compression
+// method 0), no Deflate. A .uwx container is a ZIP; compression is an
+// optimization, not part of the contract, and every standard ZIP reader
+// handles Stored entries. Staying Stored-only on write removes a class of
+// cross-tool byte asymmetry. The READER (`readZip`) additionally inflates
+// Deflate (method 8) entries — the backend's pull `.uwx` Deflates larger
+// entities, and the framework must read what the backend produces.
 //
 // No Zip64: per-record JSON files are far below 4 GiB and entry counts far
 // below 65535. The format is otherwise the classic APPNOTE layout, all
@@ -17,6 +18,7 @@
 // makes byte output reproducible for a given input.
 
 import { crc32 } from './crc32.js'
+import { inflateRawSync } from 'node:zlib'
 
 const LOCAL_SIG = 0x04034b50
 const CENTRAL_SIG = 0x02014b50
@@ -89,11 +91,12 @@ export function createZip(files) {
 }
 
 /**
- * Reader for our own Stored archives — used by tests and by inspection /
- * `--dry-run`. Not a general-purpose unzip.
+ * Reader for `.uwx` containers. Handles Stored (method 0 — what our writer emits)
+ * and Deflate (method 8 — what the backend's pull `.uwx` uses); any other method
+ * throws. Not otherwise a general-purpose unzip (no Zip64, no encryption).
  *
  * @param {Buffer} buf
- * @returns {Map<string, Buffer>} name -> data
+ * @returns {Map<string, Buffer>} name -> uncompressed data
  */
 export function readZip(buf) {
   const out = new Map()
@@ -115,6 +118,7 @@ export function readZip(buf) {
     if (buf.readUInt32LE(p) !== CENTRAL_SIG) {
       throw new Error('uwx/zip: bad central directory signature')
     }
+    const method = buf.readUInt16LE(p + 10)
     const compSize = buf.readUInt32LE(p + 20)
     const nameLen = buf.readUInt16LE(p + 28)
     const extraLen = buf.readUInt16LE(p + 30)
@@ -127,7 +131,11 @@ export function readZip(buf) {
     const lNameLen = buf.readUInt16LE(localOff + 26)
     const lExtraLen = buf.readUInt16LE(localOff + 28)
     const dataStart = localOff + 30 + lNameLen + lExtraLen
-    out.set(name, buf.subarray(dataStart, dataStart + compSize))
+    const raw = buf.subarray(dataStart, dataStart + compSize)
+    // Stored (0) → verbatim; Deflate (8) → inflate the raw deflate stream.
+    if (method === 0) out.set(name, raw)
+    else if (method === 8) out.set(name, inflateRawSync(raw))
+    else throw new Error(`uwx/zip: unsupported compression method ${method} for ${name}`)
 
     p += 46 + nameLen + extraLen + commentLen
   }
