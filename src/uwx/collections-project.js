@@ -6,8 +6,9 @@
 //
 // Identity & placement. A record's on-disk home is `(collection, slug)`:
 //   - `slug` and `collection` come from the FOLDER document — each ref leaf is
-//     `{ entry: <uuid>, path_segment: <slug> }` inside a branch whose
-//     `path_segment` is the collection name (folder.js `defaultEntries`). The
+//     `{ entry: { model, entity: <uuid> }, path_segment: <slug> }` inside a branch
+//     (its `$children`) whose `path_segment` is the collection name (folder.js
+//     `defaultContents`). The
 //     folder is the authoritative organization on a read (the record document's
 //     own `$id` envelope is not guaranteed to be echoed back), with the record
 //     document's `$id` (`<collection>/<slug>`) used as a fallback when present.
@@ -108,24 +109,28 @@ function briefHasContentBody(declaration) {
   return Object.values(brief?.fields || {}).some((f) => isContentBodyField(f))
 }
 
-// Build `uuid → { collection, slug }` from the folder document's ref leaves. A
-// leaf sits in a branch whose `path_segment` is the collection; the leaf's
-// `path_segment` is the slug and its `entry` is the record uuid. Nested branches
+// Build `uuid → { collection, slug }` from the folder document's ref leaves. The
+// folder is a self-nesting tree under `contents`, nesting via `$children` (the
+// site-content invariant — folder.js). A leaf sits in a branch whose
+// `path_segment` is the collection; the leaf's `path_segment` is the slug and its
+// `entry` is the entity_ref open form `{ model, entity: <uuid> }`. Nested branches
 // are walked; the collection is the NEAREST enclosing branch segment (correct for
 // the default one-branch-per-collection org; a deeply nested virtual org may
 // differ — see the module header).
 function indexFolder(folderDoc) {
   const byUuid = new Map()
-  const walk = (entries, collection) => {
-    for (const node of entries || []) {
+  const walk = (nodes, collection) => {
+    for (const node of nodes || []) {
       if (node?.kind === 'branch') {
-        walk(node.entries, node.path_segment ?? collection)
+        walk(node.$children, node.path_segment ?? collection)
       } else if (node?.kind === 'ref' && node.entry) {
-        byUuid.set(node.entry, { collection, slug: node.path_segment })
+        // `entry` is `{ model, entity: <uuid> }`; tolerate a bare uuid defensively.
+        const uuid = typeof node.entry === 'object' ? node.entry.entity : node.entry
+        if (uuid) byUuid.set(uuid, { collection, slug: node.path_segment })
       }
     }
   }
-  walk(folderDoc?.entries, null)
+  walk(folderDoc?.contents, null)
   return byUuid
 }
 
@@ -245,7 +250,7 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
  * Project a pulled folder + its record entities to `collections/**` files.
  *
  * @param {object} params
- * @param {object} params.folderDoc   - the `@uniweb/folder` document `{ $uuid?, entries }`
+ * @param {object} params.folderDoc   - the `@uniweb/folder` document `{ contents }` (no `$uuid`)
  * @param {object[]} params.recordDocs - record `$`-documents `{ $uuid?, $id?, $model, <brief> }`
  * @param {string} params.siteRoot
  * @param {object} params.opts
