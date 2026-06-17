@@ -80,7 +80,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder.$model).toBe('@uniweb/folder')
     expect(folder).not.toHaveProperty('$uuid')
-    const leaves = folder.entries[0].entries
+    const leaves = folder.contents[0].$children
     expect(leaves.map((l) => l.$ref)).toEqual(['articles/hello', 'articles/world'])
   })
 
@@ -89,7 +89,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     const body = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
     expect(body.$model).toBe('@uniweb/site-content')
     expect(body).not.toHaveProperty('$uuid')
-    const home = body.pages.find((p) => p.slug === 'home')
+    const home = body.pages.find((p) => p.slug?.en === 'home')
     expect(home.$id).toBe('home')
     expect(home).not.toHaveProperty('$uuid')
     expect(home.page_sections[0].$children[0].$id).toBe('detail') // @-nested
@@ -140,7 +140,7 @@ describe('site-content entity uuid → site.yml', () => {
     expect(after).toContain('name: Acme')
     const doc = await siteProjectToDocument(SITE)
     expect(doc.$uuid).toBe('u-entity-1')
-    expect(doc.pages.find((p) => p.slug === 'home')).not.toHaveProperty('$uuid')
+    expect(doc.pages.find((p) => p.slug?.en === 'home')).not.toHaveProperty('$uuid')
   })
 
   it('the producer surfaces siteContentUuid for collections binding', async () => {

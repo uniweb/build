@@ -359,7 +359,9 @@ describe('collectionRecordsToEntities — markdown body → prosemirror content 
     })
     expect(warnings).toEqual([])
     const body = entities[0].document.article.body
-    expect(body.type).toBe('doc') // ProseMirror, converted from markdown
+    // A localized field always rides as a `{ lang: value }` map on the wire (the
+    // projector drops a non-map localized value), so the converted doc is under `en`.
+    expect(body.en.type).toBe('doc') // ProseMirror, converted from markdown (not the raw string)
     expect(JSON.stringify(body)).toContain('Hello world')
   })
 

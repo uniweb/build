@@ -2,7 +2,8 @@ import { buildFolderEntity } from '../src/uwx/folder.js'
 
 // The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the
 // collection-record entities. A brand-new record is pointed at by `$ref` (its
-// payload-local `<collection>/<slug>` handle); an already-minted one by `entry: uuid`.
+// payload-local `<collection>/<slug>` handle); an already-minted one by the
+// entity_ref open form `entry: { model, entity: uuid }`.
 // The folder carries NO `$uuid` of its own — the backend owns the site's folder,
 // keyed by the site-content uuid, so the framework never holds a folder uuid.
 
@@ -24,11 +25,11 @@ describe('buildFolderEntity', () => {
     expect(folder.model).toBe('@uniweb/folder')
     expect(folder.document.$id).toBe('@folder')
     expect(folder.document).not.toHaveProperty('$uuid') // the framework holds no folder uuid
-    const branches = folder.document.entries
+    const branches = folder.document.contents
     expect(branches.map((b) => b.path_segment)).toEqual(['articles', 'team'])
     const articles = branches[0]
     expect(articles.kind).toBe('branch')
-    expect(articles.entries).toEqual([
+    expect(articles.$children).toEqual([
       { kind: 'ref', path_segment: 'hello', $ref: 'articles/hello' },
       { kind: 'ref', path_segment: 'world', $ref: 'articles/world' },
     ])
@@ -38,8 +39,8 @@ describe('buildFolderEntity', () => {
     const folder = buildFolderEntity({
       recordEntities: [rec('articles', 'hello', 'uuid-1'), rec('articles', 'world')],
     })
-    const leaves = folder.document.entries[0].entries
-    expect(leaves[0]).toEqual({ kind: 'ref', path_segment: 'hello', entry: 'uuid-1' })
+    const leaves = folder.document.contents[0].$children
+    expect(leaves[0]).toEqual({ kind: 'ref', path_segment: 'hello', entry: { model: '@acme/x', entity: 'uuid-1' } })
     expect(leaves[1]).toEqual({ kind: 'ref', path_segment: 'world', $ref: 'articles/world' })
   })
 
@@ -47,7 +48,7 @@ describe('buildFolderEntity', () => {
     const folder = buildFolderEntity({ recordEntities: [rec('articles', 'hello')] })
     expect(folder.uuid).toBeNull()
     expect(folder.document).not.toHaveProperty('$uuid')
-    expect(Object.keys(folder.document)).toEqual(['$id', '$model', 'entries'])
+    expect(Object.keys(folder.document)).toEqual(['$id', '$model', 'contents'])
   })
 
   it('virtual org: collections.yml folders build a branch tree, decoupled from layout', () => {
@@ -58,15 +59,15 @@ describe('buildFolderEntity', () => {
         { segment: 'about', entries: [{ segment: 'people', entries: ['team'] }] },
       ],
     })
-    const [blog, about] = folder.document.entries
+    const [blog, about] = folder.document.contents
     expect(blog.path_segment).toBe('blog')
-    expect(blog.label).toBe('Blog')
+    expect(blog.name).toBe('Blog')
     // a bare collection name inside `entries` expands to its leaves IN this branch
-    expect(blog.entries).toEqual([{ kind: 'ref', path_segment: 'hello', $ref: 'articles/hello' }])
+    expect(blog.$children).toEqual([{ kind: 'ref', path_segment: 'hello', $ref: 'articles/hello' }])
     // a nested { segment, entries } makes a sub-branch
-    expect(about.entries[0].kind).toBe('branch')
-    expect(about.entries[0].path_segment).toBe('people')
-    expect(about.entries[0].entries[0]).toEqual({
+    expect(about.$children[0].kind).toBe('branch')
+    expect(about.$children[0].path_segment).toBe('people')
+    expect(about.$children[0].$children[0]).toEqual({
       kind: 'ref',
       path_segment: 'ada',
       $ref: 'team/ada',
