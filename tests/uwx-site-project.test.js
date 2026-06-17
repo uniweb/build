@@ -627,11 +627,12 @@ describe('localized scalar round-trip: producer ⇄ projector (B)', () => {
       JSON.stringify({ [computeHash('Atlas')]: 'Atlas ES', [computeHash('Home')]: 'Inicio' })
     )
 
-    // Producer wraps scalars per-locale by reading locales/es.json.
+    // Producer wraps localized scalars per-locale by reading locales/es.json — but
+    // the site `name` is an identity label, so it stays a plain string regardless.
     const doc1 = await siteProjectToDocument(src)
-    expect(doc1.info.name).toEqual({ en: 'Atlas', es: 'Atlas ES' })
+    expect(doc1.info.name).toBe('Atlas') // identity label — plain, not localized
     const home1 = doc1.pages.find((p) => p.$id === 'home')
-    expect(home1.title).toEqual({ en: 'Home', es: 'Inicio' })
+    expect(home1.title).toEqual({ en: 'Home', es: 'Inicio' }) // content scalar — localized
 
     // Project to a fresh dir, then re-produce — the multi-locale scalars survive.
     const dest = join(dir, 'dest')
@@ -1001,8 +1002,9 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
     const doc2 = await siteProjectToDocument(dest)
     expect(doc2).toEqual(doc1)
 
-    // and the multi-locale shape is what we expect (not just self-consistent)
-    expect(doc1.info.name).toEqual({ en: 'Atlas', es: 'Atlas ES' })
+    // and the multi-locale shape is what we expect (not just self-consistent).
+    // The site `name` is an identity label → plain string; content scalars stay localized.
+    expect(doc1.info.name).toBe('Atlas')
     const hero = doc1.pages[0].page_sections.find((s) => s.stable_id === 'hero')
     expect(hero.content.es).toEqual({ Welcome: 'Bienvenido' })
     expect(doc1.layout_sections[0].content.es).toEqual({ Nav: 'Navegacion' })

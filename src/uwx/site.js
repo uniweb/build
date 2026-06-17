@@ -535,7 +535,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   const translations = targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales) : null
 
   const info = {}
-  info.name = localizeScalar(siteYml.name, sourceLocale, translations)
+  // `name` is an identity LABEL (the author's own handle for the site, like a
+  // filename) — single-language by nature, and it must ALWAYS render: under locale
+  // projection a localized field with no entry for the requested locale is dropped,
+  // so a `{en:…}`-only name would vanish. It therefore ships as a plain string, never
+  // a localized `{lang:value}` map. Genuine content fields (`description` below, page
+  // title/slug/label/keywords, the body) stay localized. (uwx-format.md → identity-label names.)
+  info.name = siteYml.name
   setIf(info, 'description', localizeScalar(siteYml.description, sourceLocale, translations))
   if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
   setIf(info, 'languages', siteYml.languages)

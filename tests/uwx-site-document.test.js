@@ -104,7 +104,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
 
   it('carries info with foundation (the round-trip source of truth)', async () => {
     const { info } = await siteProjectToDocument(ROOT)
-    expect(info.name).toEqual({ en: 'Acme Site' }) // localized wrap
+    expect(info.name).toBe('Acme Site') // identity label — plain string, not localized
     expect(info.foundation).toBe('@acme/marketing@1.2.3')
     expect(info.theme).toEqual({ colors: { primary: '#0099ff' } })
     expect(info.languages).toEqual(['en', 'fr'])
