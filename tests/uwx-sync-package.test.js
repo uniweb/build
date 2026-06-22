@@ -162,3 +162,22 @@ describe('site-content entity uuid → site.yml', () => {
     expect(pkg.siteContentUuid).toBe('u-entity-9')
   })
 })
+
+describe('emitSyncPackages — injectInfo (deploy-derived info)', () => {
+  it('stamps injectInfo fields (data_bundle) onto the site-content document info', async () => {
+    const pkg = await emitSyncPackages(SITE, { injectInfo: { data_bundle: 'http://h/asset/dist/abc/base.json' } })
+    const body = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
+    expect(body.info.data_bundle).toBe('http://h/asset/dist/abc/base.json')
+    // it is part of the hashed content, so changing the bundle URL re-fires the lane
+    const same = await emitSyncPackages(SITE, { injectInfo: { data_bundle: 'http://h/asset/dist/abc/base.json' }, priorHashes: pkg.hashes })
+    expect(same.siteContent).toBeNull()
+    const changed = await emitSyncPackages(SITE, { injectInfo: { data_bundle: 'http://h/asset/dist/DEF/base.json' }, priorHashes: pkg.hashes })
+    expect(changed.siteContent).toBeTruthy()
+  })
+
+  it('without injectInfo, the site-content info carries no data_bundle', async () => {
+    const pkg = await emitSyncPackages(SITE)
+    const body = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
+    expect(body.info.data_bundle).toBeUndefined()
+  })
+})

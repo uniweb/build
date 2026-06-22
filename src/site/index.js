@@ -38,6 +38,7 @@ export {
   writeCollectionFiles,
   getCollectionLastModified
 } from './collection-processor.js'
+export { assembleDataBall } from './data-ball.js'
 export {
   parseFetchConfig,
   executeFetch,

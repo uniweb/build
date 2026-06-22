@@ -51,6 +51,9 @@ function emitLane(entities, exporter, exportedAt) {
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
  * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter
  * @param {boolean} [opts.includeSite]    - include the site-content lane (default true)
+ * @param {object} [opts.injectInfo]      - deploy-derived `info.*` to stamp on the
+ *        site-content document (e.g. `{ data_bundle }`, the static-data ball URL);
+ *        wire-only — never authored in site.yml, never projected back on pull.
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
@@ -87,6 +90,13 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   })
 
   const siteDoc = includeSite ? await siteProjectToDocument(siteRoot, { sourceLocale }) : null
+  // Deploy-derived `info` fields (e.g. `data_bundle`, the static-data ball URL) are
+  // stamped here — NOT authored in site.yml, so they ride the wire but never project
+  // back on pull (the `info.assets` precedent). They are part of the hashed content,
+  // so a changed bundle URL correctly re-fires the site-content lane.
+  if (siteDoc && opts.injectInfo && typeof opts.injectInfo === 'object') {
+    siteDoc.info = { ...siteDoc.info, ...opts.injectInfo }
+  }
   const siteEntity = siteDoc
     ? { id: siteDoc.$id, model: siteDoc.$model, file: 'entities/site-content.json', document: siteDoc }
     : null
