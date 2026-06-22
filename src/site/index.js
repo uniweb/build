@@ -38,7 +38,7 @@ export {
   writeCollectionFiles,
   getCollectionLastModified
 } from './collection-processor.js'
-export { assembleDataBall } from './data-ball.js'
+export { assembleDataBall, collectBallAssets, rewriteBallAssets } from './data-ball.js'
 export {
   parseFetchConfig,
   executeFetch,
