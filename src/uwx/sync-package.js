@@ -29,8 +29,8 @@ const SITE_ENTITY_KEY = 'site-content'
 
 const cacheKey = (entity) => `${entity.model} ${entity.id}`
 
-function emitLane(entities, exporter, exportedAt) {
-  const models = [...new Set(entities.map((e) => e.model))]
+function emitLane(entities, exporter, exportedAt, extraModels = []) {
+  const models = [...new Set([...entities.map((e) => e.model), ...extraModels])]
   const buffer = emitEntitySyncPackage({
     entities,
     modelsRequired: models.map((name) => ({ name_at_export: name })),
@@ -38,6 +38,21 @@ function emitLane(entities, exporter, exportedAt) {
     exportedAt,
   })
   return { buffer, entityCount: entities.length, models }
+}
+
+// Collect the Models referenced by the folder's `ref` leaves (`entry.model`), walking
+// the contents/$children tree. The folder is built from the FULL record set, so it
+// references every record's Model — including records the send-only-changed filter
+// drops from THIS package (a re-push where the folder changed but the records didn't).
+// The backend requires every referenced Model declared in modelsRequired, so these must
+// ride even when their record entities don't.
+function collectReferencedModels(node, acc) {
+  if (!node || typeof node !== 'object') return acc
+  if (node.entry && typeof node.entry.model === 'string') acc.add(node.entry.model)
+  for (const key of ['$children', 'contents']) {
+    if (Array.isArray(node[key])) for (const child of node[key]) collectReferencedModels(child, acc)
+  }
+  return acc
 }
 
 /**
@@ -127,7 +142,11 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // back-fill (backfillEntityUuids skips it — the folder has no uuid to write).
     const entities = [folder, ...changedRecords.map((r) => r.entity)]
     const index = [{ kind: 'folder' }, ...changedRecords.map((r) => r.index)]
-    collections = { ...emitLane(entities, exporter, exportedAt), index }
+    // The folder references every record's Model via `entry.model` — including records
+    // filtered out here by send-only-changed. Declare them all (the backend rejects a
+    // folder that references an undeclared Model).
+    const referencedModels = [...collectReferencedModels(folder.document, new Set())]
+    collections = { ...emitLane(entities, exporter, exportedAt, referencedModels), index }
   }
 
   // --- site-content lane -------------------------------------------------------

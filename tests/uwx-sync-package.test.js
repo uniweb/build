@@ -143,6 +143,28 @@ describe('emitSyncPackages — two directional lanes', () => {
     // articles still syncs as entities — the partition routes each collection to one lane
     expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['articles/hello', 'articles/world'])
   })
+
+  it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {
+    // Articles with embedded $uuid → the folder references them by `entry.model` (minted form).
+    w('collections/articles/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
+    w('collections/articles/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
+
+    const first = await emitSyncPackages(SITE)
+    const articleModel = first.collections.models.find((m) => m !== '@uniweb/folder')
+    expect(articleModel).toBeTruthy()
+
+    // Re-emit with the RECORD hashes cached but the folder's dropped → the folder fires
+    // (no prior hash) while the article records are cache-hits (filtered from the package).
+    const priorHashes = { ...first.hashes }
+    for (const k of Object.keys(priorHashes)) if (k.startsWith('@uniweb/folder ')) delete priorHashes[k]
+    const second = await emitSyncPackages(SITE, { priorHashes })
+
+    expect(second.collections).toBeTruthy()
+    // the package carries only the folder (records filtered) …
+    expect(second.collections.index.filter((e) => e.kind !== 'folder').length).toBe(0)
+    // … yet the article Model the folder references is still declared in models_required.
+    expect(second.collections.models).toContain(articleModel)
+  })
 })
 
 describe('site-content entity uuid → site.yml', () => {
