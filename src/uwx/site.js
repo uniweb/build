@@ -571,6 +571,11 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'search', siteYml.search)
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
+  // `app` — the deployment's `@uniweb/app-spec` reference (a bare uuid string),
+  // bound when the site is hosted as a composite. Authored config that round-trips
+  // verbatim/opaque (like `foundation`), so a pull→edit→push preserves it; it is
+  // deployment-LOCAL (not portable across deployments). (uwx-format.md → info.app.)
+  setIf(info, 'app', siteYml.app)
   // `template: true` designates this site as a clonable SITE-TEMPLATE: on push the
   // backend applies a clonability designation to this site-content entity (it is
   // NOT a registry artifact). Verbatim; absent → a normal (non-template) site.

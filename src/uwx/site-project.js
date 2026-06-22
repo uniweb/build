@@ -101,6 +101,7 @@ const INFO_TO_SITE_YML = {
   data: 'data',
   template: 'template',
   seo: 'seo',
+  app: 'app', // deployment's @uniweb/app-spec ref (bare uuid; deployment-local)
 }
 
 /**

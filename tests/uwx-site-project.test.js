@@ -783,6 +783,33 @@ describe('info.favicon / info.assets (A5)', () => {
   })
 })
 
+describe('info.app — deploy-composite @uniweb/app-spec ref (deploy-push-publish)', () => {
+  it('round-trips site.yml::app (a bare uuid) verbatim through produce → project', async () => {
+    const APP_UUID = '019e3c01-0000-7c0d-8a03-000000000002'
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(join(src, 'site.yml'), `name: S\nfoundation: '@a/base'\napp: '${APP_UUID}'\n`)
+
+    // produce: site.yml::app → info.app (carried verbatim, like foundation)
+    const document = await siteProjectToDocument(src)
+    expect(document.info.app).toBe(APP_UUID)
+
+    // project: info.app → site.yml::app (authored config round-trips)
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({ document, siteRoot: dest })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).app).toBe(APP_UUID)
+  })
+
+  it('a site without app: produces no info.app (setIf skips undefined)', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\n")
+    const document = await siteProjectToDocument(src)
+    expect(document.info.app).toBeUndefined()
+  })
+})
+
 describe('siteContentDocumentToProject — unsafe stable_id filename safety (A8)', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
   const info = { name: { en: 'S' }, foundation: '@a/base' }
