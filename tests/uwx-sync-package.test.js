@@ -203,3 +203,37 @@ describe('emitSyncPackages — injectInfo (deploy-derived info)', () => {
     expect(body.info.data_bundle).toBeUndefined()
   })
 })
+
+describe('emitSyncPackages — local-media (Slice 5)', () => {
+  it('collects site-root local asset refs in localAssets; co-located refs warn + skip', async () => {
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![banner](/images/banner.png)\n\n![local](./co.png)\n')
+    const pkg = await emitSyncPackages(SITE)
+    expect(pkg.localAssets).toContain('/images/banner.png')
+    expect(pkg.localAssets).not.toContain('./co.png')
+    expect(pkg.warnings.some((m) => m.includes('co.png') && m.includes('co-located'))).toBe(true)
+  })
+
+  it('assetRewrite swaps the entity content refs for serve URLs (opt-in)', async () => {
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![banner](/images/banner.png)\n')
+    const serve = 'https://cdn.example/dist/abc123/base.png'
+    const pkg = await emitSyncPackages(SITE, { assetRewrite: { '/images/banner.png': serve } })
+    const json = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    expect(json).toContain(serve)
+    expect(json).not.toContain('/images/banner.png')
+  })
+
+  it('without assetRewrite the entity keeps the raw ref (the f225 path is unchanged)', async () => {
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![banner](/images/banner.png)\n')
+    const pkg = await emitSyncPackages(SITE)
+    const json = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    expect(json).toContain('/images/banner.png')
+  })
+
+  it('a ref the assetRewrite map omits is left untouched (no broken URL)', async () => {
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![a](/images/a.png)\n\n![b](/images/b.png)\n')
+    const pkg = await emitSyncPackages(SITE, { assetRewrite: { '/images/a.png': 'https://cdn/x/base.png' } })
+    const json = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    expect(json).toContain('https://cdn/x/base.png') // mapped → rewritten
+    expect(json).toContain('/images/b.png') // unmapped → preserved
+  })
+})

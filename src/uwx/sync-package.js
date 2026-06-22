@@ -23,6 +23,7 @@ import { buildCollectionEntities, entityContentHash } from './collections.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
 import { emitEntitySyncPackage } from './entity-document.js'
+import { isLocalAssetPath } from '../site/assets.js'
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
 const SITE_ENTITY_KEY = 'site-content'
@@ -55,6 +56,53 @@ function collectReferencedModels(node, acc) {
   return acc
 }
 
+// --- local-media over push (Slice 5) ----------------------------------------
+// A site's content references local media by the author's original path
+// (`/images/hero.png`, `./hero.png`); the backend stores media content-addressed
+// and serves it by URL. The deploy uploads the local files and swaps the refs for
+// the backend's serve URLs. Both steps walk the produced entity documents with one
+// generic recursion, filtered by `isLocalAssetPath` (a `/`/`./`/`../` prefix PLUS a
+// media extension) — so it covers PM image `src`, `background`/`params`, record
+// media fields, and localized `{locale: doc}` maps uniformly and safely (non-media
+// strings like `/data/x.json` never match). Mirrors the build's `walkDataAssets`.
+
+// Invoke visitor(ref) for every local asset path string anywhere in the document.
+function walkEntityAssets(node, visitor) {
+  if (typeof node === 'string') {
+    if (isLocalAssetPath(node)) visitor(node)
+    return
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) walkEntityAssets(item, visitor)
+    return
+  }
+  if (node && typeof node === 'object') {
+    for (const v of Object.values(node)) walkEntityAssets(v, visitor)
+  }
+}
+
+// In-place: replace every local-asset-path string the map covers with its serve
+// URL. A ref the map omits (upload failed/skipped) is left untouched — never a
+// broken URL. Returns the (mutated) node.
+function rewriteEntityAssets(node, map) {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      const v = node[i]
+      if (typeof v === 'string') { if (map[v]) node[i] = map[v] }
+      else rewriteEntityAssets(v, map)
+    }
+    return node
+  }
+  if (node && typeof node === 'object') {
+    for (const key of Object.keys(node)) {
+      const v = node[key]
+      if (typeof v === 'string') { if (map[v]) node[key] = map[v] }
+      else rewriteEntityAssets(v, map)
+    }
+  }
+  return node
+}
+
 /**
  * Build the two sync packages for a site.
  *
@@ -69,14 +117,19 @@ function collectReferencedModels(node, acc) {
  * @param {object} [opts.injectInfo]      - deploy-derived `info.*` to stamp on the
  *        site-content document (e.g. `{ data_bundle }`, the static-data ball URL);
  *        wire-only — never authored in site.yml, never projected back on pull.
+ * @param {Object<string,string>} [opts.assetRewrite] - map of local asset ref →
+ *        backend serve URL; rewrites the entities' media refs before push (the
+ *        deploy's 2nd emit). Absent → no rewrite (the f225 sync path is unchanged).
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   collections: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], skipped: number,
- *   schemaless: Array<{name: string}> }>}
+ *   schemaless: Array<{name: string}>, localAssets: string[] }>}
  *   `schemaless` lists collections that resolved no data schema (soft-skipped from
  *   the sync) — the composite deploy delivers these statically via the data ball.
+ *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
+ *   must upload + rewrite to serve URLs; co-located refs are warned and skipped.
  *   Each lane is null when it has nothing to push. The collections `index` keeps a
  *   leading `{ kind: 'folder' }` placeholder (submission position 0 → the folder
  *   entity) so record back-fill stays positionally aligned; the folder itself has no
@@ -112,6 +165,38 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   if (siteDoc && opts.injectInfo && typeof opts.injectInfo === 'object') {
     siteDoc.info = { ...siteDoc.info, ...opts.injectInfo }
   }
+
+  // Local-media over push (Slice 5). `assetRewrite` ({ '/images/x.png': serveUrl })
+  // is supplied by the deploy's SECOND emit, after it has uploaded the files the
+  // FIRST emit surfaced in `localAssets`. It is absent on the collect emit and on
+  // every non-deploy caller, so the f225 sync path is byte-identical without it.
+  const assetRewrite =
+    opts.assetRewrite && typeof opts.assetRewrite === 'object' ? opts.assetRewrite : null
+  if (assetRewrite) {
+    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite)
+    for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite)
+  }
+  // Collect the site-root local refs the deploy must upload (`/images/x.png`).
+  // Co-located refs (`./x`, `../x`) need the source `.md` location to resolve — the
+  // entity doesn't carry it — so warn once each and skip (v1: use a site-root path).
+  const localAssetSet = new Set()
+  const colocatedSeen = new Set()
+  const collectFrom = (doc) =>
+    doc &&
+    walkEntityAssets(doc, (ref) => {
+      if (ref.startsWith('/')) localAssetSet.add(ref)
+      else if (!colocatedSeen.has(ref)) {
+        colocatedSeen.add(ref)
+        warnings.push(
+          `local-media: co-located asset "${ref}" is not uploaded on the composite deploy — ` +
+            `use a site-root path (e.g. /images/${ref.replace(/^[./]+/, '')})`
+        )
+      }
+    })
+  collectFrom(siteDoc)
+  for (const e of col.entities) collectFrom(e.document)
+  const localAssets = [...localAssetSet]
+
   const siteEntity = siteDoc
     ? { id: siteDoc.$id, model: siteDoc.$model, file: 'entities/site-content.json', document: siteDoc }
     : null
@@ -160,5 +245,5 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // the content lane by its presence/absence.
   const siteContentUuid = siteDoc?.$uuid
 
-  return { siteContent, collections, siteContentUuid, hashes, warnings, skipped, schemaless: col.schemaless }
+  return { siteContent, collections, siteContentUuid, hashes, warnings, skipped, schemaless: col.schemaless, localAssets }
 }
