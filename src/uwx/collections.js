@@ -422,17 +422,20 @@ async function loadSourceRecords(siteRoot, decl) {
  *        `@uniweb/data-schema` declaration (or null). The verb wires this to the
  *        backend's Model-read route. Without it, the local foundation is required.
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
- * @returns {Promise<{ entities: object[], index: object[], warnings: string[], mappedCount: number }>}
+ * @returns {Promise<{ entities: object[], index: object[], warnings: string[], schemaless: Array<{name: string}>, mappedCount: number }>}
+ *   `schemaless` lists collections that resolved no data schema (the convention-
+ *   default soft-skip) — not synced as entities; the composite deploy delivers
+ *   them statically via the data ball.
  */
 export async function buildCollectionEntities(siteRoot, opts = {}) {
   // Merged collections config (collections.yml over site.yml::collections). Reused
   // from the caller when provided (sync-package shares it with the folder builder).
   const colConfig = opts.collectionsConfig || (await resolveCollectionsConfig(siteRoot))
   if (!colConfig.folderSync) {
-    return { entities: [], index: [], warnings: [], mappedCount: 0, colConfig }
+    return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig }
   }
   const mapped = syncableCollections(colConfig.declarations)
-  if (mapped.length === 0) return { entities: [], index: [], warnings: [], mappedCount: 0, colConfig }
+  if (mapped.length === 0) return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig }
 
   // A Model declaration comes from a LOCAL foundation (offline) or, for a
   // non-local Model, from the injected async `resolveModel(name)` — the verb wires
@@ -474,6 +477,10 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   const entities = []
   const index = []
   const warnings = []
+  // Collections that resolved no data schema (the convention-default soft-skip
+  // below) — not synced as folder entities. The composite deploy delivers these
+  // statically (the "data ball") instead, so the caller can route them there.
+  const schemaless = []
   // The sync response is keyed per ($model, $id), so the pair must be unique
   // within one submission (two collections on the same Model could otherwise
   // reuse a slug).
@@ -489,6 +496,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
         warnings.push(
           `${name}: no data schema "${modelName}" (subfolder-name default) — not synced`
         )
+        schemaless.push({ name })
         continue
       }
       throw new Error(
@@ -577,7 +585,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     warnings.push(...mappedOut.warnings)
   }
 
-  return { entities, index, warnings, mappedCount: mapped.length, colConfig }
+  return { entities, index, warnings, schemaless, mappedCount: mapped.length, colConfig }
 }
 
 /**

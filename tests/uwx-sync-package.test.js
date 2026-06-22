@@ -130,6 +130,19 @@ describe('emitSyncPackages — two directional lanes', () => {
     const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder).not.toHaveProperty('$uuid')
   })
+
+  it('a collection that resolves no schema is reported in `schemaless` (not synced)', async () => {
+    // `notes` declares no schema and the foundation defines none → it resolves via
+    // the subfolder-name convention, finds nothing, and soft-skips the sync. It
+    // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
+    w('collections/collections.yml', 'collections:\n  articles:\n    schema: "@/article"\n  notes: {}\n')
+    w('collections/notes/first.md', '---\ntitle: First\n---\nNote body\n')
+    const pkg = await emitSyncPackages(SITE)
+
+    expect(pkg.schemaless).toEqual([{ name: 'notes' }])
+    // articles still syncs as entities — the partition routes each collection to one lane
+    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['articles/hello', 'articles/world'])
+  })
 })
 
 describe('site-content entity uuid → site.yml', () => {

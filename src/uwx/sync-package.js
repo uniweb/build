@@ -55,7 +55,10 @@ function emitLane(entities, exporter, exportedAt) {
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   collections: { buffer, entityCount, index, models }|null,
- *   hashes: Object<string,string>, warnings: string[], skipped: number }>}
+ *   hashes: Object<string,string>, warnings: string[], skipped: number,
+ *   schemaless: Array<{name: string}> }>}
+ *   `schemaless` lists collections that resolved no data schema (soft-skipped from
+ *   the sync) — the composite deploy delivers these statically via the data ball.
  *   Each lane is null when it has nothing to push. The collections `index` keeps a
  *   leading `{ kind: 'folder' }` placeholder (submission position 0 → the folder
  *   entity) so record back-fill stays positionally aligned; the folder itself has no
@@ -128,5 +131,5 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // the content lane by its presence/absence.
   const siteContentUuid = siteDoc?.$uuid
 
-  return { siteContent, collections, siteContentUuid, hashes, warnings, skipped }
+  return { siteContent, collections, siteContentUuid, hashes, warnings, skipped, schemaless: col.schemaless }
 }
