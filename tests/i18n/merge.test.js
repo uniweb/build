@@ -388,7 +388,11 @@ describe('mergeTranslations', () => {
     expect(translated.right).toBeUndefined()
   })
 
-  it('preserves leading/trailing whitespace from original', () => {
+  it('whole-element resolution keys by trimmed text (block padding not re-added)', () => {
+    // Under whole-element substitution a block element is keyed by its TRIMMED
+    // text and its inline content is replaced by the translation. Insignificant
+    // leading/trailing block whitespace is not re-applied — that was a
+    // per-text-node artifact of the old substitution model.
     const siteContent = {
       pages: [{
         route: '/',
@@ -411,7 +415,49 @@ describe('mergeTranslations', () => {
 
     const translated = mergeTranslations(siteContent, translations)
 
-    expect(translated.pages[0].sections[0].content.content[0].content[0].text).toBe('  Hola  ')
+    expect(translated.pages[0].sections[0].content.content[0].content[0].text).toBe('Hola')
+  })
+
+  it('resolves a mark-carrying translation value (whole-element, inline markdown)', () => {
+    // The key win over the old plain-string value: a target locale can carry an
+    // inline link (with its own, re-targeted href) and emphasis. Source is one
+    // paragraph "See our docs now." with an inline link on "our docs"; the
+    // translation VALUE is inline markdown.
+    const siteContent = {
+      pages: [{
+        route: '/',
+        title: 'Home',
+        sections: [{
+          id: 'cta',
+          content: {
+            type: 'doc',
+            content: [{
+              type: 'paragraph',
+              content: [
+                { type: 'text', text: 'See ' },
+                { type: 'text', text: 'our docs', marks: [{ type: 'link', attrs: { href: '/docs' } }] },
+                { type: 'text', text: ' now.' }
+              ]
+            }]
+          }
+        }]
+      }]
+    }
+    const translations = {
+      [computeHash('See our docs now.')]: 'Voir [nos docs](/fr/docs) maintenant.'
+    }
+
+    const translated = mergeTranslations(siteContent, translations)
+    const para = translated.pages[0].sections[0].content.content[0]
+
+    // Full text reads as the translation
+    expect(para.content.map(n => n.text || '').join('')).toBe('Voir nos docs maintenant.')
+    // The inline link survived with its (re-targeted) href — impossible with the
+    // old plain-string value
+    const linkNode = para.content.find(n => n.marks?.some(m => m.type === 'link'))
+    expect(linkNode).toBeDefined()
+    expect(linkNode.text).toBe('nos docs')
+    expect(linkNode.marks.find(m => m.type === 'link').attrs.href).toBe('/fr/docs')
   })
 })
 

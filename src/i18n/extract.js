@@ -163,11 +163,10 @@ function extractFromProseMirrorDoc(doc, context, units) {
 
   let headingIndex = { h1: 0, h2: 0, h3: 0, h4: 0 }
   let paragraphIndex = 0
-  let linkIndex = 0
 
   for (const node of doc.content) {
     if (node.type === 'heading') {
-      const text = extractTextFromNode(node)
+      const text = elementText(node)
       if (!text) continue
 
       const level = node.attrs?.level || 1
@@ -176,14 +175,13 @@ function extractFromProseMirrorDoc(doc, context, units) {
 
       addUnit(units, text, field, context)
     } else if (node.type === 'paragraph') {
-      const result = extractFromParagraph(node, context, units, linkIndex)
-      linkIndex = result.linkIndex
-
-      // Add paragraph text if it's substantial (not just links/buttons)
-      const plainText = extractPlainTextFromParagraph(node)
-      if (plainText && plainText.length > 0) {
+      // Whole-element keying: ONE unit per paragraph, with link text kept INLINE
+      // (not split into a separate link.label unit). The conformance gate is
+      // tests/i18n/structural-keying-vectors.json (vectors A–H).
+      const text = elementText(node)
+      if (text) {
         const field = paragraphIndex === 0 ? 'paragraph' : `paragraph.${paragraphIndex}`
-        addUnit(units, plainText, field, context)
+        addUnit(units, text, field, context)
         paragraphIndex++
       }
     } else if (node.type === 'bulletList' || node.type === 'orderedList') {
@@ -205,47 +203,8 @@ function getHeadingField(level, index) {
 }
 
 /**
- * Extract from paragraph node, handling links specially
- */
-function extractFromParagraph(node, context, units, linkIndex) {
-  if (!node.content) return { linkIndex }
-
-  for (const child of node.content) {
-    if (child.type === 'text' && child.marks) {
-      const linkMark = child.marks.find(m => m.type === 'link')
-      if (linkMark && child.text) {
-        const field = linkIndex === 0 ? 'link.label' : `link.${linkIndex}.label`
-        addUnit(units, child.text, field, context)
-        linkIndex++
-      }
-    }
-  }
-
-  return { linkIndex }
-}
-
-/**
- * Extract plain text from paragraph, excluding link text
- */
-function extractPlainTextFromParagraph(node) {
-  if (!node.content) return ''
-
-  const parts = []
-  for (const child of node.content) {
-    if (child.type === 'text') {
-      // Skip if it's a link
-      const isLink = child.marks?.some(m => m.type === 'link')
-      if (!isLink && child.text && child.text.trim()) {
-        parts.push(child.text)
-      }
-    }
-  }
-
-  return parts.join('').trim()
-}
-
-/**
- * Extract from list items
+ * Extract from list items — one whole-element unit per list item (link text
+ * stays inline, same rule as paragraphs; vectors G and H).
  */
 function extractFromList(listNode, context, units) {
   if (!listNode.content) return
@@ -254,7 +213,7 @@ function extractFromList(listNode, context, units) {
     if (listItem.type === 'listItem' && listItem.content) {
       for (const child of listItem.content) {
         if (child.type === 'paragraph') {
-          const text = extractTextFromNode(child)
+          const text = elementText(child)
           if (text) {
             addUnit(units, text, `list.${index}`, context)
           }
@@ -265,36 +224,30 @@ function extractFromList(listNode, context, units) {
 }
 
 /**
- * Extract all text content from a node.
- * When a node has multiple text children with some carrying span marks
- * (e.g., `[text]{accent}`), wraps the marked spans in XLIFF-style
- * `<N>...</N>` tags so translators can reposition them.
+ * A block element's cleaned source text — the WHOLE-ELEMENT translation key.
+ * ALL inline marks (bold, italic, link, span, …) flatten into the text: link
+ * text stays INLINE (not split out), spans contribute their plain text (no
+ * `<N>` tags in the key). Inline atom nodes (image/icon/emoji/math/hardBreak)
+ * are skipped. Leading/trailing whitespace is trimmed; internal whitespace is
+ * preserved (the hash collapses it for matching — see hash.js normalizeText).
  */
-function extractTextFromNode(node) {
-  if (!node.content) return ''
-  const textChildren = node.content.filter(n => n.type === 'text')
+export function elementText(node) {
+  return collectInlineText(node).trim()
+}
 
-  // Check for mixed inline marks (span marks from `[text]{class}` syntax)
-  const hasInlineMarks = textChildren.length > 1 &&
-    textChildren.some(n => n.marks?.some(m => m.type === 'span'))
-
-  if (!hasInlineMarks) {
-    return textChildren.map(n => n.text || '').join('').trim()
-  }
-
-  // Wrap span-marked text in numbered tags
-  let markCounter = 0
-  const parts = []
-  for (const child of textChildren) {
-    const text = child.text || ''
-    if (child.marks?.some(m => m.type === 'span')) {
-      markCounter++
-      parts.push(`<${markCounter}>${text}</${markCounter}>`)
-    } else {
-      parts.push(text)
+function collectInlineText(node) {
+  if (!node || !node.content) return ''
+  let out = ''
+  for (const child of node.content) {
+    if (child.type === 'text') {
+      out += child.text || ''
+    } else if (child.content) {
+      // recurse through inline wrappers into their text
+      out += collectInlineText(child)
     }
+    // else: inline atom (image/icon/emoji/math/hardBreak) → contributes no text
   }
-  return parts.join('').trim()
+  return out
 }
 
 /**

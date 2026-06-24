@@ -157,7 +157,7 @@ describe('extractTranslatableContent', () => {
     expect(manifest.units[hash].field).toBe('paragraph')
   })
 
-  it('extracts link labels from content', () => {
+  it('keeps link text inline in its element (whole-element keying, no split)', () => {
     const siteContent = {
       config: { defaultLanguage: 'en' },
       pages: [{
@@ -168,13 +168,14 @@ describe('extractTranslatableContent', () => {
           content: {
             type: 'doc',
             content: [
+              // a link embedded in surrounding text — the whole paragraph is ONE unit
               {
                 type: 'paragraph',
-                content: [{
-                  type: 'text',
-                  text: 'Learn more',
-                  marks: [{ type: 'link', attrs: { href: '/about' } }]
-                }]
+                content: [
+                  { type: 'text', text: 'See ' },
+                  { type: 'text', text: 'our docs', marks: [{ type: 'link', attrs: { href: '/docs' } }] },
+                  { type: 'text', text: ' now.' }
+                ]
               }
             ]
           }
@@ -183,9 +184,15 @@ describe('extractTranslatableContent', () => {
     }
     const manifest = extractTranslatableContent(siteContent)
 
-    const hash = computeHash('Learn more')
+    // ONE unit, keyed by the whole element text with the link inline (no gap) —
+    // NOT a separate link.label unit plus a link-excluded "See  now." remainder.
+    const hash = computeHash('See our docs now.')
     expect(manifest.units[hash]).toBeDefined()
-    expect(manifest.units[hash].field).toBe('link.label')
+    expect(manifest.units[hash].source).toBe('See our docs now.')
+    expect(manifest.units[hash].field).toBe('paragraph')
+    // no split-out link unit, and no link-excluded "See now." remainder
+    expect(manifest.units[computeHash('our docs')]).toBeUndefined()
+    expect(manifest.units[computeHash('See now.')]).toBeUndefined()
   })
 
   it('handles nested subsections', () => {

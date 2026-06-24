@@ -12,8 +12,24 @@
  * when no free-form translation exists.
  */
 
-import { computeHash, stripInlineTags, parseInlineTags } from './hash.js'
+import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
+import { elementText } from './extract.js'
+
+// Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
+// translation VALUE (which carries marks/links/icons as inline markdown). Same
+// lazy-import-with-fallback pattern as freeform.js / collection-processor.js, so
+// the synchronous merge path has the converter ready at call time.
+let markdownToProseMirror
+try {
+  const contentReader = await import('@uniweb/content-reader')
+  markdownToProseMirror = contentReader.markdownToProseMirror
+} catch {
+  markdownToProseMirror = (markdown) => ({
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: markdown.trim() }] }]
+  })
+}
 
 /**
  * Merge translations into site content for a specific locale
@@ -253,100 +269,65 @@ async function translateSectionAsync(section, page, translations, options) {
 }
 
 /**
- * Translate text nodes in a ProseMirror document
+ * Resolve a ProseMirror content doc for a target locale: replace each block
+ * element's inline content with its translation, looked up by the WHOLE-ELEMENT
+ * key (shared with extract.js via elementText, so the two never drift). A
+ * missing translation leaves the source element untouched (graceful per-element
+ * fallback). The translation VALUE is inline markdown — it carries marks, inline
+ * links (with their own, possibly re-targeted, href) and inline atoms — so this
+ * is lossless for emphasis/links, unlike the former plain-string substitution.
  */
 function translateProseMirrorDoc(doc, context, translations, fallbackToSource) {
   if (!doc.content) return
-
   for (const node of doc.content) {
-    translateNode(node, context, translations, fallbackToSource)
+    translateBlock(node, context, translations, fallbackToSource)
   }
 }
 
-/**
- * Recursively translate a node and its children.
- * For nodes with mixed marked/unmarked text children (inline span marks),
- * translates the node as a whole unit using XLIFF-style inline tags,
- * then rebuilds children with original marks re-applied.
- */
-function translateNode(node, context, translations, fallbackToSource) {
-  if (!node.content) return
-
-  // Check for inline span marks across multiple text children
-  const textChildren = node.content.filter(n => n.type === 'text')
-  const hasInlineMarks = textChildren.length > 1 &&
-    textChildren.some(n => n.marks?.some(m => m.type === 'span'))
-
-  if (hasInlineMarks) {
-    // Build tagged source string (mirrors extraction)
-    let markCounter = 0
-    const markMap = [] // tag index → original marks array
-    const parts = []
-    for (const child of textChildren) {
-      const text = child.text || ''
-      if (child.marks?.some(m => m.type === 'span')) {
-        markCounter++
-        markMap.push(child.marks)
-        parts.push(`<${markCounter}>${text}</${markCounter}>`)
-      } else {
-        parts.push(text)
-      }
-    }
-    const plainSource = stripInlineTags(parts.join('').trim())
-
-    const translated = lookupTranslation(plainSource, context, translations, fallbackToSource)
-    if (translated !== plainSource) {
-      // Parse tagged translation and rebuild text children
-      const { segments } = parseInlineTags(translated)
-      const newTextChildren = segments.map(seg => {
-        if (seg.markIndex !== undefined && markMap[seg.markIndex]) {
-          return { type: 'text', text: seg.text, marks: [...markMap[seg.markIndex]] }
-        }
-        return { type: 'text', text: seg.text }
-      })
-
-      // Replace text children in content, preserve non-text children in place
-      const result = []
-      let textInserted = false
-      for (const child of node.content) {
-        if (child.type === 'text') {
-          if (!textInserted) {
-            result.push(...newTextChildren)
-            textInserted = true
+// Mirror extract.js's element coverage exactly (heading, paragraph, and each
+// list item's paragraph) so every extracted key has a resolver and vice versa.
+function translateBlock(node, context, translations, fallbackToSource) {
+  if (!node) return
+  if (node.type === 'heading' || node.type === 'paragraph') {
+    applyElementTranslation(node, context, translations, fallbackToSource)
+  } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+    for (const listItem of node.content || []) {
+      if (listItem.type === 'listItem' && listItem.content) {
+        for (const child of listItem.content) {
+          if (child.type === 'paragraph') {
+            applyElementTranslation(child, context, translations, fallbackToSource)
           }
-          // Skip remaining old text children
-        } else {
-          result.push(child)
         }
       }
-      node.content = result
-    }
-
-    // Recurse into non-text children
-    for (const child of node.content) {
-      if (child.type !== 'text') {
-        translateNode(child, context, translations, fallbackToSource)
-      }
-    }
-    return
-  }
-
-  // Default: translate each child individually
-  for (const child of node.content) {
-    if (child.type === 'text' && child.text) {
-      const translated = lookupTranslation(
-        child.text,
-        context,
-        translations,
-        fallbackToSource
-      )
-      if (translated !== child.text) {
-        child.text = translated
-      }
-    } else {
-      translateNode(child, context, translations, fallbackToSource)
     }
   }
+}
+
+// Replace one block element's inline content with the parsed translation
+// fragment. `lookupTranslation` with the already-trimmed key adds no surrounding
+// whitespace and returns the source on a miss, so `value === key` means
+// "no translation" → leave the element as-is.
+function applyElementTranslation(node, context, translations, fallbackToSource) {
+  const key = elementText(node)
+  if (!key) return
+  const value = lookupTranslation(key, context, translations, fallbackToSource)
+  if (value === key) return
+  const fragment = inlineMarkdownToFragment(value)
+  if (fragment && fragment.length) node.content = fragment
+}
+
+// Parse an inline-markdown translation value into a ProseMirror inline fragment.
+// A value is expected to be one element's inline content (one paragraph once
+// parsed); take that paragraph's inline children. If the converter yields
+// several blocks, flatten their inline content rather than drop any.
+function inlineMarkdownToFragment(value) {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  const doc = markdownToProseMirror(value)
+  const inline = []
+  for (const block of doc?.content || []) {
+    if (Array.isArray(block.content)) inline.push(...block.content)
+  }
+  return inline.length ? inline : [{ type: 'text', text: value.trim() }]
 }
 
 /**

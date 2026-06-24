@@ -1,0 +1,61 @@
+{
+  "description": "Conformance vectors for the i18n structural translation-map KEYING (whole-element model). The framework's extractor is correct iff, for each case's `doc`, the set of translation-unit keys it emits equals `expectedKeys`. Pinning the keying keeps translation units stable across releases and across any independent implementation of the same rules. Authority: src/i18n/extract.js (elementText / extractFromProseMirrorDoc).",
+  "model_note": "WHOLE-ELEMENT keys. One translatable unit per block element; links stay INLINE (NOT split into a separate key). The map VALUE (out of scope for this fixture — it tests keys only) is the translated inline content; the framework serializes it as inline markdown in locales/*.json.",
+  "key_rules": {
+    "input": "Keys derive from the ProseMirror doc JSON directly. Node names: heading/paragraph/bulletList/orderedList/listItem/text; marks: link/bold/italic/strike/code/highlight/textStyle/span.",
+    "key": "An element's cleaned source text: trim leading/trailing, KEEP internal whitespace verbatim. ALL inline marks (incl. links) flatten into the text; inline atom nodes (icon/emoji/math) are skipped. Not a hash (the hash is only the file-side join key).",
+    "links": "Links are NOT split out — link text stays inline in its element's key (whole-element keying). This applies uniformly to paragraphs AND list items (vectors E and H).",
+    "dedup": "Keys that normalize-equal (trim + collapse internal whitespace) collapse to one entry; first occurrence's spelling wins.",
+    "ordering": "Document walk order. Compare as a set if your producer orders differently."
+  },
+  "cases": [
+    {
+      "id": "A",
+      "rule": "plain heading -> its text",
+      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Our Mission" } ] } ] },
+      "expectedKeys": ["Our Mission"]
+    },
+    {
+      "id": "B",
+      "rule": "leading/trailing whitespace is trimmed",
+      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "  Welcome  " } ] } ] },
+      "expectedKeys": ["Welcome"]
+    },
+    {
+      "id": "C",
+      "rule": "plain paragraph -> its text",
+      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "We build tools." } ] } ] },
+      "expectedKeys": ["We build tools."]
+    },
+    {
+      "id": "D",
+      "rule": "bold/italic inside a paragraph flatten (no marks in the key)",
+      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "We build " }, { "type": "text", "text": "great", "marks": [ { "type": "bold" } ] }, { "type": "text", "text": " tools." } ] } ] },
+      "expectedKeys": ["We build great tools."]
+    },
+    {
+      "id": "E",
+      "rule": "link in a paragraph stays INLINE (whole-element) -> ONE key including the link text, no split, no gap",
+      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "See " }, { "type": "text", "text": "our docs", "marks": [ { "type": "link", "attrs": { "href": "/docs" } } ] }, { "type": "text", "text": " now." } ] } ] },
+      "expectedKeys": ["See our docs now."]
+    },
+    {
+      "id": "F",
+      "rule": "span marks are stripped from the key",
+      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Plain " }, { "type": "text", "text": "Accent", "marks": [ { "type": "span", "attrs": { "class": "accent" } } ] }, { "type": "text", "text": " tail" } ] } ] },
+      "expectedKeys": ["Plain Accent tail"]
+    },
+    {
+      "id": "G",
+      "rule": "one key per list item",
+      "doc": { "type": "doc", "content": [ { "type": "bulletList", "content": [ { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "First item" } ] } ] }, { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "Second item" } ] } ] } ] } ] },
+      "expectedKeys": ["First item", "Second item"]
+    },
+    {
+      "id": "H",
+      "rule": "link inside a list item stays inline too (same whole-element rule as E) -> one key including the link text",
+      "doc": { "type": "doc", "content": [ { "type": "bulletList", "content": [ { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "See " }, { "type": "text", "text": "docs", "marks": [ { "type": "link", "attrs": { "href": "/d" } } ] } ] } ] } ] } ] },
+      "expectedKeys": ["See docs"]
+    }
+  ]
+}
