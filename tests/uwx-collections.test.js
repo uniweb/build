@@ -365,7 +365,7 @@ describe('collectionRecordsToEntities — markdown body → prosemirror content 
     expect(JSON.stringify(body)).toContain('Hello world')
   })
 
-  it('wraps per-locale (source doc + structural map) from translations', () => {
+  it('wraps per-locale as a self-contained doc (resolved from translations)', () => {
     const { entities } = collectionRecordsToEntities({
       collectionName: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
@@ -374,7 +374,11 @@ describe('collectionRecordsToEntities — markdown body → prosemirror content 
     })
     const body = entities[0].document.article.body
     expect(body.en.type).toBe('doc') // source doc
-    expect(body.es).toEqual({ 'Hello world': 'Hola mundo' }) // structural map (same as a section)
+    // es is a self-contained per-locale DOC, not a {src:tgt} map — dynamic delivery
+    // ships content[locale] verbatim and cannot resolve a map. (Same as a section.)
+    expect(body.es.type).toBe('doc')
+    expect(JSON.stringify(body.es)).toContain('Hola mundo')
+    expect(JSON.stringify(body.es)).not.toContain('Hello world')
   })
 })
 

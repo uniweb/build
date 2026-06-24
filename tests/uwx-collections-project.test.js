@@ -225,7 +225,12 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
   }
   const pmResolve = (name) => (name === '@acme/pmarticle' ? pmDecl : null)
   const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi there' }] }] }
-  const ffDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto' }] }] }
+  // A genuine free-form override DIVERGES structurally from the source (two paragraphs
+  // vs one) — a structurally congruent body is recovered as a structural map instead.
+  const ffDoc = { type: 'doc', content: [
+    { type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto uno' }] },
+    { type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto dos' }] },
+  ] }
 
   it('writes a target-locale full-doc body to locales/freeform/{locale}/collections/', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')

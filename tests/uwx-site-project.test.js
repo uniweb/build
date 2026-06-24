@@ -606,7 +606,13 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
 
   it('writes a target-locale free-form body override to locales/freeform/', () => {
     const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi' }] }] }
-    const ffDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto' }] }] }
+    // A genuine free-form override DIVERGES structurally from the source (here two
+    // paragraphs vs the source's one). A structurally congruent body would instead be
+    // recovered as a structural map (whole-element keying) — see unwrapLocalizedContent.
+    const ffDoc = { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto uno' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto dos' }] },
+    ] }
     const report = siteContentDocumentToProject({
       document: {
         info: { name: { en: 'S' }, foundation: '@a/base' },
@@ -617,7 +623,7 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
     expect(readFileSync(join(dir, 'pages/home/hero.md'), 'utf8')).toContain('Hi') // source body still written
     const ff = join(dir, 'locales/freeform/es/page-ids/home/hero.md')
     expect(report.freeform.written).toContain(ff)
-    expect(readFileSync(ff, 'utf8')).toContain('Hola distinto')
+    expect(readFileSync(ff, 'utf8')).toContain('Hola distinto uno')
   })
 })
 
@@ -707,7 +713,7 @@ describe('localized keywords array: producer ⇄ projector (B-2)', () => {
 })
 
 describe('localized content body round-trip: producer ⇄ projector (B)', () => {
-  it('round-trips a multi-locale section content body via the structural map', async () => {
+  it('round-trips a multi-locale section content body via a self-contained per-locale doc', async () => {
     const src = join(dir, 'src')
     mkdirSync(join(src, 'pages/home'), { recursive: true })
     mkdirSync(join(src, 'locales'), { recursive: true })
@@ -716,11 +722,13 @@ describe('localized content body round-trip: producer ⇄ projector (B)', () => 
     writeFileSync(join(src, 'pages/home/hero.md'), '---\ntype: Hero\n---\n\nHello world\n')
     writeFileSync(join(src, 'locales/es.json'), JSON.stringify({ [computeHash('Hello world')]: 'Hola mundo' }))
 
-    // Producer wraps the content: source doc + an es structural map from locales/es.json.
+    // Producer wraps the content: source doc + a self-contained es DOC resolved from
+    // locales/es.json (the structural map lives on disk, never on the wire).
     const doc1 = await siteProjectToDocument(src)
     const hero1 = doc1.pages.find((p) => p.$id === 'home').page_sections.find((s) => s.stable_id === 'hero')
     expect(hero1.content.en.type).toBe('doc')
-    expect(hero1.content.es).toEqual({ 'Hello world': 'Hola mundo' })
+    expect(hero1.content.es.type).toBe('doc')
+    expect(JSON.stringify(hero1.content.es)).toContain('Hola mundo')
 
     // Project, then re-produce — the whole document is a fixed point.
     const dest = join(dir, 'dest')
@@ -742,21 +750,22 @@ describe('free-form body localization round-trip: producer ⇄ projector (B)', (
     writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\nlanguages: [en, es]\n")
     writeFileSync(join(src, 'pages/home/page.yml'), 'id: home\nindex: true\nsections: [hero]\n')
     writeFileSync(join(src, 'pages/home/hero.md'), '---\ntype: Hero\n---\n\nSource body\n')
-    // A free-form override (a full per-locale body, not a structural map).
-    writeFileSync(join(src, 'locales/freeform/es/page-ids/home/hero.md'), 'Cuerpo libre distinto\n')
+    // A free-form override that DIVERGES structurally from the source (two paragraphs
+    // vs one) — so it stays free-form rather than being recovered as a structural map.
+    writeFileSync(join(src, 'locales/freeform/es/page-ids/home/hero.md'), 'Cuerpo libre uno\n\nCuerpo libre dos\n')
 
     // Producer: the es value is the free-form DOC (not a {src:tgt} map).
     const doc1 = await siteProjectToDocument(src)
     const hero1 = doc1.pages.find((p) => p.$id === 'home').page_sections.find((s) => s.stable_id === 'hero')
     expect(hero1.content.en.type).toBe('doc')
     expect(hero1.content.es.type).toBe('doc') // a full body, not a map
-    expect(JSON.stringify(hero1.content.es)).toContain('Cuerpo libre distinto')
+    expect(JSON.stringify(hero1.content.es)).toContain('Cuerpo libre uno')
 
     // Project, then re-produce — fixed point, and the override file is written back.
     const dest = join(dir, 'dest')
     mkdirSync(dest, { recursive: true })
     siteContentDocumentToProject({ document: doc1, siteRoot: dest })
-    expect(readFileSync(join(dest, 'locales/freeform/es/page-ids/home/hero.md'), 'utf8')).toContain('Cuerpo libre distinto')
+    expect(readFileSync(join(dest, 'locales/freeform/es/page-ids/home/hero.md'), 'utf8')).toContain('Cuerpo libre uno')
     const doc2 = await siteProjectToDocument(dest)
     expect(doc2).toEqual(doc1)
   })
@@ -1039,7 +1048,11 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
     // The site `name` is an identity label → plain string; content scalars stay localized.
     expect(doc1.info.name).toBe('Atlas')
     const hero = doc1.pages[0].page_sections.find((s) => s.stable_id === 'hero')
-    expect(hero.content.es).toEqual({ Welcome: 'Bienvenido' })
-    expect(doc1.layout_sections[0].content.es).toEqual({ Nav: 'Navegacion' })
+    // produced es value is a self-contained DOC (not a map): dynamic delivery ships
+    // content[locale] verbatim; the structural map lives only in locales/es.json.
+    expect(hero.content.es.type).toBe('doc')
+    expect(JSON.stringify(hero.content.es)).toContain('Bienvenido')
+    expect(doc1.layout_sections[0].content.es.type).toBe('doc')
+    expect(JSON.stringify(doc1.layout_sections[0].content.es)).toContain('Navegacion')
   })
 })

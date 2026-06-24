@@ -251,6 +251,32 @@ function collectInlineText(node) {
 }
 
 /**
+ * The translatable block elements of a content doc, in document order, with the
+ * SAME coverage as extraction above (headings, paragraphs, and each list item's
+ * paragraphs). Shared by the merge resolver (push) and the pull-side
+ * structural-map derivation so all paths walk identically and keys never drift.
+ * Returns the element nodes themselves — callers read `.type`/`.content` and key
+ * them via elementText.
+ */
+export function blockElements(doc) {
+  const out = []
+  for (const node of doc?.content || []) {
+    if (node.type === 'heading' || node.type === 'paragraph') {
+      out.push(node)
+    } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+      for (const listItem of node.content || []) {
+        if (listItem.type === 'listItem' && listItem.content) {
+          for (const child of listItem.content) {
+            if (child.type === 'paragraph') out.push(child)
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+/**
  * Add a translation unit to the accumulator
  */
 function addUnit(units, source, field, context) {

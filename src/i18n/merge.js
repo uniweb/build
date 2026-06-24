@@ -14,7 +14,7 @@
 
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
-import { elementText } from './extract.js'
+import { elementText, blockElements } from './extract.js'
 
 // Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
 // translation VALUE (which carries marks/links/icons as inline markdown). Same
@@ -278,42 +278,44 @@ async function translateSectionAsync(section, page, translations, options) {
  * is lossless for emphasis/links, unlike the former plain-string substitution.
  */
 function translateProseMirrorDoc(doc, context, translations, fallbackToSource) {
-  if (!doc.content) return
-  for (const node of doc.content) {
-    translateBlock(node, context, translations, fallbackToSource)
+  let changed = false
+  for (const el of blockElements(doc)) {
+    if (applyElementTranslation(el, context, translations, fallbackToSource)) changed = true
   }
-}
-
-// Mirror extract.js's element coverage exactly (heading, paragraph, and each
-// list item's paragraph) so every extracted key has a resolver and vice versa.
-function translateBlock(node, context, translations, fallbackToSource) {
-  if (!node) return
-  if (node.type === 'heading' || node.type === 'paragraph') {
-    applyElementTranslation(node, context, translations, fallbackToSource)
-  } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-    for (const listItem of node.content || []) {
-      if (listItem.type === 'listItem' && listItem.content) {
-        for (const child of listItem.content) {
-          if (child.type === 'paragraph') {
-            applyElementTranslation(child, context, translations, fallbackToSource)
-          }
-        }
-      }
-    }
-  }
+  return changed
 }
 
 // Replace one block element's inline content with the parsed translation
 // fragment. `lookupTranslation` with the already-trimmed key adds no surrounding
 // whitespace and returns the source on a miss, so `value === key` means
-// "no translation" → leave the element as-is.
+// "no translation" → leave the element as-is. Returns true if it replaced.
 function applyElementTranslation(node, context, translations, fallbackToSource) {
   const key = elementText(node)
-  if (!key) return
+  if (!key) return false
   const value = lookupTranslation(key, context, translations, fallbackToSource)
-  if (value === key) return
+  if (value === key) return false
   const fragment = inlineMarkdownToFragment(value)
-  if (fragment && fragment.length) node.content = fragment
+  if (fragment && fragment.length) {
+    node.content = fragment
+    return true
+  }
+  return false
+}
+
+/**
+ * Resolve ONE ProseMirror content doc for a single target locale: a deep clone of
+ * the source doc with each whole-element translated (inline content replaced from
+ * the table's inline-markdown value). `table` is `{ hash: value }` for that locale.
+ * Returns the resolved doc, or null when the table translated nothing in this doc
+ * (so the caller can omit an untranslated locale — it falls back to the source
+ * locale). Lets the sync producer emit a self-contained per-locale DOC instead of a
+ * source-keyed map (which a consumer would otherwise resolve against the source).
+ */
+export function resolveDocForLocale(sourceDoc, table, context = { page: '', section: '' }) {
+  if (!sourceDoc || sourceDoc.type !== 'doc' || !table) return null
+  const doc = JSON.parse(JSON.stringify(sourceDoc))
+  const changed = translateProseMirrorDoc(doc, context, table, true)
+  return changed ? doc : null
 }
 
 // Parse an inline-markdown translation value into a ProseMirror inline fragment.

@@ -18,9 +18,10 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { proseMirrorToMarkdown } from '@uniweb/content-writer'
-import { computeHash, stripInlineTags } from '../i18n/hash.js'
-import { extractUnitsFromDoc } from '../i18n/extract.js'
+import { proseMirrorToMarkdown, serializeInlineContent } from '@uniweb/content-writer'
+import { computeHash } from '../i18n/hash.js'
+import { blockElements, elementText } from '../i18n/extract.js'
+import { resolveDocForLocale } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
 
 const FREEFORM_MANIFEST = '.manifest.json'
@@ -99,14 +100,18 @@ export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
 
 /**
  * Wrap a section's source-locale content DOC into its localized `content` form: the
- * source locale stays the doc; each target locale becomes a structural
- * `{ source-text: target }` map built from the doc's translatable units joined with
- * `locales/{locale}.json`. The map is keyed by the cleaned (inline-tag-stripped)
- * source text, so the projector's `computeHash(key)` matches the unit hash —
- * closing the round trip. Reuses the i18n extractor (extractUnitsFromDoc).
+ * source locale stays the doc, and EACH TARGET LOCALE BECOMES A SELF-CONTAINED DOC
+ * (not a structural map) — resolved from the doc's source structure joined with
+ * `locales/{locale}.json` via the merge resolver. A self-contained doc is the
+ * portable, renderer-ready form — a source-keyed map is an authoring representation
+ * that must be resolved against the source before it can be rendered; the structural
+ * map lives only on disk (`locales/{locale}.json`) and is recovered on pull (see
+ * unwrapLocalizedContent).
  *
  * Returns the bare doc unchanged when there are no target locales / no translations
- * for any of them (single-locale and pre-localization sites are untouched).
+ * for any of them (single-locale and pre-localization sites are untouched). A
+ * target locale with no translation for THIS doc is omitted (it falls back to the
+ * source locale), so the payload stays lean.
  *
  * @param {object} doc - the source-locale ProseMirror content doc
  * @param {string} sourceLocale
@@ -117,17 +122,12 @@ export function localizeContentDoc(doc, sourceLocale, targetLocales, translation
   if (!isProseMirrorDoc(doc) || !targetLocales || targetLocales.length === 0 || !translations) {
     return doc
   }
-  const units = extractUnitsFromDoc(doc)
   const result = { [sourceLocale]: doc }
   for (const locale of targetLocales) {
     const table = translations[locale]
     if (!table) continue
-    const map = {}
-    for (const [hash, unit] of Object.entries(units)) {
-      const tgt = table[hash]
-      if (typeof tgt === 'string') map[stripInlineTags(unit.source)] = tgt
-    }
-    if (Object.keys(map).length > 0) result[locale] = map
+    const resolved = resolveDocForLocale(doc, table)
+    if (resolved) result[locale] = resolved
   }
   // Only wrap when at least one target carried a translation — else stay a bare doc.
   return Object.keys(result).length > 1 ? result : doc
@@ -236,19 +236,65 @@ export function createTranslationCollector(sourceLocale) {
 }
 
 /**
+ * Derive a structural `{ source-text: target-inline-markdown }` map from a
+ * (source doc, target doc) pair — the inverse of resolveDocForLocale, used on pull
+ * to recover the compact `locales/{locale}.json` surface from the DOC the wire now
+ * carries. Returns the map when the target is structurally CONGRUENT with the
+ * source (same sequence of block elements by type) so it round-trips losslessly;
+ * returns null when the target diverges (the caller stores it as a free-form body
+ * instead). An element whose inline markdown is identical to the source is
+ * untranslated and omitted. The value is the target element's inline content as
+ * inline markdown (serializeInlineContent), so emphasis, inline icons, and
+ * per-locale link hrefs survive. Keyed by the source element's cleaned text, so
+ * `computeHash(key)` matches the extractor's unit hash — closing the round trip.
+ */
+function deriveStructuralMap(sourceDoc, targetDoc) {
+  if (!isProseMirrorDoc(sourceDoc) || !isProseMirrorDoc(targetDoc)) return null
+  const src = blockElements(sourceDoc)
+  const tgt = blockElements(targetDoc)
+  if (src.length !== tgt.length) return null // structurally divergent → free-form
+  const map = {}
+  try {
+    for (let i = 0; i < src.length; i++) {
+      if (src[i].type !== tgt[i].type) return null // divergent → free-form
+      const key = elementText(src[i])
+      if (!key) continue
+      const srcMd = serializeInlineContent(src[i].content || [])
+      const tgtMd = serializeInlineContent(tgt[i].content || [])
+      if (srcMd === tgtMd) continue // unchanged → untranslated → omit
+      map[key] = tgtMd
+    }
+  } catch {
+    // a mark we can't serialize → don't risk a lossy map; store as free-form
+    return null
+  }
+  return map
+}
+
+/**
  * Unwrap a (possibly localized) `content` field to the SOURCE-locale ProseMirror
- * doc for the `.md` body, capturing target locales into `collector`: a structural
- * `{ src: target }` map → hash entries; a free-form doc override → noted with its
- * freeform path (`freeformRelPath`, from buildFreeformPath) so it can be written to
- * `locales/freeform/{locale}/…`. A bare doc (no locale wrap) is returned unchanged.
+ * doc for the `.md` body, capturing target locales into `collector`. The wire now
+ * carries a self-contained DOC per target locale: a target structurally congruent
+ * with the source is recovered as a structural `locales/{locale}.json` map (via
+ * deriveStructuralMap); a divergent target is a free-form body override → noted
+ * with its freeform path (`freeformRelPath`, from buildFreeformPath). A structural
+ * map still on the wire (legacy / transition) passes through unchanged. The
+ * reserved `@` (and `$`-prefixed) key is opaque metadata — NEVER a locale. A bare
+ * doc (no locale wrap) is returned unchanged.
  */
 export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath) {
   if (!isLocalizedContent(content)) return content
   const source = content[sourceLocale]
   for (const [locale, value] of Object.entries(content)) {
     if (locale === sourceLocale) continue
-    if (isProseMirrorDoc(value)) collector?.noteFreeform?.(locale, value, source, freeformRelPath)
-    else collector?.addStructuralMap?.(locale, value)
+    if (locale === '@' || locale.startsWith('$')) continue // reserved metadata, not a locale
+    if (isProseMirrorDoc(value)) {
+      const map = deriveStructuralMap(source, value)
+      if (map) collector?.addStructuralMap?.(locale, map)
+      else collector?.noteFreeform?.(locale, value, source, freeformRelPath)
+    } else {
+      collector?.addStructuralMap?.(locale, value)
+    }
   }
   return source
 }
