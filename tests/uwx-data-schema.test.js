@@ -237,6 +237,15 @@ describe('toDataSchemaDeclaration — sections-form', () => {
     expect(decl.sections.outline).toMatchObject({ multiple: true, self_nesting: true })
   })
 
+  it('passes append_only through on a multi section (insert-only records)', () => {
+    const d = lower(
+      { sections: { activity: { kind: 'multi', append_only: true, fields: { event: { type: 'string' } } } } },
+      '@/x',
+      '@acme/log'
+    )
+    expect(d.sections.activity).toMatchObject({ multiple: true, append_only: true })
+  })
+
   it('infers + stamps the first single as brief when none is marked', () => {
     const d = lower(
       { sections: { a: { kind: 'multi', fields: { x: { type: 'string' } } }, b: { kind: 'single', fields: { y: { type: 'string' } } } } },

@@ -105,6 +105,14 @@ describe('validateAndNormalizeSchema — valid', () => {
     expect(out.sections.details.brief).toBe(true)
     expect(out.sections.comments.kind).toBe('multi')
   })
+
+  it('carries append_only on a multi section into the IR', () => {
+    const out = validateAndNormalizeSchema(
+      { sections: { activity: { kind: 'multi', append_only: true, fields: { event: { type: 'string' } } } } },
+      '@/log'
+    )
+    expect(out.sections.activity.append_only).toBe(true)
+  })
 })
 
 describe('validateAndNormalizeSchema — errors', () => {
@@ -136,6 +144,16 @@ describe('validateAndNormalizeSchema — errors', () => {
   })
   it('requires a target on a ref', () => {
     expect(bad({ fields: { x: { type: 'ref' } } })).toThrow(/ref field 'x' must name a target/)
+  })
+  it('rejects append_only on a non-multi section', () => {
+    expect(
+      bad({ sections: { a: { kind: 'single', append_only: true, fields: { x: { type: 'string' } } } } })
+    ).toThrow(/only a 'multi' section can be append-only/)
+  })
+  it('rejects a non-boolean append_only', () => {
+    expect(
+      bad({ sections: { a: { kind: 'multi', append_only: 'yes', fields: { x: { type: 'string' } } } } })
+    ).toThrow(/'append_only' must be a boolean/)
   })
   it('rejects array-style options (steers to enum)', () => {
     expect(bad({ fields: { x: { type: 'string', options: ['a', 'b'] } } })).toThrow(/use 'enum:'/)

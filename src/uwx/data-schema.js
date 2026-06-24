@@ -135,14 +135,15 @@ function lowerSectionsForm(sectionsMap, resolve, optResolve) {
 // Lower one section to its declaration body (the caller keys it by name; a nested
 // section gets a `type: section` marker prepended in lowerField). `kind: multi` →
 // `multiple: true`; `binder` is derived (no marker — it falls out of "all fields
-// are type: section"); `nestable` → `self_nesting`; authored cross-cutting
-// `constraints` pass through as a bare array. Leaves and nested sections share one
-// ordered `fields:` namespace.
+// are type: section"); `nestable` → `self_nesting`; `append_only` (insert-only
+// records) passes through; authored cross-cutting `constraints` pass through as a
+// bare array. Leaves and nested sections share one ordered `fields:` namespace.
 function lowerSection(def, resolve, optResolve) {
   const out = {}
   if ((def.kind || 'single') === 'multi') out.multiple = true
   if (def.brief === true) out.brief = true
   if (def.nestable) out.self_nesting = true
+  if (def.append_only) out.append_only = true
 
   const fields = {}
   for (const [key, rawField] of Object.entries(def.fields || {})) {

@@ -409,6 +409,21 @@ function normalizeSection(section, ref, path, briefState) {
     if (section.nestable) out.nestable = true
   }
 
+  // `append_only` — a multi whose records are insert-only: the backend accepts
+  // appends but refuses edits or deletes of existing items, so the section is
+  // tamper-evident (activity logs, submissions, audit trails). Carried into the IR
+  // verbatim for the submission lowering to emit as the model's `append_only`.
+  // Like `nestable`, only a `multi` section can be append-only.
+  if (section.append_only !== undefined) {
+    if (typeof section.append_only !== 'boolean') {
+      throw new Error(`Data schema '${ref}': section '${path}' 'append_only' must be a boolean.`)
+    }
+    if (section.append_only && kind !== 'multi') {
+      throw new Error(`Data schema '${ref}': section '${path}' is 'append_only: true' but kind '${kind}' — only a 'multi' section can be append-only.`)
+    }
+    if (section.append_only) out.append_only = true
+  }
+
   return out
 }
 
