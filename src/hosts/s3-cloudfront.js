@@ -74,8 +74,8 @@ const REDIRECTS_FILE    = '_redirects'
  * left it to be loaded by URL at runtime (linked).
  *
  * The user's site.yml `foundation:` declaration is the only thing that
- * controls this — `uniweb build` never auto-publishes (that's exclusive
- * to `uniweb deploy` against uniweb-edge), so the rule is:
+ * controls this — `uniweb build` never registers or ships foundation code,
+ * so the rule is purely the shape of the `foundation:` ref:
  *   - registry ref ('@ns/name@ver'), https:// URL, or { url } object → linked
  *   - everything else (file: ref, workspace path) → standalone
  */

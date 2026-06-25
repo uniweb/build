@@ -48,9 +48,14 @@ try {
  * @param {string} [params.scope] - org scope (`@acme` or `acme`) resolving `@/x` -> `@acme/x`.
  * @param {Object} [params.exporter] - `{ tool, version, instance }` for the envelope.
  * @param {string} [params.exportedAt] - ISO timestamp (default: now).
+ * @param {string} [params.digest] - the foundation's content digest (`sha256:…`),
+ *   computed by the CLI over what register ships (shipping-model.md §4.1). Rides
+ *   in the foundation-schema entity's `info.digest`; the backend stores it
+ *   OPAQUE and returns it on the foundation-latest read so `publish`/`status`
+ *   can detect "code changed since release" with no local state.
  * @returns {Object} the `.uwx` document (uwx/1; entities, names only, no uuids).
  */
-export function buildRegistryPackage({ schema, foundationDir, scope, exporter, exportedAt } = {}) {
+export function buildRegistryPackage({ schema, foundationDir, scope, exporter, exportedAt, digest } = {}) {
   const self = schema?._self
   if (!self || !self.name || !self.version) {
     throw new Error('buildRegistryPackage: schema._self with name + version is required')
@@ -65,7 +70,7 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
 
   const foundationEntity = {
     model: FOUNDATION_SCHEMA,
-    info: buildInfo(self, org),
+    info: buildInfo(self, org, digest),
     schema: buildSchemaBlob(schema),
     i18n: { locales: loadI18nLocales(foundationDir) },
     'data-schemas': { refs: buildRefs(dataSchemas, scoped) },
@@ -136,12 +141,15 @@ function wrapEntities(entities, exporter, exportedAt) {
 
 // --- foundation-schema content (names only) ----------------------------------
 
-// Identity card — decomposed so it's readable without opening the blob.
-function buildInfo(self, org) {
+// Identity card — decomposed so it's readable without opening the blob. The
+// optional `digest` (sha256:…) is the foundation's content fingerprint; the
+// backend stores it opaque and returns it on the foundation-latest read.
+function buildInfo(self, org, digest) {
   // Scope a bare foundation name (`src` -> `@acme/src`); leave an already-scoped name.
   const name = org && !String(self.name).startsWith('@') ? `@${org}/${self.name}` : self.name
   const info = { name, version: self.version, role: self.role || 'foundation' }
   if (self.description !== undefined) info.description = self.description
+  if (digest) info.digest = digest
   return info
 }
 

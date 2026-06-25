@@ -83,6 +83,16 @@ describe('buildRegistryPackage', () => {
     it('has an empty locales map when no i18n/ dir', () => {
       expect(f.i18n).toEqual({ locales: {} })
     })
+
+    it('omits info.digest when no digest is supplied', () => {
+      expect(f.info.digest).toBeUndefined()
+    })
+  })
+
+  it('threads a supplied content digest into the foundation-schema info', () => {
+    const withDigest = buildRegistryPackage({ schema: schemaJson(), digest: 'sha256:deadbeef' })
+    const fe = withDigest.entities.find((e) => e.model === '@uniweb/foundation-schema')
+    expect(fe.info.digest).toBe('sha256:deadbeef')
   })
 
   it('requires schema._self with name + version', () => {

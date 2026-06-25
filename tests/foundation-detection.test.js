@@ -41,14 +41,6 @@ describe('detectFoundationType', () => {
       expect(result.url).toContain('/foundations/uniweb/foo/0.1.2/foundation.js')
     })
 
-    test('~siteId/name@version resolves to type: url (site-bound URL convention)', () => {
-      const result = detectFoundationType('~abc123def456/foo@0.1.2', siteDir)
-      expect(result.type).toBe('url')
-      // Site-bound URL form preserves the sigil + canonical @-shape so the
-      // worker can dispatch to per-site storage.
-      expect(result.url).toContain('/foundations/~abc123def456/foo@0.1.2/foundation.js')
-    })
-
     test('object form with explicit url resolves to type: url', () => {
       const result = detectFoundationType({ url: 'https://x.example/f.js' }, siteDir)
       expect(result.type).toBe('url')
@@ -97,9 +89,18 @@ describe('detectFoundationType', () => {
       expect(fn).toThrow(/@uniweb\/foo@0\.1\.2/)
     })
 
-    test('~siteId/name (no version) with no resolution throws', () => {
+    // Site-bound `~`-prefixed refs are retired — uniwebd is cataloged-only
+    // (shipping-model.md §6.3). A `~` ref is no longer a recognized shape, so
+    // it falls through to the generic "did not resolve" rejection, whether
+    // versioned or not.
+    test('~siteId/name@version is rejected (site-bound retired)', () => {
+      expect(() => detectFoundationType('~abc123def456/foo@0.1.2', siteDir))
+        .toThrow(/did not resolve/)
+    })
+
+    test('~siteId/name (no version) is rejected (site-bound retired)', () => {
       expect(() => detectFoundationType('~abc123/foo', siteDir))
-        .toThrow(/did not resolve to a local source/)
+        .toThrow(/did not resolve/)
     })
   })
 
