@@ -62,6 +62,12 @@ describe('validateAndNormalizeSchema — valid', () => {
     expect(out.fields.prose).toEqual({ type: 'text', format: 'markdown' })
   })
 
+  it('`prose` is the rich-document alias → json + format: prosemirror', () => {
+    const out = validateAndNormalizeSchema({ fields: { body: 'prose', note: { type: 'prose' } } }, '@/x')
+    expect(out.fields.body).toEqual({ type: 'json', format: 'prosemirror' })
+    expect(out.fields.note).toEqual({ type: 'json', format: 'prosemirror' })
+  })
+
   it('accepts a bare type-string shorthand and inline enum', () => {
     const out = validateAndNormalizeSchema(
       { fields: { slug: 'string', currency: { type: 'string', enum: ['USD', 'EUR'] } } },

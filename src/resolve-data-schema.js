@@ -64,6 +64,11 @@ const FORMAT_TYPE_ALIASES = {
   email: { type: 'string', format: 'email' },
   markdown: { type: 'text', format: 'markdown' },
   html: { type: 'text', format: 'html' },
+  // `prose` → a ProseMirror rich document (`json` + `format: prosemirror`): the
+  // native, lossless form for content edited in the visual app — the common case.
+  // The intent-capturing alias for a rich body, vs `markdown`/`html` which are
+  // source strings (round-trip as raw text, no structured editor).
+  prose: { type: 'json', format: 'prosemirror' },
   // Deprecated back-compat alias: `richtext` was a kind before 2026-06-02; it is
   // now just sugar for the canonical `text` + `format: markdown`. Not a kind, and
   // intentionally left out of the advertised set below.
@@ -71,7 +76,7 @@ const FORMAT_TYPE_ALIASES = {
 }
 // The advertised format-aliasing type words (drives the "Known types" hint).
 // `richtext` is accepted (above) but omitted here — no longer recommended.
-export const FORMAT_TYPES = new Set(['url', 'email', 'markdown', 'html'])
+export const FORMAT_TYPES = new Set(['url', 'email', 'markdown', 'html', 'prose'])
 export const SECTION_KINDS = new Set(['single', 'multi', 'binder'])
 
 // Scope → schema package resolution. The shared standard schemas are referenced
