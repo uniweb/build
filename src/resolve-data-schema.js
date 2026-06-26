@@ -57,26 +57,21 @@ const TYPE_ALIASES = {
 }
 // Friendly type aliases that lower to a base kind + a carried `format` marker.
 // `url`/`email` → `string` (server-validated value subtypes). `markdown`/`html` →
-// `text` (the file-based rich-content body — round-trips as the raw source string,
-// what the retired `richtext` kind used to be: 2026-06-02 / uwx-format.md).
+// `text` (a file-based rich-content body — round-trips as the raw source string).
 const FORMAT_TYPE_ALIASES = {
   url: { type: 'string', format: 'url' },
   email: { type: 'string', format: 'email' },
   markdown: { type: 'text', format: 'markdown' },
   html: { type: 'text', format: 'html' },
-  // `prose` → a ProseMirror rich document (`json` + `format: prosemirror`): the
-  // native, lossless form for content edited in the visual app — the common case.
-  // The intent-capturing alias for a rich body, vs `markdown`/`html` which are
-  // source strings (round-trip as raw text, no structured editor).
-  prose: { type: 'json', format: 'prosemirror' },
-  // Deprecated back-compat alias: `richtext` was a kind before 2026-06-02; it is
-  // now just sugar for the canonical `text` + `format: markdown`. Not a kind, and
-  // intentionally left out of the advertised set below.
-  richtext: { type: 'text', format: 'markdown' },
+  // `richtext` → a ProseMirror rich document (`json` + `format: prosemirror`): the
+  // framework's standard way to represent rich text — the structured, lossless form
+  // the visual app edits (text, media, tables, code, data blocks, icons, and inline
+  // components). Synced to file mode as enhanced markdown via content-writer. Contrast
+  // `markdown`/`html`, which are source-string bodies (raw text, no structured editor).
+  richtext: { type: 'json', format: 'prosemirror' },
 }
 // The advertised format-aliasing type words (drives the "Known types" hint).
-// `richtext` is accepted (above) but omitted here — no longer recommended.
-export const FORMAT_TYPES = new Set(['url', 'email', 'markdown', 'html', 'prose'])
+export const FORMAT_TYPES = new Set(['url', 'email', 'markdown', 'html', 'richtext'])
 export const SECTION_KINDS = new Set(['single', 'multi', 'binder'])
 
 // Scope → schema package resolution. The shared standard schemas are referenced
@@ -506,8 +501,8 @@ function normalizeField(field, ref, path) {
     if (field[k] !== undefined) out[k] = field[k]
   }
 
-  // Resolve the type: format-aliases (url/email → string; markdown/html/richtext →
-  // text) carry a `format` marker; else the plain alias map; else verbatim.
+  // Resolve the type: format-aliases (url/email → string; markdown/html → text;
+  // richtext → json) carry a `format` marker; else the plain alias map; else verbatim.
   const formatAlias = FORMAT_TYPE_ALIASES[rawType]
   if (formatAlias) {
     out.type = formatAlias.type

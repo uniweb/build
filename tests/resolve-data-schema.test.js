@@ -41,31 +41,31 @@ describe('validateAndNormalizeSchema — valid', () => {
     expect(out.fields.price.default).toBe(0)
   })
 
-  it('lowers the rich-content aliases (markdown/html) and the retired richtext to text + format', () => {
+  it('lowers the rich-content source aliases (markdown/html) to text + format', () => {
     const out = validateAndNormalizeSchema(
       {
         fields: {
           md: { type: 'markdown' },
           page: { type: 'html' },
-          // `richtext` is retired as a kind (2026-06-02) but kept as a back-compat
-          // alias → text + format: markdown (so pre-migration schemas still register).
-          legacy: { type: 'richtext' },
           // an explicit text + format passes through verbatim
-          prose: { type: 'text', format: 'markdown' },
+          explicit: { type: 'text', format: 'markdown' },
         },
       },
       '@/x'
     )
     expect(out.fields.md).toEqual({ type: 'text', format: 'markdown' })
     expect(out.fields.page).toEqual({ type: 'text', format: 'html' })
-    expect(out.fields.legacy).toEqual({ type: 'text', format: 'markdown' })
-    expect(out.fields.prose).toEqual({ type: 'text', format: 'markdown' })
+    expect(out.fields.explicit).toEqual({ type: 'text', format: 'markdown' })
   })
 
-  it('`prose` is the rich-document alias → json + format: prosemirror', () => {
-    const out = validateAndNormalizeSchema({ fields: { body: 'prose', note: { type: 'prose' } } }, '@/x')
+  it('`richtext` is the rich-document alias → json + format: prosemirror', () => {
+    const out = validateAndNormalizeSchema({ fields: { body: 'richtext', note: { type: 'richtext' } } }, '@/x')
     expect(out.fields.body).toEqual({ type: 'json', format: 'prosemirror' })
     expect(out.fields.note).toEqual({ type: 'json', format: 'prosemirror' })
+  })
+
+  it('drops the retired `prose` alias (unknown type)', () => {
+    expect(() => validateAndNormalizeSchema({ fields: { x: 'prose' } }, '@/x')).toThrow(/unknown type 'prose'/)
   })
 
   it('accepts a bare type-string shorthand and inline enum', () => {

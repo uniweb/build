@@ -56,7 +56,7 @@ describe('toDataSchemaDeclaration — fields-form (flat shorthand)', () => {
   })
 
   it('marks human text localized; not machine strings', () => {
-    expect(fields().title.localized).toBe(true) // prose
+    expect(fields().title.localized).toBe(true) // human text
     expect(fields().slug.localized).toBeUndefined() // translatable:false
     expect(fields().status.localized).toBeUndefined() // enum token
     expect(fields().site.localized).toBeUndefined() // url format

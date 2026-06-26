@@ -194,10 +194,12 @@ function lowerField(rawField, resolve, optResolve) {
     return out
   }
 
-  // A leaf (scalar) kind. `richtext` is retired (2026-06-02 / uwx-format.md): a
-  // leftover `richtext` in the IR (e.g. a foundation built before the migration)
-  // lowers to the file-based body shape — `text` + `format: markdown` — so the wire
-  // never carries the kind the backend now rejects.
+  // A leaf (scalar) kind. The `richtext` author word is now the advertised alias for
+  // a ProseMirror document (`json` + `format: prosemirror`), resolved upstream in
+  // resolve-data-schema.js — so normalized IR never carries a raw `richtext` kind.
+  // This defensive remap only catches a leftover RAW `richtext` kind from a
+  // pre-migration prebuilt schema.json (historically a markdown body): lower it to
+  // `text` + `format: markdown` so the wire never carries the kind the backend rejects.
   let leafType = type
   let leafFormat = field.format
   if (leafType === 'richtext') {
