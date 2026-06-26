@@ -194,18 +194,21 @@ function lowerField(rawField, resolve, optResolve) {
     return out
   }
 
-  // A leaf (scalar) kind. The `richtext` author word is now the advertised alias for
-  // a ProseMirror document (`json` + `format: prosemirror`), resolved upstream in
-  // resolve-data-schema.js — so normalized IR never carries a raw `richtext` kind.
-  // This defensive remap only catches a leftover RAW `richtext` kind from a
-  // pre-migration prebuilt schema.json (historically a markdown body): lower it to
-  // `text` + `format: markdown` so the wire never carries the kind the backend rejects.
-  let leafType = type
-  let leafFormat = field.format
-  if (leafType === 'richtext') {
-    leafType = 'text'
-    leafFormat = leafFormat ?? 'markdown'
+  // A leaf (scalar) kind. `richtext` is NOT a kind — it is the author alias for a
+  // ProseMirror document (`json` + `format: prosemirror`), normalized upstream in
+  // resolve-data-schema.js, so normalized IR never carries a raw `richtext` kind. The
+  // only way one could reach here is a STALE prebuilt schema.json (a foundation built
+  // before the 2026-06-02 kind retirement and loaded from dist/meta/schema.json without
+  // re-resolving). Fail locally — rebuild the foundation — rather than ship a kind the
+  // backend rejects.
+  if (type === 'richtext') {
+    throw new Error(
+      'This foundation carries the retired `richtext` kind in its built schema — ' +
+        'rebuild it (`richtext` is now json + format: prosemirror).'
+    )
   }
+  const leafType = type
+  const leafFormat = field.format
 
   const out = { type: leafType }
   if (field.label) out.label = field.label

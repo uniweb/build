@@ -261,4 +261,12 @@ describe('toDataSchemaDeclaration — guards', () => {
   it('requires a registry name', () => {
     expect(() => toDataSchemaDeclaration({ fields: {} })).toThrow(/registry name is required/)
   })
+
+  it('rejects a stale raw `richtext` kind (a pre-migration prebuilt schema needs a rebuild)', () => {
+    // `richtext` is the resolver alias for json + format: prosemirror; a raw `richtext`
+    // kind only survives in a stale prebuilt schema.json, which must be rebuilt.
+    expect(() =>
+      toDataSchemaDeclaration({ fields: { body: { type: 'richtext' } } }, { name: '@acme/x' })
+    ).toThrow(/richtext/)
+  })
 })
