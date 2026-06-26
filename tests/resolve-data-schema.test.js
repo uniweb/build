@@ -115,6 +115,82 @@ describe('validateAndNormalizeSchema — valid', () => {
   })
 })
 
+describe('validateAndNormalizeSchema — friendly cardinality sugar', () => {
+  it('a section is single by default; `many: true` makes it a list', () => {
+    const out = validateAndNormalizeSchema(
+      {
+        sections: {
+          identity: { brief: true, fields: { title: 'string' } },
+          modules: { many: true, fields: { title: 'string' } },
+        },
+      },
+      '@/course'
+    )
+    expect(out.sections.identity.kind).toBe('single')
+    expect(out.sections.identity.brief).toBe(true)
+    expect(out.sections.modules.kind).toBe('multi')
+  })
+
+  it('infers a binder from a section with only child sections (no fields)', () => {
+    const out = validateAndNormalizeSchema(
+      { sections: { contributions: { sections: { publications: { many: true, fields: { title: 'string' } } } } } },
+      '@/cv'
+    )
+    expect(out.sections.contributions.kind).toBe('binder')
+    expect(out.sections.contributions.sections.publications.kind).toBe('multi')
+  })
+
+  it('`{ ref }` infers a reference; `{ ref, many: true }` a list of refs', () => {
+    const out = validateAndNormalizeSchema(
+      {
+        fields: {
+          instructor: { ref: '@std/person' },
+          prerequisites: { ref: '@/course', many: true },
+        },
+      },
+      '@/course'
+    )
+    expect(out.fields.instructor).toEqual({ type: 'ref', ref: '@std/person' })
+    expect(out.fields.prerequisites).toEqual({ type: 'array', items: { type: 'ref', ref: '@/course' } })
+  })
+
+  it('`{ type, many: true }` is a list of scalars; `{ options }` infers a picklist value', () => {
+    const out = validateAndNormalizeSchema(
+      { fields: { tags: { type: 'string', many: true }, country: { options: '@/countries' } } },
+      '@/x'
+    )
+    expect(out.fields.tags).toEqual({ type: 'array', items: { type: 'string' } })
+    expect(out.fields.country).toEqual({ type: 'string', options: '@/countries' })
+  })
+
+  it('`many` lifts collection metadata (required) onto the array, type onto items', () => {
+    const out = validateAndNormalizeSchema(
+      { fields: { authors: { ref: '@/person', many: true, required: true } } },
+      '@/paper'
+    )
+    expect(out.fields.authors).toEqual({
+      type: 'array',
+      required: true,
+      items: { type: 'ref', ref: '@/person' },
+    })
+  })
+
+  it('`tree: true` on a `many` section → self-nesting (nestable IR)', () => {
+    const out = validateAndNormalizeSchema(
+      { sections: { outline: { many: true, tree: true, fields: { heading: 'string' } } } },
+      '@/doc'
+    )
+    expect(out.sections.outline.kind).toBe('multi')
+    expect(out.sections.outline.nestable).toBe(true)
+  })
+
+  it('rejects `tree` on a non-list section', () => {
+    expect(() =>
+      validateAndNormalizeSchema({ sections: { a: { tree: true, fields: { x: 'string' } } } }, '@/x')
+    ).toThrow(/only a 'many: true' section can form a tree/)
+  })
+})
+
 describe('validateAndNormalizeSchema — errors', () => {
   const bad = (schema, ref = '@/x') => () => validateAndNormalizeSchema(schema, ref)
 
@@ -148,7 +224,7 @@ describe('validateAndNormalizeSchema — errors', () => {
   it('rejects append_only on a non-multi section', () => {
     expect(
       bad({ sections: { a: { kind: 'single', append_only: true, fields: { x: { type: 'string' } } } } })
-    ).toThrow(/only a 'multi' section can be append-only/)
+    ).toThrow(/only a 'many: true' section can be append-only/)
   })
   it('rejects a non-boolean append_only', () => {
     expect(

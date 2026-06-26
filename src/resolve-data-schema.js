@@ -324,7 +324,7 @@ export function validateAndNormalizeSchema(schema, ref) {
   }
 
   const out = {}
-  for (const k of ['name', 'version', 'description', 'sortDate']) {
+  for (const k of ['name', 'version', 'description', 'sort_date', 'sortDate']) {
     if (schema[k] !== undefined) out[k] = schema[k]
   }
 
@@ -361,7 +361,18 @@ function normalizeSection(section, ref, path, briefState) {
   if (!section || typeof section !== 'object' || Array.isArray(section)) {
     throw new Error(`Data schema '${ref}': section '${path}' must be an object.`)
   }
-  const kind = section.kind ?? 'single'
+  if (section.many !== undefined && typeof section.many !== 'boolean') {
+    throw new Error(`Data schema '${ref}': section '${path}' 'many' must be a boolean.`)
+  }
+  // Cardinality. Friendly sugar: `many: true` → a list of records; a section with
+  // only child `sections:` (no `fields:`) is a binder — inferred, never written.
+  // Explicit `kind:` is still honored (the lower-level form it normalizes to).
+  let kind = section.kind
+  if (kind === undefined) {
+    if (section.many === true) kind = 'multi'
+    else if (section.fields === undefined && section.sections !== undefined) kind = 'binder'
+    else kind = 'single'
+  }
   if (!SECTION_KINDS.has(kind)) {
     throw new Error(`Data schema '${ref}': section '${path}' has invalid kind '${kind}' (expected single | multi | binder).`)
   }
@@ -369,7 +380,7 @@ function normalizeSection(section, ref, path, briefState) {
 
   if (section.brief === true) {
     if (kind !== 'single') {
-      throw new Error(`Data schema '${ref}': brief section '${path}' must be kind 'single', not '${kind}'.`)
+      throw new Error(`Data schema '${ref}': brief section '${path}' must be a single record (drop 'many').`)
     }
     if (++briefState.count > 1) {
       throw new Error(`Data schema '${ref}': more than one section marked 'brief: true' (at most one).`)
@@ -395,18 +406,19 @@ function normalizeSection(section, ref, path, briefState) {
   }
   if (section.constraints !== undefined) out.constraints = section.constraints
 
-  // `nestable` — a self-nesting multi whose items form a tree among themselves.
-  // Carried into the IR so the submission lowering can map it to the model's
-  // `self_nesting`. The item parent/child link is internal to the backend
-  // (`parent_item_id`); no explicit field expresses it.
-  if (section.nestable !== undefined) {
-    if (typeof section.nestable !== 'boolean') {
-      throw new Error(`Data schema '${ref}': section '${path}' 'nestable' must be a boolean.`)
+  // `tree: true` (friendly) / `nestable: true` (lower-level) — a list section whose
+  // records form a tree among themselves. Carried into the IR so the lowering maps
+  // it to the model's `self_nesting`. The parent/child link is internal to the
+  // backend (`parent_item_id`); no explicit field expresses it.
+  const treeFlag = section.tree ?? section.nestable
+  if (treeFlag !== undefined) {
+    if (typeof treeFlag !== 'boolean') {
+      throw new Error(`Data schema '${ref}': section '${path}' 'tree' must be a boolean.`)
     }
-    if (section.nestable && kind !== 'multi') {
-      throw new Error(`Data schema '${ref}': section '${path}' is 'nestable: true' but kind '${kind}' — only a 'multi' section can self-nest.`)
+    if (treeFlag && kind !== 'multi') {
+      throw new Error(`Data schema '${ref}': section '${path}' is 'tree: true' but not a list — only a 'many: true' section can form a tree.`)
     }
-    if (section.nestable) out.nestable = true
+    if (treeFlag) out.nestable = true
   }
 
   // `append_only` — a multi whose records are insert-only: the backend accepts
@@ -419,7 +431,7 @@ function normalizeSection(section, ref, path, briefState) {
       throw new Error(`Data schema '${ref}': section '${path}' 'append_only' must be a boolean.`)
     }
     if (section.append_only && kind !== 'multi') {
-      throw new Error(`Data schema '${ref}': section '${path}' is 'append_only: true' but kind '${kind}' — only a 'multi' section can be append-only.`)
+      throw new Error(`Data schema '${ref}': section '${path}' is 'append_only: true' but not a list — only a 'many: true' section can be append-only.`)
     }
     if (section.append_only) out.append_only = true
   }
@@ -444,6 +456,40 @@ function normalizeField(field, ref, path) {
   if (!field || typeof field !== 'object' || Array.isArray(field)) {
     throw new Error(`Data schema '${ref}': field '${path}' must be an object or a type string.`)
   }
+
+  // Sugar: `many: true` → a list. Wrap the field-minus-`many` as the array's item
+  // type (lowers to the canonical `multiple`). The common cases —
+  // `{ ref: '@/x', many: true }`, `{ type: string, many: true }` — read as "a list
+  // of X" with no `array`/`items` ceremony.
+  if (field.many !== undefined) {
+    if (typeof field.many !== 'boolean') {
+      throw new Error(`Data schema '${ref}': field '${path}' 'many' must be a boolean.`)
+    }
+    if (field.many) {
+      // Collection-level metadata (required, default, label, help, description)
+      // rides on the array; the type-bearing attributes describe each item.
+      const ITEM_KEYS = new Set(['type', 'ref', 'options', 'enum', 'fields', 'items', 'format'])
+      const out = { type: 'array' }
+      const item = {}
+      for (const [k, v] of Object.entries(field)) {
+        if (k === 'many') continue
+        if (ITEM_KEYS.has(k)) item[k] = v
+        else out[k] = v
+      }
+      out.items = normalizeField(item, ref, `${path}[]`)
+      return out
+    }
+    const { many, ...rest } = field // many: false → a single value
+    field = rest
+  }
+
+  // Sugar: infer `type` from `ref:`/`options:` when omitted — `{ ref: '@/x' }` is a
+  // reference; `{ options: '@/x' }` is a curated picklist value.
+  if (field.type === undefined) {
+    if (typeof field.ref === 'string') field = { ...field, type: 'ref' }
+    else if (typeof field.options === 'string') field = { ...field, type: 'string' }
+  }
+
   const rawType = field.type
   if (typeof rawType !== 'string') {
     throw new Error(`Data schema '${ref}': field '${path}' has no 'type'.`)
