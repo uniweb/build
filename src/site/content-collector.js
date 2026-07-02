@@ -296,7 +296,16 @@ const CONTENT_PROFILES = {
 }
 
 function getContentProfile(configFile) {
-  return CONTENT_PROFILES[configFile] || CONTENT_PROFILES['site.yml']
+  // Exact match first, then prefix-match the basename so alternate configs
+  // select the right profile: `document-book.yml` / `document-print.yml` →
+  // document profile, `site-staging.yml` → site profile. This lets a content
+  // dir hold several named configs (e.g. an article and a book cut of the
+  // same manuscript) without each one being misread as the site profile.
+  if (CONTENT_PROFILES[configFile]) return CONTENT_PROFILES[configFile]
+  const name = configFile ? configFile.split('/').pop() : ''
+  if (name.startsWith('document')) return CONTENT_PROFILES['document.yml']
+  if (name.startsWith('site')) return CONTENT_PROFILES['site.yml']
+  return CONTENT_PROFILES['site.yml']
 }
 
 /**
