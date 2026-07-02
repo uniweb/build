@@ -295,17 +295,18 @@ const CONTENT_PROFILES = {
   'document.yml': { contentDir: 'content', defaultMode: 'pages',    orderField: 'content' }
 }
 
+// Short profile aliases, so a caller that knows its own context can select
+// the profile explicitly (collectSiteContent's `profile` option) instead of
+// inferring it from the config filename. unipress — always a document tool —
+// uses this so an author can name a variant config anything (book.yml,
+// print.yml) without it being misread as a site.
+const PROFILE_ALIASES = {
+  document: CONTENT_PROFILES['document.yml'],
+  site: CONTENT_PROFILES['site.yml']
+}
+
 function getContentProfile(configFile) {
-  // Exact match first, then prefix-match the basename so alternate configs
-  // select the right profile: `document-book.yml` / `document-print.yml` →
-  // document profile, `site-staging.yml` → site profile. This lets a content
-  // dir hold several named configs (e.g. an article and a book cut of the
-  // same manuscript) without each one being misread as the site profile.
-  if (CONTENT_PROFILES[configFile]) return CONTENT_PROFILES[configFile]
-  const name = configFile ? configFile.split('/').pop() : ''
-  if (name.startsWith('document')) return CONTENT_PROFILES['document.yml']
-  if (name.startsWith('site')) return CONTENT_PROFILES['site.yml']
-  return CONTENT_PROFILES['site.yml']
+  return CONTENT_PROFILES[configFile] || CONTENT_PROFILES['site.yml']
 }
 
 /**
@@ -1983,17 +1984,18 @@ async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
  * @param {Object} options - Collection options
  * @param {string} options.foundationPath - Path to foundation directory (for theme vars)
  * @param {string} [options.configFile='site.yml'] - Name of the top-level config file inside sitePath. Defaults to 'site.yml'. Document tools (unipress) pass 'document.yml'.
+ * @param {'document'|'site'} [options.profile] - Explicit content profile, authoritative over the filename. Lets a tool that knows its context (unipress → 'document') read an arbitrarily named config with the right directory/mode/ordering. Falls back to the configFile-derived profile when omitted.
  * @returns {Promise<Object>} Site content object with assets manifest
  */
 export async function collectSiteContent(sitePath, options = {}) {
-  const { foundationPath, configFile = 'site.yml' } = options
+  const { foundationPath, configFile = 'site.yml', profile: profileName } = options
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
 
   // Profile selects workspace-root defaults: site.yml → pages/ + page mode +
   // pages: ordering; document.yml → content/ + folder mode + content: ordering.
-  const profile = getContentProfile(configFile)
+  const profile = (profileName && PROFILE_ALIASES[profileName]) || getContentProfile(configFile)
 
   // Resolve content paths from <config>.paths: group, defaulting per profile.
   // Backward compatibility: when the document profile's `content/` is missing
