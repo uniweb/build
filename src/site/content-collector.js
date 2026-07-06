@@ -1823,29 +1823,49 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
  * @param {string} foundationPath - Path to foundation directory
  * @returns {Promise<{ vars: Object, layoutNames: Set<string> }>}
  */
-async function loadFoundationInfo(foundationPath) {
+export async function loadFoundationInfo(foundationPath) {
   if (!foundationPath) return { vars: {}, layoutNames: new Set() }
 
   // Try dist/meta/schema.json first (built foundation), then root schema.json
   const distSchemaPath = join(foundationPath, 'dist', 'meta', 'schema.json')
   const rootSchemaPath = join(foundationPath, 'schema.json')
 
-  const schemaPath = existsSync(distSchemaPath) ? distSchemaPath : rootSchemaPath
+  const schemaPath = existsSync(distSchemaPath)
+    ? distSchemaPath
+    : existsSync(rootSchemaPath)
+      ? rootSchemaPath
+      : null
 
-  if (!existsSync(schemaPath)) {
-    return { vars: {}, layoutNames: new Set() }
+  if (schemaPath) {
+    try {
+      const schemaContent = await readFile(schemaPath, 'utf8')
+      const schema = JSON.parse(schemaContent)
+      // Foundation config is in _self, support both 'vars' (new) and 'themeVars' (legacy)
+      const vars = schema._self?.vars || schema._self?.themeVars || schema.themeVars || {}
+      // Layout names from _layouts (keys are layout component names)
+      const layoutNames = new Set(schema._layouts ? Object.keys(schema._layouts) : [])
+      return { vars, layoutNames }
+    } catch (err) {
+      console.warn('[content-collector] Failed to load foundation schema:', err.message)
+      // Fall through to the source-config fallback below.
+    }
   }
 
+  // No built schema.json — the normal state for `uniweb dev` on a bundled-mode
+  // site that was never built (dev doesn't build the foundation to dist/). Read
+  // the foundation's declared vars straight from its source config
+  // (main.js / foundation.js) so theme tokens like --section-padding-y are
+  // defined; without them, components using py-[var(--section-padding-y)] render
+  // with collapsed section spacing. Layouts aren't resolved from source (they
+  // need component discovery), but they aren't needed to build the theme CSS.
   try {
-    const schemaContent = await readFile(schemaPath, 'utf8')
-    const schema = JSON.parse(schemaContent)
-    // Foundation config is in _self, support both 'vars' (new) and 'themeVars' (legacy)
-    const vars = schema._self?.vars || schema._self?.themeVars || schema.themeVars || {}
-    // Layout names from _layouts (keys are layout component names)
-    const layoutNames = new Set(schema._layouts ? Object.keys(schema._layouts) : [])
-    return { vars, layoutNames }
+    const { resolveFoundationSrcPath } = await import('../utils/foundation-source-root.js')
+    const { loadFoundationConfig } = await import('../schema.js')
+    const srcDir = resolveFoundationSrcPath(foundationPath)
+    const config = await loadFoundationConfig(srcDir)
+    return { vars: config?.vars || {}, layoutNames: new Set() }
   } catch (err) {
-    console.warn('[content-collector] Failed to load foundation schema:', err.message)
+    console.warn('[content-collector] Failed to load foundation source config:', err.message)
     return { vars: {}, layoutNames: new Set() }
   }
 }
