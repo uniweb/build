@@ -95,7 +95,9 @@ export async function buildSiteData({
 
   // 1. Collect content (pages, sections, theme, config, assets manifest).
   //    No vite needed — collectSiteContent is a plain async function.
-  let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath })
+  //    dropUnpublished: link mode is always a published deploy — prune hidden
+  //    pages + their subtree so drafts never reach the served site.
+  let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true })
 
   // 2. Compile content collections (file-based markdown/yaml/json).
   //    `writeCollectionFiles` lands them under `<siteRoot>/public/data/`;

@@ -29,7 +29,7 @@ import { existsSync, statSync, realpathSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
-import { normalizeHideIn } from './nav-visibility.js'
+import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
 import { parseFetchConfig, singularize } from './data-fetcher.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 
@@ -1660,13 +1660,16 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       }
     }
 
-    // When pages: is strict (no '...'), hide unlisted direct children from navigation
+    // When pages: is strict (no '...'), suppress unlisted direct children from
+    // every nav area — but keep them ROUTED (strict is a nav filter, not a draft
+    // toggle). This is the nav axis (`hideIn: ['*']`), not the reachability axis
+    // (`hidden`), which would drop the page from the published output entirely.
     if (strictPageNamesFM) {
       for (const page of pages) {
         const childName = getDirectChildName(page.route, parentRoute)
           || (page.sourcePath ? getDirectChildName(page.sourcePath, parentRoute) : null)
-        if (childName && !strictPageNamesFM.has(childName) && !page.hidden) {
-          page.hidden = true
+        if (childName && !strictPageNamesFM.has(childName) && !page.hideIn?.includes('*')) {
+          page.hideIn = [...(page.hideIn || []), '*']
         }
       }
     }
@@ -1797,13 +1800,15 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     }
   }
 
-  // When pages: is strict (no '...'), hide unlisted direct children from navigation
+  // When pages: is strict (no '...'), suppress unlisted direct children from every
+  // nav area but keep them ROUTED — the nav axis (`hideIn: ['*']`), not the
+  // reachability axis (`hidden`), which would drop them from the published output.
   if (strictPageNames) {
     for (const page of pages) {
       const childName = getDirectChildName(page.route, parentRoute)
         || (page.sourcePath ? getDirectChildName(page.sourcePath, parentRoute) : null)
-      if (childName && !strictPageNames.has(childName) && !page.hidden) {
-        page.hidden = true
+      if (childName && !strictPageNames.has(childName) && !page.hideIn?.includes('*')) {
+        page.hideIn = [...(page.hideIn || []), '*']
       }
     }
   }
@@ -2008,7 +2013,7 @@ async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
  * @returns {Promise<Object>} Site content object with assets manifest
  */
 export async function collectSiteContent(sitePath, options = {}) {
-  const { foundationPath, configFile = 'site.yml', profile: profileName } = options
+  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false } = options
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
@@ -2205,7 +2210,9 @@ export async function collectSiteContent(sitePath, options = {}) {
       ...processedTheme,
       css: themeCSS
     },
-    pages,
+    // Reachability axis: on the published build paths, drop `hidden` pages and
+    // their whole subtree (cascade). Dev keeps them so drafts stay previewable.
+    pages: dropUnpublished ? dropUnpublishedPages(pages) : pages,
     // Layout area sets: { default: { header: page, footer: page, ... }, marketing: { ... } }
     layouts,
     notFound,

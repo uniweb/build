@@ -582,7 +582,9 @@ export function siteContentPlugin(options = {}) {
     async buildStart() {
       // Collect content at build start
       try {
-        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath })
+        // dropUnpublished only on a production build — in dev (serve) hidden
+        // pages stay in the graph so in-progress drafts remain previewable.
+        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, dropUnpublished: isProduction })
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
