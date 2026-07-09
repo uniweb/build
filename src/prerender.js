@@ -138,8 +138,19 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
  * @param {function} onProgress - Progress callback
  * @returns {Array} Expanded pages array with dynamic pages replaced by concrete instances
  */
-function expandDynamicPages(pages, pageFetchedData, onProgress) {
+export function expandDynamicPages(pages, pageFetchedData, onProgress) {
   const expandedPages = []
+
+  // Static pages win over the dynamic `[slug]` catch-all, matching the SPA's
+  // route resolution (Website.getPage checks exact static routes before the
+  // `:param` loop). Without this guard, a record whose param value collides
+  // with a static sibling's segment (e.g. slug:'about' + a static /blog/about)
+  // would emit a duplicate concrete route; the write loops are keyed on
+  // page.route and last-writer-wins, silently clobbering the static page's
+  // HTML. Collect the static routes up front so we can skip + warn on collision.
+  const staticRoutes = new Set(
+    pages.filter((p) => !p.isDynamic).map((p) => p.route)
+  )
 
   for (const page of pages) {
     if (!page.isDynamic) {
@@ -186,6 +197,13 @@ function expandDynamicPages(pages, pageFetchedData, onProgress) {
 
       // Create concrete route: /blog/:slug → /blog/my-post
       const concreteRoute = page.route.replace(`:${paramName}`, paramValue)
+
+      // Static sibling wins: skip a record whose concrete route collides with
+      // an existing static page rather than overwriting its HTML at write time.
+      if (staticRoutes.has(concreteRoute)) {
+        onProgress(`    Skipping ${concreteRoute} — a static page already claims this route (${paramName}:'${paramValue}')`)
+        continue
+      }
 
       // Deep clone the page with modifications
       const concretePage = JSON.parse(JSON.stringify(page))
