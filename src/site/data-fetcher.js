@@ -300,6 +300,9 @@ export function parseFetchConfig(fetch) {
       where: fetch.where,
       limit: fetch.limit,
       sort: fetch.sort,
+      // Canonical detail page for a list card's href (page:<stable_id> ref;
+      // resolved to a route template + interpolated per record at runtime).
+      detailPage: fetch.detailPage,
       // Legacy post-processing (deprecated, see warning above)
       filter: fetch.filter,
     }
@@ -313,6 +316,7 @@ export function parseFetchConfig(fetch) {
     merge = false,
     transform,
     detail,
+    detailPage,
     // Query operators
     where,
     limit,
@@ -334,6 +338,8 @@ export function parseFetchConfig(fetch) {
     merge,
     transform,
     detail,
+    // Canonical detail page for a list card's href (page:<stable_id>).
+    detailPage,
     // Query operators
     where,
     limit,
