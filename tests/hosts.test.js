@@ -248,6 +248,17 @@ describe('github-pages adapter', () => {
       expect(result.files[0].content).toContain("node-version: '22'")
     })
 
+    test('pins pnpm/action-setup to the supplied pnpm version', async () => {
+      // Non-default value (adapter default is the current major) proves the
+      // value threads through rather than falling back to the default.
+      const result = await adapter.initCi({
+        site: { name: 'my-site', path: 'site' },
+        packageManager: 'pnpm',
+        pnpmVersion: '10',
+      })
+      expect(result.files[0].content).toContain('version: 10')
+    })
+
     test('without --domain: includes auto-detect for <user>.github.io profile repos', async () => {
       const result = await adapter.initCi({
         site: { name: 'my-site', path: 'site' },

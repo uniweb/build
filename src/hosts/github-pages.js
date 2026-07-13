@@ -45,10 +45,13 @@ const adapter = {
     onProgress('Wrote .nojekyll (opts out of Jekyll on GitHub Pages)')
   },
 
-  async initCi({ site, packageManager = 'pnpm', nodeVersion = '20', domain = null }) {
+  // `pnpmVersion` is the pnpm major for the generated CI. The CLI passes the
+  // authoritative value (versions.js::PNPM_VERSION); the default here is only a
+  // fallback for direct/test callers.
+  async initCi({ site, packageManager = 'pnpm', nodeVersion = '20', pnpmVersion = '11', domain = null }) {
     const sitePath = site.path
     const workflowPath = `.github/workflows/deploy-github-pages.yml`
-    const yaml = renderWorkflow({ sitePath, packageManager, nodeVersion, domain })
+    const yaml = renderWorkflow({ sitePath, packageManager, nodeVersion, pnpmVersion, domain })
 
     const files = [{ path: workflowPath, content: yaml }]
     if (domain) {
@@ -91,12 +94,12 @@ const adapter = {
   },
 }
 
-function renderWorkflow({ sitePath, packageManager, nodeVersion, domain }) {
+function renderWorkflow({ sitePath, packageManager, nodeVersion, pnpmVersion, domain }) {
   const isPnpm = packageManager === 'pnpm'
   const setupSteps = isPnpm
     ? `      - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: ${pnpmVersion}
       - uses: actions/setup-node@v4
         with:
           node-version: '${nodeVersion}'
