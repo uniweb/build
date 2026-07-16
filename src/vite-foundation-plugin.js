@@ -341,6 +341,132 @@ async function emitFoundationVarsCss(outDir, schema) {
 }
 
 /**
+ * Externals for the SSR bundle (`dist/entry-ssr.js`).
+ *
+ * Same set the browser foundation build externalizes (DEFAULT_EXTERNALS in
+ * foundation/config.js — react/react-dom/react-dom-server/jsx-runtime/core),
+ * which the Cloudflare edge isolate resolves to the SHARED runtime's React/core
+ * (worker-runtime.js) via its shims — so React stays deduped and runtime patches
+ * still propagate without a foundation rebuild.
+ *
+ * PLUS the client-only libraries kit code-splits via dynamic import:
+ *   - shiki / shiki/bundle/full — syntax highlighting (kit Code renderer)
+ *   - fuse.js                   — client search index
+ * Both hydrate in the browser and never run during renderToString (CLAUDE.md
+ * gotcha #12). Keeping them external drops the ~10 MB Shiki language graph from
+ * the SSR bundle and leaves them as DORMANT dynamic imports the isolate never
+ * awaits — so no extra modules-map entry is needed for them edge-side.
+ */
+const SSR_DEFAULT_EXTERNALS = [
+  'react',
+  'react-dom',
+  'react-dom/server',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  '@uniweb/core',
+]
+
+function isSSRExternal(id) {
+  if (SSR_DEFAULT_EXTERNALS.includes(id)) return true
+  if (id === 'shiki' || id.startsWith('shiki/')) return true
+  if (id === 'fuse.js' || id.startsWith('fuse.js/')) return true
+  return false
+}
+
+/**
+ * Emit `dist/entry-ssr.js` — the single-file SSR twin of the (code-split)
+ * browser `dist/entry.js`.
+ *
+ * The modern browser `entry.js` is a facade that re-exports from
+ * `_entry.generated-*.js` and lazily code-splits kit's client-only features
+ * (Shiki, Fuse) into hundreds of chunks — a graph the Cloudflare Dynamic Worker
+ * isolate can't resolve (it loads a single `foundation` module). This builds the
+ * SAME source entry into ONE file, inlining the foundation's own graph and
+ * externalizing the runtime/React set (→ the isolate's shared worker-runtime)
+ * and the client-only Shiki/Fuse libs. Result: a ~foundation-sized ESM module
+ * (no React, no Shiki) the edge loads as `foundation` for request-time SSR.
+ *
+ * Built from source (not by re-bundling the built `entry.js`, whose Shiki
+ * specifier is already rewritten to a relative chunk path that couldn't be
+ * externalized) via a secondary Vite build into a temp dir; only the JS is
+ * copied out (the throwaway CSS is discarded — the SSR bundle needs no styles).
+ *
+ * Best-effort: a failure warns and emits nothing, so the edge simply serves
+ * the client-render shell for this foundation (existence-gated) — no regression.
+ *
+ * @param {string} foundationRoot - foundation project root (vite `root`).
+ * @param {string} entrySourcePath - absolute path to `_entry.generated.js`.
+ * @param {string} outDir - dist/ directory to write `entry-ssr.js` into.
+ */
+async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
+  if (_buildingSSRBundle) return
+  _buildingSSRBundle = true
+
+  const { rm, cp, stat } = await import('node:fs/promises')
+  const tmpDir = join(outDir, '.entry-ssr-tmp')
+
+  try {
+    if (!existsSync(entrySourcePath)) {
+      console.warn(`Skipping entry-ssr.js: entry source not found at ${entrySourcePath}`)
+      return
+    }
+
+    const { build: viteBuild } = await import('vite')
+
+    // Same transform plugins as the browser foundation build (JSX, SVGR, and —
+    // best-effort — Tailwind), but WITHOUT foundationPlugin: no schema/entry
+    // regeneration and no writeBundle recursion. CSS output is discarded.
+    const plugins = []
+    try {
+      const tailwindcss = (await import('@tailwindcss/vite')).default
+      plugins.push(tailwindcss())
+    } catch {
+      // Tailwind optional / not installed — the SSR bundle discards CSS anyway.
+    }
+    const react = (await import('@vitejs/plugin-react')).default
+    const svgr = (await import('vite-plugin-svgr')).default
+    plugins.push(react(), svgr())
+
+    await viteBuild({
+      root: foundationRoot,
+      configFile: false,
+      logLevel: 'warn',
+      plugins,
+      build: {
+        outDir: tmpDir,
+        emptyOutDir: true,
+        sourcemap: false,
+        cssCodeSplit: false,
+        lib: {
+          entry: entrySourcePath,
+          formats: ['es'],
+          fileName: () => 'entry-ssr.js',
+        },
+        rollupOptions: {
+          external: isSSRExternal,
+          output: { inlineDynamicImports: true },
+        },
+      },
+    })
+
+    const built = join(tmpDir, 'entry-ssr.js')
+    if (!existsSync(built)) {
+      console.warn('Warning: entry-ssr.js build produced no JS output — skipped.')
+      return
+    }
+    const dest = join(outDir, 'entry-ssr.js')
+    await cp(built, dest)
+    const size = ((await stat(dest)).size / 1024).toFixed(1)
+    console.log(`Generated entry-ssr.js (${size} KB)`)
+  } catch (err) {
+    console.warn(`Warning: entry-ssr.js build failed: ${err.message}`)
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+    _buildingSSRBundle = false
+  }
+}
+
+/**
  * Vite plugin for foundation builds
  */
 export function foundationBuildPlugin(options = {}) {
@@ -418,17 +544,18 @@ export function foundationBuildPlugin(options = {}) {
       // automatically once the edge is updated.
       await emitRuntimePin(outDir, resolvedRoot)
 
-      // Strategy S Phase 2: foundations no longer carry a self-contained
-      // SSR bundle. The runtime + React + core + theming live in R2 under
-      // runtime/{version}/worker-runtime.js (uploaded by the platform's
-      // /deploy-runtime skill); the Cloudflare isolate side-loads them
-      // alongside dist/entry.js via the edge dual-mode dispatcher.
+      // Emit dist/entry-ssr.js — the single-file SSR twin of the (code-split)
+      // browser dist/entry.js — for the Cloudflare edge isolate. React + the
+      // runtime stay externalized (resolved to the isolate's SHARED
+      // worker-runtime, so runtime patches propagate without a rebuild — the
+      // Strategy S win); the client-only Shiki/Fuse libs are externalized so the
+      // ~10 MB Shiki graph stays out. The edge loads this as its single
+      // `foundation` module for request-time SSR, gated on its presence.
       //
-      // The buildSSRBundle() function is kept (just not invoked) so it
-      // can be flipped back on with one line if Phase 1's edge dispatcher
-      // misbehaves in production. Phase 3 cleanup deletes the function
-      // entirely once we're confident the new path is healthy.
-      // await buildSSRBundle(outDir)
+      // (The legacy self-contained buildSSRBundle() — React + runtime INLINED,
+      // ~14 MB with Shiki — is retained below, unused, for reference only.)
+      const entrySourcePath = join(resolvedSrcDir, entryFileName)
+      await buildEntrySSR(resolvedRoot, entrySourcePath, outDir)
     },
 
     async closeBundle() {
