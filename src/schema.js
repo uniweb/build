@@ -92,9 +92,13 @@ export async function loadPackageJson(srcDir) {
     const content = await readFile(packagePath, 'utf-8')
     const pkg = JSON.parse(content)
 
-    // Extract only identity fields for schema
+    // Extract only identity fields for schema.
+    // `uniweb.id` is the REGISTERED name (registry identity), decoupled from the
+    // workspace package `name` (pnpm linking / file: deps / site.yml). It lets a
+    // foundation keep a scaffold-default package name like "src" while registering
+    // under a distinct id (e.g. "docs" → @org/docs). Falls back to `name`.
     return {
-      name: pkg.name,
+      name: pkg.uniweb?.id || pkg.name,
       version: pkg.version,
       description: pkg.description,
     }
