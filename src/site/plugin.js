@@ -74,8 +74,45 @@ function resolveFaviconHref(configFavicon, publicDir, basePath) {
 }
 
 /**
- * Execute all fetches for site content (used in dev mode)
- * Collects fetchedData for DataStore pre-population at runtime
+ * Should this fetch config be pre-executed at build time and embedded into the
+ * dev boot payload, or left for the runtime to fetch live?
+ *
+ * Dev has no prerender step, so there is no server-rendered HTML to hydrate and
+ * nothing to gain from embedding fetched data — while embedding it *costs*
+ * freshness: the boot payload is a one-time snapshot, so editing a local
+ * collection regenerates `/data/*.json` but the runtime keeps reading the stale
+ * embed until the dev server is restarted.
+ *
+ * So in dev we embed only what the browser genuinely cannot fetch itself:
+ *   - Local `path:` sources (file-based collections → `/data/*.json`) are served
+ *     by Vite and always browser-reachable, so we never embed them — the runtime
+ *     fetches them live and picks up edits on reload. This also gives local
+ *     collections true parity with a real backend fetcher.
+ *   - `prerender: false` opts a source out of build-time fetching by definition.
+ *   - Remote `url:` sources with `prerender !== false` may target a
+ *     build-time-only endpoint (server-side auth, no CORS), so we keep
+ *     pre-fetching and embedding them, mirroring what prod prerender does.
+ *
+ * Prod is unaffected: prerender still embeds fetched data for flash-free SSG
+ * hydration (see build/src/prerender.js executeAllFetches / injectBuildData).
+ *
+ * @param {Object|null} cfg - A normalized fetch config (parseFetchConfig output)
+ * @returns {boolean}
+ */
+export function shouldPrefetchInDev(cfg) {
+  if (!cfg) return false
+  if (!cfg.path && !cfg.url) return false // refinement / nothing to fetch
+  if (cfg.prerender === false) return false // author opted into runtime fetch
+  if (cfg.path && !cfg.url) return false // local file — runtime fetches it live
+  return true // remote build-time fetch — keep embedding in dev
+}
+
+/**
+ * Execute the dev fetches that should be embedded (see shouldPrefetchInDev) and
+ * collect them as `fetchedData` for DataStore pre-population. Local file-based
+ * collections and `prerender: false` sources are intentionally skipped so the
+ * runtime fetches them live — keeping the dev payload free of dynamic data and
+ * ensuring edits to `/data/*.json` show up on reload without a dev restart.
  *
  * @param {Object} siteContent - The collected site content
  * @param {string} siteDir - Path to site directory
@@ -86,7 +123,7 @@ async function executeDevFetches(siteContent, siteDir) {
 
   // Site-level fetch
   const siteFetch = siteContent.config?.fetch
-  if (siteFetch) {
+  if (shouldPrefetchInDev(siteFetch)) {
     const result = await executeFetch(siteFetch, fetchOptions)
     if (result.data && !result.error) {
       fetchedData.push({ config: siteFetch, data: result.data })
@@ -97,7 +134,7 @@ async function executeDevFetches(siteContent, siteDir) {
   for (const page of siteContent.pages || []) {
     // Page-level fetch
     const pageFetch = page.fetch
-    if (pageFetch) {
+    if (shouldPrefetchInDev(pageFetch)) {
       const result = await executeFetch(pageFetch, fetchOptions)
       if (result.data && !result.error) {
         fetchedData.push({ config: pageFetch, data: result.data })
@@ -125,7 +162,7 @@ async function processDevSectionFetches(sections, fetchOptions) {
   for (const section of sections) {
     // Execute section-level fetch
     const sectionFetch = section.fetch
-    if (sectionFetch) {
+    if (shouldPrefetchInDev(sectionFetch)) {
       const result = await executeFetch(sectionFetch, fetchOptions)
       if (result.data && !result.error) {
         // Merge fetched data into section's parsedContent (not cascadedData)
