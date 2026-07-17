@@ -60,6 +60,22 @@ describe('expandDynamicPages', () => {
     expect(out.some((p) => p.route === '/blog/post-1')).toBe(true)
   })
 
+  it('bakes only { paramName, paramValue, schema } into dynamicContext — never the records', () => {
+    // allItems/currentItem used to be embedded here, duplicating the whole
+    // collection onto every prerendered page. The runtime re-finds the record
+    // from the fetched collection, so only the routing keys are needed.
+    const items = [
+      { slug: 'post-1', title: 'One', body: 'x'.repeat(5000) },
+      { slug: 'post-2', title: 'Two', body: 'y'.repeat(5000) },
+    ]
+    const out = expandDynamicPages([{ route: '/blog', isDynamic: false }, template], withData(items), noop)
+    const post1 = out.find((p) => p.route === '/blog/post-1')
+    expect(post1.dynamicContext).toEqual({ paramName: 'slug', paramValue: 'post-1', schema: 'articles' })
+    // No record data leaked in via the context (neither the item nor its siblings).
+    expect(JSON.stringify(post1.dynamicContext)).not.toContain('body')
+    expect(JSON.stringify(post1.dynamicContext)).not.toContain('post-2')
+  })
+
   it('skips records without a param value', () => {
     const pages = [{ route: '/blog', isDynamic: false }, template]
     const out = expandDynamicPages(

@@ -212,13 +212,19 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress) {
       concretePage.paramName = undefined
       concretePage.parentSchema = undefined
 
-      // Store the dynamic route context for runtime data resolution
+      // Store the dynamic route context for runtime data resolution. Only the
+      // keys the runtime actually uses — the entity cascade re-finds the record
+      // from the fetched collection by paramName/paramValue/schema. The record
+      // (`currentItem`) and the full sibling list (`allItems`) are deliberately
+      // NOT baked in: nothing reads them (the documented dynamicContext shape is
+      // { paramName, paramValue, schema }; the record is delivered via
+      // content.data and siblings via `fetch: { refine: true, detail: false }`),
+      // and embedding `allItems` duplicated the whole collection onto every
+      // prerendered page in split mode.
       concretePage.dynamicContext = {
         paramName,
         paramValue,
         schema,           // Plural: 'articles'
-        currentItem: item,    // The item for this specific route
-        allItems: items,      // All items from parent
       }
 
       // Use item data for page metadata if available
