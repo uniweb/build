@@ -96,7 +96,7 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
     onProgress(`  Fetching site data: ${cfg.path || cfg.url}`)
     const result = await executeFetch(cfg, opts)
     if (result.data && !result.error) {
-      fetchedData.push({ config: cfg, data: result.data })
+      fetchedData.push({ config: cfg, data: result.data, _scope: '__site__' })
     }
   }
 
@@ -112,7 +112,7 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
       onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
       const result = await executeFetch(cfg, opts)
       if (result.data && !result.error) {
-        fetchedData.push({ config: cfg, data: result.data })
+        fetchedData.push({ config: cfg, data: result.data, _scope: page.route })
         // Store for dynamic route expansion
         pageFetchedData.set(page.route, {
           schema: pageFetch.schema,
@@ -324,6 +324,42 @@ async function discoverLocaleContents(distDir, defaultContent) {
 }
 
 /**
+ * Strip the internal `_scope` tag off a fetchedData entry, leaving the clean
+ * `{ config, data }` shape the runtime's hydrateDataStore expects.
+ */
+function stripFetchScope(entry) {
+  const { _scope, ...clean } = entry
+  return clean
+}
+
+/**
+ * Scope `fetchedData` for a single page's inline __SITE_CONTENT__.
+ *
+ * Every fetchedData entry is tagged (in executeAllFetches) with `_scope`:
+ * '__site__' for a site-level fetch, or the owning page's route for a
+ * page-level fetch. A page's first render only ever reads the cascade
+ * block → page → page.parent → site (see @uniweb/core EntityStore), so in
+ * split-content mode we embed just the entries that cascade can reach —
+ * site-level plus the page's own route and its parent's route (`scopeRoutes`).
+ * Other pages' data, and dynamic detail data reached only by client-side
+ * navigation, is fetched on demand and must not ride in every page's payload.
+ *
+ * `scopeRoutes == null` means "don't scope" (non-split mode, or the SPA
+ * fallback): keep every entry. Either way the internal `_scope` tag is stripped.
+ *
+ * @param {Array<{config: Object, data: any, _scope?: string}>} fetchedData
+ * @param {Set<string>|null} scopeRoutes - Routes whose entries to keep, or null.
+ * @returns {Array<{config: Object, data: any}>}
+ */
+export function scopeFetchedData(fetchedData, scopeRoutes) {
+  if (!Array.isArray(fetchedData)) return fetchedData
+  if (!scopeRoutes) return fetchedData.map(stripFetchScope)
+  return fetchedData
+    .filter((e) => e._scope === '__site__' || scopeRoutes.has(e._scope))
+    .map(stripFetchScope)
+}
+
+/**
  * Inject build-specific data into HTML (theme CSS, __SITE_CONTENT__, icon cache).
  * Called after the shared injectPageContent for build-specific additions.
  *
@@ -334,7 +370,7 @@ async function discoverLocaleContents(distDir, defaultContent) {
  * @param {string|null} [options.currentRoute=null] - Route of the page this HTML is for
  * @returns {string} HTML with build-specific data injected
  */
-function injectBuildData(html, siteContent, { splitContent = false, currentRoute = null } = {}) {
+function injectBuildData(html, siteContent, { splitContent = false, currentRoute = null, scopeRoutes = null } = {}) {
   let result = html
 
   // Inject theme CSS if not already present
@@ -364,6 +400,16 @@ function injectBuildData(html, siteContent, { splitContent = false, currentRoute
         const { sections, ...metadata } = page
         return metadata
       })
+    }
+  }
+
+  // Scope fetched (collection / API) data to this page's cascade in split mode,
+  // so a page never carries other pages' collections. Non-split keeps it all
+  // (single-file inline). Either way the internal `_scope` tag is stripped.
+  if (Array.isArray(contentForJson.fetchedData)) {
+    contentForJson = {
+      ...contentForJson,
+      fetchedData: scopeFetchedData(contentForJson.fetchedData, splitContent ? scopeRoutes : null),
     }
   }
 
@@ -667,10 +713,14 @@ export async function prerenderSite(siteDir, options = {}) {
         sectionOverrideCSS: result.sectionOverrideCSS,
       })
 
-      // Build-specific: theme CSS, __SITE_CONTENT__, icon cache
+      // Build-specific: theme CSS, __SITE_CONTENT__, icon cache.
+      // scopeRoutes mirrors the runtime data cascade (page → page.parent → site)
+      // so split-mode pages embed only the collection data their first render reads.
+      const scopeRoutes = new Set([page.route, page.parent?.route].filter(Boolean))
       html = injectBuildData(html, siteContent, {
         splitContent,
         currentRoute: page.route,
+        scopeRoutes,
       })
 
       // Output to the locale-prefixed route
@@ -686,6 +736,7 @@ export async function prerenderSite(siteDir, options = {}) {
     const fallbackBaseHtml = injectBuildData(htmlShell, siteContent, {
       splitContent,
       currentRoute: null,  // 404 has no current page — manifest only
+      scopeRoutes: new Set(),  // SPA fallback carries site-level fetched data only
     })
     const { html: notFoundHtml, hasNotFoundPage } = generate404Html({
       baseHtml: fallbackBaseHtml,
@@ -709,6 +760,11 @@ export async function prerenderSite(siteDir, options = {}) {
           const { sections, ...metadata } = page
           return metadata
         })
+      }
+      // The manifest is a single (non-per-page) file, so it keeps all fetched
+      // data — but the internal `_scope` tag must never leak into it.
+      if (Array.isArray(manifest.fetchedData)) {
+        manifest.fetchedData = manifest.fetchedData.map(stripFetchScope)
       }
       await writeFile(localeContentPath, JSON.stringify(manifest))
       onProgress('Rewrote site-content.json as lightweight manifest')
