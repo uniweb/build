@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { discoverComponents } from '../src/schema.js'
+import { discoverComponents, loadFoundationConfig } from '../src/schema.js'
 import { inferTitle } from '../src/utils/infer-title.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -314,5 +314,39 @@ describe('multi-path discovery', () => {
     const result = await discoverComponents(tmpRoot)
     expect(result.Hero).toBeDefined()
     expect(result.Banner).toBeUndefined()
+  })
+})
+
+describe('font-var type inference (loadFoundationConfig)', () => {
+  afterEach(cleanup)
+
+  it('infers type:font for font-* vars, leaving longhands/bare/explicit alone', async () => {
+    fresh()
+    touch(
+      'main.js',
+      `export const vars = {
+        'font-serif': { default: 'ui-serif, Georgia, serif', description: 'Editorial serif' },
+        'font-mono': 'ui-monospace, monospace',
+        'font-weight': { default: '700' },
+        radius: { default: '1rem' },
+        serif: { default: 'ui-serif, serif' },
+        'font-display': { type: 'number', default: '3' },
+      }`
+    )
+
+    const { vars } = await loadFoundationConfig(tmpRoot)
+
+    // font-* typeface var → inferred type: 'font'
+    expect(vars['font-serif'].type).toBe('font')
+    // bare-string font var → normalized to an object carrying the type
+    expect(vars['font-mono']).toEqual({ default: 'ui-monospace, monospace', type: 'font' })
+    // CSS longhand → not a typeface, left untyped
+    expect(vars['font-weight'].type).toBeUndefined()
+    // non-font var → untouched
+    expect(vars.radius.type).toBeUndefined()
+    // bare name (no font- prefix) → needs explicit type, not inferred
+    expect(vars.serif.type).toBeUndefined()
+    // explicit type wins → never overridden
+    expect(vars['font-display'].type).toBe('number')
   })
 })

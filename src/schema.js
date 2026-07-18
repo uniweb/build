@@ -12,6 +12,7 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inferTitle } from './utils/infer-title.js'
@@ -133,13 +134,35 @@ export async function loadFoundationConfig(srcDir) {
     // Support both default export and named exports
     return {
       ...module.default,
-      vars: module.vars || module.default?.vars,
+      vars: inferFontVarTypes(module.vars || module.default?.vars),
       defaultLayout: module.default?.defaultLayout,
     }
   } catch (error) {
     console.warn(`Warning: Failed to load foundation config ${filePath}:`, error.message)
     return {}
   }
+}
+
+/**
+ * Infer `type: 'font'` on a `font-*`-named foundation var that doesn't declare a
+ * type (and isn't a CSS longhand). The runtime already treats such vars as
+ * typefaces; persisting the type here surfaces them as fonts in schema.json — so
+ * the editor sees them as fonts too. Explicit types are never overridden; a
+ * bare-named font var still needs an explicit `type: 'font'`.
+ */
+function inferFontVarTypes(vars) {
+  if (!vars || typeof vars !== 'object') return vars
+  const out = {}
+  for (const [name, config] of Object.entries(vars)) {
+    const isObj = config !== null && typeof config === 'object'
+    const hasType = isObj && config.type !== undefined
+    if (!hasType && isFontVar(name, config)) {
+      out[name] = isObj ? { ...config, type: 'font' } : { default: config, type: 'font' }
+    } else {
+      out[name] = config
+    }
+  }
+  return out
 }
 
 /**
