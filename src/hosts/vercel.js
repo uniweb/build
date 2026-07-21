@@ -122,7 +122,7 @@ async function initCi({
   site,
   packageManager = 'pnpm',
   nodeVersion = '20',
-  pnpmVersion = '11',
+  pnpmVersion,
   domain = null,
   previews = true,
 }) {

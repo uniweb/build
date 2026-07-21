@@ -281,7 +281,7 @@ const adapter = {
     target = 'site',
     packageManager = 'pnpm',
     nodeVersion = '20',
-    pnpmVersion = '11',
+    pnpmVersion,
     domain = null,
   }) {
     if (target === 'foundation') {

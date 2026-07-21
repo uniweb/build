@@ -22,10 +22,28 @@
  * @param {boolean} [opts.checkout] — Include the checkout step (default true).
  * @returns {string} YAML fragment, no trailing newline.
  */
+/**
+ * Fallback pnpm major, used only when a caller omits `pnpmVersion`.
+ *
+ * The CLI is the authority — it resolves the major from the project's
+ * `packageManager` field (see `versions.js::resolveCiPnpmVersion`) and
+ * always passes it, so this value does not apply on the normal path. It
+ * exists for direct API and test callers.
+ *
+ * `@uniweb/build` cannot import the CLI's constant (the CLI depends on
+ * this package, not the reverse), so this is a deliberate duplicate.
+ * Keeping ONE copy here — rather than one per adapter — is the point:
+ * the adapters previously each defaulted to '11' and drifted out of sync
+ * with the CLI when it moved to '10', leaving five stale fallbacks that
+ * would have silently generated an uninstallable workflow for any caller
+ * that omitted the argument.
+ */
+const FALLBACK_PNPM_VERSION = '10'
+
 export function setupSteps({
   packageManager = 'pnpm',
   nodeVersion = '20',
-  pnpmVersion = '11',
+  pnpmVersion = FALLBACK_PNPM_VERSION,
   checkout = true,
 } = {}) {
   const lines = []
