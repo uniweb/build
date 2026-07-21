@@ -404,6 +404,29 @@ describe('initCi across adapters', () => {
   const CI_HOSTS = ['github-pages', 'cloudflare-pages', 'netlify', 'vercel']
   const site = { name: 'acme-www', path: 'sites/marketing' }
 
+  test('the install step matches the workspace package manager, not the launcher', async () => {
+    // Real bug found on a live project: `npx uniweb add ci` in a pnpm
+    // workspace emitted `npm ci`, which fails on the very first CI run
+    // because there is no package-lock.json to install from. The scaffold
+    // must follow the repo's lockfile, not how the CLI was launched.
+    const expected = {
+      pnpm: ['pnpm/action-setup', 'pnpm install --frozen-lockfile', 'cache: pnpm'],
+      npm: ['npm ci', 'cache: npm'],
+      yarn: ['yarn install --frozen-lockfile', 'cache: yarn'],
+    }
+    const forbidden = { pnpm: 'npm ci', npm: 'pnpm install', yarn: 'npm ci' }
+    for (const host of CI_HOSTS) {
+      for (const [pm, needles] of Object.entries(expected)) {
+        const result = await getAdapter(host).initCi({ site, packageManager: pm })
+        const wf = result.files.find(f => f.path.includes('deploy-')).content
+        for (const needle of needles) {
+          expect(wf, `${host}/${pm} should contain ${needle}`).toContain(needle)
+        }
+        expect(wf, `${host}/${pm} must not contain ${forbidden[pm]}`).not.toContain(forbidden[pm])
+      }
+    }
+  })
+
   test('every ci-capable adapter emits parseable YAML for both package managers', async () => {
     for (const host of CI_HOSTS) {
       for (const packageManager of ['pnpm', 'npm']) {

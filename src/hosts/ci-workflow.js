@@ -31,6 +31,11 @@ export function setupSteps({
   const lines = []
   if (checkout) lines.push('      - uses: actions/checkout@v4')
 
+  // The install command has to match the repo's lockfile: `npm ci` fails
+  // outright without package-lock.json, and so does
+  // `pnpm install --frozen-lockfile` without pnpm-lock.yaml. Callers must
+  // pass the WORKSPACE's package manager (detected from its lockfile),
+  // not the one that happened to launch the CLI.
   if (packageManager === 'pnpm') {
     lines.push('      - uses: pnpm/action-setup@v4')
     lines.push('        with:')
@@ -40,6 +45,13 @@ export function setupSteps({
     lines.push(`          node-version: '${nodeVersion}'`)
     lines.push('          cache: pnpm')
     lines.push('      - run: pnpm install --frozen-lockfile')
+  } else if (packageManager === 'yarn') {
+    lines.push('      - uses: actions/setup-node@v4')
+    lines.push('        with:')
+    lines.push(`          node-version: '${nodeVersion}'`)
+    lines.push('          cache: yarn')
+    // Accepted by Yarn 1 and aliased to --immutable by Berry.
+    lines.push('      - run: yarn install --frozen-lockfile')
   } else {
     lines.push('      - uses: actions/setup-node@v4')
     lines.push('        with:')
@@ -59,7 +71,10 @@ export function setupSteps({
  * @returns {string}
  */
 export function uniwebBuildCommand({ packageManager = 'pnpm', host }) {
-  const runner = packageManager === 'pnpm' ? 'pnpm exec' : 'npx'
+  const runner =
+    packageManager === 'pnpm' ? 'pnpm exec'
+    : packageManager === 'yarn' ? 'yarn exec'
+    : 'npx'
   return `${runner} uniweb build --host=${host}`
 }
 
