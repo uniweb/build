@@ -23,9 +23,48 @@
 import { resolve, join } from 'node:path'
 import { watch } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { build } from 'vite'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
+
+/** Directories that never hold foundation source and must never be walked. */
+const UNWATCHABLE_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage'])
+
+/**
+ * Resolve what to watch for a foundation's source changes.
+ *
+ * Returns the source root as a NON-recursive target (root-level main.js,
+ * styles.css, …) plus each source subdirectory as a recursive target.
+ *
+ * Watching the source root recursively is not an option: under the flat layout
+ * (`main: "./_entry.generated.js"`) that root is the foundation *package* root,
+ * so a recursive watch descends into `node_modules/`. On Linux — including
+ * WSL2 — Node implements recursive fs.watch as one inotify watch per
+ * subdirectory, which exhausts `fs.inotify.max_user_watches` on startup and
+ * fails with ENOSPC. macOS hides the bug entirely: FSEvents makes a recursive
+ * watch a single handle regardless of tree size.
+ *
+ * @param {string} srcPath - Foundation source directory (absolute)
+ * @returns {Array<{path: string, recursive: boolean}>}
+ */
+function resolveWatchTargets(srcPath) {
+  const targets = [{ path: srcPath, recursive: false }]
+
+  let entries = []
+  try {
+    entries = readdirSync(srcPath, { withFileTypes: true })
+  } catch {
+    return targets
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (entry.name.startsWith('.') || UNWATCHABLE_DIRS.has(entry.name)) continue
+    targets.push({ path: join(srcPath, entry.name), recursive: true })
+  }
+
+  return targets
+}
 
 /**
  * Create the foundation dev plugin
@@ -180,28 +219,37 @@ export function foundationDevPlugin(options = {}) {
           }, 200)
         }
 
-        try {
-          watcher = watch(srcPath, { recursive: true }, (eventType, filename) => {
-            // Ignore generated files (build output triggers entry regeneration)
-            if (filename && filename.includes('_entry.generated')) return
+        const onChange = (eventType, filename) => {
+          // Ignore generated files (build output triggers entry regeneration)
+          if (filename && filename.includes('_entry.generated')) return
 
-            // Only rebuild for source file changes
-            if (
-              filename &&
-              (filename.endsWith('.js') ||
-                filename.endsWith('.jsx') ||
-                filename.endsWith('.ts') ||
-                filename.endsWith('.tsx') ||
-                filename.endsWith('.css') ||
-                filename.endsWith('.svg'))
-            ) {
-              console.log(`[foundation] ${filename} changed`)
-              scheduleRebuild()
-            }
-          })
+          // Only rebuild for source file changes
+          if (
+            filename &&
+            (filename.endsWith('.js') ||
+              filename.endsWith('.jsx') ||
+              filename.endsWith('.ts') ||
+              filename.endsWith('.tsx') ||
+              filename.endsWith('.css') ||
+              filename.endsWith('.svg'))
+          ) {
+            console.log(`[foundation] ${filename} changed`)
+            scheduleRebuild()
+          }
+        }
+
+        const watchers = []
+        for (const target of resolveWatchTargets(srcPath)) {
+          try {
+            watchers.push(watch(target.path, { recursive: target.recursive }, onChange))
+          } catch (err) {
+            console.warn(`[foundation] Could not watch ${target.path}:`, err.message)
+          }
+        }
+
+        if (watchers.length > 0) {
+          watcher = { close: () => watchers.forEach(w => w.close()) }
           console.log(`[foundation] Watching ${srcPath}`)
-        } catch (err) {
-          console.warn(`[foundation] Could not watch source:`, err.message)
         }
       }
     },

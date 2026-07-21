@@ -361,6 +361,38 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   }
 }
 
+/** Normalize native path separators so matching is platform-independent. */
+const toPosix = path => path.replace(/\\/g, '/')
+
+/**
+ * Structural paths worth watching, given a foundation source root.
+ *
+ * Lives next to `shouldRegenerateForFile` so the watch surface and the match
+ * predicate stay in sync — anything this returns is a path that predicate can
+ * match, and nothing it matches lies outside these paths.
+ *
+ * Deliberately does NOT include the source root itself. Under the flat layout
+ * (`main: "./_entry.generated.js"`) the source root IS the foundation package
+ * root, so handing it to a watcher pulls in `node_modules/`, `dist/` and
+ * `.git/` — thousands of directories, and on Linux one inotify watch each.
+ *
+ * @param {string} srcDir - Foundation source directory (absolute)
+ * @returns {string[]} Absolute paths to hand to a watcher
+ */
+export function getStructuralWatchPaths(srcDir) {
+  return [
+    join(srcDir, 'sections'),
+    join(srcDir, 'layouts'),
+    join(srcDir, 'meta.js'),
+    join(srcDir, 'main.js'),
+    join(srcDir, 'main.jsx'),
+    join(srcDir, 'foundation.js'),
+    join(srcDir, 'foundation.jsx'),
+    join(srcDir, 'styles.css'),
+    join(srcDir, 'index.css')
+  ]
+}
+
 /**
  * Check if a file change should trigger entry point regeneration.
  *
@@ -375,9 +407,16 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
  * @returns {string|null} Reason string if regeneration needed, null otherwise
  */
 export function shouldRegenerateForFile(file, srcDir) {
-  if (!file.startsWith(srcDir + '/')) return null
+  // Both sides arrive with native separators — chokidar normalizes the paths it
+  // emits with path.normalize() on Windows, and srcDir comes from path.resolve().
+  // Comparing against a hardcoded '/' silently matched nothing on Windows, so
+  // entry regeneration never fired there and new sections needed a dev restart.
+  const normalized = toPosix(file)
+  const base = toPosix(srcDir).replace(/\/+$/, '')
 
-  const rel = file.slice(srcDir.length + 1)
+  if (!normalized.startsWith(base + '/')) return null
+
+  const rel = normalized.slice(base.length + 1)
 
   // meta.js anywhere — affects runtime metadata
   if (rel.endsWith('/meta.js') || rel === 'meta.js') {

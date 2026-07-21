@@ -23,7 +23,11 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
-import { generateEntryPoint, shouldRegenerateForFile } from '../generate-entry.js'
+import {
+  generateEntryPoint,
+  shouldRegenerateForFile,
+  getStructuralWatchPaths
+} from '../generate-entry.js'
 import { importMapPlugin } from '../import-map-plugin.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 
@@ -360,11 +364,16 @@ export async function defineSiteConfig(options = {}) {
     },
 
     configureServer(server) {
-      // Watch foundation src for structural changes that affect the entry
+      // Watch foundation src for structural changes that affect the entry.
+      // Add the structural paths individually rather than the source root:
+      // under the flat layout that root is the foundation *package* root, so
+      // adding it walks node_modules/, dist/ and .git/. Vite's default ignore
+      // list filters those out today, but there is no reason to hand a package
+      // root to a watcher and depend on the filter to undo it.
       const srcDir = resolveFoundationSrcPath(foundationInfo.path)
       const entryPath = join(srcDir, '_entry.generated.js')
 
-      server.watcher.add(srcDir)
+      server.watcher.add(getStructuralWatchPaths(srcDir))
 
       server.watcher.on('all', async (event, path) => {
         const reason = shouldRegenerateForFile(path, srcDir)
