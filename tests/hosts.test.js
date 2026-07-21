@@ -12,6 +12,9 @@ import { load as loadYaml } from 'js-yaml'
 import { getAdapter, listAdapters } from '../src/hosts/index.js'
 import { emitRedirectsFile } from '../src/hosts/cloudflare-pages.js'
 import { pagesUrlFromRemote } from '../src/hosts/github-pages.js'
+import { extractPagesUrl } from '../src/hosts/cloudflare-pages.js'
+import { extractVercelUrl } from '../src/hosts/vercel.js'
+import { parseNetlifyJson } from '../src/hosts/netlify.js'
 
 describe('host registry', () => {
   test('lists built-in adapter names and aliases sorted', () => {
@@ -524,5 +527,43 @@ describe('github-pages public URL inference', () => {
   test('a non-GitHub remote yields null rather than a guess', () => {
     expect(pagesUrlFromRemote('git@gitlab.com:acme/site.git')).toBeNull()
     expect(pagesUrlFromRemote('../origin.git')).toBeNull()
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ * Deploy-output URL extraction                                        *
+ * ------------------------------------------------------------------ *
+ * Best-effort parsers over another tool's human/JSON output. A miss
+ * costs only the echoed URL and deploy.yml's lastDeploy.url — it must
+ * never throw, because that would fail a deploy that actually succeeded.
+ */
+
+describe('deploy URL extraction', () => {
+  test('cloudflare: pulls the deployment URL out of wrangler output', () => {
+    expect(extractPagesUrl('✨ Deployment complete! Take a peek over at https://abc123.my-site.pages.dev'))
+      .toBe('https://abc123.my-site.pages.dev')
+    expect(extractPagesUrl('Uploading... done.\nView at https://my-site.pages.dev.'))
+      .toBe('https://my-site.pages.dev')
+  })
+
+  test('vercel: takes the LAST url, which is the deployment (not the inspect link)', () => {
+    const out = 'Inspect: https://vercel.com/acme/site/abc\nhttps://site-abc123.vercel.app\n'
+    expect(extractVercelUrl(out)).toBe('https://site-abc123.vercel.app')
+  })
+
+  test('netlify: parses --json output even with leading progress noise', () => {
+    const out = 'Deploying...\n{"deploy_url":"https://pr-7--site.netlify.app","url":"https://site.netlify.app"}'
+    expect(parseNetlifyJson(out)).toMatchObject({ deploy_url: 'https://pr-7--site.netlify.app' })
+  })
+
+  test('all three return null on empty or unparseable output rather than throwing', () => {
+    for (const input of ['', 'no url here', '{{{not json']) {
+      expect(() => extractPagesUrl(input)).not.toThrow()
+      expect(() => extractVercelUrl(input)).not.toThrow()
+      expect(() => parseNetlifyJson(input)).not.toThrow()
+      expect(extractPagesUrl(input)).toBeNull()
+      expect(extractVercelUrl(input)).toBeNull()
+    }
+    expect(parseNetlifyJson('no json at all')).toBeNull()
   })
 })
