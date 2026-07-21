@@ -135,4 +135,35 @@ describe('getStructuralWatchPaths', () => {
       expect(paths.some(p => p.includes(dir))).toBe(false)
     }
   })
+
+  it('covers extra section paths declared by the foundation', () => {
+    const paths = getStructuralWatchPaths(src, {
+      sectionPaths: ['sections', 'sections/marketing', 'widgets']
+    })
+
+    expect(paths).toContain(join(src, 'sections/marketing'))
+    expect(paths).toContain(join(src, 'widgets'))
+
+    // Extra paths use strict discovery — a section there is only registered
+    // once it has a meta.js, and that is what has to reach the predicate.
+    expect(shouldRegenerateForFile(`${src}/widgets/Chart/meta.js`, src)).toBe('meta.js changed')
+    expect(paths.some(p => `${src}/widgets/Chart/meta.js`.startsWith(p + '/'))).toBe(true)
+  })
+
+  it('is layout-agnostic — paths are relative to the resolved source root', () => {
+    // The documented workspace layouts: single, segregated, co-located,
+    // extension. Folder depth and naming differ; the watch surface must not.
+    for (const root of ['/w/src', '/w/foundations/blog', '/w/marketing/src', '/w/extensions/effects']) {
+      const paths = getStructuralWatchPaths(root)
+
+      // Never the source root itself — that is the package root under the flat layout.
+      expect(paths).not.toContain(root)
+
+      // Every path sits under this root, and the set is identical across layouts.
+      expect(paths.every(p => p.startsWith(root + '/'))).toBe(true)
+      expect(paths.map(p => p.slice(root.length + 1))).toEqual(
+        getStructuralWatchPaths('/w/src').map(p => p.slice('/w/src'.length + 1))
+      )
+    }
+  })
 })

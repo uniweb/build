@@ -22,7 +22,12 @@
 import { writeFile, readFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { discoverComponents, discoverLayoutsInPath } from './schema.js'
+import {
+  discoverComponents,
+  discoverLayoutsInPath,
+  DEFAULT_SECTION_PATHS,
+  LAYOUTS_PATH
+} from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
 import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
 
@@ -371,25 +376,40 @@ const toPosix = path => path.replace(/\\/g, '/')
  * predicate stay in sync — anything this returns is a path that predicate can
  * match, and nothing it matches lies outside these paths.
  *
+ * Derived from the same discovery constants `generateEntryPoint` scans, and
+ * takes the same `sectionPaths` override, so a foundation that declares extra
+ * search paths via `defineFoundationConfig({ sections })` is watched wherever
+ * its sections actually live. Foundation folder layout is free-form — `src/`,
+ * `foundations/blog/`, `marketing/src/` — but every path here is relative to
+ * the resolved source root, so layout does not matter.
+ *
  * Deliberately does NOT include the source root itself. Under the flat layout
  * (`main: "./_entry.generated.js"`) the source root IS the foundation package
  * root, so handing it to a watcher pulls in `node_modules/`, `dist/` and
  * `.git/` — thousands of directories, and on Linux one inotify watch each.
  *
  * @param {string} srcDir - Foundation source directory (absolute)
+ * @param {Object} [options]
+ * @param {string[]} [options.sectionPaths] - Section search paths (relative to srcDir)
  * @returns {string[]} Absolute paths to hand to a watcher
  */
-export function getStructuralWatchPaths(srcDir) {
+export function getStructuralWatchPaths(srcDir, options = {}) {
+  const { sectionPaths = DEFAULT_SECTION_PATHS } = options
+
+  const rootFiles = [
+    'meta.js',
+    'main.js',
+    'main.jsx',
+    'foundation.js',
+    'foundation.jsx',
+    'styles.css',
+    'index.css'
+  ]
+
   return [
-    join(srcDir, 'sections'),
-    join(srcDir, 'layouts'),
-    join(srcDir, 'meta.js'),
-    join(srcDir, 'main.js'),
-    join(srcDir, 'main.jsx'),
-    join(srcDir, 'foundation.js'),
-    join(srcDir, 'foundation.jsx'),
-    join(srcDir, 'styles.css'),
-    join(srcDir, 'index.css')
+    ...sectionPaths.map(path => join(srcDir, path)),
+    join(srcDir, LAYOUTS_PATH),
+    ...rootFiles.map(file => join(srcDir, file))
   ]
 }
 
@@ -401,6 +421,13 @@ export function getStructuralWatchPaths(srcDir) {
  *
  * The content-comparison guard in generateEntryPoint() makes false positives
  * cheap (discovery runs but no write), so we err on the side of regenerating.
+ *
+ * The bare-file and entry-file rules below are scoped to the primary `sections`
+ * path on purpose: that is the only path where relaxed discovery applies.
+ * Additional paths declared via `defineFoundationConfig({ sections })` use
+ * strict discovery, where a section is only registered once it has a `meta.js`
+ * — and the "meta.js anywhere" rule already covers those. Widening the bare-file
+ * rule to every configured path would fire on files discovery ignores.
  *
  * @param {string} file - Absolute path of the changed file
  * @param {string} srcDir - Foundation source directory (absolute)

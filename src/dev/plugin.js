@@ -36,6 +36,16 @@ const UNWATCHABLE_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage'])
  * Returns the source root as a NON-recursive target (root-level main.js,
  * styles.css, …) plus each source subdirectory as a recursive target.
  *
+ * Enumerating subdirectories rather than naming them keeps this correct across
+ * every foundation layout — `sections/`, `components/`, `utils/`, `layouts/`,
+ * whatever extra section paths `defineFoundationConfig({ sections })` declares,
+ * and whatever a given project happens to call its folders.
+ *
+ * Known limitation: a top-level directory created after the server starts is
+ * not watched recursively until restart. The non-recursive root watch still
+ * sees it appear, so a rebuild fires; only per-file events inside it are
+ * missed. This matches the existing directory-rename limitation.
+ *
  * Watching the source root recursively is not an option: under the flat layout
  * (`main: "./_entry.generated.js"`) that root is the foundation *package* root,
  * so a recursive watch descends into `node_modules/`. On Linux — including

@@ -26,8 +26,10 @@ const META_FILE_NAME = 'meta.js'
 // Whichever exists at the source root is loaded.
 const FOUNDATION_FILE_NAMES = ['main.js', 'foundation.js']
 
-// Default paths to scan for section types (relative to srcDir)
-const DEFAULT_SECTION_PATHS = ['sections']
+// Default paths to scan for section types (relative to srcDir).
+// Exported so dev-server watchers can derive their watch surface from the same
+// value discovery uses, instead of re-typing the literal and drifting from it.
+export const DEFAULT_SECTION_PATHS = ['sections']
 
 // Extensions recognized as component entry files
 const COMPONENT_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
@@ -36,7 +38,7 @@ const COMPONENT_EXTENSIONS = new Set(['.jsx', '.tsx', '.js', '.ts'])
 const SECTIONS_PATH = 'sections'
 
 // The layouts path where layout components are discovered
-const LAYOUTS_PATH = 'layouts'
+export const LAYOUTS_PATH = 'layouts'
 
 /**
  * Load a meta.js file via dynamic import
