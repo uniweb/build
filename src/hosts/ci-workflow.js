@@ -23,22 +23,21 @@
  * @returns {string} YAML fragment, no trailing newline.
  */
 /**
- * Fallback pnpm major, used only when a caller omits `pnpmVersion`.
+ * Fallback pnpm major, for callers that don't supply one.
  *
- * The CLI is the authority — it resolves the major from the project's
- * `packageManager` field (see `versions.js::resolveCiPnpmVersion`) and
- * always passes it, so this value does not apply on the normal path. It
- * exists for direct API and test callers.
+ * **Must equal the CLI's `versions.js::PNPM_VERSION`.** This is a copy
+ * across a package boundary — `@uniweb/build` cannot import from the CLI,
+ * since the dependency runs the other way — and copies drift. This one
+ * drifted twice in a week: stale at '11' when the CLI moved to '10', then
+ * stale at '10' when it moved back to '11'.
  *
- * `@uniweb/build` cannot import the CLI's constant (the CLI depends on
- * this package, not the reverse), so this is a deliberate duplicate.
- * Keeping ONE copy here — rather than one per adapter — is the point:
- * the adapters previously each defaulted to '11' and drifted out of sync
- * with the CLI when it moved to '10', leaving five stale fallbacks that
- * would have silently generated an uninstallable workflow for any caller
- * that omitted the argument.
+ * The CLI always passes an explicit value, so this never applies on the
+ * normal path; it exists for direct API and test callers. Drift is caught
+ * by a CLI-side test that generates a workflow *without* passing a version
+ * and asserts the emitted major matches `PNPM_VERSION` — i.e. the guard
+ * lives at the boundary where the two values have to agree.
  */
-const FALLBACK_PNPM_VERSION = '10'
+const FALLBACK_PNPM_VERSION = '11'
 
 export function setupSteps({
   packageManager = 'pnpm',

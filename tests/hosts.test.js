@@ -591,31 +591,42 @@ describe('deploy URL extraction', () => {
   })
 })
 
-describe('pnpm version fallback', () => {
-  test('adapters do not carry their own stale pnpm default', async () => {
-    // The adapters each defaulted to '11' and drifted when the CLI moved
-    // to '10' — five stale fallbacks that would silently generate an
-    // uninstallable workflow for any caller omitting the argument. There
-    // is now exactly one fallback, in ci-workflow.js.
+describe('pnpm version', () => {
+  test('the supplied major is what lands in the workflow', async () => {
+    for (const v of ['10', '11']) {
+      const result = await getAdapter('github-pages').initCi({
+        site: { name: 'acme', path: 'site' },
+        packageManager: 'pnpm',
+        pnpmVersion: v,
+      })
+      expect(result.files[0].content).toContain(`version: ${v}`)
+    }
+  })
+
+  test('adapters share one fallback rather than each carrying their own', async () => {
+    // They previously defaulted individually and went stale when the CLI's
+    // authoritative value moved. Whether the shared fallback AGREES with the
+    // CLI is asserted CLI-side (test/ci-node-version.test.js), at the
+    // boundary where the two values must match.
+    const emitted = []
     for (const host of ['github-pages', 'cloudflare-pages', 'netlify', 'vercel']) {
       const result = await getAdapter(host).initCi({
         site: { name: 'acme', path: 'site' },
         packageManager: 'pnpm',
-        // pnpmVersion deliberately omitted
       })
       const wf = result.files.find(f => f.path.includes('deploy-')).content
-      expect(wf, `${host} fell back to a pnpm major that cannot install a Uniweb project`)
-        .toContain('version: 10')
-      expect(wf).not.toContain('version: 11')
+      emitted.push(wf.match(/pnpm\/action-setup[\s\S]*?version: (\d+)/)?.[1])
     }
+    expect(new Set(emitted).size, `adapters disagree on the fallback: ${emitted}`).toBe(1)
   })
 
-  test('an explicit pnpmVersion always wins over the fallback', async () => {
-    const result = await getAdapter('github-pages').initCi({
-      site: { name: 'acme', path: 'site' },
-      packageManager: 'pnpm',
-      pnpmVersion: '11',
-    })
-    expect(result.files[0].content).toContain('version: 11')
+  test('npm and yarn need no pnpm version', async () => {
+    for (const pm of ['npm', 'yarn']) {
+      const result = await getAdapter('github-pages').initCi({
+        site: { name: 'acme', path: 'site' },
+        packageManager: pm,
+      })
+      expect(result.files[0].content).not.toContain('pnpm/action-setup')
+    }
   })
 })
