@@ -30,6 +30,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 
+import { DeployError } from './deploy-utils.js'
+
 const FUNCTION_SOURCE = `// CloudFront Function — viewer-request — directory-index resolution.
 //
 // Attach to the default cache behavior of your CloudFront distribution.
@@ -183,13 +185,9 @@ async function augmentManifest(distDir, deployConfig) {
  * Deploy hook                                                        *
  * ------------------------------------------------------------------ */
 
-class DeployError extends Error {
-  constructor(message, { hint } = {}) {
-    super(message)
-    this.name = 'DeployError'
-    this.hint = hint
-  }
-}
+// DeployError now lives in deploy-utils.js — every adapter that shells
+// out to a CLI needs the same shape. Re-exported at the bottom of this
+// file so existing importers (tests) keep resolving it here.
 
 /**
  * Run an `aws` subcommand with stdout piped to the user. stderr is
@@ -502,6 +500,15 @@ async function deploy({ distDir, deployConfig = {}, env = process.env, log = () 
 
 const adapter = {
   name: 's3-cloudfront',
+  display: {
+    order: 50,
+    pushWith: 'the aws CLI',
+    title: 'S3 + CloudFront',
+    qualifier: 'your AWS account',
+    summary: 'Builds and uploads to your own bucket, then invalidates the CDN. Needs the aws CLI and a provisioned distribution.',
+    ci: false,
+    previews: false,
+  },
   postBuild,
   deploy,
 }

@@ -43,6 +43,7 @@
 import cloudflarePages from './cloudflare-pages.js'
 import githubPages from './github-pages.js'
 import genericStatic from './generic-static.js'
+import netlify from './netlify.js'
 import s3Cloudfront from './s3-cloudfront.js'
 import vercel from './vercel.js'
 
@@ -50,6 +51,7 @@ const builtins = new Map([
   [cloudflarePages.name, cloudflarePages],
   [githubPages.name, githubPages],
   [genericStatic.name, genericStatic],
+  [netlify.name, netlify],
   [s3Cloudfront.name, s3Cloudfront],
   [vercel.name, vercel],
 ])
@@ -57,18 +59,25 @@ const builtins = new Map([
 /**
  * Aliases mapping a user-facing host name to a canonical adapter that
  * already implements the right behavior. Aliases exist when two hosts
- * share an artifact contract (e.g., Netlify and Cloudflare Pages both
- * consume `_redirects` in the same format) — one tested code path,
- * multiple discoverable names.
+ * share an artifact contract — one tested code path, multiple
+ * discoverable names.
  *
  * The returned adapter's `name` is rewritten to the *requested* name,
  * so the deploy manifest, dry-run output, and lastDeploy entry record
  * what the user picked. Adapters that need to *behave* differently per
  * name should become canonical entries in `builtins`, not aliases.
+ *
+ * Netlify used to alias cloudflare-pages (they share the `_redirects`
+ * contract, so one postBuild covers both). It was promoted to a
+ * canonical adapter when deploy hooks landed: `netlify deploy` and
+ * `wrangler pages deploy` are different tools with different auth, so
+ * the behavior genuinely diverges. `netlify.js` still imports
+ * cloudflare-pages' `emitRedirectsFile` — the shared part stays shared.
+ *
+ * Empty today. Kept because the lookup path below is the documented
+ * extension point and re-adding an alias should not require rewiring.
  */
-const aliases = new Map([
-  ['netlify', 'cloudflare-pages'],
-])
+const aliases = new Map()
 
 /**
  * Look up an adapter by name. Throws with the list of known names if

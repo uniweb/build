@@ -14,6 +14,18 @@
 
 const adapter = {
   name: 'generic-static',
+  display: {
+    order: 90,
+    title: 'Generic static host',
+    qualifier: 'no helper files',
+    summary: 'A plain dist/ with no host-specific output. Pick this for a self-managed nginx, Caddy, or any host that needs nothing extra.',
+    ci: false,
+    previews: false,
+    // Not a destination in its own right — it names an *artifact shape*,
+    // which is the `export --host` question, not "where should this go?".
+    // The deploy wizard offers "Somewhere else" instead, which exports.
+    wizard: false,
+  },
   async postBuild() {
     // Intentionally empty.
   },
