@@ -13,6 +13,7 @@ import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
+import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
 
@@ -376,8 +377,17 @@ export function scopeFetchedData(fetchedData, scopeRoutes) {
  * @param {string|null} [options.currentRoute=null] - Route of the page this HTML is for
  * @returns {string} HTML with build-specific data injected
  */
-function injectBuildData(html, siteContent, { splitContent = false, currentRoute = null, scopeRoutes = null } = {}) {
+export function injectBuildData(html, siteContent, { splitContent = false, currentRoute = null, scopeRoutes = null } = {}) {
   let result = html
+
+  // Inject the theme's font <link> tags if not already present (the vite
+  // plugin normally puts them there when it builds index.html)
+  if (siteContent?.theme?.links && !result.includes(FONT_LINKS_MARKER)) {
+    result = result.replace(
+      '</head>',
+      `  ${FONT_LINKS_MARKER}\n${siteContent.theme.links}\n  </head>`
+    )
+  }
 
   // Inject theme CSS if not already present
   if (siteContent?.theme?.css && !result.includes('id="uniweb-theme"')) {
@@ -388,11 +398,12 @@ function injectBuildData(html, siteContent, { splitContent = false, currentRoute
   }
 
   // Inject site content as JSON for hydration
-  // Strip CSS from theme (it's already in a <style> tag)
+  // Strip CSS and font links from theme (both are already in <head>)
   let contentForJson = { ...siteContent }
-  if (contentForJson.theme?.css) {
+  if (contentForJson.theme?.css || contentForJson.theme?.links) {
     contentForJson.theme = { ...contentForJson.theme }
     delete contentForJson.theme.css
+    delete contentForJson.theme.links
   }
 
   // Split mode: strip sections from all pages except the current one.

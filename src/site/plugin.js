@@ -39,6 +39,7 @@ import { processAdvancedAssets } from './advanced-processors.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
+import { FONT_LINKS_MARKER } from './head-markers.js'
 
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
@@ -989,22 +990,19 @@ export function siteContentPlugin(options = {}) {
         headInjection += headHtml + '\n'
       }
 
-      // Inject font preconnect links (before theme CSS so browser starts DNS early)
-      const fontImports = contentToInject.theme?.fonts?.import
-      if (Array.isArray(fontImports) && fontImports.length > 0) {
-        const origins = new Set()
-        for (const font of fontImports) {
-          if (font.url) {
-            try { origins.add(new URL(font.url).origin) } catch {}
-          }
-        }
-        for (const origin of origins) {
-          headInjection += `    <link rel="preconnect" href="${origin}">\n`
-        }
-        // Google Fonts serves CSS from googleapis.com but font files from gstatic.com
-        if (origins.has('https://fonts.googleapis.com')) {
-          headInjection += `    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n`
-        }
+      // Inject the theme's font <link> tags (before theme CSS so the browser
+      // starts DNS/fetch early). This is every font link in one place:
+      // preconnects, the merged Google Fonts stylesheet, and preload hints for
+      // self-hosted faces.
+      //
+      // These used to be dropped. The theme CSS once carried `@import
+      // url(<google>)` and this spot only had to add a preconnect in front of
+      // it; when @uniweb/theming replaced that @import with a `links` string,
+      // nothing here started consuming it — so the build preconnected to
+      // Google Fonts and then never requested the stylesheet, leaving every
+      // imported family undefined and silently falling back.
+      if (contentToInject.theme?.links) {
+        headInjection += `    ${FONT_LINKS_MARKER}\n${contentToInject.theme.links}\n`
       }
 
       // Inject theme CSS

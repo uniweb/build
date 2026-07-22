@@ -2018,6 +2018,21 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
 
+  // Record the RESOLVED base (--base > UNIWEB_BASE > site.yml::base) on the
+  // config so every consumer reads one value. Prerender sets website.basePath
+  // from `config.base` alone — it has no access to Vite's BASE_URL — so a base
+  // that arrived via UNIWEB_BASE (what the generated GitHub Pages workflow
+  // uses) was invisible to it, and prerendered <a href>s came out with no
+  // base prefix while the hydrated browser routes were fine.
+  //
+  // Only a real base is written. At '/' the field stays absent, because in
+  // shell mode `config.base` is the SERVING layer's channel (it injects the
+  // served subpath, e.g. /gateway/site/<uuid>/) and a build-time '/' would
+  // be a meaningless value sitting in its slot.
+  if (base && base !== '/') {
+    siteConfig.base = base
+  }
+
   // Profile selects workspace-root defaults: site.yml → pages/ + page mode +
   // pages: ordering; document.yml → content/ + folder mode + content: ordering.
   const profile = (profileName && PROFILE_ALIASES[profileName]) || getContentProfile(configFile)
@@ -2050,7 +2065,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // `base` reaches the theme because self-hosted font faces are authored
   // root-relative (`/fonts/x.woff2`) and the emitted @font-face lives in an
   // inline <style> — under a subdirectory deployment it must carry the base.
-  const { config: processedTheme, css: themeCSS, warnings } = buildTheme(rawThemeConfig, { foundationVars, base })
+  const { config: processedTheme, css: themeCSS, links: themeLinks, warnings } = buildTheme(rawThemeConfig, { foundationVars, base })
 
   // Log theme warnings
   if (warnings?.length > 0) {
@@ -2063,7 +2078,8 @@ export async function collectSiteContent(sitePath, options = {}) {
       config: siteConfig,
       theme: {
         ...processedTheme,
-        css: themeCSS
+        css: themeCSS,
+        links: themeLinks
       },
       pages: [],
       assets: {}
@@ -2211,7 +2227,11 @@ export async function collectSiteContent(sitePath, options = {}) {
     },
     theme: {
       ...processedTheme,
-      css: themeCSS
+      css: themeCSS,
+      // Font <link> tags (Google Fonts stylesheet + preconnects, preload hints
+      // for self-hosted faces). The theme CSS stopped carrying an @import for
+      // these, so they only reach the page if a consumer injects `links`.
+      links: themeLinks
     },
     // Reachability axis: on the published build paths, drop `hidden` pages and
     // their whole subtree (cascade). Dev keeps them so drafts stay previewable.
