@@ -241,11 +241,17 @@ function collectInlineText(node) {
   for (const child of node.content) {
     if (child.type === 'text') {
       out += child.text || ''
+    } else if (child.type === 'hardBreak') {
+      // A break must contribute a separator or the words either side fuse
+      // ("line oneline two"), silently changing the unit key. "\n" is the
+      // pinned separator — see vector I. computeHash normalizes whitespace, so
+      // it hashes identically to " "; only the raw structural-map key differs.
+      out += '\n'
     } else if (child.content) {
       // recurse through inline wrappers into their text
       out += collectInlineText(child)
     }
-    // else: inline atom (image/icon/emoji/math/hardBreak) → contributes no text
+    // else: other inline atom (image/icon/emoji/math) → contributes no text
   }
   return out
 }

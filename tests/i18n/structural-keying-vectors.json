@@ -3,7 +3,7 @@
   "model_note": "WHOLE-ELEMENT keys. One translatable unit per block element; links stay INLINE (NOT split into a separate key). The map VALUE (out of scope for this fixture — it tests keys only) is the translated inline content; the framework serializes it as inline markdown in locales/*.json.",
   "key_rules": {
     "input": "Keys derive from the ProseMirror doc JSON directly. Node names: heading/paragraph/bulletList/orderedList/listItem/text; marks: link/bold/italic/strike/code/highlight/textStyle/span.",
-    "key": "An element's cleaned source text: trim leading/trailing, KEEP internal whitespace verbatim. ALL inline marks (incl. links) flatten into the text; inline atom nodes (icon/emoji/math) are skipped. Not a hash (the hash is only the file-side join key).",
+    "key": "An element's cleaned source text: trim leading/trailing, KEEP internal whitespace verbatim. ALL inline marks (incl. links) flatten into the text; inline atom nodes (icon/emoji/math) are skipped, EXCEPT hardBreak, which contributes \"\\n\" so a break does not fuse the words around it. Not a hash (the hash is only the file-side join key).",
     "links": "Links are NOT split out — link text stays inline in its element's key (whole-element keying). This applies uniformly to paragraphs AND list items (vectors E and H).",
     "dedup": "Keys that normalize-equal (trim + collapse internal whitespace) collapse to one entry; first occurrence's spelling wins.",
     "ordering": "Document walk order. Compare as a set if your producer orders differently."
@@ -56,6 +56,18 @@
       "rule": "link inside a list item stays inline too (same whole-element rule as E) -> one key including the link text",
       "doc": { "type": "doc", "content": [ { "type": "bulletList", "content": [ { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "See " }, { "type": "text", "text": "docs", "marks": [ { "type": "link", "attrs": { "href": "/d" } } ] } ] } ] } ] } ] },
       "expectedKeys": ["See docs"]
+    },
+    {
+      "id": "I",
+      "rule": "hard break inside a paragraph -> ONE key, with the break contributing \"\\n\" (not nothing, not a space) so the words do not fuse",
+      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "line one" }, { "type": "hardBreak" }, { "type": "text", "text": "line two" } ] } ] },
+      "expectedKeys": ["line one\nline two"]
+    },
+    {
+      "id": "J",
+      "rule": "two same-level headings -> TWO keys, not one merged key: the multi-line-title merge is semantic-parser's grouping layer (readHeadingGroup), not the doc, so the doc still holds two heading elements",
+      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Alpha" } ] }, { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Beta" } ] } ] },
+      "expectedKeys": ["Alpha", "Beta"]
     }
   ]
 }
