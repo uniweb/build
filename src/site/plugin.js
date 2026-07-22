@@ -621,7 +621,7 @@ export function siteContentPlugin(options = {}) {
       try {
         // dropUnpublished only on a production build — in dev (serve) hidden
         // pages stay in the graph so in-progress drafts remain previewable.
-        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, dropUnpublished: isProduction })
+        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath })
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
@@ -669,7 +669,7 @@ export function siteContentPlugin(options = {}) {
           rebuildTimeout = setTimeout(async () => {
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = await collectSiteContent(resolvedSitePath, { foundationPath })
+              siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, base: basePath })
               headHtml = await loadHeadHtml()
               // Execute fetches for the updated content
               await executeDevFetches(siteContent, resolvedSitePath)
@@ -1063,7 +1063,8 @@ export function siteContentPlugin(options = {}) {
             outputDir: resolvedOutDir,
             assetsSubdir: assetsOptions.outputDir,
             convertToWebp: assetsOptions.convertToWebp,
-            quality: assetsOptions.quality
+            quality: assetsOptions.quality,
+            basePath
           })
 
           // Process advanced assets (videos, PDFs)
@@ -1079,6 +1080,7 @@ export function siteContentPlugin(options = {}) {
                 videoPosters: assetsOptions.videoPosters,
                 pdfThumbnails: assetsOptions.pdfThumbnails,
                 quality: assetsOptions.quality,
+                basePath,
                 // Pass explicit poster/preview sets to skip auto-generation
                 hasExplicitPoster: siteContent.hasExplicitPoster || new Set(),
                 hasExplicitPreview: siteContent.hasExplicitPreview || new Set()

@@ -97,7 +97,7 @@ export async function buildSiteData({
   //    No vite needed — collectSiteContent is a plain async function.
   //    dropUnpublished: link mode is always a published deploy — prune hidden
   //    pages + their subtree so drafts never reach the served site.
-  let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true })
+  let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true, base: basePath })
 
   // 2. Compile content collections (file-based markdown/yaml/json).
   //    `writeCollectionFiles` lands them under `<siteRoot>/public/data/`;
@@ -138,6 +138,7 @@ export async function buildSiteData({
         assetsSubdir: assetsOpts.outputDir,
         convertToWebp: assetsOpts.convertToWebp,
         quality: assetsOpts.quality,
+        basePath,
       })
 
       const advancedEnabled = assetsOpts.videoPosters || assetsOpts.pdfThumbnails
@@ -150,6 +151,7 @@ export async function buildSiteData({
             videoPosters: assetsOpts.videoPosters,
             pdfThumbnails: assetsOpts.pdfThumbnails,
             quality: assetsOpts.quality,
+            basePath,
             hasExplicitPoster: siteContent.hasExplicitPoster || new Set(),
             hasExplicitPreview: siteContent.hasExplicitPreview || new Set(),
           }

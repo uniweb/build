@@ -258,6 +258,7 @@ export async function generatePdfThumbnail(pdfPath, outputPath, options = {}) {
  *
  * @param {Object} asset - Asset info
  * @param {Object} options - Processing options
+ * @param {string} [options.basePath='/'] - Site base path for subdirectory deployments
  * @returns {Promise<Object>} Processing result with poster/thumbnail info
  */
 export async function processAdvancedAsset(asset, options = {}) {
@@ -266,8 +267,15 @@ export async function processAdvancedAsset(asset, options = {}) {
     assetsSubdir = 'assets',
     videoPosters = true,
     pdfThumbnails = true,
-    quality = 80
+    quality = 80,
+    basePath = '/'
   } = options
+
+  // Emitted URLs are site-root-absolute and must carry the deployment base,
+  // same as processAsset() — see the withBase() note in asset-processor.js.
+  const prefix = basePath && basePath !== '/'
+    ? (basePath.endsWith('/') ? basePath.slice(0, -1) : basePath)
+    : ''
 
   const { resolved } = asset
 
@@ -293,7 +301,7 @@ export async function processAdvancedAsset(asset, options = {}) {
       return {
         processed: true,
         type: 'video',
-        poster: `/${assetsSubdir}/${posterFilename}`
+        poster: `${prefix}/${assetsSubdir}/${posterFilename}`
       }
     } else if (result.skipped) {
       // ffmpeg not available - not an error, just skip
@@ -314,7 +322,7 @@ export async function processAdvancedAsset(asset, options = {}) {
       return {
         processed: true,
         type: 'pdf',
-        thumbnail: `/${assetsSubdir}/${thumbFilename}`,
+        thumbnail: `${prefix}/${assetsSubdir}/${thumbFilename}`,
         pageCount: result.pageCount,
         placeholder: result.placeholder
       }

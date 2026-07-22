@@ -22,6 +22,24 @@ const CONVERTIBLE_FORMATS = ['.png', '.jpg', '.jpeg', '.gif']
 const PASSTHROUGH_FORMATS = ['.svg', '.webp', '.avif', '.ico']
 
 /**
+ * Prefix a root-relative URL with the site's base path.
+ *
+ * Emitted asset URLs are absolute-from-site-root (`/assets/hero-ab12cd34.webp`).
+ * Under a subdirectory deployment (GitHub Pages project sites, `/docs/`, ...)
+ * the served root moves, so the URL baked into site-content.json has to carry
+ * the base — components render `content.images[]` as a raw `<img src>` and have
+ * no chance to resolve it themselves. This mirrors what the collection
+ * processor already does for collection asset paths.
+ */
+function withBase(url, basePath) {
+  if (!url || !basePath || basePath === '/') return url
+  if (!url.startsWith('/') || url.startsWith('//')) return url
+  const prefix = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath
+  if (url === prefix || url.startsWith(prefix + '/')) return url // already based
+  return prefix + url
+}
+
+/**
  * Generate a content hash for a file
  */
 async function getFileHash(filePath) {
@@ -56,7 +74,8 @@ export async function processAsset(asset, options = {}) {
     outputDir,
     assetsSubdir = 'assets',
     convertToWebp: shouldConvert = true,
-    quality = 80
+    quality = 80,
+    basePath = '/'
   } = options
 
   const { original, resolved, isImage } = asset
@@ -66,7 +85,9 @@ export async function processAsset(asset, options = {}) {
     console.warn(`[asset-processor] Source not found: ${resolved}`)
     return {
       original,
-      output: original, // Keep original path as fallback
+      // Keep the authored path as fallback — still based, since an unprocessed
+      // public/ asset is served under the base too.
+      output: withBase(original, basePath),
       processed: false,
       error: 'Source not found'
     }
@@ -107,8 +128,8 @@ export async function processAsset(asset, options = {}) {
     // Write processed file
     await writeFile(outputPath, outputBuffer)
 
-    // Return the URL path (relative to site root)
-    const outputUrl = `/${assetsSubdir}/${outputFilename}`
+    // Return the URL path (site-root-absolute, carrying the deployment base)
+    const outputUrl = withBase(`/${assetsSubdir}/${outputFilename}`, basePath)
 
     return {
       original,
@@ -123,7 +144,7 @@ export async function processAsset(asset, options = {}) {
     console.warn(`[asset-processor] Failed to process ${resolved}:`, error.message)
     return {
       original,
-      output: original,
+      output: withBase(original, basePath),
       processed: false,
       error: error.message
     }
@@ -135,6 +156,7 @@ export async function processAsset(asset, options = {}) {
  *
  * @param {Object} assetManifest - Asset manifest from content collector
  * @param {Object} options - Processing options
+ * @param {string} [options.basePath='/'] - Site base path for subdirectory deployments
  * @returns {Promise<Object>} Mapping of original paths to output URLs
  */
 export async function processAssets(assetManifest, options = {}) {

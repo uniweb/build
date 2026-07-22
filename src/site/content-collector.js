@@ -2013,7 +2013,7 @@ async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
  * @returns {Promise<Object>} Site content object with assets manifest
  */
 export async function collectSiteContent(sitePath, options = {}) {
-  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false } = options
+  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/' } = options
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
@@ -2047,7 +2047,10 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Load foundation info (vars + layout names) and process theme
   const { vars: foundationVars, layoutNames: layoutNames } = await loadFoundationInfo(foundationPath)
-  const { config: processedTheme, css: themeCSS, warnings } = buildTheme(rawThemeConfig, { foundationVars })
+  // `base` reaches the theme because self-hosted font faces are authored
+  // root-relative (`/fonts/x.woff2`) and the emitted @font-face lives in an
+  // inline <style> — under a subdirectory deployment it must carry the base.
+  const { config: processedTheme, css: themeCSS, warnings } = buildTheme(rawThemeConfig, { foundationVars, base })
 
   // Log theme warnings
   if (warnings?.length > 0) {
