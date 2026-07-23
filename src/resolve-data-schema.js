@@ -93,7 +93,7 @@ export function parseSchemaRef(ref) {
   if (typeof ref !== 'string' || ref[0] !== '@') {
     throw new Error(
       `Invalid data-schema ref ${JSON.stringify(ref)}: must start with '@' ` +
-        `(e.g. '@/member' for this foundation, or '@uniweb/person' for a shared standard).`
+        `(e.g. '@/member' for this foundation, or '@std/person' for a shared standard).`
     )
   }
   const slash = ref.indexOf('/')
