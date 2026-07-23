@@ -33,6 +33,7 @@
 import { resolve, join } from 'node:path'
 import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
+import { resolveDefaultLocale } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
@@ -205,6 +206,21 @@ function applyRouteTranslation(route, locale, routeTranslations) {
 }
 
 /**
+ * Restrict authored `seo.locales` hreflang entries to locales the payload
+ * actually serves. `config.languages` is the publishable intersection on
+ * production builds (the collector filters by publishLanguages), so draft
+ * locales never get advertised in sitemap/meta hreflang. The default-locale
+ * entry always survives (it's served at the root regardless).
+ */
+function filterSeoLocales(seoLocales, config) {
+  if (!Array.isArray(seoLocales) || seoLocales.length === 0) return seoLocales || []
+  const langs = Array.isArray(config?.languages) ? config.languages : null
+  if (!langs) return seoLocales
+  const served = new Set(langs)
+  return seoLocales.filter((l) => l.default || served.has(l.code))
+}
+
+/**
  * Generate sitemap.xml content
  */
 function generateSitemap(pages, baseUrl, locales = [], routeTranslations = {}) {
@@ -299,7 +315,8 @@ function generateRobotsTxt(baseUrl, options = {}) {
  * Generate meta tags for SEO
  */
 function generateMetaTags(siteContent, seoOptions) {
-  const { baseUrl, defaultImage, twitterHandle, locales = [] } = seoOptions
+  const { baseUrl, defaultImage, twitterHandle } = seoOptions
+  const locales = filterSeoLocales(seoOptions.locales, siteContent.config)
   const siteConfig = siteContent.config || {}
   const tags = []
 
@@ -651,6 +668,11 @@ export function siteContentPlugin(options = {}) {
         collectionTranslations = {}
       } catch (err) {
         console.error('[site-content] Failed to collect content:', err.message)
+        // Production: a failed collect must fail the build — falling through
+        // would publish an empty site (and would swallow deliberate hard
+        // errors like an invalid publishLanguages config). Dev: keep the
+        // server up with empty content so the author can fix the file.
+        if (isProduction) throw err
         siteContent = { config: {}, theme: {}, pages: [] }
       }
     },
@@ -871,7 +893,7 @@ export function siteContentPlugin(options = {}) {
         // Serve sitemap.xml in dev mode
         if (req.url === '/sitemap.xml' && seoEnabled && siteContent?.pages) {
           res.setHeader('Content-Type', 'application/xml')
-          res.end(generateSitemap(siteContent.pages, seoOptions.baseUrl, seoOptions.locales, siteContent.config?.i18n?.routeTranslations))
+          res.end(generateSitemap(siteContent.pages, seoOptions.baseUrl, filterSeoLocales(seoOptions.locales, siteContent.config), siteContent.config?.i18n?.routeTranslations))
           return
         }
 
@@ -888,7 +910,7 @@ export function siteContentPlugin(options = {}) {
           const searchEnabled = searchPluginConfig.enabled !== false && isSearchEnabled(siteContent)
           if (searchEnabled) {
             const searchConfig = siteContent.config?.search || {}
-            const defaultLocale = siteContent.config?.defaultLanguage || 'en'
+            const defaultLocale = resolveDefaultLocale(siteContent.config)
             // Use requested locale from URL, fall back to active or default
             const requestedLocale = searchIndexMatch[1]
             const activeLocale = requestedLocale || siteContent.config?.activeLocale || defaultLocale
@@ -1170,7 +1192,7 @@ export function siteContentPlugin(options = {}) {
       // Generate SEO files if enabled
       if (seoEnabled && finalContent?.pages) {
         // Generate sitemap.xml
-        const sitemap = generateSitemap(finalContent.pages, seoOptions.baseUrl, seoOptions.locales, finalContent.config?.i18n?.routeTranslations)
+        const sitemap = generateSitemap(finalContent.pages, seoOptions.baseUrl, filterSeoLocales(seoOptions.locales, finalContent.config), finalContent.config?.i18n?.routeTranslations)
         this.emitFile({
           type: 'asset',
           fileName: 'sitemap.xml',
@@ -1192,7 +1214,7 @@ export function siteContentPlugin(options = {}) {
       const searchEnabled = searchPluginConfig.enabled !== false && isSearchEnabled(finalContent)
       if (searchEnabled) {
         const searchConfig = finalContent.config?.search || {}
-        const defaultLocale = finalContent.config?.defaultLanguage || 'en'
+        const defaultLocale = resolveDefaultLocale(finalContent.config)
         const activeLocale = finalContent.config?.activeLocale || defaultLocale
 
         // Generate search index for current locale

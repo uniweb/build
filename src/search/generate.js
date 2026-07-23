@@ -5,6 +5,7 @@
  * for client-side search functionality.
  */
 
+import { resolveDefaultLocale } from '@uniweb/core'
 import { extractSearchContent } from './extract.js'
 
 /**
@@ -18,7 +19,7 @@ import { extractSearchContent } from './extract.js'
  */
 export function generateSearchIndex(siteContent, options = {}) {
   const {
-    locale = siteContent.config?.activeLocale || siteContent.config?.defaultLanguage || 'en',
+    locale = siteContent.config?.activeLocale || resolveDefaultLocale(siteContent.config),
     extract: extractOptions = {},
     search: searchConfig = {}
   } = options

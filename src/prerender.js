@@ -11,6 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { resolveDefaultLocale } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -284,7 +285,7 @@ async function processSectionFetches(sections, fetchOptions, onProgress) {
  */
 async function discoverLocaleContents(distDir, defaultContent) {
   const locales = []
-  const defaultLocale = defaultContent.config?.defaultLanguage || 'en'
+  const defaultLocale = resolveDefaultLocale(defaultContent.config)
 
   // Add the default locale (root level)
   locales.push({
@@ -582,7 +583,7 @@ export async function prerenderSite(siteDir, options = {}) {
     // Execute data fetches (site, page, section levels)
     // For non-default locales, collection data is read from dist/{locale}/data/
     onProgress('Executing data fetches...')
-    const defaultLocale = defaultSiteContent.config?.defaultLanguage || 'en'
+    const defaultLocale = resolveDefaultLocale(defaultSiteContent.config)
     const { pageFetchedData, fetchedData } = await executeAllFetches(
       siteContent, siteDir, onProgress,
       { locale, defaultLocale, distDir }

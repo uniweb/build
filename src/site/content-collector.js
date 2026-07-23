@@ -32,6 +32,7 @@ import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
 import { parseFetchConfig, singularize } from './data-fetcher.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
+import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -2204,21 +2205,59 @@ export async function collectSiteContent(sitePath, options = {}) {
   // keeps the canonical (folder-based) route. Strip the build-time `slug` from
   // pages afterward — the runtime hydrates the precomputed map, not per-page
   // slugs (see "Minimize Runtime Payload").
-  const defaultLocale =
-    siteConfig.defaultLanguage ||
-    (Array.isArray(siteConfig.languages) ? siteConfig.languages[0] : null) ||
-    'en'
+  const defaultLocale = resolveDefaultLocale(siteConfig)
+  const langValidation = validateLanguageConfig(siteConfig)
+  for (const { message } of langValidation.warnings) {
+    console.warn(`[content-collector] ${message}`)
+  }
+  // Publish filter (kb/framework/build/uwx-format.md → "Per-locale publish
+  // readiness"): on published build paths, only the publishable intersection
+  // (publishLanguages ∩ languages; absent field = all declared) ships — in
+  // the embedded languages list and in route translations. Dev keeps the
+  // full declared set so draft locales stay previewable, mirroring how
+  // `hidden` pages behave. Invalid publish configs (nothing publishable /
+  // default not publishable) hard-error the publish build, warn-only in dev.
+  const { publishable, explicit: hasPublishList } = resolvePublishableLocales(siteConfig)
+  if (dropUnpublished && langValidation.errors.length > 0) {
+    throw new Error(
+      `[content-collector] invalid language configuration:\n` +
+        langValidation.errors.map((e) => `  - ${e.message}`).join('\n')
+    )
+  }
+  const publishFilterActive = dropUnpublished && hasPublishList
+  const effectiveLanguages = Array.isArray(siteConfig.languages)
+    ? publishFilterActive
+      ? publishable
+      : siteConfig.languages
+    : null
   const routeTranslations = buildRouteTranslations(pages, {
     defaultLocale,
-    languages: Array.isArray(siteConfig.languages) ? siteConfig.languages : null,
+    languages: effectiveLanguages,
   })
   for (const page of pages) {
     if (page.slug) delete page.slug
   }
 
+  // `publishLanguages` is authoring/publish intent — it has no runtime
+  // consumer and never ships in a payload (the visitor runtime is
+  // list-unaware; the sync lane reads site.yml directly, not this output).
+  const { publishLanguages: _publishLanguages, ...runtimeSiteConfig } = siteConfig
+
   return {
     config: {
-      ...siteConfig,
+      ...runtimeSiteConfig,
+      // Embed the RESOLVED effective default (defaultLanguage || languages[0]
+      // || 'en') so every downstream reader — prerender, search, runtime,
+      // shell-mode consumers — sees an explicit value instead of re-deriving
+      // it (historically with inconsistent fallbacks). The backend projection
+      // normalizes identically on its lane (default_language || languages[0]).
+      defaultLanguage: defaultLocale,
+      // On publish builds the embedded languages list is the publishable
+      // intersection — a draft locale is indistinguishable from an
+      // undeclared one to visitors (no locale switcher entry).
+      ...(publishFilterActive && Array.isArray(siteConfig.languages)
+        ? { languages: publishable }
+        : {}),
       fetch: parseFetchConfig(siteConfig.fetch),
       ...(hasIntelligence && { intelligence: intelligenceConfig }),
       ...(routeTranslations

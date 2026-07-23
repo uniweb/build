@@ -46,8 +46,8 @@ import {
   processMarkdownFile,
 } from '../site/content-collector.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
+import { resolveDefaultLocale } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
@@ -503,15 +503,15 @@ function collectionsNested(declarations) {
  * @param {object} [opts]
  * @param {string} [opts.entityUuid] - override the entity `$uuid` (tests); default
  *        is `site.yml::$uuid` (absent on first sync — `$id`-only document).
- * @param {string} [opts.sourceLocale] - localized-field wrap locale (default "en").
+ * @param {string} [opts.sourceLocale] - localized-field wrap locale. Defaults to
+ *        the site's effective default locale (`defaultLanguage || languages[0] ||
+ *        'en'` — the shared `resolveDefaultLocale` rule), NOT a bare 'en'.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, collections }`
  */
 export async function siteProjectToDocument(siteRoot, opts = {}) {
-  const sourceLocale =
-    opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
-
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
+  const sourceLocale = opts.sourceLocale || resolveDefaultLocale(siteYml)
   if (!siteYml.name) {
     throw new Error('uwx/site: site.yml::name is required')
   }

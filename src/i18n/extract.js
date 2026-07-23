@@ -5,6 +5,7 @@
  * strings and building a manifest of translation units.
  */
 
+import { resolveDefaultLocale } from '@uniweb/core'
 import { computeHash, stripInlineTags } from './hash.js'
 
 /**
@@ -55,7 +56,7 @@ export function extractTranslatableContent(siteContent) {
 
   return {
     version: '1.0',
-    defaultLocale: siteContent.config?.defaultLanguage || 'en',
+    defaultLocale: resolveDefaultLocale(siteContent.config),
     extracted: new Date().toISOString(),
     units
   }

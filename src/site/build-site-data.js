@@ -21,6 +21,7 @@ import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+import { resolveDefaultLocale } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
@@ -197,8 +198,7 @@ export async function buildSiteData({
   //    declared the feature at all.
   const siteFeatures = finalContent.config?.features || []
   if (Array.isArray(siteFeatures) && siteFeatures.includes('search')) {
-    const defaultLocale =
-      finalContent.config?.defaultLanguage || finalContent.config?.activeLocale || 'en'
+    const defaultLocale = resolveDefaultLocale(finalContent.config)
     const searchDir = join(resolvedDistDir, '_search', defaultLocale)
     await mkdir(searchDir, { recursive: true })
 
