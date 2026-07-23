@@ -46,7 +46,7 @@ import {
   processMarkdownFile,
 } from '../site/content-collector.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
-import { resolveDefaultLocale } from '@uniweb/core'
+import { resolveDefaultLocale, validateLanguageConfig } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
@@ -521,6 +521,20 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
         'it maps to the required @uniweb/site-content info.foundation'
     )
   }
+  // Language-config contract: warnings surface (dangling publish codes,
+  // legacy entry shapes); errors — nothing publishable / default not
+  // publishable — hard-error at push, same as the static build does at
+  // build/deploy (uwx-format.md → "Per-locale publish readiness").
+  const langValidation = validateLanguageConfig(siteYml)
+  for (const { message } of langValidation.warnings) {
+    console.warn(`uwx/site: ${message}`)
+  }
+  if (langValidation.errors.length > 0) {
+    throw new Error(
+      'uwx/site: invalid language configuration:\n' +
+        langValidation.errors.map((e) => `  - ${e.message}`).join('\n')
+    )
+  }
 
   const themeYml = await readYamlFile(join(siteRoot, 'theme.yml'))
   let headHtml
@@ -550,6 +564,12 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
   setIf(info, 'languages', siteYml.languages)
   setIf(info, 'default_language', siteYml.defaultLanguage)
+  // Publish intent (site.yml `publishLanguages:`) rides VERBATIM — dangling
+  // codes included. Sync carries the full working set; only *publish* filters
+  // (backend projection / static-build filter). The verbatim carry is what
+  // preserves a locale's publish intent across a remove + re-add in
+  // `languages:` (uwx-format.md → "Per-locale publish readiness").
+  setIf(info, 'publish_languages', siteYml.publishLanguages)
   // `foundation` (required) — the verbatim `site.yml::foundation` string
   // (registry ref / URL / local path), the round-trip source of truth.
   info.foundation = siteYml.foundation

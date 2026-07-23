@@ -92,6 +92,9 @@ const INFO_TO_SITE_YML = {
   foundation: 'foundation',
   languages: 'languages',
   default_language: 'defaultLanguage',
+  // Publish intent — verbatim both ways, dangling codes included (they carry
+  // the preserved publish intent of a temporarily-undeclared language).
+  publish_languages: 'publishLanguages',
   base: 'base',
   favicon: 'favicon',
   fetcher: 'fetcher',
