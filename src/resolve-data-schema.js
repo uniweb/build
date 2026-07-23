@@ -18,10 +18,12 @@
  *   '@uniweb/name'   → reserved: the platform system namespace, not a data
  *                      schema source (rejected, with a pointer to '@std').
  *
- * Alias routing (`schemas.config.js`): a foundation may map a scope to a
- * directory of schema files, so '@org/name' resolves to a bare folder anywhere
- * on disk — no package, no install. The alias takes precedence over the
- * '@org/schemas' package convention; see `loadSchemaAliases`.
+ * Alias routing (`schemas.config.js`): a foundation may route a scope to a
+ * directory of schema files ('@org' → a folder), so '@org/name' resolves to a
+ * bare folder anywhere on disk — no package, no install. It may also override a
+ * SINGLE schema to an exact file ('@org/name' → a file), which wins over the
+ * scope directory for that one name. Both take precedence over the '@org/schemas'
+ * package convention (file over directory over package); see `loadSchemaAliases`.
  *
  * The authoring format and its canonical type vocabulary are documented in
  * `data-schema-format.md`. This module validates that format and normalizes the
@@ -31,7 +33,7 @@
  */
 
 import { readFile } from 'node:fs/promises'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, isAbsolute, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
@@ -155,20 +157,47 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
     )
   }
 
-  // Alias routing (schemas.config.js): a scope mapped to a directory resolves to
-  // a bare schema FILE in that directory — no package, no install, no node_modules.
-  // This lets a foundation point '@agency' at a shared schema folder anywhere on
-  // disk. Takes precedence over the package convention below; '@/' (self) and the
-  // reserved '@uniweb' scope are handled above and are never aliasable.
+  // Alias routing (schemas.config.js), most-specific first — no package, no
+  // install, no node_modules; '@/' (self) and the reserved '@uniweb' scope are
+  // handled above and are never aliasable.
+  //
+  // A per-schema alias ('@org/name' → a FILE) overrides one schema to an exact
+  // file. It's the explicit way to keep a shared scope routed to a catalog while
+  // swapping in one local definition — no symlink, no forked scope. It wins over
+  // the scope directory (checked next), which wins over the package (below).
+  const aliasedFile = aliases?.[`@${scope}/${name}`]
+  if (aliasedFile) {
+    const file = resolveAliasedSchemaFile(aliasedFile)
+    if (!file) {
+      throw new Error(
+        `Data schema '${ref}' is aliased to '${aliasedFile}' (via schemas.config.js), but no schema file ` +
+          `exists there. Point it at a ${SCHEMA_EXTENSIONS.join(' / ')} file.`
+      )
+    }
+    return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
+  }
+
+  // A scope alias ('@org' → a DIR) resolves 'name' to a bare schema FILE in that
+  // directory. This lets a foundation point '@agency' at a shared schema folder
+  // anywhere on disk.
   const aliasDir = aliases?.[`@${scope}`]
   if (aliasDir) {
     const file = findSchemaFileInDir(aliasDir, name)
     if (!file) {
       const tried = SCHEMA_EXTENSIONS.map((e) => `${name}${e}`).join(', ')
-      throw new Error(
+      let msg =
         `Data schema '${ref}' not found in the directory '@${scope}' is aliased to ('${aliasDir}' ` +
-          `via schemas.config.js). Expected one of: ${tried}.`
-      )
+        `via schemas.config.js). Expected one of: ${tried}.`
+      // The confusing case: the '@org/schemas' package is ALSO installed. A routed
+      // scope never falls back to it (fail-loud beats silently loading a different
+      // definition), so say so rather than leave the developer wondering.
+      if (isScopePackageInstalled(scope, srcDir)) {
+        msg +=
+          ` Note: '${packageForScope(scope)}' is installed, but a routed scope takes precedence over the ` +
+          `package and does not fall back to it. Override this one schema with a '@${scope}/${name}' file alias, ` +
+          `or add '${name}' to the routed directory.`
+      }
+      throw new Error(msg)
     }
     return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
   }
@@ -640,20 +669,23 @@ function findSchemaFileInDir(dir, name) {
 
 /**
  * Load a foundation's optional `schemas.config.js` and return a map of
- * `'@scope' → absolute directory`. The file default-exports a plain object
- * mapping a schema-ref scope to a directory of schema files:
+ * `'@key' → absolute path`. The file default-exports a plain object; each key is
+ * either a SCOPE (routing the whole scope to a directory of schema files) or a
+ * single SCHEMA (`@scope/name`, overriding that one schema to an exact file):
  *
  *   // <foundation>/schemas.config.js
  *   export default {
- *     '@agency': '../shared/agency-schemas',   // relative to the foundation
- *     '@brand':  process.env.BRAND_SCHEMAS,     // machine-specific, via env
+ *     '@agency':        '../shared/agency-schemas',   // scope → directory
+ *     '@agency/person': './schemas/agency-person.yml', // one schema → a file
+ *     '@brand':         process.env.BRAND_SCHEMAS,     // machine-specific, via env
  *   }
  *
  * It's plain JS (consistent with main.js / vite.config.js), so paths compute
  * natively — relative, absolute, env-based, or homedir — with no expansion DSL.
- * Relative paths resolve against the foundation source dir. A scope whose value
- * is null/undefined (e.g. an unset env var) is skipped — that scope falls back
- * to the '@org/schemas' package convention. Returns `{}` when the file is absent.
+ * Relative paths resolve against the foundation source dir. A key whose value is
+ * null/undefined (e.g. an unset env var) is skipped — that scope/schema falls
+ * back to the next source (scope directory, then the '@org/schemas' package).
+ * Returns `{}` when the file is absent.
  *
  * @param {string} srcDir - Foundation source root (where main.js lives).
  * @returns {Promise<Record<string, string>>}
@@ -670,21 +702,67 @@ async function loadSchemaAliases(srcDir) {
     throw new Error(`Failed to load schemas.config.js: ${err.message}`)
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error(`schemas.config.js must default-export a map of '@scope' → directory.`)
+    throw new Error(`schemas.config.js must default-export a map of '@scope' (or '@scope/name') → path.`)
   }
 
   const out = {}
   for (const [key, value] of Object.entries(raw)) {
     if (value == null) continue // unset (e.g. missing env var) → not aliased
     if (typeof value !== 'string') {
-      throw new Error(`schemas.config.js: alias '${key}' must be a directory path string, got ${typeof value}.`)
+      throw new Error(`schemas.config.js: alias '${key}' must be a path string, got ${typeof value}.`)
     }
-    if (key[0] !== '@' || key === '@/' || key.includes('/')) {
-      throw new Error(`schemas.config.js: alias key '${key}' must be a scope like '@agency' (no slash, not '@/').`)
-    }
+    validateAliasKey(key)
     out[key] = isAbsolute(value) ? value : resolve(srcDir, value)
   }
   return out
+}
+
+// A schemas.config.js key is either a scope ('@agency' → a directory of schema
+// files) or a single schema ('@agency/person' → one file). Reject '@/' (self —
+// put the file in the foundation's schemas/), the reserved '@uniweb' scope, and
+// anything malformed. The message keeps the "must be a scope like '@agency'"
+// phrasing so the guidance reads the same for the common no-'@' slip.
+function validateAliasKey(key) {
+  if (typeof key !== 'string' || key[0] !== '@') {
+    throw new Error(
+      `schemas.config.js: alias key '${key}' must be a scope like '@agency' (or a single schema like '@agency/person').`
+    )
+  }
+  const slash = key.indexOf('/')
+  const scope = slash === -1 ? key.slice(1) : key.slice(1, slash)
+  const name = slash === -1 ? '' : key.slice(slash + 1)
+  if (!scope) {
+    throw new Error(`schemas.config.js: alias key '${key}' must be a scope like '@agency' (not '@/…' — that's the foundation's own schemas/).`)
+  }
+  if (scope === RESERVED_SYSTEM_SCOPE) {
+    throw new Error(`schemas.config.js: '@${scope}' is reserved and cannot be aliased. Use '@std' for the standard schemas.`)
+  }
+  if (slash !== -1 && (!name || name.includes('/'))) {
+    throw new Error(`schemas.config.js: alias key '${key}' must be '@scope' or '@scope/name' (a single schema name).`)
+  }
+}
+
+// Resolve a per-schema alias VALUE (already an absolute path) to a loadable
+// schema file: the exact path if it names a file, else the path + each known
+// extension (so a '@acme/person' → '.../person' value finds 'person.yml'). A
+// directory is not a file — returns null so the caller errors clearly.
+function resolveAliasedSchemaFile(absPath) {
+  if (existsSync(absPath) && !statSync(absPath).isDirectory()) return absPath
+  for (const ext of SCHEMA_EXTENSIONS) {
+    if (existsSync(absPath + ext)) return absPath + ext
+  }
+  return null
+}
+
+// Is the scope's '@org/schemas' package resolvable from the foundation? Used only
+// to enrich a routed-scope "not found" error — never throws, never loads.
+function isScopePackageInstalled(scope, srcDir) {
+  try {
+    createRequire(join(srcDir, 'package.json')).resolve(packageForScope(scope))
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function loadSchemaFile(filePath) {

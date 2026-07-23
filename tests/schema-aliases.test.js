@@ -118,3 +118,132 @@ describe('schemas.config.js alias routing', () => {
     }
   })
 })
+
+// A per-schema key ('@scope/name' → a FILE) overrides ONE schema, winning over
+// the scope directory and the package. The explicit alternative to symlinking a
+// file into a routed folder or forking a whole scope.
+const OVERRIDE_PERSON = ['name: person', 'fields:', '  name: { type: string }', '  local_only: { type: bool }'].join('\n')
+
+describe('schemas.config.js per-schema file aliases', () => {
+  it('resolves a single schema to an exact file', async () => {
+    const fx = makeFixture("export default { '@agency/person': './person-local.yml' }")
+    try {
+      writeFileSync(join(fx.fnd, 'person-local.yml'), OVERRIDE_PERSON)
+      const map = await buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })
+      expect(map['@agency/person'].fields.local_only).toEqual({ type: 'bool' })
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('appends a known extension when the value omits one', async () => {
+    const fx = makeFixture("export default { '@agency/person': './person-local' }")
+    try {
+      writeFileSync(join(fx.fnd, 'person-local.yml'), OVERRIDE_PERSON)
+      const map = await buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })
+      expect(map['@agency/person'].fields.local_only).toBeTruthy()
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('a per-schema file wins over the scope directory for that one name', async () => {
+    // '@agency' routes person+project to the shared folder; '@agency/person' swaps
+    // in a local file. person comes from the override; project from the directory,
+    // and project's ref:'@agency/person' resolves to the override too (same map).
+    const fx = makeFixture(
+      "export default { '@agency': '../ext-schemas', '@agency/person': './person-local.yml' }",
+      { extFiles: { 'person.yml': PERSON_YML, 'project.yml': PROJECT_YML } }
+    )
+    try {
+      writeFileSync(join(fx.fnd, 'person-local.yml'), OVERRIDE_PERSON)
+      const map = await buildDataSchemaMap(['@agency/project'], { srcDir: fx.fnd })
+      expect(Object.keys(map).sort()).toEqual(['@agency/person', '@agency/project'])
+      // override person has local_only and does NOT have the directory's email field
+      expect(map['@agency/person'].fields.local_only).toBeTruthy()
+      expect(map['@agency/person'].fields.email).toBeUndefined()
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('errors clearly when the aliased file is missing', async () => {
+    const fx = makeFixture("export default { '@agency/person': './nope.yml' }")
+    try {
+      await expect(buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })).rejects.toThrow(
+        /aliased to '.*nope\.yml'.*no schema file exists there/
+      )
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('errors when the aliased value is a directory, not a file', async () => {
+    const fx = makeFixture("export default { '@agency/person': '../ext-schemas' }", {
+      extFiles: { 'person.yml': PERSON_YML },
+    })
+    try {
+      await expect(buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })).rejects.toThrow(/no schema file exists there/)
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it("rejects the reserved '@uniweb' scope as an alias key", async () => {
+    const fx = makeFixture("export default { '@uniweb/person': './p.yml' }")
+    try {
+      await expect(buildDataSchemaMap(['@std/person'], { srcDir: fx.fnd })).rejects.toThrow(/'@uniweb' is reserved/)
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it("rejects '@/name' self keys and multi-segment names", async () => {
+    const self = makeFixture("export default { '@/person': './p.yml' }")
+    try {
+      await expect(buildDataSchemaMap(['@agency/person'], { srcDir: self.fnd })).rejects.toThrow(/not '@\/…'/)
+    } finally {
+      self.cleanup()
+    }
+    const deep = makeFixture("export default { '@agency/a/b': './p.yml' }")
+    try {
+      await expect(buildDataSchemaMap(['@agency/x'], { srcDir: deep.fnd })).rejects.toThrow(/a single schema name/)
+    } finally {
+      deep.cleanup()
+    }
+  })
+})
+
+describe('routed-scope not-found diagnostic', () => {
+  // When a routed scope is missing a schema AND the '@org/schemas' package is also
+  // installed, the error explains that a routed scope never falls back to it.
+  function withPackage(configBody) {
+    const fx = makeFixture(configBody)
+    const pkgDir = join(fx.fnd, 'node_modules', '@agency', 'schemas')
+    mkdirSync(pkgDir, { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@agency/schemas', type: 'module', main: 'index.js' }))
+    writeFileSync(join(pkgDir, 'index.js'), 'export const schemas = {}\n')
+    return fx
+  }
+
+  it('notes that a routed scope does not fall back to an installed package', async () => {
+    const fx = withPackage("export default { '@agency': '../ext-schemas' }")
+    try {
+      await expect(buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })).rejects.toThrow(
+        /does not fall back to it/
+      )
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('omits the note when no package is installed', async () => {
+    const fx = makeFixture("export default { '@agency': '../ext-schemas' }")
+    try {
+      await expect(buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })).rejects.toThrow(/Expected one of/)
+      await expect(buildDataSchemaMap(['@agency/person'], { srcDir: fx.fnd })).rejects.not.toThrow(/fall back/)
+    } finally {
+      fx.cleanup()
+    }
+  })
+})
