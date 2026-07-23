@@ -324,8 +324,24 @@ export function validateAndNormalizeSchema(schema, ref) {
   }
 
   const out = {}
-  for (const k of ['name', 'version', 'description', 'sort_date', 'sortDate']) {
+  for (const k of ['name', 'version', 'description']) {
     if (schema[k] !== undefined) out[k] = schema[k]
+  }
+
+  // The model's sort axis names a DATE FIELD IN THE BRIEF section (not a boolean,
+  // not a field-level flag) — the lowering stamps `sort_date: true` on that field.
+  // Authored as `sort_date` (the authoring vocabulary is snake_case, like
+  // `append_only`); `sortDate` is an accepted alias. Both normalize to `sortDate`,
+  // the single key the lowering reads — carrying the two spellings through verbatim
+  // meant an authored `sort_date` was silently dropped.
+  const sortDate = schema.sort_date ?? schema.sortDate
+  if (sortDate !== undefined) {
+    if (typeof sortDate !== 'string') {
+      throw new Error(
+        `Data schema '${ref}': 'sort_date' must name a date field in the brief section, got ${typeof sortDate}.`
+      )
+    }
+    out.sortDate = sortDate
   }
 
   const hasFields = schema.fields !== undefined

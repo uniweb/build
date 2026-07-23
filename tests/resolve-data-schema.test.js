@@ -119,6 +119,16 @@ describe('validateAndNormalizeSchema — valid', () => {
     )
     expect(out.sections.activity.append_only).toBe(true)
   })
+
+  // The lowering reads exactly one key (`sortDate`). Both authoring spellings must
+  // normalize to it — carrying them through verbatim silently dropped an authored
+  // snake_case `sort_date`, which is the spelling the format documents.
+  it('normalizes both sort_date spellings to the single key the lowering reads', () => {
+    const fields = { title: { type: 'string' }, published_on: { type: 'date' } }
+    expect(validateAndNormalizeSchema({ sort_date: 'published_on', fields }, '@/post').sortDate).toBe('published_on')
+    expect(validateAndNormalizeSchema({ sortDate: 'published_on', fields }, '@/post').sortDate).toBe('published_on')
+    expect(validateAndNormalizeSchema({ fields }, '@/post').sortDate).toBeUndefined()
+  })
 })
 
 describe('validateAndNormalizeSchema — friendly cardinality sugar', () => {
@@ -239,6 +249,9 @@ describe('validateAndNormalizeSchema — errors', () => {
   })
   it('rejects array-style options (steers to enum)', () => {
     expect(bad({ fields: { x: { type: 'string', options: ['a', 'b'] } } })).toThrow(/use 'enum:'/)
+  })
+  it('rejects a sort_date that is not a field name', () => {
+    expect(bad({ sort_date: true, fields: { x: { type: 'date' } } })).toThrow(/must name a date field/)
   })
   it('rejects more than one brief section', () => {
     expect(
