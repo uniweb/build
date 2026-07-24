@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolveDefaultLocale } from '@uniweb/core'
+import { resolveDefaultLocale, hasDarkScheme } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -368,6 +368,49 @@ export function scopeFetchedData(fetchedData, scopeRoutes) {
 }
 
 /**
+ * Build the pre-paint appearance boot script for a prerendered page.
+ *
+ * Prerendered HTML carries real content in <body>, styled from :root (light)
+ * tokens. Without this, a visitor whose scheme is dark — by stored preference or
+ * OS — sees a flash of light before the bundle hydrates and applies the class.
+ * A synchronous <head> script sets the scheme class on <html> before <body> is
+ * painted, so the first paint is already correct. (Pure SPA builds don't need
+ * it: the body is empty until the bundle renders, and initRuntime applies the
+ * scheme before that first render.)
+ *
+ * The logic mirrors resolveBootScheme() + applyScheme() in @uniweb/runtime,
+ * inlined as a string because it must run before any module loads. Emitted only
+ * when the site can reach dark (same @uniweb/core predicate the CSS generator
+ * uses); a light-only site always renders light and needs no script. Because
+ * hasDarkScheme() is already true here, system-following collapses to
+ * `respectSystemPreference && prefers-color-scheme: dark`.
+ *
+ * Only a coerced boolean and the literal 'light'/'dark' are interpolated, so
+ * author-supplied theme.yml values cannot inject script.
+ *
+ * @param {Object} [appearance] - normalized theme.yml `appearance:` block
+ * @returns {string} a `<script>` line, or '' when no script is needed
+ */
+export function renderAppearanceBootScript(appearance) {
+  if (!appearance || !hasDarkScheme(appearance)) return ''
+
+  const respectSystem = appearance.respectSystemPreference !== false
+  const dflt = appearance.default === 'dark' ? 'dark' : 'light'
+
+  const body =
+    `(function(){try{` +
+    `var d=document.documentElement,s=null;` +
+    `try{s=localStorage.getItem('uniweb-appearance')}catch(e){}` +
+    `var m=(s==='light'||s==='dark')?s:` +
+    `((${respectSystem}&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'${dflt}');` +
+    `if(m==='dark'){d.classList.add('scheme-dark');d.classList.remove('scheme-light')}` +
+    `else{d.classList.add('scheme-light');d.classList.remove('scheme-dark')}` +
+    `}catch(e){}})();`
+
+  return `  <script id="uniweb-appearance">${body}</script>\n`
+}
+
+/**
  * Inject build-specific data into HTML (theme CSS, __SITE_CONTENT__, icon cache).
  * Called after the shared injectPageContent for build-specific additions.
  *
@@ -396,6 +439,15 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
       '</head>',
       `  <style id="uniweb-theme">\n${siteContent.theme.css}\n    </style>\n  </head>`
     )
+  }
+
+  // Inject the pre-paint appearance boot script so a prerendered page renders in
+  // the visitor's scheme from the first paint instead of flashing light first.
+  if (!result.includes('id="uniweb-appearance"')) {
+    const bootScript = renderAppearanceBootScript(siteContent?.theme?.appearance)
+    if (bootScript) {
+      result = result.replace('</head>', `${bootScript}  </head>`)
+    }
   }
 
   // Inject site content as JSON for hydration
