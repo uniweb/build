@@ -22,7 +22,7 @@
 import { buildCollectionEntities, entityContentHash } from './collections.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
-import { stampUnitUuids } from './site-diff.js'
+import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { isLocalAssetPath } from '../site/assets.js'
 
@@ -38,10 +38,24 @@ const cacheKey = (entity) => `${entity.model} ${entity.id}`
 // uuid→version map (the sync-cache); an entity the map doesn't know is left
 // unconditional rather than guessed at. See entity-document.js for what the
 // token means on the wire.
-const withBaseVersion = (baseVersions) => (entity) => {
+const withBaseVersion = (baseVersions, itemBaseVersions) => (entity) => {
   const uuid = entity?.document?.$uuid
   const v = uuid ? baseVersions[uuid] : null
-  return v ? { ...entity, baseVersion: v } : entity
+  // Per-item preconditions, narrowed to the records THIS package actually carries.
+  // The cache spans the whole site, but a package holds only what changed; sending
+  // tokens for absent records would bloat the manifest and assert preconditions on
+  // items we are not touching.
+  let items = null
+  if (itemBaseVersions && Object.keys(itemBaseVersions).length) {
+    items = {}
+    for (const itemUuid of Object.values(collectUnitUuids(entity.document))) {
+      const t = itemBaseVersions[itemUuid]
+      if (t) items[itemUuid] = t
+    }
+    if (!Object.keys(items).length) items = null
+  }
+  if (!v && !items) return entity
+  return { ...entity, ...(v ? { baseVersion: v } : {}), ...(items ? { itemBaseVersions: items } : {}) }
 }
 
 function emitLane(entities, exporter, exportedAt, extraModels = []) {
@@ -131,6 +145,11 @@ function rewriteEntityAssets(node, map) {
  *        stamped onto the site-content document so the backend matches our items
  *        instead of re-minting them (which deletes and recreates every page and
  *        section row). Sourced from a pull or a push response, cached by the caller.
+ * @param {Object<string,string>} [opts.itemBaseVersions] - record `$uuid` → opaque
+ *        per-ITEM `version`. Narrowed at emit to the records the package carries and
+ *        sent as `entries[].item_base_versions`, so the backend can refuse only the
+ *        records that genuinely moved instead of the whole document. Omit to push
+ *        those records unconditionally.
  * @param {Object<string,string>} [opts.baseVersions] - backend-uuid → opaque
  *        `version` token, the push gate's optimistic-concurrency precondition.
  *        Each sent entity whose `$uuid` the map knows carries it as a top-level
@@ -164,7 +183,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const sourceLocale = opts.sourceLocale
   const priorHashes = opts.priorHashes || {}
   const sendAll = !!opts.sendAll
-  const stamp = withBaseVersion(opts.baseVersions || {})
+  const stamp = withBaseVersion(opts.baseVersions || {}, opts.itemBaseVersions || {})
   const exporter = opts.exporter
   const exportedAt = opts.exportedAt
 

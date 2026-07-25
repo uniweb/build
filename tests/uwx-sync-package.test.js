@@ -6,12 +6,14 @@ import {
   siteProjectToDocument,
   writeSiteEntityUuid,
   readZip,
+  computeUnitHashes,
 } from '../src/uwx/index.js'
 
 // The two directional sync lanes: site-content (static) and collections (folder +
 // records). Each fires independently on "send only changed"; the entity uuids live
-// in files (site.yml / collections.yml / record files), and site-content carries no
-// per-item uuids on the wire.
+// in files (site.yml / collections.yml / record files). Site-content items carry a
+// per-item `$uuid` when the caller supplies `itemUuids` — without it the backend
+// recreates every row — so the no-identity cases below are the un-stamped path.
 
 let ROOT, SITE
 function w(rel, body) {
@@ -293,5 +295,61 @@ describe('emitSyncPackages — local-media (Slice 5)', () => {
     const json = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
     expect(json).toContain('https://cdn/x/base.png') // mapped → rewritten
     expect(json).toContain('/images/b.png') // unmapped → preserved
+  })
+})
+
+describe('emitSyncPackages — per-item preconditions (item_base_versions)', () => {
+  const manifestOf = (buffer) => JSON.parse(readZip(buffer).get('manifest.json').toString('utf8'))
+
+  it('sends only the tokens for records THIS package carries', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    // Identity first — tokens are keyed by record uuid, so they can only be sent
+    // for records whose uuid we know.
+    const pkg0 = await emitSyncPackages(SITE, { itemUuids: {} })
+    const uuids = {}
+    for (const p of Object.keys(computeUnitHashes(JSON.parse(readZip(pkg0.siteContent.buffer).get('entities/site-content.json').toString('utf8'))))) {
+      uuids[p] = `u-${p.replace(/[^a-z0-9]/gi, '-')}`
+    }
+    const tokens = Object.fromEntries(Object.values(uuids).map((u) => [u, `v-${u}`]))
+    tokens['u-not-in-this-package'] = 'v-stale'
+
+    const pkg = await emitSyncPackages(SITE, { itemUuids: uuids, itemBaseVersions: tokens })
+    const sent = manifestOf(pkg.siteContent.buffer).entries[0].item_base_versions
+    expect(Object.keys(sent).length).toBe(Object.keys(uuids).length)
+    expect(sent['u-not-in-this-package']).toBeUndefined()
+  })
+
+  it('omits the field entirely with no tokens — unconditional, the force path', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const pkg = await emitSyncPackages(SITE, { itemUuids: {} })
+    expect(manifestOf(pkg.siteContent.buffer).entries[0].item_base_versions).toBeUndefined()
+  })
+
+  it('rides TOP-LEVEL on the entry, beside base_version — not under `extra`', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const pkg0 = await emitSyncPackages(SITE, { itemUuids: {} })
+    const doc = JSON.parse(readZip(pkg0.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
+    const uuids = Object.fromEntries(Object.keys(computeUnitHashes(doc)).map((p, i) => [p, `u-${i}`]))
+    const pkg = await emitSyncPackages(SITE, {
+      itemUuids: uuids,
+      itemBaseVersions: Object.fromEntries(Object.values(uuids).map((u) => [u, 'v'])),
+      baseVersions: { 'u-site-1': 'V-entity' },
+    })
+    const entry = manifestOf(pkg.siteContent.buffer).entries[0]
+    expect(entry.base_version).toBe('V-entity')
+    expect(entry.item_base_versions).toBeTruthy()
+    expect(entry.extra).toBeUndefined()
+  })
+
+  it('does not perturb the content hash — adopting tokens must not re-push a site', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const plain = await emitSyncPackages(SITE, { itemUuids: {} })
+    const doc = JSON.parse(readZip(plain.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
+    const uuids = Object.fromEntries(Object.keys(computeUnitHashes(doc)).map((p, i) => [p, `u-${i}`]))
+    const gated = await emitSyncPackages(SITE, {
+      itemUuids: uuids,
+      itemBaseVersions: Object.fromEntries(Object.values(uuids).map((u) => [u, 'v'])),
+    })
+    expect(gated.hashes).toEqual(plain.hashes)
   })
 })

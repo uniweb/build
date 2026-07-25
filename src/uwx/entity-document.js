@@ -106,6 +106,15 @@ export function emitEntitySyncPackage({
     // two different things depending on sync state, and the backend has no use
     // for it (it reads identity from the body everywhere else too).
     if (entity.baseVersion) entry.base_version = entity.baseVersion
+    // Per-ITEM preconditions, keyed by each record's `$uuid`. The entity token
+    // gates the whole document, so a stale base on any one record refuses the
+    // entire push — which fires on the common case of two people editing different
+    // sections. These let the backend accept the records we may touch and refuse
+    // only the ones that genuinely moved. Same rules as the entity token: opaque,
+    // top-level on the entry (no `extra` wrapper), omitted = unconditional.
+    if (entity.itemBaseVersions && Object.keys(entity.itemBaseVersions).length) {
+      entry.item_base_versions = entity.itemBaseVersions
+    }
     entries.push(entry)
   }
 
