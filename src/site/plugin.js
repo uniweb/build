@@ -34,6 +34,15 @@ import { resolve, join } from 'node:path'
 import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { resolveDefaultLocale } from '@uniweb/core'
+import {
+  renderSiteIndex,
+  renderPageMarkdown,
+  resolveAgentsConfig,
+  selectIndexablePages,
+  pageMarkdownFilename,
+  applyRouteTranslation,
+  INDEX_FILENAME
+} from '@uniweb/projections'
 import { collectSiteContent } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
@@ -187,23 +196,12 @@ async function processDevSectionFetches(sections, fetchOptions) {
 import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
 import { mergeTranslations } from '../i18n/merge.js'
 
-/**
- * Translate a canonical route for a given locale using route translations config
- * Supports exact and prefix matching (e.g., /blog → /noticias also applies to /blog/post)
+/*
+ * `applyRouteTranslation` now comes from `@uniweb/projections` (imported
+ * above). It used to be defined here; the agent index builds localized URLs
+ * from the same rule, and two copies would eventually disagree about where a
+ * localized page lives.
  */
-function applyRouteTranslation(route, locale, routeTranslations) {
-  const localeMap = routeTranslations?.[locale]
-  if (!localeMap) return route
-  // Exact match
-  if (localeMap[route]) return localeMap[route]
-  // Prefix match
-  for (const [canonical, translated] of Object.entries(localeMap)) {
-    if (route.startsWith(canonical + '/')) {
-      return translated + route.slice(canonical.length)
-    }
-  }
-  return route
-}
 
 /**
  * Restrict authored `seo.locales` hreflang entries to locales the payload
@@ -577,6 +575,76 @@ export function siteContentPlugin(options = {}) {
     })
   }
 
+  /**
+   * Options shared by every projection call, so the dev middleware and the
+   * build emit cannot drift apart in how they build URLs.
+   */
+  function projectionOptions(content) {
+    const defaultLocale = resolveDefaultLocale(content.config)
+    return {
+      baseUrl: seoOptions.baseUrl,
+      basePath,
+      locale: content.config?.activeLocale || defaultLocale,
+      defaultLocale
+    }
+  }
+
+  /**
+   * Emit `llms.txt` and the per-page `.md` projections.
+   *
+   * Called with the Rollup plugin context, so `this.emitFile` is available.
+   * Sits beside the sitemap and search-index emits because it is the same kind
+   * of thing: an artifact derived from the site's content alone.
+   *
+   * Unlike the SEO artifacts, this does NOT silently skip when `seo.baseUrl`
+   * is unset — it falls back to root-relative links and `uniweb doctor` warns.
+   * An agent that arrived via the index can still follow a relative link, and
+   * a silently-absent index is the failure mode the whole feature exists to
+   * prevent.
+   *
+   * @param {Object} content - Final site content for this locale
+   */
+  function emitProjections(content) {
+    const agents = resolveAgentsConfig(content?.config)
+    if (!agents.index && !agents.markdown) return
+    if (!content?.pages?.length) return
+
+    const options = projectionOptions(content)
+    const localeDir =
+      options.locale && options.defaultLocale && options.locale !== options.defaultLocale
+        ? `${options.locale}/`
+        : ''
+
+    if (agents.index) {
+      this.emitFile({
+        type: 'asset',
+        fileName: `${localeDir}${INDEX_FILENAME}`,
+        source: renderSiteIndex(content, { ...options, exclude: agents.exclude })
+      })
+      console.log(`[site-content] Generated ${localeDir}${INDEX_FILENAME}`)
+    }
+
+    if (agents.markdown) {
+      const pages = selectIndexablePages(content.pages, { exclude: agents.exclude })
+      let emitted = 0
+      for (const page of pages) {
+        const markdown = renderPageMarkdown(page)
+        if (!markdown) continue
+        const route =
+          options.locale !== options.defaultLocale
+            ? applyRouteTranslation(page.route, options.locale, content.config?.i18n?.routeTranslations)
+            : page.route
+        this.emitFile({
+          type: 'asset',
+          fileName: `${localeDir}${pageMarkdownFilename(route)}`,
+          source: markdown
+        })
+        emitted++
+      }
+      if (emitted) console.log(`[site-content] Generated ${emitted} page markdown projections`)
+    }
+  }
+
   return {
     name: 'uniweb:site-content',
 
@@ -928,6 +996,47 @@ export function siteContentPlugin(options = {}) {
           }
         }
 
+        // Serve the agent projections in dev mode.
+        //
+        // Without this the artifacts can only be inspected by deploying, and
+        // `uniweb doctor`'s baseUrl warning describes something invisible
+        // locally. Both routes reuse the build's generators, so what a
+        // developer sees here is what ships.
+        if (siteContent) {
+          const agents = resolveAgentsConfig(siteContent.config)
+          const url = req.url.split('?')[0]
+
+          const indexMatch = url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/${INDEX_FILENAME}$`))
+          if (indexMatch && agents.index) {
+            const localized = (indexMatch[1] ? await getTranslatedContent(indexMatch[1]) : null) || siteContent
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+            res.end(
+              renderSiteIndex(localized, {
+                ...projectionOptions(localized),
+                locale: indexMatch[1] || projectionOptions(localized).locale,
+                exclude: agents.exclude
+              })
+            )
+            return
+          }
+
+          const markdownMatch = url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/(.+)\\.md$`))
+          if (markdownMatch && agents.markdown) {
+            const localized = (markdownMatch[1] ? await getTranslatedContent(markdownMatch[1]) : null) || siteContent
+            const requested = markdownMatch[2] === 'index' ? '/' : `/${markdownMatch[2]}`
+            const pages = selectIndexablePages(localized.pages, { exclude: agents.exclude })
+            const page = pages.find(p => p.route === requested)
+            if (page) {
+              const markdown = renderPageMarkdown(page)
+              if (markdown) {
+                res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+                res.end(markdown)
+                return
+              }
+            }
+          }
+        }
+
         // Handle localized collection data (e.g., /fr/data/articles.json)
         const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/data\\/(.+\\.json)$`))
         if (localeDataMatch) {
@@ -1234,6 +1343,11 @@ export function siteContentPlugin(options = {}) {
 
         console.log(`[site-content] Generated ${searchFilename} (${searchIndex.count} entries)`)
       }
+
+      // Agent-readable projections: the index (discovery) and per-page
+      // markdown (retrieval). Free and on by default; a site opts out under
+      // `agents:` in site.yml.
+      emitProjections.call(this, finalContent)
     },
 
     closeBundle() {

@@ -19,15 +19,23 @@
 
 import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 
 import { resolveDefaultLocale } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
-import { generateSearchIndex } from '../search/generate.js'
-import { generateCollectionIndex } from '../search/collections.js'
+import {
+  generateSearchIndex,
+  generateCollectionIndex,
+  renderSiteIndex,
+  renderPageMarkdown,
+  resolveAgentsConfig,
+  selectIndexablePages,
+  pageMarkdownFilename,
+  INDEX_FILENAME
+} from '@uniweb/projections'
 
 /**
  * Build the site data outputs needed by `uniweb deploy` (link-mode).
@@ -230,5 +238,56 @@ export async function buildSiteData({
     }
   }
 
+  // 6. Agent projections — `llms.txt` and one `.md` per page.
+  //
+  //    Emitted here as well as in the vite plugin because both lanes publish
+  //    a site, and an artifact derived from site content has to exist
+  //    whichever lane produced it. A projection present after one publish and
+  //    absent after another is worse than none: agents are told to rely on it.
+  //
+  //    Ungated by `features:` — projections are free, so they carry no
+  //    billing intent and no entitlement to check downstream.
+  await writeProjections(finalContent, resolvedDistDir)
+
   return { siteContent: finalContent, distDir: resolvedDistDir }
+}
+
+/**
+ * Write the agent projections into `distDir`.
+ *
+ * Mirrors the vite plugin's `emitProjections`, differing only in how bytes
+ * reach disk (`writeFile` vs. Rollup's `emitFile`) — the generators, options
+ * and filenames come from `@uniweb/projections`, so the two lanes cannot
+ * disagree about what they produce.
+ *
+ * @param {Object} siteContent - Final site content for the default locale
+ * @param {string} distDir - Resolved output directory
+ * @returns {Promise<void>}
+ */
+async function writeProjections(siteContent, distDir) {
+  const agents = resolveAgentsConfig(siteContent?.config)
+  if (!agents.index && !agents.markdown) return
+  if (!siteContent?.pages?.length) return
+
+  const defaultLocale = resolveDefaultLocale(siteContent.config)
+  const options = {
+    baseUrl: siteContent.config?.seo?.baseUrl || '',
+    locale: siteContent.config?.activeLocale || defaultLocale,
+    defaultLocale
+  }
+
+  if (agents.index) {
+    const index = renderSiteIndex(siteContent, { ...options, exclude: agents.exclude })
+    await writeFile(join(distDir, INDEX_FILENAME), index)
+  }
+
+  if (!agents.markdown) return
+
+  for (const page of selectIndexablePages(siteContent.pages, { exclude: agents.exclude })) {
+    const markdown = renderPageMarkdown(page)
+    if (!markdown) continue
+    const target = join(distDir, pageMarkdownFilename(page.route))
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(target, markdown)
+  }
 }

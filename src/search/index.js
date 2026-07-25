@@ -1,34 +1,20 @@
 /**
  * Search Index Generation Module
  *
- * Generates search indexes for Uniweb sites at build time.
- * The generated indexes can be loaded at runtime for client-side search.
+ * Re-export of `@uniweb/projections/search`. The implementation moved there so
+ * one copy serves every publisher of a site — the CLI and the app both import
+ * it, and the backend stores the result rather than generating its own. This
+ * shim keeps `@uniweb/build/search` and every existing call site working.
  *
  * @module @uniweb/build/search
- *
- * @example
- * import { generateSearchIndex, isSearchEnabled } from '@uniweb/build/search'
- *
- * // Check if search is enabled
- * if (isSearchEnabled(siteContent)) {
- *   // Generate index for current locale
- *   const index = generateSearchIndex(siteContent, {
- *     locale: 'en'
- *   })
- *
- *   // Write to file
- *   writeFileSync('dist/search-index.json', JSON.stringify(index))
- * }
  */
 
 export {
   extractSearchContent,
-  extractSearchContent as default
-} from './extract.js'
-
-export {
+  extractSearchContent as default,
   generateSearchIndex,
   isSearchEnabled,
   getSearchConfig,
-  getSearchIndexFilename
-} from './generate.js'
+  getSearchIndexFilename,
+  generateCollectionIndex
+} from '@uniweb/projections/search'
