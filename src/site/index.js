@@ -45,8 +45,7 @@ export {
   applyFilter,
   applySort,
   applyPostProcessing,
-  mergeDataIntoContent,
-  singularize
+  mergeDataIntoContent
 } from './data-fetcher.js'
 export { loadDeployYml, resolveTarget } from './deploy-config.js'
 export { recordLastDeploy, recordTarget } from './deploy-config-writer.js'

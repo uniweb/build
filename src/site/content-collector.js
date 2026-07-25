@@ -30,7 +30,7 @@ import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
-import { parseFetchConfig, singularize } from './data-fetcher.js'
+import { parseFetchConfig } from './data-fetcher.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
 

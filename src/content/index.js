@@ -28,7 +28,6 @@ export {
   applySort,
   applyPostProcessing,
   mergeDataIntoContent,
-  singularize,
 } from '../site/data-fetcher.js'
 
 // Cross-reference registry moved out of build into kit
