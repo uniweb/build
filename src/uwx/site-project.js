@@ -259,7 +259,7 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
 
 // A section/page record's durable handle: the `stable_id` content field (which
 // survives the round trip), falling back to the `$id` transport handle.
-function recordStableId(record) {
+export function recordStableId(record) {
   return record?.stable_id || record?.$id || null
 }
 
@@ -274,7 +274,7 @@ function recordStableId(record) {
 // collide on one filename (a collision would silently drop a section). The
 // `page.yml::sections:` leaf uses this same safe base so file resolution matches.
 const SAFE_STABLE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/
-function safeStableIdFilename(stableId) {
+export function safeStableIdFilename(stableId) {
   if (SAFE_STABLE_ID.test(stableId)) return stableId
   const base = stableId
     .replace(/[^A-Za-z0-9._-]+/g, '-')
@@ -409,7 +409,7 @@ function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
 // `slug` is a localized `{lang: value}` map on the wire (a page route stays
 // localized); the directory uses the canonical SOURCE-locale slug. `param_name`
 // is already a plain string.
-function pageDirName(record, sourceLocale) {
+export function pageDirName(record, sourceLocale) {
   const slug = unwrapLocalized(record.slug, sourceLocale)
   return record.is_dynamic ? `[${record.param_name || slug}]` : slug
 }

@@ -69,11 +69,10 @@ export {
 } from './locale-sync.js'
 export { emitSyncPackages } from './sync-package.js'
 export {
-  diffSitePages,
+  diffSiteUnits,
   describeSiteDiff,
-  computePageHashes,
-  pageIdentity,
-  pageLabel,
+  computeUnitHashes,
+  collectSiteUnits,
 } from './site-diff.js'
 export {
   collectionRecordsToEntities,

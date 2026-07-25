@@ -1,118 +1,164 @@
-import { diffSitePages, describeSiteDiff, computePageHashes, pageLabel } from '../src/uwx/site-diff.js'
+import { diffSiteUnits, describeSiteDiff, computeUnitHashes, collectSiteUnits } from '../src/uwx/site-diff.js'
 
-// Page-level attribution behind the entity-grained staleness gate. The refusal can
-// only say "the document moved"; this turns that into an account of which pages and
-// which side moved them.
+// File-level attribution behind the entity-grained staleness gate.
 //
-// The load-bearing property under test is that each side is judged against a base in
-// its OWN representation. The backend's copy of a page is not byte-equal to ours
-// (extra fields, its own key order), so a single shared base makes untouched pages
-// look changed — the bug these tests exist to prevent coming back.
+// Two properties are load-bearing and each has a bug behind it:
+//  1. The unit is the FILE, not the page. Content is split one section per file, so
+//     two people editing different sections of the SAME page have not conflicted.
+//     Page granularity called that a conflict, and a false conflict leaves only
+//     destructive moves — it pushes people toward --force.
+//  2. Each side is judged against a base in its OWN representation. The backend's
+//     copy of a unit is not byte-equal to ours, so a single shared base makes
+//     untouched units look changed.
 
-const page = (id, slug, body) => ({
-  mode: 'page',
-  stable_id: id,
-  slug: { en: slug },
-  title: { en: slug },
-  page_sections: [{ type: 'Section', stable_id: slug, content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] } }],
+const section = (id, body) => ({
+  type: 'Section', stable_id: id,
+  content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] },
 })
-// The same page as the backend stores it: extra fields we never emit.
-const asRemote = (p) => ({
-  ...p,
-  $uuid: `u-${p.stable_id}`,
-  page_sections: p.page_sections.map((s) => ({ ...s, params: { align: 'center' }, theme_override: null, $uuid: `u-${s.stable_id}` })),
+const page = (id, slug, sections, extra = {}) => ({
+  mode: 'page', stable_id: id, slug: { en: slug }, title: { en: slug }, page_sections: sections, ...extra,
 })
 const doc = (...pages) => ({ $model: '@uniweb/site-content', pages })
-const remoteDoc = (...pages) => doc(...pages.map(asRemote))
+// The same document as the backend stores it: fields we never emit, its own uuids.
+const asRemote = (d) => JSON.parse(JSON.stringify(d, (k, v) =>
+  (v && typeof v === 'object' && v.stable_id && v.type === 'Section')
+    ? { ...v, params: { align: 'center' }, theme_override: null, $uuid: `u-${v.stable_id}` }
+    : v))
 
-describe('diffSitePages — two bases, one per representation', () => {
-  it('attributes each side correctly when both bases are present', () => {
-    const localBase = computePageHashes(doc(page('h', 'home', 'H0'), page('a', 'about', 'A0'), page('c', 'contact', 'C0')))
-    const remoteBase = computePageHashes(remoteDoc(page('h', 'home', 'H0'), page('a', 'about', 'A0'), page('c', 'contact', 'C0')))
-
-    const local = doc(page('h', 'home', 'H-mine'), page('a', 'about', 'A0'), page('c', 'contact', 'C-mine'))
-    const remote = remoteDoc(page('h', 'home', 'H0'), page('a', 'about', 'A-theirs'), page('c', 'contact', 'C-theirs'))
-
-    const d = diffSitePages(local, remote, { local: localBase, remote: remoteBase })
-    expect(d.changedLocally).toEqual(['home'])
-    expect(d.changedUpstream).toEqual(['about'])
-    expect(d.changedBoth).toEqual(['contact'])
-    expect(d.changedUnattributed).toEqual([])
+describe('collectSiteUnits — the unit is the file', () => {
+  it('yields one unit per projected file: page.yml plus each section', () => {
+    const d = doc(page('h', 'home', [section('hero', 'A'), section('cta', 'B')]))
+    expect([...collectSiteUnits(d).keys()].sort()).toEqual([
+      'pages/home/cta.md', 'pages/home/hero.md', 'pages/home/page.yml',
+    ])
   })
 
-  it('does NOT report an untouched page as changed just because the sides serialize differently', () => {
-    // The regression. With one shared base every page here reads as "changed
-    // upstream"; with per-representation bases, none do.
-    const p = page('a', 'about', 'A0')
-    const d = diffSitePages(doc(p), remoteDoc(p), {
-      local: computePageHashes(doc(p)),
-      remote: computePageHashes(remoteDoc(p)),
-    })
-    expect(d.identical).toEqual(['about'])
-    expect(d.changedUpstream).toEqual([])
-    expect(d.changedBoth).toEqual([])
+  it('walks nested sections and child pages, and names layout sections', () => {
+    const d = {
+      $model: '@uniweb/site-content',
+      pages: [page('h', 'home', [{ ...section('grid', 'G'), $children: [section('card-a', 'A')] }], {
+        $children: [page('c', 'child', [section('body', 'X')])],
+      })],
+      layout_sections: [section('header', 'H')],
+    }
+    const keys = [...collectSiteUnits(d).keys()].sort()
+    expect(keys).toContain('pages/home/card-a.md')     // nested child, flat in the page dir
+    expect(keys).toContain('pages/home/child/body.md') // child page's section
+    expect(keys).toContain('pages/home/child/page.yml')
+    expect(keys).toContain('layout/header.md')
   })
 
-  it('flags a page added upstream — forcing DELETES it rather than reverting it', () => {
-    const p = page('h', 'home', 'H')
-    const d = diffSitePages(doc(p), remoteDoc(p, page('n', 'news', 'authored in the app')), {
-      local: computePageHashes(doc(p)),
-      remote: computePageHashes(remoteDoc(p)),
-    })
-    expect(d.addedUpstream).toEqual(['news'])
-    expect(describeSiteDiff(d)[0]).toMatch(/forcing DELETES these.*news/)
+  it('uses folder.yml for a folder page and [param] for a dynamic one', () => {
+    const d = {
+      $model: '@uniweb/site-content',
+      pages: [
+        { mode: 'folder', stable_id: 'f', slug: { en: 'blog' } },
+        page('d', 'entry', [section('article', 'X')], { is_dynamic: true, param_name: 'slug' }),
+      ],
+    }
+    const keys = [...collectSiteUnits(d).keys()]
+    expect(keys).toContain('pages/blog/folder.yml')
+    expect(keys).toContain('pages/[slug]/article.md')
   })
 
-  it('separates a locally added page from an upstream one', () => {
-    const h = page('h', 'home', 'H')
-    const d = diffSitePages(doc(h, page('d', 'docs', 'mine')), remoteDoc(h, page('n', 'news', 'theirs')), {
-      local: computePageHashes(doc(h)),
-      remote: computePageHashes(remoteDoc(h)),
-    })
-    expect(d.addedLocally).toEqual(['docs'])
-    expect(d.addedUpstream).toEqual(['news'])
+  it('keeps units disjoint — a section edit does not also mark its page changed', () => {
+    const before = doc(page('h', 'home', [section('hero', 'A')]))
+    const after = doc(page('h', 'home', [section('hero', 'CHANGED')]))
+    const b = computeUnitHashes(before), a = computeUnitHashes(after)
+    expect(a['pages/home/hero.md']).not.toBe(b['pages/home/hero.md'])
+    expect(a['pages/home/page.yml']).toBe(b['pages/home/page.yml'])
   })
 })
 
-describe('diffSitePages — honest degradation', () => {
-  it('reports the side it cannot judge instead of guessing, when the remote base is missing', () => {
-    const d = diffSitePages(doc(page('h', 'home', 'mine')), remoteDoc(page('h', 'home', 'theirs')), {
-      local: computePageHashes(doc(page('h', 'home', 'base'))),
+describe('diffSiteUnits — different sections of one page are not a conflict', () => {
+  it('attributes per section when both sides edited the SAME page', () => {
+    // The case that motivated this. Page granularity reported `home` as
+    // changed-on-both-sides; there is no conflict here at all.
+    const base = doc(page('h', 'home', [section('hero', 'H0'), section('cta', 'C0')]))
+    const local = doc(page('h', 'home', [section('hero', 'H-mine'), section('cta', 'C0')]))
+    const remote = asRemote(doc(page('h', 'home', [section('hero', 'H0'), section('cta', 'C-theirs')])))
+
+    const d = diffSiteUnits(local, remote, {
+      local: computeUnitHashes(base), remote: computeUnitHashes(asRemote(base)),
     })
-    expect(d.knowsRemote).toBe(false)
-    expect(d.changedLocally).toEqual(['home'])
+    expect(d.changedLocally).toEqual(['pages/home/hero.md'])
+    expect(d.changedUpstream).toEqual(['pages/home/cta.md'])
+    expect(d.changedBoth).toEqual([])
+    expect(describeSiteDiff(d)).toContain('No unit was changed on both sides — pulling should merge cleanly.')
+  })
+
+  it('still reports a genuine conflict when both edited the SAME section', () => {
+    const base = doc(page('h', 'home', [section('hero', 'H0')]))
+    const local = doc(page('h', 'home', [section('hero', 'H-mine')]))
+    const remote = asRemote(doc(page('h', 'home', [section('hero', 'H-theirs')])))
+    const d = diffSiteUnits(local, remote, {
+      local: computeUnitHashes(base), remote: computeUnitHashes(asRemote(base)),
+    })
+    expect(d.changedBoth).toEqual(['pages/home/hero.md'])
+    expect(describeSiteDiff(d)).not.toContain('No unit was changed on both sides — pulling should merge cleanly.')
+  })
+
+  it('does NOT report an untouched unit as changed just because the sides serialize differently', () => {
+    const d0 = doc(page('h', 'home', [section('hero', 'H')]))
+    const d = diffSiteUnits(d0, asRemote(d0), {
+      local: computeUnitHashes(d0), remote: computeUnitHashes(asRemote(d0)),
+    })
+    expect(d.identical.sort()).toEqual(['pages/home/hero.md', 'pages/home/page.yml'])
     expect(d.changedUpstream).toEqual([])
+  })
+
+  it('flags a section added upstream — forcing DELETES it rather than reverting it', () => {
+    const base = doc(page('h', 'home', [section('hero', 'H')]))
+    const remote = asRemote(doc(page('h', 'home', [section('hero', 'H'), section('news', 'added in the app')])))
+    const d = diffSiteUnits(base, remote, {
+      local: computeUnitHashes(base), remote: computeUnitHashes(asRemote(base)),
+    })
+    expect(d.addedUpstream).toEqual(['pages/home/news.md'])
+    expect(describeSiteDiff(d)[0]).toMatch(/forcing DELETES these.*pages\/home\/news\.md/)
+  })
+})
+
+describe('diffSiteUnits — honest degradation', () => {
+  it('names the side it cannot judge instead of guessing', () => {
+    const base = doc(page('h', 'home', [section('hero', 'H0')]))
+    const d = diffSiteUnits(
+      doc(page('h', 'home', [section('hero', 'mine')])),
+      asRemote(doc(page('h', 'home', [section('hero', 'theirs')]))),
+      { local: computeUnitHashes(base) }
+    )
+    expect(d.knowsRemote).toBe(false)
+    expect(d.changedLocally).toEqual(['pages/home/hero.md'])
     expect(describeSiteDiff(d).join('\n')).toMatch(/No record of the backend's last state/)
   })
 
-  it('reports nothing attributable with no bases at all, but still names added pages', () => {
-    const d = diffSitePages(doc(page('h', 'home', 'mine')), remoteDoc(page('h', 'home', 'x'), page('n', 'news', 'y')))
-    expect(d.knowsLocal).toBe(false)
-    expect(d.knowsRemote).toBe(false)
-    expect(d.addedUpstream).toEqual(['news']) // set membership needs no base
-    expect(d.changedUnattributed).toEqual(['home'])
+  it('still names added units with no bases at all', () => {
+    const d = diffSiteUnits(
+      doc(page('h', 'home', [section('hero', 'mine')])),
+      asRemote(doc(page('h', 'home', [section('hero', 'x'), section('news', 'y')])))
+    )
+    expect(d.addedUpstream).toEqual(['pages/home/news.md'])
+    expect(d.changedUnattributed).toContain('pages/home/hero.md')
   })
 
-  it('treats a page missing from a base as unknown, not as unchanged', () => {
-    const d = diffSitePages(doc(page('h', 'home', 'mine')), remoteDoc(page('h', 'home', 'theirs')), {
-      local: { 'other-page': 'x' }, remote: { 'other-page': 'y' },
-    })
-    expect(d.changedUnattributed).toEqual(['home'])
+  it('treats a unit missing from a base as unknown, not unchanged', () => {
+    const d = diffSiteUnits(
+      doc(page('h', 'home', [section('hero', 'mine')])),
+      asRemote(doc(page('h', 'home', [section('hero', 'theirs')]))),
+      { local: { 'other': 'x' }, remote: { 'other': 'y' } }
+    )
+    expect(d.changedUnattributed).toContain('pages/home/hero.md')
     expect(d.identical).toEqual([])
   })
 
-  it('handles empty and malformed documents without throwing', () => {
-    expect(diffSitePages(null, null).changedBoth).toEqual([])
-    expect(diffSitePages(doc(), doc()).identical).toEqual([])
-    expect(computePageHashes({ pages: [{ no: 'identity' }] })).toEqual({})
-    expect(describeSiteDiff(diffSitePages(doc(), doc()))).toEqual([])
+  it('caps a long list rather than letting it read as complete', () => {
+    const many = Array.from({ length: 12 }, (_, i) => section(`s${i}`, 'x'))
+    const d = diffSiteUnits(doc(page('h', 'home', [])), asRemote(doc(page('h', 'home', many))))
+    expect(describeSiteDiff(d, { limit: 3 })[0]).toMatch(/… and 9 more/)
   })
-})
 
-describe('pageLabel', () => {
-  it('prefers the slug, then the title, then the stable id', () => {
-    expect(pageLabel(page('h', 'home', 'x'))).toBe('home')
-    expect(pageLabel({ stable_id: 'h', title: { en: 'Home' } })).toBe('Home')
-    expect(pageLabel({ stable_id: 'e5f6a7b8' })).toBe('e5f6a7b8')
+  it('handles empty and malformed documents without throwing', () => {
+    expect(diffSiteUnits(null, null).changedBoth).toEqual([])
+    expect(collectSiteUnits({ pages: [{ no: 'slug' }] }).size).toBe(0)
+    expect(describeSiteDiff(diffSiteUnits(doc(), doc()))).toEqual([])
   })
 })
