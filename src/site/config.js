@@ -577,26 +577,7 @@ export async function defineSiteConfig(options = {}) {
 
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-router-dom'],
-      // The foundation is excluded under both the names it can be reached by.
-      //
-      // '#foundation' is the alias this config installs. The package name is the
-      // one a site actually declares — `"src": "file:../src"` — and Vite's
-      // dependency scanner sees that as an ordinary node_modules package and
-      // prebundles it. Two things go wrong when it does. The foundation is
-      // source under active editing, so a prebundle is stale the moment it is
-      // written; and the prebundler is esbuild, whose `imports`-field resolution
-      // does not apply `resolve.extensions` the way Vite's own resolver does —
-      // so a foundation using subpath imports (`#components/Container`, which
-      // the scaffolder generates) fails to resolve and the site renders blank.
-      //
-      // It stayed hidden because a warm dependency cache is not rebuilt. Vite
-      // only rescans when something invalidates it — a lockfile change, most
-      // often — so the failure surfaced on the first `uniweb update`, well away
-      // from anything that had changed.
-      exclude: [
-        '#foundation',
-        ...(foundationInfo.type === 'local' && foundationInfo.name ? [foundationInfo.name] : [])
-      ]
+      exclude: ['#foundation']
     },
 
     ...restOptions
