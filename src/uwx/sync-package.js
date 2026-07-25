@@ -30,6 +30,19 @@ const SITE_ENTITY_KEY = 'site-content'
 
 const cacheKey = (entity) => `${entity.model} ${entity.id}`
 
+// Attach the push gate's optimistic-concurrency token to an entity, keyed by the
+// BACKEND uuid in its document body (`$uuid`). A never-synced entity has no
+// `$uuid` and therefore no base — correctly unconditional, since there is no
+// stored state it could be stale against. `baseVersions` is the caller's
+// uuid→version map (the sync-cache); an entity the map doesn't know is left
+// unconditional rather than guessed at. See entity-document.js for what the
+// token means on the wire.
+const withBaseVersion = (baseVersions) => (entity) => {
+  const uuid = entity?.document?.$uuid
+  const v = uuid ? baseVersions[uuid] : null
+  return v ? { ...entity, baseVersion: v } : entity
+}
+
 function emitLane(entities, exporter, exportedAt, extraModels = []) {
   const models = [...new Set([...entities.map((e) => e.model), ...extraModels])]
   const buffer = emitEntitySyncPackage({
@@ -113,6 +126,12 @@ function rewriteEntityAssets(node, map) {
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
  * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter
+ * @param {Object<string,string>} [opts.baseVersions] - backend-uuid → opaque
+ *        `version` token, the push gate's optimistic-concurrency precondition.
+ *        Each sent entity whose `$uuid` the map knows carries it as
+ *        `entries[].extra.base_version`; the backend refuses the whole package
+ *        atomically if its stored version has moved. Omit the map (or an entry)
+ *        to push unconditionally — that IS the force path.
  * @param {boolean} [opts.includeSite]    - include the site-content lane (default true)
  * @param {object} [opts.injectInfo]      - deploy-derived `info.*` to stamp on the
  *        site-content document (e.g. `{ data_bundle }`, the static-data ball URL);
@@ -140,6 +159,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const sourceLocale = opts.sourceLocale
   const priorHashes = opts.priorHashes || {}
   const sendAll = !!opts.sendAll
+  const stamp = withBaseVersion(opts.baseVersions || {})
   const exporter = opts.exporter
   const exportedAt = opts.exportedAt
 
@@ -225,7 +245,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // Folder first (always, for the `$ref` closure), then changed records. The
     // leading `{ kind: 'folder' }` keeps submission position 0 aligned for record
     // back-fill (backfillEntityUuids skips it — the folder has no uuid to write).
-    const entities = [folder, ...changedRecords.map((r) => r.entity)]
+    const entities = [folder, ...changedRecords.map((r) => r.entity)].map(stamp)
     const index = [{ kind: 'folder' }, ...changedRecords.map((r) => r.index)]
     // The folder references every record's Model via `entry.model` — including records
     // filtered out here by send-only-changed. Declare them all (the backend rejects a
@@ -237,7 +257,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // --- site-content lane -------------------------------------------------------
   let siteContent = null
   if (siteEntity && changed(siteEntity)) {
-    siteContent = { ...emitLane([siteEntity], exporter, exportedAt), index: [{ kind: 'site' }] }
+    siteContent = { ...emitLane([stamp(siteEntity)], exporter, exportedAt), index: [{ kind: 'site' }] }
   }
 
   // The site's current uuid (from site.yml): the verb keys the folder push route on

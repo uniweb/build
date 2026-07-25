@@ -68,7 +68,7 @@ export function emitEntitySyncPackage({
   for (const entity of entities) {
     const data = toJsonBuffer(entity.document)
     files.push({ name: entity.file, data })
-    entries.push({
+    const entry = {
       kind: 'entity',
       // `$id` as the handle label — NOT the identity key on the sync lane (the
       // backend reads identity from the body) and never uuid-parsed for entities.
@@ -83,7 +83,18 @@ export function emitEntitySyncPackage({
       updated_at: null,
       file: entity.file,
       sha256: sha256Hex(data),
-    })
+    }
+    // Optimistic-concurrency precondition (the push gate). When present, the
+    // backend compares it against the entity's stored version and refuses the
+    // WHOLE package atomically if it has moved (409 `reason: "stale_base"`),
+    // before any write. OMITTING it is the force path — the backend then falls
+    // back to the `collision` policy. Note `collision=force` does NOT override a
+    // present token: the token wins, so `--force` must DROP this, never flip
+    // `collision`. The value is the opaque RFC3339 `version` the backend stamped
+    // on the entity — read from the pull manifest's `extra.version` or from a
+    // prior push's `finalized[].version`, and never parsed or synthesized here.
+    if (entity.baseVersion) entry.extra = { base_version: entity.baseVersion }
+    entries.push(entry)
   }
 
   const manifest = buildManifest({

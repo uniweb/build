@@ -204,6 +204,50 @@ describe('emitSyncPackages — injectInfo (deploy-derived info)', () => {
   })
 })
 
+describe('emitSyncPackages — baseVersions (the push staleness gate)', () => {
+  const manifestOf = (buffer) => JSON.parse(readZip(buffer).get('manifest.json').toString('utf8'))
+
+  it('stamps extra.base_version on a synced entity whose $uuid the map knows', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const pkg = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': '2026-07-25T21:09:44.120388Z' } })
+    const entry = manifestOf(pkg.siteContent.buffer).entries[0]
+    expect(entry.extra).toEqual({ base_version: '2026-07-25T21:09:44.120388Z' })
+  })
+
+  it('omits extra entirely with no map — the unconditional (force) path', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const pkg = await emitSyncPackages(SITE)
+    expect(manifestOf(pkg.siteContent.buffer).entries[0].extra).toBeUndefined()
+  })
+
+  it('omits it for a never-synced entity — no $uuid means no state to be stale against', async () => {
+    const pkg = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': 'V1' } })
+    expect(manifestOf(pkg.siteContent.buffer).entries[0].extra).toBeUndefined()
+  })
+
+  it('does not perturb the entity body or its content hash — the token is manifest-only', async () => {
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const plain = await emitSyncPackages(SITE)
+    const gated = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': 'V1' } })
+    expect(readZip(gated.siteContent.buffer).get('entities/site-content.json').toString('utf8')).toBe(
+      readZip(plain.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    )
+    // A changing base_version must never re-fire send-only-changed.
+    expect(gated.hashes).toEqual(plain.hashes)
+  })
+
+  it('keeps package_sha256 self-consistent when the token is present', async () => {
+    // The consumer verifies by blanking package_sha256 over OUR bytes, so the extra
+    // field must be inside the hashed preimage — not appended after hashing.
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const pkg = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': 'V1' } })
+    const withToken = manifestOf(pkg.siteContent.buffer)
+    const plain = manifestOf((await emitSyncPackages(SITE)).siteContent.buffer)
+    expect(withToken.package_sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(withToken.package_sha256).not.toBe(plain.package_sha256)
+  })
+})
+
 describe('emitSyncPackages — local-media (Slice 5)', () => {
   it('collects site-root local asset refs in localAssets; co-located refs warn + skip', async () => {
     w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![banner](/images/banner.png)\n\n![local](./co.png)\n')
