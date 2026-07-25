@@ -51,9 +51,12 @@ import { generateCollectionIndex } from '../search/collections.js'
  *   - `_pages/<route>.json` — only meaningful for static-host bundles
  *     where they're served as static assets. Worker derives them from
  *     `payload.locales[lang].pages[].sections` server-side.
- *   - `sitemap.xml`, `robots.txt`, `search-index.json` — worker generates
- *     sitemap/robots at request time; search-index is currently
- *     bundle-mode-only territory.
+ *   - `sitemap.xml`, `robots.txt` — static-host bundle territory. Note these
+ *     are simply absent from Uniweb-hosted sites today: nothing in platform
+ *     generates them, at publish time or at request time.
+ *   - `search-index.json` — the single-file bundle-mode form. Link mode emits
+ *     the split `_search/{locale}/*.json` files instead (step 5 below), gated
+ *     by `features: [search]`; those are what the hosting worker serves.
  *
  * @param {Object} params
  * @param {string} params.siteRoot - Absolute path to the site directory.

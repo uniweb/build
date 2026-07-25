@@ -263,12 +263,18 @@ export function readIntelligenceConfig(siteRoot) {
  * @param {string} [options.base] - Base public path for deployment (e.g., '/demos/mysite/')
  * @returns {Promise<Object>} Vite configuration
  */
+/** De-duplicate a list, keeping first-seen order. */
+function unique(list) {
+  return [...new Set(list)]
+}
+
 export async function defineSiteConfig(options = {}) {
   const {
     plugins: extraPlugins = [],
     server: serverOverrides = {},
     build: buildOverrides = {},
     resolve: resolveOverrides = {},
+    optimizeDeps: optimizeDepsOverrides = {},
     seo = {},
     assets = {},
     search = {},
@@ -575,9 +581,21 @@ export async function defineSiteConfig(options = {}) {
       ...buildOverrides
     },
 
+    // `include` and `exclude` are unioned with anything the site adds rather
+    // than replaced by it. Every other key here is a value a caller can
+    // reasonably want to override outright; these two are lists of things that
+    // must be true, and the framework's entries are load-bearing — React has to
+    // be prebundled or the site gets two copies of it. A site adding one
+    // package to `exclude` is asking for one more exclusion, not volunteering
+    // to restate the framework's list, and getting that wrong is silent: the
+    // dev server starts, and the failure surfaces somewhere unrelated.
     optimizeDeps: {
-      include: ['react', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-router-dom'],
-      exclude: ['#foundation']
+      ...optimizeDepsOverrides,
+      include: unique([
+        'react', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-router-dom',
+        ...(optimizeDepsOverrides.include || [])
+      ]),
+      exclude: unique(['#foundation', ...(optimizeDepsOverrides.exclude || [])])
     },
 
     ...restOptions
