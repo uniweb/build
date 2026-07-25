@@ -207,22 +207,36 @@ describe('emitSyncPackages — injectInfo (deploy-derived info)', () => {
 describe('emitSyncPackages — baseVersions (the push staleness gate)', () => {
   const manifestOf = (buffer) => JSON.parse(readZip(buffer).get('manifest.json').toString('utf8'))
 
-  it('stamps extra.base_version on a synced entity whose $uuid the map knows', async () => {
+  it('stamps a TOP-LEVEL base_version on a synced entity whose $uuid the map knows', async () => {
     writeSiteEntityUuid(SITE, 'u-site-1')
     const pkg = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': '2026-07-25T21:09:44.120388Z' } })
     const entry = manifestOf(pkg.siteContent.buffer).entries[0]
-    expect(entry.extra).toEqual({ base_version: '2026-07-25T21:09:44.120388Z' })
+    expect(entry.base_version).toBe('2026-07-25T21:09:44.120388Z')
+    // Nesting it under `extra` is what shipped first and it disarmed the gate
+    // silently — the backend's `extra` is #[serde(flatten)] and never on the wire.
+    expect(entry.extra).toBeUndefined()
   })
 
-  it('omits extra entirely with no map — the unconditional (force) path', async () => {
+  it('leaves entries[].uuid as the $id handle — the backend correlates via the body', async () => {
+    // Writing a real uuid here looks helpful and is wrong: the field would mean
+    // two different things by sync state, and the gate reads the body's $uuid.
+    writeSiteEntityUuid(SITE, 'u-site-1')
+    const pkg = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': 'V1' } })
+    const z = readZip(pkg.siteContent.buffer)
+    const entry = manifestOf(pkg.siteContent.buffer).entries[0]
+    expect(entry.uuid).toBe('site-content')
+    expect(JSON.parse(z.get(entry.file).toString('utf8')).$uuid).toBe('u-site-1')
+  })
+
+  it('omits base_version with no map — the unconditional (force) path', async () => {
     writeSiteEntityUuid(SITE, 'u-site-1')
     const pkg = await emitSyncPackages(SITE)
-    expect(manifestOf(pkg.siteContent.buffer).entries[0].extra).toBeUndefined()
+    expect(manifestOf(pkg.siteContent.buffer).entries[0].base_version).toBeUndefined()
   })
 
   it('omits it for a never-synced entity — no $uuid means no state to be stale against', async () => {
     const pkg = await emitSyncPackages(SITE, { baseVersions: { 'u-site-1': 'V1' } })
-    expect(manifestOf(pkg.siteContent.buffer).entries[0].extra).toBeUndefined()
+    expect(manifestOf(pkg.siteContent.buffer).entries[0].base_version).toBeUndefined()
   })
 
   it('does not perturb the entity body or its content hash — the token is manifest-only', async () => {

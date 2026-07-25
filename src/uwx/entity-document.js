@@ -91,9 +91,21 @@ export function emitEntitySyncPackage({
     // back to the `collision` policy. Note `collision=force` does NOT override a
     // present token: the token wins, so `--force` must DROP this, never flip
     // `collision`. The value is the opaque RFC3339 `version` the backend stamped
-    // on the entity — read from the pull manifest's `extra.version` or from a
+    // on the entity — read from the pull manifest's top-level `version` or from a
     // prior push's `finalized[].version`, and never parsed or synthesized here.
-    if (entity.baseVersion) entry.extra = { base_version: entity.baseVersion }
+    //
+    // TOP-LEVEL on the entry, beside `sha256` — not nested under an `extra`
+    // object. The backend's Rust struct has an `extra` field but it is
+    // `#[serde(flatten)]`, so those keys serialize beside the others and `extra`
+    // never appears on the wire in either direction. Its pull manifests emit a
+    // top-level `version` for the same reason.
+    //
+    // The backend correlates this to an entity by the BODY's `$uuid`, not by
+    // `entries[].uuid` — which stays the `$id` handle above. Don't be tempted to
+    // write a real uuid into that field to "help": it would make the field mean
+    // two different things depending on sync state, and the backend has no use
+    // for it (it reads identity from the body everywhere else too).
+    if (entity.baseVersion) entry.base_version = entity.baseVersion
     entries.push(entry)
   }
 
