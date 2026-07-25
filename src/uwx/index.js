@@ -73,6 +73,9 @@ export {
   describeSiteDiff,
   computeUnitHashes,
   collectSiteUnits,
+  walkSiteUnits,
+  collectUnitUuids,
+  stampUnitUuids,
 } from './site-diff.js'
 export {
   collectionRecordsToEntities,

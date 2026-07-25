@@ -70,32 +70,44 @@ const ownContent = (record, ...childKeys) => {
  */
 export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
   const units = new Map()
+  walkSiteUnits(doc, (path, record, kind) => {
+    units.set(path, kind === 'page' ? ownContent(record, 'page_sections', '$children') : ownContent(record, '$children'))
+  }, sourceLocale)
+  return units
+}
 
+/**
+ * Walk every unit of a site-content document, handing the callback the path and the
+ * LIVE record (not a copy — mutating it mutates the document).
+ *
+ * The single traversal behind hashing, uuid harvesting, and uuid stamping, so those
+ * three can never disagree about what a unit is or where it lives. A path that
+ * differs between them would silently mis-key a cache.
+ *
+ * @param {(path: string, record: object, kind: 'page'|'section') => void} cb
+ */
+export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
   const walkSections = (sections, dir) => {
     for (const record of sections || []) {
       const id = recordStableId(record)
       // Anonymous and id-less: the projector cannot place it either, so there is
       // no file to name and nothing to attribute.
-      if (id) units.set(`${dir}/${safeStableIdFilename(id)}.md`, ownContent(record, '$children'))
+      if (id) cb(`${dir}/${safeStableIdFilename(id)}.md`, record, 'section')
       walkSections(record.$children, dir)
     }
   }
-
-  const walkPages = (pages, parentDir, routePrefix) => {
+  const walkPages = (pages, parentDir) => {
     for (const record of pages || []) {
       const dirName = pageDirName(record, sourceLocale)
       if (!dirName) continue
       const dir = `${parentDir}/${dirName}`
-      const ymlName = record.mode === 'folder' ? 'folder.yml' : 'page.yml'
-      units.set(`${dir}/${ymlName}`, ownContent(record, 'page_sections', '$children'))
+      cb(`${dir}/${record.mode === 'folder' ? 'folder.yml' : 'page.yml'}`, record, 'page')
       if (record.mode !== 'folder') walkSections(record.page_sections, dir)
-      walkPages(record.$children, dir, routePrefix)
+      walkPages(record.$children, dir)
     }
   }
-
   walkPages(doc?.pages, 'pages')
   walkSections(doc?.layout_sections, 'layout')
-  return units
 }
 
 /** Per-unit content hashes: `{ <path>: <sha256> }`. */
@@ -103,6 +115,67 @@ export function computeUnitHashes(doc, sourceLocale) {
   const out = {}
   for (const [path, record] of collectSiteUnits(doc, sourceLocale)) out[path] = entityContentHash(record)
   return out
+}
+
+/**
+ * Harvest per-item identity from a document the BACKEND produced (a pull, or a push
+ * response's `finalized[].document`): `{ <path>: <$uuid> }`.
+ *
+ * This is the map that has to be echoed back on the next push. Without it the
+ * backend cannot match our items — a uuid-less record in a `multi` section (which
+ * `pages`, `page_sections` and `layout_sections` all are) is read as new, so it is
+ * inserted and its stored counterpart is deleted. That silently replaces every
+ * page and section identity on every push, which in turn destroys the per-item
+ * handles the app holds for its own concurrency. Identity is not decoration here.
+ */
+export function collectUnitUuids(doc, sourceLocale) {
+  const out = {}
+  walkSiteUnits(doc, (path, record) => {
+    if (typeof record?.$uuid === 'string' && record.$uuid) out[path] = record.$uuid
+  }, sourceLocale)
+  return out
+}
+
+/**
+ * Stamp known `$uuid`s onto a document we are about to push, so the backend matches
+ * our items instead of re-minting them.
+ *
+ * A unit the map doesn't know is left alone: that is genuinely new content on its
+ * first push, and minting is the only coherent reading. The map's absence entirely
+ * is the dangerous case — see `collectUnitUuids` — and the caller is responsible for
+ * not pushing blind (the backend also refuses an all-blank `multi` section).
+ *
+ * @returns {{ stamped: number, unknown: number }}
+ */
+export function stampUnitUuids(doc, pathToUuid = {}, sourceLocale) {
+  let stamped = 0
+  let unknown = 0
+  const seen = new Set()
+  const collisions = []
+  walkSiteUnits(doc, (path, record) => {
+    // Two records can resolve to ONE path when their stable ids collide — most
+    // easily `1-hero.md` and `hero.md` in the same page dir, since the numeric
+    // prefix is stripped. Stamping both with the same uuid produces a package the
+    // backend rejects outright ("a `$uuid` must be unique within the entity"), so
+    // only the first occurrence takes the identity; the rest push as new. The
+    // collision is reported because it is an authoring problem either way — the
+    // projector writes `<stableId>.md`, so a pull would collapse the two files
+    // into one.
+    if (seen.has(path)) {
+      collisions.push(path)
+      unknown++
+      return
+    }
+    seen.add(path)
+    const uuid = pathToUuid[path]
+    if (uuid) {
+      record.$uuid = uuid
+      stamped++
+    } else {
+      unknown++
+    }
+  }, sourceLocale)
+  return { stamped, unknown, collisions }
 }
 
 /**

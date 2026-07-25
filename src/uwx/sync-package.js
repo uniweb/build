@@ -22,6 +22,7 @@
 import { buildCollectionEntities, entityContentHash } from './collections.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
+import { stampUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { isLocalAssetPath } from '../site/assets.js'
 
@@ -126,10 +127,14 @@ function rewriteEntityAssets(node, map) {
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
  * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter
+ * @param {Object<string,string>} [opts.itemUuids] - unit path → backend `$uuid`,
+ *        stamped onto the site-content document so the backend matches our items
+ *        instead of re-minting them (which deletes and recreates every page and
+ *        section row). Sourced from a pull or a push response, cached by the caller.
  * @param {Object<string,string>} [opts.baseVersions] - backend-uuid → opaque
  *        `version` token, the push gate's optimistic-concurrency precondition.
- *        Each sent entity whose `$uuid` the map knows carries it as
- *        `entries[].extra.base_version`; the backend refuses the whole package
+ *        Each sent entity whose `$uuid` the map knows carries it as a top-level
+ *        `entries[].base_version`; the backend refuses the whole package
  *        atomically if its stored version has moved. Omit the map (or an entry)
  *        to push unconditionally — that IS the force path.
  * @param {boolean} [opts.includeSite]    - include the site-content lane (default true)
@@ -184,6 +189,33 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // so a changed bundle URL correctly re-fires the site-content lane.
   if (siteDoc && opts.injectInfo && typeof opts.injectInfo === 'object') {
     siteDoc.info = { ...siteDoc.info, ...opts.injectInfo }
+  }
+
+  // Per-item identity. `pages`, `page_sections` and `layout_sections` are all
+  // `multi` sections on the backend's Model, and its reconcile matches a record by
+  // `$uuid`: a record without one is read as NEW, so it is inserted and the stored
+  // counterpart falls out as host-only and is DELETED. Pushing identity-blind
+  // therefore replaces every page and section row on every push — the content still
+  // lands, which is why it hid, but the app's per-item concurrency handles all point
+  // at rows that no longer exist.
+  //
+  // The uuids come from whatever the backend last told us (a pull, or a push
+  // response's `finalized[].document`), cached out-of-band by the caller so author
+  // files never carry sync uuids. A unit the map doesn't know keeps no `$uuid` —
+  // that is new content on its first push, where minting is correct.
+  //
+  // Stamping does NOT perturb the send-only-changed hash: `entityContentHash`
+  // strips `$`-sigils, so adopting this never re-fires an unchanged lane.
+  let itemIdentity = null
+  if (siteDoc && opts.itemUuids && typeof opts.itemUuids === 'object') {
+    itemIdentity = stampUnitUuids(siteDoc, opts.itemUuids, sourceLocale)
+    for (const path of itemIdentity.collisions) {
+      warnings.push(
+        `Two sections resolve to the same file (${path}) — their stable ids collide ` +
+        `(e.g. \`1-name.md\` and \`name.md\`). Only the first keeps its identity, and a pull ` +
+        `would collapse them into one file. Rename one.`
+      )
+    }
   }
 
   // Local-media over push (Slice 5). `assetRewrite` ({ '/images/x.png': serveUrl })
@@ -265,5 +297,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // the content lane by its presence/absence.
   const siteContentUuid = siteDoc?.$uuid
 
-  return { siteContent, collections, siteContentUuid, hashes, warnings, skipped, schemaless: col.schemaless, localAssets }
+  return {
+    siteContent, collections, siteContentUuid, hashes, warnings, skipped,
+    schemaless: col.schemaless, localAssets,
+    // { stamped, unknown } when identity was applied; null when the caller passed
+    // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed
+    // before is the index-loss signature the backend refuses — the caller reports it.
+    itemIdentity,
+  }
 }

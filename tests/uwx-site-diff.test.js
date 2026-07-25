@@ -1,4 +1,7 @@
-import { diffSiteUnits, describeSiteDiff, computeUnitHashes, collectSiteUnits } from '../src/uwx/site-diff.js'
+import {
+  diffSiteUnits, describeSiteDiff, computeUnitHashes, collectSiteUnits,
+  collectUnitUuids, stampUnitUuids, walkSiteUnits,
+} from '../src/uwx/site-diff.js'
 
 // File-level attribution behind the entity-grained staleness gate.
 //
@@ -160,5 +163,68 @@ describe('diffSiteUnits — honest degradation', () => {
     expect(diffSiteUnits(null, null).changedBoth).toEqual([])
     expect(collectSiteUnits({ pages: [{ no: 'slug' }] }).size).toBe(0)
     expect(describeSiteDiff(diffSiteUnits(doc(), doc()))).toEqual([])
+  })
+})
+
+describe('per-item identity — stamping and harvesting', () => {
+  it('harvests $uuid per unit from a backend document, at every nesting level', () => {
+    const d = {
+      $model: '@uniweb/site-content',
+      pages: [{ ...page('h', 'home', [{ ...section('grid', 'G'), $uuid: 'u-grid', $children: [{ ...section('card', 'C'), $uuid: 'u-card' }] }]), $uuid: 'u-home' }],
+      layout_sections: [{ ...section('header', 'H'), $uuid: 'u-header' }],
+    }
+    expect(collectUnitUuids(d)).toEqual({
+      'pages/home/page.yml': 'u-home',
+      'pages/home/grid.md': 'u-grid',
+      'pages/home/card.md': 'u-card',
+      'layout/header.md': 'u-header',
+    })
+  })
+
+  it('stamps known uuids back onto a document we are about to push', () => {
+    const d = doc(page('h', 'home', [section('hero', 'H'), section('brand-new', 'N')]))
+    const r = stampUnitUuids(d, { 'pages/home/page.yml': 'u-home', 'pages/home/hero.md': 'u-hero' })
+    expect(r).toEqual({ stamped: 2, unknown: 1, collisions: [] })
+    expect(d.pages[0].$uuid).toBe('u-home')
+    expect(d.pages[0].page_sections[0].$uuid).toBe('u-hero')
+    // Genuinely new content keeps no uuid — minting is correct on a first push.
+    expect(d.pages[0].page_sections[1].$uuid).toBeUndefined()
+  })
+
+  it('stamping does NOT change the content hash — adopting it must not re-fire an unchanged lane', () => {
+    // entityContentHash strips $-sigils; if that ever stopped being true, every
+    // site would re-push wholesale the first time it stamped identity.
+    const before = computeUnitHashes(doc(page('h', 'home', [section('hero', 'H')])))
+    const d = doc(page('h', 'home', [section('hero', 'H')]))
+    stampUnitUuids(d, { 'pages/home/page.yml': 'u-home', 'pages/home/hero.md': 'u-hero' })
+    expect(computeUnitHashes(d)).toEqual(before)
+  })
+
+  it('round-trips: harvest from a backend doc, stamp onto ours, identity matches', () => {
+    const remote = {
+      $model: '@uniweb/site-content',
+      pages: [{ ...page('h', 'home', [{ ...section('hero', 'H'), $uuid: 'u-hero' }]), $uuid: 'u-home' }],
+    }
+    const mine = doc(page('h', 'home', [section('hero', 'H-edited')]))
+    stampUnitUuids(mine, collectUnitUuids(remote))
+    expect(collectUnitUuids(mine)).toEqual(collectUnitUuids(remote))
+  })
+})
+
+describe('per-item identity — stable-id collisions', () => {
+  it('stamps only the first of two units that resolve to the same file, and reports it', () => {
+    // `1-welcome.md` and `welcome.md` in one page dir both derive stable id
+    // `welcome`. Stamping both with the same uuid produces a package the backend
+    // rejects ("a $uuid must be unique within the entity"), so the duplicate
+    // pushes as new instead.
+    const d = doc(page('h', 'home', [section('welcome', 'first'), section('welcome', 'second')]))
+    const r = stampUnitUuids(d, { 'pages/home/welcome.md': 'u-welcome', 'pages/home/page.yml': 'u-home' })
+    expect(r.collisions).toEqual(['pages/home/welcome.md'])
+    expect(d.pages[0].page_sections[0].$uuid).toBe('u-welcome')
+    expect(d.pages[0].page_sections[1].$uuid).toBeUndefined()
+    // No uuid appears twice — that is the property the backend enforces.
+    const used = []
+    walkSiteUnits(d, (_p, rec) => { if (rec.$uuid) used.push(rec.$uuid) })
+    expect(new Set(used).size).toBe(used.length)
   })
 })
