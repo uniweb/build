@@ -639,7 +639,9 @@ export function siteContentPlugin(options = {}) {
       try {
         // dropUnpublished only on a production build — in dev (serve) hidden
         // pages stay in the graph so in-progress drafts remain previewable.
-        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath })
+        // strict on a production build: a mount that contributes no pages is a
+        // warning while you author and a broken deploy once you ship.
+        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 

@@ -25,7 +25,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, parse, resolve, sep } from 'node:path'
-import { existsSync, statSync, realpathSync } from 'node:fs'
+import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
@@ -267,10 +267,18 @@ function stripAtPrefix(filename) {
 
 /**
  * Check if a folder should be ignored.
- * Excludes folders starting with _ (drafts/private).
+ *
+ * Excludes folders starting with `_` (drafts/private) and with `.` (hidden).
+ *
+ * Hidden folders matter more than they look. A site's own `pages/` never holds
+ * one, but a mount target routinely does: point `paths:` at a directory that is
+ * also a git working tree — a sibling clone, which the docs suggest — and `.git`
+ * is a directory sitting right next to the content. Walked as content it
+ * contributed hundreds of routes. (A submodule hides this: there, `.git` is a
+ * file, so only the plain-clone case ever showed it.)
  */
 function isIgnoredFolder(name) {
-  return name.startsWith('_')
+  return name.startsWith('_') || name.startsWith('.')
 }
 
 /**
@@ -340,6 +348,35 @@ async function readFolderConfig(dirPath, inheritedMode) {
 }
 
 /**
+ * Whether a mount target holds anything this collector would read.
+ *
+ * A mount declares "pages come from here." An existing, readable directory is
+ * not the same claim — an uninitialized git submodule is exactly that, and it
+ * is the state a plain `git clone` leaves one in. So look for content the walk
+ * would actually pick up: a folder to recurse into, a markdown file, or a
+ * folder/page config. README.md deliberately does not count; isMarkdownFile
+ * excludes it as repo documentation.
+ *
+ * @param {string} dirPath - Absolute path to the mount target
+ * @returns {boolean}
+ */
+function mountHasContent(dirPath) {
+  let entries
+  try {
+    entries = readdirSync(dirPath, { withFileTypes: true })
+  } catch {
+    return false
+  }
+
+  return entries.some(entry => {
+    const { name } = entry
+    if (name.startsWith('.') || isIgnoredFolder(name)) return false
+    if (entry.isDirectory()) return true
+    return isMarkdownFile(name) || name === 'folder.yml' || name === 'page.yml'
+  })
+}
+
+/**
  * Extract page mounts from site.yml paths: config.
  *
  * Keys like `pages/docs: ../../../docs` map a route segment to an external
@@ -348,9 +385,14 @@ async function readFolderConfig(dirPath, inheritedMode) {
  * @param {Object} pathsConfig - The paths: object from site.yml
  * @param {string} sitePath - Absolute path to the site directory
  * @param {string} pagesPath - Resolved absolute path to the pages directory
+ * @param {Object} [options]
+ * @param {boolean} [options.strict=false] - Treat a mount that contributes no
+ *   pages as an error rather than a warning. Dev is forgiving — an empty folder
+ *   is normal the moment an author creates one. A build is not: shipping a route
+ *   with nothing under it is never what was meant.
  * @returns {Map<string, string>|null} Route segment → canonical absolute path, or null
  */
-function resolveMounts(pathsConfig, sitePath, pagesPath) {
+function resolveMounts(pathsConfig, sitePath, pagesPath, { strict = false } = {}) {
   if (!pathsConfig || typeof pathsConfig !== 'object') return null
 
   // Extract entries with "pages/" prefix (e.g., "pages/docs": "../../../docs")
@@ -388,6 +430,22 @@ function resolveMounts(pathsConfig, sitePath, pagesPath) {
         `[content-collector] External pages path is not a directory: ${absolutePath}\n` +
         `  Declared in site.yml: pages/${routeSegment}: ${relativePath}`
       )
+    }
+
+    // Existing, readable, and empty — which is what a mount looks like when its
+    // git submodule was never fetched. Every check above passes and the route
+    // builds with nothing under it, so say so rather than shipping the silence.
+    if (!mountHasContent(absolutePath)) {
+      const detail =
+        `External pages path is empty: ${absolutePath}\n` +
+        `  Declared in site.yml: pages/${routeSegment}: ${relativePath}\n` +
+        `  The "${routeSegment}" route will have no pages under it.\n` +
+        `  If this is a git submodule: git submodule update --init --recursive`
+
+      if (strict) {
+        throw new Error(`[content-collector] ${detail}`)
+      }
+      console.warn(`[content-collector] ${detail}`)
     }
 
     const canonical = realpathSync(absolutePath)
@@ -1373,57 +1431,67 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   let notFound = null
   const versionedScopes = new Map() // scope route → versionMeta
 
-  // First pass: discover all page folders and read their config
-  const pageFolders = []
+  // First pass: discover all page folders and read their config.
+  //
+  // A route can be backed by a local directory, by a mount, or by both. When
+  // both, the two configs LAYER rather than one replacing the other — the same
+  // rule as params over meta defaults, or page over folder config. The division
+  // it encodes: the mounted repo declares what its content is (ordering, title,
+  // how it nests), the local folder declares how this site presents it (layout,
+  // SEO, menu visibility). A local folder used to win outright, and since a
+  // local folder is the only place `layout:` can be declared for a mounted
+  // route, an author had to choose between a layout and the mounted repo's own
+  // config. There was no way to see which one had been dropped.
+  const localDirs = new Set()
   for (const entry of entries) {
     if (isIgnoredFolder(entry)) continue // Skip _prefixed folders
-    const entryPath = join(dirPath, entry)
-    const stats = await stat(entryPath)
-    if (!stats.isDirectory()) continue
+    const stats = await stat(join(dirPath, entry))
+    if (stats.isDirectory()) localDirs.add(entry)
+  }
 
-    // Read folder.yml or page.yml to determine mode and get config
-    const { config: dirConfig, mode: dirMode } = await readFolderConfig(entryPath, contentMode)
-    const numericOrder = typeof dirConfig.order === 'number' ? dirConfig.order : undefined
+  const routeNames = new Set([...localDirs, ...(mounts?.keys() ?? [])])
 
-    // Extract layout name from folder config (folder.yml layout: or page.yml layout:)
+  const pageFolders = []
+  for (const name of routeNames) {
+    const mountPath = mounts?.get(name) ?? null
+    const localPath = localDirs.has(name) ? join(dirPath, name) : null
+
+    // The content's declaration about itself, then the site's about presenting it.
+    const mounted = mountPath ? await readFolderConfig(mountPath, 'pages') : null
+    const local = localPath ? await readFolderConfig(localPath, contentMode) : null
+
+    const dirConfig = mounted
+      ? { title: mounted.config.title || name, ...mounted.config, ...local?.config }
+      : local.config
+
+    // Mode is not a config key — it comes from which config file exists, so it
+    // cannot be spread. An explicit local declaration wins (a `page.yml` stub
+    // with its own markdown is a real landing page above mounted children);
+    // otherwise the mount decides, because it owns the content being read.
+    const dirMode = local && local.source !== 'inherited'
+      ? local.mode
+      : mounted?.mode ?? local?.mode ?? contentMode
+
     const folderLayout = typeof dirConfig.layout === 'string' ? dirConfig.layout
       : dirConfig.layout?.name || null
 
     pageFolders.push({
-      name: entry,
-      path: entryPath,
-      order: numericOrder,
+      name,
+      path: localPath ?? mountPath,
+      order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined,
       dirConfig,
       dirMode,
+      // The mode the mounted subtree is walked in belongs to the mount: it is
+      // the mount's tree. Without this a `page.yml` stub silently imposed page
+      // mode on a mounted folder of pages, and only every mounted subfolder
+      // carrying its own folder.yml kept that from collapsing them into one page.
+      mountedContentMode: mounted?.mode ?? null,
       childOrderConfig: {
         pages: dirConfig.pages,
         index: dirConfig.index
       },
       childLayoutName: folderLayout
     })
-  }
-
-  // Inject virtual entries for mounts without physical directories
-  if (mounts) {
-    for (const [routeSegment, mountPath] of mounts) {
-      if (!pageFolders.some(f => f.name === routeSegment)) {
-        const { config: mountConfig } = await readFolderConfig(mountPath, 'pages')
-        const mountLayout = typeof mountConfig.layout === 'string' ? mountConfig.layout
-          : mountConfig.layout?.name || null
-        pageFolders.push({
-          name: routeSegment,
-          path: mountPath,
-          order: typeof mountConfig.order === 'number' ? mountConfig.order : undefined,
-          dirConfig: { title: mountConfig.title || routeSegment, ...mountConfig },
-          dirMode: 'pages',
-          childOrderConfig: {
-            pages: mountConfig.pages,
-            index: mountConfig.index
-          },
-          childLayoutName: mountLayout
-        })
-      }
-    }
   }
 
   // Sort page folders by order (ascending), then alphabetically
@@ -1565,7 +1633,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
     // Process subdirectories
     for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig, childLayoutName } = folder
+      const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayoutName } = folder
       const isIndex = entry === indexName
       const effectiveLayout = childLayoutName || parentLayoutName
 
@@ -1590,11 +1658,14 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
           pages.push(page)
 
-          // Recurse into subdirectories (page mode)
+          // Recurse into subdirectories (page mode). When the children come from
+          // a mount, they are walked in the mount's own mode — it is the mount's
+          // tree, and its root config is what declared how its content is shaped.
           const childDirPath = mounts?.get(entry) || entryPath
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
-          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, 'sections', null, effectiveLayout)
+          const childContentMode = mountedContentMode ?? 'sections'
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, childContentMode, null, effectiveLayout)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -1693,7 +1764,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
-    const { name: entry, path: entryPath, dirConfig, dirMode, childOrderConfig, childLayoutName } = folder
+    const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayoutName } = folder
     const isIndex = entry === indexPageName
     const effectiveLayout = childLayoutName || parentLayoutName
 
@@ -1782,14 +1853,17 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           pages.push(page)
         }
 
-        // Recursively process subdirectories
+        // Recursively process subdirectories. Children coming from a mount are
+        // walked in the mount's own mode — its root config declared how its
+        // content is shaped, and this local stub holds none of that content.
         {
           const childDirPath = mounts?.get(entry) || entryPath
           const childParentRoute = isIndex
             ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
             : page.route
           const childFetch = page.fetch || parentFetch
-          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, dirMode, null, effectiveLayout)
+          const childContentMode = mountedContentMode ?? dirMode
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, childContentMode, null, effectiveLayout)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2011,10 +2085,11 @@ async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
  * @param {string} options.foundationPath - Path to foundation directory (for theme vars)
  * @param {string} [options.configFile='site.yml'] - Name of the top-level config file inside sitePath. Defaults to 'site.yml'. Document tools (unipress) pass 'document.yml'.
  * @param {'document'|'site'} [options.profile] - Explicit content profile, authoritative over the filename. Lets a tool that knows its context (unipress → 'document') read an arbitrarily named config with the right directory/mode/ordering. Falls back to the configFile-derived profile when omitted.
+ * @param {boolean} [options.strict=false] - Fail on content problems that would ship broken output rather than warning about them. A production build passes true; dev leaves it false, because a folder an author just created is empty for a moment and that is not an error.
  * @returns {Promise<Object>} Site content object with assets manifest
  */
 export async function collectSiteContent(sitePath, options = {}) {
-  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/' } = options
+  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/', strict = false } = options
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
@@ -2054,7 +2129,7 @@ export async function collectSiteContent(sitePath, options = {}) {
       : profileDefault
   }
 
-  const mounts = resolveMounts(siteConfig.paths, sitePath, pagesPath)
+  const mounts = resolveMounts(siteConfig.paths, sitePath, pagesPath, { strict })
 
   const layoutPath = siteConfig.paths?.layout
     ? resolve(sitePath, siteConfig.paths.layout)
