@@ -16,10 +16,18 @@
 //
 // IDENTITY. The ENTITY `$uuid` lives in `site.yml` (top-level `$uuid`); we read it,
 // send it, and back-fill the minted value there. Nested pages/sections carry a `$id`
-// handle but NO per-item `$uuid` — the backend takes site-content content wholesale
-// (collision=force), so there is no per-item uuid round-trip on the wire. For the
-// eventual pull, per-item identity is recovered from the in-file `stableId` +
-// content-match, not a local id store.
+// handle AND a per-item `$uuid`.
+//
+// The per-item uuid is NOT authored — author files never carry sync uuids. It is
+// stamped at emit (`stampUnitUuids`) from an out-of-band cache populated by whatever
+// the backend last reported: a pull, or a push response's `finalized[].document`.
+// This is load-bearing, not bookkeeping: the backend matches records by uuid, and
+// `pages` / `page_sections` / `layout_sections` are all `multi` sections, where a
+// uuid-less record is read as NEW — inserted, with its stored counterpart deleted as
+// host-only. Sending without it replaced every page and section row on every push,
+// which silently invalidated the per-item handles the app holds for its own
+// concurrency. (This note previously said the opposite and described the wholesale
+// treatment as intended; it was neither intended nor harmless.)
 //
 // `@`-prefix child sections declared in `page.yml::nest:` ARE reconstructed —
 // they ride under their parent section's `$children` (page_sections is
@@ -238,10 +246,12 @@ const DYNAMIC_RE = /^\[(.+)\]$/
 //   - genuine self-nesting uses `$children`: a folder's child pages (within
 //     `pages`), and `@`-prefix child sections declared in `nest:` (within
 //     `page_sections`). Cross-section parentage is pure structure, never `$parent`.
-//   - identity on the wire is `$id` (the stableId — the in-file handle) at every
-//     item level, with NO per-item `$uuid` (the entity `$uuid` lives in site.yml;
-//     the backend takes site-content content wholesale). See the IDENTITY note in
-//     the file header.
+//   - `$id` (the stableId — the in-file handle) rides at every item level as the
+//     wire-only closure handle. Per-item `$uuid` is NOT authored here: it is
+//     stamped on by `stampUnitUuids` at emit, from the out-of-band identity cache,
+//     because the backend matches records by uuid and a uuid-less record in a
+//     `multi` section is read as new (inserted, stored counterpart deleted). See
+//     the IDENTITY note in the file header and `site-diff.js`.
 //
 // v0 deferrals: folder-mode `.md`-as-pages, `paths:` mounts, versioned scopes, and
 // media/asset bytes (favicon/assets, carried out of band). `@`-prefix `nest:`
@@ -253,8 +263,9 @@ const SITE_MODEL_NAME = '@uniweb/site-content'
 // `$id` (the handle), then the record's fields — the wire's canonical key order.
 // `fields` already carries `stable_id` (the Model field); `$id` is the same value.
 // Both are kept: `$id` is the sync handle, `stable_id` is the declared content field
-// the editor/render reads. No per-item `$uuid` on the wire (see the IDENTITY note in
-// the file header) — items are content of the one site-content entity.
+// the editor/render reads. Per-item `$uuid` is added later by `stampUnitUuids` (it
+// comes from the identity cache, not from the authored files) — see the IDENTITY
+// note in the file header.
 function withIdentity(id, fields) {
   return Object.assign({ $id: id }, fields)
 }
