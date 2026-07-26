@@ -43,7 +43,6 @@ import { createTranslationCollector, writeLocaleTranslations, writeFreeformTrans
 import { buildFreeformCollectionPath } from '../i18n/freeform.js'
 
 // Single-record source extensions we scan + place (BibTeX is multi-record → out).
-const SINGLE_RECORD_EXTS = ['.md', '.yml', '.yaml', '.json']
 const EXT_FOR_FORMAT = { md: '.md', yaml: '.yml', json: '.json' }
 
 function formatForExt(ext) {
