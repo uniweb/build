@@ -237,11 +237,17 @@ export function diffSiteUnits(localDoc, remoteDoc, bases = {}) {
     const weChanged = knowsLocal && localBase[path] ? entityContentHash(l) !== localBase[path] : null
     const theyChanged = knowsRemote && remoteBase[path] ? entityContentHash(r) !== remoteBase[path] : null
 
-    if (weChanged === false && theyChanged === false) { out.identical.push(path); continue }
-    if (weChanged && theyChanged) out.changedBoth.push(path)
-    else if (theyChanged) out.changedUpstream.push(path)
-    else if (weChanged) out.changedLocally.push(path)
-    else if (weChanged === null || theyChanged === null) out.changedUnattributed.push(path)
+    // An UNKNOWN side is only worth reporting when the other side doesn't already
+    // settle the question. If the remote is known to sit at its base, this unit is
+    // not contested no matter what we did to it — pushing our version is the whole
+    // point — so "differs, side unknown" would be both untrue and noise. That
+    // combination is the normal state right after a pull (which clears the local
+    // base), which is exactly when a refusal is most likely, so getting it wrong
+    // buried the one contested file under a list of perfectly fine ones.
+    if (weChanged === true && theyChanged === true) out.changedBoth.push(path)
+    else if (theyChanged === true) out.changedUpstream.push(path)
+    else if (weChanged === true) out.changedLocally.push(path)
+    else if (weChanged === null && theyChanged === null) out.changedUnattributed.push(path)
     else out.identical.push(path)
   }
 
@@ -266,9 +272,15 @@ export function describeSiteDiff(diff, { limit = 8 } = {}) {
   if (diff.changedUnattributed.length) lines.push(`Differs, side unknown: ${list(diff.changedUnattributed)}`)
   if (diff.addedLocally.length) lines.push(`Added by you (not upstream yet): ${list(diff.addedLocally)}`)
 
-  // The good news is worth saying: if nothing is contested, the only thing standing
-  // between the user and a clean push is taking the other side's work first.
-  if (lines.length && !diff.changedBoth.length && !diff.changedUnattributed.length) {
+  // The good news is worth saying — but only when BOTH sides are actually known.
+  // Without the local base we cannot see our own edits, so "nothing was changed on
+  // both sides" would be a claim about evidence we don't have: the user could pull
+  // on the strength of it and lose the very edit they were trying to push. A
+  // reassurance that can't be backed is worse than no reassurance.
+  if (
+    lines.length && diff.knowsLocal && diff.knowsRemote &&
+    !diff.changedBoth.length && !diff.changedUnattributed.length
+  ) {
     lines.push('No unit was changed on both sides — pulling should merge cleanly.')
   }
   // Say which half of the attribution is missing rather than under-reporting silently.

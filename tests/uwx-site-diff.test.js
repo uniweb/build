@@ -249,3 +249,30 @@ describe('collectSiteUnits — site info is a unit too', () => {
     expect(mine.info.$uuid).toBe('u-info')
   })
 })
+
+describe('diffSiteUnits — an unknown side is only reported when it matters', () => {
+  it('stays quiet about units the remote has not moved, even with no local base', () => {
+    // The state right after a pull: local base cleared, remote base known. Only the
+    // unit the other side actually changed should be named — reporting the rest as
+    // "differs, side unknown" buries it, and is untrue besides.
+    const base = doc(page('h', 'home', [section('hero', 'H0'), section('cta', 'C0')]))
+    const remote = asRemote(doc(page('h', 'home', [section('hero', 'H-theirs'), section('cta', 'C0')])))
+    const d = diffSiteUnits(base, remote, { remote: computeUnitHashes(asRemote(base)) })
+
+    expect(d.changedUpstream).toEqual(['pages/home/hero.md'])
+    expect(d.changedUnattributed).toEqual([])
+    const out = describeSiteDiff(d).join('\n')
+    expect(out).not.toMatch(/pages\/home\/cta\.md/)
+    // And it must NOT promise a clean merge: without the local base we cannot see
+    // our own edits, so the user could pull on that promise and lose one.
+    expect(out).not.toMatch(/should merge cleanly/)
+  })
+
+  it('still reports genuinely unknown units when NEITHER base is available', () => {
+    const d = diffSiteUnits(
+      doc(page('h', 'home', [section('hero', 'mine')])),
+      asRemote(doc(page('h', 'home', [section('hero', 'theirs')])))
+    )
+    expect(d.changedUnattributed).toContain('pages/home/hero.md')
+  })
+})
