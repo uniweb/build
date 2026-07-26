@@ -629,6 +629,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'fetcher', siteYml.fetcher)
   setIf(info, 'build', siteYml.build)
   setIf(info, 'search', siteYml.search)
+  // `agents` — the projections opt-out + route exclusions. Carried because the
+  // app is a second PUBLISHER of projections and derives them from stored
+  // content: without this block it cannot see `agents: false` or
+  // `agents.exclude`, so an author's opt-out is silently reversed and an
+  // excluded branch becomes both discoverable AND summarized by the index.
+  // (The CLI lane reads site.yml directly and honors it either way.)
+  setIf(info, 'agents', siteYml.agents)
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
   // `app` — the deployment's `@uniweb/app-spec` reference (a bare uuid string),

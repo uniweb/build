@@ -100,6 +100,7 @@ const INFO_TO_SITE_YML = {
   fetcher: 'fetcher',
   build: 'build',
   search: 'search',
+  agents: 'agents',
   paths: 'paths',
   data: 'data',
   template: 'template',

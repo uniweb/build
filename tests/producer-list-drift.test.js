@@ -96,3 +96,22 @@ describe('producer-side lists cannot drift silently', () => {
     }
   })
 })
+
+describe('the agents block round-trips', () => {
+  // `agents:` carries the projections opt-out and route exclusions. The app is a
+  // second PUBLISHER of projections and derives them from stored content, so a
+  // block that does not round-trip means an author's `agents: false` is silently
+  // reversed on an app publish, and an excluded branch becomes both discoverable
+  // AND summarized by the index. Push and pull halves are asserted together
+  // because one without the other is the silent case.
+  const src = (rel) => readFileSync(new URL(`../src/uwx/${rel}`, import.meta.url), 'utf8')
+
+  it('is emitted onto info by the producer', () => {
+    expect(src('site.js')).toMatch(/setIf\(info, 'agents', siteYml\.agents\)/)
+  })
+
+  it('is mapped back onto site.yml by the projector', () => {
+    const map = src('site-project.js').match(/const INFO_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
+    expect(map).toMatch(/\bagents:\s*'agents'/)
+  })
+})
