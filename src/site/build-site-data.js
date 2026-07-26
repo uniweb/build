@@ -29,6 +29,8 @@ import { processAdvancedAssets } from './advanced-processors.js'
 import {
   generateSearchIndex,
   generateCollectionIndex,
+  mergeSearchIndexes,
+  getSearchIndexFilename,
   renderSiteIndex,
   renderPageMarkdown,
   resolveAgentsConfig,
@@ -223,6 +225,7 @@ export async function buildSiteData({
 
     // Collection indexes — one per routed + search-configured collection
     const collections = finalContent.config?.collections || {}
+    const collectionIndexes = []
     for (const [collName, collConfig] of Object.entries(collections)) {
       if (!collConfig.search?.enabled || !collConfig.route) continue
       const cascadeFile = join(resolvedDistDir, 'data', `${collName}.json`)
@@ -234,8 +237,23 @@ export async function buildSiteData({
         continue
       }
       const collIndex = generateCollectionIndex(collName, collConfig, collectionData, defaultLocale)
+      collectionIndexes.push(collIndex)
       await writeFile(join(searchDir, `${collName}.json`), JSON.stringify(collIndex))
     }
+
+    // The single-file form, for the BROWSER lane.
+    //
+    // The split files above serve a server that loads only the parts a query
+    // needs. Kit's client-side `index` provider needs all of it, and asks for
+    // `search-index.json` — so without this, a site published through this lane
+    // 404s on its own search index and degrades to no results. Emitting both
+    // from the same entries is one extra serialization and means the client
+    // works identically on every lane, with no host configuration describing
+    // where the index lives.
+    await writeFile(
+      join(resolvedDistDir, getSearchIndexFilename(defaultLocale, defaultLocale)),
+      JSON.stringify(mergeSearchIndexes(pagesIndex, collectionIndexes))
+    )
   }
 
   // 6. Agent projections — `llms.txt` and one `.md` per page.
