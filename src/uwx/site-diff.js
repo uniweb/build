@@ -14,6 +14,7 @@
 // actively pushes people toward the destructive one. Three unit kinds, matching
 // exactly what someone would open:
 //
+//   site.yml                      site info (name, theme, foundation ref)
 //   pages/<route>/page.yml        page metadata (title, slug, section order, …)
 //   pages/<route>/<section>.md    one section — including nested `$children`,
 //                                 which the projector also writes flat here
@@ -71,7 +72,12 @@ const ownContent = (record, ...childKeys) => {
 export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
   const units = new Map()
   walkSiteUnits(doc, (path, record, kind) => {
-    units.set(path, kind === 'page' ? ownContent(record, 'page_sections', '$children') : ownContent(record, '$children'))
+    units.set(
+      path,
+      kind === 'page' ? ownContent(record, 'page_sections', '$children')
+        : kind === 'info' ? ownContent(record)
+          : ownContent(record, '$children')
+    )
   }, sourceLocale)
   return units
 }
@@ -84,7 +90,7 @@ export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.
  * three can never disagree about what a unit is or where it lives. A path that
  * differs between them would silently mis-key a cache.
  *
- * @param {(path: string, record: object, kind: 'page'|'section') => void} cb
+ * @param {(path: string, record: object, kind: 'info'|'page'|'section') => void} cb
  */
 export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
   const walkSections = (sections, dir) => {
@@ -106,6 +112,12 @@ export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION
       walkPages(record.$children, dir)
     }
   }
+  // `info` is an item too — it carries its own `$uuid` and its own per-item token,
+  // and it holds the site's name, theme and foundation ref. Omitting it left those
+  // ungated (an upstream theme change would not be caught) and invisible in the
+  // diff. It projects to several files (site.yml, theme.yml, head.html); `site.yml`
+  // is the label, since that is where its identity-bearing fields live.
+  if (doc?.info && typeof doc.info === 'object') cb('site.yml', doc.info, 'info')
   walkPages(doc?.pages, 'pages')
   walkSections(doc?.layout_sections, 'layout')
 }

@@ -228,3 +228,24 @@ describe('per-item identity — stable-id collisions', () => {
     expect(new Set(used).size).toBe(used.length)
   })
 })
+
+describe('collectSiteUnits — site info is a unit too', () => {
+  it('covers info, so a theme/name change is gated and shows in the diff', () => {
+    // info carries its own $uuid and its own per-item token. Leaving it out left
+    // the site's theme, name and foundation ref ungated and invisible here.
+    const d = { ...doc(page('h', 'home', [section('hero', 'H')])), info: { name: 'Acme', theme: { colors: { primary: '#000' } } } }
+    expect([...collectSiteUnits(d).keys()]).toContain('site.yml')
+
+    const changed = { ...d, info: { name: 'Acme', theme: { colors: { primary: '#fff' } } } }
+    const diff = diffSiteUnits(changed, d, { local: computeUnitHashes(d), remote: computeUnitHashes(d) })
+    expect(diff.changedLocally).toEqual(['site.yml'])
+  })
+
+  it('harvests and stamps info identity like any other unit', () => {
+    const remote = { ...doc(page('h', 'home', [section('hero', 'H')])), info: { name: 'Acme', $uuid: 'u-info' } }
+    expect(collectUnitUuids(remote)['site.yml']).toBe('u-info')
+    const mine = { ...doc(page('h', 'home', [section('hero', 'H')])), info: { name: 'Acme' } }
+    stampUnitUuids(mine, { 'site.yml': 'u-info' })
+    expect(mine.info.$uuid).toBe('u-info')
+  })
+})
