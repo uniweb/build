@@ -207,7 +207,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
 
     // home page (page mode): page.yml with index + sections, + the section file
     const homeYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
-    expect(homeYml).toMatchObject({ id: 'home', index: true, title: 'Home', sections: ['hero'] })
+    expect(homeYml).toMatchObject({ id: 'home', index: true, title: 'Home', sections: ['hero', '...'] })
     expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
 
     // blog (folder mode): folder.yml, no page.yml
@@ -291,7 +291,7 @@ describe('siteContentDocumentToProject — reconcile (prune)', () => {
 
     expect(existsSync(join(dir, 'pages/home/features.md'))).toBe(false)
     expect(report.deleted).toContain(join(dir, 'pages/home/features.md'))
-    expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).sections).toEqual(['hero'])
+    expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).sections).toEqual(['hero', '...'])
   })
 
   it('deletes an orphaned page directory', () => {
@@ -339,7 +339,7 @@ describe('siteContentDocumentToProject — uuid-anchored rename detection', () =
     expect(report.renamed).toContainEqual({ from: join(dir, 'pages/home/features.md'), to: join(dir, 'pages/home/capabilities.md') })
     expect(report.deleted).toEqual([]) // a rename is NOT a delete
     const pageYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
-    expect(pageYml.sections).toEqual(['hero', 'capabilities'])
+    expect(pageYml.sections).toEqual(['hero', 'capabilities', '...'])
     expect(pageYml.ids).toBeUndefined() // identity lives in .uniweb/, not page.yml
   })
 
@@ -364,7 +364,7 @@ describe('siteContentDocumentToProject — uuid-anchored rename detection', () =
     expect(existsSync(join(dir, 'pages/about/features.md'))).toBe(true)
     expect(report.renamed).toContainEqual({ from: join(dir, 'pages/home/features.md'), to: join(dir, 'pages/about/features.md') })
     expect(report.deleted).toEqual([]) // a cross-page move is a relocation, not a delete
-    expect(yaml.load(readFileSync(join(dir, 'pages/about/page.yml'), 'utf8')).sections).toEqual(['intro', 'features'])
+    expect(yaml.load(readFileSync(join(dir, 'pages/about/page.yml'), 'utf8')).sections).toEqual(['intro', 'features', '...'])
   })
 
   it('renames a page directory in place when its uuid maps to a new slug', () => {
@@ -883,7 +883,7 @@ describe('siteContentDocumentToProject — page.yml surgical merge (A9)', () => 
     const yml = yaml.load(readFileSync(join(home, 'page.yml'), 'utf8'))
     expect(yml.customNote).toBe('keep-me') // author-added key preserved
     expect(yml.title).toBe('New Title') // managed key updated
-    expect(yml.sections).toEqual(['hero']) // managed sections replaced wholesale
+    expect(yml.sections).toEqual(['hero', '...']) // managed sections replaced wholesale
     expect(yml.hidden).toBeUndefined() // managed key absent from the record → dropped
   })
 })
@@ -1054,5 +1054,66 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
     expect(JSON.stringify(hero.content.es)).toContain('Bienvenido')
     expect(doc1.layout_sections[0].content.es.type).toBe('doc')
     expect(JSON.stringify(doc1.layout_sections[0].content.es)).toContain('Navegacion')
+  })
+})
+
+describe('pulled pages stay open to new sections', () => {
+  const pmDoc = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+
+  // `sections:` exists to carry order and nesting, which the projected filenames
+  // can't. It must not also decide membership: a bare list is STRICT to the
+  // collector ("only listed sections processed"), so a pulled page silently
+  // excluded anything added afterwards — you'd create the file, push, and be told
+  // "nothing to push", with nothing explaining why.
+  it('writes a rest marker so a section added after a pull is picked up', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'uwx-open-'))
+    try {
+      siteContentDocumentToProject({
+        document: {
+          $id: 'site-content', $model: '@uniweb/site-content', info: { name: 'S' },
+          pages: [{
+            $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
+            page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: pmDoc('Hi') }],
+          }],
+        },
+        siteRoot: dir,
+      })
+      expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).sections)
+        .toEqual(['hero', '...'])
+
+      // An author adds a section the way they always would.
+      writeFileSync(join(dir, 'pages/home/2-extra.md'), '---\ntype: Section\n---\n# Extra\n')
+      writeFileSync(join(dir, 'site.yml'), 'name: S\nfoundation: "@a/b"\n')
+      const doc = await siteProjectToDocument(dir)
+      const ids = doc.pages.find((p) => p.$id === 'home').page_sections.map((s) => s.$id)
+      expect(ids).toContain('hero')
+      expect(ids).toContain('extra') // would be missing with a bare (strict) list
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('appending the rest marker does not flatten nesting', async () => {
+    // The producer used to treat `...` as disqualifying the explicit path, falling
+    // back to a directory scan — which promoted every nested child to a sibling of
+    // its own parent, destroying exactly what the list exists to preserve.
+    const dir = mkdtempSync(join(tmpdir(), 'uwx-open-nest-'))
+    try {
+      mkdirSync(join(dir, 'pages/home'), { recursive: true })
+      writeFileSync(join(dir, 'site.yml'), 'name: S\nfoundation: "@a/b"\n')
+      writeFileSync(join(dir, 'pages/home/page.yml'), "sections:\n  - hero\n  - features:\n      - card-a\n  - '...'\n")
+      writeFileSync(join(dir, 'pages/home/hero.md'), '---\ntype: Hero\n---\n# H\n')
+      writeFileSync(join(dir, 'pages/home/features.md'), '---\ntype: Features\n---\n# F\n')
+      writeFileSync(join(dir, 'pages/home/card-a.md'), '---\ntype: Card\n---\n# C\n')
+      writeFileSync(join(dir, 'pages/home/late.md'), '---\ntype: Section\n---\n# L\n')
+
+      const doc = await siteProjectToDocument(dir)
+      const secs = doc.pages.find((p) => p.$id === 'home').page_sections
+      expect(secs.map((s) => s.$id)).toEqual(['hero', 'features', 'late'])
+      // card-a stays a CHILD, and is not also promoted alongside its parent
+      expect(secs.find((s) => s.$id === 'features').$children.map((c) => c.$id)).toEqual(['card-a'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

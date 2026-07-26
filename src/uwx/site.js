@@ -319,11 +319,21 @@ function isFullyExplicitSections(sectionsConfig) {
   )
 }
 
+// The same list plus a `...` rest marker: the named entries still give order and
+// nesting, and anything undiscovered is appended. `uniweb pull` writes exactly this
+// shape, because a bare list would make the page STRICT and silently exclude every
+// section added after the pull.
+function isExplicitWithRest(sectionsConfig) {
+  if (!Array.isArray(sectionsConfig) || sectionsConfig.length === 0) return false
+  if (!sectionsConfig.includes('...')) return false
+  return isFullyExplicitSections(sectionsConfig.filter((i) => i !== '...'))
+}
+
 // Build the page_sections tree from an explicit `sections:` array: each item is
 // a section name (string) or `{ name: [children…] }`, resolved to its file by
 // name (bare / `@` / numeric-prefix tolerant) and recursed. Order and nesting
 // come from the array, not the directory.
-async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig) {
+async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { appendRest = false } = {}) {
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const seen = new Set()
 
@@ -346,8 +356,24 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig) {
 
   const sections = []
   for (const item of sectionsConfig) {
+    if (item === '...') continue // the rest marker itself names no section
     const s = await buildItem(item)
     if (s) sections.push(s)
+  }
+
+  // `...` — append any top-level file the list didn't claim, in filename order, so
+  // a section added after a pull appears instead of being silently dropped.
+  // `seen` already holds every file the list used, children included, so a nested
+  // child is never also promoted to a sibling of its own parent.
+  if (appendRest) {
+    for (const file of mdFiles) {
+      if (isChildSection(file) || seen.has(file)) continue
+      seen.add(file)
+      const stableDefault = parseNumericPrefix(stripAtPrefix(parse(file).name)).name
+      const { section } = await processMarkdownFile(join(pageDir, file), String(seen.size), siteRoot, stableDefault)
+      section.subsections = []
+      sections.push(section)
+    }
   }
   return sections.map((s, i) => sectionToRecord(s, i))
 }
@@ -355,6 +381,9 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig) {
 async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   if (isFullyExplicitSections(pageConfig?.sections)) {
     return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections)
+  }
+  if (isExplicitWithRest(pageConfig?.sections)) {
+    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { appendRest: true })
   }
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const nest = pageConfig?.nest && typeof pageConfig.nest === 'object' ? pageConfig.nest : {}

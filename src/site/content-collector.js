@@ -1164,11 +1164,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       }
     }
 
-    // Create items with .name property for applyWildcardOrder
-    const allItems = [...discoveredMap.keys()].map(name => ({ name }))
-    const ordered = applyWildcardOrder(allItems, sectionsParsed)
-
     // Collect subsection configs from the original array (e.g., { features: [a, b] })
+    // BEFORE ordering, because the children they name must not also be treated as
+    // top-level sections.
     const subsectionConfigs = new Map()
     for (const item of [...sectionsParsed.before, ...sectionsParsed.after]) {
       if (typeof item === 'object' && item !== null) {
@@ -1178,6 +1176,26 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         }
       }
     }
+
+    // A child named in `nest`-style config is already placed, so it must not fall
+    // into the auto-discovered "rest" as well. `@`-prefixed files are excluded from
+    // discovery above, but a child does NOT have to be `@`-prefixed: `uniweb pull`
+    // writes every section — nested or not — as a flat `<stableId>.md` in the page
+    // dir. Without this, an inclusive list flattens exactly the nesting the list
+    // exists to preserve, promoting each child to a sibling of its own parent.
+    const claimedChildren = new Set()
+    for (const children of subsectionConfigs.values()) {
+      for (const child of children || []) {
+        const name = typeof child === 'string' ? child : Object.keys(child || {})[0]
+        if (name) claimedChildren.add(name)
+      }
+    }
+
+    // Create items with .name property for applyWildcardOrder
+    const allItems = [...discoveredMap.keys()]
+      .filter(name => !claimedChildren.has(name))
+      .map(name => ({ name }))
+    const ordered = applyWildcardOrder(allItems, sectionsParsed)
 
     // Process sections in wildcard-expanded order
     const sections = []

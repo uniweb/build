@@ -361,7 +361,17 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (record.layout !== undefined) y.layout = record.layout
   if (record.seo !== undefined) y.seo = record.seo
   if (record.fetch !== undefined) y.fetch = record.fetch
-  if (sectionsArray && sectionsArray.length > 0) y.sections = sectionsArray
+  // `sections:` exists to preserve ORDER and NESTING, which the projected filenames
+  // can't carry (they're `<stableId>.md`, with no numeric prefix). It must not also
+  // decide MEMBERSHIP — and a bare list does: the collector reads a list without
+  // `...` as strict, "only listed sections processed". So a pulled page silently
+  // excluded any section added afterwards. You'd create the file, push, and be told
+  // "nothing to push", with nothing anywhere explaining why.
+  //
+  // The trailing `...` makes it inclusive: listed sections keep their order and
+  // their nesting, and anything new is discovered and appended as it would be in a
+  // page that was never pulled.
+  if (sectionsArray && sectionsArray.length > 0) y.sections = [...sectionsArray, '...']
   return y
 }
 
