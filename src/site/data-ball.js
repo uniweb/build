@@ -56,7 +56,7 @@ function collectionOf(relPath) {
  * @returns {Promise<{ data: Object, search: Object }|null>} null when there is nothing
  *          to deliver (no schema-less data AND no search index).
  */
-export async function assembleDataBall(distDir, schemalessNames = [], { projections = false } = {}) {
+export async function assembleDataBall(distDir, schemalessNames = []) {
   const schemaless = new Set(schemalessNames)
   const allData = await readJsonTree(join(distDir, 'data'))
   const data = {}
@@ -65,47 +65,22 @@ export async function assembleDataBall(distDir, schemalessNames = [], { projecti
   }
   const search = await readJsonTree(join(distDir, '_search'))
 
-  // Agent projections ride the same ball — same shape of thing (precomputed
-  // at publish, opaque to the backend, served as-is), just text rather than
-  // JSON. Off by default: what the artifacts are called and how they are
-  // addressed on the serving side is the backend's to specify, and shipping
-  // an unrecognized key into a payload the backend unwraps is not something
-  // to decide unilaterally. Flip this on once that contract is agreed.
-  const projectionFiles = projections ? await readTextTree(distDir) : {}
+  // Agent projections deliberately do NOT ride the ball.
+  //
+  // A backend that stores the site's content derives them itself at publish —
+  // one producer, so shipping ours would upload an artifact to the one host
+  // that does not need it, and invite two answers for one site. The projections
+  // this build emits into `dist/` are for hosts with no backend to derive them:
+  // static hosts and foreign backends. That is `@uniweb/projections`' scope and
+  // it is unchanged.
+  //
+  // (An opt-in `projections` bucket lived here while the delivery contract was
+  // open. It never shipped enabled, and the one-producer ruling closed the
+  // question — removed rather than left as a flag nobody may turn on.)
 
-  const empty =
-    Object.keys(data).length === 0 &&
-    Object.keys(search).length === 0 &&
-    Object.keys(projectionFiles).length === 0
-  if (empty) return null
+  if (Object.keys(data).length === 0 && Object.keys(search).length === 0) return null
 
-  return projections ? { data, search, projections: projectionFiles } : { data, search }
-}
-
-/**
- * Collect the agent projections from a built dist/ — `llms.txt` plus every
- * `.md` page projection, keyed by their served path.
- *
- * Deliberately excludes `node_modules`-shaped noise and anything under the
- * bundle's own asset directories; a site's `dist/` at this point holds only
- * what the link lane emitted.
- *
- * @param {string} distDir
- * @returns {Promise<Object<string, string>>}
- */
-async function readTextTree(distDir) {
-  if (!existsSync(distDir)) return {}
-  const out = {}
-  const entries = await readdir(distDir, { withFileTypes: true, recursive: true })
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    const isProjection = entry.name === 'llms.txt' || entry.name.endsWith('.md')
-    if (!isProjection) continue
-    const full = join(entry.parentPath || entry.path, entry.name)
-    const rel = relative(distDir, full).split(sep).join('/')
-    out[rel] = await readFile(full, 'utf8')
-  }
-  return out
+  return { data, search }
 }
 
 // --- local media in the ball -------------------------------------------------
