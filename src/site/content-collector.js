@@ -527,6 +527,38 @@ function prettifySlug(slug) {
     .join(' ')
 }
 
+/**
+ * Resolve a page's display title when the author declared none.
+ *
+ * Keys on whether the node has content of its own — the property the page
+ * payload already carries as `hasContent` — and deliberately NOT on which
+ * config file declared the folder. `folder.yml` vs `page.yml` decides how a
+ * directory's markdown is read; it says nothing about what the node IS, and
+ * keying on it made a content-less group node's name depend on how it happened
+ * to be declared. A `page.yml` folder with no markdown is the same group node
+ * as a `folder.yml` one and renders identically in nav.
+ *
+ * A node with no sections of its own (a group/container node, a redirect stub)
+ * has nothing to humanize from, so it shows the identifier the author actually
+ * wrote — `v1` stays `v1`. A node with content falls back to its opening H1,
+ * and only then to a prettified slug.
+ *
+ * The runtime has no fallback of its own: an empty title renders empty. The
+ * fill belongs here, at the producer, because `title` also feeds `<title>`,
+ * `og:title`, `llms.txt` and the search index — a fix applied at render would
+ * repair the nav row and leave the rest blank.
+ *
+ * @param {string|undefined} declaredTitle - Author-supplied title, if any
+ * @param {string} segment - Route segment (directory or file name)
+ * @param {Array|null} sections - The node's own sections, if any
+ * @returns {string}
+ */
+function resolveDisplayTitle(declaredTitle, segment, sections) {
+  if (declaredTitle) return declaredTitle
+  if (!sections?.length) return segment
+  return extractH1(sections[0]?.content) || prettifySlug(segment)
+}
+
 function parseNumericPrefix(filename) {
   const match = filename.match(/^(\d+(?:\.\d+)*)-?(.*)$/)
   if (match) {
@@ -1031,7 +1063,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
         id: pageConfig.id || null,
         isIndex,
-        title: pageConfig.title || prettifySlug(pageName),
+        title: resolveDisplayTitle(pageConfig.title, pageName, null),
         description: pageConfig.description || '',
         label: pageConfig.label || null,
         hidden: pageConfig.hidden || false,
@@ -1057,7 +1089,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
         id: pageConfig.id || null,
         isIndex,
-        title: pageConfig.title || prettifySlug(pageName),
+        title: resolveDisplayTitle(pageConfig.title, pageName, null),
         description: pageConfig.description || '',
         label: pageConfig.label || null,
         hidden: pageConfig.hidden || false,
@@ -1318,7 +1350,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       sourcePath, // Original folder-based path (for ancestor checking in navigation)
       id: pageConfig.id || null, // Stable page ID for page: links (survives reorganization)
       isIndex, // Marks this page as the index for its parent route
-      title: pageConfig.title || extractH1(hierarchicalSections[0]?.content) || prettifySlug(pageName),
+      title: resolveDisplayTitle(pageConfig.title, pageName, hierarchicalSections),
       description: pageConfig.description || '',
       label: pageConfig.label || null, // Short label for navigation (defaults to title)
       // Localized URL slug overrides: { <locale>: <segment> }. Compiled into
@@ -1705,7 +1737,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           sourcePath: isIndex ? (parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`) : null,
           id: dirConfig.id || null,
           isIndex,
-          title: dirConfig.title || entry,
+          title: resolveDisplayTitle(dirConfig.title, entry, null),
           description: dirConfig.description || '',
           label: dirConfig.label || null,
           lastModified: null,
@@ -1801,7 +1833,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         sourcePath: isIndex ? (parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`) : null,
         id: dirConfig.id || null,
         isIndex,
-        title: dirConfig.title || entry,
+        title: resolveDisplayTitle(dirConfig.title, entry, null),
         description: dirConfig.description || '',
         label: dirConfig.label || null,
         lastModified: null,
