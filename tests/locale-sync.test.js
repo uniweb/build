@@ -20,7 +20,30 @@ describe('localizeContentDoc — self-contained per-locale docs (push)', () => {
 
   it('omits an untranslated target locale (it falls back to the source locale)', () => {
     const out = localizeContentDoc(docOf('Hello world'), 'en', ['es'], { es: {} })
-    expect(out.type).toBe('doc') // stays a bare source doc — no empty es wrapper
+    expect(Object.keys(out)).toEqual(['en']) // no empty es wrapper
+    expect(out.en.type).toBe('doc')
+  })
+
+  // The field declares `localized: true`, so it ships as a map whatever the
+  // language count. This used to return the bare doc whenever nothing had been
+  // translated, which made the wire shape depend on whether a given section
+  // happened to have a translation — a translated section and its untranslated
+  // neighbour left in DIFFERENT shapes on the same page.
+  it('ALWAYS wraps — single-locale sites included', () => {
+    expect(Object.keys(localizeContentDoc(docOf('Hi'), 'en', [], null))).toEqual(['en'])
+    expect(Object.keys(localizeContentDoc(docOf('Hi'), 'en', undefined, undefined))).toEqual(['en'])
+  })
+
+  it('passes non-docs through untouched', () => {
+    expect(localizeContentDoc(null, 'en', [], null)).toBe(null)
+    const already = { en: docOf('Hi') }
+    expect(localizeContentDoc(already, 'en', [], null)).toBe(already) // no double wrap
+  })
+
+  it('a source-only map round-trips back to a bare doc on the file lane', () => {
+    const doc = docOf('Hello world')
+    const wrapped = localizeContentDoc(doc, 'en', [], null)
+    expect(unwrapLocalizedContent(wrapped, 'en', null, null)).toEqual(doc)
   })
 })
 

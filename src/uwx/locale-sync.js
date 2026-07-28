@@ -108,29 +108,50 @@ export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
  * map lives only on disk (`locales/{locale}.json`) and is recovered on pull (see
  * unwrapLocalizedContent).
  *
- * Returns the bare doc unchanged when there are no target locales / no translations
- * for any of them (single-locale and pre-localization sites are untouched). A
- * target locale with no translation for THIS doc is omitted (it falls back to the
- * source locale), so the payload stays lean.
+ * ALWAYS returns the per-locale map — `{ [sourceLocale]: doc }` at minimum. A target
+ * locale with no translation for THIS doc is omitted (it falls back to the source
+ * locale through the delivery locale chain), so the payload stays lean.
+ *
+ * It used to return the bare doc when nothing had been translated, which made the
+ * wire shape depend on *whether a given section happened to have a translation* —
+ * so one push could carry a map for a translated section and a bare doc for its
+ * untranslated neighbour, on the same page. The field declares `localized: true`,
+ * and a bare doc makes that declaration false: `{type, content}` is an object, so
+ * it satisfies "must be a map" with `type` and `content` sitting where locale codes
+ * belong, and a store cannot validate the one property the field declares. Every
+ * reader then has to disambiguate by asking "does this object happen to look like a
+ * ProseMirror doc" — a heuristic that has to be implemented identically in three
+ * codebases forever, and has already fail-opened in one of them.
+ *
+ * `localizeScalar` below has always wrapped unconditionally, so the producer was
+ * also inconsistent with itself: a section's `title` shipped as `{en: …}` while its
+ * `content` shipped bare, in the same payload.
+ *
+ * Readers stay tolerant of the bare form permanently — it exists in stores, in
+ * `.uwx` files on disk, and in every backup taken before this change. This changes
+ * what we WRITE, never what we accept (see `isLocalizedContent`, and
+ * `unwrapLocalizedContent`, which returns `content[sourceLocale]` so a source-only
+ * map round-trips back to a bare doc on the file lane).
  *
  * @param {object} doc - the source-locale ProseMirror content doc
  * @param {string} sourceLocale
- * @param {string[]} targetLocales
- * @param {object} translations - `{ locale: { hash: tgt } }` from loadLocaleTranslations
+ * @param {string[]} [targetLocales]
+ * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
  */
 export function localizeContentDoc(doc, sourceLocale, targetLocales, translations) {
-  if (!isProseMirrorDoc(doc) || !targetLocales || targetLocales.length === 0 || !translations) {
-    return doc
-  }
+  // Non-docs (null, an already-localized map) pass through untouched.
+  if (!isProseMirrorDoc(doc)) return doc
+
   const result = { [sourceLocale]: doc }
-  for (const locale of targetLocales) {
-    const table = translations[locale]
-    if (!table) continue
-    const resolved = resolveDocForLocale(doc, table)
-    if (resolved) result[locale] = resolved
+  if (targetLocales && translations) {
+    for (const locale of targetLocales) {
+      const table = translations[locale]
+      if (!table) continue
+      const resolved = resolveDocForLocale(doc, table)
+      if (resolved) result[locale] = resolved
+    }
   }
-  // Only wrap when at least one target carried a translation — else stay a bare doc.
-  return Object.keys(result).length > 1 ? result : doc
+  return result
 }
 
 /**
