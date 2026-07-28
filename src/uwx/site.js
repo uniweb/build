@@ -663,11 +663,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
 
   // Wrap each section's content into its per-locale form (source doc + target
   // structural maps from locales/{locale}.json, or a free-form body override from
-  // locales/freeform/**) when the site is multi-locale. A non-invasive post-pass
-  // over the built tree — single-locale sites are untouched.
-  if (targetLocales.length > 0) {
-    await localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot)
-  }
+  // locales/freeform/**). A non-invasive post-pass over the built tree.
+  //
+  // Runs for EVERY site, including single-locale ones: `content` declares
+  // `localized: true`, so it ships as `{ [sourceLocale]: doc }` whatever the
+  // language count. Guarding this on `targetLocales.length` is what used to send
+  // a bare doc from single-locale sites — see localizeContentDoc for why one
+  // field with two shapes is a store that cannot validate its own declaration.
+  await localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot)
 
   // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
   // config (the records themselves are separate entities; this is just the config).

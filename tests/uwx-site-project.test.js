@@ -998,7 +998,7 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
     // (A1) inline-inset serializer writes `[@darwin]` — recovered identically.
     const home = doc1.pages.find((p) => p.$id === 'home')
     const hero = home.page_sections.find((s) => s.stable_id === 'hero')
-    const placeholder = hero.content.content[0].content.find((n) => n.type === 'inset_placeholder')
+    const placeholder = hero.content.en.content[0].content.find((n) => n.type === 'inset_placeholder')
     expect(placeholder).toBeDefined()
     expect(hero.insets).toContainEqual(expect.objectContaining({ type: 'Cite', embedKind: 'text', params: { key: '@darwin' } }))
     // the projected source markdown carries the inline cite, not a dropped inset

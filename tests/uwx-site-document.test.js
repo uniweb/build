@@ -120,7 +120,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     const hero = home.page_sections[0]
     expect(hero.$id).toBe('hero')
     expect(hero.type).toBe('Hero')
-    expect(hero.content.type).toBe('doc') // raw ProseMirror
+    expect(hero.content.en.type).toBe('doc') // raw ProseMirror, per-locale keyed
     expect(hero.background).toEqual({ image: '/img/bg.jpg' }) // lifted from params
     expect(hero.theme_override).toBe('dark')
     expect(hero.params).toEqual({ cta: 'Get Started' })
@@ -165,7 +165,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     const footer = layout_sections.find((s) => s.area === 'footer')
     expect(header.layout_name).toBe('default')
     expect(footer.layout_name).toBe('marketing')
-    expect(header.content.type).toBe('doc')
+    expect(header.content.en.type).toBe('doc') // per-locale keyed
   })
 
   it('emits extensions (url = $id) and collections (name = $id)', async () => {
