@@ -381,35 +381,19 @@ export function scopeFetchedData(fetchedData, scopeRoutes) {
 export function injectBuildData(html, siteContent, { splitContent = false, currentRoute = null, scopeRoutes = null } = {}) {
   let result = html
 
-  // Inject the theme's font <link> tags if not already present (the vite
-  // plugin normally puts them there when it builds index.html)
+  // Neither the theme <style> NOR the font <link>s are injected here anymore.
+  // Both are derived from the website graph (`website.themeData`), so they
+  // belong to the shared seam — @uniweb/runtime/ssr's injectPageContent(),
+  // which runs just before this — and every lane gets them from one
+  // implementation. The theme CSS sat here until 2026-07-28 and cloud-rendered
+  // pages were unstyled the whole time; the font links followed once
+  // FONT_LINKS_MARKER moved to @uniweb/theming, the one package both this and
+  // the runtime can read it from.
   //
-  // STILL HERE, and it is the remaining half of the 2026-07-28 seam fix.
-  // `theme.links` is graph-derived like the theme CSS was, so by the rule
-  // below it belongs in injectPageContent() too — a lane that doesn't run
-  // this build gets no webfont <link>s and falls back to system fonts.
-  // What blocks the move is the marker, not the principle: FONT_LINKS_MARKER
-  // has a second consumer in site/plugin.js (the vite plugin), which must not
-  // import the SSR bundle, and @uniweb/build declares no dependency on
-  // @uniweb/runtime — so there is no one place both sides can read it from
-  // today. Fixing that means giving the runtime a zero-dep leaf export for
-  // the constant and re-exporting it here. Degraded-not-broken (wrong
-  // typeface, not unstyled), which is why it was scoped out rather than
-  // rushed.
-  if (siteContent?.theme?.links && !result.includes(FONT_LINKS_MARKER)) {
-    result = result.replace(
-      '</head>',
-      `  ${FONT_LINKS_MARKER}\n${siteContent.theme.links}\n  </head>`
-    )
-  }
-
-  // Theme CSS is NOT injected here. Like the appearance boot script below, it
-  // is derived from the website graph (`website.themeData`), so it belongs to
-  // the shared seam — @uniweb/runtime/ssr's injectPageContent(), which runs
-  // just before this — and every lane gets it from one implementation. It sat
-  // here until 2026-07-28 and cloud-rendered pages were unstyled the whole
-  // time. See the "which side of the seam?" note there before adding a new
-  // head injection, and note that this file has now got it wrong twice.
+  // See the "which side of the seam?" note there before adding a new head
+  // injection, and note that this file has now got it wrong twice. The guard
+  // against a third is mechanical: tests/head-seam-parity.test.js fails if this
+  // function's <head> output gains anything outside its BUILD_ONLY allowlist.
 
   // The pre-paint appearance script is NOT injected here. It belongs to the
   // shared seam — @uniweb/runtime/ssr's injectPageContent(), which runs just

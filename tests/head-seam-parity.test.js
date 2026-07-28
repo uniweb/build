@@ -48,12 +48,6 @@ const BUILD_ONLY = new Set([
   '__SITE_CONTENT__',
   // Icons resolved and cached at build time by prefetchIcons().
   '__ICON_CACHE__',
-  // Font <link>s. Graph-derived in principle and the remaining half of the
-  // 2026-07-28 seam fix — blocked only because FONT_LINKS_MARKER has a second
-  // consumer in the vite plugin, which cannot import the SSR bundle. See the
-  // note in src/prerender.js. Remove this entry when that constant gets a
-  // shared home.
-  '<!--uniweb-fonts-->',
 ])
 
 /** Identifiers of the elements a head carries: element ids + bare markers. */
@@ -109,11 +103,32 @@ describe('head-injection seam parity', () => {
     expect(out).toContain('id="uniweb-appearance"')
   })
 
+  it('font <link>s reach it too — the second half of the same fix', () => {
+    // Graph-derived like the theme CSS, so a lane that never runs this build
+    // still gets its webfonts rather than falling back to system faces.
+    const out = injectPageContent(SHELL, '<p>hi</p>', makePage(), {})
+
+    expect(out).toContain('<!--uniweb-fonts-->')
+    expect(out).toContain('family=Inter')
+  })
+
   it('running both lanes yields exactly one copy of each shared injection', () => {
     const page = makePage()
     const out = injectBuildData(injectPageContent(SHELL, '<p>hi</p>', page, {}), siteContent)
 
     expect(out.match(/id="uniweb-theme"/g)).toHaveLength(1)
     expect(out.match(/id="uniweb-appearance"/g)).toHaveLength(1)
+    expect(out.match(/<!--uniweb-fonts-->/g)).toHaveLength(1)
+  })
+
+  it('a shell that already carries the block is left alone', () => {
+    // The real pipeline hands the prerenderer an index.html the vite plugin has
+    // already written the font block into. Both sides dedupe on the same
+    // literal, which is why it has one home in @uniweb/theming.
+    const shell = SHELL.replace('</head>', `<!--uniweb-fonts-->\n${THEME.links}\n</head>`)
+    const out = injectBuildData(injectPageContent(shell, '<p>hi</p>', makePage(), {}), siteContent)
+
+    expect(out.match(/<!--uniweb-fonts-->/g)).toHaveLength(1)
+    expect(out.match(/family=Inter/g)).toHaveLength(1)
   })
 })
