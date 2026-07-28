@@ -186,6 +186,15 @@ function generateEntrySource(components, options = {}) {
     const capParts = []
     if (foundationExports) {
       capParts.push('..._foundationModule.default')
+      // `vars` is a NAMED export of main.js, so the spread above misses it —
+      // schema.js reads `module.vars || module.default?.vars` and this must
+      // agree with it (named wins), or the runtime and the editor would see
+      // different foundation vars. Without this line the declared theme vars
+      // exist ONLY in dist/meta/schema.json, which is a build-time artifact:
+      // any lane that generates theme CSS outside the build (the runtime's
+      // ensureThemeCss, a cloud shell assembler) would silently produce a
+      // theme missing every foundation-declared var.
+      capParts.push('vars: _foundationModule.vars || _foundationModule.default?.vars')
     }
     if (layoutNames.length > 0) {
       capParts.push(`layouts: { ${layoutNames.join(', ')} }`)

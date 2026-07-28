@@ -61,6 +61,28 @@ describe('injectBuildData — theme font links', () => {
     const out = injectBuildData(SHELL, { theme: { css: THEME.css }, pages: [], config: {} })
 
     expect(out).not.toContain('<!--uniweb-fonts-->')
-    expect(out).toContain('id="uniweb-theme"')
+  })
+
+  it('does NOT inject the theme <style> — that moved to the shared seam', () => {
+    // Until 2026-07-28 this function injected `<style id="uniweb-theme">`, so
+    // only lanes running @uniweb/build got theme CSS and every cloud-rendered
+    // page was unstyled. Theme CSS is derived from the website graph, so it
+    // now belongs to @uniweb/runtime/ssr's injectPageContent(), which every
+    // prerender lane calls. This asserts the injection does not come back
+    // here — a second copy would be worse than the original bug, since the
+    // two would drift and only one lane would show it.
+    const out = injectBuildData(SHELL, { theme: THEME, pages: [], config: {} })
+
+    expect(out).not.toContain('id="uniweb-theme"')
+  })
+
+  it('still strips css from the payload even though it no longer injects it', () => {
+    // The strip is what keeps ~6KB of generated CSS out of __SITE_CONTENT__
+    // when it is already in <head>. It is independent of who injects, and it
+    // is also why "no css on the graph" cannot be used by the browser entry to
+    // mean "no css on the page" — see the DOM guard in runtime's setup.js.
+    const out = injectBuildData(SHELL, { theme: THEME, pages: [], config: {} })
+
+    expect(payloadOf(out).theme.css).toBeUndefined()
   })
 })
