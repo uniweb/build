@@ -35,7 +35,9 @@ import {
   renderPageMarkdown,
   resolveAgentsConfig,
   selectIndexablePages,
+  selectIndexBranches,
   pageMarkdownFilename,
+  branchIndexFilename,
   INDEX_FILENAME
 } from '@uniweb/projections'
 
@@ -297,6 +299,23 @@ async function writeProjections(siteContent, distDir) {
   if (agents.index) {
     const index = renderSiteIndex(siteContent, { ...options, exclude: agents.exclude })
     await writeFile(join(distDir, INDEX_FILENAME), index)
+
+    // Additive scoped indexes; the root one above stays complete. See
+    // `selectIndexBranches` for why this is not a delegation.
+    if (agents.branchIndexes) {
+      const branches = selectIndexBranches(siteContent.pages, {
+        exclude: agents.exclude,
+        minPages: agents.branchMinPages
+      })
+      for (const branch of branches) {
+        const target = join(distDir, branchIndexFilename(branch.route))
+        await mkdir(dirname(target), { recursive: true })
+        await writeFile(
+          target,
+          renderSiteIndex(siteContent, { ...options, exclude: agents.exclude, branch: branch.route })
+        )
+      }
+    }
   }
 
   if (!agents.markdown) return

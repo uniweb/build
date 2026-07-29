@@ -39,7 +39,9 @@ import {
   renderPageMarkdown,
   resolveAgentsConfig,
   selectIndexablePages,
+  selectIndexBranches,
   pageMarkdownFilename,
+  branchIndexFilename,
   applyRouteTranslation,
   INDEX_FILENAME
 } from '@uniweb/projections'
@@ -275,18 +277,67 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;')
 }
 
+/** The three defined Content Signals, in the order they are emitted. */
+const CONTENT_SIGNAL_KEYS = ['search', 'ai-input', 'ai-train']
+
+/**
+ * Format the `Content-Signal:` directive from `seo.robots.contentSignals`.
+ *
+ * Content Signals express what a site permits its content to be *used for*,
+ * which is a different axis from `Disallow:` — that governs fetching, this
+ * governs use after fetching. The three defined signals:
+ *
+ * - `search`    — appear in search results
+ * - `ai-input`  — be retrieved at inference time (RAG, grounding)
+ * - `ai-train`  — be used to train a model
+ *
+ * **Emitted only when declared.** There is no default: a preference the site
+ * owner did not state is not ours to assert, in either direction. An absent
+ * signal means "unstated", which is not the same as `no`.
+ *
+ * Unknown keys are ignored rather than passed through — the vocabulary is a
+ * closed set, and forwarding an invented signal would produce a directive no
+ * crawler honors while reading as though it were doing something.
+ *
+ * @param {Object|null} signals - e.g. `{ search: true, 'ai-input': true, 'ai-train': false }`
+ * @returns {string} The directive line, or `''` when nothing is declared
+ */
+export function formatContentSignals(signals) {
+  if (!signals || typeof signals !== 'object') return ''
+
+  const parts = []
+  for (const key of CONTENT_SIGNAL_KEYS) {
+    if (!(key in signals)) continue
+    const value = signals[key]
+    const yes = value === true || value === 'yes'
+    const no = value === false || value === 'no'
+    if (!yes && !no) continue
+    parts.push(`${key}=${yes ? 'yes' : 'no'}`)
+  }
+
+  return parts.length ? `Content-Signal: ${parts.join(', ')}` : ''
+}
+
 /**
  * Generate robots.txt content
  */
-function generateRobotsTxt(baseUrl, options = {}) {
+export function generateRobotsTxt(baseUrl, options = {}) {
   const {
     disallow = [],
     allow = [],
     crawlDelay = null,
-    additionalSitemaps = []
+    additionalSitemaps = [],
+    contentSignals = null
   } = options
 
   let content = 'User-agent: *\n'
+
+  const signals = formatContentSignals(contentSignals)
+  if (signals) {
+    // Inside the User-agent group, before the rules — the directive applies to
+    // the group it sits in.
+    content += `${signals}\n`
+  }
 
   for (const path of allow) {
     content += `Allow: ${path}\n`
@@ -622,6 +673,31 @@ export function siteContentPlugin(options = {}) {
         source: renderSiteIndex(content, { ...options, exclude: agents.exclude })
       })
       console.log(`[site-content] Generated ${localeDir}${INDEX_FILENAME}`)
+
+      // Branch indexes are ADDITIVE — the root index above still enumerates
+      // every page, because the two-hop criterion depends on it. These are a
+      // scoped entry point for an agent already inside a branch.
+      if (agents.branchIndexes) {
+        const branches = selectIndexBranches(content.pages, {
+          exclude: agents.exclude,
+          minPages: agents.branchMinPages
+        })
+        for (const branch of branches) {
+          this.emitFile({
+            type: 'asset',
+            fileName: `${localeDir}${branchIndexFilename(branch.route)}`,
+            source: renderSiteIndex(content, {
+              ...options,
+              exclude: agents.exclude,
+              branch: branch.route
+            })
+          })
+        }
+        if (branches.length) {
+          const names = branches.map(b => `${b.route} (${b.count})`).join(', ')
+          console.log(`[site-content] Generated ${branches.length} branch index(es): ${names}`)
+        }
+      }
     }
 
     if (agents.markdown) {
@@ -1006,18 +1082,39 @@ export function siteContentPlugin(options = {}) {
           const agents = resolveAgentsConfig(siteContent.config)
           const url = req.url.split('?')[0]
 
-          const indexMatch = url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/${INDEX_FILENAME}$`))
+          // `/llms.txt`, `/fr/llms.txt`, and the branch form `/docs/llms.txt`.
+          // The optional middle group is the branch route; an empty one is the
+          // site index, so a single pattern serves both rather than two that
+          // could drift.
+          const indexMatch = url.match(
+            new RegExp(`^(?:\\/(${LOCALE_RE}))?((?:\\/[^/]+)*)\\/${INDEX_FILENAME}$`)
+          )
           if (indexMatch && agents.index) {
             const localized = (indexMatch[1] ? await getTranslatedContent(indexMatch[1]) : null) || siteContent
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-            res.end(
-              renderSiteIndex(localized, {
-                ...projectionOptions(localized),
-                locale: indexMatch[1] || projectionOptions(localized).locale,
-                exclude: agents.exclude
-              })
-            )
-            return
+            const branch = indexMatch[2] || null
+
+            // Serve a branch index only where the build would emit one, or dev
+            // and the built output disagree about which URLs exist.
+            const served =
+              !branch ||
+              (agents.branchIndexes &&
+                selectIndexBranches(localized.pages, {
+                  exclude: agents.exclude,
+                  minPages: agents.branchMinPages
+                }).some(b => b.route === branch))
+
+            if (served) {
+              res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+              res.end(
+                renderSiteIndex(localized, {
+                  ...projectionOptions(localized),
+                  locale: indexMatch[1] || projectionOptions(localized).locale,
+                  exclude: agents.exclude,
+                  branch
+                })
+              )
+              return
+            }
           }
 
           const markdownMatch = url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/(.+)\\.md$`))
