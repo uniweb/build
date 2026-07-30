@@ -31,7 +31,7 @@ import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { collectionNameFromUrl } from '@uniweb/core'
 
-import { SCALAR_KINDS, FORMAT_TYPES } from './resolve-data-schema.js'
+import { SCALAR_KINDS, FORMAT_TYPES, validateAndNormalizeSchema } from './resolve-data-schema.js'
 import { buildSchema } from './schema.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
@@ -353,6 +353,13 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
     })
   }
 
+  // Pass 3 — concept blocks, which join to a schema by CONVENTION rather than
+  // by a foundation binding. Additive and silent unless a schema resolves.
+  const concepts = await validateConceptBlocks(site)
+  violations.push(...concepts.violations)
+  for (const ref of concepts.schemas) schemasSeen.add(ref)
+  recordCount += concepts.checked
+
   return {
     violations,
     deferred,
@@ -363,6 +370,146 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       violations: violations.length,
       deferred: deferred.length,
     },
+  }
+}
+
+/**
+ * Check each ```md:<tag> concept block against `@std/<tag>`, when that schema
+ * exists.
+ *
+ * THREE PROPERTIES MAKE THIS SAFE, and all three have to hold:
+ *
+ * 1. It adds NO REGISTRY. The resolution is mechanical — `md:faq` → `@std/faq`,
+ *    the same `@std` → `@uniweb/schemas` mapping every other ref uses. What the
+ *    framework gains is a naming convention; no code branches on the value of a
+ *    tag, and nothing here knows which concepts exist. A hardcoded list of
+ *    concept names is the thing this whole design exists to avoid, and it would
+ *    arrive through this door if the check needed to know what `faq` means.
+ *
+ * 2. It never touches SHAPE. A concept block's shape comes from its fence,
+ *    unconditionally. This runs after the parse and changes nothing: a block
+ *    with no resolvable schema still parses, still delivers items, still
+ *    renders. The schema is a check, never a gate.
+ *
+ * 3. It never fails at RENDER. Findings only — this whole module is a pre-live
+ *    dev/CI gate and the runtime stays tolerant.
+ *
+ * ⛔ A standard schema for a concept MUST be authored in the ITEM vocabulary —
+ * `title`, `paragraphs`, and the rest of the parsed shape — because that is what
+ * a concept block always produces. An `@std/faq` written as `{ question, answer }`
+ * could only be checked with a per-concept field mapping, which is the forbidden
+ * registry arriving by the back door. Author the schema to match the parse, or
+ * do not ship the schema.
+ *
+ * ⚠️ And `required` is INERT here, which is the first thing a schema author will
+ * reach for. The item vocabulary is TOTAL — the semantic parser's `flattenGroup`
+ * fills every field it declares, so `title` on a titleless item is `''` rather
+ * than absent, and `required` fires only on an absent or null value. "The author
+ * actually wrote a question" is not expressible that way. The facets that bite
+ * against a parsed item are the ones about a value's SHAPE (`type`, `enum`,
+ * `format`, nested `fields`/`items`). Which is also a fair argument that
+ * validation here is thin, and a reason not to ship a standard schema for a
+ * concept until one earns its place.
+ *
+ * Note on resolution: this deliberately does NOT go through `resolveSchemaRef`,
+ * which resolves a package from a FOUNDATION's node_modules and throws when a
+ * ref is unknown. Neither fits — a concept block needs no foundation (so this
+ * works on a link-mode site whose foundation is a registry ref with nothing
+ * local), and an unresolved tag must be silent rather than an error. So the
+ * package is resolved from this build's own graph, where it is an
+ * optionalDependency, exactly as `i18n/collections.js` resolves it.
+ *
+ * @param {Object} site - collected site content (`{ pages }`)
+ * @returns {Promise<{ violations: Array, schemas: Set<string>, checked: number }>}
+ */
+export async function validateConceptBlocks(site) {
+  const empty = { violations: [], schemas: new Set(), checked: 0 }
+
+  const parse = await loadSemanticParser()
+  if (!parse) return empty // no parser available — nothing to derive items from
+
+  const standards = await loadStandardSchemas()
+  if (!standards) return empty // @uniweb/schemas absent — nothing to check against
+
+  const violations = []
+  const schemasSeen = new Set()
+  let checked = 0
+
+  for (const page of site.pages || []) {
+    walkSections(page.sections || [], (section) => {
+      const doc = section.content
+      if (doc?.type !== 'doc') return
+
+      for (const node of conceptBlockNodes(doc)) {
+        const tag = node.attrs?.tag
+        if (!tag) continue
+
+        const raw = standards(tag)
+        if (!raw) continue // no `@std/<tag>` — say nothing, by design
+
+        let schema
+        try {
+          schema = validateAndNormalizeSchema(raw, `@std/${tag}`)
+        } catch {
+          continue // a malformed standard schema is that package's problem
+        }
+        if (!isStaticallyCheckable(schema)) continue
+
+        schemasSeen.add(`@std/${tag}`)
+        const { items } = parse({ type: 'doc', content: node.content || [] }, { alwaysItems: true })
+
+        items.forEach((item, idx) => {
+          checked++
+          for (const finding of validateItem(schema, item)) {
+            violations.push({
+              file: `${page.route || '/'} › ${section.type || 'section'} › md:${tag}`,
+              schema: `@std/${tag}`,
+              item: `item ${idx + 1}`,
+              users: [{ route: page.route, section: section.type, key: tag }],
+              ...finding,
+            })
+          }
+        })
+      }
+    })
+  }
+
+  return { violations, schemas: schemasSeen, checked }
+}
+
+/** Every concept block in a doc, including any nested inside a container. */
+function conceptBlockNodes(doc) {
+  const out = []
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (!node) continue
+      if (node.type === 'concept_block') out.push(node)
+      else if (Array.isArray(node.content)) walk(node.content)
+    }
+  }
+  walk(doc?.content)
+  return out
+}
+
+/** `parseContent`, or null when the parser is not installed. */
+async function loadSemanticParser() {
+  try {
+    const mod = await import('@uniweb/semantic-parser')
+    return typeof mod.parseContent === 'function' ? mod.parseContent : null
+  } catch {
+    return null
+  }
+}
+
+/** A `(name) => schema | undefined` lookup over `@std`, or null when absent. */
+async function loadStandardSchemas() {
+  try {
+    const mod = await import('@uniweb/schemas')
+    if (typeof mod.getSchema === 'function') return (name) => mod.getSchema(name)
+    const table = mod.schemas ?? mod.default
+    return table ? (name) => table[name] : null
+  } catch {
+    return null
   }
 }
 
