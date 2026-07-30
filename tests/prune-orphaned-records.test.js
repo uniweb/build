@@ -96,18 +96,39 @@ describe('per-record file pruning', () => {
     expect(kept.body).toBe('body of keep')
   })
 
-  it('does not touch non-JSON files a user put in the directory', async () => {
+  it('reconciles the whole directory, not just .json', async () => {
+    // `public/data/` is build output and nothing else — `collections/` is the
+    // only supported way to provide structured data. So anything in a record
+    // directory that this run did not write is stale by definition, whatever
+    // its extension. (An earlier revision of this test asserted the opposite,
+    // from a docs section that invited hand-authoring here; that section is
+    // gone and the pattern with it.)
     await writeCollectionFiles(siteDir, { articles: [rec('a')] }, DEFERRED)
     const dir = join(siteDir, 'public', DATA_DIR, 'articles')
-    writeFileSync(join(dir, 'NOTES.md'), 'hand-written, not ours to delete')
+    writeFileSync(join(dir, 'NOTES.md'), 'stale')
     mkdirSync(join(dir, 'attachments'))
-    writeFileSync(join(dir, 'attachments', 'paper.pdf'), 'binary-ish')
+    writeFileSync(join(dir, 'attachments', 'paper.pdf'), 'stale')
 
     await writeCollectionFiles(siteDir, { articles: [] }, DEFERRED)
 
-    expect(existsSync(join(dir, 'NOTES.md'))).toBe(true)
-    expect(existsSync(join(dir, 'attachments', 'paper.pdf'))).toBe(true)
+    expect(existsSync(join(dir, 'NOTES.md'))).toBe(false)
+    expect(existsSync(join(dir, 'attachments'))).toBe(false)
     expect(existsSync(join(dir, 'a.json'))).toBe(false)
+  })
+
+  it('refuses a collection name that escapes the output directory', async () => {
+    // The routine deletes and `name` arrives from site.yml, so a traversing
+    // name would make the sweep somebody else's files. Guarded rather than
+    // trusted.
+    const outside = join(siteDir, 'public', 'sibling')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'keep.json'), 'not in the output directory')
+
+    await writeCollectionFiles(siteDir, { '../sibling': [] }, {
+      '../sibling': { path: 'collections/x', deferred: ['body'] }
+    })
+
+    expect(existsSync(join(outside, 'keep.json'))).toBe(true)
   })
 
   it('does not touch the cascade file or a sibling collection', async () => {

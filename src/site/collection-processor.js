@@ -33,7 +33,7 @@
  */
 
 import { readFile, readdir, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
-import { join, basename, extname, dirname, relative, resolve } from 'node:path'
+import { join, basename, extname, dirname, relative, resolve, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
@@ -657,29 +657,44 @@ export async function processCollections(siteDir, collectionsConfig, collections
  * every reason to believe the content is gone. It is still fetchable at a URL
  * that was public a moment ago.
  *
- * Deliberately narrow, because this deletes files:
- *   - only inside `<name>/`, where `<name>` is a collection the site declares,
- *     so the directory is this build's own prior output;
- *   - only `.json` files, so anything else a user put there is left alone;
- *   - `expected` is empty when a collection stops declaring `deferred:`, which
- *     correctly clears a directory that will otherwise never be written again.
+ * `public/data/` is the build's output directory and nothing else — authors
+ * provide structured data through `collections/`, which is the only supported
+ * way. So `<name>/` is entirely ours and the reconciliation is total: anything
+ * in it that this run did not write is stale by definition. `expected` is
+ * empty when a collection stops declaring `deferred:`, which correctly clears
+ * a directory that will otherwise never be written again.
  *
  * NOT covered: a collection removed from `site.yml` entirely. There is no
  * declaration left to reconcile against, so pruning it would mean the build
  * asserting ownership of a directory on a name match alone. That needs the
  * ownership question answered on purpose, not as a side effect of this.
  *
- * @param {string} recordsDir - `public/data/<name>/`
+ * @param {string} dataDir - `public/data/`, the containing output directory
+ * @param {string} name - the declared collection name
  * @param {Set<string>} expected - filenames this run wrote, e.g. `hello.json`
- * @returns {Promise<string[]>} the filenames removed
+ * @returns {Promise<string[]>} the entry names removed
  */
-async function pruneOrphanedRecords(recordsDir, expected) {
+async function pruneOrphanedRecords(dataDir, name, expected) {
+  const recordsDir = join(dataDir, name)
+
+  // This routine deletes, and `name` reaches it from site.yml. A name that
+  // resolves outside the output directory would make the traversal somebody
+  // else's files, so refuse rather than trust the caller.
+  const contained = resolve(recordsDir)
+  if (contained !== resolve(dataDir, name) || !contained.startsWith(resolve(dataDir) + sep)) {
+    console.warn(
+      `[collection-processor] Refusing to prune "${name}" — it does not resolve ` +
+      `inside ${dataDir}`
+    )
+    return []
+  }
   if (!existsSync(recordsDir)) return []
+
   const removed = []
-  for (const entry of await readdir(recordsDir)) {
-    if (!entry.endsWith('.json') || expected.has(entry)) continue
-    await rm(join(recordsDir, entry))
-    removed.push(entry)
+  for (const entry of await readdir(recordsDir, { withFileTypes: true })) {
+    if (expected.has(entry.name)) continue
+    await rm(join(recordsDir, entry.name), { recursive: true, force: true })
+    removed.push(entry.isDirectory() ? `${entry.name}/` : entry.name)
   }
   return removed
 }
@@ -727,7 +742,7 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
         written.add(filename)
       }
       const perRecordCount = written.size
-      const pruned = await pruneOrphanedRecords(recordsDir, written)
+      const pruned = await pruneOrphanedRecords(dataDir, name, written)
 
       const stripped = items.map((item) => {
         if (!item || typeof item !== 'object') return item
@@ -757,7 +772,7 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
       // This collection is not deferred, so it has no per-record files. If it
       // used to, the directory is still there and will never be written again
       // — every file in it is stale. Same reconciliation, empty expected set.
-      const pruned = await pruneOrphanedRecords(join(dataDir, name), new Set())
+      const pruned = await pruneOrphanedRecords(dataDir, name, new Set())
       if (pruned.length > 0) {
         console.log(
           `[collection-processor] Removed ${pruned.length} per-record file(s) ` +

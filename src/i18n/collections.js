@@ -86,8 +86,14 @@ async function resolveSchema(collectionName, siteRoot) {
 
   let schema = null
 
-  // 1. Companion schema file
-  const companionPath = join(siteRoot, 'public', DATA_DIR, `${collectionName}.schema.js`)
+  // 1. Companion schema file, beside the collection it describes.
+  //
+  // This used to be looked up in `public/<DATA_DIR>/` — next to the compiled
+  // output rather than the source. That directory is the build's, and asking
+  // an author to write into it was the one remaining place the framework
+  // contradicted its own rule that `collections/` is the only way to provide
+  // structured data. The schema describes the source, so it lives with it.
+  const companionPath = join(siteRoot, 'collections', `${collectionName}.schema.js`)
   if (existsSync(companionPath)) {
     try {
       const mod = await import(pathToFileURL(companionPath).href)
