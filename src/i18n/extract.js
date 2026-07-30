@@ -7,6 +7,7 @@
 
 import { resolveDefaultLocale } from '@uniweb/core'
 import { computeHash, stripInlineTags } from './hash.js'
+import { visitDataStrings } from './data-strings.js'
 
 /**
  * Extract all translatable units from site content
@@ -130,12 +131,68 @@ function extractFromSection(section, pageRoute, units) {
 
   if (section.content?.type === 'doc') {
     extractFromProseMirrorDoc(section.content, context, units)
+    extractFromDataBlocks(section.content, context, units)
   }
 
   // Recursively process subsections
   for (const subsection of section.subsections || []) {
     extractFromSection(subsection, pageRoute, units)
   }
+}
+
+/**
+ * Extract the human-readable strings inside a section's TAGGED DATA BLOCKS.
+ *
+ * A ```yaml:nav block's link labels, a ```yaml:pricing block's plan names — the
+ * strings an author most expects to see translated, and which stayed in the
+ * source language on every multilingual site until 2026-07-30 because nothing
+ * in this file mentioned `dataBlock`.
+ *
+ * Which strings count is not this file's judgement to make: it is the same
+ * question collections answer for a record's fields, so the same detection runs
+ * here (`data-strings.js`).
+ *
+ * DELIBERATELY SEPARATE from `extractFromProseMirrorDoc`, and not folded into
+ * it. That function is also `extractUnitsFromDoc`, which publishes the
+ * structural-keying contract pinned by tests/i18n/structural-keying-vectors.json
+ * — units keyed by a BLOCK ELEMENT's text. A data string is not a block
+ * element's text and has no place in that map. The consequence is real rather
+ * than tidy: `deriveStructuralMap` recovers a pulled translation by walking
+ * block elements, so a data string translated on the sync wire would be
+ * invisible to it — neither captured in the map nor counted as divergence — and
+ * would be silently lost on the next pull. So this lane is the BUILD lane only
+ * (the manifest, and `dist/{locale}/`), which is where the reported bug lives.
+ * Carrying data-block translations across the sync wire needs a representation
+ * that contract does not have yet.
+ */
+function extractFromDataBlocks(doc, context, units) {
+  for (const node of dataBlockNodes(doc)) {
+    const { tag, data } = node.attrs || {}
+    if (!tag || !data || typeof data !== 'object') continue
+
+    visitDataStrings(data, (value, fieldPath) => {
+      addUnit(units, value, `data.${tag}.${fieldPath}`, context)
+    })
+  }
+}
+
+/**
+ * Every tagged data block in a doc, including any nested inside a container.
+ */
+function dataBlockNodes(doc) {
+  const out = []
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (!node) continue
+      if (node.type === 'dataBlock') out.push(node)
+      else if (CONTAINER_BLOCKS.has(node.type)) walk(node.content)
+      else if (node.type === 'bulletList' || node.type === 'orderedList') {
+        for (const listItem of node.content || []) walk(listItem.content)
+      }
+    }
+  }
+  walk(doc?.content)
+  return out
 }
 
 /**

@@ -163,3 +163,28 @@ describe('containers ride the sync lane too', () => {
     expect(collector.byLocale.fr[computeHash('An answer.')]).toBe('Une réponse.')
   })
 })
+
+describe('data blocks deliberately do NOT ride the sync wire', () => {
+  it('a per-locale doc leaves a tagged data block untranslated', () => {
+    // Not an oversight — a scope boundary, and removing it would LOSE data.
+    // deriveStructuralMap recovers a pulled translation by walking block
+    // elements and comparing their inline content. A dataBlock's payload is
+    // neither a block element nor divergence, so a translated one on the wire
+    // would be invisible on pull: not captured in the map, not flagged as
+    // free-form, silently reverted. The build lane (the manifest and
+    // dist/{locale}/) does translate them — that is where the reported bug was.
+    // Carrying them across sync needs a representation this contract lacks.
+    const doc = {
+      type: 'doc',
+      content: [{ type: 'dataBlock', attrs: { tag: 'nav', language: 'yaml', data: [{ label: 'Home', href: '/' }] } }],
+    }
+    const out = localizeContentDoc(doc, 'en', ['fr'], {
+      fr: { [computeHash('Home')]: 'Accueil' },
+    })
+
+    // Nothing translated → the target locale is omitted entirely and the site
+    // falls back to the source, rather than shipping a half-translated doc.
+    expect(Object.keys(out)).toEqual(['en'])
+    expect(out.en.content[0].attrs.data[0].label).toBe('Home')
+  })
+})

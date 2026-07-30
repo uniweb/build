@@ -1,4 +1,5 @@
 import { mergeTranslations, generateAllLocales } from '../../src/i18n/merge.js'
+import { extractTranslatableContent } from '../../src/i18n/extract.js'
 import { computeHash } from '../../src/i18n/hash.js'
 
 describe('mergeTranslations', () => {
@@ -603,5 +604,90 @@ describe('containers are translated, not just extracted', () => {
     const block = sectionDoc(translated).content[0]
     expect(block.content[0].content[0].text).toBe('Untranslated')
     expect(block.content[1].content[0].text).toBe('Traduit.')
+  })
+})
+
+describe('tagged data blocks are translated — a bug that predates concept blocks', () => {
+  // ```yaml:nav link labels and ```yaml:pricing plan names stayed in the source
+  // language on every multilingual site, because nothing in the i18n walk
+  // mentioned dataBlock. Reported and fixed 2026-07-30.
+
+  const navSite = (data) => ({
+    pages: [{
+      route: '/',
+      title: 'T',
+      sections: [{
+        id: 'header',
+        content: {
+          type: 'doc',
+          content: [{ type: 'dataBlock', attrs: { tag: 'nav', language: 'yaml', data } }]
+        }
+      }]
+    }]
+  })
+
+  const navData = (site) =>
+    site.pages[0].sections[0].content.content[0].attrs.data
+
+  it('translates the labels an author expects to see translated', () => {
+    const site = navSite([
+      { label: 'Home', href: '/' },
+      { label: 'Docs', href: '/docs' }
+    ])
+    const translated = mergeTranslations(site, {
+      [computeHash('Home')]: 'Accueil',
+      [computeHash('Docs')]: 'Documentation'
+    })
+
+    expect(navData(translated)).toEqual([
+      { label: 'Accueil', href: '/' },
+      { label: 'Documentation', href: '/docs' }
+    ])
+  })
+
+  it('leaves the machinery alone — hrefs, icons and ids are not prose', () => {
+    // The direction that would break a site rather than merely leave it
+    // untranslated: rewriting a URL into another language.
+    const site = navSite([{ label: 'Home', href: '/', icon: 'lu:house', id: 'nav-home' }])
+    const translated = mergeTranslations(site, {
+      [computeHash('Home')]: 'Accueil',
+      [computeHash('/')]: '/fr',
+      [computeHash('lu:house')]: 'lu:maison',
+      [computeHash('nav-home')]: 'nav-accueil'
+    })
+
+    expect(navData(translated)[0]).toEqual({
+      label: 'Accueil',
+      href: '/',
+      icon: 'lu:house',
+      id: 'nav-home'
+    })
+  })
+
+  it('reaches nested structures', () => {
+    const site = navSite([{
+      label: 'Product',
+      children: [{ label: 'Features', href: '/features' }]
+    }])
+    const translated = mergeTranslations(site, {
+      [computeHash('Product')]: 'Produit',
+      [computeHash('Features')]: 'Fonctionnalités'
+    })
+
+    expect(navData(translated)[0].label).toBe('Produit')
+    expect(navData(translated)[0].children[0].label).toBe('Fonctionnalités')
+  })
+
+  it('extracts the same strings it applies', () => {
+    // The two halves have to agree, or a translator does work that is never
+    // used. Assert the manifest and the application against each other rather
+    // than against a hand-written list.
+    const site = navSite([{ label: 'Home', href: '/', icon: 'lu:house' }])
+    const manifest = extractTranslatableContent(site)
+    const sources = Object.values(manifest.units).map((u) => u.source)
+
+    expect(sources).toContain('Home')
+    expect(sources).not.toContain('/')
+    expect(sources).not.toContain('lu:house')
   })
 })

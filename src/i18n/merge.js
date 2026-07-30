@@ -15,6 +15,7 @@
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
 import { elementText, blockElements } from './extract.js'
+import { visitDataStrings } from './data-strings.js'
 
 // Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
 // translation VALUE (which carries marks/links/icons as inline markdown). Same
@@ -227,6 +228,7 @@ function translateSectionSync(section, pageRoute, translations, fallbackToSource
 
   if (section.content?.type === 'doc') {
     translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
+    translateDataBlocks(section.content, context, translations, fallbackToSource)
   }
 
   // Recursively translate subsections
@@ -259,6 +261,7 @@ async function translateSectionAsync(section, page, translations, options) {
     // Fall back to hash-based translation
     if (section.content?.type === 'doc') {
       translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
+      translateDataBlocks(section.content, context, translations, fallbackToSource)
     }
   }
 
@@ -300,6 +303,37 @@ function applyElementTranslation(node, context, translations, fallbackToSource) 
     return true
   }
   return false
+}
+
+/**
+ * Translate the human-readable strings inside a section's TAGGED DATA BLOCKS,
+ * in place. The other half of the fix in `extract.js` — a manifest entry nobody
+ * applies is worse than no entry, because a translator has already done the work.
+ *
+ * Called from the two BUILD-lane section walks only, deliberately, and NOT from
+ * `resolveDocForLocale`. See `extractFromDataBlocks` for why: the sync wire's
+ * structural map is derived by walking block elements, so a translated data
+ * payload there would be neither captured nor flagged as divergent, and would be
+ * dropped on the next pull. Losing a translation silently is worse than not
+ * carrying one yet.
+ */
+function translateDataBlocks(doc, context, translations, fallbackToSource) {
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (!node) continue
+      if (node.type === 'dataBlock') {
+        const data = node.attrs?.data
+        if (data && typeof data === 'object') {
+          visitDataStrings(data, (value) =>
+            lookupTranslation(value, context, translations, fallbackToSource)
+          )
+        }
+      } else if (Array.isArray(node.content)) {
+        walk(node.content)
+      }
+    }
+  }
+  walk(doc?.content)
 }
 
 /**

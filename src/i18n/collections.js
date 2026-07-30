@@ -17,48 +17,19 @@ import { pathToFileURL } from 'url'
 import { DATA_DIR } from '@uniweb/core'
 import { computeHash } from './hash.js'
 import { loadFreeformCollectionItem } from './freeform.js'
+// The heuristic judgement about which strings inside structured data are prose.
+// It lives in its own module because the page lane needs exactly the same
+// answer for a tagged data block's payload — a `label` is prose and an `href`
+// is not, wherever the value came from. Moved rather than copied: two tuned
+// denylists would drift, and drift here is silent.
+import {
+  NON_TRANSLATABLE_TYPES,
+  HEURISTIC_SKIP_FIELDS,
+  MAX_HEURISTIC_DEPTH,
+  isStructuralString,
+} from './data-strings.js'
 
 export const COLLECTIONS_DIR = 'collections'
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Types that are never translatable regardless of schema */
-const NON_TRANSLATABLE_TYPES = new Set([
-  'number', 'boolean', 'date', 'datetime', 'url', 'email', 'image'
-])
-
-/** Field names skipped by the heuristic extractor (structural, not human-readable) */
-const HEURISTIC_SKIP_FIELDS = new Set([
-  'slug', 'id', 'type', 'status', 'href', 'url', 'src', 'icon',
-  'target', 'email', 'phone', 'orcid', 'doi', 'arxiv', 'isbn',
-  'pmid', 'bibtex', 'pdf', 'code', 'data', 'slides', 'video',
-  'repository', 'caseStudy', 'website', 'avatar', 'image',
-  'thumbnail', 'currency', 'order', 'hidden', 'current',
-  'featured', 'published', 'allDay', 'remote', 'hybrid',
-  'noindex', 'corresponding', 'required', 'virtual',
-  'lastModified', 'date', 'updated', 'posted', 'submitted',
-  'accepted', 'startDate', 'endDate', 'deadline',
-  'readTime', 'citations', 'capacity', 'volume', 'issue', 'pages',
-  'time', 'timezone',
-])
-
-/** String patterns that indicate non-translatable values */
-const HEURISTIC_SKIP_PATTERNS = [
-  /^https?:\/\//,                  // URLs
-  /^mailto:/,                      // mailto links
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/,   // email addresses
-  /^\d{4}-\d{2}-\d{2}/,           // ISO dates
-  /^#[0-9a-fA-F]{3,8}$/,          // hex colors
-  /^[\w./\\-]+\.\w{2,4}$/,        // file paths (e.g., ./logo.svg, /img/hero.jpg)
-  /^[A-Z]{3}$/,                   // currency codes (USD, EUR)
-  /^\d+(\.\d+)?$/,                // plain numbers as strings
-  /^\d{1,2}:\d{2}(:\d{2})?$/,    // times (09:00, 14:30:00)
-]
-
-/** Max recursion depth for heuristic extraction */
-const MAX_HEURISTIC_DEPTH = 5
 
 // ---------------------------------------------------------------------------
 // Schema resolution
@@ -295,13 +266,6 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
     }
     // Skip numbers, booleans
   }
-}
-
-/**
- * Check if a string value looks structural (not human-readable).
- */
-function isStructuralString(value) {
-  return HEURISTIC_SKIP_PATTERNS.some(pattern => pattern.test(value))
 }
 
 // ---------------------------------------------------------------------------
