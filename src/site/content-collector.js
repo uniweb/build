@@ -2152,9 +2152,10 @@ export async function collectSiteContent(sitePath, options = {}) {
   // base prefix while the hydrated browser routes were fine.
   //
   // Only a real base is written. At '/' the field stays absent, because in
-  // shell mode `config.base` is the SERVING layer's channel (it injects the
-  // served subpath, e.g. /gateway/site/<uuid>/) and a build-time '/' would
-  // be a meaningless value sitting in its slot.
+  // shell mode `config.base` is the SERVING layer's channel — the host injects
+  // whatever subpath it serves the site under, and a build-time '/' would be a
+  // meaningless value sitting in its slot. The build deliberately does not model
+  // what that subpath looks like; that is the host's shape, not ours.
   if (base && base !== '/') {
     siteConfig.base = base
   }
