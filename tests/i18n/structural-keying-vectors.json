@@ -6,68 +6,574 @@
     "key": "An element's cleaned source text: trim leading/trailing, KEEP internal whitespace verbatim. ALL inline marks (incl. links) flatten into the text; inline atom nodes (icon/emoji/math) are skipped, EXCEPT hardBreak, which contributes \"\\n\" so a break does not fuse the words around it. Not a hash (the hash is only the file-side join key).",
     "links": "Links are NOT split out — link text stays inline in its element's key (whole-element keying). This applies uniformly to paragraphs AND list items (vectors E and H).",
     "dedup": "Keys that normalize-equal (trim + collapse internal whitespace) collapse to one entry; first occurrence's spelling wins.",
-    "ordering": "Document walk order. Compare as a set if your producer orders differently."
+    "ordering": "Document walk order. Compare as a set if your producer orders differently.",
+    "containers": "Containers are DESCENDED INTO: a block node that holds prose contributes its children as ordinary units, keyed the same way, in document order. Framework container node names: concept_block (a ```md:<tag> fence), inset_block (a ```@Component{params} fence), blockquote, table/tableRow/tableCell. An editor whose dialect decomposes these — details/detailsContent/detailsSummary/WarningBlock for inset_block, Row/Cell for table — must recurse its own equivalents to match. codeBlock is deliberately NOT descended into: its text is source, not prose."
   },
   "cases": [
     {
       "id": "A",
       "rule": "plain heading -> its text",
-      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Our Mission" } ] } ] },
-      "expectedKeys": ["Our Mission"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 1
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Our Mission"
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "Our Mission"
+      ]
     },
     {
       "id": "B",
       "rule": "leading/trailing whitespace is trimmed",
-      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "  Welcome  " } ] } ] },
-      "expectedKeys": ["Welcome"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 1
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "  Welcome  "
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "Welcome"
+      ]
     },
     {
       "id": "C",
       "rule": "plain paragraph -> its text",
-      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "We build tools." } ] } ] },
-      "expectedKeys": ["We build tools."]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "We build tools."
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "We build tools."
+      ]
     },
     {
       "id": "D",
       "rule": "bold/italic inside a paragraph flatten (no marks in the key)",
-      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "We build " }, { "type": "text", "text": "great", "marks": [ { "type": "bold" } ] }, { "type": "text", "text": " tools." } ] } ] },
-      "expectedKeys": ["We build great tools."]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "We build "
+              },
+              {
+                "type": "text",
+                "text": "great",
+                "marks": [
+                  {
+                    "type": "bold"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": " tools."
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "We build great tools."
+      ]
     },
     {
       "id": "E",
       "rule": "link in a paragraph stays INLINE (whole-element) -> ONE key including the link text, no split, no gap",
-      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "See " }, { "type": "text", "text": "our docs", "marks": [ { "type": "link", "attrs": { "href": "/docs" } } ] }, { "type": "text", "text": " now." } ] } ] },
-      "expectedKeys": ["See our docs now."]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "See "
+              },
+              {
+                "type": "text",
+                "text": "our docs",
+                "marks": [
+                  {
+                    "type": "link",
+                    "attrs": {
+                      "href": "/docs"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": " now."
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "See our docs now."
+      ]
     },
     {
       "id": "F",
       "rule": "span marks are stripped from the key",
-      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Plain " }, { "type": "text", "text": "Accent", "marks": [ { "type": "span", "attrs": { "class": "accent" } } ] }, { "type": "text", "text": " tail" } ] } ] },
-      "expectedKeys": ["Plain Accent tail"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 1
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Plain "
+              },
+              {
+                "type": "text",
+                "text": "Accent",
+                "marks": [
+                  {
+                    "type": "span",
+                    "attrs": {
+                      "class": "accent"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": " tail"
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "Plain Accent tail"
+      ]
     },
     {
       "id": "G",
       "rule": "one key per list item",
-      "doc": { "type": "doc", "content": [ { "type": "bulletList", "content": [ { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "First item" } ] } ] }, { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "Second item" } ] } ] } ] } ] },
-      "expectedKeys": ["First item", "Second item"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "First item"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Second item"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "First item",
+        "Second item"
+      ]
     },
     {
       "id": "H",
       "rule": "link inside a list item stays inline too (same whole-element rule as E) -> one key including the link text",
-      "doc": { "type": "doc", "content": [ { "type": "bulletList", "content": [ { "type": "listItem", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "See " }, { "type": "text", "text": "docs", "marks": [ { "type": "link", "attrs": { "href": "/d" } } ] } ] } ] } ] } ] },
-      "expectedKeys": ["See docs"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "See "
+                      },
+                      {
+                        "type": "text",
+                        "text": "docs",
+                        "marks": [
+                          {
+                            "type": "link",
+                            "attrs": {
+                              "href": "/d"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "See docs"
+      ]
     },
     {
       "id": "I",
       "rule": "hard break inside a paragraph -> ONE key, with the break contributing \"\\n\" (not nothing, not a space) so the words do not fuse",
-      "doc": { "type": "doc", "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "line one" }, { "type": "hardBreak" }, { "type": "text", "text": "line two" } ] } ] },
-      "expectedKeys": ["line one\nline two"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "line one"
+              },
+              {
+                "type": "hardBreak"
+              },
+              {
+                "type": "text",
+                "text": "line two"
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "line one\nline two"
+      ]
     },
     {
       "id": "J",
       "rule": "two same-level headings -> TWO keys, not one merged key: the multi-line-title merge is semantic-parser's grouping layer (readHeadingGroup), not the doc, so the doc still holds two heading elements",
-      "doc": { "type": "doc", "content": [ { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Alpha" } ] }, { "type": "heading", "attrs": { "level": 1 }, "content": [ { "type": "text", "text": "Beta" } ] } ] },
-      "expectedKeys": ["Alpha", "Beta"]
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 1
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Alpha"
+              }
+            ]
+          },
+          {
+            "type": "heading",
+            "attrs": {
+              "level": 1
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Beta"
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "Alpha",
+        "Beta"
+      ]
+    },
+    {
+      "id": "K",
+      "rule": "concept_block -> its body contributes ordinary units, in document order (the container itself contributes none)",
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "concept_block",
+            "attrs": {
+              "tag": "faq"
+            },
+            "content": [
+              {
+                "type": "heading",
+                "attrs": {
+                  "level": 1
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "What plans do you have?"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "We have three."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "What plans do you have?",
+        "We have three."
+      ]
+    },
+    {
+      "id": "L",
+      "rule": "inset_block -> same rule. This one repairs a PRE-EXISTING hole: a callout body was untranslatable before containers were descended into",
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "inset_block",
+            "attrs": {
+              "component": "Alert",
+              "type": "warning"
+            },
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Back up your database first."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "Back up your database first."
+      ]
+    },
+    {
+      "id": "M",
+      "rule": "blockquote and table cells contribute units too — any container holding prose does",
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "blockquote",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "A quoted claim."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "content": [
+              {
+                "type": "tableRow",
+                "content": [
+                  {
+                    "type": "tableCell",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Cell one"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "tableCell",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Cell two"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "A quoted claim.",
+        "Cell one",
+        "Cell two"
+      ]
+    },
+    {
+      "id": "N",
+      "rule": "a codeBlock inside a container contributes NOTHING — source is not prose, and this is why the container list is an allowlist rather than \"anything with content\"",
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "concept_block",
+            "attrs": {
+              "tag": "faq"
+            },
+            "content": [
+              {
+                "type": "heading",
+                "attrs": {
+                  "level": 1
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "How do I install it?"
+                  }
+                ]
+              },
+              {
+                "type": "codeBlock",
+                "attrs": {
+                  "language": "sh"
+                },
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "npm install uniweb"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "How do I install it?"
+      ]
+    },
+    {
+      "id": "O",
+      "rule": "a container nested inside a list item is descended into as well",
+      "doc": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "A step"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "inset_block",
+                    "attrs": {
+                      "component": "Alert"
+                    },
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Mind this while doing it."
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expectedKeys": [
+        "A step",
+        "Mind this while doing it."
+      ]
     }
   ]
 }

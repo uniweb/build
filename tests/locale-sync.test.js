@@ -106,3 +106,60 @@ describe('localizeContentDoc ⇄ unwrapLocalizedContent — wire round-trip', ()
     expect(collector.byLocale.fr[computeHash('See our docs now.')]).toBe('Voir [nos docs](/fr/docs) maintenant.')
   })
 })
+
+describe('containers ride the sync lane too', () => {
+  // The build lane (dist/{locale}/) and the sync lane (a self-contained doc per
+  // locale) both resolve through the same blockElements collector, so a
+  // container that one can translate the other can too. Asserted rather than
+  // assumed: this is the lane an app author's copy of the content arrives on,
+  // and a concept block whose prose stayed in the source language there would
+  // be invisible until someone opened the site in another locale.
+
+  const conceptDoc = (tag, ...blocks) => ({
+    type: 'doc',
+    content: [{ type: 'concept_block', attrs: { tag }, content: blocks }],
+  })
+  const h = (text) => ({ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text }] })
+  const p = (text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+
+  it('emits a per-locale doc carrying the translated concept block', () => {
+    const source = conceptDoc('faq', h('A question'), p('An answer.'))
+    const out = localizeContentDoc(source, 'en', ['fr'], {
+      fr: {
+        [computeHash('A question')]: 'Une question',
+        [computeHash('An answer.')]: 'Une réponse.',
+      },
+    })
+
+    expect(Object.keys(out).sort()).toEqual(['en', 'fr'])
+
+    const fr = out.fr.content[0]
+    expect(fr.type).toBe('concept_block')
+    expect(fr.attrs.tag).toBe('faq') // the discriminator survives the wire
+    expect(fr.content[0].content[0].text).toBe('Une question')
+    expect(fr.content[1].content[0].text).toBe('Une réponse.')
+
+    // The source locale is untouched — nothing is translated in place.
+    expect(out.en.content[0].content[0].content[0].text).toBe('A question')
+  })
+
+  it('derives the structural map back on pull', () => {
+    const source = conceptDoc('faq', h('A question'), p('An answer.'))
+    const wire = localizeContentDoc(source, 'en', ['fr'], {
+      fr: {
+        [computeHash('A question')]: 'Une question',
+        [computeHash('An answer.')]: 'Une réponse.',
+      },
+    })
+
+    const collector = createTranslationCollector('en')
+    const back = unwrapLocalizedContent(wire, 'en', collector, 'pages/faq/body')
+
+    // The source doc comes back unchanged, and the target locale reduces to a
+    // hash-keyed map — congruent structure, so no free-form body is needed.
+    expect(back).toEqual(source)
+    expect(collector.freeformPending).toHaveLength(0)
+    expect(collector.byLocale.fr[computeHash('A question')]).toBe('Une question')
+    expect(collector.byLocale.fr[computeHash('An answer.')]).toBe('Une réponse.')
+  })
+})

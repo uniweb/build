@@ -499,3 +499,109 @@ describe('generateAllLocales', () => {
     expect(results.fr.pages[0].sections[0].content.content[0].content[0].text).toBe('Bienvenue')
   })
 })
+
+describe('containers are translated, not just extracted', () => {
+  // The half that fails silently on its own. Extraction and application used to
+  // be two walks over the same node types; teaching only the extractor about a
+  // container puts its strings in the manifest and applies none of them, and
+  // nothing reports the gap. They share one walker now, and these pin it.
+
+  const docWith = (node) => ({ type: 'doc', content: [node] })
+
+  const conceptBlock = (tag, ...blocks) => ({
+    type: 'concept_block',
+    attrs: { tag },
+    content: blocks
+  })
+
+  const h = (text) => ({ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text }] })
+  const p = (text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+
+  const siteWith = (doc) => ({
+    pages: [{ route: '/', title: 'T', sections: [{ id: 's', content: doc }] }]
+  })
+
+  const sectionDoc = (site) => site.pages[0].sections[0].content
+
+  it("translates a concept block's prose", () => {
+    const site = siteWith(docWith(conceptBlock('faq', h('A question'), p('An answer.'))))
+    const translated = mergeTranslations(site, {
+      [computeHash('A question')]: 'Une question',
+      [computeHash('An answer.')]: 'Une réponse.'
+    })
+
+    const block = sectionDoc(translated).content[0]
+    expect(block.type).toBe('concept_block')
+    expect(block.attrs.tag).toBe('faq')
+    expect(block.content[0].content[0].text).toBe('Une question')
+    expect(block.content[1].content[0].text).toBe('Une réponse.')
+  })
+
+  it("translates a callout's body — the pre-existing hole, now closed", () => {
+    // True before concept blocks existed and true for every multilingual site
+    // shipping a callout: the body stayed in the source language, silently.
+    const site = siteWith(docWith({
+      type: 'inset_block',
+      attrs: { component: 'Alert', type: 'warning' },
+      content: [p('Back up first.')]
+    }))
+    const translated = mergeTranslations(site, {
+      [computeHash('Back up first.')]: 'Sauvegardez d’abord.'
+    })
+
+    const block = sectionDoc(translated).content[0]
+    expect(block.attrs).toEqual({ component: 'Alert', type: 'warning' })
+    expect(block.content[0].content[0].text).toBe('Sauvegardez d’abord.')
+  })
+
+  it('translates blockquotes and table cells', () => {
+    const site = siteWith({
+      type: 'doc',
+      content: [
+        { type: 'blockquote', content: [p('A claim.')] },
+        {
+          type: 'table',
+          content: [{
+            type: 'tableRow',
+            content: [{ type: 'tableCell', content: [p('Cell one')] }]
+          }]
+        }
+      ]
+    })
+    const translated = mergeTranslations(site, {
+      [computeHash('A claim.')]: 'Une affirmation.',
+      [computeHash('Cell one')]: 'Cellule un'
+    })
+
+    const [quote, table] = sectionDoc(translated).content
+    expect(quote.content[0].content[0].text).toBe('Une affirmation.')
+    expect(table.content[0].content[0].content[0].content[0].text).toBe('Cellule un')
+  })
+
+  it('leaves a code sample inside a container alone', () => {
+    // Source is not prose. A translation table that happens to contain the
+    // code as a key must not rewrite it — which is why the container list is
+    // an allowlist and codeBlock is not on it.
+    const code = { type: 'codeBlock', attrs: { language: 'sh' }, content: [{ type: 'text', text: 'npm i' }] }
+    const site = siteWith(docWith(conceptBlock('faq', h('How?'), code)))
+    const translated = mergeTranslations(site, {
+      [computeHash('How?')]: 'Comment ?',
+      [computeHash('npm i')]: 'installez'
+    })
+
+    const block = sectionDoc(translated).content[0]
+    expect(block.content[0].content[0].text).toBe('Comment ?')
+    expect(block.content[1].content[0].text).toBe('npm i')
+  })
+
+  it('a missing translation leaves the element untouched, as everywhere else', () => {
+    const site = siteWith(docWith(conceptBlock('faq', h('Untranslated'), p('Translated.'))))
+    const translated = mergeTranslations(site, {
+      [computeHash('Translated.')]: 'Traduit.'
+    })
+
+    const block = sectionDoc(translated).content[0]
+    expect(block.content[0].content[0].text).toBe('Untranslated')
+    expect(block.content[1].content[0].text).toBe('Traduit.')
+  })
+})

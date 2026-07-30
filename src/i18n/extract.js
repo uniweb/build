@@ -165,28 +165,103 @@ function extractFromProseMirrorDoc(doc, context, units) {
   let headingIndex = { h1: 0, h2: 0, h3: 0, h4: 0 }
   let paragraphIndex = 0
 
-  for (const node of doc.content) {
+  visitTranslatableBlocks(doc.content, (node, listIndex) => {
     if (node.type === 'heading') {
       const text = elementText(node)
-      if (!text) continue
+      if (!text) return
 
       const level = node.attrs?.level || 1
       const field = getHeadingField(level, headingIndex)
       headingIndex[`h${level}`]++
 
       addUnit(units, text, field, context)
-    } else if (node.type === 'paragraph') {
-      // Whole-element keying: ONE unit per paragraph, with link text kept INLINE
-      // (not split into a separate link.label unit). The conformance gate is
-      // tests/i18n/structural-keying-vectors.json (vectors A–H).
-      const text = elementText(node)
-      if (text) {
-        const field = paragraphIndex === 0 ? 'paragraph' : `paragraph.${paragraphIndex}`
-        addUnit(units, text, field, context)
-        paragraphIndex++
-      }
+      return
+    }
+
+    // Whole-element keying: ONE unit per paragraph, with link text kept INLINE
+    // (not split into a separate link.label unit). The conformance gate is
+    // tests/i18n/structural-keying-vectors.json.
+    const text = elementText(node)
+    if (!text) return
+
+    if (listIndex !== null) {
+      addUnit(units, text, `list.${listIndex}`, context)
+      return
+    }
+
+    const field = paragraphIndex === 0 ? 'paragraph' : `paragraph.${paragraphIndex}`
+    addUnit(units, text, field, context)
+    paragraphIndex++
+  })
+}
+
+/**
+ * Block node types whose children carry translatable prose, so the walk has to
+ * descend into them.
+ *
+ * WHY THIS EXISTS. The walk used to handle four node types and recurse into
+ * nothing, so a string inside ANY container was invisible to translation: a
+ * callout's body, a table cell, a blockquote. On a multilingual site those
+ * silently stayed in the source language, and nothing reported it. That
+ * predates concept blocks — adding one more prose container without fixing the
+ * walk would have inherited the hole in the place it hurts most, since a
+ * concept block is prose, which is the thing translation exists for.
+ *
+ * An explicit set rather than "recurse into anything with content", because the
+ * denylist version is the dangerous one: `codeBlock` also has content, and
+ * extracting source code as translatable prose would be worse than missing it.
+ *
+ * KEEP IN SYNC with the editor's own container list. It maintains a second
+ * implementation of this walk over the same documents and already recursed
+ * containers when this one did not, so the two disagreed — the shared vectors
+ * in tests/i18n/structural-keying-vectors.json are the only thing pinning them
+ * together, and they are kept in step by hand.
+ */
+export const CONTAINER_BLOCKS = new Set([
+  'concept_block', // ```md:<tag> — a concept's body is authored prose
+  'inset_block', // ```@Component{params} — a callout's body is authored prose
+  'blockquote',
+  'table',
+  'tableRow',
+  'tableCell',
+])
+
+/**
+ * Walk a content array and hand every translatable BLOCK element to `visit`, in
+ * document order, descending into containers.
+ *
+ * ONE walker with two consumers, deliberately. Extraction (into the manifest)
+ * and resolution (applying a translation) used to be two separate walks over
+ * the same four node types. Two copies of one rule is the shape that fails
+ * halfway: teach only the extractor about a container and its strings reach the
+ * manifest but are never applied; teach only the resolver and there is nothing
+ * to apply. Neither half fails loudly. They cannot drift now because there is
+ * only one of them.
+ *
+ * @param {Array} nodes - a content array
+ * @param {(node: Object, listIndex: number|null) => void} visit
+ */
+function visitTranslatableBlocks(nodes, visit) {
+  for (const node of nodes || []) {
+    if (!node) continue
+
+    if (node.type === 'heading' || node.type === 'paragraph') {
+      visit(node, null)
     } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-      extractFromList(node, context, units)
+      // A list item's index is part of its unit's field name, so lists keep
+      // their own branch rather than folding into the container recursion.
+      ;(node.content || []).forEach((listItem, index) => {
+        if (listItem.type !== 'listItem') return
+        for (const child of listItem.content || []) {
+          if (child.type === 'paragraph') {
+            visit(child, index)
+          } else if (CONTAINER_BLOCKS.has(child.type)) {
+            visitTranslatableBlocks([child], visit)
+          }
+        }
+      })
+    } else if (CONTAINER_BLOCKS.has(node.type)) {
+      visitTranslatableBlocks(node.content, visit)
     }
   }
 }
@@ -201,27 +276,6 @@ function getHeadingField(level, index) {
   if (level === 2) return index.h2 === 0 ? 'subtitle' : `heading.h2.${index.h2}`
   if (level === 3) return `heading.h3.${index.h3}`
   return `heading.h${level}.${index[`h${level}`]}`
-}
-
-/**
- * Extract from list items — one whole-element unit per list item (link text
- * stays inline, same rule as paragraphs; vectors G and H).
- */
-function extractFromList(listNode, context, units) {
-  if (!listNode.content) return
-
-  listNode.content.forEach((listItem, index) => {
-    if (listItem.type === 'listItem' && listItem.content) {
-      for (const child of listItem.content) {
-        if (child.type === 'paragraph') {
-          const text = elementText(child)
-          if (text) {
-            addUnit(units, text, `list.${index}`, context)
-          }
-        }
-      }
-    }
-  })
 }
 
 /**
@@ -259,27 +313,14 @@ function collectInlineText(node) {
 
 /**
  * The translatable block elements of a content doc, in document order, with the
- * SAME coverage as extraction above (headings, paragraphs, and each list item's
- * paragraphs). Shared by the merge resolver (push) and the pull-side
- * structural-map derivation so all paths walk identically and keys never drift.
- * Returns the element nodes themselves — callers read `.type`/`.content` and key
- * them via elementText.
+ * SAME coverage as extraction above — because it is the same walk. Shared by the
+ * merge resolver (push) and the pull-side structural-map derivation so all paths
+ * walk identically and keys never drift. Returns the element nodes themselves —
+ * callers read `.type`/`.content` and key them via elementText.
  */
 export function blockElements(doc) {
   const out = []
-  for (const node of doc?.content || []) {
-    if (node.type === 'heading' || node.type === 'paragraph') {
-      out.push(node)
-    } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-      for (const listItem of node.content || []) {
-        if (listItem.type === 'listItem' && listItem.content) {
-          for (const child of listItem.content) {
-            if (child.type === 'paragraph') out.push(child)
-          }
-        }
-      }
-    }
-  }
+  visitTranslatableBlocks(doc?.content, (node) => out.push(node))
   return out
 }
 
