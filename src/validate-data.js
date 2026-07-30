@@ -401,15 +401,30 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
  * registry arriving by the back door. Author the schema to match the parse, or
  * do not ship the schema.
  *
- * ⚠️ And `required` is INERT here, which is the first thing a schema author will
- * reach for. The item vocabulary is TOTAL — the semantic parser's `flattenGroup`
- * fills every field it declares, so `title` on a titleless item is `''` rather
- * than absent, and `required` fires only on an absent or null value. "The author
- * actually wrote a question" is not expressible that way. The facets that bite
- * against a parsed item are the ones about a value's SHAPE (`type`, `enum`,
- * `format`, nested `fields`/`items`). Which is also a fair argument that
- * validation here is thin, and a reason not to ship a standard schema for a
- * concept until one earns its place.
+ * ⛔ AND FOR A PROSE CONCEPT, NO FACET CAN FIRE AT ALL — so do not write an
+ * `@std` schema for one. Measured 2026-07-30:
+ *
+ *   - `required` is inert. The item vocabulary is TOTAL — `flattenGroup` fills
+ *     every field it declares, so a titleless item has `title: ''` rather than
+ *     no title, and `required` fires only on absent or null. "The author
+ *     actually wrote a question" is not expressible.
+ *   - `type` cannot fail either. Inside a concept block `title` is always a
+ *     string (never an array — `alwaysItems` suppresses the same-level merge
+ *     that would make one) and `paragraphs` is always an array of strings.
+ *   - which leaves `enum` / `format`, and neither has a natural application to
+ *     a question or an answer. The test suite had to invent `format: 'url'` on
+ *     a question to make anything fire — that is the tell, not a fixture quirk.
+ *
+ * The mechanism still earns its place, but it is waiting for a different shape:
+ * a concept that carries a tagged DATA BLOCK. Verified that one reaches the item
+ * — ```` ```md:steps ```` holding a ```` ```yaml:meta ```` gives
+ * `items[0].data.meta` — and there `required` fires when an author omits the
+ * block, `enum` constrains a status, `format` constrains a duration. That is the
+ * trigger to write a schema. Until then the frontend holds the concept names and
+ * their shapes, which is where they belong: its extension encodes the shape
+ * executably, and a `standard/faq.js` in `@uniweb/schemas` whose only consumer is
+ * that app would be this framework stating which concepts exist — the registry
+ * this design forbids, spelled as a filename instead of a switch.
  *
  * Note on resolution: this deliberately does NOT go through `resolveSchemaRef`,
  * which resolves a package from a FOUNDATION's node_modules and throws when a

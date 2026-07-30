@@ -10,11 +10,15 @@
  *                     exactly as before; the schema is a check, never a gate
  *   3. never fails   — findings only, and silence when nothing resolves
  *
- * `@uniweb/schemas` is mocked rather than extended. Shipping a real `@std/faq`
- * would validate every author's FAQ against whatever shape we picked today, and
- * the ITEM vocabulary it has to be written in (see the ⛔ note in the source) is
- * a content-design decision that deserves its own pass. The mechanism is what
- * ships now; a standard schema is a separate, deliberate act.
+ * `@uniweb/schemas` is mocked rather than extended, and it will stay mocked: no
+ * `@std` schema is written for a PROSE concept, because none can produce a
+ * finding. See the ⛔ note in the source — the item vocabulary is total so
+ * `required` is inert, and `alwaysItems` keeps `title` a string so `type` cannot
+ * fail either. The contrived `format: 'url'` below is what that costs: it exists
+ * only to prove the plumbing, and needing to invent it is the evidence.
+ *
+ * The mechanism is the deliverable. The trigger to write an actual schema is a
+ * concept that carries a tagged DATA BLOCK, where the facets bite for real.
  */
 
 import { vi } from 'vitest'
