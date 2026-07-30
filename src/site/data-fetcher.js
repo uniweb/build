@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { matchWhere } from '@uniweb/core'
+import { matchWhere, collectionDataUrl } from '@uniweb/core'
 
 /**
  * Infer schema name from path or URL
@@ -290,7 +290,7 @@ export function parseFetchConfig(fetch) {
   if (fetch.collection) {
     if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
-      path: `/data/${fetch.collection}.json`,
+      path: collectionDataUrl(fetch.collection),
       url: undefined,
       schema: fetch.schema || fetch.collection,
       prerender: fetch.prerender ?? true,

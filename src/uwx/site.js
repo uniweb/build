@@ -54,7 +54,7 @@ import {
   processMarkdownFile,
 } from '../site/content-collector.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
-import { resolveDefaultLocale, validateLanguageConfig } from '@uniweb/core'
+import { resolveDefaultLocale, validateLanguageConfig, collectionDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
@@ -182,7 +182,7 @@ function buildPageData(config, ctx) {
     // `schema` (the collection name) is BOTH the content.data key and part of the
     // dataStore cache key (deriveCacheKey hashes {path,url,schema,…}; `collection`
     // is ignored). Mirrors the static build's parseFetchConfig resolution.
-    fetch = { path: `/data/${collection}.json`, schema: collection, ...rest }
+    fetch = { path: collectionDataUrl(collection), schema: collection, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {

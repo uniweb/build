@@ -14,6 +14,7 @@ import { readFile, writeFile, readdir, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
+import { DATA_DIR } from '@uniweb/core'
 import { computeHash } from './hash.js'
 import { loadFreeformCollectionItem } from './freeform.js'
 
@@ -86,7 +87,7 @@ async function resolveSchema(collectionName, siteRoot) {
   let schema = null
 
   // 1. Companion schema file
-  const companionPath = join(siteRoot, 'public', 'data', `${collectionName}.schema.js`)
+  const companionPath = join(siteRoot, 'public', DATA_DIR, `${collectionName}.schema.js`)
   if (existsSync(companionPath)) {
     try {
       const mod = await import(pathToFileURL(companionPath).href)
@@ -412,7 +413,7 @@ function translateItemHeuristic(data, context, translations, depth) {
  * @returns {Promise<Object>} Manifest with translation units
  */
 export async function extractCollectionContent(siteRoot, options = {}) {
-  const dataDir = join(siteRoot, 'public', 'data')
+  const dataDir = join(siteRoot, 'public', DATA_DIR)
 
   if (!existsSync(dataDir)) {
     return { version: '1.0', units: {} }
@@ -577,7 +578,7 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
     freeformEnabled = true
   } = options
 
-  const dataDir = join(siteRoot, 'public', 'data')
+  const dataDir = join(siteRoot, 'public', DATA_DIR)
 
   if (!existsSync(dataDir)) {
     return {}
@@ -615,7 +616,7 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
     const hasFreeform = freeformEnabled && existsSync(freeformDir)
 
     // Create locale data directory
-    const localeDataDir = join(outputDir, locale, 'data')
+    const localeDataDir = join(outputDir, locale, DATA_DIR)
     await mkdir(localeDataDir, { recursive: true })
 
     outputs[locale] = {}

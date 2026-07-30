@@ -21,7 +21,7 @@ import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 
-import { resolveDefaultLocale } from '@uniweb/core'
+import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
@@ -135,8 +135,8 @@ export async function buildSiteData({
     )
     await writeCollectionFiles(resolvedSiteRoot, collections, siteContent.config.collections)
 
-    const publicDataDir = join(resolvedSiteRoot, 'public', 'data')
-    const distDataDir = join(resolvedDistDir, 'data')
+    const publicDataDir = join(resolvedSiteRoot, 'public', DATA_DIR)
+    const distDataDir = join(resolvedDistDir, DATA_DIR)
     if (existsSync(publicDataDir)) {
       await cp(publicDataDir, distDataDir, { recursive: true })
     }
@@ -230,7 +230,7 @@ export async function buildSiteData({
     const collectionIndexes = []
     for (const [collName, collConfig] of Object.entries(collections)) {
       if (!collConfig.search?.enabled || !collConfig.route) continue
-      const cascadeFile = join(resolvedDistDir, 'data', `${collName}.json`)
+      const cascadeFile = join(resolvedDistDir, DATA_DIR, `${collName}.json`)
       if (!existsSync(cascadeFile)) continue
       let collectionData
       try {

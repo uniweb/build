@@ -3,6 +3,9 @@ import { processCollections, writeCollectionFiles } from '../src/site/collection
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+// Derived, never re-spelled — the convention is pinned once, in
+// `@uniweb/core`'s tests/data-paths.test.js.
+import { DATA_DIR } from '@uniweb/core'
 
 describe('Collection Processor', () => {
   let testDir
@@ -258,7 +261,7 @@ Content.
 
       await writeCollectionFiles(testDir, collections)
 
-      const outputPath = join(testDir, 'public', 'data', 'articles.json')
+      const outputPath = join(testDir, 'public', DATA_DIR, 'articles.json')
       expect(existsSync(outputPath)).toBe(true)
 
       const content = JSON.parse(readFileSync(outputPath, 'utf-8'))
@@ -464,7 +467,7 @@ year: 1858
         }
       })
 
-      const recordPath = join(testDir, 'public', 'data', 'bibliography', 'darwin1859.json')
+      const recordPath = join(testDir, 'public', DATA_DIR, 'bibliography', 'darwin1859.json')
       expect(existsSync(recordPath)).toBe(true)
 
       const record = JSON.parse(readFileSync(recordPath, 'utf-8'))

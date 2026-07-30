@@ -7,6 +7,9 @@ import {
   applySort,
   applyPostProcessing,
 } from '../src/site/data-fetcher.js'
+// Derived, never re-spelled — the convention is pinned once, in
+// `@uniweb/core`'s tests/data-paths.test.js.
+import { collectionDataUrl } from '@uniweb/core'
 
 describe('parseFetchConfig', () => {
   it('returns null for falsy input', () => {
@@ -136,7 +139,7 @@ describe('parseFetchConfig', () => {
       const config = { collection: 'articles' }
       const result = parseFetchConfig(config)
 
-      expect(result.path).toBe('/data/articles.json')
+      expect(result.path).toBe(collectionDataUrl('articles'))
       expect(result.schema).toBe('articles')
       expect(result.prerender).toBe(true)
     })
@@ -145,7 +148,7 @@ describe('parseFetchConfig', () => {
       const config = { collection: 'articles', limit: 3 }
       const result = parseFetchConfig(config)
 
-      expect(result.path).toBe('/data/articles.json')
+      expect(result.path).toBe(collectionDataUrl('articles'))
       expect(result.limit).toBe(3)
     })
 
@@ -180,7 +183,7 @@ describe('parseFetchConfig', () => {
       }
       const result = parseFetchConfig(config)
 
-      expect(result.path).toBe('/data/articles.json')
+      expect(result.path).toBe(collectionDataUrl('articles'))
       expect(result.schema).toBe('posts')
       expect(result.limit).toBe(5)
       expect(result.sort).toBe('date desc')

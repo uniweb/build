@@ -3,6 +3,9 @@ import { buildSiteData } from '../src/site/build-site-data.js'
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+// Derived, never re-spelled — the convention is pinned once, in
+// `@uniweb/core`'s tests/data-paths.test.js.
+import { DATA_DIR } from '@uniweb/core'
 
 // Pins the contract for the link-mode data pipeline:
 //   - `dist/site-content.json` always emitted, sections always inlined
@@ -103,7 +106,7 @@ Body text.
 
     await buildSiteData({ siteRoot, distDir })
 
-    const collectionFile = join(distDir, 'data', 'articles.json')
+    const collectionFile = join(distDir, DATA_DIR, 'articles.json')
     expect(existsSync(collectionFile)).toBe(true)
     const articles = JSON.parse(readFileSync(collectionFile, 'utf8'))
     expect(Array.isArray(articles) || typeof articles === 'object').toBe(true)
@@ -112,7 +115,7 @@ Body text.
   it('skips collections when not declared', async () => {
     await buildSiteData({ siteRoot, distDir })
     // No collections declared → no data dir.
-    expect(existsSync(join(distDir, 'data'))).toBe(false)
+    expect(existsSync(join(distDir, DATA_DIR))).toBe(false)
   })
 
   it('returns the in-memory siteContent for callers that need it', async () => {

@@ -29,6 +29,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
+import { collectionNameFromUrl } from '@uniweb/core'
 
 import { SCALAR_KINDS, FORMAT_TYPES } from './resolve-data-schema.js'
 import { buildSchema } from './schema.js'
@@ -402,8 +403,9 @@ function walkSections(sections, visit) {
  * (hand-authored data) is read from disk. Either way no prior build is needed.
  */
 async function resolveRecords(path, { collections, siteRoot }) {
-  // `/data/<name>.json` → a declared collection? Use the compiled records.
-  const name = path.replace(/^\/?data\//, '').replace(/\.json$/i, '')
+  // A compiled-collection URL → a declared collection? Use the compiled
+  // records. Anything else falls through to the file read below.
+  const name = collectionNameFromUrl(path)
   let records
   if (Object.prototype.hasOwnProperty.call(collections, name)) {
     records = collections[name]

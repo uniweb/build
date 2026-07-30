@@ -37,6 +37,7 @@ import { join, basename, extname, dirname, relative, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
+import { DATA_DIR } from '@uniweb/core'
 import { applyFilter, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 
@@ -660,7 +661,7 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
     return
   }
 
-  const dataDir = join(siteDir, 'public', 'data')
+  const dataDir = join(siteDir, 'public', DATA_DIR)
   await mkdir(dataDir, { recursive: true })
 
   for (const [name, items] of Object.entries(collections)) {

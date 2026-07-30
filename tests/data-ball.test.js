@@ -2,6 +2,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assembleDataBall, collectBallAssets, rewriteBallAssets } from '../src/site/index.js'
+// Derived, never re-spelled — the convention is pinned once, in
+// `@uniweb/core`'s tests/data-paths.test.js.
+import { DATA_DIR } from '@uniweb/core'
 
 // The static-data ball: the schema-less subset of dist/data/** + the whole
 // dist/_search/** index, parsed into one JSON doc for the composite deploy.
@@ -19,9 +22,9 @@ afterEach(() => rmSync(dist, { recursive: true, force: true }))
 
 describe('assembleDataBall', () => {
   it('bundles only the schema-less collections data + the whole search index, as parsed JSON', async () => {
-    w('data/articles.json', JSON.stringify([{ slug: 'a' }])) // schema-backed → excluded
-    w('data/notes.json', JSON.stringify([{ slug: 'n1' }])) // schema-less → included
-    w('data/notes/n1.json', JSON.stringify({ slug: 'n1', body: 'x' })) // deferred per-record → included
+    w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed → excluded
+    w(`${DATA_DIR}/notes.json`, JSON.stringify([{ slug: 'n1' }])) // schema-less → included
+    w(`${DATA_DIR}/notes/n1.json`, JSON.stringify({ slug: 'n1', body: 'x' })) // deferred per-record → included
     w('_search/en/pages.json', JSON.stringify({ type: 'pages', items: [] }))
 
     const ball = await assembleDataBall(dist, ['notes'])
@@ -33,7 +36,7 @@ describe('assembleDataBall', () => {
   })
 
   it('search is NOT filtered by schema presence (baked over all content)', async () => {
-    w('data/articles.json', JSON.stringify([{ slug: 'a' }]))
+    w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }]))
     w('_search/en/articles.json', JSON.stringify({ type: 'collection' }))
 
     const ball = await assembleDataBall(dist, []) // no schema-less collections
@@ -42,7 +45,7 @@ describe('assembleDataBall', () => {
   })
 
   it('returns null when there is nothing to deliver (no schema-less data, no search)', async () => {
-    w('data/articles.json', JSON.stringify([{ slug: 'a' }])) // schema-backed only, no search
+    w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed only, no search
     expect(await assembleDataBall(dist, [])).toBeNull()
     expect(await assembleDataBall(dist)).toBeNull() // default schemalessNames = []
   })

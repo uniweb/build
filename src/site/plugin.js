@@ -33,7 +33,7 @@
 import { resolve, join } from 'node:path'
 import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
-import { resolveDefaultLocale } from '@uniweb/core'
+import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import {
   renderSiteIndex,
   renderPageMarkdown,
@@ -1135,12 +1135,12 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Handle localized collection data (e.g., /fr/data/articles.json)
-        const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/data\\/(.+\\.json)$`))
+        const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/${DATA_DIR}\\/(.+\\.json)$`))
         if (localeDataMatch) {
           const locale = localeDataMatch[1]
           const filename = localeDataMatch[2]
           const collectionName = filename.replace('.json', '')
-          const sourcePath = join(resolvedSitePath, 'public', 'data', filename)
+          const sourcePath = join(resolvedSitePath, 'public', DATA_DIR, filename)
 
           if (existsSync(sourcePath)) {
             try {

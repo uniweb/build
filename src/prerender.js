@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolveDefaultLocale } from '@uniweb/core'
+import { resolveDefaultLocale, isDataUrl } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -81,7 +81,7 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
     localeInfo.distDir
 
   function localizeFetch(config) {
-    if (!isNonDefaultLocale || !config.path?.startsWith('/data/')) return config
+    if (!isNonDefaultLocale || !isDataUrl(config.path)) return config
     return { ...config, path: `/${localeInfo.locale}${config.path}` }
   }
 

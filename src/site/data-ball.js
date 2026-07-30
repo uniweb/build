@@ -19,6 +19,7 @@
 import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import { DATA_DIR } from '@uniweb/core'
 import { isLocalAssetPath } from './assets.js'
 
 // Walk a dist subdir for *.json → { "<posix-relpath>": <parsedJson> }. Unparseable
@@ -58,7 +59,7 @@ function collectionOf(relPath) {
  */
 export async function assembleDataBall(distDir, schemalessNames = []) {
   const schemaless = new Set(schemalessNames)
-  const allData = await readJsonTree(join(distDir, 'data'))
+  const allData = await readJsonTree(join(distDir, DATA_DIR))
   const data = {}
   for (const [relPath, value] of Object.entries(allData)) {
     if (schemaless.has(collectionOf(relPath))) data[relPath] = value
