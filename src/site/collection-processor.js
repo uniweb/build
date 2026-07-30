@@ -32,7 +32,7 @@
  * await writeCollectionFiles(siteDir, collections)
  */
 
-import { readFile, readdir, stat, writeFile, mkdir, copyFile } from 'node:fs/promises'
+import { readFile, readdir, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
 import { join, basename, extname, dirname, relative, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
@@ -644,6 +644,47 @@ export async function processCollections(siteDir, collectionsConfig, collections
 }
 
 /**
+ * Reconcile a deferred collection's per-record directory with the records it
+ * should hold this run — delete the `<slug>.json` files that are no longer
+ * backed by a record.
+ *
+ * Why this is not optional. `public/data/` is a persistent, normally-committed
+ * directory, so anything written there survives until something removes it.
+ * Without this, unpublishing a record (`published: false`, which the build
+ * honours automatically) or deleting its source file drops it from the cascade
+ * listing — it vanishes from the site — while its per-record file stays on
+ * disk with the full body, gets committed, and gets deployed. The author has
+ * every reason to believe the content is gone. It is still fetchable at a URL
+ * that was public a moment ago.
+ *
+ * Deliberately narrow, because this deletes files:
+ *   - only inside `<name>/`, where `<name>` is a collection the site declares,
+ *     so the directory is this build's own prior output;
+ *   - only `.json` files, so anything else a user put there is left alone;
+ *   - `expected` is empty when a collection stops declaring `deferred:`, which
+ *     correctly clears a directory that will otherwise never be written again.
+ *
+ * NOT covered: a collection removed from `site.yml` entirely. There is no
+ * declaration left to reconcile against, so pruning it would mean the build
+ * asserting ownership of a directory on a name match alone. That needs the
+ * ownership question answered on purpose, not as a side effect of this.
+ *
+ * @param {string} recordsDir - `public/data/<name>/`
+ * @param {Set<string>} expected - filenames this run wrote, e.g. `hello.json`
+ * @returns {Promise<string[]>} the filenames removed
+ */
+async function pruneOrphanedRecords(recordsDir, expected) {
+  if (!existsSync(recordsDir)) return []
+  const removed = []
+  for (const entry of await readdir(recordsDir)) {
+    if (!entry.endsWith('.json') || expected.has(entry)) continue
+    await rm(join(recordsDir, entry))
+    removed.push(entry)
+  }
+  return removed
+}
+
+/**
  * Write collection data to JSON files in public/data/
  *
  * @param {string} siteDir - Site root directory
@@ -678,13 +719,15 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
       const recordsDir = join(dataDir, name)
       await mkdir(recordsDir, { recursive: true })
 
-      let perRecordCount = 0
+      const written = new Set()
       for (const item of items) {
         if (!item || typeof item !== 'object' || !item.slug) continue
-        const recordPath = join(recordsDir, `${item.slug}.json`)
-        await writeFile(recordPath, JSON.stringify(item, null, 2))
-        perRecordCount++
+        const filename = `${item.slug}.json`
+        await writeFile(join(recordsDir, filename), JSON.stringify(item, null, 2))
+        written.add(filename)
       }
+      const perRecordCount = written.size
+      const pruned = await pruneOrphanedRecords(recordsDir, written)
 
       const stripped = items.map((item) => {
         if (!item || typeof item !== 'object') return item
@@ -698,10 +741,29 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
         `[collection-processor] Generated ${cascadePath} (${items.length} items, ` +
         `deferred: [${deferred.join(', ')}]) + ${perRecordCount} per-record files`
       )
+      if (pruned.length > 0) {
+        // A deletion is always worth naming. These files were public a moment
+        // ago, so "which ones went" is the question an author will have.
+        console.log(
+          `[collection-processor] Removed ${pruned.length} stale per-record ` +
+          `file(s) from ${recordsDir}: ${pruned.join(', ')}`
+        )
+      }
     } else {
       const filepath = join(dataDir, `${name}.json`)
       await writeFile(filepath, JSON.stringify(items, null, 2))
       console.log(`[collection-processor] Generated ${filepath} (${items.length} items)`)
+
+      // This collection is not deferred, so it has no per-record files. If it
+      // used to, the directory is still there and will never be written again
+      // — every file in it is stale. Same reconciliation, empty expected set.
+      const pruned = await pruneOrphanedRecords(join(dataDir, name), new Set())
+      if (pruned.length > 0) {
+        console.log(
+          `[collection-processor] Removed ${pruned.length} per-record file(s) ` +
+          `from ${join(dataDir, name)} — "${name}" no longer declares deferred:`
+        )
+      }
     }
   }
 }
