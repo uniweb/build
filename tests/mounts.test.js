@@ -268,3 +268,79 @@ describe('page mounts — structural validation', () => {
     await expect(collectSiteContent(siteDir)).rejects.toThrow(/Invalid mount/)
   })
 })
+
+describe('page mounts — the dev server watches them', () => {
+  /**
+   * A mount lives outside the site, so the pages/ watcher cannot reach it. When
+   * nothing else did either, an author editing a mounted docs repository saw
+   * their change ignored until they restarted — and the natural reading of that
+   * is that the edit was wrong rather than unwatched.
+   *
+   * This drives the plugin's real hooks rather than asserting on config,
+   * because the bug it guards against is exactly a resolved-but-unused path.
+   */
+  async function startDevPlugin(siteDir) {
+    const { siteContentPlugin } = await import('../src/site/plugin.js')
+    const plugin = siteContentPlugin({ sitePath: '.' })
+
+    const watched = []
+    const log = console.log
+    console.log = (...args) => {
+      const line = args.join(' ')
+      if (line.includes('[site-content] Watching')) watched.push(line)
+    }
+
+    let reloads = 0
+    try {
+      await plugin.configResolved({
+        root: siteDir,
+        command: 'serve',
+        build: { outDir: 'dist' },
+        base: '/',
+      })
+      await plugin.configureServer({
+        ws: { send: () => { reloads++ } },
+        middlewares: { use: () => {} },
+      })
+    } finally {
+      console.log = log
+    }
+
+    return { watched, reloads: () => reloads }
+  }
+
+  /** fs events are asynchronous; poll rather than guess at a sleep duration. */
+  async function waitFor(predicate, timeout = 8000) {
+    const deadline = Date.now() + timeout
+    while (Date.now() < deadline) {
+      if (predicate()) return true
+      await new Promise(r => setTimeout(r, 50))
+    }
+    return false
+  }
+
+  it('registers a watcher on the mounted directory', async () => {
+    const siteDir = await makeWorkspace({
+      siteYml: 'name: Test\nindex: home\npaths:\n  pages/docs: ../external/docs\n',
+      mountFiles: TWO_SECTIONS,
+    })
+
+    const { watched } = await startDevPlugin(siteDir)
+
+    expect(watched.some(l => l.includes('external/docs') && l.includes('(mounted)'))).toBe(true)
+  })
+
+  it('rebuilds when a file inside the mount changes', async () => {
+    const siteDir = await makeWorkspace({
+      siteYml: 'name: Test\nindex: home\npaths:\n  pages/docs: ../external/docs\n',
+      mountFiles: TWO_SECTIONS,
+    })
+
+    const { reloads } = await startDevPlugin(siteDir)
+    const target = join(root, 'external', 'docs', 'guides', 'intro.md')
+
+    await writeFile(target, '# Intro, edited in the mount\n')
+
+    expect(await waitFor(() => reloads() > 0)).toBe(true)
+  }, 20000)
+})

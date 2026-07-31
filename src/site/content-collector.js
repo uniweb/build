@@ -377,6 +377,25 @@ function mountHasContent(dirPath) {
 }
 
 /**
+ * The `pages/<segment>` keys in a site.yml `paths:` group, unvalidated.
+ *
+ * Split out from resolveMounts so the dev server can learn which directories a
+ * site mounts without re-running resolveMounts' validation — that would repeat
+ * its warnings on every startup, and the watcher only needs paths. Both callers
+ * share this one definition of what a mount key looks like, so the prefix can
+ * never mean one thing to the collector and another to the watcher.
+ *
+ * @param {Object} pathsConfig - The paths: object from site.yml
+ * @returns {Array<[string, string]>} [routeSegment, relativePath] pairs
+ */
+export function mountEntriesOf(pathsConfig) {
+  if (!pathsConfig || typeof pathsConfig !== 'object') return []
+  return Object.entries(pathsConfig)
+    .filter(([key]) => key.startsWith('pages/'))
+    .map(([key, value]) => [key.slice('pages/'.length), value])
+}
+
+/**
  * Extract page mounts from site.yml paths: config.
  *
  * Keys like `pages/docs: ../../../docs` map a route segment to an external
@@ -396,9 +415,7 @@ function resolveMounts(pathsConfig, sitePath, pagesPath, { strict = false } = {}
   if (!pathsConfig || typeof pathsConfig !== 'object') return null
 
   // Extract entries with "pages/" prefix (e.g., "pages/docs": "../../../docs")
-  const mountEntries = Object.entries(pathsConfig)
-    .filter(([key]) => key.startsWith('pages/'))
-    .map(([key, value]) => [key.slice('pages/'.length), value])
+  const mountEntries = mountEntriesOf(pathsConfig)
 
   if (mountEntries.length === 0) return null
 

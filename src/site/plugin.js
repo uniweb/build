@@ -45,7 +45,7 @@ import {
   applyRouteTranslation,
   INDEX_FILENAME
 } from '@uniweb/projections'
-import { collectSiteContent } from './content-collector.js'
+import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
@@ -516,6 +516,7 @@ export function siteContentPlugin(options = {}) {
   let localesDir = 'locales' // Default, updated from site config
   let collectionsConfig = null // Cached for watcher setup
   let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
+  let resolvedMountPaths = [] // Absolute dirs mounted under pages/ via site.yml paths:
   let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
   let resolvedCollectionsBase = null // Resolved from site.yml collectionsDir
   let headHtml = '' // Contents of site/head.html for injection
@@ -750,6 +751,7 @@ export function siteContentPlugin(options = {}) {
           resolvedCollectionsBase = paths.collections
             ? resolve(resolvedSitePath, paths.collections)
             : null
+          resolvedMountPaths = mountEntriesOf(paths).map(([, rel]) => resolve(resolvedSitePath, rel))
 
           if (collectionsConfig) {
             console.log('[site-content] Processing content collections...')
@@ -883,6 +885,23 @@ export function siteContentPlugin(options = {}) {
             console.log(`[site-content] Watching ${resolvedPagesPath}`)
           } catch (err) {
             console.warn('[site-content] Could not watch pages directory:', err.message)
+          }
+        }
+
+        // Watch each directory mounted under pages/ by site.yml `paths:`.
+        //
+        // The site's own pages/ watcher above does not reach these — a mount
+        // lives outside the site, which is the whole point of one. Without this
+        // an author editing a mounted docs repository sees nothing change until
+        // they restart the dev server, and the natural reading of that is that
+        // their edit was wrong rather than unwatched.
+        for (const mountPath of resolvedMountPaths) {
+          if (!existsSync(mountPath)) continue
+          try {
+            watchers.push(watch(mountPath, { recursive: true }, scheduleRebuild))
+            console.log(`[site-content] Watching ${mountPath} (mounted)`)
+          } catch (err) {
+            console.warn(`[site-content] Could not watch mounted directory ${mountPath}:`, err.message)
           }
         }
 
