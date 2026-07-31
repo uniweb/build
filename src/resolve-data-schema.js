@@ -600,10 +600,32 @@ function normalizeField(field, ref, path) {
 
   // Structural kinds.
   if (out.type === 'object') {
-    if (field.fields === undefined) {
-      throw new Error(`Data schema '${ref}': object field '${path}' must declare nested 'fields'.`)
+    // Two ways to describe an object, and they answer different questions:
+    //
+    //   fields  the object's KNOWN keys — `{ street, city }`
+    //   values  an OPEN MAP whose keys belong to the author and whose values all
+    //           conform to one shape — `{ <anything>: <a field spec> }`
+    //
+    // `values` is to an object what `items` is to an array, and it exists for
+    // the same reason: a form's `fields` is a map keyed by author-chosen names
+    // (see `@std/form`), which could not be described at all until this landed.
+    // Requested by the editor team 2026-07-31 — the shape they needed and could
+    // not state in this vocabulary either.
+    if (field.values !== undefined && field.fields !== undefined) {
+      throw new Error(
+        `Data schema '${ref}': object field '${path}' declares both 'fields' and 'values'. ` +
+          `Use 'fields' for known keys, 'values' for an open map — not both.`
+      )
     }
-    out.fields = normalizeFields(field.fields, ref, path)
+    if (field.values !== undefined) {
+      out.values = normalizeField(field.values, ref, `${path}{}`)
+    } else if (field.fields === undefined) {
+      throw new Error(
+        `Data schema '${ref}': object field '${path}' must declare nested 'fields' (known keys) or 'values' (an open map).`
+      )
+    } else {
+      out.fields = normalizeFields(field.fields, ref, path)
+    }
   } else if (out.type === 'array') {
     // `items` (the element type) is recommended but optional — an array with
     // no declared element type is an untyped list.
@@ -637,6 +659,7 @@ export function collectNestedRefs(schema) {
       if (typeof field.options === 'string') found.add(field.options)
       if (field.fields) walkFields(field.fields)
       if (field.items) walkFields({ _: field.items })
+      if (field.values) walkFields({ _: field.values })
     }
   }
   const walkSections = (sections) => {

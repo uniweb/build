@@ -118,6 +118,21 @@ function validateValue(def, value, path) {
       out.push(violation(path, 'type', `expected object, got ${typeName(value)}`))
     } else if (def.fields) {
       out.push(...validateFields(def.fields, value, path))
+    } else if (def.values) {
+      // An OPEN MAP: the keys are the author's, every value conforms to one
+      // shape. `values` is to an object what `items` is to an array.
+      //
+      // Note what this deliberately does NOT do: reject a key. It cannot — the
+      // keys are the whole point — and it must not reject unexpected keys
+      // WITHIN a value either, which falls out of `validateFields` walking the
+      // schema's fields rather than the data's. That tolerance is load-bearing
+      // for `@std/form`: a form definition may carry per-field keys the current
+      // builder cannot author (hand-written, or from a newer editor), and the
+      // editor's boundary passes them through untouched. A stricter check here
+      // would fail builds on good content.
+      for (const [key, item] of Object.entries(value)) {
+        out.push(...validateValue(def.values, item, `${path}.${key}`))
+      }
     }
     return out
   }
