@@ -313,8 +313,8 @@ describe('page mounts — the dev server watches them', () => {
   async function waitFor(predicate, timeout = 20000) {
     const deadline = Date.now() + timeout
     while (Date.now() < deadline) {
-      if (predicate()) return true
-      await new Promise(r => setTimeout(r, 50))
+      if (await predicate()) return true
+      await new Promise(r => setTimeout(r, 250))
     }
     return false
   }
@@ -339,8 +339,18 @@ describe('page mounts — the dev server watches them', () => {
     const { reloads } = await startDevPlugin(siteDir)
     const target = join(root, 'external', 'docs', 'guides', 'intro.md')
 
-    await writeFile(target, '# Intro, edited in the mount\n')
+    // Rewrite until the watcher reports, rather than writing once and waiting.
+    // A recursive fs.watch is not guaranteed to be delivering events the
+    // instant the call returns, so a single write can land in the gap before
+    // it is established -- which is exactly how this test failed
+    // intermittently under a parallel workspace run while passing alone.
+    let n = 0
+    const seen = await waitFor(async () => {
+      if (reloads() > 0) return true
+      await writeFile(target, `# Intro, edited in the mount (${++n})\n`)
+      return reloads() > 0
+    })
 
-    expect(await waitFor(() => reloads() > 0)).toBe(true)
+    expect(seen).toBe(true)
   }, 30000)
 })
