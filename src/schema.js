@@ -120,6 +120,63 @@ export async function loadPackageJson(srcDir) {
  * - props: Foundation-wide props
  * - Future: providers, middleware, etc.
  */
+/**
+ * Capability keys that only work as keys of the DEFAULT export.
+ *
+ * The list is `cli/partials/agents.md`'s ("A single `export default { … }` whose
+ * top-level keys are the capabilities the foundation provides"). `vars` is
+ * deliberately absent: it is the one capability that also works named, because
+ * `generate-entry.js` reads it explicitly.
+ */
+const DEFAULT_ONLY_CAPABILITIES = [
+  'name',
+  'description',
+  'defaultLayout',
+  'defaultSection',
+  'viewTransitions',
+  'props',
+  'defaultInsets',
+  'xref',
+  'outputs',
+  'handlers',
+  'extension',
+]
+
+/**
+ * Warn when a capability was written as a named export.
+ *
+ * `generate-entry.js` builds `capabilities` as `{ ..._foundationModule.default,
+ * vars: … }` — it spreads only the DEFAULT export. A named `export const xref =
+ * …` is therefore dropped with no error, no warning, and a build that succeeds.
+ * Whatever the capability did simply does not happen, which reads as "the
+ * feature is not implemented" rather than "it is declared in the wrong place".
+ *
+ * Real incident (2026-07-31): cross-references were wired onto uniweb.io as
+ * named `xref` and `defaultInsets` exports. The build passed, the site ran, and
+ * every `[#id]` rendered as its own literal text — indistinguishable from a
+ * foundation that had never opted in. Found only by reading generate-entry.js.
+ *
+ * A warning rather than an error: a foundation may legitimately export a name
+ * that collides for its own use, and failing someone's build over a naming
+ * coincidence is worse than telling them what we ignored.
+ */
+function warnMisplacedCapabilities(module, filePath) {
+  const onDefault = module.default && typeof module.default === 'object' ? module.default : {}
+  const misplaced = DEFAULT_ONLY_CAPABILITIES.filter(
+    key => module[key] !== undefined && onDefault[key] === undefined,
+  )
+  if (misplaced.length === 0) return
+
+  const list = misplaced.map(k => `\`${k}\``).join(', ')
+  console.warn(
+    `Warning: ${filePath} exports ${list} as named export${misplaced.length > 1 ? 's' : ''}, ` +
+      `which the build ignores.\n` +
+      `  Capabilities are read from the default export only — move ${misplaced.length > 1 ? 'them' : 'it'} into ` +
+      `\`export default { … }\`.\n` +
+      `  (\`vars\` is the exception and may stay a named export.)`,
+  )
+}
+
 export async function loadFoundationConfig(srcDir) {
   let filePath = null
   for (const name of FOUNDATION_FILE_NAMES) {
@@ -133,6 +190,7 @@ export async function loadFoundationConfig(srcDir) {
 
   try {
     const module = await import(pathToFileURL(filePath).href)
+    warnMisplacedCapabilities(module, filePath)
     // Support both default export and named exports
     return {
       ...module.default,
