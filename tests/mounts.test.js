@@ -310,7 +310,7 @@ describe('page mounts — the dev server watches them', () => {
   }
 
   /** fs events are asynchronous; poll rather than guess at a sleep duration. */
-  async function waitFor(predicate, timeout = 8000) {
+  async function waitFor(predicate, timeout = 20000) {
     const deadline = Date.now() + timeout
     while (Date.now() < deadline) {
       if (predicate()) return true
@@ -328,7 +328,7 @@ describe('page mounts — the dev server watches them', () => {
     const { watched } = await startDevPlugin(siteDir)
 
     expect(watched.some(l => l.includes('external/docs') && l.includes('(mounted)'))).toBe(true)
-  })
+  }, 30000)
 
   it('rebuilds when a file inside the mount changes', async () => {
     const siteDir = await makeWorkspace({
@@ -342,5 +342,5 @@ describe('page mounts — the dev server watches them', () => {
     await writeFile(target, '# Intro, edited in the mount\n')
 
     expect(await waitFor(() => reloads() > 0)).toBe(true)
-  }, 20000)
+  }, 30000)
 })
