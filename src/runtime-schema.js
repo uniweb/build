@@ -359,6 +359,7 @@ export function extractAllRuntimeSchemas(componentsMeta, dataSchemaMap = {}) {
  *   this overrides per region, or `false` opts the layout out)
  * - defaults: Param default values
  * - scroll: Scroll management mode ('self' or CSS selector)
+ * - layers: Stacking order of the area wrappers (object, or false to opt out)
  *
  * @param {Object} fullMeta - The full meta.js default export for a layout
  * @returns {Object|null} - Lean layout runtime schema or null if empty
@@ -374,8 +375,19 @@ export function extractLayoutRuntimeSchema(fullMeta) {
     runtime.areas = fullMeta.areas
   }
 
-  if (fullMeta.transitions && typeof fullMeta.transitions === 'object') {
+  // `false` is a value, not an absence: it is the documented way a layout opts
+  // out of per-area view transitions. The previous guard was
+  // `fullMeta.transitions && typeof … === 'object'`, which is false for `false`
+  // — so the opt-out was dropped here and never reached the runtime, even
+  // though `resolveLayoutTransitions` has always handled it. Same for `layers`.
+  if (fullMeta.transitions === false || (fullMeta.transitions && typeof fullMeta.transitions === 'object')) {
     runtime.transitions = fullMeta.transitions
+  }
+
+  // Stacking order of the area wrappers. Carried whether or not the layout
+  // declares transitions, because an explicit layer is itself a reason to wrap.
+  if (fullMeta.layers === false || (fullMeta.layers && typeof fullMeta.layers === 'object')) {
+    runtime.layers = fullMeta.layers
   }
 
   if (fullMeta.scroll !== undefined) {
