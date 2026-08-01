@@ -27,10 +27,6 @@ import { processCollections, writeCollectionFiles } from './collection-processor
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import {
-  generateSearchIndex,
-  generateCollectionIndex,
-  mergeSearchIndexes,
-  getSearchIndexFilename,
   renderSiteIndex,
   renderPageMarkdown,
   resolveAgentsConfig,
@@ -205,58 +201,26 @@ export async function buildSiteData({
   const contentPath = join(resolvedDistDir, 'site-content.json')
   await writeFile(contentPath, JSON.stringify(finalContent, null, 2))
 
-  // 5. Generate `_search/{locale}/pages.json` and per-collection indexes.
-  //    Gated by `features: [search]` in site.yml — consistent with the billing
-  //    model where features: is the single declaration of intent. The hosting
-  //    worker has its own entitlement gate (searchEnabled) that decides whether
-  //    to store these files, but no point generating them when the site hasn't
-  //    declared the feature at all.
-  const siteFeatures = finalContent.config?.features || []
-  if (Array.isArray(siteFeatures) && siteFeatures.includes('search')) {
-    const defaultLocale = resolveDefaultLocale(finalContent.config)
-    const searchDir = join(resolvedDistDir, '_search', defaultLocale)
-    await mkdir(searchDir, { recursive: true })
-
-    // pages.json — static pages + sections
-    const pagesIndex = generateSearchIndex(finalContent, {
-      locale: defaultLocale,
-      search: finalContent.config?.search,
-    })
-    const { version: _v, count: _c, ...pagesRest } = pagesIndex
-    await writeFile(join(searchDir, 'pages.json'), JSON.stringify({ type: 'pages', ...pagesRest }))
-
-    // Collection indexes — one per routed + search-configured collection
-    const collections = finalContent.config?.collections || {}
-    const collectionIndexes = []
-    for (const [collName, collConfig] of Object.entries(collections)) {
-      if (!collConfig.search?.enabled || !collConfig.route) continue
-      const cascadeFile = join(resolvedDistDir, DATA_DIR, `${collName}.json`)
-      if (!existsSync(cascadeFile)) continue
-      let collectionData
-      try {
-        collectionData = JSON.parse(await readFile(cascadeFile, 'utf8'))
-      } catch {
-        continue
-      }
-      const collIndex = generateCollectionIndex(collName, collConfig, collectionData, defaultLocale)
-      collectionIndexes.push(collIndex)
-      await writeFile(join(searchDir, `${collName}.json`), JSON.stringify(collIndex))
-    }
-
-    // The single-file form, for the BROWSER lane.
-    //
-    // The split files above serve a server that loads only the parts a query
-    // needs. Kit's client-side `index` provider needs all of it, and asks for
-    // `search-index.json` — so without this, a site published through this lane
-    // 404s on its own search index and degrades to no results. Emitting both
-    // from the same entries is one extra serialization and means the client
-    // works identically on every lane, with no host configuration describing
-    // where the index lives.
-    await writeFile(
-      join(resolvedDistDir, getSearchIndexFilename(defaultLocale, defaultLocale)),
-      JSON.stringify(mergeSearchIndexes(pagesIndex, collectionIndexes))
-    )
-  }
+  // 5. (removed 2026-08-01) This lane used to emit a search index — the split
+  //    `_search/{locale}/*.json` for a server, and `search-index.json` for the
+  //    browser — gated by `features: [search]`.
+  //
+  //    Both are gone because only ONE of the two publishers produced them. A
+  //    CLI deploy did; a CMS publish did not, so a site's search existed or
+  //    vanished depending on who published it last. That is the flicker rule,
+  //    and the fix is not to make the app produce them too — it is that a host
+  //    storing the content derives search from it, one input that exists
+  //    identically on both lanes.
+  //
+  //    The browser one was doubly dead: nothing ever uploaded it. `dist/` on
+  //    this lane reaches a backend only through the data ball and the media
+  //    refs, and the ball read `dist/data` and `dist/_search` — never the dist
+  //    root. So it was serialized on every publish and dropped.
+  //
+  //    ⚠️ The static index for hosts with NO backend is untouched and still
+  //    emitted by the bundle lane (`site/plugin.js` → `search-index.json`).
+  //    That is what GitHub Pages and every other static target serve, and the
+  //    framework has more targets than one backend.
 
   // 6. Agent projections — `llms.txt` and one `.md` per page.
   //

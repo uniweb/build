@@ -21,31 +21,43 @@ beforeEach(() => {
 afterEach(() => rmSync(dist, { recursive: true, force: true }))
 
 describe('assembleDataBall', () => {
-  it('bundles only the schema-less collections data + the whole search index, as parsed JSON', async () => {
+  it('bundles only the schema-less collections data, as parsed JSON', async () => {
     w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed → excluded
     w(`${DATA_DIR}/notes.json`, JSON.stringify([{ slug: 'n1' }])) // schema-less → included
     w(`${DATA_DIR}/notes/n1.json`, JSON.stringify({ slug: 'n1', body: 'x' })) // deferred per-record → included
-    w('_search/en/pages.json', JSON.stringify({ type: 'pages', items: [] }))
 
     const ball = await assembleDataBall(dist, ['notes'])
 
     expect(Object.keys(ball.data).sort()).toEqual(['notes.json', 'notes/n1.json'])
     expect(ball.data['notes.json']).toEqual([{ slug: 'n1' }]) // a parsed value, not a string
     expect(ball.data['articles.json']).toBeUndefined() // schema-backed → entity lane, not the ball
-    expect(ball.search['en/pages.json']).toEqual({ type: 'pages', items: [] })
   })
 
-  it('search is NOT filtered by schema presence (baked over all content)', async () => {
-    w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }]))
-    w('_search/en/articles.json', JSON.stringify({ type: 'collection' }))
+  /**
+   * A search index used to ride here. It no longer does, and this pins that,
+   * because re-adding it would look like restoring symmetry with `data`.
+   *
+   * It was wrong for a reason `data` is not: only ONE of the two publishers
+   * produced it. A CLI deploy did, a CMS publish did not, so a site's search
+   * existed or vanished with whoever published last — the flicker rule. A host
+   * that wants search derives it from the content it already stores, which is
+   * the one input both lanes produce identically.
+   */
+  it('does NOT carry a search index, even when one is present in dist', async () => {
+    w(`${DATA_DIR}/notes.json`, JSON.stringify([{ slug: 'n1' }]))
+    w('_search/en/pages.json', JSON.stringify({ type: 'pages', items: [] }))
+    w('search-index.json', JSON.stringify({ entries: [] }))
 
-    const ball = await assembleDataBall(dist, []) // no schema-less collections
-    expect(ball.data).toEqual({}) // nothing schema-less → no data
-    expect(ball.search['en/articles.json']).toEqual({ type: 'collection' }) // search still bundled
+    const ball = await assembleDataBall(dist, ['notes'])
+
+    expect(ball.search).toBeUndefined()
+    expect(Object.keys(ball)).toEqual(['data'])
+    expect(JSON.stringify(ball)).not.toContain('pages.json')
   })
 
-  it('returns null when there is nothing to deliver (no schema-less data, no search)', async () => {
-    w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed only, no search
+  it('returns null when there is no schema-less data — a search index cannot keep it alive', async () => {
+    w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed only
+    w('_search/en/pages.json', JSON.stringify({ type: 'pages', items: [] })) // ignored now
     expect(await assembleDataBall(dist, [])).toBeNull()
     expect(await assembleDataBall(dist)).toBeNull() // default schemalessNames = []
   })

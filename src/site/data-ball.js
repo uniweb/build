@@ -3,17 +3,17 @@
  * collections partition by schema presence: a collection that resolves a data schema
  * syncs as folder entities; a SCHEMA-LESS collection has no entity model, so its built
  * `dist/data/<name>.json` (cascade + any `deferred:` per-record files) is delivered
- * statically. This bundles that schema-less subset of `dist/data/**` plus the whole
- * `dist/_search/**` index into one JSON doc the deploy uploads as a single
- * content-addressed asset; the backend unwraps it into the `/data/*` + `/_search/*`
- * bytes the gateway serves.
+ * statically. This bundles that schema-less subset of `dist/data/**` into one JSON doc
+ * the deploy uploads as a single content-addressed asset; the backend unwraps it into
+ * the `/data/*` bytes the gateway serves.
  *
- *   { data:   { "<relpath-under-data>":    <json> },   // schema-less collections only
- *     search: { "<relpath-under-_search>": <json> } }  // the whole (baked) index
+ *   { data: { "<relpath-under-data>": <json> } }   // schema-less collections only
  *
- * Search is NOT filtered: the index is baked over all content (the live/baked seam —
- * schema-backed lists are served live from entities, but their search entries are baked
- * here until the next deploy).
+ * **A search index used to ride here too, and deliberately no longer does** (2026-08-01).
+ * Only a CLI deploy produced one — a CMS publish produced none — so a site's search
+ * existed or vanished depending on who published it, which is the flicker rule exactly.
+ * A host that wants search derives it from the content it already stores. See the note
+ * at the removal point below, and `collab/context/site-derived-artifacts.md`.
  */
 
 import { existsSync } from 'node:fs'
@@ -64,8 +64,6 @@ export async function assembleDataBall(distDir, schemalessNames = []) {
   for (const [relPath, value] of Object.entries(allData)) {
     if (schemaless.has(collectionOf(relPath))) data[relPath] = value
   }
-  const search = await readJsonTree(join(distDir, '_search'))
-
   // Agent projections deliberately do NOT ride the ball.
   //
   // A backend that stores the site's content derives them itself at publish —
@@ -78,10 +76,25 @@ export async function assembleDataBall(distDir, schemalessNames = []) {
   // (An opt-in `projections` bucket lived here while the delivery contract was
   // open. It never shipped enabled, and the one-producer ruling closed the
   // question — removed rather than left as a flag nobody may turn on.)
+  //
+  // THE SEARCH INDEX IS ONE OF THOSE PROJECTIONS, and it rode this ball anyway
+  // — `const search = readJsonTree(dist/_search)` sat four lines above this
+  // comment, doing the exact thing the comment forbids. Removed 2026-08-01.
+  //
+  // What made it wrong is not symmetry, it is the flicker rule: a CLI deploy
+  // produced the index and a CMS publish produced none, so a site's search
+  // oscillated with whoever published it. Deriving it from stored content — one
+  // input that exists identically on both lanes — makes that unexpressible,
+  // which is a stronger guarantee than any producer agreement.
+  //
+  // The static index for hosts with no backend is UNCHANGED and still emitted:
+  // `search-index.json`, bundle lane, what GitHub Pages and every other static
+  // target serve. The framework has more targets than one backend, and that is
+  // the artifact for the rest of them.
 
-  if (Object.keys(data).length === 0 && Object.keys(search).length === 0) return null
+  if (Object.keys(data).length === 0) return null
 
-  return { data, search }
+  return { data }
 }
 
 // --- local media in the ball -------------------------------------------------
