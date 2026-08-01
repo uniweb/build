@@ -629,6 +629,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'fetcher', siteYml.fetcher)
   setIf(info, 'build', siteYml.build)
   setIf(info, 'search', siteYml.search)
+  // `submit` — where this site's forms send submissions. Same family as
+  // `fetcher`/`search`: the site declares it, the runtime reads it, and it
+  // round-trips verbatim. It has to be listed HERE because this lane is an
+  // explicit allowlist while the bundle lane spreads all of site.yml — without
+  // the line a `submit:` block works on a static host and vanishes silently on
+  // the synced lane, which is the worst shape a config bug can take.
+  setIf(info, 'submit', siteYml.submit)
   // `agents` — the projections opt-out + route exclusions. Carried because the
   // app is a second PUBLISHER of projections and derives them from stored
   // content: without this block it cannot see `agents: false` or

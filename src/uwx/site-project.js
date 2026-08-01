@@ -100,6 +100,11 @@ const INFO_TO_SITE_YML = {
   fetcher: 'fetcher',
   build: 'build',
   search: 'search',
+  // Safe to project back because nothing STAMPS it: `submit` is authored-only,
+  // so a pull can never launder a deploy-derived value into authored config the
+  // way a key carried by both would. A host-supplied destination is resolved at
+  // render time and never enters `info`.
+  submit: 'submit',
   agents: 'agents',
   paths: 'paths',
   data: 'data',

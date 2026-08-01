@@ -464,6 +464,45 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
     expect(yaml.load(readFileSync(join(dest, 'theme.yml'), 'utf8'))).toEqual({ vars: { accent: 'blue' } })
     expect(readFileSync(join(dest, 'head.html'), 'utf8')).toBe('<link rel="icon" href="/f.ico">\n')
   })
+
+  // This lane is an explicit allowlist while the bundle lane spreads all of
+  // site.yml, so a key that reaches the runtime for free on a static host is
+  // dropped in silence here unless it is listed. Both spellings are asserted
+  // because the object form is the one that would survive a `typeof === string`
+  // shortcut in either direction.
+  it.each([
+    ['shorthand string', '/forms'],
+    ['object form', { endpoint: '/forms' }],
+    ['absolute URL', 'https://forms.example.com/intake'],
+  ])('carries site.yml::submit through produce → project (%s)', async (_label, submit) => {
+    const src = join(dir, `src-submit-${_label.replace(/\W/g, '')}`)
+    mkdirSync(src, { recursive: true })
+    writeFileSync(
+      join(src, 'site.yml'),
+      `name: Forms\nfoundation: '@acme/base@2.0.0'\ndefaultLanguage: en\nsubmit: ${JSON.stringify(submit)}\n`
+    )
+
+    const document = await siteProjectToDocument(src)
+    expect(document.info.submit).toEqual(submit)
+
+    const dest = join(dir, `dest-submit-${_label.replace(/\W/g, '')}`)
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({ document, siteRoot: dest })
+
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).submit).toEqual(submit)
+  })
+
+  it('omits submit entirely when the site declares none', async () => {
+    const src = join(dir, 'src-nosubmit')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(join(src, 'site.yml'), "name: No Forms\nfoundation: '@acme/base@2.0.0'\n")
+
+    const document = await siteProjectToDocument(src)
+
+    // Absent, not null — the runtime distinguishes "declared nothing" from a
+    // declaration whose value happens to be empty.
+    expect(document.info).not.toHaveProperty('submit')
+  })
 })
 
 describe('collection declarations — round-trip against the real producer', () => {
