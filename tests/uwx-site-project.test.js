@@ -492,6 +492,28 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
     expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).submit).toEqual(submit)
   })
 
+  /**
+   * `forms:` is what a HOST reports about a site, read by the runtime from the
+   * served payload config. The bundle lane spreads all of site.yml, so writing
+   * it there is the local way to exercise that path without a host — and this
+   * asserts the property that makes doing so safe: the allowlist does not carry
+   * it, so a synced site's `forms` can only have come from its host. If someone
+   * ever adds it to the allowlist "for symmetry", a site file starts
+   * impersonating the host and this fails.
+   */
+  it('does NOT carry site.yml::forms across the sync wire', async () => {
+    const src = join(dir, 'src-forms')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(
+      join(src, 'site.yml'),
+      "name: Mock Host\nfoundation: '@acme/base@2.0.0'\nforms:\n  endpoint: /_submit\n"
+    )
+
+    const document = await siteProjectToDocument(src)
+
+    expect(document.info).not.toHaveProperty('forms')
+  })
+
   it('omits submit entirely when the site declares none', async () => {
     const src = join(dir, 'src-nosubmit')
     mkdirSync(src, { recursive: true })
