@@ -6,8 +6,8 @@ import { assembleDataBall, collectBallAssets, rewriteBallAssets } from '../src/s
 // `@uniweb/core`'s tests/data-paths.test.js.
 import { DATA_DIR } from '@uniweb/core'
 
-// The static-data ball: the schema-less subset of dist/data/** + the whole
-// dist/_search/** index, parsed into one JSON doc for the composite deploy.
+// The static-data ball: the schema-less subset of dist/data/**, parsed into one
+// JSON doc for the composite deploy. Nothing else rides it.
 
 let dist
 function w(rel, body) {
@@ -50,10 +50,13 @@ describe('assembleDataBall', () => {
 
     const ball = await assembleDataBall(dist, ['notes'])
 
-    // `search` ships as an EMPTY map, not dropped: the consumer named that as
-    // its safe path and retires the field itself. What must not survive is any
-    // content in it.
-    expect(ball.search).toEqual({})
+    // The key is gone now, not merely empty. It shipped as `search: {}` for one
+    // release so the consumer's relay stayed a well-formed shape while it still
+    // declared the field; once the consumer retired it (2026-08-01), keeping an
+    // empty key would have been sending into nothing. What must never survive
+    // either way is CONTENT — that is what the two assertions below pin.
+    expect(ball.search).toBeUndefined()
+    expect(Object.keys(ball)).toEqual(['data'])
     expect(JSON.stringify(ball)).not.toContain('pages.json')
     expect(JSON.stringify(ball)).not.toContain('entries')
   })

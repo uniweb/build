@@ -54,8 +54,7 @@ function collectionOf(relPath) {
  * @param {string} distDir - the site's built dist/ directory
  * @param {string[]} [schemalessNames] - collection names with no data schema (from
  *        `emitSyncPackages(...).schemaless`); only these contribute `data`.
- * @returns {Promise<{ data: Object, search: Object }|null>} null when there is nothing
- *          to deliver (no schema-less data AND no search index).
+ * @returns {Promise<{ data: Object }|null>} null when there is nothing to deliver.
  */
 export async function assembleDataBall(distDir, schemalessNames = []) {
   const schemaless = new Set(schemalessNames)
@@ -94,18 +93,23 @@ export async function assembleDataBall(distDir, schemalessNames = []) {
 
   if (Object.keys(data).length === 0) return null
 
-  // `search` ships as a deliberate empty map rather than being dropped, for one
-  // release, because the consumer described THIS as its safe path: "my relay is
-  // harmless while it receives an empty map", and it retires the field as
-  // cleanup once nothing sends content. An absent key is a different shape from
-  // an empty one to a strict deserializer, and a missing required field fails
-  // exactly as loudly as an unknown one — which is how the producer half of
-  // this contract broke pushes earlier the same day, in the other direction.
+  // The `search` key is gone too, and that was the SECOND step of a two-step
+  // retirement, not an afterthought.
   //
-  // So this is not indecision: emitting empty is the announced-and-agreed step,
-  // and dropping the key belongs to the consumer's cleanup, after which this
-  // line goes too.
-  return { data, search: {} }
+  // Step one shipped `search: {}` — content removed, key kept — because an
+  // absent field and an empty one are different shapes to a strict
+  // deserializer, and a missing required field fails exactly as loudly as an
+  // unknown one. (The producer half of this same contract broke pushes earlier
+  // the same day by emitting a key the consumer had not declared. Same failure,
+  // opposite direction.) Step two is this: the consumer retired the field on
+  // 2026-08-01 and said an older CLI still sending it deploys fine, so the key
+  // now has nowhere to land and dropping it is safe in both directions.
+  //
+  // Worth keeping as a shape: **announce, then remove** — the mirror of
+  // "declare, then emit". Neither half of a wire can be changed in one step by
+  // one side, and which side moves first is decided by which direction the
+  // strictness runs.
+  return { data }
 }
 
 // --- local media in the ball -------------------------------------------------
@@ -121,7 +125,7 @@ export async function assembleDataBall(distDir, schemalessNames = []) {
  * Site-root local asset refs anywhere in the ball (`/images/x.png`, `/collections/...`).
  * Built `dist/data` refs are already site-root (the collection processor copied
  * co-located assets to `public/collections/**`), so only `/`-prefixed refs are collected.
- * @param {{data:object,search:object}|null} ball
+ * @param {{data:object}|null} ball
  * @returns {string[]} deduped refs to upload
  */
 export function collectBallAssets(ball) {
@@ -142,9 +146,9 @@ export function collectBallAssets(ball) {
  * Rewrite the ball: replace every local ref the map covers with its serve URL. Pure —
  * returns a NEW ball (the input is reused elsewhere). A ref the map omits (upload
  * failed/skipped) is left untouched — never a broken URL.
- * @param {{data:object,search:object}|null} ball
+ * @param {{data:object}|null} ball
  * @param {Record<string,string>} map - ref → serve URL
- * @returns {{data:object,search:object}|null} a new ball, or the input when there's nothing to do
+ * @returns {{data:object}|null} a new ball, or the input when there's nothing to do
  */
 export function rewriteBallAssets(ball, map) {
   if (!ball || !map || Object.keys(map).length === 0) return ball
