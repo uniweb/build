@@ -50,9 +50,12 @@ describe('assembleDataBall', () => {
 
     const ball = await assembleDataBall(dist, ['notes'])
 
-    expect(ball.search).toBeUndefined()
-    expect(Object.keys(ball)).toEqual(['data'])
+    // `search` ships as an EMPTY map, not dropped: the consumer named that as
+    // its safe path and retires the field itself. What must not survive is any
+    // content in it.
+    expect(ball.search).toEqual({})
     expect(JSON.stringify(ball)).not.toContain('pages.json')
+    expect(JSON.stringify(ball)).not.toContain('entries')
   })
 
   it('returns null when there is no schema-less data — a search index cannot keep it alive', async () => {

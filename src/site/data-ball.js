@@ -94,7 +94,18 @@ export async function assembleDataBall(distDir, schemalessNames = []) {
 
   if (Object.keys(data).length === 0) return null
 
-  return { data }
+  // `search` ships as a deliberate empty map rather than being dropped, for one
+  // release, because the consumer described THIS as its safe path: "my relay is
+  // harmless while it receives an empty map", and it retires the field as
+  // cleanup once nothing sends content. An absent key is a different shape from
+  // an empty one to a strict deserializer, and a missing required field fails
+  // exactly as loudly as an unknown one — which is how the producer half of
+  // this contract broke pushes earlier the same day, in the other direction.
+  //
+  // So this is not indecision: emitting empty is the announced-and-agreed step,
+  // and dropping the key belongs to the consumer's cleanup, after which this
+  // line goes too.
+  return { data, search: {} }
 }
 
 // --- local media in the ball -------------------------------------------------
