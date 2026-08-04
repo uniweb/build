@@ -113,22 +113,50 @@ export function detectFoundationType(foundation, siteRoot) {
     }
   }
 
-  // Catalog registry ref:
-  //   `@org/name@version`  → resolves via the registry CDN.
-  // Link-mode by definition — the foundation lives on the hosting edge and is
-  // loaded at runtime. Surfacing this as `type: 'url'` makes Vite skip the
-  // local-foundation bundling path and use the noop virtual module. Base URL
-  // defaults to the production worker but is overridable via UNIWEB_REGISTRY_URL
-  // for self-hosted / staging.
+  // Catalog registry ref: `@org/name@version`.
+  //
+  // A build does NOT turn this into a URL. Where a foundation is served is the
+  // host's to say — a serve location is READ (from backend discovery, or from an
+  // upload plan's `serve_base`), never reconstructed. `@uniweb/cli`'s
+  // DISCOVERY_DEFAULTS carries no serve-root default for exactly this reason.
+  // A build is offline and backend-optional by design, so it has nothing to ask.
+  //
+  // A ref names a foundation in the Uniweb platform's catalog, and `uniweb
+  // publish` — the verb reserved for that target — has the platform resolve it,
+  // running no vite build. That is one hosting target among many. The others
+  // reach a host through `uniweb deploy --host=<adapter>` or `uniweb export`,
+  // and both need a concrete URL, which the site declares: the runtime accepts
+  // any URL, from any host.
+  //
+  // Until 2026-08-04 this returned `{base}/foundations/{ns}/{name}/{ver}/foundation.js`
+  // against a hardcoded host, overridable only through an env var that did not
+  // match the documented backend selection — so `--backend`, `uniweb login
+  // --backend` and the documented env var all left it pinned — and the artifact
+  // names were the pre-`entry.js` ones the build stopped emitting.
   const orgScopedMatch = /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
   if (orgScopedMatch) {
-    const base = process.env.UNIWEB_REGISTRY_URL || 'https://site-router.uniweb-edge.workers.dev'
-    const [, ns, fn, ver] = orgScopedMatch
-    return {
-      type: 'url',
-      url: `${base}/foundations/${ns}/${fn}/${ver}/foundation.js`,
-      cssUrl: `${base}/foundations/${ns}/${fn}/${ver}/assets/foundation.css`
-    }
+    throw new Error(
+      [
+        `Foundation "${name}" is a catalog ref, and a build cannot resolve it to a URL.`,
+        `Where a foundation is served is the host's to declare, so the build does not guess it.`,
+        ``,
+        `  • Deploying to another host (\`uniweb deploy --host=<adapter>\`), or taking`,
+        `    the build anywhere (\`uniweb export\`)? Declare the served URL in site.yml —`,
+        `    the runtime accepts any URL, from any host:`,
+        ``,
+        `      foundation: https://<host>/<path>/entry.js`,
+        ``,
+        `    or the object form when the stylesheet sits elsewhere:`,
+        ``,
+        `      foundation: { url: 'https://…/entry.js', cssUrl: 'https://…/assets/style.css' }`,
+        ``,
+        `  • Iterating locally?`,
+        `    Reference the workspace foundation by package name.`,
+        ``,
+        `  • Targeting the Uniweb platform?`,
+        `    \`uniweb publish\` has the platform resolve the ref — no build-time URL needed.`
+      ].join('\n')
+    )
   }
 
   // Versionless scoped names (`@org/name`) are valid as *handles* — they
