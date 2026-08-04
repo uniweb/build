@@ -318,15 +318,14 @@ export async function defineSiteConfig(options = {}) {
   // Read site.yml
   const siteConfig = readSiteConfig(siteRoot)
 
-  // Allow callers to override `foundation:` without modifying site.yml on
-  // disk. Used by `uniweb deploy` to substitute a workspace-local file: ref
-  // with the resolved registry ref (`@ns/name@ver`) for the duration of the
-  // deploy build, so the site builds in runtime/link mode against the just-
-  // published artifact instead of bundling the local source.
-  const foundationOverride = process.env.UNIWEB_FOUNDATION_REF
-  if (foundationOverride) {
-    siteConfig.foundation = foundationOverride
-  }
+  // `site.yml` is the only place a site's foundation is declared. A
+  // `UNIWEB_FOUNDATION_REF` env override lived here until 2026-08-04, silently
+  // substituting a different foundation for the duration of a build. It served
+  // the `uniweb deploy` auto-publish flow, which was removed; after that no
+  // command set it, so what remained was an invisible way for a site to be
+  // rendered by code its own config did not name. Removed rather than kept as a
+  // manual escape hatch — which foundation renders a site is exactly the thing
+  // that should never be true-but-unstated.
 
   // Determine base path for deployment (priority: option > env > site.yml)
   // Normalize: ensure leading slash, collapse repeated slashes, add trailing slash for Vite
