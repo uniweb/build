@@ -498,15 +498,72 @@ async function collectLayoutNested(layoutDir, siteRoot) {
   return items
 }
 
+// An extension IS a foundation (same build, same output — it just contributes no
+// Layout or theme vars), so it is DECLARED the same way the primary is: a catalog
+// ref, a URL, or a local name the producer resolves. Ruling, 2026-08-04: "extensions
+// should be delivered like any other foundation."
+//
+// The wire therefore carries whichever the author wrote, never a resolution:
+//   `@org/name@1.2.3`  → { ref }   the host resolves it, exactly as for the primary
+//   `https://…`        → { url }   an explicit URL, any origin
+//   anything else      → { ref }   a local name; `publish` releases it and stamps
+//                                  the pinned `@scope/name@version` over this entry
+//                                  (see injectExtensions in sync-package.js)
+//
+// `$id` is the authored declaration, so an entry keeps its identity across a
+// re-publish even when the ref it resolves to moves.
+//
+// ⚠️ A SITE-RELATIVE url (`/effects/entry.js`) is the self-hosted shape and does not
+// work on a backend-hosted site: the site ships no JS, so nothing serves that path
+// and the request falls through to the SPA shell — 200 with `text/html`, which
+// `import()` then fails to parse. `publish` rejects it with a pointer to the ref
+// form; `export` / `deploy --host` keep working, since there the site does serve
+// its own files.
 function extensionsNested(siteYml) {
   const ext = siteYml.extensions
   if (!Array.isArray(ext)) return []
   const out = []
-  for (const url of ext) {
-    if (typeof url !== 'string') continue // object form deferred (v0)
-    out.push(withIdentity(url, { url }))
+  for (const entry of ext) {
+    const decl = extensionDeclaration(entry)
+    if (decl) out.push(withIdentity(decl.$id, decl.fields))
   }
   return out
+}
+
+/**
+ * One authored `extensions:` entry → its wire fields, or null when unusable.
+ * Exported for the publish-time validator, so "what counts as a URL" is decided
+ * in exactly one place.
+ *
+ * @param {string|{url?: string, ref?: string, name?: string}} entry
+ * @returns {{ $id: string, fields: { url: string } | { ref: string } } | null}
+ */
+export function extensionDeclaration(entry) {
+  if (entry && typeof entry === 'object') {
+    if (typeof entry.url === 'string' && entry.url)
+      return { $id: entry.url, fields: { url: entry.url } }
+    const named = entry.ref || entry.name
+    return typeof named === 'string' && named
+      ? { $id: named, fields: { ref: named } }
+      : null
+  }
+  if (typeof entry !== 'string' || !entry) return null
+  return isExtensionUrl(entry)
+    ? { $id: entry, fields: { url: entry } }
+    : { $id: entry, fields: { ref: entry } }
+}
+
+/** True for declarations that are URLs rather than names — absolute or site-relative. */
+export function isExtensionUrl(decl) {
+  return (
+    typeof decl === 'string' &&
+    (/^https?:\/\//.test(decl) || decl.startsWith('/'))
+  )
+}
+
+/** True only for the site-relative form, which no backend-hosted site can serve. */
+export function isSiteRelativeExtensionUrl(decl) {
+  return typeof decl === 'string' && decl.startsWith('/')
 }
 
 // The collection DECLARATIONS carried inside site-content `info`-adjacent metadata.

@@ -57,6 +57,14 @@ export { defineFoundationConfig } from './foundation/config.js'
 
 // Site config
 export { defineSiteConfig, detectFoundationType } from './site/config.js'
+// Extension declaration helpers — an extension is a foundation and is declared
+// like one, so "is this a URL or a name/ref?" must be decided in ONE place that
+// both the wire projection and the CLI's bring-along/validation agree on.
+export {
+  extensionDeclaration,
+  isExtensionUrl,
+  isSiteRelativeExtensionUrl
+} from './uwx/site.js'
 
 // Foundation source root resolution (reads package.json::main)
 export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'

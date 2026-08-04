@@ -150,9 +150,17 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
   }
 
-  // extensions[] (each `{ $id: url, url }`) → site.yml::extensions (url list).
+  // extensions[] → site.yml::extensions. Each entry carries EITHER `ref` (a
+  // catalog ref or a local name — an extension is a foundation and is declared
+  // like one) OR `url`. Project back whichever is present so a ref survives a
+  // pull instead of being dropped or rewritten into a URL. `$id` is the authored
+  // declaration and is deliberately NOT used here: after a publish that released
+  // a local extension, `ref` is the pinned `@scope/name@version` and is the value
+  // the site should now carry.
   const extensions = Array.isArray(document?.extensions)
-    ? document.extensions.map((e) => e?.url).filter((u) => typeof u === 'string')
+    ? document.extensions
+        .map((e) => (typeof e?.ref === 'string' ? e.ref : e?.url))
+        .filter((u) => typeof u === 'string' && u)
     : []
   if (extensions.length > 0) siteChanges.extensions = extensions
 

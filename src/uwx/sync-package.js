@@ -160,6 +160,11 @@ function rewriteEntityAssets(node, map) {
  * @param {object} [opts.injectInfo]      - deploy-derived `info.*` to stamp on the
  *        site-content document (e.g. `{ data_bundle }`, the static-data ball URL);
  *        wire-only — never authored in site.yml, never projected back on pull.
+ * @param {Object<string,string>} [opts.injectExtensions] - authored extension
+ *        declaration (`$id`) → the pinned `@scope/name@version` to stamp over it.
+ *        `publish` fills this for the site's LOCAL extensions after releasing them;
+ *        the parallel of `info.foundation`, and needed because `extensions` is a
+ *        sibling of `info` rather than a field in it.
  * @param {Object<string,string>} [opts.assetRewrite] - map of local asset ref →
  *        backend serve URL; rewrites the entities' media refs before push (the
  *        deploy's 2nd emit). Absent → no rewrite (the f225 sync path is unchanged).
@@ -208,6 +213,21 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // so a changed bundle URL correctly re-fires the site-content lane.
   if (siteDoc && opts.injectInfo && typeof opts.injectInfo === 'object') {
     siteDoc.info = { ...siteDoc.info, ...opts.injectInfo }
+  }
+  // Same idea one level out: `extensions` is a sibling of `info`, not a field in
+  // it, so a pinned extension ref cannot ride `injectInfo`. `publish` releases a
+  // site's LOCAL extensions and stamps the resulting `@scope/name@version` over
+  // the authored declaration here — the exact parallel of `info.foundation`, and
+  // for the same reason: delivery is version-pinned, so an unpinned local name on
+  // the wire points at code the host cannot serve. Keyed by `$id` (the authored
+  // declaration), so entries the publish didn't touch are left verbatim.
+  if (siteDoc && opts.injectExtensions && Array.isArray(siteDoc.extensions)) {
+    siteDoc.extensions = siteDoc.extensions.map((e) => {
+      const pinned = opts.injectExtensions[e?.$id]
+      if (!pinned) return e
+      const { url: _dropped, ...rest } = e
+      return { ...rest, ref: pinned }
+    })
   }
 
   // Per-item identity. `pages`, `page_sections` and `layout_sections` are all

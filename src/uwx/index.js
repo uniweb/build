@@ -43,6 +43,9 @@ export {
   siteProjectToDocument,
   emitSiteSyncPackage,
   writeSiteEntityUuid,
+  extensionDeclaration,
+  isExtensionUrl,
+  isSiteRelativeExtensionUrl,
 } from './site.js'
 export {
   resolveCollectionsConfig,
