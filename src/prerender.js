@@ -17,6 +17,7 @@ import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
+import { stripBasePath } from './site/extension-urls.js'
 
 /**
  * Resolve an extension URL to a filesystem path for prerender.
@@ -27,7 +28,14 @@ import { detectCiContext } from './hosts/detect-ci-context.js'
  * 2. Project root with dist subdir (dev layout, e.g., project/effects/dist/entry.js)
  * 3. Original URL (absolute or remote — let import() handle it)
  */
-export function resolveExtensionPath(url, distDir, projectRoot) {
+export function resolveExtensionPath(url, distDir, projectRoot, base) {
+  // The payload now carries FINAL, base-resolved URLs (see
+  // site/extension-urls.js), but `dist/` has no base segment — a site deployed
+  // at `/docs/` still writes `dist/effects/entry.js`. Strip the base before
+  // mapping onto the build tree. A URL without the base is returned unchanged,
+  // so a payload produced before this change still resolves.
+  url = stripBasePath(url, base)
+
   // Only resolve URLs that look like root-relative paths
   if (url.startsWith('/')) {
     // Try dist directory first (production: files copied to site/dist/)
@@ -638,7 +646,7 @@ export async function prerenderSite(siteDir, options = {}) {
       for (const ext of extensionSources) {
         try {
           const url = typeof ext === 'string' ? ext : ext.url
-          const extPath = resolveExtensionPath(url, distDir, projectRoot)
+          const extPath = resolveExtensionPath(url, distDir, projectRoot, siteContent.config?.base)
           const extModule = await import(pathToFileURL(extPath).href)
           loadedExtensions.push(extModule)
           onProgress(`  Extension loaded: ${url}`)

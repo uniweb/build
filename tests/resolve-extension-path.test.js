@@ -53,4 +53,24 @@ describe('resolveExtensionPath', () => {
     expect(resolveExtensionPath('/effects/entry.js', join(root, 'site', 'dist'), root)).toBe('/effects/entry.js')
     expect(resolveExtensionPath('https://cdn.example.com/x/entry.js', join(root, 'd'), root)).toBe('https://cdn.example.com/x/entry.js')
   })
+
+  /**
+   * Since 2026-08-04 the payload carries FINAL, base-resolved extension URLs
+   * (the producer applies the deployment base — see site/extension-urls.js), but
+   * `dist/` has no base segment: a site deployed at `/docs/` still writes
+   * `dist/effects/entry.js`. Without stripping, prerender would look for
+   * `dist/docs/effects/entry.js`, find nothing, and silently render every page
+   * of a subdirectory-deployed site without its extension sections.
+   */
+  it('strips the deployment base before mapping onto the build tree', () => {
+    const built = writeFixture('extensions/effects/dist/entry.js')
+    const distDir = join(root, 'site', 'dist')
+    expect(resolveExtensionPath('/docs/effects/entry.js', distDir, root, '/docs/')).toBe(built)
+  })
+
+  it('still resolves a URL that does NOT carry the base (payload built before the change)', () => {
+    const built = writeFixture('extensions/effects/dist/entry.js')
+    const distDir = join(root, 'site', 'dist')
+    expect(resolveExtensionPath('/effects/entry.js', distDir, root, '/docs/')).toBe(built)
+  })
 })

@@ -31,6 +31,7 @@ import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
 import { parseFetchConfig } from './data-fetcher.js'
+import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
 
@@ -2175,6 +2176,13 @@ export async function collectSiteContent(sitePath, options = {}) {
   // what that subpath looks like; that is the host's shape, not ours.
   if (base && base !== '/') {
     siteConfig.base = base
+
+    // Extension module URLs are resolved HERE, not at load time. What reaches
+    // the runtime is final — the loader anchors it to the document origin and
+    // applies no base of its own, so the primary foundation and every extension
+    // resolve by one rule. See site/extension-urls.js for why the producer owns
+    // this. Non-URL entries (registry refs) and absolute URLs pass through.
+    siteConfig.extensions = resolveExtensionUrls(siteConfig.extensions, base)
   }
 
   // Profile selects workspace-root defaults: site.yml → pages/ + page mode +

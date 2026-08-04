@@ -29,6 +29,7 @@ import {
   getStructuralWatchPaths
 } from '../generate-entry.js'
 import { importMapPlugin } from '../import-map-plugin.js'
+import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 
 /**
@@ -506,8 +507,14 @@ export async function defineSiteConfig(options = {}) {
           }
 
           // Extension JS modulepreload (CSS left to runtime — we can't reliably
-          // derive CSS URLs for all extension formats)
-          const extensions = siteConfig.extensions || []
+          // derive CSS URLs for all extension formats).
+          //
+          // Resolved through the SAME helper the payload uses, so the hint and
+          // `config.extensions` cannot disagree. They did: the payload was
+          // base-resolved at load time by the runtime while this emitted the
+          // raw URL, so on a subdirectory deploy the browser preloaded one URL
+          // and then requested another.
+          const extensions = resolveExtensionUrls(siteConfig.extensions, base) || []
           for (const ext of extensions) {
             const url = typeof ext === 'string' ? ext : ext?.url
             if (url) {
@@ -525,12 +532,18 @@ export async function defineSiteConfig(options = {}) {
     })
   }
 
-  // Build foundation config for runtime
-  const foundationConfig = {
+  // Build foundation config for runtime.
+  //
+  // URLs are resolved against the deployment base HERE, because what reaches
+  // the runtime is final — the loader anchors a root-relative URL to the
+  // document origin and applies no base of its own. That is what makes the
+  // primary foundation and every extension follow one rule; they used to
+  // differ. See site/extension-urls.js.
+  const foundationConfig = resolveModuleUrl({
     mode: isRuntimeMode ? 'runtime' : 'bundled',
     url: foundationInfo.url || '/foundation/foundation.js',
     cssUrl: foundationInfo.cssUrl || '/foundation/assets/style.css'
-  }
+  }, base)
 
   return {
     // Base public path for deployment (e.g., '/demos/mysite/')
