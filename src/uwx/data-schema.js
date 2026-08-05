@@ -29,6 +29,14 @@ const TEXT_KINDS = new Set(['string', 'text'])
 // carrying one round-trips as the RAW source string (no ProseMirror conversion).
 const CONTENT_TEXT_FORMATS = new Set(['markdown', 'html'])
 
+// The field an open map's key lowers into. `name` matches the idiom already in use
+// for this shape (the backend's site-content `collections` section), so an open map
+// and a hand-authored row set produce the same wire shape rather than two spellings
+// of one thing. Not configurable on purpose: a second way to spell it would be a
+// vocabulary addition for a collision that does not exist yet — a value schema that
+// declares its own `name` is an error instead, which names the problem precisely.
+const OPEN_MAP_KEY = 'name'
+
 /**
  * A `text` field marked as rich content (`format: markdown` or `html`): the
  * file-based body target. Round-trips as the raw source string — what the retired
@@ -119,7 +127,7 @@ function lowerSectionsForm(sectionsMap, resolve, optResolve) {
   let explicit = null
   let firstSingle = null
   for (const [secName, def] of Object.entries(sectionsMap)) {
-    sections[secName] = lowerSection(def, resolve, optResolve)
+    sections[secName] = lowerSection(def, resolve, optResolve, secName)
     if (def.brief === true) explicit = secName
     if (!firstSingle && (def.kind || 'single') === 'single') firstSingle = secName
   }
@@ -138,7 +146,7 @@ function lowerSectionsForm(sectionsMap, resolve, optResolve) {
 // are type: section"); `nestable` → `self_nesting`; `append_only` (insert-only
 // records) passes through; authored cross-cutting `constraints` pass through as a
 // bare array. Leaves and nested sections share one ordered `fields:` namespace.
-function lowerSection(def, resolve, optResolve) {
+function lowerSection(def, resolve, optResolve, path = '') {
   const out = {}
   if ((def.kind || 'single') === 'multi') out.multiple = true
   if (def.brief === true) out.brief = true
@@ -147,14 +155,29 @@ function lowerSection(def, resolve, optResolve) {
 
   const fields = {}
   for (const [key, rawField] of Object.entries(def.fields || {})) {
-    fields[key] = lowerField(rawField, resolve, optResolve)
+    fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key)
   }
   // Explicit child sections (sections-form, e.g. under a binder) → `type: section`
   // fields, in the same ordered namespace as the leaves.
   for (const [childName, childDef] of Object.entries(def.sections || {})) {
-    fields[childName] = { type: 'section', ...lowerSection(childDef, resolve, optResolve) }
+    const childPath = path ? `${path}/${childName}` : childName
+    fields[childName] = {
+      type: 'section',
+      ...lowerSection(childDef, resolve, optResolve, childPath)
+    }
   }
-  if (Object.keys(fields).length) out.fields = fields
+  // A section with neither leaves nor sub-sections carries nothing, and is not a
+  // valid section on this wire by either party's reckoning. Refusing here fails at
+  // the schema author's screen; emitting it fails in a consumer's restore, which is
+  // the last possible moment and the wrong screen (2026-08-04: `@std/form` shipped
+  // exactly this, because `values:` had no lowering and silently produced no fields).
+  if (!Object.keys(fields).length) {
+    throw new Error(
+      `Data schema: section '${path || '(root)'}' declares no fields and no sub-sections. ` +
+        `A section must carry at least one leaf or child section.`
+    )
+  }
+  out.fields = fields
   if (Array.isArray(def.constraints) && def.constraints.length) out.constraints = def.constraints
   return out
 }
@@ -166,17 +189,69 @@ function lowerSection(def, resolve, optResolve) {
 //   array of ref      → entity_ref + multiple
 //   array of scalar   → the scalar kind + multiple
 //   ref               → entity_ref (model by name)
-function lowerField(rawField, resolve, optResolve) {
+function lowerField(rawField, resolve, optResolve, path = '') {
   const field = asField(rawField)
   const type = field.type
 
   if (type === 'object') {
-    return { type: 'section', ...lowerSection({ kind: 'single', fields: field.fields }, resolve, optResolve) }
+    // An OPEN MAP (`values:`) is ROWS, not a singleton. Its keys belong to the
+    // author, which makes them data — so the map lowers to a `multi` section whose
+    // key field carries what was the object key, with a section-scoped uniqueness
+    // rule making that key the row's identity. This is the same shape `array of
+    // object` already lowers to, and the idiom the backend's own site-content
+    // `collections` section uses; no new wire construct is involved.
+    //
+    // Identity is the KEY, never row position — a round-trip that rebuilds the map
+    // from order looks correct and drifts the first time rows are reordered.
+    // Authoring order is still preserved into row order, because for a form the
+    // field order is what the visitor sees.
+    if (field.values !== undefined) {
+      const value = asField(field.values)
+      if (value.type !== 'object' || !value.fields) {
+        throw new Error(
+          `Data schema: open map at '${path}' declares 'values' that is not an object with ` +
+            `'fields'. An open map lowers to rows, and a row needs declared columns.`
+        )
+      }
+      if (value.fields[OPEN_MAP_KEY]) {
+        throw new Error(
+          `Data schema: open map at '${path}' has a value field named '${OPEN_MAP_KEY}', which ` +
+            `is the field the map's key lowers into. Rename that field.`
+        )
+      }
+      return {
+        type: 'section',
+        ...lowerSection(
+          {
+            kind: 'multi',
+            // `translatable: false` is load-bearing, not tidiness: a string field is
+            // localized by default, and a localized key could differ per locale —
+            // which would destroy the identity the key exists to carry. The key is an
+            // identifier, never content.
+            fields: {
+              [OPEN_MAP_KEY]: { type: 'string', required: true, translatable: false },
+              ...value.fields
+            },
+            constraints: [{ kind: 'unique_field', field: OPEN_MAP_KEY, scope: 'section' }]
+          },
+          resolve,
+          optResolve,
+          path
+        )
+      }
+    }
+    return {
+      type: 'section',
+      ...lowerSection({ kind: 'single', fields: field.fields }, resolve, optResolve, path)
+    }
   }
   if (type === 'array') {
     const items = field.items ? asField(field.items) : null
     if (items && items.type === 'object') {
-      return { type: 'section', ...lowerSection({ kind: 'multi', fields: items.fields }, resolve, optResolve) }
+      return {
+        type: 'section',
+        ...lowerSection({ kind: 'multi', fields: items.fields }, resolve, optResolve, path)
+      }
     }
     if (items && items.type === 'ref') {
       // Multi-valued reference — the per-field `multiple` flag (the `array` Kind

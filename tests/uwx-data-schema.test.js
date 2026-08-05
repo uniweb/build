@@ -270,3 +270,121 @@ describe('toDataSchemaDeclaration — guards', () => {
     ).toThrow(/richtext/)
   })
 })
+
+/**
+ * An OPEN MAP (`values:`) — an object whose keys belong to the author and whose
+ * values share one schema.
+ *
+ * It lowers to ROWS: a `multi` section whose key field carries what was the object
+ * key, with a section-scoped uniqueness rule making that key the row's identity.
+ * That is the same shape `array of object` already lowers to, and the idiom the
+ * store already uses for this (its site-content `collections` section), so an open
+ * map and a hand-authored row set produce one wire shape rather than two spellings.
+ *
+ * Until 2026-08-05 `values:` had no lowering at all: the object branch read
+ * `field.fields`, which an open map does not declare, so the section was emitted
+ * with no fields. `@std/form` shipped that way and a consumer's validator rejected
+ * it at restore — correctly, and at the last possible moment.
+ */
+describe('toDataSchemaDeclaration — open map (values:)', () => {
+  const decl = lower(
+    {
+      name: 'form',
+      fields: {
+        title: { type: 'string' },
+        fields: {
+          type: 'object',
+          required: true,
+          values: {
+            type: 'object',
+            fields: {
+              type: { type: 'string', required: true },
+              label: { type: 'string' },
+              required: { type: 'bool' }
+            }
+          }
+        }
+      }
+    },
+    '@std/form',
+    '@std/form'
+  )
+  const map = decl.sections.form.fields.fields
+
+  test('lowers to a nested section, not a leaf', () => {
+    expect(map.type).toBe('section')
+  })
+
+  test('the section is MULTI — an open map is rows, not a singleton', () => {
+    // The original bug: lowered as `kind: single`, which is a collection lowered
+    // as one record.
+    expect(map.multiple).toBe(true)
+  })
+
+  test('the map key becomes a required `name` field, first in the namespace', () => {
+    expect(Object.keys(map.fields)[0]).toBe('name')
+    expect(map.fields.name.type).toBe('string')
+    expect(map.fields.name.required).toBe(true)
+  })
+
+  test('the key is NOT localized — a per-locale key would destroy identity', () => {
+    // String fields localize by default. A key that differed per locale would mean
+    // the same row is two rows, which is exactly what the key exists to prevent.
+    expect(map.fields.name.localized).toBeUndefined()
+  })
+
+  test('the key carries a section-scoped uniqueness rule', () => {
+    expect(map.constraints).toEqual([
+      { kind: 'unique_field', field: 'name', scope: 'section' }
+    ])
+  })
+
+  test('the value schema becomes ordinary declared fields beside the key', () => {
+    // The point of rows over `type: json`: every value field stays a real field the
+    // store validates, rather than an opaque blob.
+    expect(Object.keys(map.fields)).toEqual(['name', 'type', 'label', 'required'])
+    expect(map.fields.type.required).toBe(true)
+    expect(map.fields.required.type).toBe('bool')
+  })
+
+  test('a value schema declaring its own `name` is an error, not a silent overwrite', () => {
+    expect(() =>
+      lower(
+        {
+          name: 'x',
+          fields: {
+            m: {
+              type: 'object',
+              values: { type: 'object', fields: { name: { type: 'string' } } }
+            }
+          }
+        },
+        '@t/x',
+        '@t/x'
+      )
+    ).toThrow(/value field named 'name'/)
+  })
+
+  test('`values` that is not an object with fields is an error — a row needs columns', () => {
+    expect(() =>
+      lower(
+        { name: 'x', fields: { m: { type: 'object', values: { type: 'string' } } } },
+        '@t/x',
+        '@t/x'
+      )
+    ).toThrow(/lowers to rows/)
+  })
+})
+
+/**
+ * A section with neither leaves nor sub-sections carries nothing. Emitting one is
+ * what let `@std/form` reach a consumer's restore in a state no producer should
+ * have shipped; refusing here moves that to the schema author's screen.
+ */
+describe('toDataSchemaDeclaration — leafless sections are refused', () => {
+  test('an empty section throws, naming the path', () => {
+    expect(() =>
+      lower({ name: 'x', sections: { empty: { fields: {} } } }, '@t/x', '@t/x')
+    ).toThrow(/section 'empty' declares no fields/)
+  })
+})
