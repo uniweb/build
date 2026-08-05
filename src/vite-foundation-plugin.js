@@ -47,21 +47,22 @@ let _buildingSSRBundle = false
  * Emit dist/runtime-pin.json declaring the @uniweb/runtime version this
  * foundation was built against.
  *
- * ⛔ **NOTHING READS IT** — not this build, not the CLI, and no serving lane
- * we have checked (2026-08-04, confirmed again 2026-08-06). This header
- * previously said a server-side isolate read the pin to pick which runtime to
- * side-load, and that a "semver resolver" applied the policy. Neither existed.
- * The claim had also reached four documentation surfaces before anyone checked
- * it against the consumers, which is the cost of describing a design as though
- * it had shipped.
+ * ⛔ **NOTHING ENFORCES IT.** `uniweb register` reads the pin and carries it
+ * with the foundation (as `info.runtime`), so the floor reaches a party that
+ * could act on it — but no lane checks it yet. This header previously said a
+ * server-side isolate read the pin to pick which runtime to side-load, and that
+ * a "semver resolver" applied the policy. Neither existed, and for a while the
+ * pin was written and read by nothing at all. The wrong version had reached
+ * four documentation surfaces before anyone checked it against the consumers,
+ * which is the cost of describing a design as though it had shipped.
  *
  * The pin is a **compatibility floor**, not a selector, and it cannot be a
  * selector: a site loads a primary foundation plus N extensions, each emitting
  * its own pin, while a site has exactly one runtime — pins are plural, the
- * choice is singular. The selector is `site.yml::runtime`. The pin's designed
- * use is publish-time VALIDATION (is the selected runtime inside every
- * foundation's compatible interval?), which is producer-side and not yet
- * implemented.
+ * choice is singular. The selector is `site.yml::runtime`. The pin's use is
+ * VALIDATION — is a site's runtime at or above max() of every loaded
+ * foundation's floor? — which belongs wherever all of those foundations are
+ * held, not here: this build sees one foundation.
  *
  * Reads the resolved version from the foundation's node_modules/@uniweb/
  * runtime/package.json so the pin reflects what was actually linked at
@@ -70,7 +71,9 @@ let _buildingSSRBundle = false
  *
  * Silently no-ops when @uniweb/runtime isn't resolvable (e.g., the
  * foundation depends on the runtime via a workspace alias that puts it
- * elsewhere). Nothing requires the pin, so omitting it is harmless.
+ * elsewhere). Nothing breaks without it — but note the absence means the
+ * foundation states NO floor, and "unknown" is not "unconstrained": a floor
+ * nobody declared cannot be shown to be satisfied.
  *
  * Optional foundation-author override: a `uniweb.runtimePolicy` field in the
  * foundation's own package.json is recorded alongside the runtime version,
