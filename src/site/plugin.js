@@ -52,6 +52,7 @@ import { processCollections, writeCollectionFiles } from './collection-processor
 import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { FONT_LINKS_MARKER } from './head-markers.js'
+import { collectExtensionAssets } from './emit-extensions.js'
 
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
@@ -1464,6 +1465,25 @@ export function siteContentPlugin(options = {}) {
       // markdown (retrieval). Free and on by default; a site opts out under
       // `agents:` in site.yml.
       emitProjections.call(this, finalContent)
+
+      // A site-relative extension (`/effects/entry.js`) is served from the
+      // site's OWN origin, so the site's build is what has to put it there.
+      // Without this the build succeeds, prerender renders the extension's
+      // sections from the workspace, and the browser then 404s and replaces
+      // them with `Component not found` on hydration.
+      const { emit, unresolved } = collectExtensionAssets(
+        finalContent.config?.extensions,
+        resolve(sitePath)
+      )
+      for (const asset of emit) {
+        this.emitFile({ type: 'asset', fileName: asset.fileName, source: asset.source })
+      }
+      for (const url of unresolved) {
+        this.warn(
+          `Extension '${url}' is site-relative but no built extension was found for it. ` +
+            `The site will 404 on it at runtime — build the extension, or reference it by URL.`
+        )
+      }
     },
 
     closeBundle() {
