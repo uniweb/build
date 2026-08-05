@@ -152,11 +152,16 @@ function lowerSection(def, resolve, optResolve, path = '') {
   if (def.brief === true) out.brief = true
   // Display prose IS a section key — the registry stores it and keys it for
   // translation as `section.<name>.label` / `.description` (confirmed 2026-08-05).
-  // Note the asymmetry with a LEAF, which is the opposite way round: a leaf's
-  // `label`/`description` are accepted by the registry's parser and then DROPPED,
-  // because a field declaration has no slot for prose — field labels live in
-  // translation rows (`section.<name>.field.<key>.label`), which this producer
-  // does not emit today. So section prose arrives; leaf prose does not.
+  // A LEAF is stored differently: its `label`/`description` are accepted by the
+  // registry's parser and then dropped FROM THE FIELD DECLARATION, because a
+  // field declaration has no slot for prose — field labels live in translation
+  // rows keyed `section.<name>.field.<key>.label`. Whether the parser relocates
+  // our inline values into those rows (as it relocates `enum` into a `one_of`
+  // constraint) or discards them is not stated, and it is the difference between
+  // authored field prose reaching the app and not. We keep emitting it either
+  // way: it is accepted, so there is no failure mode, and relocation needs no
+  // producer change. Do not restate this as "leaf prose is lost" — that reading
+  // was asserted here once on the strength of the word "dropped" alone.
   if (def.label) out.label = def.label
   if (def.description) out.description = def.description
   if (def.nestable) out.self_nesting = true
