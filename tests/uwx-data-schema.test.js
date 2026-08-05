@@ -77,7 +77,150 @@ describe('toDataSchemaDeclaration — fields-form (flat shorthand)', () => {
   })
 
   it('lowers array-of-scalar → the scalar kind + multiple (no `array` type)', () => {
-    expect(fields().tags).toEqual({ type: 'string', multiple: true })
+    // `localized` is not incidental here: a list of strings is text, and text
+    // localizes unless opted out. It was absent until multi-valued leaves stopped
+    // taking a shortcut past the attribute block — see the metadata describe below.
+    expect(fields().tags).toEqual({ type: 'string', multiple: true, localized: true })
+  })
+})
+
+/**
+ * A multi-valued field is still a LEAF, and carries what a leaf carries.
+ *
+ * Every one of these used to be dropped. `lowerField` emitted the attribute block
+ * only on its final fall-through, and each structural branch returned before
+ * reaching it — so `{ type: string, many: true, required: true, enum: [...] }`
+ * reached the wire as a bare `{ type: 'string', multiple: true }`: no closed set,
+ * no format validation, no localization, not required.
+ *
+ * The giveaway was a split between the two reference kinds. `item_ref` fell
+ * through and kept its label/description/required; `entity_ref` returned early and
+ * lost them. Nothing had decided that — the control flow had.
+ *
+ * These are asserted per attribute rather than as one whole-object comparison, so
+ * a future regression names the attribute it dropped.
+ */
+describe('toDataSchemaDeclaration — a multi-valued leaf keeps its attributes', () => {
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+
+  it('keeps label, description and required', () => {
+    expect(field({ type: 'string', many: true, required: true, label: 'Tags', description: 'D' })).toEqual({
+      type: 'string',
+      multiple: true,
+      label: 'Tags',
+      description: 'D',
+      required: true,
+      localized: true,
+    })
+  })
+
+  it('keeps a closed set — a multi-valued enum still narrows', () => {
+    expect(field({ type: 'string', many: true, enum: ['a', 'b'] })).toEqual({
+      type: 'string',
+      multiple: true,
+      enum: ['a', 'b'],
+    })
+  })
+
+  it('keeps a value-validator format — a list of emails is still validated', () => {
+    expect(field({ type: 'string', many: true, format: 'email' })).toEqual({
+      type: 'string',
+      multiple: true,
+      format: 'email',
+    })
+  })
+
+  it('localizes a list of text, and honours translatable: false', () => {
+    // `@std/scene` authors `tags` with `translatable: false`. That declaration was
+    // a no-op while lists never localized at all — which is the evidence that the
+    // author expected the default to be the other way.
+    expect(field({ type: 'string', many: true }).localized).toBe(true)
+    expect(field({ type: 'string', many: true, translatable: false }).localized).toBeUndefined()
+  })
+
+  it('does not localize a machine-ish list (enum or value-validator format)', () => {
+    expect(field({ type: 'string', many: true, enum: ['a'] }).localized).toBeUndefined()
+    expect(field({ type: 'string', many: true, format: 'url' }).localized).toBeUndefined()
+  })
+
+  it('refuses a stale `richtext` kind even when it is a list', () => {
+    // Bypasses the normalizer deliberately, as the sibling guard test does: the
+    // resolver folds `richtext` to json + format: prosemirror, so a raw kind only
+    // survives in a stale PREBUILT schema.json handed straight to the lowering.
+    //
+    // The single-value case was already guarded. The list case was not — the old
+    // array branch read `items.type` and returned without consulting the guard, so
+    // the retired kind reached the wire as long as it was multi-valued.
+    expect(() =>
+      toDataSchemaDeclaration({ fields: { body: { type: 'array', items: { type: 'richtext' } } } }, { name: '@acme/x' })
+    ).toThrow(/richtext/)
+  })
+})
+
+describe('toDataSchemaDeclaration — a reference keeps its attributes', () => {
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+
+  it('entity_ref carries label, description and required', () => {
+    expect(field({ ref: '@/person', required: true, label: 'Author', description: 'D' })).toEqual({
+      type: 'entity_ref',
+      label: 'Author',
+      description: 'D',
+      required: true,
+      model: '@acme/person',
+    })
+  })
+
+  it('a multi-valued entity_ref carries them too', () => {
+    expect(field({ ref: '@/person', many: true, required: true, label: 'Authors' })).toEqual({
+      type: 'entity_ref',
+      multiple: true,
+      label: 'Authors',
+      required: true,
+      model: '@acme/person',
+    })
+  })
+
+  it('the two reference kinds agree', () => {
+    // The asymmetry that exposed the bug: same declaration, one kind kept the
+    // attributes and the other silently dropped them.
+    const entity = field({ ref: '@/person', required: true, label: 'L', description: 'D' })
+    const item = field({ type: 'string', options: '@/colors', required: true, label: 'L', description: 'D' })
+    const attrs = (f) => ({ label: f.label, description: f.description, required: f.required })
+    expect(attrs(entity)).toEqual(attrs(item))
+  })
+
+  it('a reference is never localized — the target localizes itself', () => {
+    expect(field({ ref: '@/person' }).localized).toBeUndefined()
+  })
+})
+
+describe('toDataSchemaDeclaration — a SECTION-shaped field still drops them', () => {
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+
+  /**
+   * Pinned as a KNOWN GAP, not as desired behaviour.
+   *
+   * A section body's documented shape is `multiple` / `brief` / `self_nesting` /
+   * `append_only` / `constraints` / `fields`. Whether the wire accepts `label` /
+   * `description` / `required` on a section is the consumer's contract to state,
+   * so the producer does not invent the keys. Until that is answered, an authored
+   * `required: true` on a nested object or a list of records is dropped —
+   * `@std/publication`'s `authors` is exactly that case.
+   *
+   * If the answer arrives, this test should fail and be replaced.
+   */
+  it('a nested object drops label/description/required', () => {
+    expect(field({ type: 'object', required: true, label: 'L', description: 'D', fields: { a: 'string' } })).toEqual({
+      type: 'section',
+      fields: { a: { type: 'string', localized: true } },
+    })
+  })
+
+  it('a list of records drops them as well', () => {
+    const out = field({ type: 'object', many: true, required: true, label: 'L', fields: { a: 'string' } })
+    expect(out.multiple).toBe(true)
+    expect(out).not.toHaveProperty('required')
+    expect(out).not.toHaveProperty('label')
   })
 })
 

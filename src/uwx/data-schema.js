@@ -182,13 +182,32 @@ function lowerSection(def, resolve, optResolve, path = '') {
   return out
 }
 
-// Lower one field to its declaration value. Leaves carry their kind + attributes;
-// structural kinds become sections or multi-valued leaves:
-//   object           → a single nested section
+// Lower one field to its declaration value:
+//   object            → a single nested section
 //   array of object   → a multi nested section
-//   array of ref      → entity_ref + multiple
-//   array of scalar   → the scalar kind + multiple
-//   ref               → entity_ref (model by name)
+//   array of ref      → entity_ref + multiple      ┐
+//   array of scalar   → the scalar kind + multiple ├─ leaf-shaped: lowerLeaf
+//   ref               → entity_ref (model by name) │
+//   scalar            → the kind + its attributes  ┘
+//
+// Every LEAF-SHAPED output goes through `lowerLeaf`, which is the whole point of
+// the split: the field attributes (`label` / `description` / `required`, plus
+// `enum` / `format` / `localized`) are emitted in exactly one place, so a kind
+// cannot quietly miss them. They used to be emitted inline at the end of this
+// function, which each structural branch returned before reaching — so a
+// multi-valued leaf reached the wire as a bare `{ type, multiple }`, losing its
+// closed set, its format validation and its localization, and an `entity_ref`
+// lost its label/description/required while `item_ref` (which fell through)
+// kept them. That asymmetry between the two reference kinds is what gave the
+// bug away: nothing had decided it, the control flow had.
+//
+// SECTION-shaped outputs (`object`, `array of object`) still carry none of
+// those attributes. That is NOT settled — a section body's documented shape is
+// `multiple` / `brief` / `self_nesting` / `append_only` / `constraints` /
+// `fields`, so whether the wire accepts `label` / `description` / `required` on
+// a section is the consumer's contract to state, not ours to assume. Until it
+// does, an authored `required: true` on a nested object or a list of records is
+// still dropped here. `@std/publication`'s `authors` is exactly that case.
 function lowerField(rawField, resolve, optResolve, path = '') {
   const field = asField(rawField)
   const type = field.type
@@ -253,42 +272,63 @@ function lowerField(rawField, resolve, optResolve, path = '') {
         ...lowerSection({ kind: 'multi', fields: items.fields }, resolve, optResolve, path)
       }
     }
-    if (items && items.type === 'ref') {
-      // Multi-valued reference — the per-field `multiple` flag (the `array` Kind
-      // that once forced a child multi section is retired).
-      const out = { type: 'entity_ref', multiple: true }
-      if (items.ref) out.model = resolve(items.ref)
-      return out
-    }
-    // Array of scalars → a multi-valued leaf.
-    return { type: items ? items.type : 'string', multiple: true }
-  }
-  if (type === 'ref') {
-    const out = { type: 'entity_ref' }
-    if (field.ref) out.model = resolve(field.ref)
-    return out
+    // A multi-valued LEAF or REFERENCE. `normalizeField` split this field in two
+    // when it expanded `many: true` — collection-level metadata (`required`,
+    // `label`, `description`, `translatable`) stayed on the array, the
+    // type-bearing attributes (`type`, `ref`, `options`, `enum`, `format`) moved
+    // to `items` — so rejoin the halves and lower them as one leaf carrying
+    // `multiple: true`. Reading only `items.type` here is what silently dropped
+    // both halves' attributes; the rejoin is the exact inverse of the split.
+    const { items: _items, ...collection } = field
+    return lowerLeaf(
+      { ...collection, ...items, type: items ? items.type : 'string' },
+      resolve,
+      optResolve,
+      { multiple: true }
+    )
   }
 
-  // A leaf (scalar) kind. `richtext` is NOT a kind — it is the author alias for a
-  // ProseMirror document (`json` + `format: prosemirror`), normalized upstream in
-  // resolve-data-schema.js, so normalized IR never carries a raw `richtext` kind. The
-  // only way one could reach here is a STALE prebuilt schema.json (a foundation built
-  // before the 2026-06-02 kind retirement and loaded from dist/meta/schema.json without
-  // re-resolving). Fail locally — rebuild the foundation — rather than ship a kind the
-  // backend rejects.
-  if (type === 'richtext') {
+  return lowerLeaf(field, resolve, optResolve)
+}
+
+// Lower a LEAF-SHAPED field — a scalar, a reference (`entity_ref`), or a curated
+// picklist (`item_ref`) — with or without `multiple`. The single place field
+// attributes are emitted, so every leaf-shaped kind carries the same set.
+function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
+  const leafType = field.type
+
+  // `richtext` is NOT a kind — it is the author alias for a ProseMirror document
+  // (`json` + `format: prosemirror`), normalized upstream in resolve-data-schema.js,
+  // so normalized IR never carries a raw `richtext` kind. The only way one reaches
+  // here is a STALE prebuilt schema.json (a foundation built before the 2026-06-02
+  // kind retirement and loaded from dist/meta/schema.json without re-resolving).
+  // Fail locally — rebuild the foundation — rather than ship a kind the backend
+  // rejects. (Routing multi-valued leaves through here closes a hole: the old
+  // array branch never consulted this guard, so `richtext` could reach the wire
+  // as long as it was a list.)
+  if (leafType === 'richtext') {
     throw new Error(
       'This foundation carries the retired `richtext` kind in its built schema — ' +
         'rebuild it (`richtext` is now json + format: prosemirror).'
     )
   }
-  const leafType = type
   const leafFormat = field.format
 
   const out = { type: leafType }
+  if (multiple) out.multiple = true
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
   if (field.required) out.required = true
+
+  // A reference to a whole entity, hydrating to the target's brief. It is a
+  // FIELD, so it carries field attributes — the same ones `item_ref` below has
+  // always carried. Never localized: the text a reader sees belongs to the
+  // referenced entity, which localizes on its own.
+  if (leafType === 'ref') {
+    out.type = 'entity_ref'
+    if (field.ref) out.model = resolve(field.ref)
+    return out
+  }
 
   // A curated picklist is an item_ref (machine-ish — never localized).
   if (field.options !== undefined) {
