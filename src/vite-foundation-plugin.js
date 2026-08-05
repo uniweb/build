@@ -45,9 +45,23 @@ let _buildingSSRBundle = false
 
 /**
  * Emit dist/runtime-pin.json declaring the @uniweb/runtime version this
- * foundation was built against. Read by the edge isolate (under the
- * Strategy S split-bundle path) to decide which runtime/{ver}/ssr.js to
- * side-load from R2.
+ * foundation was built against.
+ *
+ * ⛔ **NOTHING READS IT** — not this build, not the CLI, and no serving lane
+ * we have checked (2026-08-04, confirmed again 2026-08-06). This header
+ * previously said a server-side isolate read the pin to pick which runtime to
+ * side-load, and that a "semver resolver" applied the policy. Neither existed.
+ * The claim had also reached four documentation surfaces before anyone checked
+ * it against the consumers, which is the cost of describing a design as though
+ * it had shipped.
+ *
+ * The pin is a **compatibility floor**, not a selector, and it cannot be a
+ * selector: a site loads a primary foundation plus N extensions, each emitting
+ * its own pin, while a site has exactly one runtime — pins are plural, the
+ * choice is singular. The selector is `site.yml::runtime`. The pin's designed
+ * use is publish-time VALIDATION (is the selected runtime inside every
+ * foundation's compatible interval?), which is producer-side and not yet
+ * implemented.
  *
  * Reads the resolved version from the foundation's node_modules/@uniweb/
  * runtime/package.json so the pin reflects what was actually linked at
@@ -56,13 +70,11 @@ let _buildingSSRBundle = false
  *
  * Silently no-ops when @uniweb/runtime isn't resolvable (e.g., the
  * foundation depends on the runtime via a workspace alias that puts it
- * elsewhere). The edge resolver treats the absence of a pin as the
- * legacy single-bundle path, so omitting the pin is harmless during the
- * dual-mode window.
+ * elsewhere). Nothing requires the pin, so omitting it is harmless.
  *
- * Optional foundation-author override: a `uniweb.runtimePolicy` field
- * in the foundation's own package.json gets recorded alongside the
- * runtime version so the registry's semver resolver can apply it.
+ * Optional foundation-author override: a `uniweb.runtimePolicy` field in the
+ * foundation's own package.json is recorded alongside the runtime version,
+ * declaring the author's intent for the validation above.
  *
  * @param {string} outDir - dist/ directory to write to.
  * @param {string} projectRoot - foundation project root (where package.json lives).
@@ -555,11 +567,9 @@ export function foundationBuildPlugin(options = {}) {
       // site build's theme.css — this is harmless redundancy there.
       await emitFoundationVarsCss(outDir, schema)
 
-      // Emit runtime-pin.json so the edge isolate (under Strategy S) can
-      // side-load the matching runtime/{ver}/ssr.js. Lands silently before
-      // the dual-mode resolver ships; foundations published in the dual-mode
-      // window already have the pin and start using the split-bundle path
-      // automatically once the edge is updated.
+      // Record which @uniweb/runtime this build linked against. A compatibility
+      // floor for a validation step that does not exist yet, and read by nothing
+      // today — see emitRuntimePin's header before assuming otherwise.
       await emitRuntimePin(outDir, resolvedRoot)
 
       // Emit dist/entry-ssr.js — the single-file SSR twin of the (code-split)
