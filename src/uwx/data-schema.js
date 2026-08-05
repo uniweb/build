@@ -408,6 +408,13 @@ function sectionAttrsFromField(field) {
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
   if (Array.isArray(field.constraints) && field.constraints.length) out.constraints = field.constraints
+  // `tree` (→ `self_nesting`) and `append_only` describe how a list of records
+  // behaves, so they belong to the section too. Same silent-drop as `constraints`
+  // had: a list authored as a FIELD could not be a tree or append-only, while the
+  // identical thing in `sections:` form could. `self_nesting` is valid on a nested
+  // section, not only a top-level one (backend, 2026-08-05).
+  if (field.nestable) out.nestable = true
+  if (field.append_only) out.append_only = true
   return out
 }
 

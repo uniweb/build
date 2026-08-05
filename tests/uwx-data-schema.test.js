@@ -319,6 +319,58 @@ describe('toDataSchemaDeclaration — a section-shaped field carries its constra
   })
 })
 
+/**
+ * `tree` and `append_only` on a section-shaped field — the same silent drop as
+ * `constraints`, found while checking a stale claim that `self_nesting` was
+ * top-level-only (it is not — a nested self-nesting section is shipped in one of
+ * the registry's own system Models).
+ *
+ * A list of records authored as a FIELD could not be a tree or append-only, while
+ * the identical thing in `sections:` form could. Nothing decided that either.
+ */
+describe('toDataSchemaDeclaration — a section-shaped field carries tree and append_only', () => {
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+
+  it('`tree` becomes self_nesting on the section', () => {
+    const out = field({ type: 'object', many: true, tree: true, fields: { a: 'string' } })
+    expect(out).toMatchObject({ type: 'section', multiple: true, self_nesting: true })
+  })
+
+  it('`append_only` carries', () => {
+    expect(field({ type: 'object', many: true, append_only: true, fields: { a: 'string' } }).append_only).toBe(true)
+  })
+
+  it('both together, alongside the other section attributes', () => {
+    const out = field({
+      type: 'object',
+      many: true,
+      tree: true,
+      append_only: true,
+      description: 'D',
+      constraints: [{ kind: 'min_items', value: 1 }],
+      fields: { a: 'string' },
+    })
+    expect(out).toMatchObject({
+      type: 'section',
+      multiple: true,
+      self_nesting: true,
+      append_only: true,
+      description: 'D',
+      constraints: [{ kind: 'min_items', value: 1 }],
+    })
+  })
+
+  it('a nested section in the sections-form still self-nests', () => {
+    // Guards the case the stale doc claimed was invalid.
+    const decl = lower(
+      { sections: { root: { sections: { kids: { many: true, tree: true, fields: { a: 'string' } } } } } },
+      '@/y',
+      '@acme/y'
+    )
+    expect(decl.sections.root.fields.kids.self_nesting).toBe(true)
+  })
+})
+
 describe('toDataSchemaDeclaration — json + format: prosemirror (content fields)', () => {
   const decl = lower(
     {
