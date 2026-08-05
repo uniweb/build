@@ -300,9 +300,22 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     // to `items` — so rejoin the halves and lower them as one leaf carrying
     // `multiple: true`. Reading only `items.type` here is what silently dropped
     // both halves' attributes; the rejoin is the exact inverse of the split.
+    //
+    // An UNTYPED array (`items` omitted — the authoring format allows it) becomes
+    // `json`, not `string`. It used to invent `string`, which is a claim about the
+    // elements that the author never made and that is wrong the moment the list
+    // holds anything else: `@std/form`'s `enum` is documented as "bare strings
+    // AND/OR { value, label }", and it was reaching the registry declared as a
+    // list of strings. `json` is this vocabulary's word for an opaque structured
+    // value, which is exactly what an undeclared element type is. Declaring
+    // `items:` remains the way to say something stronger.
+    //
+    // Note the local checker is unaffected and still stricter: `validateItem`
+    // works on the IR, where the field is `type: array`, so it verifies the value
+    // IS a list. Only what the registry is told changes.
     const { items: _items, ...collection } = field
     return lowerLeaf(
-      { ...collection, ...items, type: items ? items.type : 'string' },
+      { ...collection, ...items, type: items ? items.type : 'json' },
       resolve,
       optResolve,
       { multiple: true }

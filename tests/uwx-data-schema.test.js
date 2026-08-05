@@ -143,6 +143,33 @@ describe('toDataSchemaDeclaration — a multi-valued leaf keeps its attributes',
     expect(field({ type: 'string', many: true, format: 'url' }).localized).toBeUndefined()
   })
 
+  it('an UNTYPED array becomes json, not an invented `string`', () => {
+    // The authoring format allows an array with no declared `items`. The lowering
+    // used to fill that gap with `type: 'string'` — a claim about the elements the
+    // author never made, and wrong the moment the list holds anything else.
+    // `@std/form`'s `enum` is documented as "bare strings AND/OR { value, label }"
+    // and was reaching the registry declared as a list of strings.
+    expect(field({ type: 'array' })).toEqual({ type: 'json', multiple: true })
+  })
+
+  it('keeps the collection metadata on an untyped array, and does not localize it', () => {
+    // `json` is opaque, so there is no text to translate — unlike the `string` it
+    // used to be invented as, which picked up `localized: true` on the way.
+    expect(field({ type: 'array', required: true, label: 'L', description: 'D' })).toEqual({
+      type: 'json',
+      multiple: true,
+      label: 'L',
+      description: 'D',
+      required: true,
+    })
+  })
+
+  it('a DECLARED element type is still lowered precisely', () => {
+    // The fix must not blur a list that did say what it holds.
+    expect(field({ type: 'string', many: true })).toEqual({ type: 'string', multiple: true, localized: true })
+    expect(field({ type: 'int', many: true })).toEqual({ type: 'int', multiple: true })
+  })
+
   it('refuses a stale `richtext` kind even when it is a list', () => {
     // Bypasses the normalizer deliberately, as the sibling guard test does: the
     // resolver folds `richtext` to json + format: prosemirror, so a raw kind only
