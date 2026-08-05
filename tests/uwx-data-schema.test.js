@@ -262,6 +262,63 @@ describe('toDataSchemaDeclaration — section prose travels, section `required` 
   })
 })
 
+/**
+ * `constraints` on a section-shaped FIELD.
+ *
+ * Section rules were declarable only in the `sections:` form, but a list of
+ * records is normally authored as a field — `authors: { type: object, many: true }`
+ * — so the rules were unreachable in the shape that usually needs them. They were
+ * accepted at every stage and silently discarded, which is exactly why this looked
+ * supported: a `many:` field even carried them through normalization, because the
+ * `many` expansion copies every non-item key onto the array.
+ *
+ * `min_items` is the motivating rule, and its scope is narrow in two directions
+ * worth stating where someone will read them: it is a WRITE guarantee (a delete
+ * may not take the section below N — it cannot force an author to populate it),
+ * and never a RENDER guarantee (the same Model is renderable by a foundation that
+ * never saw the constraint, so components still handle an empty list).
+ */
+describe('toDataSchemaDeclaration — a section-shaped field carries its constraints', () => {
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+  const MIN1 = [{ kind: 'min_items', value: 1 }]
+
+  it('a list of records carries them — the shape that needed this', () => {
+    const out = field({ type: 'object', many: true, constraints: MIN1, fields: { a: 'string' } })
+    expect(out).toMatchObject({ type: 'section', multiple: true, constraints: MIN1 })
+  })
+
+  it('a nested object carries them too', () => {
+    expect(field({ type: 'object', constraints: MIN1, fields: { a: 'string' } }).constraints).toEqual(MIN1)
+  })
+
+  it('an open map MERGES them with its structural uniqueness rule', () => {
+    // The `unique_field` rule is what makes the map's key the row identity, so an
+    // author's own constraints must add to it and can never replace it.
+    const out = field({
+      type: 'object',
+      constraints: MIN1,
+      values: { type: 'object', fields: { t: { type: 'string', required: true } } },
+    })
+    expect(out.constraints).toEqual([
+      { kind: 'unique_field', field: 'name', scope: 'section' },
+      { kind: 'min_items', value: 1 },
+    ])
+  })
+
+  it('a leaf drops them — the wire has no slot, and that is not an error', () => {
+    // Well-formed authoring the registry has no home for. Failing a build over it
+    // would break a project that never registers at all, so it is documented
+    // rather than enforced; a leaf narrows with `enum` / `format` instead.
+    expect(field({ type: 'string', constraints: MIN1 })).not.toHaveProperty('constraints')
+  })
+
+  it('@std/publication declares min_items on its authors, and it reaches the wire', async () => {
+    const { publication } = await import('@uniweb/schemas')
+    const decl = lower(publication, '@std/publication', '@std/publication')
+    expect(decl.sections.publication.fields.authors.constraints).toEqual([{ kind: 'min_items', value: 1 }])
+  })
+})
+
 describe('toDataSchemaDeclaration — json + format: prosemirror (content fields)', () => {
   const decl = lower(
     {

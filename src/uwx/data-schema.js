@@ -257,7 +257,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
         ...lowerSection(
           {
             kind: 'multi',
-            ...sectionProse(field),
+            ...sectionAttrsFromField(field),
             // `translatable: false` is load-bearing, not tidiness: a string field is
             // localized by default, and a localized key could differ per locale —
             // which would destroy the identity the key exists to carry. The key is an
@@ -266,7 +266,13 @@ function lowerField(rawField, resolve, optResolve, path = '') {
               [OPEN_MAP_KEY]: { type: 'string', required: true, translatable: false },
               ...value.fields
             },
-            constraints: [{ kind: 'unique_field', field: OPEN_MAP_KEY, scope: 'section' }]
+            // The uniqueness rule is STRUCTURAL — it is what makes the map's key the
+            // row's identity — so it is prepended rather than assigned: an author's
+            // own constraints on this field add to it and can never replace it.
+            constraints: [
+              { kind: 'unique_field', field: OPEN_MAP_KEY, scope: 'section' },
+              ...(sectionAttrsFromField(field).constraints || [])
+            ]
           },
           resolve,
           optResolve,
@@ -276,7 +282,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     }
     return {
       type: 'section',
-      ...lowerSection({ kind: 'single', ...sectionProse(field), fields: field.fields }, resolve, optResolve, path)
+      ...lowerSection({ kind: 'single', ...sectionAttrsFromField(field), fields: field.fields }, resolve, optResolve, path)
     }
   }
   if (type === 'array') {
@@ -284,7 +290,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     if (items && items.type === 'object') {
       return {
         type: 'section',
-        ...lowerSection({ kind: 'multi', ...sectionProse(field), fields: items.fields }, resolve, optResolve, path)
+        ...lowerSection({ kind: 'multi', ...sectionAttrsFromField(field), fields: items.fields }, resolve, optResolve, path)
       }
     }
     // A multi-valued LEAF or REFERENCE. `normalizeField` split this field in two
@@ -384,14 +390,24 @@ function asField(def) {
 }
 
 // A nested section is authored as a FIELD (`{ type: object, description: … }`),
-// but arrives on the wire as a section — so its prose has to travel from the
-// field declaration onto the section body, where the registry has a slot for it.
-// Without this an authored `description:` on a nested object was dropped twice
-// over: once by the normalizer, then again here.
-function sectionProse(field) {
+// but arrives on the wire as a section — so the attributes that belong to a
+// SECTION have to travel from the field declaration onto the section body, where
+// the registry has a slot for them. Without this an authored `description:` on a
+// nested object was dropped twice over (once by the normalizer, then again here),
+// and `constraints:` never arrived at all.
+//
+// `constraints` is the load-bearing one. A list of records is normally authored
+// as a field — `authors: { type: object, many: true }` — so until this existed,
+// section rules were declarable only in the `sections:` form and unreachable in
+// the shape that usually needs them. `min_items` is the motivating rule; note it
+// is a WRITE guarantee ("a delete may not take the section below N"), never a
+// render guarantee — a component still handles an empty list, because the same
+// Model is renderable by a foundation that never saw the constraint.
+function sectionAttrsFromField(field) {
   const out = {}
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
+  if (Array.isArray(field.constraints) && field.constraints.length) out.constraints = field.constraints
   return out
 }
 
