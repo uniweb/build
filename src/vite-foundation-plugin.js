@@ -467,6 +467,22 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
 }
 
 /**
+ * Marks a foundation build as a DEV-server rebuild.
+ *
+ * The dev server runs a real Vite `build()` of the foundation on every watched
+ * change (`dev/plugin.js`), so `command`, `mode` and `isProduction` cannot tell
+ * a dev rebuild from a shipping build — all of them say "build". An injected
+ * marker plugin can, and it survives the foundation's own `vite.config.js`
+ * being merged in, which a plugin *option* would not (the dev server does not
+ * construct the foundation plugin — the foundation's config file does).
+ *
+ * Used to skip the `entry-ssr.js` sub-build in dev: it is a second full Vite
+ * pass per save, and nothing in the dev loop reads it (dev never ships, and the
+ * SSR lanes that run locally — SSG prerender and unipress — load `entry.js`).
+ */
+export const DEV_REBUILD_MARKER = 'uniweb:dev-foundation-rebuild'
+
+/**
  * Vite plugin for foundation builds
  */
 export function foundationBuildPlugin(options = {}) {
@@ -481,6 +497,7 @@ export function foundationBuildPlugin(options = {}) {
   let resolvedOutDir
   let resolvedRoot
   let isProduction
+  let isDevRebuild = false
 
   return {
     name: 'uniweb-foundation-build',
@@ -500,6 +517,7 @@ export function foundationBuildPlugin(options = {}) {
       resolvedOutDir = config.build.outDir
       resolvedRoot = config.root
       isProduction = config.mode === 'production'
+      isDevRebuild = (config.plugins || []).some((p) => p?.name === DEV_REBUILD_MARKER)
     },
 
     async writeBundle() {
@@ -554,8 +572,20 @@ export function foundationBuildPlugin(options = {}) {
       //
       // (The legacy self-contained buildSSRBundle() — React + runtime INLINED,
       // ~14 MB with Shiki — is retained below, unused, for reference only.)
-      const entrySourcePath = join(resolvedSrcDir, entryFileName)
-      await buildEntrySSR(resolvedRoot, entrySourcePath, outDir)
+      // Skipped on a DEV rebuild: this is a second full Vite pass, it runs on
+      // every save, and nothing in the dev loop reads its output. The local SSR
+      // lanes load `entry.js` (SSG prerender via `import()`, unipress the same);
+      // only the edge isolate needs the single-file twin, and dev ships nothing
+      // to it.
+      //
+      // Shipping lanes are unaffected — `uniweb build`, and `register`/`publish`
+      // which build through it. `register`'s build-if-stale check also requires
+      // `entry-ssr.js`, so a dist left behind by a dev session is treated as
+      // stale and rebuilt rather than uploaded without one.
+      if (!isDevRebuild) {
+        const entrySourcePath = join(resolvedSrcDir, entryFileName)
+        await buildEntrySSR(resolvedRoot, entrySourcePath, outDir)
+      }
     },
 
     async closeBundle() {

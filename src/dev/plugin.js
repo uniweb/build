@@ -26,6 +26,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import { build } from 'vite'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
+import { DEV_REBUILD_MARKER } from '../vite-foundation-plugin.js'
 
 /** Directories that never hold foundation source and must never be walked. */
 const UNWATCHABLE_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage'])
@@ -126,6 +127,13 @@ export function foundationDevPlugin(options = {}) {
           root: resolvedFoundationPath,
           configFile: existsSync(configPath) ? configPath : false,
           logLevel: 'warn',
+          // Marks this as a dev rebuild so the foundation plugin skips the
+          // `entry-ssr.js` sub-build — a second full Vite pass, on every save,
+          // producing something nothing in the dev loop reads. A marker plugin
+          // rather than an option because the foundation's own vite.config.js
+          // constructs the plugin, not us; and rather than `mode`/`command`,
+          // which both say "build" here since this IS a real build.
+          plugins: [{ name: DEV_REBUILD_MARKER }],
           build: {
             outDir: 'dist',
             emptyOutDir: true,
