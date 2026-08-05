@@ -29,7 +29,7 @@ import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { collectionNameFromUrl } from '@uniweb/core'
 
-import { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
+import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema } from './resolve-data-schema.js'
 
 // The pure checker, re-exported so `@uniweb/build/validate` stays the one import
@@ -173,6 +173,13 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   for (const ref of concepts.schemas) schemasSeen.add(ref)
   recordCount += concepts.checked
 
+  // Pass 4 — tagged data blocks, which join by the component's OWN binding.
+  const blocks = validateTaggedDataBlocks(site, foundation, dataSchemas)
+  violations.push(...blocks.violations)
+  deferred.push(...blocks.deferred)
+  for (const ref of blocks.schemas) schemasSeen.add(ref)
+  recordCount += blocks.checked
+
   return {
     violations,
     deferred,
@@ -307,16 +314,98 @@ export async function validateConceptBlocks(site) {
 
 /** Every concept block in a doc, including any nested inside a container. */
 function conceptBlockNodes(doc) {
+  return nodesOfType(doc, 'concept_block')
+}
+
+function nodesOfType(doc, type) {
   const out = []
   const walk = (nodes) => {
     for (const node of nodes || []) {
       if (!node) continue
-      if (node.type === 'concept_block') out.push(node)
+      if (node.type === type) out.push(node)
       else if (Array.isArray(node.content)) walk(node.content)
     }
   }
   walk(doc?.content)
   return out
+}
+
+/**
+ * Check each ```` ```yaml:<tag> ```` / ```` ```json:<tag> ```` data block against
+ * the schema the section's own component BOUND to that key.
+ *
+ * This is the pass that closes an odd hole: a component declares
+ * `data: { form: '@std/form' }`, an author writes a ```` ```yaml:form ```` block,
+ * and until now **nothing checked one against the other**. The join walked
+ * `section.fetch` — collections and fetches — so a schema bound to a key that a
+ * tagged block fills was never applied to anything. `@std/form` existed for
+ * exactly this and had never run outside its own contract test.
+ *
+ * Unlike concept blocks (pass 3), the join here is NOT by convention. A concept
+ * block resolves `md:faq` → `@std/faq` mechanically, which is why that pass must
+ * stay silent when no such schema exists. This one uses the binding the component
+ * actually declared, so there is no naming rule and no registry — a tag nobody
+ * bound is simply not governed, and says nothing.
+ *
+ * The value needs no parsing: a tagged fence lands as a `dataBlock` node with its
+ * parsed value already on `attrs.data`, and a body that FAILED to parse never
+ * becomes one (it falls back to `codeBlock`), so a malformed block cannot reach
+ * here and be misreported as a schema violation.
+ *
+ * Uses `validateBound` rather than `validateItem` because a block's value may be
+ * a record OR a list — ```` ```yaml:nav ```` is a bare array. That dispatch is the
+ * reason root-list conformance had to land first.
+ *
+ * @param {Object} site - collected site content
+ * @param {Object} foundation - the built foundation schema (type → { data })
+ * @param {Object} dataSchemas - normalized schemas keyed by ref
+ * @returns {{ violations: Array, schemas: Set<string>, checked: number, deferred: Array }}
+ */
+export function validateTaggedDataBlocks(site, foundation, dataSchemas) {
+  const violations = []
+  const schemas = new Set()
+  const deferred = []
+  let checked = 0
+
+  for (const page of site?.pages || []) {
+    walkSections(page.sections || [], (section) => {
+      const type = section.type
+      const bindings = type && foundation?.[type]?.data
+      if (!bindings || typeof bindings !== 'object') return
+
+      for (const node of nodesOfType(section.content, 'dataBlock')) {
+        const tag = node.attrs?.tag
+        if (!tag) continue
+
+        const binding = bindings[tag]
+        if (binding === undefined) continue // this key is not governed — say nothing
+
+        // A binding is a named ref, or an inline schema. Only a ref resolves to a
+        // normalized schema here; an inline one is reported rather than guessed at.
+        const ref = typeof binding === 'string' ? binding : binding?.schema
+        if (typeof ref !== 'string') {
+          deferred.push({ route: page.route, section: type, key: tag, reason: 'inline schema on the binding' })
+          continue
+        }
+        const schema = dataSchemas?.[ref]
+        if (!schema) continue // unresolved ref — the build reports that on its own
+
+        schemas.add(ref)
+        checked++
+        for (const finding of validateBound(schema, node.attrs?.data)) {
+          violations.push({
+            file: `${page.route || '/'} › ${type} › ${node.attrs?.language || 'yaml'}:${tag}`,
+            schema: ref,
+            item: `data.${tag}`,
+            users: [{ route: page.route, section: type, key: tag }],
+            ...finding,
+          })
+        }
+      }
+    })
+  }
+
+  return { violations, schemas, checked, deferred }
 }
 
 /** `parseContent`, or null when the parser is not installed. */
