@@ -150,6 +150,15 @@ function lowerSection(def, resolve, optResolve, path = '') {
   const out = {}
   if ((def.kind || 'single') === 'multi') out.multiple = true
   if (def.brief === true) out.brief = true
+  // Display prose IS a section key — the registry stores it and keys it for
+  // translation as `section.<name>.label` / `.description` (confirmed 2026-08-05).
+  // Note the asymmetry with a LEAF, which is the opposite way round: a leaf's
+  // `label`/`description` are accepted by the registry's parser and then DROPPED,
+  // because a field declaration has no slot for prose — field labels live in
+  // translation rows (`section.<name>.field.<key>.label`), which this producer
+  // does not emit today. So section prose arrives; leaf prose does not.
+  if (def.label) out.label = def.label
+  if (def.description) out.description = def.description
   if (def.nestable) out.self_nesting = true
   if (def.append_only) out.append_only = true
 
@@ -243,6 +252,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
         ...lowerSection(
           {
             kind: 'multi',
+            ...sectionProse(field),
             // `translatable: false` is load-bearing, not tidiness: a string field is
             // localized by default, and a localized key could differ per locale —
             // which would destroy the identity the key exists to carry. The key is an
@@ -261,7 +271,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     }
     return {
       type: 'section',
-      ...lowerSection({ kind: 'single', fields: field.fields }, resolve, optResolve, path)
+      ...lowerSection({ kind: 'single', ...sectionProse(field), fields: field.fields }, resolve, optResolve, path)
     }
   }
   if (type === 'array') {
@@ -269,7 +279,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     if (items && items.type === 'object') {
       return {
         type: 'section',
-        ...lowerSection({ kind: 'multi', fields: items.fields }, resolve, optResolve, path)
+        ...lowerSection({ kind: 'multi', ...sectionProse(field), fields: items.fields }, resolve, optResolve, path)
       }
     }
     // A multi-valued LEAF or REFERENCE. `normalizeField` split this field in two
@@ -366,6 +376,18 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
 
 function asField(def) {
   return typeof def === 'string' ? { type: def } : (def && typeof def === 'object' ? def : {})
+}
+
+// A nested section is authored as a FIELD (`{ type: object, description: … }`),
+// but arrives on the wire as a section — so its prose has to travel from the
+// field declaration onto the section body, where the registry has a slot for it.
+// Without this an authored `description:` on a nested object was dropped twice
+// over: once by the normalizer, then again here.
+function sectionProse(field) {
+  const out = {}
+  if (field.label) out.label = field.label
+  if (field.description) out.description = field.description
+  return out
 }
 
 function shortName(name) {

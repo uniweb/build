@@ -194,33 +194,71 @@ describe('toDataSchemaDeclaration — a reference keeps its attributes', () => {
   })
 })
 
-describe('toDataSchemaDeclaration — a SECTION-shaped field still drops them', () => {
+/**
+ * A SECTION takes prose but not `required` — and the split is the registry's,
+ * answered 2026-08-05, not a guess we are hedging on.
+ *
+ *   label, description   ACCEPTED and stored on the section, keyed for
+ *                        translation as `section.<name>.label` / `.description`.
+ *   required             a HARD ERROR: "carries leaf-only attribute required —
+ *                        it belongs on a leaf field, not a section."
+ *
+ * So the drop is not symmetric and never was. The prose was ours to fix; the
+ * flag is theirs to declare, and they have deliberately not: it would not be
+ * sugar over `min_items: 1` (which only stops you deleting the last record — it
+ * cannot make an entity have one), so section-required needs an entity-level
+ * completeness check that does not exist. A flag nothing enforces is worse than
+ * no flag. `@std/publication`'s `authors` is the standing authoring case.
+ *
+ * The producer must therefore keep dropping `required` here — emitting it would
+ * fail the publish outright, the way `info.submit` did.
+ */
+describe('toDataSchemaDeclaration — section prose travels, section `required` does not', () => {
   const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
 
-  /**
-   * Pinned as a KNOWN GAP, not as desired behaviour.
-   *
-   * A section body's documented shape is `multiple` / `brief` / `self_nesting` /
-   * `append_only` / `constraints` / `fields`. Whether the wire accepts `label` /
-   * `description` / `required` on a section is the consumer's contract to state,
-   * so the producer does not invent the keys. Until that is answered, an authored
-   * `required: true` on a nested object or a list of records is dropped —
-   * `@std/publication`'s `authors` is exactly that case.
-   *
-   * If the answer arrives, this test should fail and be replaced.
-   */
-  it('a nested object drops label/description/required', () => {
-    expect(field({ type: 'object', required: true, label: 'L', description: 'D', fields: { a: 'string' } })).toEqual({
+  it('a nested object carries label and description onto the section', () => {
+    expect(field({ type: 'object', label: 'L', description: 'D', fields: { a: 'string' } })).toEqual({
       type: 'section',
+      label: 'L',
+      description: 'D',
       fields: { a: { type: 'string', localized: true } },
     })
   })
 
-  it('a list of records drops them as well', () => {
-    const out = field({ type: 'object', many: true, required: true, label: 'L', fields: { a: 'string' } })
-    expect(out.multiple).toBe(true)
-    expect(out).not.toHaveProperty('required')
-    expect(out).not.toHaveProperty('label')
+  it('a list of records carries them too', () => {
+    const out = field({ type: 'object', many: true, label: 'L', description: 'D', fields: { a: 'string' } })
+    expect(out).toMatchObject({ type: 'section', multiple: true, label: 'L', description: 'D' })
+  })
+
+  it('an open map carries the field prose onto its rows section', () => {
+    const out = field({
+      type: 'object',
+      description: 'The form controls',
+      values: { type: 'object', fields: { type: { type: 'string', required: true } } },
+    })
+    expect(out).toMatchObject({ type: 'section', multiple: true, description: 'The form controls' })
+  })
+
+  it('an authored ROOT section keeps its prose through normalize + lower', () => {
+    // The normalizer used to drop these before the lowering could see them, so
+    // this asserts the whole path rather than just the second half.
+    const decl = lower(
+      { sections: { identity: { brief: true, label: 'Identity', description: 'The card', fields: { a: 'string' } } } },
+      '@/x',
+      '@acme/x'
+    )
+    expect(decl.sections.identity).toMatchObject({ label: 'Identity', description: 'The card' })
+  })
+
+  it('NEVER emits `required` on a section — the registry rejects it outright', () => {
+    const nested = field({ type: 'object', required: true, label: 'L', fields: { a: 'string' } })
+    const list = field({ type: 'object', many: true, required: true, fields: { a: 'string' } })
+    expect(nested).not.toHaveProperty('required')
+    expect(list).not.toHaveProperty('required')
+  })
+
+  it('a leaf keeps `required` — that is where it belongs', () => {
+    expect(field({ type: 'string', required: true }).required).toBe(true)
   })
 })
 
