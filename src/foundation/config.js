@@ -26,23 +26,14 @@
 import { resolve } from 'node:path'
 import { foundationPlugin } from '../vite-foundation-plugin.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
-
-/**
- * Default externals for foundations
- * These are not bundled into the foundation output
- */
-/**
- * Default externals for foundations
- * These are provided by the runtime and should not be bundled
- */
-const DEFAULT_EXTERNALS = [
-  'react',
-  'react-dom',
-  'react-dom/server',
-  'react/jsx-runtime',
-  'react/jsx-dev-runtime',
-  '@uniweb/core'
-]
+// The ONE definition. This list used to be re-typed here, and again in
+// vite-foundation-plugin.js — three hand-synced copies of "what a foundation
+// externalizes", with nothing binding them. The failure mode of a drift is not
+// a build error: it is the same bare specifier resolving to two React
+// instances at runtime, which breaks hooks with no signal at build time.
+// `import-map-plugin.js` imports nothing, so this is a leaf import with no
+// cycle risk.
+import { DEFAULT_EXTERNALS } from '../import-map-plugin.js'
 
 /**
  * Create a complete Vite configuration for a Uniweb foundation

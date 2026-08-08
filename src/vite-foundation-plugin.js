@@ -14,6 +14,7 @@ import { buildSchema } from './schema.js'
 import { generateEntryPoint, shouldRegenerateForFile } from './generate-entry.js'
 import { processAllPreviews } from './images.js'
 import { generateFoundationVars } from './theme/index.js'
+import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
 
 /**
  * Build schema.json with preview image references
@@ -358,11 +359,12 @@ async function emitFoundationVarsCss(outDir, schema) {
 /**
  * Externals for the SSR bundle (`dist/entry-ssr.js`).
  *
- * Same set the browser foundation build externalizes (DEFAULT_EXTERNALS in
- * foundation/config.js — react/react-dom/react-dom-server/jsx-runtime/core),
- * which the Cloudflare edge isolate resolves to the SHARED runtime's React/core
- * (worker-runtime.js) via its shims — so React stays deduped and runtime patches
- * still propagate without a foundation rebuild.
+ * Same set the browser foundation build externalizes, and now literally the
+ * same array — `DEFAULT_EXTERNALS`, imported rather than re-typed. The isolate
+ * resolves these to the SHARED runtime's React/core (worker-runtime.js) via its
+ * shims, so React stays deduped and runtime patches still propagate without a
+ * foundation rebuild. "Same set" was a comment three copies made a promise
+ * rather than a fact; deriving it makes drift unrepresentable.
  *
  * PLUS the client-only libraries kit code-splits via dynamic import:
  *   - shiki / shiki/bundle/full — syntax highlighting (kit Code renderer)
@@ -372,14 +374,7 @@ async function emitFoundationVarsCss(outDir, schema) {
  * the SSR bundle and leaves them as DORMANT dynamic imports the isolate never
  * awaits — so no extra modules-map entry is needed for them edge-side.
  */
-const SSR_DEFAULT_EXTERNALS = [
-  'react',
-  'react-dom',
-  'react-dom/server',
-  'react/jsx-runtime',
-  'react/jsx-dev-runtime',
-  '@uniweb/core',
-]
+const SSR_DEFAULT_EXTERNALS = DEFAULT_EXTERNALS
 
 function isSSRExternal(id) {
   if (SSR_DEFAULT_EXTERNALS.includes(id)) return true
