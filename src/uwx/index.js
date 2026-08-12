@@ -43,6 +43,7 @@ export {
   siteProjectToDocument,
   emitSiteSyncPackage,
   writeSiteEntityUuid,
+  writeSiteOrg,
   extensionDeclaration,
   isExtensionUrl,
   isSiteRelativeExtensionUrl,

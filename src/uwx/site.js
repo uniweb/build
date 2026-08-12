@@ -860,3 +860,30 @@ export async function emitSiteSyncPackage(siteRoot, opts = {}) {
 export function writeSiteEntityUuid(siteRoot, uuid) {
   return upsertYamlScalar(join(siteRoot, 'site.yml'), '$uuid', uuid)
 }
+
+/**
+ * Record the org the site was CREATED under (`site.yml::$org`), beside `$uuid`.
+ *
+ * The org is consumed at exactly one moment — the `as_org` on the create that
+ * mints `$uuid` — and after that the uuid carries the ownership binding. So this
+ * is not a knob the backend re-reads; it is the answer to *"whose workspace is
+ * this site's storage charged to?"*, which `$uuid` alone cannot answer and which
+ * otherwise costs a backend round-trip (or is simply unknowable from the repo).
+ *
+ * Stored as the BARE handle, never `@handle`: `upsertYamlScalar` writes the value
+ * verbatim, and `@` is a reserved YAML indicator, so a plain scalar may not start
+ * with one — `$org: @acme` is a parse error. The bare form is also the canonical
+ * one everywhere else (`deriveScope` returns it, `createOrg` echoes it as
+ * `org.handle`, `validateHandle` validates it); the `@` is display sugar the
+ * reader re-adds.
+ *
+ * Safe to add to `site.yml` because the sync lane is an explicit allowlist
+ * (`info.*` above is built key by key), so this never rides the wire.
+ *
+ * @param {string} siteRoot
+ * @param {string} handle - the bare org handle (no leading `@`)
+ * @returns {boolean} true if site.yml changed
+ */
+export function writeSiteOrg(siteRoot, handle) {
+  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$org', handle)
+}
