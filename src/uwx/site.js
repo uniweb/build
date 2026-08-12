@@ -880,6 +880,29 @@ export function writeSiteEntityUuid(siteRoot, uuid) {
  * Safe to add to `site.yml` because the sync lane is an explicit allowlist
  * (`info.*` above is built key by key), so this never rides the wire.
  *
+ * ⛔ NOT `deploy.yml`, though that file already holds the bound `backend` and the
+ * two look like the same class of fact. Four reasons, and the first is the one that
+ * settles it:
+ *
+ *  1. CARDINALITY. `deploy.yml` is multi-TARGET and `backend` sits *under* a target,
+ *     so its shape says "this may vary per target." An org may not: one site has one
+ *     owning org, fixed at create and preserved on replace. `$org` is a property of
+ *     `$uuid`, which is singular and lives here — filing it under a target would
+ *     encode a freedom that does not exist.
+ *  2. WHO WRITES. Three paths mint a site (`ensureSiteExists`, the media-less push's
+ *     content-lane create, and `clone` seeding an existing one) and **none of them
+ *     write `deploy.yml`** — only `deploy` and `publish` call `recordLastDeploy`. The
+ *     record would exist or not depending on which verb the developer reached for.
+ *  3. SUPPRESSIBLE. `recordLastDeploy` is a no-op under `autoSave: off` / `--no-save`.
+ *     Turning off deploy *receipts* would silently drop an *ownership* record.
+ *  4. SEMANTICS. `deploy.yml` describes the act of shipping (`lastDeploy` is a
+ *     receipt) and is optional entirely. But `push` creates a site and never
+ *     publishes — a site can exist, be owned, and accrue storage charges without
+ *     ever being deployed. Ownership does not belong in a record of a deploy that
+ *     may not have happened.
+ *
+ * `backend` answers *where this ships*; `$org` answers *whose this is*.
+ *
  * @param {string} siteRoot
  * @param {string} handle - the bare org handle (no leading `@`)
  * @returns {boolean} true if site.yml changed
