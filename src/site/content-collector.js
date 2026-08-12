@@ -2345,10 +2345,6 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Convert versionedScopes Map to plain object for JSON serialization
   const versionedScopesObj = Object.fromEntries(versionedScopes)
 
-  // Read intelligence.yml if it exists (AI knowledge page settings)
-  const intelligenceConfig = await readYamlFile(join(sitePath, 'intelligence.yml'))
-  const hasIntelligence = intelligenceConfig && Object.keys(intelligenceConfig).length > 0
-
   // Compile per-page `slug:` maps into config.i18n.routeTranslations
   // (canonical route → per-locale display route). Producer-only: the runtime
   // (@uniweb/core website.js) and the sitemap generator already consume this
@@ -2410,7 +2406,12 @@ export async function collectSiteContent(sitePath, options = {}) {
         ? { languages: publishable }
         : {}),
       fetch: parseFetchConfig(siteConfig.fetch),
-      ...(hasIntelligence && { intelligence: intelligenceConfig }),
+      // NOTE: `intelligence.yml` was read here and emitted as `config.intelligence`.
+      // Removed 2026-08-12 — the assistant surface is `site.yml::assistant`, which
+      // needs no line at all on this lane (`config` spreads all of site.yml) and one
+      // line on the sync lane, so it reaches BOTH. The separate file could only ever
+      // reach this one, which is what made an authored persona vanish on hosted
+      // sites. See kb/framework/architecture/assistant-config.md.
       ...(routeTranslations
         ? { i18n: { ...(siteConfig.i18n || {}), routeTranslations } }
         : {}),
