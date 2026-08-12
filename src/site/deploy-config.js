@@ -110,6 +110,29 @@ function validate(doc, path) {
   if (doc.targets !== undefined && (typeof doc.targets !== 'object' || Array.isArray(doc.targets))) {
     throw new Error(`${path}: \`targets\` must be a map.`)
   }
+  // A site has exactly ONE Uniweb identity — `site.yml::$uuid`, a single scalar,
+  // set by the create and never moved. So two targets naming `host: uniweb` cannot
+  // both be coherent: whichever one `default:` selects is the site, and the other
+  // silently describes a site that does not exist. The per-target `backend` key
+  // makes that look expressible, which is exactly why it is worth rejecting rather
+  // than leaving to be discovered.
+  //
+  // *(Diego, 2026-08-12: multiple deploys are not expected in general, and are not
+  // allowed for Uniweb Cloud specifically — the only host that reads `$uuid` at
+  // all. Every other host is stateless from the CLI's side, so any number of those
+  // targets is fine.)*
+  if (doc.targets && typeof doc.targets === 'object' && !Array.isArray(doc.targets)) {
+    const uniwebTargets = Object.entries(doc.targets)
+      .filter(([, t]) => t && typeof t === 'object' && t.host === 'uniweb')
+      .map(([name]) => name)
+    if (uniwebTargets.length > 1) {
+      throw new Error(
+        `${path}: only one target may use \`host: uniweb\` — found ${uniwebTargets.length} (${uniwebTargets.join(', ')}). ` +
+          'A site has a single Uniweb identity (site.yml::$uuid), so a second Uniweb target cannot describe a different site. ' +
+          'Keep one, or point the others at a third-party host.'
+      )
+    }
+  }
   if (doc.autoSave !== undefined && !VALID_AUTOSAVE.has(doc.autoSave)) {
     throw new Error(
       `${path}: \`autoSave\` must be one of: ${[...VALID_AUTOSAVE].join(', ')}.`

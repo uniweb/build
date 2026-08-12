@@ -67,6 +67,69 @@ describe('loadDeployYml', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  // A site has ONE Uniweb identity (`site.yml::$uuid`), so a second `host: uniweb`
+  // target cannot describe a different site — whichever `default:` picks is the
+  // site, and the other silently describes one that does not exist. The per-target
+  // `backend` key makes that look expressible, which is why it is rejected rather
+  // than left to be discovered.
+  test('rejects a second host: uniweb target, naming both', async () => {
+    const dir = await makeSiteDir()
+    try {
+      await writeFile(
+        join(dir, 'deploy.yml'),
+        'default: production\n' +
+          'targets:\n' +
+          '  production:\n    host: uniweb\n    backend: https://uniweb.app\n' +
+          '  staging:\n    host: uniweb\n    backend: http://localhost:8080\n',
+        'utf8'
+      )
+      await expect(loadDeployYml(dir)).rejects.toThrow(
+        /only one target may use `host: uniweb`.*production, staging/s
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('one uniweb target alongside any number of third-party targets is fine', async () => {
+    const dir = await makeSiteDir()
+    try {
+      // Only Uniweb hosting reads `$uuid`; every other host is stateless from the
+      // CLI's side, so multiplicity there is legitimate and must stay allowed.
+      await writeFile(
+        join(dir, 'deploy.yml'),
+        'default: production\n' +
+          'targets:\n' +
+          '  production:\n    host: uniweb\n' +
+          '  preview:\n    host: cloudflare-pages\n' +
+          '  archive:\n    host: github-pages\n' +
+          '  mirror:\n    host: s3-cloudfront\n',
+        'utf8'
+      )
+      const doc = await loadDeployYml(dir)
+      expect(Object.keys(doc.targets)).toHaveLength(4)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('zero uniweb targets is fine, and a malformed target entry does not crash the check', async () => {
+    const dir = await makeSiteDir()
+    try {
+      // `null` and a scalar entry are rejected later by resolveTarget's missing-host
+      // error; this guard must step over them rather than throw the wrong message.
+      await writeFile(
+        join(dir, 'deploy.yml'),
+        'targets:\n  a:\n    host: netlify\n  b:\n  c: nonsense\n',
+        'utf8'
+      )
+      const doc = await loadDeployYml(dir)
+      expect(Object.keys(doc.targets)).toHaveLength(3)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('resolveTarget', () => {
