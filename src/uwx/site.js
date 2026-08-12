@@ -68,6 +68,46 @@ function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
 }
 
+// Credential-shaped keys, mirroring the set the delivery edge strips on the
+// reading side. Deliberately the SAME list rather than a stricter one, so the
+// two guards are visibly twins and a key added to one is obviously owed to the
+// other.
+const CREDENTIAL_KEYS = ['apiKey', 'api_key', 'key', 'token', 'secret']
+
+/**
+ * Drop credential-shaped keys out of an authored service block.
+ *
+ * An authored block crosses into backend storage here and is served from there
+ * in a published payload — which is world-readable. So a credential in
+ * `site.yml` is not merely untidy, it is disclosed. The host's secret store is
+ * the only right home, resolved at request time.
+ *
+ * Warns rather than throwing: the fix belongs to the author, a failed push
+ * helps nobody, and the block is still useful without the key. Returns the
+ * value untouched when there is nothing to strip, so `setIf`'s absent-vs-empty
+ * behaviour is unchanged — a block that carried ONLY a credential arrives as
+ * `{}` rather than vanishing, keeping the mistake visible where the author
+ * looks for it.
+ *
+ * @param {*} block - the authored value, any shape
+ * @param {string} label - the site.yml key, for the warning
+ * @returns {*} the block, minus anything credential-shaped
+ */
+function stripCredentials(block, label) {
+  if (!block || typeof block !== 'object' || Array.isArray(block)) return block
+  const found = CREDENTIAL_KEYS.filter(key => key in block)
+  if (found.length === 0) return block
+
+  console.warn(
+    `uwx/site: dropped ${found.join(', ')} from \`${label}:\` — authored config is published ` +
+      'world-readable, so a credential belongs in the host secret store, never in site.yml.'
+  )
+
+  const cleaned = { ...block }
+  for (const key of found) delete cleaned[key]
+  return cleaned
+}
+
 // page_sections and layout_sections share this content shape.
 // processMarkdownFile only destructures type/component/preset/input/props/
 // fetch/data/id out of frontmatter, so `background:` and `theme:` stay
@@ -700,6 +740,22 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // excluded branch becomes both discoverable AND summarized by the index.
   // (The CLI lane reads site.yml directly and honors it either way.)
   setIf(info, 'agents', siteYml.agents)
+  // `assistant` — the site's own declaration for an AI assistant: where it
+  // lives (`endpoint`, read by kit's `resolveService`) plus authored settings a
+  // host reads (`system` persona, model hints). Same family as
+  // `search`/`submit`, and here for the reason spelled out above them — the
+  // bundle lane spreads all of site.yml while this one is an allowlist, so
+  // without this line the block works on a static host and vanishes silently
+  // on the synced lane.
+  //
+  // ⚠️ That is not hypothetical: this replaces `intelligence.yml`, a SEPARATE
+  // file, which needed a bespoke line in each lane and got one in only the
+  // bundle lane — so an authored persona never reached a hosted site at all.
+  // A key inside site.yml cannot repeat that, because only this lane needs a
+  // line. (kb/framework/architecture/assistant-config.md)
+  //
+  // ⛔ Credentials are stripped, not trusted — see `stripCredentials`.
+  setIf(info, 'assistant', stripCredentials(siteYml.assistant, 'assistant'))
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
   // `app` — the deployment's `@uniweb/app-spec` reference (a bare uuid string),

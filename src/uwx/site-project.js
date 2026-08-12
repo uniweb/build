@@ -106,6 +106,16 @@ const INFO_TO_SITE_YML = {
   // render time and never enters `info`.
   submit: 'submit',
   agents: 'agents',
+  // Authored-only, like `submit` above — a host's assistant endpoint is offered
+  // through `config.services` and resolved at render time, so it never enters
+  // `info` and a pull cannot launder it into authored config.
+  //
+  // ⚠️ One asymmetry worth knowing: push STRIPS credential-shaped keys, so a
+  // block that carried an `apiKey` comes back without it and the pull rewrites
+  // the author's file minus that line. That is intended — the key must not be
+  // there and the push already warned — but it is the one case where a pull
+  // removes something the author typed.
+  assistant: 'assistant',
   paths: 'paths',
   data: 'data',
   template: 'template',
