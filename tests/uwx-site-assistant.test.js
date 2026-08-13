@@ -51,9 +51,9 @@ describe('uwx/site — the assistant block reaches the wire', () => {
   })
 
   it('carries the string shorthand untouched', async () => {
-    const root = siteRoot(['assistant: /_ai/chat'])
+    const root = siteRoot(['assistant: /_agent/chat'])
     const { info } = await siteProjectToDocument(root)
-    expect(info.assistant).toBe('/_ai/chat')
+    expect(info.assistant).toBe('/_agent/chat')
   })
 
   // The claim that adding this line is inert for every existing site rests on
