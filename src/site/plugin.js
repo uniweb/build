@@ -513,13 +513,20 @@ export function siteContentPlugin(options = {}) {
   /**
    * Collect the site, then drop `knowledge:` pages.
    *
-   * ⛔ **This is the bundle lane, and the bundle lane has no agent endpoint.**
+   * ⛔ **This is the bundle lane, and the bundle lane has no agent.**
    * `uniweb export` and `uniweb deploy --host <adapter>` both run this pipeline
    * (`cli/src/commands/export.js`, `deploy.js`), and their destinations are
-   * static hosts — no worker, no backend, nothing that can gate a request. A
-   * `knowledge:` page is content the author marked for an agent and not for a
-   * visitor; here there is no agent to serve it to and no gate to withhold it
-   * with, so shipping it is disclosure with **no consumer on the other side**.
+   * static hosts — files served as files, with no service running over the
+   * content. A `knowledge:` page is source material for such a service: prose
+   * written for it to reason with, addressed to it rather than to a person.
+   * Here there is no service to give it to, so publishing it would turn prose
+   * written for a machine reader into pages for visitors — the only readers
+   * this host has.
+   *
+   * ⚠️ **Not a confidentiality argument.** [Diego, 2026-08-13] *"It is not the
+   * case that it's private in the sense of sensitive."* The service quotes this
+   * material back to whoever prompts it, by design. The reason to drop it here
+   * is that it has no reader on this lane, not that it must be kept from one.
    *
    * Measured 2026-08-13, before this existed: a knowledge page became
    * `dist/kb/index.html` — a public route — and its body rode in the
@@ -543,8 +550,8 @@ export function siteContentPlugin(options = {}) {
       const routes = knowledgePages.map(page => page.route).join(', ')
       console.warn(
         `[site-content] Dropped ${knowledgePages.length} knowledge page(s) from this build: ${routes}\n` +
-          `  This build targets a host that serves files only, so there is no agent endpoint to read them ` +
-          `and no gate to keep them from visitors. Use \`uniweb deploy\` to make them agent-readable.`
+          `  This build targets a host that serves files only, so nothing here reads them — their prose is ` +
+          `written for a site assistant, not for visitors. Use \`uniweb deploy\` to make them agent-readable.`
       )
     }
 
