@@ -43,6 +43,7 @@ import {
   pageMarkdownFilename,
   branchIndexFilename,
   applyRouteTranslation,
+  partitionKnowledgePages,
   INDEX_FILENAME
 } from '@uniweb/projections'
 import { collectSiteContent, mountEntriesOf } from './content-collector.js'
@@ -505,6 +506,51 @@ export function siteContentPlugin(options = {}) {
     robots: seo.robots || {}
   }
 
+  // Warn once per build, not once per collection — the dev server re-collects
+  // on every content change and would otherwise repeat this on every keystroke.
+  let warnedAboutKnowledge = false
+
+  /**
+   * Collect the site, then drop `knowledge:` pages.
+   *
+   * ⛔ **This is the bundle lane, and the bundle lane has no agent endpoint.**
+   * `uniweb export` and `uniweb deploy --host <adapter>` both run this pipeline
+   * (`cli/src/commands/export.js`, `deploy.js`), and their destinations are
+   * static hosts — no worker, no backend, nothing that can gate a request. A
+   * `knowledge:` page is content the author marked for an agent and not for a
+   * visitor; here there is no agent to serve it to and no gate to withhold it
+   * with, so shipping it is disclosure with **no consumer on the other side**.
+   *
+   * Measured 2026-08-13, before this existed: a knowledge page became
+   * `dist/kb/index.html` — a public route — and its body rode in the
+   * `__SITE_CONTENT__` of *every* prerendered page including `404.html`,
+   * because that script carries the whole site.
+   *
+   * ⚠️ **Deliberately NOT inside `collectSiteContent`.** The link lane
+   * (`build-site-data.js`) calls that same collector and **must keep** these
+   * pages: it hands `site-content.json` to a backend that derives an agent
+   * corpus from it and gates access to that corpus. Same flag, two correct
+   * answers, decided by what is behind the destination — so the subtraction
+   * belongs to the pipeline, not to the collector.
+   */
+  async function collectForBundle(path, options) {
+    const collected = await collectSiteContent(path, options)
+    const { knowledgePages, renderedPages } = partitionKnowledgePages(collected.pages || [])
+    if (!knowledgePages.length) return collected
+
+    if (!warnedAboutKnowledge) {
+      warnedAboutKnowledge = true
+      const routes = knowledgePages.map(page => page.route).join(', ')
+      console.warn(
+        `[site-content] Dropped ${knowledgePages.length} knowledge page(s) from this build: ${routes}\n` +
+          `  This build targets a host that serves files only, so there is no agent endpoint to read them ` +
+          `and no gate to keep them from visitors. Use \`uniweb deploy\` to make them agent-readable.`
+      )
+    }
+
+    return { ...collected, pages: renderedPages }
+  }
+
   let siteContent = null
   let resolvedSitePath = null
   let resolvedPublicDir = null
@@ -738,7 +784,7 @@ export function siteContentPlugin(options = {}) {
       if (!isProduction) {
         try {
           // Do an early content collection to get the collections config
-          const earlyContent = await collectSiteContent(resolvedSitePath, { foundationPath })
+          const earlyContent = await collectForBundle(resolvedSitePath, { foundationPath })
           collectionsConfig = earlyContent.config?.collections
 
           // Resolve content directory paths from site.yml paths: group
@@ -788,7 +834,7 @@ export function siteContentPlugin(options = {}) {
         // pages stay in the graph so in-progress drafts remain previewable.
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
-        siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })
+        siteContent = await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
@@ -841,7 +887,7 @@ export function siteContentPlugin(options = {}) {
           rebuildTimeout = setTimeout(async () => {
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = await collectSiteContent(resolvedSitePath, { foundationPath, base: basePath })
+              siteContent = await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })
               headHtml = await loadHeadHtml()
               // Execute fetches for the updated content
               await executeDevFetches(siteContent, resolvedSitePath)
