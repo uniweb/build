@@ -9,6 +9,10 @@
 export { siteContentPlugin } from './plugin.js'
 export { defineSiteConfig, readSiteConfig, default } from './config.js'
 export { collectSiteContent } from './content-collector.js'
+// The `agents:` vocabulary lives in @uniweb/projections (which owns the block);
+// re-exported so the CLI can validate an author's spelling without taking a
+// direct dependency on it. Same shape as the search re-exports.
+export { AGENTS_KEYS } from '@uniweb/projections'
 export { buildSiteData } from './build-site-data.js'
 export { shouldSplitContent } from './split-content.js'
 export {
