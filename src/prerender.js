@@ -148,6 +148,41 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
  * @param {function} onProgress - Progress callback
  * @returns {Array} Expanded pages array with dynamic pages replaced by concrete instances
  */
+/**
+ * Where a content-less container's redirect stub should point, in THIS locale.
+ *
+ * A folder with no body of its own gets a `<meta http-equiv="refresh">` stub so
+ * the redirect works without JS. `page.getNavigableRoute()` answers in CANONICAL
+ * routes — right, because the hierarchy is canonical and "does this folder have
+ * a page of its own?" is not a language question. But the stub is per-locale, so
+ * the destination has to be localized exactly the way `outputRoute` is: translate
+ * the slug, then re-apply the locale prefix.
+ *
+ * Emitting the canonical route raw sent a reader who asked for `/fr/<container>`
+ * to the DEFAULT-locale page — a language switch they never asked for, from a
+ * URL that was correct. The runtime's copy of this redirect (PageRenderer.jsx)
+ * had the identical bug and was fixed first; this is its twin, and the two must
+ * agree or a container behaves differently on a cold load than on an in-app
+ * navigation.
+ *
+ * The DECISION to redirect stays canonical (`target !== page.route`) — only the
+ * destination is localized. Comparing a localized destination against a
+ * canonical route would make a folder with an index child redirect to itself.
+ *
+ * @param {string} target - Canonical route from getNavigableRoute()
+ * @param {Object} ctx
+ * @param {Object} ctx.website - Website instance (for translateRoute / basePath)
+ * @param {string} ctx.locale - Locale being rendered
+ * @param {boolean} ctx.isDefault - Is this the site's default locale?
+ * @param {string} ctx.routePrefix - Locale prefix for this pass ('' or '/fr')
+ * @returns {string} Absolute path for the stub's refresh + canonical link
+ */
+export function localizeRedirectTarget(target, { website, locale, isDefault, routePrefix = '' }) {
+  const localized = isDefault ? target : routePrefix + website.translateRoute(target, locale)
+  const withSlash = localized.startsWith('/') ? localized : '/' + localized
+  return (website.basePath || '') + withSlash
+}
+
 export function expandDynamicPages(pages, pageFetchedData, onProgress) {
   const expandedPages = []
 
@@ -704,8 +739,12 @@ export async function prerenderSite(siteDir, options = {}) {
       if (!page.hasContent()) {
         const target = page.getNavigableRoute()
         if (target && target !== page.route) {
-          const base = website.basePath || ''
-          const targetPath = base + (target.startsWith('/') ? target : '/' + target)
+          const targetPath = localizeRedirectTarget(target, {
+            website,
+            locale,
+            isDefault,
+            routePrefix
+          })
           onProgress(`  Auto-redirect ${outputRoute} → ${targetPath}`)
           const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${targetPath}"><link rel="canonical" href="${targetPath}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${targetPath}">${targetPath}</a></p></body></html>`
           const outputPath = getOutputPath(distDir, outputRoute)
