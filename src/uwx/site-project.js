@@ -358,7 +358,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
 // and preserved. Keep in sync with pageRecordToYml below.
 const PAGE_YML_MANAGED_KEYS = new Set([
   'id', 'title', 'description', 'label', 'keywords', 'index', 'hidden',
-  'hideIn', 'redirect', 'rewrite', 'layout', 'seo',
+  'hideIn', 'knowledge', 'redirect', 'rewrite', 'layout', 'seo',
   'fetch', 'sections',
 ])
 
@@ -380,6 +380,7 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (record.is_index) y.index = true
   if (record.hidden !== undefined) y.hidden = record.hidden
   if (record.hide_in !== undefined) y.hideIn = record.hide_in
+  if (record.knowledge !== undefined) y.knowledge = record.knowledge
   if (record.redirect !== undefined) y.redirect = record.redirect
   if (record.rewrite !== undefined) y.rewrite = record.rewrite
   if (record.layout !== undefined) y.layout = record.layout

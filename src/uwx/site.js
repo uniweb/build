@@ -201,6 +201,11 @@ function buildPageData(config, ctx) {
   setIf(data, 'hidden', config.hidden)
   const hideIn = normalizeHideIn(config)
   if (hideIn.length) data.hide_in = hideIn
+  // Agent-only content. Sent as authored — only the marked page carries it, and
+  // the cascade to descendants is the CONSUMER's to compute (by route prefix, or
+  // equivalently by walking the page tree). A reader that tests this field alone
+  // honours the branch root and silently misses every child.
+  setIf(data, 'knowledge', config.knowledge)
   setIf(data, 'redirect', config.redirect)
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)

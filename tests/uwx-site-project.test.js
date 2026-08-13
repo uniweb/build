@@ -1178,3 +1178,70 @@ describe('pulled pages stay open to new sections', () => {
     }
   })
 })
+
+describe('knowledge: survives the round trip', () => {
+  /**
+   * A page prop that pushes but does not pull is worse than one that does
+   * neither: the author's marker is silently removed from their `page.yml` the
+   * first time they run `uniweb pull`. So both directions are asserted here, in
+   * one test, on purpose — splitting them lets one side ship alone.
+   *
+   * ⚠️ The cascade is deliberately NOT carried. Only the marked page emits the
+   * field; descendants inherit by route prefix, and computing that is the
+   * consumer's job. A consumer that filters on this field alone honours the
+   * branch root and misses every child — which is the trap worth having a
+   * fixture for.
+   */
+  it('emits knowledge on the marked page only, and never on its descendants', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'uwx-knowledge-'))
+    writeFileSync(join(root, 'site.yml'), "name: kb-site\nfoundation: '@acme/base'\n")
+    const kb = join(root, 'pages', 'kb')
+    mkdirSync(join(kb, 'pricing'), { recursive: true })
+    writeFileSync(join(kb, 'page.yml'), 'title: Agent Knowledge\nknowledge: true\n')
+    writeFileSync(join(kb, '1-body.md'), '# KB\n\nFor the agent.\n')
+    writeFileSync(join(kb, 'pricing', 'page.yml'), 'title: Pricing\n')
+    writeFileSync(join(kb, 'pricing', '1-body.md'), '# Pricing\n\nHow to answer.\n')
+
+    const doc = await siteProjectToDocument(root)
+    const find = (nodes, slug) => {
+      for (const n of nodes || []) {
+        if (n.slug && Object.values(n.slug)[0] === slug) return n
+        const hit = find(n.$children || n.pages, slug)
+        if (hit) return hit
+      }
+      return null
+    }
+
+    expect(find(doc.pages, 'kb').knowledge).toBe(true)
+    // The child inherits at read time; it must not carry the flag itself.
+    expect(find(doc.pages, 'pricing').knowledge).toBeUndefined()
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('writes knowledge back into page.yml on pull', () => {
+    const out = mkdtempSync(join(tmpdir(), 'uwx-knowledge-pull-'))
+    const document = {
+      info: { name: { en: 'kb-site' }, foundation: '@acme/base' },
+      pages: [
+        {
+          $id: 'kb',
+          slug: { en: 'kb' },
+          mode: 'page',
+          title: { en: 'Agent Knowledge' },
+          knowledge: true,
+          page_sections: [],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document, siteRoot: out })
+
+    const yml = yaml.load(readFileSync(join(out, 'pages', 'kb', 'page.yml'), 'utf8'))
+    expect(yml.knowledge).toBe(true)
+    // Control: an ordinary field round-trips the same way, so a failure above is
+    // about `knowledge` and not about the writer.
+    expect(yml.title).toBe('Agent Knowledge')
+
+    rmSync(out, { recursive: true, force: true })
+  })
+})
