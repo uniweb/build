@@ -124,8 +124,8 @@ const INFO_TO_SITE_YML = {
   //
   // Both are correct: a pull does not silently delete something the author
   // typed, and the push already warned them. The security property is upheld at
-  // the push, not by the pull. (Measured end-to-end against a live uniwebd,
-  // channel `framework-backend-9269`.)
+  // the push, not by the pull. Measured end-to-end against a live uniwebd —
+  // every unit test passed before and after, so only a real push touched it.
   assistant: 'assistant',
   // Authored-only, like `submit` and `assistant`: a host's tracking endpoint is
   // offered through `config.services.tracking` and resolved at render, so it
