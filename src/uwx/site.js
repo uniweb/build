@@ -761,6 +761,20 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //
   // ⛔ Credentials are stripped, not trusted — see `stripCredentials`.
   setIf(info, 'assistant', stripCredentials(siteYml.assistant, 'assistant'))
+  // `tracking` — where this site's usage events go (`endpoint`, read by the
+  // runtime through `resolveService`, plus `consent:`). Same family as
+  // `search`/`submit`/`assistant` and here for the same reason: the bundle lane
+  // spreads all of site.yml while this one is an allowlist, so without this line
+  // an authored `tracking:` works on a static host and vanishes silently on the
+  // synced lane.
+  //
+  // ⛔ Credentials stripped like `assistant`. A collector that wants a write key
+  // is a real shape, and this block is published world-readable — but note the
+  // strip only reaches a KEYED FIELD: a key embedded in the endpoint URL itself
+  // (`https://collector/e?key=…`) is invisible here and is disclosed. The host's
+  // secret store is the only right home either way.
+  // (kb/framework/plans/tracking.md)
+  setIf(info, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
   // `app` — the deployment's `@uniweb/app-spec` reference (a bare uuid string),

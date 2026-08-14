@@ -1245,3 +1245,81 @@ describe('knowledge: survives the round trip', () => {
     rmSync(out, { recursive: true, force: true })
   })
 })
+
+/**
+ * `tracking:` — where a site's usage events go. Same allowlist hazard as
+ * `submit:`: the bundle lane spreads all of site.yml, so a missing line here
+ * would make an authored destination work on a static host and vanish in
+ * silence on the synced lane. Design: `kb/framework/plans/tracking.md`.
+ */
+describe('site.yml::tracking across the sync wire', () => {
+  let dir
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'uwx-tracking-'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it.each([
+    ['shorthand string', '/_t'],
+    ['object form with consent', { endpoint: 'https://plausible.io/api/event', consent: 'required' }],
+  ])('carries it through produce → project (%s)', async (label, tracking) => {
+    const src = join(dir, `src-${label.replace(/\W/g, '')}`)
+    mkdirSync(src, { recursive: true })
+    writeFileSync(
+      src + '/site.yml',
+      `name: Tracked\nfoundation: '@acme/base@2.0.0'\ndefaultLanguage: en\ntracking: ${JSON.stringify(tracking)}\n`
+    )
+
+    const document = await siteProjectToDocument(src)
+    expect(document.info.tracking).toEqual(tracking)
+
+    const dest = join(dir, `dest-${label.replace(/\W/g, '')}`)
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({ document, siteRoot: dest })
+
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).tracking).toEqual(tracking)
+  })
+
+  it('omits it entirely when the site declares none', async () => {
+    const src = join(dir, 'src-none')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(src + '/site.yml', "name: Untracked\nfoundation: '@acme/base@2.0.0'\n")
+
+    const document = await siteProjectToDocument(src)
+    expect(document.info).not.toHaveProperty('tracking')
+  })
+
+  it('strips a credential-shaped key, like assistant does', async () => {
+    const src = join(dir, 'src-cred')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(
+      src + '/site.yml',
+      "name: Keyed\nfoundation: '@acme/base@2.0.0'\ntracking:\n  endpoint: /_t\n  apiKey: super-secret\n"
+    )
+
+    const document = await siteProjectToDocument(src)
+    expect(document.info.tracking).toEqual({ endpoint: '/_t' })
+    expect(JSON.stringify(document)).not.toContain('super-secret')
+  })
+
+  /**
+   * The invariant that makes writing a `services:` block in site.yml a SAFE way
+   * to simulate a host locally (the bundle lane spreads it; this lane must not).
+   * Without this, a site file could impersonate its host on the synced lane —
+   * and `tracking` now resolves through that same host tier, so the property is
+   * load-bearing for two services rather than one.
+   */
+  it('does NOT carry site.yml::services across the wire', async () => {
+    const src = join(dir, 'src-services')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(
+      src + '/site.yml',
+      "name: Mock Host\nfoundation: '@acme/base@2.0.0'\nservices:\n  tracking:\n    endpoint: /_t\n  submit:\n    endpoint: /_submit\n"
+    )
+
+    const document = await siteProjectToDocument(src)
+    expect(document.info).not.toHaveProperty('services')
+  })
+})

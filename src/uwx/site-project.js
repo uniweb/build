@@ -110,12 +110,27 @@ const INFO_TO_SITE_YML = {
   // through `config.services` and resolved at render time, so it never enters
   // `info` and a pull cannot launder it into authored config.
   //
-  // ⚠️ One asymmetry worth knowing: push STRIPS credential-shaped keys, so a
-  // block that carried an `apiKey` comes back without it and the pull rewrites
-  // the author's file minus that line. That is intended — the key must not be
-  // there and the push already warned — but it is the one case where a pull
-  // removes something the author typed.
+  // ⚠️ Credential-shaped keys are STRIPPED ON PUSH (`stripCredentials`), so the
+  // backend never stores one and it cannot come back. What that does to the
+  // author's file depends on which direction they are pulling into, and the two
+  // differ — ⛔ this comment asserted the wrong one until it was run:
+  //
+  //   - `pull` over an EXISTING site.yml — the local `apiKey` SURVIVES.
+  //     `mergeYamlConfig` spreads one level (`{...existing[key], ...value}`), so
+  //     the projected `{endpoint, …}` merges over the local block and nothing
+  //     removes a key the document does not carry.
+  //   - `clone` into a fresh directory — no local block exists, so the file is
+  //     written from the document alone and has no `apiKey`.
+  //
+  // Both are correct: a pull does not silently delete something the author
+  // typed, and the push already warned them. The security property is upheld at
+  // the push, not by the pull. (Measured end-to-end against a live uniwebd,
+  // channel `framework-backend-9269`.)
   assistant: 'assistant',
+  // Authored-only, like `submit` and `assistant`: a host's tracking endpoint is
+  // offered through `config.services.tracking` and resolved at render, so it
+  // never enters `info` and a pull cannot launder it into authored config.
+  tracking: 'tracking',
   paths: 'paths',
   data: 'data',
   template: 'template',
