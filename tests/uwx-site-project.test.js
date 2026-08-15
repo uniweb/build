@@ -1264,7 +1264,7 @@ describe('site.yml::tracking across the sync wire', () => {
   it.each([
     ['shorthand string', '/_t'],
     ['object form with consent', { endpoint: 'https://collector.example.com/events', consent: 'required' }],
-    // `tags` rides INSIDE the block, so nothing carries it by name. Pinned
+    // `scripts` rides INSIDE the block, so nothing carries it by name. Pinned
     // because the whole vendor-tag capability depends on it reaching a hosted
     // site, and a later key allowlist inside `tracking:` would drop it in
     // silence — the exact shape of the hazard this describe block exists for.
@@ -1274,7 +1274,11 @@ describe('site.yml::tracking across the sync wire', () => {
     // not one: they can only prove what the fixture happens to contain. The
     // consumer's matching test had this exact hole and passed for months —
     // whole-value compare, two-key fixture, blind to the block growing (channel
-    // `framework-backend-a1c8`; they added `tags`, watched it fail, restored).
+    // `framework-backend-a1c8`; they added the nested key, watched it fail,
+    // restored). ⚠️ Their fixture pins the key under its ORIGINAL name, `tags`,
+    // renamed here to `scripts` afterwards. Harmless — their forward is
+    // wholesale, so what it proves is that a nested key survives at all, which
+    // is name-independent — but worth knowing before reading their test.
     //
     // ⭐ The tell, which generalises past `tracking`: an **open-ended value
     // whose contents are authored elsewhere**. Nothing local changes as the
@@ -1283,10 +1287,10 @@ describe('site.yml::tracking across the sync wire', () => {
     // key inside an author block means adding it here**, and that is not
     // optional tidiness — it is the only thing that keeps this honest.
     [
-      'nested tags, the vendor-tag case',
+      'nested scripts, the vendor case',
       {
         endpoint: '/collect',
-        tags: ['https://vendor.example.com/tag.js', { src: '/js/local.js' }]
+        scripts: ['https://vendor.example.com/tag.js', { src: '/js/local.js' }]
       }
     ]
   ])('carries it through produce → project (%s)', async (label, tracking) => {
