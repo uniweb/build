@@ -1263,7 +1263,18 @@ describe('site.yml::tracking across the sync wire', () => {
 
   it.each([
     ['shorthand string', '/_t'],
-    ['object form with consent', { endpoint: 'https://plausible.io/api/event', consent: 'required' }],
+    ['object form with consent', { endpoint: 'https://collector.example.com/events', consent: 'required' }],
+    // `tags` rides INSIDE the block, so nothing carries it by name. Pinned
+    // because the whole vendor-tag capability depends on it reaching a hosted
+    // site, and a later key allowlist inside `tracking:` would drop it in
+    // silence — the exact shape of the hazard this describe block exists for.
+    [
+      'nested tags, the vendor-tag case',
+      {
+        endpoint: '/collect',
+        tags: ['https://vendor.example.com/tag.js', { src: '/js/local.js' }]
+      }
+    ]
   ])('carries it through produce → project (%s)', async (label, tracking) => {
     const src = join(dir, `src-${label.replace(/\W/g, '')}`)
     mkdirSync(src, { recursive: true })
