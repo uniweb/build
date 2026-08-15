@@ -1268,6 +1268,20 @@ describe('site.yml::tracking across the sync wire', () => {
     // because the whole vendor-tag capability depends on it reaching a hosted
     // site, and a later key allowlist inside `tracking:` would drop it in
     // silence — the exact shape of the hazard this describe block exists for.
+    //
+    // ⛔ **A FIXTURE IS AN ALLOWLIST WEARING A COMPARISON'S CLOTHES.** These
+    // cases assert the *whole* value, which reads like a verbatim guard and is
+    // not one: they can only prove what the fixture happens to contain. The
+    // consumer's matching test had this exact hole and passed for months —
+    // whole-value compare, two-key fixture, blind to the block growing (channel
+    // `framework-backend-a1c8`; they added `tags`, watched it fail, restored).
+    //
+    // ⭐ The tell, which generalises past `tracking`: an **open-ended value
+    // whose contents are authored elsewhere**. Nothing local changes as the
+    // guarded value grows, so the fixture ages into a narrower assertion with
+    // no commit, no diff and no failing test to mark the moment. ⇒ **Adding a
+    // key inside an author block means adding it here**, and that is not
+    // optional tidiness — it is the only thing that keeps this honest.
     [
       'nested tags, the vendor-tag case',
       {
