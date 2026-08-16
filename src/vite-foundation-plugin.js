@@ -60,10 +60,18 @@ let _buildingSSRBundle = false
  * The pin is a **compatibility floor**, not a selector, and it cannot be a
  * selector: a site loads a primary foundation plus N extensions, each emitting
  * its own pin, while a site has exactly one runtime — pins are plural, the
- * choice is singular. The selector is `site.yml::runtime`. The pin's use is
- * VALIDATION — is a site's runtime at or above max() of every loaded
- * foundation's floor? — which belongs wherever all of those foundations are
- * held, not here: this build sees one foundation.
+ * choice is singular. The pin's use is VALIDATION — is a site's runtime at or
+ * above max() of every loaded foundation's floor? — which belongs wherever all
+ * of those foundations are held, not here: this build sees one foundation.
+ *
+ * ⚠️ **This used to say "the selector is `site.yml::runtime`". It is not.** That
+ * key is an operator-level override, not the authoring surface: a link-mode site
+ * is CODELESS, so it has nothing that binds to a runtime version and no basis for
+ * an opinion about one. The selector is the backend's resolution (an explicit pin
+ * → the site's current → a deployment default → newest installed). What a
+ * foundation declares here is the CONSTRAINT on that choice, never the choice.
+ * `kb/framework/architecture/site-foundation-runtime-model.md` § "who gets to say
+ * whether a site accepts a newer runtime" is the authority.
  *
  * Reads the resolved version from the foundation's node_modules/@uniweb/
  * runtime/package.json so the pin reflects what was actually linked at
@@ -79,6 +87,27 @@ let _buildingSSRBundle = false
  * Optional foundation-author override: a `uniweb.runtimePolicy` field in the
  * foundation's own package.json is recorded alongside the runtime version,
  * declaring the author's intent for the validation above.
+ *
+ * ⛔ **`policy` REACHES NOBODY TODAY — it is written here and read by nothing.**
+ * `readRuntimePin()` (`cli/src/utils/code-upload.js`) returns only `.runtime`, so
+ * `register` carries the floor as `info.runtime` and the policy is dropped. A
+ * foundation author who sets `uniweb.runtimePolicy` gets it emitted into `dist/`
+ * and silently discarded.
+ *
+ * ⚖️ **This is a field with standing and no consumer — NOT a mistake to delete.**
+ * The architecture assigns this declaration to the foundation on principle: each
+ * version policy is declared by the party whose code binds to the thing being
+ * updated, and the foundation's JS is what links against the runtime's React and
+ * core. So this is the designated home for the answer; nothing has asked for the
+ * answer yet.
+ *
+ * ⇒ **The event that gives it a consumer** (agreed with the backend, 2026-08-16):
+ * when the runtime declares what it supplies — replacing today's `>=` version
+ * compare, which is a proxy that holds only while the runtime's version number
+ * tracks its externals contract — **or** when the publish path starts consulting
+ * floors at all, whichever lands first. Ask again then; until one of those, delivering
+ * `policy` would add a field compared against a number already known to be a
+ * stand-in. **Do not wire it, and do not remove it, without re-opening that.**
  *
  * @param {string} outDir - dist/ directory to write to.
  * @param {string} projectRoot - foundation project root (where package.json lives).
@@ -171,6 +200,15 @@ async function emitRuntimePin(outDir, projectRoot) {
   const pinPath = join(outDir, 'runtime-pin.json')
   await writeFile(pinPath, JSON.stringify(pin, null, 2) + '\n', 'utf-8')
   console.log(`Generated runtime-pin.json (runtime ${runtimeVersion}${policy ? `, policy ${policy}` : ''})`)
+  // Said HERE, not only in the header above: this line is where a foundation
+  // author meets the field, and reading "policy X" next to a floor that IS
+  // delivered implies both travel. Only the floor does.
+  if (policy) {
+    console.log(
+      `  note: runtimePolicy "${policy}" is recorded but not yet delivered — nothing consumes it today.\n` +
+        `        The floor (runtime ${runtimeVersion}) does travel, as info.runtime at register.`
+    )
+  }
 }
 
 /**
