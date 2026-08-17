@@ -1247,6 +1247,84 @@ describe('knowledge: survives the round trip', () => {
 })
 
 /**
+ * `trackSections` — per-page section instrumentation opt-in.
+ *
+ * ⭐ **Both directions in one test, for the reason `knowledge` states above**: a
+ * page prop that pushes and does not pull silently deletes the author's flag on
+ * their next `uniweb pull`. Splitting them lets one side ship alone.
+ *
+ * ⚠️ The interesting part is the CASE CROSSING — authored `trackSections`
+ * (camelCase, like `hideIn`) against the wire's `track_sections` (snake_case,
+ * like every field the backend declares). Two spellings of one field is exactly
+ * the shape that cost the analytics lane a week (`collection_started` /
+ * `analyticsEnabledAt`), so it is pinned in both directions rather than trusted.
+ *
+ * ⛔ And it must cross AT ALL: without the producer line the flag works on the
+ * `--bundle` / `--link` lanes and is silently ignored on a backend-hosted site,
+ * whose page config comes from the backend's projection — the one lane the
+ * feature is sold on. `kb/framework/plans/tracking.md` §10b.
+ */
+describe('trackSections: crosses the wire, in both directions, changing case', () => {
+  it('emits track_sections on the opted-in page ONLY', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'uwx-tracksections-'))
+    writeFileSync(join(root, 'site.yml'), "name: ts-site\nfoundation: '@acme/base'\n")
+    const shop = join(root, 'pages', 'shop')
+    mkdirSync(join(shop, 'about'), { recursive: true })
+    writeFileSync(join(shop, 'page.yml'), 'title: Shop\ntrackSections: true\n')
+    writeFileSync(join(shop, '1-body.md'), '# Shop\n\nBuy things.\n')
+    writeFileSync(join(shop, 'about', 'page.yml'), 'title: About\n')
+    writeFileSync(join(shop, 'about', '1-body.md'), '# About\n\nWho we are.\n')
+
+    const doc = await siteProjectToDocument(root)
+    const find = (nodes, slug) => {
+      for (const n of nodes || []) {
+        if (n.slug && Object.values(n.slug)[0] === slug) return n
+        const hit = find(n.$children || n.pages, slug)
+        if (hit) return hit
+      }
+      return null
+    }
+
+    expect(find(doc.pages, 'shop').track_sections).toBe(true)
+    // ⛔ Page-level only — it must NOT cascade to a descendant. A site-wide or
+    // inherited form is the unscoped mode whose cardinality a counter-based
+    // collector cannot store.
+    expect(find(doc.pages, 'about').track_sections).toBeUndefined()
+    // Control: the authored camelCase spelling is not what crosses.
+    expect(find(doc.pages, 'shop').trackSections).toBeUndefined()
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('writes trackSections back into page.yml on pull', () => {
+    const out = mkdtempSync(join(tmpdir(), 'uwx-tracksections-pull-'))
+    const document = {
+      info: { name: { en: 'ts-site' }, foundation: '@acme/base' },
+      pages: [
+        {
+          $id: 'shop',
+          slug: { en: 'shop' },
+          mode: 'page',
+          title: { en: 'Shop' },
+          track_sections: true,
+          page_sections: [],
+        },
+      ],
+    }
+    siteContentDocumentToProject({ document, siteRoot: out })
+
+    const yml = yaml.load(readFileSync(join(out, 'pages', 'shop', 'page.yml'), 'utf8'))
+    expect(yml.trackSections).toBe(true)
+    // The wire spelling must not leak into an authored file.
+    expect(yml.track_sections).toBeUndefined()
+    // Control, as above: an ordinary field proves the writer ran.
+    expect(yml.title).toBe('Shop')
+
+    rmSync(out, { recursive: true, force: true })
+  })
+})
+
+/**
  * `tracking:` — where a site's usage events go. Same allowlist hazard as
  * `submit:`: the bundle lane spreads all of site.yml, so a missing line here
  * would make an authored destination work on a static host and vanish in

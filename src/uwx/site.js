@@ -206,6 +206,16 @@ function buildPageData(config, ctx) {
   // equivalently by walking the page tree). A reader that tests this field alone
   // honours the branch root and silently misses every child.
   setIf(data, 'knowledge', config.knowledge)
+  // Per-page section instrumentation opt-in. ⭐ Authored camelCase → wire
+  // snake_case, the same crossing `hideIn` → `hide_in` already makes; the
+  // backend's field list is entirely snake_case and stays that way.
+  // ⛔ It MUST cross: without this line the flag works on `--bundle`/`--link`
+  // and is silently ignored on a backend-hosted site, where page config comes
+  // from the backend's projection — i.e. it would fail on the one lane the
+  // feature is sold on, with no instrument able to say why.
+  // ⚠️ Declared backend-side FIRST (`track_sections`, generation 7) — an
+  // undeclared field refuses the whole push, not the field.
+  setIf(data, 'track_sections', config.trackSections)
   setIf(data, 'redirect', config.redirect)
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)

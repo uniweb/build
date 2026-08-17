@@ -1396,6 +1396,16 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       // Knowledge page — content feeds AI pipeline instead of (or in addition to) rendering
       ...(pageConfig.knowledge != null ? { knowledge: pageConfig.knowledge } : {}),
 
+      // Per-page section instrumentation opt-in. ⛔ PAGE-LEVEL ONLY, and it must
+      // stay that way: a site-wide form would emit one event per section on every
+      // page, whose cardinality a counter-based collector cannot store (measured:
+      // ~160 distinct values against a 50-value cap folds ~70% into `(other)`).
+      // Deliberately NOT part of the site → page → section cascade that
+      // `prerender:` uses, even though that is the local convention — following it
+      // would re-create the unscoped mode through the front door.
+      // `kb/framework/plans/tracking.md` §10b.
+      ...(pageConfig.trackSections != null ? { trackSections: pageConfig.trackSections } : {}),
+
       // Layout options (named layout + per-page overrides)
       layout: {
         ...(resolvedLayoutName ? { name: resolvedLayoutName } : {}),

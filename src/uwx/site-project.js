@@ -373,7 +373,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
 // and preserved. Keep in sync with pageRecordToYml below.
 const PAGE_YML_MANAGED_KEYS = new Set([
   'id', 'title', 'description', 'label', 'keywords', 'index', 'hidden',
-  'hideIn', 'knowledge', 'redirect', 'rewrite', 'layout', 'seo',
+  'hideIn', 'knowledge', 'trackSections', 'redirect', 'rewrite', 'layout', 'seo',
   'fetch', 'sections',
 ])
 
@@ -396,6 +396,12 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (record.hidden !== undefined) y.hidden = record.hidden
   if (record.hide_in !== undefined) y.hideIn = record.hide_in
   if (record.knowledge !== undefined) y.knowledge = record.knowledge
+  // Wire snake_case → authored camelCase, the same crossing `hide_in` → `hideIn`
+  // makes two lines up. ⛔ Both directions or neither: a page prop that pushes
+  // and does not pull is WORSE than one that does neither, because the author's
+  // flag is silently removed from their `page.yml` the first time they run
+  // `uniweb pull`.
+  if (record.track_sections !== undefined) y.trackSections = record.track_sections
   if (record.redirect !== undefined) y.redirect = record.redirect
   if (record.rewrite !== undefined) y.rewrite = record.rewrite
   if (record.layout !== undefined) y.layout = record.layout
