@@ -73,6 +73,13 @@ export {
 } from './locale-sync.js'
 export { emitSyncPackages } from './sync-package.js'
 export {
+  readAssetMap,
+  updateAssetMap,
+  refForAssetId,
+  restoreAssetRefs,
+  ASSET_MAP_FILE,
+} from './asset-map.js'
+export {
   diffSiteUnits,
   describeSiteDiff,
   computeUnitHashes,

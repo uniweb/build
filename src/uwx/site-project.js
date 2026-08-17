@@ -33,6 +33,7 @@
 // the i18n pipeline). Absent `info` keys are left untouched on disk.
 
 import { join, relative, extname, basename } from 'node:path'
+import { readAssetMap, restoreAssetRefs } from './asset-map.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
@@ -626,11 +627,18 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
-  const report = { config: null, collections: null, locales: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
+  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).
   const collector = createTranslationCollector(sourceLocale)
+
+  // Put the author's own asset paths back before anything is serialized. Stored
+  // content carries an id and a serve URL; only the committed map knows the ref
+  // the author wrote. Without this a push/pull cycle rewrites every image in a
+  // developer's source to a backend route — a mangling of files they own, by a
+  // round trip that changed nothing.
+  report.assets = restoreAssetRefs(document, readAssetMap(siteRoot))
 
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector })
   report.collections = declarationsToCollectionsYml({ document, siteRoot })
