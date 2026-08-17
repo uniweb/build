@@ -70,7 +70,7 @@ let _buildingSSRBundle = false
  * an opinion about one. The selector is the backend's resolution (an explicit pin
  * → the site's current → a deployment default → newest installed). What a
  * foundation declares here is the CONSTRAINT on that choice, never the choice.
- * `kb/framework/architecture/site-foundation-runtime-model.md` § "who gets to say
+ * the site/foundation/runtime model, § "who gets to say
  * whether a site accepts a newer runtime" is the authority.
  *
  * Reads the resolved version from the foundation's node_modules/@uniweb/

@@ -1403,7 +1403,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       // Deliberately NOT part of the site → page → section cascade that
       // `prerender:` uses, even though that is the local convention — following it
       // would re-create the unscoped mode through the front door.
-      // `kb/framework/plans/tracking.md` §10b.
+      // the tracking design, §10b.
       ...(pageConfig.trackSections != null ? { trackSections: pageConfig.trackSections } : {}),
 
       // Layout options (named layout + per-page overrides)
@@ -2367,7 +2367,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   for (const { message } of langValidation.warnings) {
     console.warn(`[content-collector] ${message}`)
   }
-  // Publish filter (kb/framework/build/uwx-format.md → "Per-locale publish
+  // Publish filter (the sync format's "Per-locale publish
   // readiness"): on published build paths, only the publishable intersection
   // (publishLanguages ∩ languages; absent field = all declared) ships — in
   // the embedded languages list and in route translations. Dev keeps the
@@ -2421,7 +2421,7 @@ export async function collectSiteContent(sitePath, options = {}) {
       // needs no line at all on this lane (`config` spreads all of site.yml) and one
       // line on the sync lane, so it reaches BOTH. The separate file could only ever
       // reach this one, which is what made an authored persona vanish on hosted
-      // sites. See kb/framework/architecture/assistant-config.md.
+      // sites.
       ...(routeTranslations
         ? { i18n: { ...(siteConfig.i18n || {}), routeTranslations } }
         : {}),

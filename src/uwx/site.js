@@ -292,7 +292,7 @@ const DYNAMIC_RE = /^\[(.+)\]$/
 // The flat `siteProjectToEntity` above emits `items[]` with positional
 // `parent_path` tuple-chains (the register lane, package.js). This lane emits the
 // section-keyed `$`-document the backend's @uniweb/site-content Model actually
-// declares (apps/uniweb-rs/.../system-models/site-content.fixture.yaml) and that
+// declares (the backend's site-content system-model fixture) and that
 // docs/reference/entity-content.md specifies:
 //
 //   - `page_sections` is a CHILD section of `pages` → it rides as an INLINE FIELD
@@ -775,7 +775,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // file, which needed a bespoke line in each lane and got one in only the
   // bundle lane — so an authored persona never reached a hosted site at all.
   // A key inside site.yml cannot repeat that, because only this lane needs a
-  // line. (kb/framework/architecture/assistant-config.md)
+  // line.
   //
   // ⛔ Credentials are stripped, not trusted — see `stripCredentials`.
   setIf(info, 'assistant', stripCredentials(siteYml.assistant, 'assistant'))
@@ -791,7 +791,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // strip only reaches a KEYED FIELD: a key embedded in the endpoint URL itself
   // (`https://collector/e?key=…`) is invisible here and is disclosed. The host's
   // secret store is the only right home either way.
-  // (kb/framework/plans/tracking.md)
+
   setIf(info, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
