@@ -33,7 +33,7 @@
  * ⛔ **No serve URL.** A URL is a host's route layout, and storing one here would
  * re-create — in a committed file, on every machine — exactly the coupling that
  * deleting `buildAssetUrl` removed from this CLI. The id plus the host's
- * `config.assets.url` template is the whole address, and only the host owns the
+ * `config.assets.url` pattern is the whole address, and only the host owns the
  * second half.
  *
  * ⛔ **No mime or size.** The store validates those and they are its to change;

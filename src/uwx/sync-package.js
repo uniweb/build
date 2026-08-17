@@ -127,7 +127,7 @@ function walkEntityAssets(node, visitor) {
 //
 // ⇒ Writing both means content authored now stays correct whichever order the
 // halves arrive in — the same reason the app writes both. The URL is dropped
-// only once every deployment declares a template.
+// only once every deployment declares a pattern.
 //
 // Identity is stamped on the OBJECT carrying the reference, which covers a
 // ProseMirror image node's attrs (`{src, alt, …}`) and a section background's
