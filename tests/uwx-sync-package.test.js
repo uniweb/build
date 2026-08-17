@@ -416,3 +416,40 @@ describe('asset identity rides BESIDE the URL', () => {
     expect(raw).toContain(SERVE)
   })
 })
+
+describe('an assetId already on the node survives push untouched', () => {
+  // The no-download case. A project that declines downloads records a plain URL
+  // rather than a local path — so on push-back there is no local ref, nothing to
+  // hash, no dedup hit and no id to RECOVER.
+  //
+  // ⭐ Nothing needs recovering, because the id never left. `pull` writes the id
+  // beside the URL exactly as `push` does, so the durable half is already on the
+  // node and the rewrite — which only touches strings matching a local ref —
+  // walks straight past it.
+  //
+  // ⇒ The invariant this pins: `assetId` is never dropped by a transform, in
+  // either direction or either mode. The URL is the volatile half; the id is the
+  // durable half; they travel together. Durability does NOT depend on the
+  // committed map (that is for restoring authored PATHS) — it depends on this.
+  beforeEach(() => {
+    w('pages/1-home/1-hero.md',
+      '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![Hero](https://cdn.example/dist/9f2c/base.png)\n')
+  })
+
+  it('a remote URL with identity keeps its identity through a push', async () => {
+    // Simulate what a no-download pull leaves behind: a plain URL, plus identity.
+    const pkg = await emitSyncPackages(SITE, {
+      assetRewrite: { '/images/other.png': '/served/other.png' },
+      assetIds: { '/images/other.png': { id: 'OTHER', ext: 'png' } }
+    })
+    const doc = JSON.parse(
+      readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    )
+    const raw = JSON.stringify(doc)
+    // The unrelated rewrite did not disturb the remote URL…
+    expect(raw).toContain('https://cdn.example/dist/9f2c/base.png')
+    // …and stamping is keyed on local refs, so it neither adds nor removes
+    // identity on a node the map does not cover.
+    expect(raw).not.toContain('"assetId":"OTHER"')
+  })
+})
