@@ -129,6 +129,57 @@ Body text.
     expect(siteContent.hasExplicitPreview).toBeUndefined()
   })
 
+  // ── the icon base is the HOST's slot on this lane ──────────────────────────
+  //
+  // This payload only goes to a backend, and the icon base is a property of the
+  // deployment — one value for every site a backend serves. It is not a site's
+  // call, because the base and the icon NAMESPACE are coupled: names minted
+  // against one corpus 404 wholesale against another base.
+  //
+  // The sync lane never had the exposure (`uwx/site.js` allowlists `info.*` and
+  // has no `icons` entry). This is the link lane being made to agree.
+  describe('config.icons (host-owned on this lane)', () => {
+    it('drops an author-set icons block, and keeps the rest of site.yml', async () => {
+      writeFileSync(
+        join(siteRoot, 'site.yml'),
+        `name: test-site\nfoundation: src\nindex: home\ndescription: kept\nicons:\n  cdnUrl: https://authors-choice.test\n`
+      )
+
+      await buildSiteData({ siteRoot, distDir })
+      const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
+
+      expect(content.config.icons).toBeUndefined()
+
+      // Controls. Without these the assertion above would pass just as well on
+      // an empty config, or on a build that never read site.yml at all.
+      expect(content.config.description).toBe('kept')
+      expect(content.config.name).toBe('test-site')
+    })
+
+    it('leaves the icon MANIFEST alone — different key, different thing', async () => {
+      // `content.icons` is the build's manifest of icons used; only
+      // `config.icons` is the host-owned address slot.
+      writeFileSync(
+        join(siteRoot, 'pages', 'home', '1-hero.md'),
+        `---\ntype: Hero\n---\n\n![](lu-house)\n\n# Welcome\n`
+      )
+
+      await buildSiteData({ siteRoot, distDir })
+      const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
+
+      expect(content.icons?.used).toContain('lu:house')
+      expect(content.config.icons).toBeUndefined()
+    })
+
+    it('is a no-op when the author set none', async () => {
+      await buildSiteData({ siteRoot, distDir })
+      const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
+
+      expect(content.config).toBeTruthy()
+      expect(content.config.icons).toBeUndefined()
+    })
+  })
+
   it('throws when siteRoot is missing', async () => {
     await expect(buildSiteData({ distDir })).rejects.toThrow('siteRoot is required')
   })

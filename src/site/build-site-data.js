@@ -193,6 +193,33 @@ export async function buildSiteData({
   delete finalContent.hasExplicitPoster
   delete finalContent.hasExplicitPreview
 
+  // ⛔ `config.icons` is a HOST-owned slot on this lane — drop it.
+  //
+  // This payload only ever goes to a backend (link mode is what `uniweb deploy`
+  // runs), and `config` is site.yml spread whole, so an author's
+  // `icons.cdnUrl` would otherwise ride along and land in a slot the host is
+  // supposed to fill. The icon base is a property of the DEPLOYMENT, identical
+  // for every site a given backend serves — not something one site gets to
+  // choose [Diego, 2026-08-17].
+  //
+  // The reason it cannot be a site's call is that the base and the NAMESPACE
+  // are coupled: icon filenames are minted by whoever built the corpus, so
+  // content carrying one host's names 404s wholesale against a different base.
+  // A site-level override here is a broken site, not a preference.
+  //
+  // The sync lane never had this exposure — `uwx/site.js` builds `info.*` from
+  // a key-by-key allowlist with no `icons` entry. This makes the two agree.
+  // `site.yml::icons` stays fully live on the bundled/static lanes, which have
+  // no host to ask.
+  //
+  // Rebuilt rather than mutated: `finalContent` is sometimes `siteContent`
+  // itself, and `config` is shared by reference through the shallow copies
+  // above.
+  if (finalContent.config?.icons !== undefined) {
+    const { icons: _hostOwnedIcons, ...configWithoutIcons } = finalContent.config
+    finalContent = { ...finalContent, config: configWithoutIcons }
+  }
+
   // 4. Write `dist/site-content.json` with FULL sections inlined.
   //    Important: do NOT strip sections per the split-content rule here.
   //    The link-mode deploy ships full content; the worker re-evaluates
