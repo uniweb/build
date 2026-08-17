@@ -353,3 +353,66 @@ describe('emitSyncPackages — per-item preconditions (item_base_versions)', () 
     expect(gated.hashes).toEqual(plain.hashes)
   })
 })
+
+describe('asset identity rides BESIDE the URL', () => {
+  // The interim's whole safety property. The id is what survives — a URL is a
+  // host's route layout frozen into content that outlives it. The URL is what
+  // RENDERS today — no deployment emits config.assets.url yet, so a resolver
+  // handed an id alone would resolve nothing. Writing both means content
+  // authored now stays correct whichever order the halves arrive in.
+  const REF = '/images/hero.png'
+  const SERVE = '/gateway/asset/dist/9f2c/base.png'
+
+  const emit = async () =>
+    emitSyncPackages(SITE, {
+      assetRewrite: { [REF]: SERVE },
+      assetIds: { [REF]: { id: '9f2c', ext: 'png' } }
+    })
+
+  const siteDocOf = (pkg) =>
+    JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
+
+  const findWith = (node, pred, hits = []) => {
+    if (Array.isArray(node)) node.forEach((n) => findWith(n, pred, hits))
+    else if (node && typeof node === 'object') {
+      if (pred(node)) hits.push(node)
+      Object.values(node).forEach((v) => findWith(v, pred, hits))
+    }
+    return hits
+  }
+
+  beforeEach(() => {
+    // An image node carrying the local ref, and a section background carrying
+    // the same one — the two shapes framework resolves.
+    w('pages/1-home/1-hero.md',
+      '---\ntype: Hero\nid: hero\nbackground:\n  image:\n    src: ' + REF +
+      '\n---\n# Hi\n\n![Hero](' + REF + ')\n')
+  })
+
+  it('stamps assetId/assetExt AND keeps the resolved URL', async () => {
+    const doc = siteDocOf(await emit())
+    const stamped = findWith(doc, (n) => n.assetId === '9f2c')
+    expect(stamped.length).toBeGreaterThan(0)
+    for (const n of stamped) {
+      expect(n.assetExt).toBe('png')
+      // the URL is still there — this is what renders until a host declares a template
+      expect(n.src ?? n.url).toBe(SERVE)
+    }
+  })
+
+  it('reaches a section background as well as an image node', async () => {
+    const doc = siteDocOf(await emit())
+    const raw = JSON.stringify(doc)
+    // both shapes carry identity; neither lost its URL
+    expect(raw).toContain('"assetId":"9f2c"')
+    expect(raw).toContain(SERVE)
+    expect(raw).not.toContain(REF) // the local ref itself is fully rewritten
+  })
+
+  it('CONTROL: without assetIds nothing is stamped, and the URL rewrite still happens', async () => {
+    const pkg = await emitSyncPackages(SITE, { assetRewrite: { [REF]: SERVE } })
+    const raw = JSON.stringify(siteDocOf(pkg))
+    expect(raw).not.toContain('assetId')
+    expect(raw).toContain(SERVE)
+  })
+})

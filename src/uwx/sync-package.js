@@ -110,22 +110,53 @@ function walkEntityAssets(node, visitor) {
 }
 
 // In-place: replace every local-asset-path string the map covers with its serve
-// URL. A ref the map omits (upload failed/skipped) is left untouched — never a
-// broken URL. Returns the (mutated) node.
-function rewriteEntityAssets(node, map) {
+// URL, and stamp the asset's IDENTITY beside it. A ref the map omits (upload
+// failed/skipped) is left untouched — never a broken URL. Returns the (mutated)
+// node.
+//
+// ⭐ `ids` writes `assetId`/`assetExt` ALONGSIDE the URL rather than instead of
+// it, and the "alongside" is the whole safety property of the interim:
+//
+//   - **the id is what survives.** A URL is a host's route layout frozen into
+//     content that outlives it; an id is re-resolved on every render, so a host
+//     that moves its assets costs a config edit rather than a migration.
+//   - **the URL is what RENDERS today.** No deployment emits `config.assets.url`
+//     yet, so a resolver handed an id alone would resolve nothing. With the URL
+//     still there it falls through and renders exactly as before.
+//
+// ⇒ Writing both means content authored now stays correct whichever order the
+// halves arrive in — the same reason the app writes both. The URL is dropped
+// only once every deployment declares a template.
+//
+// Identity is stamped on the OBJECT carrying the reference, which covers a
+// ProseMirror image node's attrs (`{src, alt, …}`) and a section background's
+// media object (`{image: {src}}`) with one rule — the two shapes framework
+// resolves, reached through the same walk.
+function rewriteEntityAssets(node, map, ids) {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
       const v = node[i]
       if (typeof v === 'string') { if (map[v]) node[i] = map[v] }
-      else rewriteEntityAssets(v, map)
+      else rewriteEntityAssets(v, map, ids)
     }
     return node
   }
   if (node && typeof node === 'object') {
+    // Stamp BEFORE the string swap below, while the reference is still the
+    // local ref the ids map is keyed by.
+    if (ids) {
+      const ref = typeof node.src === 'string' ? node.src
+        : typeof node.url === 'string' ? node.url : null
+      const identity = ref ? ids[ref] : null
+      if (identity?.id) {
+        node.assetId = identity.id
+        if (identity.ext) node.assetExt = identity.ext
+      }
+    }
     for (const key of Object.keys(node)) {
       const v = node[key]
       if (typeof v === 'string') { if (map[v]) node[key] = map[v] }
-      else rewriteEntityAssets(v, map)
+      else rewriteEntityAssets(v, map, ids)
     }
   }
   return node
@@ -165,6 +196,8 @@ function rewriteEntityAssets(node, map) {
  *        `publish` fills this for the site's LOCAL extensions after releasing them;
  *        the parallel of `info.foundation`, and needed because `extensions` is a
  *        sibling of `info` rather than a field in it.
+ * @param {Object<string,{id:string,ext:string}>} [opts.assetIds] - local asset ref →
+ *        backend identity, stamped as `assetId`/`assetExt` BESIDE the URL
  * @param {Object<string,string>} [opts.assetRewrite] - map of local asset ref →
  *        backend serve URL; rewrites the entities' media refs before push (the
  *        deploy's 2nd emit). Absent → no rewrite (the f225 sync path is unchanged).
@@ -263,9 +296,11 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // every non-deploy caller, so the f225 sync path is byte-identical without it.
   const assetRewrite =
     opts.assetRewrite && typeof opts.assetRewrite === 'object' ? opts.assetRewrite : null
+  const assetIds =
+    opts.assetIds && typeof opts.assetIds === 'object' ? opts.assetIds : null
   if (assetRewrite) {
-    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite)
-    for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite)
+    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds)
+    for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite, assetIds)
   }
   // Collect the site-root local refs the deploy must upload (`/images/x.png`).
   // Co-located refs (`./x`, `../x`) need the source `.md` location to resolve — the
