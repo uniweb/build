@@ -157,3 +157,39 @@ describe('restoreAssetRefs — the reason the map is committed', () => {
     expect(pushed.attrs.src).toBe(authored)
   })
 })
+
+describe('a poster round-trips like any other asset', () => {
+  const POSTER_ID = 'b'.repeat(64)
+  const MAP2 = {
+    '/images/hero.png': { id: '9f2c', ext: 'png' },
+    '/video/clip.mp4': { id: 'aaaa', ext: 'mp4' },
+    '/images/poster.png': { id: POSTER_ID, ext: 'png' }
+  }
+
+  it('⭐ restores src AND poster to their authored paths', () => {
+    const node = {
+      src: '/gateway/asset/dist/aaaa/base.mp4',
+      assetId: 'aaaa',
+      assetExt: 'mp4',
+      poster: `/gateway/asset/dist/${POSTER_ID}/base.png`,
+      posterAssetId: POSTER_ID,
+      posterAssetExt: 'png'
+    }
+    const stats = restoreAssetRefs(node, MAP2)
+    expect(stats).toEqual({ restored: 2, unknown: 0 })
+    expect(node.src).toBe('/video/clip.mp4')
+    expect(node.poster).toBe('/images/poster.png')
+  })
+
+  it('restores a document preview', () => {
+    const node = { preview: '/served/x.png', previewAssetId: '9f2c', previewAssetExt: 'png' }
+    expect(restoreAssetRefs(node, MAP2).restored).toBe(1)
+    expect(node.preview).toBe('/images/hero.png')
+  })
+
+  it('an unknown poster id leaves the poster URL alone', () => {
+    const node = { poster: 'https://cdn/p.png', posterAssetId: 'UNSEEN' }
+    expect(restoreAssetRefs(node, MAP2)).toEqual({ restored: 0, unknown: 1 })
+    expect(node.poster).toBe('https://cdn/p.png')
+  })
+})

@@ -41,6 +41,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { join } from 'node:path'
 
 export const ASSET_MAP_FILE = 'assets.json'
@@ -173,16 +174,16 @@ export function restoreAssetRefs(document, map) {
   const visit = (node) => {
     if (Array.isArray(node)) return node.forEach(visit)
     if (!node || typeof node !== 'object') return
-    if (typeof node.assetId === 'string' && node.assetId) {
-      const ref = byId.get(node.assetId)
-      if (ref) {
-        if (typeof node.src === 'string') node.src = ref
-        else if (typeof node.url === 'string') node.url = ref
-        else node.src = ref
-        stats.restored++
-      } else {
-        stats.unknown++
-      }
+    // Every slot: a poster is the one asset a round trip would still mangle if
+    // only the primary reference were restored.
+    for (const slot of ASSET_SLOTS) {
+      const id = node[slot.id]
+      if (typeof id !== 'string' || !id) continue
+      const ref = byId.get(id)
+      if (!ref) { stats.unknown++; continue }
+      const urlAttr = slot.urls.find((k) => typeof node[k] === 'string') || slot.urls[0]
+      node[urlAttr] = ref
+      stats.restored++
     }
     for (const v of Object.values(node)) visit(v)
   }

@@ -20,6 +20,7 @@
 //     lane (the idempotent no-op).
 
 import { buildCollectionEntities, entityContentHash } from './collections.js'
+import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
 import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
@@ -145,12 +146,18 @@ function rewriteEntityAssets(node, map, ids) {
     // Stamp BEFORE the string swap below, while the reference is still the
     // local ref the ids map is keyed by.
     if (ids) {
-      const ref = typeof node.src === 'string' ? node.src
-        : typeof node.url === 'string' ? node.url : null
-      const identity = ref ? ids[ref] : null
-      if (identity?.id) {
-        node.assetId = identity.id
-        if (identity.ext) node.assetExt = identity.ext
+      // Every asset slot, not just the primary: a video's `poster` and a
+      // document's `preview` are assets like any other, and each has identity
+      // attrs naming which reference they belong to (ASSET_SLOTS).
+      for (const slot of ASSET_SLOTS) {
+        const ref = slot.urls
+          .map((k) => (typeof node[k] === 'string' ? node[k] : null))
+          .find(Boolean)
+        const identity = ref ? ids[ref] : null
+        if (identity?.id) {
+          node[slot.id] = identity.id
+          if (identity.ext) node[slot.ext] = identity.ext
+        }
       }
     }
     for (const key of Object.keys(node)) {

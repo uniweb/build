@@ -453,3 +453,27 @@ describe('an assetId already on the node survives push untouched', () => {
     expect(raw).not.toContain('"assetId":"OTHER"')
   })
 })
+
+describe('push stamps every asset slot, not just the primary', () => {
+  it('⭐ stamps a poster through its own identity attrs', async () => {
+    w('pages/1-home/1-hero.md',
+      '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![Clip](/video/clip.mp4){role=video poster=/images/poster.png}\n')
+    const pkg = await emitSyncPackages(SITE, {
+      assetRewrite: {
+        '/video/clip.mp4': '/served/clip.mp4',
+        '/images/poster.png': '/served/poster.png'
+      },
+      assetIds: {
+        '/video/clip.mp4': { id: 'VID', ext: 'mp4' },
+        '/images/poster.png': { id: 'POS', ext: 'png' }
+      }
+    })
+    const raw = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    expect(raw).toContain('"assetId":"VID"')
+    expect(raw).toContain('"posterAssetId":"POS"')
+    expect(raw).toContain('"posterAssetExt":"png"')
+    // both URLs still there — identity rides beside, never instead
+    expect(raw).toContain('/served/clip.mp4')
+    expect(raw).toContain('/served/poster.png')
+  })
+})
