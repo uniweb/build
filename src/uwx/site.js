@@ -726,8 +726,16 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // (registry ref / URL / local path), the round-trip source of truth.
   info.foundation = siteYml.foundation
   setIf(info, 'base', siteYml.base)
-  // favicon — a verbatim URL/path string (the kit resolves it, like other media
-  // refs). `assets` is a build-DERIVED upload manifest, not authored config, so it
+  // favicon — a verbatim URL/path string. ⚠️ This comment claimed "the kit
+  // resolves it, like other media refs" until 2026-08-17; measured, `favicon`
+  // appears nowhere in `kit/src` or `runtime/src`. The real consumer is
+  // `build/src/site/plugin.js`, which injects a `<link>` into `index.html` at
+  // BUILD time — from `config.favicon` verbatim, else by auto-detecting
+  // `public/favicon.{svg,ico,png}`. So it is a build-time injection, not a
+  // runtime resolve, and anything giving the favicon a resolvable asset
+  // reference has to act there rather than in the runtime.
+  //
+  // `assets` is a build-DERIVED upload manifest, not authored config, so it
   // is never produced from / projected to the site files.
   setIf(info, 'favicon', siteYml.favicon)
   // Site-level SEO/social metadata — the same shape as page.yml's `seo:` + the
