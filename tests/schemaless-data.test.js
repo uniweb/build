@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assembleDataBall, collectBallAssets, rewriteBallAssets } from '../src/site/index.js'
+import { collectSchemalessData, collectSchemalessDataAssets, rewriteSchemalessDataAssets } from '../src/site/index.js'
 // Derived, never re-spelled — the convention is pinned once, in
 // `@uniweb/core`'s tests/data-paths.test.js.
 import { DATA_DIR } from '@uniweb/core'
@@ -20,13 +20,13 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dist, { recursive: true, force: true }))
 
-describe('assembleDataBall', () => {
+describe('collectSchemalessData', () => {
   it('bundles only the schema-less collections data, as parsed JSON', async () => {
     w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed → excluded
     w(`${DATA_DIR}/notes.json`, JSON.stringify([{ slug: 'n1' }])) // schema-less → included
     w(`${DATA_DIR}/notes/n1.json`, JSON.stringify({ slug: 'n1', body: 'x' })) // deferred per-record → included
 
-    const ball = await assembleDataBall(dist, ['notes'])
+    const ball = await collectSchemalessData(dist, ['notes'])
 
     expect(Object.keys(ball.data).sort()).toEqual(['notes.json', 'notes/n1.json'])
     expect(ball.data['notes.json']).toEqual([{ slug: 'n1' }]) // a parsed value, not a string
@@ -48,7 +48,7 @@ describe('assembleDataBall', () => {
     w('_search/en/pages.json', JSON.stringify({ type: 'pages', items: [] }))
     w('search-index.json', JSON.stringify({ entries: [] }))
 
-    const ball = await assembleDataBall(dist, ['notes'])
+    const ball = await collectSchemalessData(dist, ['notes'])
 
     // The key is gone now, not merely empty. It shipped as `search: {}` for one
     // release so the consumer's relay stayed a well-formed shape while it still
@@ -64,12 +64,12 @@ describe('assembleDataBall', () => {
   it('returns null when there is no schema-less data — a search index cannot keep it alive', async () => {
     w(`${DATA_DIR}/articles.json`, JSON.stringify([{ slug: 'a' }])) // schema-backed only
     w('_search/en/pages.json', JSON.stringify({ type: 'pages', items: [] })) // ignored now
-    expect(await assembleDataBall(dist, [])).toBeNull()
-    expect(await assembleDataBall(dist)).toBeNull() // default schemalessNames = []
+    expect(await collectSchemalessData(dist, [])).toBeNull()
+    expect(await collectSchemalessData(dist)).toBeNull() // default schemalessNames = []
   })
 })
 
-describe('collectBallAssets', () => {
+describe('collectSchemalessDataAssets', () => {
   it('collects site-root local media refs anywhere in the ball; skips remote + non-media; dedups', () => {
     const ball = {
       data: {
@@ -82,23 +82,23 @@ describe('collectBallAssets', () => {
       },
       search: { 'en/pages.json': { thumb: '/collections/notes/t.webp' } },
     }
-    expect(collectBallAssets(ball).sort()).toEqual(['/collections/notes/t.webp', '/images/cover.png'])
+    expect(collectSchemalessDataAssets(ball).sort()).toEqual(['/collections/notes/t.webp', '/images/cover.png'])
   })
 
   it('returns [] for a null ball or a ball with no local media', () => {
-    expect(collectBallAssets(null)).toEqual([])
-    expect(collectBallAssets({ data: { 'n.json': [{ slug: 'x', url: 'https://e/y.png' }] }, search: {} })).toEqual([])
+    expect(collectSchemalessDataAssets(null)).toEqual([])
+    expect(collectSchemalessDataAssets({ data: { 'n.json': [{ slug: 'x', url: 'https://e/y.png' }] }, search: {} })).toEqual([])
   })
 })
 
-describe('rewriteBallAssets', () => {
+describe('rewriteSchemalessDataAssets', () => {
   it('swaps every mapped local ref for its serve URL, leaves unmapped + non-refs untouched, and is pure', () => {
     const ball = {
       data: { 'notes.json': [{ image: '/images/cover.png', also: '/images/missing.png', body: 'text' }] },
       search: { 'en/pages.json': { thumb: '/images/cover.png' } },
     }
     const map = { '/images/cover.png': 'https://cdn/dist/abc/base.png' }
-    const out = rewriteBallAssets(ball, map)
+    const out = rewriteSchemalessDataAssets(ball, map)
 
     expect(out.data['notes.json'][0].image).toBe('https://cdn/dist/abc/base.png') // mapped → rewritten
     expect(out.search['en/pages.json'].thumb).toBe('https://cdn/dist/abc/base.png') // search rewritten too
@@ -109,7 +109,7 @@ describe('rewriteBallAssets', () => {
 
   it('returns the ball untouched for an empty map or a null ball', () => {
     const ball = { data: {}, search: {} }
-    expect(rewriteBallAssets(ball, {})).toBe(ball)
-    expect(rewriteBallAssets(null, { a: 'b' })).toBeNull()
+    expect(rewriteSchemalessDataAssets(ball, {})).toBe(ball)
+    expect(rewriteSchemalessDataAssets(null, { a: 'b' })).toBeNull()
   })
 })

@@ -1,19 +1,39 @@
 /**
- * Data ball — the static-delivery half of a composite `uniweb deploy`. A site's
- * collections partition by schema presence: a collection that resolves a data schema
- * syncs as folder entities; a SCHEMA-LESS collection has no entity model, so its built
- * `dist/data/<name>.json` (cascade + any `deferred:` per-record files) is delivered
- * statically. This bundles that schema-less subset of `dist/data/**` into one JSON doc
- * the deploy uploads as a single content-addressed asset; the backend unwraps it into
- * the `/data/*` bytes the gateway serves.
+ * Schema-less collection data — the set, and its local media.
  *
- *   { data: { "<relpath-under-data>": <json> } }   // schema-less collections only
+ * ⭐ **The name carries the scope on purpose.** This is NOT "the site's static
+ * data" in general. A site's collections partition by **schema presence**: one
+ * that resolves a data schema syncs as folder entities — content a backend
+ * genuinely consumes, queryable, editable, with a `brief:` for its lean shape.
+ * A **schema-less** collection has no entity model, so its compiled
+ * `dist/data/<name>.json` (plus any `deferred:` per-record files) is delivered
+ * as files instead. That fallback tier is all this module is about.
  *
- * **A search index used to ride here too, and deliberately no longer does** (2026-08-01).
- * Only a CLI deploy produced one — a CMS publish produced none — so a site's search
- * existed or vanished depending on who published it, which is the flicker rule exactly.
- * A host that wants search derives it from the content it already stores. See the note
- * at the removal point below, and `collab/context/site-derived-artifacts.md`.
+ *   { data: { "<relpath under dist/data>": <json> } }   // schema-less only
+ *
+ * ⇒ It is an **in-memory enumeration**, not an artifact. `collectSchemalessData`
+ * gathers the set; the CLI's `site-data-upload` lane PUTs each file to the
+ * target the backend returns, landing at its serving tail.
+ *
+ * ## ⛔ It used to be a "data ball", and that is retired (2026-08-18)
+ *
+ * This merged the whole set into ONE uploaded asset that the backend then had
+ * to fetch, parse and fan out. It was the **only aggregate the CLI produced** —
+ * media, foundation code and the runtime all upload one object per file — and
+ * the only place these bytes ever transited the backend. Nothing in the code or
+ * the docs ever justified the bundling.
+ *
+ * ⇒ **Do not reintroduce a bundle here.** One object per file is what the
+ * reader's static arm already assumes: a plain object GET on the verbatim tail,
+ * with nothing anywhere that unbundles. Full account, including the endpoint
+ * contract: `kb/framework/build/data-ball-retirement.md`.
+ *
+ * **A search index used to ride here too, and deliberately no longer does**
+ * (2026-08-01). Only a CLI deploy produced one — a CMS publish produced none —
+ * so a site's search existed or vanished depending on who published it, which
+ * is the artifact-flicker rule exactly. A host that wants search derives it from
+ * the content it already stores. See the note at the removal point below and
+ * `collab/context/site-derived-artifacts.md`.
  */
 
 import { existsSync } from 'node:fs'
@@ -56,7 +76,7 @@ function collectionOf(relPath) {
  *        `emitSyncPackages(...).schemaless`); only these contribute `data`.
  * @returns {Promise<{ data: Object }|null>} null when there is nothing to deliver.
  */
-export async function assembleDataBall(distDir, schemalessNames = []) {
+export async function collectSchemalessData(distDir, schemalessNames = []) {
   const schemaless = new Set(schemalessNames)
   const allData = await readJsonTree(join(distDir, DATA_DIR))
   const data = {}
@@ -128,7 +148,7 @@ export async function assembleDataBall(distDir, schemalessNames = []) {
  * @param {{data:object}|null} ball
  * @returns {string[]} deduped refs to upload
  */
-export function collectBallAssets(ball) {
+export function collectSchemalessDataAssets(ball) {
   const refs = new Set()
   const walk = (n) => {
     if (typeof n === 'string') {
@@ -150,7 +170,7 @@ export function collectBallAssets(ball) {
  * @param {Record<string,string>} map - ref → serve URL
  * @returns {{data:object}|null} a new ball, or the input when there's nothing to do
  */
-export function rewriteBallAssets(ball, map) {
+export function rewriteSchemalessDataAssets(ball, map) {
   if (!ball || !map || Object.keys(map).length === 0) return ball
   const walk = (n) => {
     if (typeof n === 'string') return map[n] || n

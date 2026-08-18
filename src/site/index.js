@@ -42,7 +42,7 @@ export {
   writeCollectionFiles,
   getCollectionLastModified
 } from './collection-processor.js'
-export { assembleDataBall, collectBallAssets, rewriteBallAssets } from './data-ball.js'
+export { collectSchemalessData, collectSchemalessDataAssets, rewriteSchemalessDataAssets } from './schemaless-data.js'
 export {
   parseFetchConfig,
   executeFetch,
