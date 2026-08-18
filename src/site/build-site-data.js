@@ -42,23 +42,33 @@ import {
  *
  * Emits to `distDir`:
  *   - `site-content.json` — full content tree, sections always inlined.
- *     The deploy CLI reads this and ships it as `payload.locales[default]`
- *     to the worker. Keeping sections inlined is load-bearing: the worker
- *     re-evaluates split-content from the full payload it receives, and
- *     emits `_pages/<lang>/<route>.json` itself when split is active.
- *     If we shipped a stripped manifest (as prerender does for static-host
- *     bundles), the worker would mis-detect split and serve broken pages.
+ *     The deploy CLI reads this and ships it as `payload.locales[default]`.
+ *
+ *     ⛔ Ship FULL sections; never strip them per the split-content rule.
+ *     A stripped manifest is what prerender emits for static-host bundles,
+ *     and a consumer that re-derives split content from the full payload
+ *     would mis-detect split and serve broken pages.
+ *
+ *     ⚠️ This used to justify the rule by stating what the receiving host
+ *     does with the payload. Removed 2026-08-18: the description was
+ *     accurate about one deployment and false about another, and both were
+ *     live at once — so naming "the worker" was wrong even though the
+ *     sentence was true somewhere. Framework has no host client and no host
+ *     knowledge (root CLAUDE.md, THE LANE CHAIN); we cannot tell consumers
+ *     apart and must not write as though we can.
+ *
+ *     ⇒ The rule stands on its own: we do not know which consumers
+ *     re-derive, so we always ship enough for the ones that do.
  *   - `data/<collection>.json` (+ per-record files for `deferred:`
  *     collections) — same shape `processCollections` produces today.
  *   - `assets/<media>` — processed images / video posters / PDF
  *     thumbnails. Filtered by the deploy CLI to MEDIA only at upload time.
  *
  * Does NOT emit:
- *   - HTML, JS, CSS, source maps, `_importmap/*` — none of these are
- *     consumed by Uniweb-edge; the worker generates HTML at request time.
- *   - `_pages/<route>.json` — only meaningful for static-host bundles
- *     where they're served as static assets. Worker derives them from
- *     `payload.locales[lang].pages[].sections` server-side.
+ *   - HTML, JS, CSS, source maps, `_importmap/*` — static-host bundle
+ *     artifacts; a host on this lane renders pages itself.
+ *   - `_pages/<route>.json` — only meaningful for static-host bundles,
+ *     where they are served as files.
  *   - `sitemap.xml`, `robots.txt` — static-host bundle territory. Note these
  *     are simply absent from Uniweb-hosted sites today: nothing in platform
  *     generates them, at publish time or at request time.
@@ -222,9 +232,9 @@ export async function buildSiteData({
 
   // 4. Write `dist/site-content.json` with FULL sections inlined.
   //    Important: do NOT strip sections per the split-content rule here.
-  //    The link-mode deploy ships full content; the worker re-evaluates
-  //    split + emits `_pages/<lang>/<route>.json` itself. Stripping at
-  //    this stage would silently break split-mode sites in production.
+  //    Stripping would silently break split-mode sites on any consumer that
+  //    re-derives split content from the full payload. See the header for
+  //    why this no longer names one.
   const contentPath = join(resolvedDistDir, 'site-content.json')
   await writeFile(contentPath, JSON.stringify(finalContent, null, 2))
 
