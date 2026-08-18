@@ -493,10 +493,16 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
       // soft skip — the collection is delivery-only, not a sync target. Only an
       // EXPLICIT schema/model the author asked for is a hard error.
       if (!decl.schemaExplicit) {
-        warnings.push(
-          `${name}: no data schema "${modelName}" (subfolder-name default) — not synced`
-        )
-        schemaless.push({ name })
+        // ⛔ Deliberately NOT a `warnings` string. This is a product decision the
+        // author is making — entities or static files — and it needs to be
+        // reported at a prominence a prose warning cannot carry. Callers get the
+        // structured entry and say it themselves (`cli/src/commands/{publish,push}.js`).
+        //
+        // It used to push `"… — not synced"`, printed dim among everything else.
+        // That was misleading in the expensive direction: the data IS delivered,
+        // as static files. An author read "not synced" as "my data did not
+        // upload" — or skimmed it — and either way could not act on it.
+        schemaless.push({ name, model: modelName })
         continue
       }
       throw new Error(

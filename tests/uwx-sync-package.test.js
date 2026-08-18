@@ -133,7 +133,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(folder).not.toHaveProperty('$uuid')
   })
 
-  it('a collection that resolves no schema is reported in `schemaless` (not synced)', async () => {
+  it('a collection that resolves no schema is reported in `schemaless`, WITH the model it looked for', async () => {
     // `notes` declares no schema and the foundation defines none → it resolves via
     // the subfolder-name convention, finds nothing, and soft-skips the sync. It
     // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
@@ -141,7 +141,19 @@ describe('emitSyncPackages — two directional lanes', () => {
     w('collections/notes/first.md', '---\ntitle: First\n---\nNote body\n')
     const pkg = await emitSyncPackages(SITE)
 
-    expect(pkg.schemaless).toEqual([{ name: 'notes' }])
+    // `model` carries the name the convention looked for and did not find. The CLI
+    // needs it to tell the author what to declare — a bare name cannot say that,
+    // and this entry replaced a prose warning precisely so the message could.
+    // ⭐ Note the SINGULARIZATION: collection `notes` looks for model `@/note`.
+    // That is exactly why the name has to travel — an author told only "no data
+    // schema" would declare `@/notes` and still not resolve.
+    expect(pkg.schemaless).toEqual([{ name: 'notes', model: '@/note' }])
+
+    // ⛔ And it is NOT also a prose warning. It used to push
+    // `"… — not synced"` into `warnings`, printed dim; that read as "my data did
+    // not upload" when the data ships as static files. One signal, reported by
+    // the CLI at warn level — see cli/src/utils/schemaless-report.js.
+    expect((pkg.warnings || []).join('\n')).not.toMatch(/not synced/i)
     // articles still syncs as entities — the partition routes each collection to one lane
     expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['articles/hello', 'articles/world'])
   })

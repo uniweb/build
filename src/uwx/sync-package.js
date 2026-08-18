@@ -121,9 +121,33 @@ function walkEntityAssets(node, visitor) {
 //   - **the id is what survives.** A URL is a host's route layout frozen into
 //     content that outlives it; an id is re-resolved on every render, so a host
 //     that moves its assets costs a config edit rather than a migration.
-//   - **the URL is what RENDERS today.** No deployment emits `config.assets.url`
-//     yet, so a resolver handed an id alone would resolve nothing. With the URL
-//     still there it falls through and renders exactly as before.
+//   - **the URL is what RENDERS today.** With the URL still there, a resolver
+//     that cannot resolve the id falls through and renders exactly as before.
+//
+//     ⚠️ **This bullet used to justify itself with "no deployment emits
+//     `config.assets.url` yet". FALSIFIED 2026-08-18** by the backend lane:
+//     `serve` publishes the pattern **unconditionally**, falling back to the
+//     direct form, so a deployment with no asset storage emits the honest
+//     `/gateway/asset/dist/{id}/base.{ext}` rather than nothing (measured by
+//     them on a running daemon, not read off a type). ⛔ Scoped to deployments
+//     running code from 2026-08-17 or later; an older one emits nothing, and
+//     absent stays absent. A present-tense negative about someone else's
+//     deployments is the claim nothing in this repo can ever contradict — it
+//     was true when written, and nothing here changed when it stopped being.
+//
+//     ⛔ **That does NOT license dropping the URL, and the reason is not
+//     coverage.** An earlier version of this note named coverage as the
+//     governor; it was only ever a gate. Dropping the `src` companion was
+//     **withdrawn as a goal** on 2026-08-17 on CONSUMER grounds: the editor
+//     canvas renders `attrs.url || attrs.src` and reads `assetId` nowhere, so
+//     an id-only node shows an `<img>` with no source *(measured by the
+//     frontend lane — their surface, their finding)*. Durability comes from
+//     every consumer PREFERRING the id, which each can do on its own schedule;
+//     dropping `src` only forces that at the cost of a migration window across
+//     two consumer chains where images blank.
+//
+//     ⇒ **Keep writing both.** See `kb/framework/content/asset-url-resolution.md`
+//     item 13 — and re-read it there rather than re-deriving the answer here.
 //
 // ⇒ Writing both means content authored now stays correct whichever order the
 // halves arrive in — the same reason the app writes both. The URL is dropped
@@ -213,7 +237,7 @@ function rewriteEntityAssets(node, map, ids) {
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   collections: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], skipped: number,
- *   schemaless: Array<{name: string}>, localAssets: string[] }>}
+ *   schemaless: Array<{name: string, model: string}>, localAssets: string[] }>}
  *   `schemaless` lists collections that resolved no data schema (soft-skipped from
  *   the sync) — the composite deploy delivers these statically via the data ball.
  *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
