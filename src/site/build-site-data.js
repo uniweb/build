@@ -126,8 +126,9 @@ export async function buildSiteData({
   //    in the vite plugin path that's fine because vite copies
   //    `public/` into `dist/` at build time. The link-mode pipeline
   //    has no vite, so we mirror that copy ourselves into
-  //    `<distDir>/data/` — the path `uniweb deploy::collectDataFiles`
-  //    walks at upload time. Same output bytes, same paths, just
+  //    `<distDir>/data/` — the set the CLI's `site-data-upload` lane walks at
+  //    publish time. (This named `uniweb deploy::collectDataFiles` until
+  //    2026-08-18; no such function has existed for some time.) Same output bytes, same paths, just
   //    without the vite intermediary.
   if (siteContent.config?.collections) {
     const collectionsBase = siteContent.config?.paths?.collections
