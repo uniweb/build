@@ -237,11 +237,16 @@ function rewriteEntityAssets(node, map, ids) {
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   collections: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], skipped: number,
- *   schemaless: Array<{name: string, model: string}>, localAssets: string[] }>}
+ *   schemaless: Array<{name: string, model: string}>, localAssets: string[],
+ *   applied: object }>}
  *   `schemaless` lists collections that resolved no data schema (soft-skipped from
  *   the sync) — the composite deploy delivers these statically via the data ball.
  *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
  *   must upload + rewrite to serve URLs; co-located refs are warned and skipped.
+ *   `applied` echoes the hash-affecting injections this emit actually used
+ *   (`assetRewrite` / `assetIds` / `injectInfo` / `injectExtensions`), ready to be
+ *   passed straight back as opts. A caller that banks the `hashes` must bank this
+ *   beside them, or an offline re-emit cannot reproduce the document they describe.
  *   Each lane is null when it has nothing to push. The collections `index` keeps a
  *   leading `{ kind: 'folder' }` placeholder (submission position 0 → the folder
  *   entity) so record back-fill stays positionally aligned; the folder itself has no
@@ -275,8 +280,10 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // stamped here — NOT authored in site.yml, so they ride the wire but never project
   // back on pull (the `info.assets` precedent). They are part of the hashed content,
   // so a changed bundle URL correctly re-fires the site-content lane.
-  if (siteDoc && opts.injectInfo && typeof opts.injectInfo === 'object') {
-    siteDoc.info = { ...siteDoc.info, ...opts.injectInfo }
+  const injectInfo =
+    opts.injectInfo && typeof opts.injectInfo === 'object' ? opts.injectInfo : null
+  if (siteDoc && injectInfo) {
+    siteDoc.info = { ...siteDoc.info, ...injectInfo }
   }
   // Same idea one level out: `extensions` is a sibling of `info`, not a field in
   // it, so a pinned extension ref cannot ride `injectInfo`. `publish` releases a
@@ -285,9 +292,13 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // for the same reason: delivery is version-pinned, so an unpinned local name on
   // the wire points at code the host cannot serve. Keyed by `$id` (the authored
   // declaration), so entries the publish didn't touch are left verbatim.
-  if (siteDoc && opts.injectExtensions && Array.isArray(siteDoc.extensions)) {
+  const injectExtensions =
+    opts.injectExtensions && typeof opts.injectExtensions === 'object'
+      ? opts.injectExtensions
+      : null
+  if (siteDoc && injectExtensions && Array.isArray(siteDoc.extensions)) {
     siteDoc.extensions = siteDoc.extensions.map((e) => {
-      const pinned = opts.injectExtensions[e?.$id]
+      const pinned = injectExtensions[e?.$id]
       if (!pinned) return e
       const { url: _dropped, ...rest } = e
       return { ...rest, ref: pinned }
@@ -402,9 +413,33 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // the content lane by its presence/absence.
   const siteContentUuid = siteDoc?.$uuid
 
+  // ⛔ EVERY INJECTION ABOVE IS PART OF THE HASHED DOCUMENT — so a reader that
+  // cannot reproduce them cannot compare against the hashes a push banked.
+  //
+  // `uniweb status` is exactly such a reader: it re-emits OFFLINE, and both an asset
+  // serve URL and a pinned foundation ref are things only a backend round-trip can
+  // produce. Left implicit, it reports every entity as changed FOREVER — measured
+  // 2026-08-19 on a site with one `/images/*.svg` reference, where push banked the
+  // rewritten hash, status re-hashed the authored one, and `changed` never dropped
+  // below 1 no matter how many times you pushed. `push.js` had already written the
+  // rule down for its own two emits ("or every entity reads as changed forever") and
+  // the third reader of the same cache never got it.
+  //
+  // ⭐ So the EMITTER reports what it applied, the pusher banks it beside the hashes,
+  // and the offline reader replays it. Reporting it here rather than having each
+  // caller remember to pass its own injections along is the whole point: what gets
+  // banked is then, by construction, what was hashed. A future injection is covered
+  // by adding one line here — not by finding every reader.
+  const applied = {
+    ...(assetRewrite ? { assetRewrite } : {}),
+    ...(assetIds ? { assetIds } : {}),
+    ...(injectInfo ? { injectInfo } : {}),
+    ...(injectExtensions ? { injectExtensions } : {})
+  }
+
   return {
     siteContent, collections, siteContentUuid, hashes, warnings, skipped,
-    schemaless: col.schemaless, localAssets,
+    schemaless: col.schemaless, localAssets, applied,
     // { stamped, unknown } when identity was applied; null when the caller passed
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed
     // before is the index-loss signature the backend refuses — the caller reports it.
