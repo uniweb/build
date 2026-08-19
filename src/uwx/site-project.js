@@ -90,6 +90,22 @@ function placeByUuid(ctx, uuid, targetAbs) {
 // most are identity; only `default_language` differs (the file key is camelCase
 // `defaultLanguage`).
 const INFO_TO_SITE_YML = {
+  // ⛔ `foundation` is the one entry a caller may SUPPRESS (`keepAuthoredFoundation`),
+  // and it is the same principle as restoring authored asset paths below: a round
+  // trip must not mangle what the author wrote.
+  //
+  // The stored value is not always what they wrote. `publish` stamps the RELEASED,
+  // version-pinned ref over it, because delivery is version-pinned end to end. Project
+  // that straight back into a workspace project and `foundation: src` becomes
+  // `@org/x@1.2.3` — which `detectFoundationType` REFUSES for a build (a build is
+  // offline and does not guess where a foundation is served), so the project can no
+  // longer `build`, `dev` or `export`. Measured 2026-08-19.
+  //
+  // ⚖️ It is NOT wrong everywhere, which is why this is a caller's decision and not a
+  // deletion: a project from `uniweb clone` has no local foundation on disk, and there
+  // the pinned ref is exactly what site.yml should say. Only the caller knows which
+  // shape it is writing into — and it needs the build's own resolver to know, which is
+  // why that check is not made here (it would drag the vite chain into `uwx/`).
   foundation: 'foundation',
   languages: 'languages',
   default_language: 'defaultLanguage',
@@ -152,7 +168,7 @@ const INFO_TO_SITE_YML = {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector }) {
+export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
   const info = document?.info || {}
 
   const siteChanges = {}
@@ -173,6 +189,7 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
 
   // Verbatim fields (includes `seo` — the site-level social/SEO block).
   for (const [infoKey, ymlKey] of Object.entries(INFO_TO_SITE_YML)) {
+    if (infoKey === 'foundation' && keepAuthoredFoundation) continue
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
   }
 
@@ -626,7 +643,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  *        empty set.
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false }) {
+export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false }) {
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
@@ -640,7 +657,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   // round trip that changed nothing.
   report.assets = restoreAssetRefs(document, readAssetMap(siteRoot))
 
-  report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector })
+  report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector, keepAuthoredFoundation })
   report.collections = declarationsToCollectionsYml({ document, siteRoot })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor

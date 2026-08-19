@@ -1430,3 +1430,61 @@ describe('site.yml::tracking across the sync wire', () => {
     expect(document.info).not.toHaveProperty('services')
   })
 })
+
+// ─── a round trip must not mangle what the author wrote ──────────────────────
+// `publish` stamps the RELEASED, version-pinned ref into `info.foundation`, because
+// delivery is version-pinned end to end. Projecting the stored value straight back
+// turns a workspace project's `foundation: src` into `@org/x@1.2.3` — which the
+// build REFUSES to resolve (a build is offline and does not guess where a
+// foundation is served), leaving the project unable to `build`, `dev` or `export`.
+// It stays publishable throughout, so nothing surfaces it. Measured 2026-08-19.
+//
+// ⚖️ Not a blanket "never project it": a project from `uniweb clone` has no local
+// foundation on disk, and there the pinned ref is exactly what site.yml should say.
+// Hence a caller's decision — the caller being the only one who can tell the two
+// project shapes apart. Same principle as restoring authored asset paths.
+describe('siteInfoToConfig — the authored foundation', () => {
+  const STORED = '@acme/flow-mszfnd41-0-src@0.1.0'
+  const project = (keepAuthoredFoundation) => {
+    const root = mkdtempSync(join(tmpdir(), 'authored-fnd-'))
+    writeFileSync(join(root, 'site.yml'), 'name: Acme\nfoundation: src\nindex: home\n')
+    siteInfoToConfig({
+      document: { $model: '@uniweb/site-content', $id: 'site-content', info: { foundation: STORED } },
+      siteRoot: root,
+      keepAuthoredFoundation,
+    })
+    const out = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'))
+    rmSync(root, { recursive: true, force: true })
+    return out.foundation
+  }
+
+  it('is preserved when the caller says the project resolves one locally', () => {
+    expect(project(true)).toBe('src')
+  })
+
+  it('CONTROL: is overwritten otherwise — the fresh-clone case, and proof the flag is what does it', () => {
+    // Without this, the assertion above would also pass if the projection had
+    // simply stopped writing `foundation` at all.
+    expect(project(false)).toBe(STORED)
+  })
+
+  it('other info fields still project either way', () => {
+    // The suppression must be surgical: it is one key, not a switch that quietly
+    // stops the config projection doing its job.
+    const root = mkdtempSync(join(tmpdir(), 'authored-fnd-'))
+    writeFileSync(join(root, 'site.yml'), 'name: Old\nfoundation: src\n')
+    siteInfoToConfig({
+      document: {
+        $model: '@uniweb/site-content', $id: 'site-content',
+        info: { foundation: STORED, base: '/docs/', defaultLanguage: undefined, default_language: 'fr' },
+      },
+      siteRoot: root,
+      keepAuthoredFoundation: true,
+    })
+    const out = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'))
+    rmSync(root, { recursive: true, force: true })
+    expect(out.foundation).toBe('src')
+    expect(out.base).toBe('/docs/')
+    expect(out.defaultLanguage).toBe('fr')
+  })
+})
