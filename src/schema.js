@@ -10,7 +10,7 @@
  * - Additional paths (via config): meta.js required for addressability
  */
 
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
@@ -177,6 +177,70 @@ function warnMisplacedCapabilities(module, filePath) {
   )
 }
 
+/**
+ * Import a foundation config, transpiling it when Node alone cannot.
+ *
+ * ⛔ A foundation config routinely imports JSX, and Node cannot parse it.
+ * `defaultInsets` and `xref` take REACT COMPONENTS — that is what they are
+ * for — so `main.js` legitimately reads:
+ *
+ *     import { buildXrefRegistry, Ref } from '@uniweb/kit/xref'
+ *
+ * kit ships source, so that resolves to `Ref.jsx` and a bare `import()`
+ * throws `Unknown file extension ".jsx"`. The config is fine; the loader was
+ * the problem.
+ *
+ * Fast path first: a plain `import()`, which is free and covers the common
+ * case of a config that is pure data. Only when Node rejects the SYNTAX do we
+ * pay for a bundle — the same fallback shape Vite uses for `vite.config.ts`.
+ *
+ * React stays external because Node imports it happily and it is the bulk of
+ * the graph; everything else is inlined so no `.jsx` survives to be resolved
+ * at run time. The temp file is written beside the config so bare specifiers
+ * still resolve from the project's own `node_modules`.
+ */
+async function importFoundationConfig(filePath) {
+  const href = pathToFileURL(filePath).href
+  try {
+    return await import(href)
+  } catch (error) {
+    if (!isUnparseableByNode(error)) throw error
+
+    const esbuild = (await import('esbuild')).default ?? (await import('esbuild'))
+    const outfile = join(
+      dirname(filePath),
+      `.${basename(filePath)}.uniweb-config.${process.pid}.mjs`,
+    )
+    try {
+      await esbuild.build({
+        entryPoints: [filePath],
+        outfile,
+        bundle: true,
+        format: 'esm',
+        platform: 'node',
+        jsx: 'automatic',
+        // Node can load these as-is, and they dominate the graph.
+        external: ['react', 'react/*', 'react-dom', 'react-dom/*'],
+        logLevel: 'silent',
+      })
+      return await import(pathToFileURL(outfile).href)
+    } finally {
+      await rm(outfile, { force: true }).catch(() => {})
+    }
+  }
+}
+
+/**
+ * Does this error mean "Node cannot read this file", as opposed to "the
+ * config threw"? Only the former is worth re-trying through a bundler —
+ * re-running a config that threw on its own would just throw again.
+ */
+function isUnparseableByNode(error) {
+  if (error instanceof SyntaxError) return true
+  const code = error?.code
+  return code === 'ERR_UNKNOWN_FILE_EXTENSION' || code === 'ERR_UNSUPPORTED_DIR_IMPORT'
+}
+
 export async function loadFoundationConfig(srcDir) {
   let filePath = null
   for (const name of FOUNDATION_FILE_NAMES) {
@@ -188,18 +252,32 @@ export async function loadFoundationConfig(srcDir) {
   }
   if (!filePath) return {}
 
+  let module
   try {
-    const module = await import(pathToFileURL(filePath).href)
-    warnMisplacedCapabilities(module, filePath)
-    // Support both default export and named exports
-    return {
-      ...module.default,
-      vars: inferFontVarTypes(module.vars || module.default?.vars),
-      defaultLayout: module.default?.defaultLayout,
-    }
+    module = await importFoundationConfig(filePath)
   } catch (error) {
-    console.warn(`Warning: Failed to load foundation config ${filePath}:`, error.message)
-    return {}
+    // ⛔ NEVER degrade to `{}` here. Everything a foundation declares — `vars`,
+    // `xref`, `defaultInsets`, `name` — arrives through this one call, so an
+    // empty return silently produces a foundation with NO THEME VARIABLES. The
+    // symptom is a site whose `px-[var(--section-padding-x)]` resolves to 0 and
+    // whose `max-w-[var(--width-content)]` resolves to `none`: content sprawls
+    // edge to edge and every layout token is gone, with nothing in the output
+    // naming a cause. Measured 2026-08-23 on a real site that had been shipping
+    // that way for three weeks behind a single `console.warn`.
+    throw new Error(
+      `Failed to load foundation config ${filePath}: ${error.message}\n` +
+        `  Everything the foundation declares (vars, xref, defaultInsets, name) comes from this file,\n` +
+        `  so the build cannot continue without it — a partial load would emit a site with no theme variables.`,
+      { cause: error },
+    )
+  }
+
+  warnMisplacedCapabilities(module, filePath)
+  // Support both default export and named exports
+  return {
+    ...module.default,
+    vars: inferFontVarTypes(module.vars || module.default?.vars),
+    defaultLayout: module.default?.defaultLayout,
   }
 }
 
