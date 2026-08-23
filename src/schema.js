@@ -156,6 +156,24 @@ const DEFAULT_ONLY_CAPABILITIES = [
  * every `[#id]` rendered as its own literal text — indistinguishable from a
  * foundation that had never opted in. Found only by reading generate-entry.js.
  *
+ * ⚠️ THAT DIAGNOSIS WAS CORRECT AND INCOMPLETE, and the rest took three weeks
+ * to find (2026-08-23). The same commit that moved those keys onto the default
+ * export also added `import … from '@uniweb/kit/xref'`, whose graph reaches
+ * `Ref.jsx`. `loadFoundationConfig` could not parse that, so the config never
+ * loaded at all — the identical symptom, from an unrelated cause, arriving on
+ * the same day the correct fix was applied. The fix looked inert because it
+ * was: where the keys sat could not matter while nothing was read.
+ *
+ * ⛔ AND IT DISABLED THIS WARNING. `warnMisplacedCapabilities` runs AFTER the
+ * import; a config that throws never reaches it. The guard added to catch that
+ * incident was, from that day, unable to fire on the project it was written
+ * for. A check downstream of the thing most likely to fail is not a check.
+ *
+ * To tell the two apart: a misplaced named export loses only that capability.
+ * A config that fails to load loses everything the file declares — `vars`
+ * included, so the site also renders with no theme variables at all. If the
+ * theme is gone too, stop looking at export placement.
+ *
  * A warning rather than an error: a foundation may legitimately export a name
  * that collides for its own use, and failing someone's build over a naming
  * coincidence is worse than telling them what we ignored.
