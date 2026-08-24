@@ -947,3 +947,42 @@ export function writeSiteEntityUuid(siteRoot, uuid) {
 export function writeSiteOrg(siteRoot, handle) {
   return upsertYamlScalar(join(siteRoot, 'site.yml'), '$org', handle)
 }
+
+/**
+ * Record the backend this project SYNCS WITH (`site.yml::$backend`), beside `$uuid`/`$org`.
+ *
+ * ⭐ It is not a tag on the site uuid — it is the project's **sync scope**. Four surfaces
+ * hold backend-minted identity, and this one fact is what makes all of them meaningful:
+ * `site.yml::$uuid`, every collection record's `$uuid` in its own source file,
+ * `assets.json`, and `.uniweb/sync-cache.json`. Change the backend and every one of them
+ * is foreign at once — which is why a mismatch is a stop, not a fallback
+ * (`assertSiteBackendScope` in the CLI).
+ *
+ * ⛔ **Written ONLY for a non-default backend.** The 98% case stays out of the file, and an
+ * absent value reads as the default — correct both for a project written before this key
+ * existed and for one synced against the default. Callers decide; this writer does not know
+ * the CLI's default. See `recordSiteBackend` (cli/src/backend/site-sync.js), which is where
+ * the "is it the default?" test lives.
+ *
+ * ⚠️ **The name is load-bearing. Five alternatives were considered and rejected (2026-08-24);
+ * do not re-propose one.** `origin` is wrong twice over — a site HAS an origin (its own
+ * served domain), and this lane is git-modeled, where `origin` names a remote rather than a
+ * URL. `remote` implies a multiplicity this design closes. `hosting` and `platform` name the
+ * hosting edge, which this package has no client for. `host` collides with
+ * `deploy.yml::targets.<n>.host` (the deploy adapter). A `uuid: <id>@<backend>` suffix was
+ * rejected too: it would make "this never reaches the backend" a discipline at every read
+ * site instead of a property, and `siteProjectToDocument` assigns `$uuid` straight onto the
+ * wire document.
+ *
+ * Safe as a plain YAML scalar: a URL's `:` is followed by `/` or a digit, never a space, so
+ * it needs no quoting (verified against js-yaml for apex, `localhost:8080` and host:port+path
+ * forms, 2026-08-24). This is the same class of hazard as `$org`'s leading `@`, which is
+ * stripped for exactly that reason — but it lands on the safe side.
+ *
+ * @param {string} siteRoot
+ * @param {string} origin - a bare origin, no trailing slash
+ * @returns {boolean} true if site.yml changed
+ */
+export function writeSiteBackend(siteRoot, origin) {
+  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$backend', origin)
+}

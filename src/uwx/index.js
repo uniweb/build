@@ -44,6 +44,7 @@ export {
   emitSiteSyncPackage,
   writeSiteEntityUuid,
   writeSiteOrg,
+  writeSiteBackend,
   extensionDeclaration,
   isExtensionUrl,
   isSiteRelativeExtensionUrl,
