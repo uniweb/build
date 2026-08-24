@@ -134,12 +134,38 @@ function parseCollectionConfig(name, config) {
 }
 
 /**
- * Parse YAML frontmatter from markdown content
+ * Parse YAML frontmatter from markdown content.
+ *
+ * Two cases, and keeping them apart is the whole point:
+ *
+ *   NO frontmatter — the file does not open with `---`, or never closes the
+ *   block. Legitimate: a record can be pure body. Returns {}.
+ *
+ *   DECLARED frontmatter that does not parse — an error, because every field
+ *   is gone at once. Not just the one with the typo: title, slug, date, image,
+ *   category, all of it. The record still builds, still ships, and lands at a
+ *   filename-derived slug with no title and no cover.
+ *
+ * ⛔ THIS USED TO WARN AND CONTINUE, and the warning could not be found.
+ * Measured 2026-08-24 on a real post: an unquoted colon inside a description
+ * ("...on a website framework: everything hard about docs...") voided six
+ * fields and moved the page from /blog/docs-sites to /blog/11_docs_sites. The
+ * only trace was
+ *
+ *   [collection-processor] YAML parse error: bad indentation of a mapping entry (4:72)
+ *
+ * on line 16 of 857 lines of build output, naming no file, nine lines above
+ * "Processed articles: 6 items" — a success line that reads as everything
+ * being fine. The build exited 0 and the broken record shipped.
+ *
+ * A parse error now names the file and says what it costs, because "which of
+ * my 200 records is (4:72) in?" is the question the old message left you with.
  *
  * @param {string} raw - Raw file content
+ * @param {string} [filepath] - Path to the file, for the error message
  * @returns {{ frontmatter: Object, body: string }}
  */
-function parseFrontmatter(raw) {
+function parseFrontmatter(raw, filepath) {
   if (!raw.trim().startsWith('---')) {
     return { frontmatter: {}, body: raw }
   }
@@ -154,8 +180,18 @@ function parseFrontmatter(raw) {
     const body = parts.slice(2).join('---\n')
     return { frontmatter, body }
   } catch (err) {
-    console.warn('[collection-processor] YAML parse error:', err.message)
-    return { frontmatter: {}, body: raw }
+    const where = filepath ? `${filepath}: ` : ''
+    throw new Error(
+      `${where}frontmatter is not valid YAML — ${err.message}\n` +
+        `  The file opens with \`---\`, so it is declaring frontmatter. Since the block does not\n` +
+        `  parse, EVERY field in it is lost — title, slug, date, image, category — and the record\n` +
+        `  would build as an untitled entry at a slug derived from its filename.\n` +
+        `  A common cause is an unquoted value containing a colon followed by a space:\n` +
+        `    description: Building on a framework: everything hard is a website problem\n` +
+        `  Quote the value and it parses:\n` +
+        `    description: "Building on a framework: everything hard is a website problem"`,
+      { cause: err },
+    )
   }
 }
 
@@ -508,7 +544,7 @@ async function processContentItem(dir, filename, config, siteRoot, basePath) {
   const slug = basename(filename, extname(filename))
 
   // Parse frontmatter and body
-  const { frontmatter, body } = parseFrontmatter(raw)
+  const { frontmatter, body } = parseFrontmatter(raw, filepath)
 
   // Skip unpublished items by default
   if (frontmatter.published === false) {
