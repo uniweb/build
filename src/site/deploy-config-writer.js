@@ -26,10 +26,31 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { Document, parseDocument, isMap } from 'yaml'
 
+// The header every generated deploy.yml carries. It has to answer the question
+// a reader has while looking AT the file — who wrote this, and may I edit it —
+// because that is where the question gets asked, not in the docs.
+//
+// The previous wording opened "operational config ... edit `targets:` freely",
+// which reads as a file you are expected to author with one auto-managed block
+// inside it. It cost a real reader an afternoon: they went looking for what to
+// write under `targets:` for a site that had never deployed, when the answer is
+// that the first deploy writes it.
 const SCAFFOLD_HEADER = [
-  ' deploy.yml — operational config and last-deploy memory for this site.',
-  ' Safe to commit. The `lastDeploy:` block is auto-managed by `uniweb deploy`;',
-  ' edit `targets:` freely.',
+  ' deploy.yml — written by `uniweb deploy` / `uniweb publish`.',
+  '',
+  ' You do not create this file. The first successful deploy does, recording the',
+  ' target you picked and what happened. Later deploys rewrite only `lastDeploy:`',
+  ' and leave the rest — including your comments — alone.',
+  '',
+  ' Safe to commit; no credentials live here. Host credentials come from the',
+  ' environment.',
+  '',
+  '   default:     which target is used when none is named',
+  '   targets:     where this site ships. Edit to change the destination, or add',
+  '                a target and pick it with `--target <name>`',
+  '   autoSave:    `lastDeploy` to keep the record below, `off` to stop writing it',
+  '   lastDeploy:  what the last deploy did. A record, not a setting — nothing',
+  '                reads it back, so a stale one is safe to delete',
 ].join('\n')
 
 /**

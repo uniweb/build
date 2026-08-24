@@ -215,7 +215,10 @@ describe('recordLastDeploy', () => {
       expect(result.created).toBe(true)
 
       const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
-      expect(text).toMatch(/deploy\.yml — operational config/)
+      // The header says who writes the file — the point a reader needs while
+      // looking at it. Pinned because the previous wording implied the opposite.
+      expect(text).toMatch(/written by `uniweb deploy` \/ `uniweb publish`/)
+      expect(text).toMatch(/You do not create this file/)
       expect(text).toMatch(/default: production/)
       expect(text).toMatch(/host: s3-cloudfront/)
       expect(text).toMatch(/bucket: my-bucket/)
