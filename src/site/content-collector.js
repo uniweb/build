@@ -24,6 +24,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
+import { resolveCollectionsConfig, toConfigCollections } from './collections-config.js'
 import { join, parse, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
@@ -2171,6 +2172,17 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
+
+  // Collections are declared in TWO files — `site.yml::collections` and
+  // `collections/collections.yml`, the latter winning per key — and resolving
+  // them is one question with one answer. This used to read `site.yml` alone
+  // while the sync lane merged both, so a collection declared only in
+  // `collections.yml` was invisible here: never compiled, `data: <name>`
+  // delivering nothing, while sync pushed it fine.
+  const collections = toConfigCollections(
+    (await resolveCollectionsConfig(sitePath, { siteYml: siteConfig })).declarations
+  )
+  if (collections) siteConfig.collections = collections
 
   // Record the RESOLVED base (--base > UNIWEB_BASE > site.yml::base) on the
   // config so every consumer reads one value. Prerender sets website.basePath
