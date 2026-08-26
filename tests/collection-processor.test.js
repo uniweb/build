@@ -23,6 +23,101 @@ describe('Collection Processor', () => {
     }
   })
 
+  describe('nested records — a collection has an internal structure', () => {
+    // Before recursion a record in a subdirectory was not skipped with a
+    // warning, it was INVISIBLE: `readdir` returned the directory name, the
+    // extension filter dropped it, and the site rendered without those records.
+    const writeRecord = (dir, name, title) => {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, name), `---\ntitle: ${title}\n---\n\nBody.\n`)
+    }
+
+    const buildNews = async () => {
+      const root = join(testDir, 'collections', 'news')
+      writeRecord(root, 'hello.md', 'Top level')
+      writeRecord(join(root, '2024'), 'spring.md', 'Spring')
+      writeRecord(join(root, '2024', 'q1'), 'report.md', 'Q1 report')
+      writeRecord(join(root, '_drafts'), 'secret.md', 'Draft')
+      const out = await processCollections(
+        testDir,
+        { news: { name: 'news', path: 'collections/news' } },
+        testDir,
+        '/'
+      )
+      return out.news
+    }
+
+    it('finds records at any depth', async () => {
+      const items = await buildNews()
+      expect(items.map((i) => i.slug).sort()).toEqual(['hello', 'report', 'spring'])
+    })
+
+    it('stamps each record with its directory inside the collection', async () => {
+      const items = await buildNews()
+      const bySlug = Object.fromEntries(items.map((i) => [i.slug, i.path]))
+      expect(bySlug.hello).toBe('')
+      expect(bySlug.spring).toBe('2024')
+      expect(bySlug.report).toBe('2024/q1')
+    })
+
+    it('skips underscore-prefixed directories, as it always has for files', async () => {
+      const items = await buildNews()
+      expect(items.some((i) => i.slug === 'secret')).toBe(false)
+    })
+
+    it('leaves a flat collection byte-for-byte as it was — path is the empty string', async () => {
+      // The control. Recursion must be additive: a collection with no
+      // subdirectories has to behave exactly as before.
+      const dir = join(testDir, 'collections', 'flat')
+      writeRecord(dir, 'a.md', 'A')
+      writeRecord(dir, 'b.md', 'B')
+      const out = await processCollections(
+        testDir,
+        { flat: { name: 'flat', path: 'collections/flat', route: '/f' } },
+        testDir,
+        '/'
+      )
+      expect(out.flat.map((i) => i.slug).sort()).toEqual(['a', 'b'])
+      expect(out.flat.every((i) => i.path === '')).toBe(true)
+      expect(out.flat.map((i) => i.route).sort()).toEqual(['/f/a', '/f/b'])
+    })
+
+    it('warns when two branches hold the same slug, naming both', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const root = join(testDir, 'collections', 'dupes')
+      writeRecord(join(root, '2024'), 'notes.md', 'New')
+      writeRecord(join(root, '2023'), 'notes.md', 'Old')
+      await processCollections(
+        testDir,
+        { dupes: { name: 'dupes', path: 'collections/dupes' } },
+        testDir,
+        '/'
+      )
+      const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('slug "notes"'))
+      expect(msg).toBeTruthy()
+      expect(msg).toContain('2023/notes')
+      expect(msg).toContain('2024/notes')
+      warn.mockRestore()
+    })
+
+    it('keeps both colliding records rather than silently dropping one', async () => {
+      // Reporting is the remedy, not repair — only the author can decide which
+      // record owns the slug, so the build must not choose for them.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const root = join(testDir, 'collections', 'dupes')
+      writeRecord(join(root, '2024'), 'notes.md', 'New')
+      writeRecord(join(root, '2023'), 'notes.md', 'Old')
+      const out = await processCollections(
+        testDir,
+        { dupes: { name: 'dupes', path: 'collections/dupes' } },
+        testDir,
+        '/'
+      )
+      expect(out.dupes).toHaveLength(2)
+      warn.mockRestore()
+    })
+  })
+
   describe('processCollections', () => {
     it('should process markdown files into collection items', async () => {
       // Create test library folder

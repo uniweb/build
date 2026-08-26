@@ -234,10 +234,25 @@ function buildPageData(config, ctx) {
   // at `<base>/data/<name>.json`.
   if (fetch && typeof fetch.collection === 'string') {
     const { collection, ...rest } = fetch
+    // ⭐ BOTH, deliberately, and they are not redundant.
+    //
+    //   `collection` — the author's query, unresolved. A consumer that can ask
+    //     a host where collections live (`config.records`) resolves it there,
+    //     which is the only way a live lane is reachable at all: a resolved
+    //     path names one place and closes the question.
+    //
+    //   `path` — the compiled artifact, the answer when nobody declares a lane.
+    //     Also what a consumer still reading `fetch.path` gets, so teaching the
+    //     wire a new field does not break one that has not learned it.
+    //
+    // `@uniweb/core`'s resolveFetchConfigs gives `collection` precedence and
+    // drops `path` once it has resolved an address — matching parseFetchConfig,
+    // which has always returned early on `collection`.
+    //
     // `schema` (the collection name) is BOTH the content.data key and part of the
-    // dataStore cache key (deriveCacheKey hashes {path,url,schema,…}; `collection`
-    // is ignored). Mirrors the static build's parseFetchConfig resolution.
-    fetch = { path: collectionDataUrl(collection), schema: collection, ...rest }
+    // dataStore cache key (deriveCacheKey hashes {path,url,endpoint,schema,…};
+    // `collection` is ignored). Mirrors the static build's parseFetchConfig.
+    fetch = { collection, path: collectionDataUrl(collection), schema: collection, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {

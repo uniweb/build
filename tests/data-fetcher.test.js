@@ -507,3 +507,65 @@ describe('applyPostProcessing', () => {
     expect(result[0].name).toBe('C')
   })
 })
+
+describe('parseFetchConfig — unrecognized keys are reported, not swallowed', () => {
+  // The parser reads an allowlist and builds a new object, so an unrecognized
+  // key vanishes with no trace in the output. A typo and a capability the
+  // author believed existed are then indistinguishable from having written
+  // nothing at all — which is how `type:`/`recursive:` were discovered to be
+  // silently discarded rather than unsupported.
+  let warn
+  beforeEach(async () => {
+    const mod = await import('../src/site/data-fetcher.js')
+    mod._resetUnknownFetchKeyWarnings()
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => warn.mockRestore())
+
+  const messages = () => warn.mock.calls.map((c) => String(c[0]))
+
+  it('names the offending key on a path/url declaration', () => {
+    parseFetchConfig({ path: '/data/x.json', schema: 'x', wehre: { a: 1 } })
+    expect(messages().some((m) => m.includes('"wehre"'))).toBe(true)
+  })
+
+  it('names it on a collection declaration too', () => {
+    parseFetchConfig({ collection: 'articles', recursive: true })
+    expect(messages().some((m) => m.includes('"recursive"'))).toBe(true)
+  })
+
+  it('names it on a refine declaration too', () => {
+    parseFetchConfig({ refine: true, limit: 2, bogus: 1 })
+    expect(messages().some((m) => m.includes('"bogus"'))).toBe(true)
+  })
+
+  it('lists what IS recognized, so the message is actionable', () => {
+    parseFetchConfig({ collection: 'articles', nope: 1 })
+    const m = messages().find((x) => x.includes('"nope"'))
+    expect(m).toContain('collection')
+    expect(m).toContain('where')
+  })
+
+  it('reports once per key, not once per record', () => {
+    parseFetchConfig({ collection: 'a', recursive: true })
+    parseFetchConfig({ collection: 'b', recursive: true })
+    expect(messages().filter((m) => m.includes('"recursive"'))).toHaveLength(1)
+  })
+
+  it('stays silent on every recognized shape', () => {
+    // The control. Without it, a warn-on-everything bug would pass every
+    // assertion above while making the build unusable.
+    parseFetchConfig({ collection: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
+    parseFetchConfig({ path: '/data/x.json', schema: 'x', transform: 'data.items', merge: true })
+    parseFetchConfig({ url: 'https://example.com/api', schema: 'x', prerender: false })
+    parseFetchConfig({ refine: true, detail: false, limit: 3 })
+    expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
+  })
+
+  it('does not confuse a dropped key with a deprecated one', () => {
+    // `filter:` is recognized-but-deprecated; it must warn about deprecation,
+    // never about being unrecognized.
+    parseFetchConfig({ collection: 'articles', filter: 'a == 1' })
+    expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
+  })
+})

@@ -4,10 +4,28 @@
  * Processes content collections from markdown and YAML files into JSON data.
  * Collections are defined in site.yml and processed at build time.
  *
+ * ⛔ A COLLECTION `.md` IS NOT A PAGE-SECTION `.md`. Same extension, unrelated
+ * meanings, and the sync-side reader states this too
+ * (`build/src/uwx/collection-source.js`) because getting it backwards produces
+ * confident nonsense:
+ *
+ *   - collection record — frontmatter is structured DATA whose shape is the
+ *     collection's data schema; the body is the value of ONE declared field
+ *     (the Model's content body field). Not "metadata".
+ *   - page section — frontmatter is foundation/runtime CONFIG (`type:`, params,
+ *     `theme:`); the body is authored content with no schema behind it.
+ *
+ * ⭐ And `.md` is the HYBRID case, not the general one. It exists for records
+ * that are part data and part prose — a blog article. YAML and JSON records are
+ * data only, have no body, and express nesting and arrays natively; they are the
+ * plain case rather than the exception. Reasoning about collections from the
+ * markdown shape alone imports a body and a content field that most records
+ * do not have.
+ *
  * Features:
  * - Discovers markdown (.md), data (.yml/.yaml), JSON (.json), and BibTeX (.bib)
  *   files in collection folders
- * - Parses frontmatter for metadata (markdown), full YAML or JSON (data items),
+ * - Parses frontmatter for record data (markdown), full YAML or JSON (data items),
  *   or BibTeX → CSL-JSON (bibliography items)
  * - Pure-data formats (YAML, JSON, BibTeX) accept either one record per file
  *   (mapping at the top, slug from filename) or many records per file (array
@@ -575,6 +593,63 @@ async function processContentItem(dir, filename, config, siteRoot, basePath) {
 }
 
 /**
+ * Every source file in a collection, as paths relative to the collection root —
+ * `hello.md`, `2024/spring.md`, `2024/q1/notes.yml`.
+ *
+ * Nesting is how an author gives a collection an internal structure, and it is
+ * what the `path` field and the `under` predicate address. Before this walk the
+ * scan was a flat `readdir`, so a record in a subdirectory was not ignored with
+ * a warning — it was invisible, and the site simply rendered without it.
+ *
+ * `_`-prefixed and dot-prefixed names are skipped at every level, files and
+ * directories alike: `_drafts/` stays out of the build the same way `_draft.md`
+ * always has. That is also the escape hatch for a subdirectory that holds
+ * something other than records.
+ */
+async function collectSourceFiles(dir, rel = '') {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const out = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
+    const relPath = rel ? `${rel}/${entry.name}` : entry.name
+    if (entry.isDirectory()) {
+      out.push(...(await collectSourceFiles(join(dir, entry.name), relPath)))
+    } else if (/\.(md|ya?ml|json|bib)$/i.test(entry.name)) {
+      out.push(relPath)
+    }
+  }
+  return out
+}
+
+/**
+ * A slug identifies one record within its collection — it is what a `[slug]`
+ * route matches and what a per-record file is named. Two files in different
+ * branches can now share a stem (`2024/notes.md`, `2025/notes.md`), which makes
+ * a previously theoretical collision reachable in ordinary authoring.
+ *
+ * The build does not rename or drop either record: the cascade keeps both, and
+ * whichever sorts last wins the route and the per-record file. That is a real
+ * ambiguity only the author can resolve, so it is reported rather than repaired.
+ */
+function warnDuplicateSlugs(items, collectionName) {
+  const seen = new Map()
+  for (const item of items) {
+    if (!item || item.slug === undefined) continue
+    const slug = String(item.slug)
+    const where = item.path ? `${item.path}/` : ''
+    if (seen.has(slug)) {
+      console.warn(
+        `[collection-processor] Collection "${collectionName}" has more than one record with ` +
+          `slug "${slug}" (${seen.get(slug)}${slug}, ${where}${slug}). Its detail route and ` +
+          `per-record file resolve to only one of them — give them distinct slugs.`
+      )
+      continue
+    }
+    seen.set(slug, where)
+  }
+}
+
+/**
  * Collect and process all items in a collection folder
  *
  * @param {string} siteDir - Site root directory
@@ -591,11 +666,7 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
     return []
   }
 
-  const files = await readdir(collectionDir)
-  const itemFiles = files.filter(f =>
-    !f.startsWith('_') &&
-    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json') || f.endsWith('.bib'))
-  )
+  const itemFiles = await collectSourceFiles(collectionDir)
 
   // Process all collection files (markdown → content items, YAML/JSON → data
   // items, BibTeX → CSL-JSON bibliography items).
@@ -614,12 +685,24 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
     })
   )
 
+  // Stamp each record's position inside the collection BEFORE flattening, while
+  // a result is still aligned with the file it came from. A file's own array
+  // entries (array-form YAML/JSON, every .bib entry) all share its directory.
+  items = items.map((result, i) => {
+    const dir = dirname(itemFiles[i])
+    const path = dir === '.' ? '' : dir
+    if (Array.isArray(result)) return result.map((item) => item && { ...item, path })
+    return result && { ...result, path }
+  })
+
   // Flatten one level: array-form YAML/JSON files and every .bib file
   // contribute their entries individually.
   items = items.flat()
 
   // Filter out nulls (unpublished items)
   items = items.filter(Boolean)
+
+  warnDuplicateSlugs(items, config.name)
 
   // Add routes to items if collection has a route configured
   if (config.route) {

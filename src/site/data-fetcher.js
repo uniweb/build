@@ -239,6 +239,50 @@ export function applyPostProcessing(data, config) {
  * parseFetchConfig({ collection: 'articles', limit: 3, sort: 'date desc' })
  * // Returns: { path: '/data/articles.json', schema: 'articles', limit: 3, sort: 'date desc', ... }
  */
+// ─── Unrecognized-key reporting ───────────────────────────────────────
+//
+// `parseFetchConfig` reads an explicit allowlist and builds a new object, so
+// anything the author wrote that is not on that list is DROPPED — silently,
+// with no warning and no trace in the output. A typo (`wehre:`), a field from
+// another config block, or a capability the author believed existed all look
+// identical to having written nothing.
+//
+// ⛔ That silence is the defect, not the dropping. We cannot act on a key we do
+// not understand, but we can refuse to pretend it was never there. Reported
+// once per key name per process so a 200-record build does not print 200 lines.
+const RECOGNIZED_FETCH_KEYS = {
+  refine: new Set(['refine', 'inherit', 'detail', 'limit', 'sort', 'where', 'filter']),
+  collection: new Set([
+    'collection', 'schema', 'prerender', 'merge', 'transform',
+    'where', 'limit', 'sort', 'detailPage', 'filter',
+  ]),
+  source: new Set([
+    'path', 'url', 'schema', 'prerender', 'merge', 'transform', 'detail',
+    'detailPage', 'where', 'limit', 'sort', 'filter',
+  ]),
+}
+
+const warnedUnknownFetchKeys = new Set()
+
+function warnUnknownFetchKeys(fetch, shape) {
+  const recognized = RECOGNIZED_FETCH_KEYS[shape]
+  for (const key of Object.keys(fetch)) {
+    if (recognized.has(key)) continue
+    const seenKey = `${shape}:${key}`
+    if (warnedUnknownFetchKeys.has(seenKey)) continue
+    warnedUnknownFetchKeys.add(seenKey)
+    console.warn(
+      `[uniweb] fetch: unrecognized key "${key}" was ignored. ` +
+        `Keys recognized on this declaration: ${[...recognized].sort().join(', ')}.`
+    )
+  }
+}
+
+/** Test seam — reset the once-per-key memo so suites do not leak into each other. */
+export function _resetUnknownFetchKeyWarnings() {
+  warnedUnknownFetchKeys.clear()
+}
+
 export function parseFetchConfig(fetch) {
   if (!fetch) return null
 
@@ -269,6 +313,7 @@ export function parseFetchConfig(fetch) {
   // block are currently accepted by the parser but not honored at runtime.
   // Preserved as-is in this rename commit; revisit separately if needed.
   if (fetch.refine === true || fetch.inherit === true) {
+    warnUnknownFetchKeys(fetch, 'refine')
     if (fetch.inherit === true && fetch.refine !== true) {
       console.warn(
         "[uniweb] 'fetch: { inherit: true }' is deprecated; rename to 'fetch: { refine: true }'. " +
@@ -288,6 +333,7 @@ export function parseFetchConfig(fetch) {
 
   // Collection reference: { collection: 'articles', limit: 3 }
   if (fetch.collection) {
+    warnUnknownFetchKeys(fetch, 'collection')
     if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
       path: collectionDataUrl(fetch.collection),
@@ -308,6 +354,7 @@ export function parseFetchConfig(fetch) {
     }
   }
 
+  warnUnknownFetchKeys(fetch, 'source')
   const {
     path,
     url,

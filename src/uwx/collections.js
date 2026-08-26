@@ -3,7 +3,8 @@
 //
 // Each record becomes a section-keyed `$`-document (docs/reference/entity-content.md):
 // `$id` (the slug — the producer-local handle), `$model` (the Model by name), and
-// the brief section keyed by its name. The backend MINTS `$uuid` on first sync and
+// each SINGLE section keyed by its name — the brief plus any sibling singles, not
+// the brief alone. The backend MINTS `$uuid` on first sync and
 // returns it in the finalized response; the verb back-fills it into the source
 // file. A record that already carries `$uuid` (a prior back-fill) round-trips it
 // for restore-in-place. No id sidecar — identity is the file-embedded `$uuid` plus
@@ -15,9 +16,28 @@
 // via `toDataSchemaDeclaration`, the same path `uniweb register` uses), so it
 // stays offline.
 //
-// v1 scope: a FLAT record -> the Model's brief `single` section. Deferred:
-// multi / nested / non-brief sections (`$children` self-nesting), entity_ref /
-// item_ref / file fields, and remote (non-local) foundations.
+// Scope: this mapper implements the FLAT-RECORD shape — one source file whose
+// frontmatter keys are field names — so it walks the Model's `single` sections
+// and skips `multi` ones.
+//
+// ⛔ That is a property of THIS MAPPER, not of the schema system, and saying
+// otherwise has already misled twice. `multi` is first-class: the author writes
+// `many: true`, which lowers to IR `kind: 'multi'` and to wire `multiple: true`.
+// A Model whose ONLY section is `many` is a supported shape in its own right — a
+// root list, content authored as a bare array (`@uniweb/schemas` `rootListSection`;
+// `@std/nav` and `@std/form` are exactly this). Such a Model has no flat-record
+// surface at all, so it is not that its records "cannot be expressed" — it is
+// that they are not this shape, and this mapper only knows this shape.
+//
+// Nested sections (a `type: section` field) and entity_ref / item_ref / file
+// fields have no branch in `encodeFieldValue`; unverified either way.
+//
+// ⚠️ Two claims that used to sit here were stale and were removed rather than
+// re-worded, because both named real capabilities as missing: NON-BRIEF single
+// sections are handled (see `recordSections` below — the filter is `multiple !==
+// true`, not `brief === true`), and REMOTE foundations are handled through the
+// injected `opts.resolveModel`. A scope note that under-claims is worse than none:
+// it sends a reader to build what is already there.
 
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -161,10 +181,27 @@ export function collectionRecordsToEntities({
   if (!briefName) {
     throw new Error(`uwx/collections: Model ${declaration.name} has no brief section`)
   }
-  // The single sections a flat record can populate (the brief + sibling singles),
-  // and a global field→section map across them — for distributing frontmatter and
-  // flagging unknown keys. Field names are unique across a Model's sections (the
-  // declaration's own convention); a collision keeps the first occurrence.
+  // The single sections one record can populate (the brief + sibling singles).
+  //
+  // ⛔ `fieldByKey` IS NOT A FIELD→SECTION ROUTING TABLE, and must not be used as
+  // one. It answers exactly one question — "is this frontmatter key declared
+  // anywhere on this Model?" — for the unknown-key warning below. The assignment
+  // loop does not consult it: it walks each section and reads `record[key]` afresh.
+  //
+  // ⚠️ SO A FIELD NAME DECLARED IN TWO SECTIONS FANS OUT. The same frontmatter
+  // value is written into BOTH sections, each encoded per its own field's type — so
+  // a name shared by, say, a `string` and a `json` field yields one plausible value
+  // and one malformed one, silently. And flat frontmatter has no way to give the
+  // two fields different values in the first place: the representation is lossy
+  // exactly where names collide.
+  //
+  // ⛔ Nothing prevents this. A previous version of this comment asserted that
+  // "field names are unique across a Model's sections (the declaration's own
+  // convention)" — that is FALSE, no such convention holds, and nothing validates
+  // it: `resolve-data-schema.js` throws in 14 places and never checks this, and the
+  // only `unique_field` in the schema translator is a section-scoped constraint on
+  // an open map's KEY VALUE, which is unrelated. The invariant was asserted, relied
+  // on, and never provided.
   const recordSections = sectionEntries.filter(([, s]) => s && s.multiple !== true)
   const fieldByKey = new Map()
   for (const [, sec] of recordSections) {
