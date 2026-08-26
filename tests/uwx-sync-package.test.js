@@ -151,7 +151,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // ⭐ Note the SINGULARIZATION: collection `notes` looks for model `@/note`.
     // That is exactly why the name has to travel — an author told only "no data
     // schema" would declare `@/notes` and still not resolve.
-    expect(pkg.schemaless).toEqual([{ name: 'notes', model: '@/note' }])
+    expect(pkg.schemaless).toEqual([{ name: 'notes', model: '@/notes' }])
 
     // ⛔ And it is NOT also a prose warning. It used to push
     // `"… — not synced"` into `warnings`, printed dim; that read as "my data did

@@ -48,23 +48,29 @@ async function readYamlFile(filePath) {
 
 export const COLLECTIONS_YML_RELPATH = 'collections/collections.yml'
 
-// Naive English singularization — enough for the schema-name default (an explicit
-// `schema:` always overrides). `categories` → `category`, `boxes` → `box`,
-// `articles` → `article`, `team` → `team` (unchanged).
-function singularize(name) {
-  if (/[^aeiou]ies$/i.test(name)) return name.slice(0, -3) + 'y'
-  if (/(ses|xes|zes|ches|shes)$/i.test(name)) return name.slice(0, -2)
-  if (/[^s]s$/i.test(name)) return name.slice(0, -1)
-  return name
-}
-
-// Default data-schema ref for a collection with no explicit `schema:` — the
-// self-scope (`@/`) singular of its name. `@/` resolves to the local foundation's
-// `schemas/` (named-data-schemas), so this stays backend-independent. Exported so
-// the inverse (projection) can drop a `schema:` that merely restates this default,
-// keeping a projected collections.yml as terse as the author would have left it.
+// The default data-schema ref for a collection that declares none: the collection's
+// OWN NAME, unchanged. `@/` is the self scope — the local foundation's `schemas/` —
+// so this stays backend-independent.
+//
+// ⛔ IT USED TO APPLY AN ENGLISH SINGULAR RULE to every language. Measured:
+// `news` → `@/new`, `series` → `@/sery`, `analyses` → `@/analys`. Right for regular
+// English plurals, right-by-accident elsewhere (`noticias` → `noticia`), and inert
+// for languages with no plural marker.
+//
+// ⚠️ The failure was SILENT, which is why the rule was removed rather than improved.
+// A default that does not resolve is not an error — the collection soft-skips to
+// delivery-only — so a `news` collection simply never synced as entities, and
+// nothing said the cause was a guess about English morphology.
+//
+// A more complete rule would move that boundary, not remove it: every irregular
+// list belongs to one language, and a site names its collections in its own.
+// Identity has no boundary to get wrong, and an author wanting a different schema
+// name writes `schema:`, which is one line and says what it means.
+//
+// Exported so the inverse (projection) can drop a `schema:` that merely restates
+// this default, keeping a projected collections.yml as terse as the author left it.
 export function defaultSchema(name) {
-  return `@/${singularize(name)}`
+  return `@/${name}`
 }
 
 // Normalize one site.yml::collections entry (string shorthand or object) to the

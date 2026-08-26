@@ -587,7 +587,10 @@ describe('collection declarations — round-trip against the real producer', () 
     )
 
     const document = {
-      collections: [{ $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/article' }],
+      // `@/articles` IS the convention default for a collection named `articles`
+      // (identity, not a singular guess), so the projection drops it as redundant —
+      // which is what this case is asserting.
+      collections: [{ $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/articles' }],
     }
     const report = declarationsToCollectionsYml({ document, siteRoot: site })
     expect(report.collections).toBe('updated')
