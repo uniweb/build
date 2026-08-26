@@ -88,11 +88,25 @@ let _buildingSSRBundle = false
  * foundation's own package.json is recorded alongside the runtime version,
  * declaring the author's intent for the validation above.
  *
- * ⛔ **`policy` REACHES NOBODY TODAY — it is written here and read by nothing.**
+ * ⛔ **`policy` IS NOT SENT AT REGISTER — this half is ours and is certain.**
  * `readRuntimePin()` (`cli/src/utils/code-upload.js`) returns only `.runtime`, so
  * `register` carries the floor as `info.runtime` and the policy is dropped. A
  * foundation author who sets `uniweb.runtimePolicy` gets it emitted into `dist/`
- * and silently discarded.
+ * and no further.
+ *
+ * ⚠️ **Whether a HOST reads `runtime-pin.json` off the built foundation is that
+ * host's to answer, not ours — name the host before saying what is consumed.**
+ * A note here once read "nothing consumes it today", unscoped, which is a claim
+ * about every host the framework serves and framework can substantiate it for
+ * none of them.
+ *
+ * 📌 **The check that refutes it, so this is not a claim with no expiry:** grep a
+ * host's serving code for `runtime-pin` / `runtimePolicy`. Asked and answered for
+ * the Uniweb host on **2026-08-26 — zero consumers across its delivery worker,
+ * mirror, runtime host and capability worker**, and its runtime version comes
+ * solely from published site metadata and is part of a render-cache key, so a
+ * request-time policy would collide with its invalidation model. **That is one
+ * host on one date; a static host or a foreign backend is a separate question.**
  *
  * ⚖️ **This is a field with standing and no consumer — NOT a mistake to delete.**
  * The architecture assigns this declaration to the foundation on principle: each
@@ -205,8 +219,9 @@ async function emitRuntimePin(outDir, projectRoot) {
   // delivered implies both travel. Only the floor does.
   if (policy) {
     console.log(
-      `  note: runtimePolicy "${policy}" is recorded but not yet delivered — nothing consumes it today.\n` +
-        `        The floor (runtime ${runtimeVersion}) does travel, as info.runtime at register.`
+      `  note: runtimePolicy "${policy}" is recorded in dist/runtime-pin.json and is NOT sent at register.\n` +
+        `        The floor (runtime ${runtimeVersion}) does travel, as info.runtime.\n` +
+        `        Whether your host reads the file is its own to say — see the header for how to check.`
     )
   }
 }
