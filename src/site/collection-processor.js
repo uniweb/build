@@ -4,10 +4,28 @@
  * Processes content collections from markdown and YAML files into JSON data.
  * Collections are defined in site.yml and processed at build time.
  *
+ * ⛔ A COLLECTION `.md` IS NOT A PAGE-SECTION `.md`. Same extension, unrelated
+ * meanings, and the sync-side reader states this too
+ * (`build/src/uwx/collection-source.js`) because getting it backwards produces
+ * confident nonsense:
+ *
+ *   - collection record — frontmatter is structured DATA whose shape is the
+ *     collection's data schema; the body is the value of ONE declared field
+ *     (the Model's content body field). Not "metadata".
+ *   - page section — frontmatter is foundation/runtime CONFIG (`type:`, params,
+ *     `theme:`); the body is authored content with no schema behind it.
+ *
+ * ⭐ And `.md` is the HYBRID case, not the general one. It exists for records
+ * that are part data and part prose — a blog article. YAML and JSON records are
+ * data only, have no body, and express nesting and arrays natively; they are the
+ * plain case rather than the exception. Reasoning about collections from the
+ * markdown shape alone imports a body and a content field that most records
+ * do not have.
+ *
  * Features:
  * - Discovers markdown (.md), data (.yml/.yaml), JSON (.json), and BibTeX (.bib)
  *   files in collection folders
- * - Parses frontmatter for metadata (markdown), full YAML or JSON (data items),
+ * - Parses frontmatter for record data (markdown), full YAML or JSON (data items),
  *   or BibTeX → CSL-JSON (bibliography items)
  * - Pure-data formats (YAML, JSON, BibTeX) accept either one record per file
  *   (mapping at the top, slug from filename) or many records per file (array
