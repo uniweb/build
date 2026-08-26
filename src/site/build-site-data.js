@@ -72,9 +72,16 @@ import {
  *   - `sitemap.xml`, `robots.txt` — static-host bundle territory. Note these
  *     are simply absent from Uniweb-hosted sites today: nothing in platform
  *     generates them, at publish time or at request time.
- *   - `search-index.json` — the single-file bundle-mode form. Link mode emits
- *     the split `_search/{locale}/*.json` files instead (step 5 below), gated
- *     by `features: [search]`; those are what the hosting worker serves.
+ *   - ANY search index — neither the single-file `search-index.json` nor the
+ *     split `_search/{locale}/*.json`. This lane emitted both until
+ *     2026-08-01 and emits neither now; see step 5 for why. A host that
+ *     stores the content derives search from it.
+ *
+ *     ⚠️ This entry claimed the opposite until 2026-08-26 — that link mode
+ *     emitted the split files "instead", and named a consumer for them. It
+ *     described an emission its own step 5 had already removed, in the
+ *     paragraph a reader consults BEFORE the code, and it was read as
+ *     evidence by a downstream consumer.
  *
  * @param {Object} params
  * @param {string} params.siteRoot - Absolute path to the site directory.
