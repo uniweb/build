@@ -29,8 +29,12 @@ beforeEach(() => {
   mkdirSync(join(fdn, 'dist', 'meta'), { recursive: true })
   mkdirSync(SITE, { recursive: true })
 
-  w('site.yml', ['name: Acme', 'foundation: "@acme/marketing@1"', 'index: home', ''].join('\n'))
-  w('package.json', JSON.stringify({ name: 's', dependencies: { foundation: 'file:../foundation' } }))
+  // Versionless + a `file:` dep keyed by that same name — the reference workflow
+  // (model doc, correction #11), and the shape that resolves to a LOCAL foundation.
+  // A version pin means a catalog ref, which resolves against the registry and has
+  // no local path by design; this fixture needs the local one.
+  w('site.yml', ['name: Acme', 'foundation: "@acme/marketing"', 'index: home', ''].join('\n'))
+  w('package.json', JSON.stringify({ name: 's', dependencies: { '@acme/marketing': 'file:../foundation' } }))
   // pages
   w('pages/1-home/page.yml', ['id: home', 'nest:', '  hero: [detail]', ''].join('\n'))
   w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n')
@@ -147,7 +151,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // ⭐ Note the SINGULARIZATION: collection `notes` looks for model `@/note`.
     // That is exactly why the name has to travel — an author told only "no data
     // schema" would declare `@/notes` and still not resolve.
-    expect(pkg.schemaless).toEqual([{ name: 'notes', model: '@/note' }])
+    expect(pkg.schemaless).toEqual([{ name: 'notes', model: '@/notes' }])
 
     // ⛔ And it is NOT also a prose warning. It used to push
     // `"… — not synced"` into `warnings`, printed dim; that read as "my data did

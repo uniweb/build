@@ -410,7 +410,11 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     )
     writeFileSync(
       join(siteDir, 'package.json'),
-      JSON.stringify({ name: 'site', dependencies: { foundation: 'file:../foundation' } })
+      // Keyed by the DECLARED foundation name, which is the shape a real project has
+      // (model doc, correction #11): site.yml names `@acme/marketing`, so that is the
+      // dependency key. The old fixture keyed it `foundation`, matching a resolver
+      // that read `dependencies.foundation` — a key no template produces.
+      JSON.stringify({ name: 'site', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
     writeFileSync(join(siteDir, 'data', 'products', 'widget-x.yml'), 'title: Widget X\nprice: 9.99\n')
     writeFileSync(join(siteDir, 'data', 'products', 'gadget-y.yml'), 'title: Gadget Y\nprice: 19.5\n')
@@ -476,7 +480,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     )
     writeFileSync(
       join(reSite, 'package.json'),
-      JSON.stringify({ name: 're', dependencies: { foundation: 'file:../foundation' } })
+      JSON.stringify({ name: 're', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
     writeFileSync(
       join(reSite, 'data', 'products', 'widget-x.yml'),
@@ -567,7 +571,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
     )
     writeFileSync(
       join(localSite, 'package.json'),
-      JSON.stringify({ name: 'l', dependencies: { foundation: 'file:../local-foundation' } })
+      JSON.stringify({ name: 'l', dependencies: { '@acme/marketing': 'file:../local-foundation' } })
     )
     writeFileSync(join(localSite, 'data', 'products', 'a.yml'), 'title: A\n')
     writeFileSync(
@@ -627,7 +631,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     )
     writeFileSync(
       join(siteDir, 'package.json'),
-      JSON.stringify({ name: 's', dependencies: { foundation: 'file:../foundation' } })
+      JSON.stringify({ name: 's', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
     writeFileSync(join(siteDir, 'data', 'products', 'a.yml'), 'title: A\nprice: 1\n')
     writeFileSync(join(siteDir, 'data', 'products', 'b.yml'), 'title: B\nprice: 2\n')
@@ -709,7 +713,7 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
     )
     writeFileSync(
       join(siteDir, 'package.json'),
-      JSON.stringify({ name: 'site', dependencies: { foundation: 'file:../foundation' } })
+      JSON.stringify({ name: 'site', dependencies: { '@acme/blog': 'file:../foundation' } })
     )
     // Source record: a markdown body that maps to the prosemirror content field.
     writeFileSync(

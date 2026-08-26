@@ -27,13 +27,13 @@ describe('resolveCollectionsConfig', () => {
     expect(cfg.folderSync).toBe(true)
   })
 
-  it('legacy site.yml::collections still resolves; schema defaults to the singular', async () => {
+  it('legacy site.yml::collections still resolves; schema defaults to the collection name', async () => {
     w('site.yml', 'name: X\nfoundation: "@a/b@1"\ncollections:\n  articles:\n    path: collections/articles\n    sort: date desc\n')
     const cfg = await resolveCollectionsConfig(ROOT)
     const a = cfg.declarations.articles
     expect(a.path).toBe('collections/articles')
     expect(a.sort).toBe('date desc')
-    expect(a.schema).toBe('@/article') // subfolder-name convention default
+    expect(a.schema).toBe('@/articles') // subfolder-name convention default — identity, not singular
     expect(a.schemaExplicit).toBe(false) // convention → soft-skip if unresolved
   })
 
@@ -57,7 +57,7 @@ describe('resolveCollectionsConfig', () => {
     expect(cfg.declarations.team.path).toBe('collections/team')
     // an explicit collections.yml path is relative to collections/
     expect(cfg.declarations.posts.path).toBe('collections/blog')
-    expect(cfg.declarations.posts.schema).toBe('@/post') // convention default
+    expect(cfg.declarations.posts.schema).toBe('@/posts') // convention default — identity
   })
 
   it('collections.yml wins per-key over site.yml::collections', async () => {

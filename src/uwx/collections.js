@@ -40,6 +40,8 @@
 // it sends a reader to build what is already there.
 
 import { readFileSync, existsSync } from 'node:fs'
+import yaml from 'js-yaml'
+import { detectFoundationType } from '../site/foundation-ref.js'
 import { join, resolve } from 'node:path'
 
 import { resolveCollectionsConfig } from './collections-config.js'
@@ -364,21 +366,31 @@ function syncableCollections(declarations) {
 // Resolve the foundation dir from an explicit opt, else the site's `file:`
 // foundation dep. A local foundation supplies locally-defined Model declarations
 // offline; non-local Models are fetched via an injected resolver (see below).
+// Where this site's foundation lives, via the ONE resolver for that question
+// (`../site/foundation-ref.js` — a leaf precisely so this lane can import it).
+//
+// This used to be a private copy that read `package.json` `dependencies.foundation`
+// — a key no current template produces, since a site's foundation dep is keyed by
+// the foundation's package name (`"src": "file:../src"`). It returned null for
+// every scaffolded site, so the local-foundation path silently never ran: with a
+// `resolveModel` wired the caller fell back to the backend, and without one every
+// collection soft-skipped to delivery-only.
+//
+// The site declares its foundation in `site.yml`; the resolver turns that
+// declaration into a location. A declaration it refuses (a versionless registry
+// ref, an unknown name) is not this function's error to raise — the caller decides
+// whether a local foundation was required — so a throw becomes "no local
+// foundation" here and the caller's `required` flag still owns the message.
 function resolveFoundationDir(siteRoot, opts) {
   if (opts.foundationDir) return resolve(opts.foundationDir)
-  const pkgPath = join(siteRoot, 'package.json')
-  if (existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
-      const dep = pkg.dependencies?.foundation || pkg.devDependencies?.foundation
-      if (typeof dep === 'string' && dep.startsWith('file:')) {
-        return resolve(siteRoot, dep.slice('file:'.length))
-      }
-    } catch {
-      // fall through to the not-found error below
-    }
+  try {
+    const siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8')) || {}
+    if (!siteYml.foundation) return null
+    const info = detectFoundationType(siteYml.foundation, siteRoot)
+    return info?.type === 'local' && info.path ? info.path : null
+  } catch {
+    return null
   }
-  return null
 }
 
 // Load the local foundation's built schema.json (the source of locally-defined
