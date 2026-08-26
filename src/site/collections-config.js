@@ -28,7 +28,9 @@
 // (`articles` → `@/article`). Absent the file entirely, behavior is unchanged.
 
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { briefFields, flatRecordFields } from '@uniweb/schemas/conform'
+import { detectFoundationType } from './foundation-ref.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
 
@@ -144,6 +146,8 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
     }
   }
 
+  await deriveDeferredFromSchemas(siteRoot, siteYml, declarations)
+
   const folderSync = colYml?.sync !== false
   return {
     folderSync,
@@ -175,6 +179,79 @@ export function toConfigCollections(declarations) {
     out[name] = rest
   }
   return out
+}
+
+
+/**
+ * Fill in `deferred:` from each collection's own data schema.
+ *
+ * ⭐ A schema's **brief** section already states what a record's summary is — the
+ * card, the row, the thing a list shows. Everything else is wanted only when one
+ * record is the focus. That is exactly what `deferred:` says, so an author with a
+ * schema should not have to say it twice, in a second vocabulary, with nothing
+ * checking the two against each other.
+ *
+ * ⇒ `deferred` = the schema's flat-record fields MINUS its brief fields.
+ *
+ * Derived from the SCHEMA, never from a record. That is what keeps the
+ * build-derived keys safe without a reserved list: `slug`, `route`, `path`,
+ * `excerpt`, `image` and `lastModified` are not schema fields, so they are never
+ * in the difference and never stripped. `content` is not exempt — it is
+ * schema-governed, and usually the heavy field the split exists for.
+ *
+ * ⛔ Silent on every path that cannot answer, because none of them is an error:
+ *
+ *   - an author-declared `deferred:` wins outright — this never overrides one;
+ *   - no local foundation (a linked or cataloged one), or it is unbuilt → nothing
+ *     to read, and a site must still build;
+ *   - the schema is not in the foundation's built map → the same soft-skip the
+ *     sync lane already applies. `dist/meta/schema.json` carries the schemas
+ *     COMPONENTS reference, so a collection whose schema no component binds is
+ *     simply not there;
+ *   - the schema states no brief (`briefFields` → null, e.g. a root list) → there
+ *     is no lean shape to honour, so records stay whole.
+ *
+ * The last two are why this reads the built artifact rather than resolving
+ * schemas itself: it is the same input the sync lane uses, so both lanes agree
+ * about which schemas exist.
+ */
+async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
+  const pending = Object.values(declarations).filter(
+    (d) => d.schema && !Array.isArray(d.deferred)
+  )
+  if (pending.length === 0) return
+
+  const dataSchemas = loadFoundationDataSchemas(siteRoot, siteYml)
+  if (!dataSchemas) return
+
+  for (const decl of pending) {
+    const schema = dataSchemas[decl.schema]
+    if (!schema) continue
+    const brief = briefFields(schema)
+    if (!brief) continue
+    const all = Object.keys(flatRecordFields(schema) || {})
+    const heavy = all.filter((f) => !brief.has(f))
+    if (heavy.length) decl.deferred = heavy
+  }
+}
+
+/** The foundation's built data-schema map, or null when there is nothing to read. */
+function loadFoundationDataSchemas(siteRoot, siteYml) {
+  if (!siteYml?.foundation) return null
+  let info
+  try {
+    info = detectFoundationType(siteYml.foundation, siteRoot)
+  } catch {
+    return null // a declaration this resolver refuses is not this function's error
+  }
+  if (info?.type !== 'local' || !info.path) return null
+  const schemaPath = join(info.path, 'dist', 'meta', 'schema.json')
+  if (!existsSync(schemaPath)) return null
+  try {
+    return JSON.parse(readFileSync(schemaPath, 'utf8'))?.dataSchemas || null
+  } catch {
+    return null
+  }
 }
 
 /** Path to the collections.yml file (whether or not it exists yet). */
