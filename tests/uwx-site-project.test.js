@@ -1262,7 +1262,7 @@ describe('knowledge: survives the round trip', () => {
  * ⛔ And it must cross AT ALL: without the producer line the flag works on the
  * `--bundle` / `--link` lanes and is silently ignored on a backend-hosted site,
  * whose page config comes from the backend's projection — the one lane the
- * feature is sold on. `kb/framework/plans/tracking.md` §10b.
+ * feature is sold on.
  */
 describe('trackSections: crosses the wire, in both directions, changing case', () => {
   it('emits track_sections on the opted-in page ONLY', async () => {
@@ -1328,7 +1328,7 @@ describe('trackSections: crosses the wire, in both directions, changing case', (
  * `tracking:` — where a site's usage events go. Same allowlist hazard as
  * `submit:`: the bundle lane spreads all of site.yml, so a missing line here
  * would make an authored destination work on a static host and vanish in
- * silence on the synced lane. Design: `kb/framework/plans/tracking.md`.
+ * silence on the synced lane.
  */
 describe('site.yml::tracking across the sync wire', () => {
   let dir

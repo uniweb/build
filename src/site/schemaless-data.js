@@ -25,15 +25,13 @@
  *
  * ⇒ **Do not reintroduce a bundle here.** One object per file is what the
  * reader's static arm already assumes: a plain object GET on the verbatim tail,
- * with nothing anywhere that unbundles. Full account, including the endpoint
- * contract: `kb/framework/build/data-ball-retirement.md`.
+ * with nothing anywhere that unbundles.
  *
  * **A search index used to ride here too, and deliberately no longer does**
  * (2026-08-01). Only a CLI deploy produced one — a CMS publish produced none —
  * so a site's search existed or vanished depending on who published it, which
  * is the artifact-flicker rule exactly. A host that wants search derives it from
- * the content it already stores. See the note at the removal point below and
- * `collab/context/site-derived-artifacts.md`.
+ * the content it already stores. See the note at the removal point below.
  */
 
 import { existsSync } from 'node:fs'

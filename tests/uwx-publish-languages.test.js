@@ -1,5 +1,5 @@
 // publish_languages on the sync wire — verbatim carry both ways (contract:
-// kb/framework/build/uwx-format.md → "Per-locale publish readiness").
+// the "Per-locale publish readiness" contract).
 //
 // Sync push/pull round-trips the FULL working set plus the publish list —
 // dangling codes included (a code listed in publishLanguages but not declared

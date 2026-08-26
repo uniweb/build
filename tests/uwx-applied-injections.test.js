@@ -8,7 +8,7 @@
  *
  * ⛔ Which means a reader that re-emits WITHOUT those injections is comparing against
  * hashes of a document it never built. That is not a theoretical asymmetry — it is
- * the defect backend reported in channel `backend-framework-787e` (2026-08-19):
+ * the defect the backend lane reported on 2026-08-19:
  * `uniweb push` said "1 entity unchanged since the last push" and `uniweb status
  * --json` said `changed: 1`, from one cache, seconds apart, on a site whose only
  * distinguishing feature was a single `![](/images/placeholder.svg)`. It could never

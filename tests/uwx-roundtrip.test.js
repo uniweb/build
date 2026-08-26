@@ -3,7 +3,7 @@
 //   pass 1 — a pristine authored file gains ONLY a `$uuid`;
 //   pass 2 — a no-op re-sync is byte-identical (the cycle has a fixpoint).
 // This is the oracle for "sync brings files into actual sync; re-sync with no
-// changes changes nothing." See kb/framework/build/collection-sync-source-and-roundtrip.md.
+// changes changes nothing."
 
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

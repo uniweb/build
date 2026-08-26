@@ -16,7 +16,7 @@ import { siteProjectToDocument } from '../src/uwx/index.js'
 //
 // The first two cases below are the ones that would have caught it.
 //
-// See kb/framework/architecture/assistant-config.md.
+// The assistant surface is `site.yml::assistant`.
 
 const ROOTS = []
 

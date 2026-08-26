@@ -1,6 +1,6 @@
 /**
  * Publish filter for per-locale readiness — `publishLanguages` (contract:
- * kb/framework/build/uwx-format.md → "Per-locale publish readiness").
+ * the "Per-locale publish readiness" contract).
  *
  * On published build paths (`dropUnpublished: true`) the embedded
  * `config.languages` is the publishable intersection and invalid publish

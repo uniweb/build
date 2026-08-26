@@ -146,8 +146,8 @@ function walkEntityAssets(node, visitor) {
 //     dropping `src` only forces that at the cost of a migration window across
 //     two consumer chains where images blank.
 //
-//     ⇒ **Keep writing both.** See `kb/framework/content/asset-url-resolution.md`
-//     item 13 — and re-read it there rather than re-deriving the answer here.
+//     ⇒ **Keep writing both.** Settled 2026-08-* against the two consumer
+//     chains above; do not re-derive it from one of them in isolation.
 //
 // ⇒ Writing both means content authored now stays correct whichever order the
 // halves arrive in — the same reason the app writes both. The URL is dropped
