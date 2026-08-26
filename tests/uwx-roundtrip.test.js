@@ -49,7 +49,7 @@ beforeEach(() => {
   )
   writeFileSync(
     join(siteDir, 'package.json'),
-    JSON.stringify({ name: 'site', dependencies: { foundation: 'file:../foundation' } })
+    JSON.stringify({ name: 'site', dependencies: { '@acme/marketing': 'file:../foundation' } })
   )
   writeFileSync(join(siteDir, 'collections', 'products', 'widget-x.yml'), PRODUCT_YML)
   writeFileSync(join(siteDir, 'collections', 'articles', 'hello.md'), ARTICLE_MD)

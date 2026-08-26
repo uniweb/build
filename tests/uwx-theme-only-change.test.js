@@ -40,7 +40,7 @@ beforeEach(() => {
   mkdirSync(SITE, { recursive: true })
 
   w('site.yml', ['name: Acme', 'foundation: "@acme/marketing@1"', 'index: home', ''].join('\n'))
-  w('package.json', JSON.stringify({ name: 's', dependencies: { foundation: 'file:../foundation' } }))
+  w('package.json', JSON.stringify({ name: 's', dependencies: { '@acme/marketing': 'file:../foundation' } }))
   w('theme.yml', themeYml('#ff0000'))
   w('pages/1-home/page.yml', ['id: home', ''].join('\n'))
   w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n')
