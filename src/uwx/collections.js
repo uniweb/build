@@ -16,10 +16,21 @@
 // via `toDataSchemaDeclaration`, the same path `uniweb register` uses), so it
 // stays offline.
 //
-// Scope: one source file -> the Model's `single` sections. What is NOT handled:
-// `multi` sections (repeating items) are skipped outright — one file's frontmatter
-// cannot express them. Nested sections (a `type: section` field), entity_ref /
-// item_ref / file fields have no branch in `encodeFieldValue` and are unverified.
+// Scope: this mapper implements the FLAT-RECORD shape — one source file whose
+// frontmatter keys are field names — so it walks the Model's `single` sections
+// and skips `multi` ones.
+//
+// ⛔ That is a property of THIS MAPPER, not of the schema system, and saying
+// otherwise has already misled twice. `multi` is first-class: the author writes
+// `many: true`, which lowers to IR `kind: 'multi'` and to wire `multiple: true`.
+// A Model whose ONLY section is `many` is a supported shape in its own right — a
+// root list, content authored as a bare array (`@uniweb/schemas` `rootListSection`;
+// `@std/nav` and `@std/form` are exactly this). Such a Model has no flat-record
+// surface at all, so it is not that its records "cannot be expressed" — it is
+// that they are not this shape, and this mapper only knows this shape.
+//
+// Nested sections (a `type: section` field) and entity_ref / item_ref / file
+// fields have no branch in `encodeFieldValue`; unverified either way.
 //
 // ⚠️ Two claims that used to sit here were stale and were removed rather than
 // re-worded, because both named real capabilities as missing: NON-BRIEF single
