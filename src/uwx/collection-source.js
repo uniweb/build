@@ -111,9 +111,14 @@ export async function readCollectionRecords(collectionDir) {
   if (!existsSync(collectionDir)) {
     throw new Error(`uwx/collection-source: collection folder not found: ${collectionDir}`)
   }
-  const files = (await readdir(collectionDir))
+  const entries = await readdir(collectionDir, { withFileTypes: true })
+  const files = entries
+    .filter((e) => e.isFile())
+    .map((e) => e.name)
     .filter((f) => !f.startsWith('_') && SOURCE_EXTENSIONS.has(extname(f).toLowerCase()))
     .sort() // stable order — the wire's package digest depends on it
+
+  await reportNestedRecords(collectionDir, entries)
 
   const records = []
   for (const file of files) {
@@ -121,4 +126,55 @@ export async function readCollectionRecords(collectionDir) {
     records.push(...recs)
   }
   return records
+}
+
+/**
+ * Report source records nested below a collection's top level.
+ *
+ * ⛔ THIS LANE IS FLAT AND THAT IS A CONTRACT, NOT AN OVERSIGHT. The delivery
+ * build reads a collection recursively — an author may organise records into
+ * branches, and `path` + the `under` predicate address them
+ * (`build/src/site/collection-processor.js`). Sync cannot follow yet: the
+ * folder shape agreed with the entity store is one level, records as direct
+ * leaves of a collection's branch, and going deeper needs that renegotiated
+ * with an explicit order axis rather than assumed.
+ *
+ * ⚠️ The two lanes therefore disagree, and the failure mode is the dangerous
+ * shape: a nested record BUILDS and RENDERS locally, then is simply absent from
+ * everything the sync produced — no error, no empty result, just a smaller set
+ * than the author is looking at. Losing records silently is the one outcome
+ * that must not happen, so this says so. It does not throw: a static site with
+ * nested collections is completely valid and must keep working, and an author
+ * who never syncs should not be blocked by a lane they do not use.
+ */
+async function reportNestedRecords(collectionDir, entries) {
+  const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+  if (dirs.length === 0) return
+
+  const nested = []
+  for (const dir of dirs) {
+    nested.push(...(await findSourceFiles(resolve(collectionDir, dir.name), dir.name)))
+  }
+  if (nested.length === 0) return
+
+  const shown = nested.slice(0, 5).join(', ')
+  const more = nested.length > 5 ? `, and ${nested.length - 5} more` : ''
+  console.warn(
+    `[uwx/collection-source] ${nested.length} record(s) below the top level of ` +
+      `"${basename(collectionDir)}" are NOT synced: ${shown}${more}. ` +
+      `Collection sync is one level deep; these build and render locally but are ` +
+      `absent from the synced set. Move them to the collection's top level to sync them.`
+  )
+}
+
+/** Every source file at or below `dir`, as paths relative to the collection root. */
+async function findSourceFiles(dir, rel) {
+  const out = []
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
+    const relPath = `${rel}/${entry.name}`
+    if (entry.isDirectory()) out.push(...(await findSourceFiles(resolve(dir, entry.name), relPath)))
+    else if (SOURCE_EXTENSIONS.has(extname(entry.name).toLowerCase())) out.push(relPath)
+  }
+  return out
 }
