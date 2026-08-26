@@ -364,6 +364,24 @@ function syncableCollections(declarations) {
 // Resolve the foundation dir from an explicit opt, else the site's `file:`
 // foundation dep. A local foundation supplies locally-defined Model declarations
 // offline; non-local Models are fetched via an injected resolver (see below).
+// ⛔ THIS DUPLICATES `detectFoundationType` (`build/src/site/config.js`, re-exported
+// from `@uniweb/build`) AND IS WEAKER THAN IT. That function is the one resolver for
+// a site's foundation declaration; it reads `site.yml::foundation` and handles every
+// supported shape — workspace sibling, `file:` dep keyed by the DECLARED NAME,
+// `foundations/<name>`, versioned registry ref, URL.
+//
+// This copy instead reads `package.json` `dependencies.foundation` — a key no current
+// template produces (a site's foundation dep is keyed by the foundation's PACKAGE
+// NAME, e.g. `"src": "file:../src"`; framework/CLAUDE.md gotcha #3). So it returns
+// null for a scaffolded site, and the local-foundation path silently never runs:
+// with a `resolveModel` wired the caller falls back to the backend, and without one
+// every collection soft-skips to delivery-only.
+//
+// ⚠️ Not converged here because `site/config.js` imports a Vite plugin, so this lane
+// cannot import it as things stand — the fix is to extract the resolver to a leaf
+// (the `route-match` / `data-paths` pattern) and have all callers read it. A THIRD
+// copy exists in `cli/src/commands/build.js`, whose own comment says it "mirrors a
+// subset of" the real one. Open work; do not add a fourth.
 function resolveFoundationDir(siteRoot, opts) {
   if (opts.foundationDir) return resolve(opts.foundationDir)
   const pkgPath = join(siteRoot, 'package.json')
