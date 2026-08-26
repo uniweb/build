@@ -575,6 +575,63 @@ async function processContentItem(dir, filename, config, siteRoot, basePath) {
 }
 
 /**
+ * Every source file in a collection, as paths relative to the collection root —
+ * `hello.md`, `2024/spring.md`, `2024/q1/notes.yml`.
+ *
+ * Nesting is how an author gives a collection an internal structure, and it is
+ * what the `path` field and the `under` predicate address. Before this walk the
+ * scan was a flat `readdir`, so a record in a subdirectory was not ignored with
+ * a warning — it was invisible, and the site simply rendered without it.
+ *
+ * `_`-prefixed and dot-prefixed names are skipped at every level, files and
+ * directories alike: `_drafts/` stays out of the build the same way `_draft.md`
+ * always has. That is also the escape hatch for a subdirectory that holds
+ * something other than records.
+ */
+async function collectSourceFiles(dir, rel = '') {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const out = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
+    const relPath = rel ? `${rel}/${entry.name}` : entry.name
+    if (entry.isDirectory()) {
+      out.push(...(await collectSourceFiles(join(dir, entry.name), relPath)))
+    } else if (/\.(md|ya?ml|json|bib)$/i.test(entry.name)) {
+      out.push(relPath)
+    }
+  }
+  return out
+}
+
+/**
+ * A slug identifies one record within its collection — it is what a `[slug]`
+ * route matches and what a per-record file is named. Two files in different
+ * branches can now share a stem (`2024/notes.md`, `2025/notes.md`), which makes
+ * a previously theoretical collision reachable in ordinary authoring.
+ *
+ * The build does not rename or drop either record: the cascade keeps both, and
+ * whichever sorts last wins the route and the per-record file. That is a real
+ * ambiguity only the author can resolve, so it is reported rather than repaired.
+ */
+function warnDuplicateSlugs(items, collectionName) {
+  const seen = new Map()
+  for (const item of items) {
+    if (!item || item.slug === undefined) continue
+    const slug = String(item.slug)
+    const where = item.path ? `${item.path}/` : ''
+    if (seen.has(slug)) {
+      console.warn(
+        `[collection-processor] Collection "${collectionName}" has more than one record with ` +
+          `slug "${slug}" (${seen.get(slug)}${slug}, ${where}${slug}). Its detail route and ` +
+          `per-record file resolve to only one of them — give them distinct slugs.`
+      )
+      continue
+    }
+    seen.set(slug, where)
+  }
+}
+
+/**
  * Collect and process all items in a collection folder
  *
  * @param {string} siteDir - Site root directory
@@ -591,11 +648,7 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
     return []
   }
 
-  const files = await readdir(collectionDir)
-  const itemFiles = files.filter(f =>
-    !f.startsWith('_') &&
-    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json') || f.endsWith('.bib'))
-  )
+  const itemFiles = await collectSourceFiles(collectionDir)
 
   // Process all collection files (markdown → content items, YAML/JSON → data
   // items, BibTeX → CSL-JSON bibliography items).
@@ -614,12 +667,24 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
     })
   )
 
+  // Stamp each record's position inside the collection BEFORE flattening, while
+  // a result is still aligned with the file it came from. A file's own array
+  // entries (array-form YAML/JSON, every .bib entry) all share its directory.
+  items = items.map((result, i) => {
+    const dir = dirname(itemFiles[i])
+    const path = dir === '.' ? '' : dir
+    if (Array.isArray(result)) return result.map((item) => item && { ...item, path })
+    return result && { ...result, path }
+  })
+
   // Flatten one level: array-form YAML/JSON files and every .bib file
   // contribute their entries individually.
   items = items.flat()
 
   // Filter out nulls (unpublished items)
   items = items.filter(Boolean)
+
+  warnDuplicateSlugs(items, config.name)
 
   // Add routes to items if collection has a route configured
   if (config.route) {
