@@ -16,5 +16,5 @@ export {
   isSearchEnabled,
   getSearchConfig,
   getSearchIndexFilename,
-  generateCollectionIndex
+  generateRecordSearchIndex
 } from '@uniweb/projections/search'
