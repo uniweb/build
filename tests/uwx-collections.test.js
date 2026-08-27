@@ -752,3 +752,96 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
     expect(JSON.stringify(body.es)).toContain('Hola mundo distinto')
   })
 })
+
+// ⛔ `@/x` IS A FOUNDATION-RELATIVE ALIAS AND MUST NOT REACH THE WIRE UNRESOLVED.
+//
+// Measured on a live manor 2026-08-27: `register` resolved `@/member` into
+// `@proximify/member` and stored it; the collections push then named `@/member`
+// verbatim, and the backend — which resolves Models BY NAME and never mints —
+// refused the restore with "missing host Models for entity restore: @/member".
+// One CLI, two paths, one resolver.
+//
+// ⭐ This pins the PAIR, not the fix: both paths must agree on one alias. The
+// register-side rule lives in `uwx/registry-package.js` (`scoped`), this side in
+// `buildCollectionEntities`, and a test that only asserted one would let them
+// drift again.
+describe('buildCollectionEntities — `@/` model refs resolve into the publish org', () => {
+  let root
+  let siteDir
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'uwx-selfscope-'))
+    siteDir = join(root, 'site')
+    const foundationDir = join(root, 'foundation')
+    mkdirSync(join(siteDir, 'collections', 'members'), { recursive: true })
+    mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
+
+    writeFileSync(
+      join(siteDir, 'site.yml'),
+      'name: S\nfoundation: "@acme/fnd"\ncollections:\n  members:\n    path: collections/members\n    schema: "@/member"\n'
+    )
+    writeFileSync(
+      join(siteDir, 'package.json'),
+      JSON.stringify({ name: 'site', dependencies: { '@acme/fnd': 'file:../foundation' } })
+    )
+    writeFileSync(
+      join(siteDir, 'collections', 'members', 'alice.md'),
+      '---\nname: Alice\n---\nBio\n'
+    )
+    writeFileSync(
+      join(foundationDir, 'dist', 'meta', 'schema.json'),
+      JSON.stringify({
+        _self: { name: '@acme/fnd', version: '1.0.0', role: 'foundation' },
+        dataSchemas: {
+          '@/member': validateAndNormalizeSchema(
+            { name: 'member', fields: { name: { type: 'string' } } },
+            '@/member'
+          ),
+        },
+      })
+    )
+  })
+
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('resolves `@/member` to `@org/member` on the entity and leaves `@uniweb/*` alone', async () => {
+    const { entities } = await buildCollectionEntities(siteDir, { org: '@proximify' })
+    expect(entities).toHaveLength(1)
+    // The value that becomes `$model` on the wire, and `models_required` in the manifest.
+    expect(entities[0].model).toBe('@proximify/member')
+    expect(entities[0].document.$model).toBe('@proximify/member')
+  })
+
+  it('accepts a bare org handle as well as `@handle`', async () => {
+    const { entities } = await buildCollectionEntities(siteDir, { org: 'proximify' })
+    expect(entities[0].model).toBe('@proximify/member')
+  })
+
+  it('⛔ WARNS rather than throwing when no org is known — a `status` probe has none', async () => {
+    // Throwing here would break `probeUnpushed`, which is offline and orgless and
+    // must still be able to count changed entities on a never-pushed site.
+    const { entities, warnings } = await buildCollectionEntities(siteDir)
+    expect(entities[0].model).toBe('@/member')
+    expect(warnings.join('\n')).toMatch(/foundation-relative/)
+  })
+
+  it('⛔ CONTROL — an ALREADY-QUALIFIED ref is NOT re-scoped to the publisher', async () => {
+    // Without this the suite cannot tell "resolves @/" from "rewrites every ref to
+    // the publish org", and the second would silently re-home a shared or
+    // other-org Model onto whoever happened to run the push.
+    const alt = join(root, 'site2')
+    mkdirSync(join(alt, 'collections', 'members'), { recursive: true })
+    writeFileSync(
+      join(alt, 'site.yml'),
+      'name: S2\nfoundation: "@acme/fnd"\ncollections:\n  members:\n    path: collections/members\n    schema: "@acme/member"\n'
+    )
+    writeFileSync(
+      join(alt, 'package.json'),
+      JSON.stringify({ name: 'site2', dependencies: { '@acme/fnd': 'file:../foundation' } })
+    )
+    writeFileSync(join(alt, 'collections', 'members', 'alice.md'), '---\nname: Alice\n---\nBio\n')
+
+    const { entities } = await buildCollectionEntities(alt, { org: '@proximify' })
+    expect(entities[0].model).toBe('@acme/member')
+  })
+})

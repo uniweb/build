@@ -526,6 +526,30 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   const entities = []
   const index = []
   const warnings = []
+
+  // ⛔ `@/x` IS A FOUNDATION-RELATIVE ALIAS AND MUST BE RESOLVED BEFORE IT SHIPS.
+  //
+  // `register` resolves it (`uwx/registry-package.js` builds `scoped` from the
+  // publish scope and applies it to BOTH the declaration's name and its refs), so
+  // a foundation's `@/member` is stored as `@org/member`. This path did NOT, and
+  // carried the alias verbatim into `$model` and `models_required.name_at_export`.
+  //
+  // ⚠️ The backend resolves Models BY NAME and never mints, so an unresolved alias
+  // is refused at restore with a message about a missing Model — which reads as a
+  // registration problem rather than a producer one. Measured 2026-08-27 on a live
+  // manor: `register` had already stored `@proximify/member` from the same alias,
+  // and the push then named `@/member`. One CLI, two paths, one resolver.
+  //
+  // ⭐ Resolving BEFORE `declarationFor` is what keeps this to one line of behaviour:
+  // `resolveDeclaration` already matches a fully-qualified name against the
+  // foundation's `@/`-keyed `dataSchemas`, so a resolved name looks up correctly and
+  // `declaration.name` — the value that becomes `$model` — is the resolved one.
+  const selfScopeOrg =
+    typeof opts.org === 'string' ? opts.org.replace(/^@/, '').replace(/\/.*$/, '') : ''
+  const resolveSelfScope = (ref) =>
+    typeof ref === 'string' && ref.startsWith('@/') && selfScopeOrg
+      ? `@${selfScopeOrg}/${ref.slice(2)}`
+      : ref
   // Collections that resolved no data schema (the convention-default soft-skip
   // below) — not synced as folder entities. The composite deploy delivers these
   // statically (the "data ball") instead, so the caller can route them there.
@@ -535,7 +559,18 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   // reuse a slug).
   const seen = new Set()
   for (const { name, decl } of mapped) {
-    const modelName = decl.schema || decl.model
+    const declaredModel = decl.schema || decl.model
+    const modelName = resolveSelfScope(declaredModel)
+    // Unresolvable `@/` — no org is known. Ship it rather than throwing (a `status`
+    // probe on a never-pushed site has no org and must still count), but say so:
+    // the backend's refusal names a missing Model and cannot name this cause.
+    if (modelName === declaredModel && typeof declaredModel === 'string' && declaredModel.startsWith('@/')) {
+      warnings.push(
+        `collection "${name}": \`${declaredModel}\` is foundation-relative and no org is known, ` +
+          `so it ships unresolved. The backend resolves Models by name and will refuse it. ` +
+          `Pass \`--org @handle\`, or push once so the site records its org.`
+      )
+    }
     const declaration = await declarationFor(modelName)
     if (!declaration) {
       // A convention-defaulted schema (subfolder-name) that doesn't resolve is a

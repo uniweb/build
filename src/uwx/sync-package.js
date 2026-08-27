@@ -265,6 +265,10 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     ...(opts.foundationDir ? { foundationDir: opts.foundationDir } : {}),
     ...(opts.resolveModel ? { resolveModel: opts.resolveModel } : {}),
     ...(sourceLocale ? { sourceLocale } : {}),
+    // The publish org — resolves a foundation-relative `@/x` model ref into
+    // `@org/x` before it ships. Absent on an offline probe, which is why
+    // buildCollectionEntities warns rather than throws.
+    ...(opts.org ? { org: opts.org } : {}),
   })
   const warnings = [...col.warnings]
 
