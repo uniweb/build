@@ -277,6 +277,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     folders: col.colConfig?.folders ?? null,
+    // Placement identity from the folder document a previous push returned.
+    // Absent on a first push — every item is genuinely new then. Its ABSENCE on a
+    // later push is what made `publish` after `push` fail: send-only-changed skips
+    // the unchanged records and re-sends the folder ALONE, so the folder is exactly
+    // the payload whose item identity has to survive.
+    ...(opts.folderItemUuids ? { itemUuids: opts.folderItemUuids } : {}),
   })
 
   const siteDoc = includeSite ? await siteProjectToDocument(siteRoot, { sourceLocale }) : null

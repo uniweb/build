@@ -96,6 +96,76 @@ function virtualContents(folders, groups) {
   return folders.map(buildNode).filter(Boolean)
 }
 
+
+/**
+ * Walk a folder document's `contents` tree, visiting every item with the
+ * slash-joined `path_segment` chain that addresses it.
+ *
+ * ⛔ IT MUST RECURSE INTO `$children`. `contents` is SELF-NESTING: a walk of the
+ * top level sees the branches and misses every record under them — which is 6 of
+ * the 7 entries in a two-collection site. *(Named by the backend lane, 2026-08-27,
+ * before it could be got wrong.)*
+ */
+function walkFolderItems(contents, cb, prefix = '') {
+  for (const item of contents || []) {
+    if (!item || typeof item !== 'object') continue
+    const seg = typeof item.path_segment === 'string' ? item.path_segment : null
+    const path = seg ? (prefix ? `${prefix}/${seg}` : seg) : prefix
+    if (seg) cb(path, item)
+    walkFolderItems(item.$children, cb, path)
+  }
+}
+
+/**
+ * Harvest per-item identity from the folder document the backend returns.
+ *
+ * ⭐ THE KEY IS THE `path_segment` CHAIN, and it is the right one because the
+ * backend's own model declares `path_segment` SIBLING-UNIQUE — so the chain is
+ * unique within the folder, stable across pushes, and derivable identically on
+ * both sides without either lane holding the other's ids.
+ *
+ * @param {object} doc - a stored `@uniweb/folder` document (`{ contents: [...] }`)
+ * @returns {Record<string,string>} path → `$uuid`
+ */
+export function collectFolderItemUuids(doc) {
+  const out = {}
+  walkFolderItems(doc?.contents, (path, item) => {
+    if (typeof item.$uuid === 'string' && item.$uuid) out[path] = item.$uuid
+  })
+  return out
+}
+
+/**
+ * Stamp known `$uuid`s onto a folder document about to be sent, so the backend
+ * matches its stored rows instead of reading every item as new.
+ *
+ * ⛔ WHY THIS EXISTS. `contents` is a `multi` section: an item without a `$uuid`
+ * is a new row, so re-sending the folder without identity would replace every
+ * placement. The backend refuses that outright (`identity_required`) — correctly
+ * — and the refusal is what a `publish` after a `push` used to hit, because
+ * send-only-changed skips the unchanged RECORDS and re-sends the FOLDER alone.
+ *
+ * ⚠️ The folder ENTITY still carries no `$uuid` — that stays the backend's, keyed
+ * from the site-content uuid. This is about its ITEMS, and the two were conflated
+ * by a comment in this file that was true of the entity and false of its contents.
+ *
+ * @returns {{ stamped: number, unknown: number }}
+ */
+export function stampFolderItemUuids(doc, pathToUuid = {}) {
+  let stamped = 0
+  let unknown = 0
+  walkFolderItems(doc?.contents, (path, item) => {
+    const uuid = pathToUuid[path]
+    if (uuid) {
+      item.$uuid = uuid
+      stamped++
+    } else {
+      unknown++
+    }
+  })
+  return { stamped, unknown }
+}
+
 /**
  * Build the `@uniweb/folder` entity descriptor, or null when there are no records.
  *
@@ -106,9 +176,12 @@ function virtualContents(folders, groups) {
  * @param {object[]} params.recordEntities - the collection-record entities (full
  *        set, BEFORE send-only-changed filtering), each `{ id, uuid, slug, collection? }`
  * @param {Array|null} [params.folders] - `collections.yml::folders` virtual org
+ * @param {Record<string,string>} [params.itemUuids] - path → `$uuid`, harvested
+ *        from the folder document a previous push returned. Absent on a first
+ *        push, where every item is genuinely new.
  * @returns {{ id, uuid, model, file, document, collection: '@folder' }|null}
  */
-export function buildFolderEntity({ recordEntities, folders = null }) {
+export function buildFolderEntity({ recordEntities, folders = null, itemUuids = null }) {
   if (!Array.isArray(recordEntities) || recordEntities.length === 0) return null
   const groups = groupByCollection(recordEntities)
   const contents = folders ? virtualContents(folders, groups) : defaultContents(groups)
@@ -118,6 +191,9 @@ export function buildFolderEntity({ recordEntities, folders = null }) {
     $model: FOLDER_MODEL_NAME,
     contents,
   }
+  // Re-arm placement identity. Without it a second send reads as "every item is
+  // new" and the backend refuses rather than replacing them all.
+  if (itemUuids && Object.keys(itemUuids).length) stampFolderItemUuids(document, itemUuids)
 
   return {
     id: FOLDER_ENTITY_KEY,

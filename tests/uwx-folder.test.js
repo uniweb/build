@@ -1,4 +1,4 @@
-import { buildFolderEntity } from '../src/uwx/folder.js'
+import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 
 // The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the
 // collection-record entities. A brand-new record is pointed at by `$ref` (its
@@ -72,5 +72,75 @@ describe('buildFolderEntity', () => {
       path_segment: 'ada',
       $ref: 'team/ada',
     })
+  })
+})
+
+// ─── placement identity — the defect that made `publish` after `push` refuse ──
+//
+// `contents` is a `multi` section: an item without a `$uuid` is a NEW row. So a
+// re-send of the folder without identity would replace every placement, and the
+// backend refuses outright (`identity_required`).
+//
+// ⛔ That refusal is exactly what a `publish` after a `push` hit, because
+// send-only-changed skips the unchanged RECORDS and re-sends the FOLDER ALONE —
+// making the folder the one payload whose item identity has to survive.
+// Reproduced on a live manor 2026-08-27; the identities were on the wire all along
+// and framework simply never harvested them.
+describe('folder placement identity', () => {
+  const records = [
+    { id: 'members/alice', slug: 'alice', collection: 'members', model: '@acme/member', uuid: 'R1' },
+    { id: 'members/bob', slug: 'bob', collection: 'members', model: '@acme/member', uuid: 'R2' },
+  ]
+
+  it('harvests every level — branches AND the records under $children', () => {
+    // ⛔ A walk of the top level alone sees the branch and misses every record
+    // under it. Named by the backend lane before it could be got wrong.
+    const stored = {
+      contents: [
+        {
+          kind: 'branch',
+          path_segment: 'members',
+          $uuid: 'B1',
+          $children: [
+            { kind: 'ref', path_segment: 'alice', $uuid: 'I1' },
+            { kind: 'ref', path_segment: 'bob', $uuid: 'I2' },
+          ],
+        },
+      ],
+    }
+    expect(collectFolderItemUuids(stored)).toEqual({
+      members: 'B1',
+      'members/alice': 'I1',
+      'members/bob': 'I2',
+    })
+  })
+
+  it('stamps banked identity back onto a folder about to be sent', () => {
+    const folder = buildFolderEntity({
+      recordEntities: records,
+      itemUuids: { members: 'B1', 'members/alice': 'I1', 'members/bob': 'I2' },
+    })
+    const branch = folder.document.contents[0]
+    expect(branch.$uuid).toBe('B1')
+    expect(branch.$children.map((c) => c.$uuid)).toEqual(['I1', 'I2'])
+  })
+
+  it('⛔ CONTROL — a first push carries NO identity, because every item is new', () => {
+    // Without this the suite cannot tell "stamps what it was given" from "always
+    // stamps something", and a first push must mint rather than address.
+    const folder = buildFolderEntity({ recordEntities: records })
+    const branch = folder.document.contents[0]
+    expect(branch.$uuid).toBeUndefined()
+    expect(branch.$children.every((c) => c.$uuid === undefined)).toBe(true)
+  })
+
+  it('leaves an unknown placement unstamped rather than guessing', () => {
+    const folder = buildFolderEntity({
+      recordEntities: records,
+      itemUuids: { 'members/alice': 'I1' }, // bob absent — genuinely new
+    })
+    const kids = folder.document.contents[0].$children
+    expect(kids[0].$uuid).toBe('I1')
+    expect(kids[1].$uuid).toBeUndefined()
   })
 })
