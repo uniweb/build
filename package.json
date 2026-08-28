@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@citestyle/bibtex": "^1.1.0",
+    "@uniweb/content-reader": "workspace:^",
     "@uniweb/content-writer": "workspace:^",
     "@uniweb/projections": "workspace:^",
     "@uniweb/schemas": "workspace:^",
@@ -69,10 +70,7 @@
     "yaml": "^2.5.0"
   },
   "optionalDependencies": {
-    "@uniweb/content-reader": "workspace:^",
-    "@uniweb/runtime": "workspace:^",
-    "@uniweb/schemas": "workspace:^",
-    "@uniweb/semantic-parser": "workspace:^"
+    "@uniweb/runtime": "workspace:^"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0 || ^7.0.0",
