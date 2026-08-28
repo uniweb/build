@@ -144,3 +144,61 @@ describe('folder placement identity', () => {
     expect(kids[1].$uuid).toBeUndefined()
   })
 })
+
+/**
+ * ⛔ MINTING A RECORD MUST NOT MOVE THE FOLDER'S CONTENT HASH.
+ *
+ * The folder is the one entity whose document depends on OTHER entities' identity
+ * state: `refLeaf` writes `$ref: "<collection>/<slug>"` while a record is new and
+ * `entry: { model, entity: <uuid> }` once it is minted. Both denote the same
+ * record.
+ *
+ * That made the folder's banked hash unreproducible, because a push does all three
+ * of these in one function, in this order:
+ *
+ *   1. emit + hash          (records new  → `$ref`)
+ *   2. submit, back-fill    (writes each record's `$uuid` into its source file)
+ *   3. bank the step-1 hash (now describes a document that no longer exists)
+ *
+ * So `uniweb status` reported the folder changed immediately after a successful
+ * push, permanently. Measured on the matinee manor 2026-08-29; stripping the
+ * back-filled uuids from the record sources reproduced the banked hash exactly,
+ * which is what identified the encoding as the variable rather than the content.
+ *
+ * ⭐ Records escape this because `$uuid` is already stripped before hashing. This
+ * is the same principle reaching the one place it had not: identity is not content.
+ * Sibling incident, same class, different injection: `uwx-applied-injections.test.js`.
+ *
+ * ⚠️ The second and third cases are the point. Excluding the reference could have
+ * made the folder blind to real changes; it does not, because a leaf's
+ * `path_segment` and its position in the tree still carry which record sits where.
+ */
+describe('folder hash is identity-independent', () => {
+  const hashOf = async (recordEntities) => {
+    const { entityContentHash } = await import('../src/uwx/collections.js')
+    return entityContentHash(buildFolderEntity({ recordEntities }).document)
+  }
+
+  const nu = [rec('team', 'ada'), rec('team', 'grace')]
+  const minted = [
+    rec('team', 'ada', '01a0-aaaa'),
+    rec('team', 'grace', '01a0-bbbb'),
+  ]
+
+  it('is unchanged when records are minted ($ref → entry)', async () => {
+    expect(await hashOf(minted)).toBe(await hashOf(nu))
+  })
+
+  it('still moves when a record is RENAMED', async () => {
+    const renamed = [rec('team', 'adalovelace', '01a0-aaaa'), rec('team', 'grace', '01a0-bbbb')]
+    expect(await hashOf(renamed)).not.toBe(await hashOf(minted))
+  })
+
+  it('still moves when a record is REMOVED', async () => {
+    expect(await hashOf([rec('team', 'ada', '01a0-aaaa')])).not.toBe(await hashOf(minted))
+  })
+
+  it('still moves when records are REORDERED', async () => {
+    expect(await hashOf([minted[1], minted[0]])).not.toBe(await hashOf(minted))
+  })
+})

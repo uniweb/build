@@ -81,12 +81,36 @@ const SKIP_KEYS = new Set([
 function stripSigils(value) {
   if (Array.isArray(value)) return value.map(stripSigils)
   if (value && typeof value === 'object') {
+    // ⛔ A `@uniweb/folder` REF LEAF ENCODES ONE REFERENCE TWO WAYS, and hashing the
+    // encoding rather than the reference made the folder's hash unreproducible.
+    //
+    // `refLeaf` (uwx/folder.js) emits `$ref: "<collection>/<slug>"` while the record
+    // is brand-new and `entry: { model, entity: <uuid> }` once it has been minted.
+    // Both denote the same record. A push hashes the folder BEFORE submitting, then
+    // back-fills the minted `$uuid` into every record's source file — so the very
+    // next emit builds the OTHER encoding, and the hash the push just banked can
+    // never be recomputed. Measured on the matinee manor 2026-08-29: `uniweb status`
+    // reported the folder changed immediately after a successful push, permanently.
+    // Stripping the back-filled uuids from the sources reproduced the banked hash
+    // exactly, which is what identified the encoding as the variable.
+    //
+    // ⭐ Neither encoding is content. What the folder SAYS is "this branch contains
+    // this record, here, in this order" — and that is already hashed: a leaf carries
+    // `path_segment` (the record's slug) inside a branch carrying the collection's.
+    // A `folders:` branch's entries are COLLECTION names, so every leaf under one
+    // comes from a single collection, where a slug is unique. Position plus segment
+    // therefore identify the record on their own; `$ref` adds a payload-local handle
+    // and `entry` adds identity, and both are exactly what `$uuid` is stripped for.
+    //
+    // ⚖️ The previous rule kept `$ref` "so a reference change is visible". It still
+    // is: point a leaf at a different record and its `path_segment` moves with it.
+    const isFolderRefLeaf = value.kind === 'ref'
     const out = {}
     for (const [k, v] of Object.entries(value)) {
-      // `$children` (a self-nesting subtree) and `$ref` (the @uniweb/folder leaf's
-      // reference target) are structural CONTENT, not identity sigils — keep them so
-      // a nesting or reference change is visible to "send only changed".
-      if (k === '$children' || k === '$ref') {
+      if (isFolderRefLeaf && (k === '$ref' || k === 'entry')) continue
+      // `$children` (a self-nesting subtree) is structural CONTENT, not an identity
+      // sigil — kept and recursed into, so a nesting change stays visible.
+      if (k === '$children') {
         out[k] = stripSigils(v)
         continue
       }
