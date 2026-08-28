@@ -1,4 +1,6 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -369,5 +371,63 @@ describe('resolveSchemaRef — org scope resolution', () => {
     await expect(resolveSchemaRef('@acme/person', { srcDir: dir })).rejects.toThrow(
       /'@acme\/schemas' is not installed/
     )
+  })
+
+  it("points at devDependencies, not dependencies — the package is needed to BUILD", async () => {
+    await expect(resolveSchemaRef('@acme/person', { srcDir: dir })).rejects.toThrow(/devDependencies/)
+  })
+
+  // --- '@std' falls back to the build's own copy ------------------------------
+
+  /**
+   * ⛔ THIS ONE CANNOT RUN IN-PROCESS, AND THE REASON IS WORTH KNOWING.
+   *
+   * Vitest sets NODE_PATH to pnpm's flat virtual store
+   * (`node_modules/.pnpm/node_modules`), which contains EVERY package in the
+   * workspace. So `createRequire(<any directory>).resolve('@uniweb/schemas')`
+   * succeeds under vitest even from a bare tmpdir — the primary resolution
+   * never fails, and the fallback is never reached.
+   *
+   * ⚠️ Measured 2026-08-28: the first version of this test passed IDENTICALLY
+   * with and without the fallback implemented. It asserted "the package happened
+   * to be available", which is exactly the failure `_contracts/
+   * template-schema-deps.test.js` documents for workspace sandboxes — the same
+   * trap by a different mechanism.
+   *
+   * A child process with NODE_PATH cleared is what a real foundation build sees.
+   * The control inside it is load-bearing: it proves the child genuinely lacks
+   * workspace resolution, so the '@std' result means something.
+   */
+  it("resolves '@std/name' with no copy installed in the foundation", () => {
+    const modulePath = fileURLToPath(new URL('../src/resolve-data-schema.js', import.meta.url))
+    const script = `
+      import { resolveSchemaRef } from ${JSON.stringify(modulePath)}
+      import { mkdtempSync, writeFileSync } from 'node:fs'
+      import { tmpdir } from 'node:os'
+      import { join } from 'node:path'
+      const d = mkdtempSync(join(tmpdir(), 'std-fallback-'))
+      writeFileSync(join(d, 'package.json'), '{"name":"f","version":"1.0.0"}')
+      let control = 'RESOLVED'
+      try { await resolveSchemaRef('@acme/person', { srcDir: d }) } catch { control = 'THREW' }
+      const out = await resolveSchemaRef('@std/person', { srcDir: d })
+      console.log(JSON.stringify({ control, name: out.name }))
+    `
+    const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_PATH: '' },
+    })
+    const result = JSON.parse(stdout.trim().split('\n').pop())
+
+    // CONTROL: an '@org' ref has no fallback, so it must still throw in there.
+    expect(result.control).toBe('THREW')
+    expect(result.name).toBe('person')
+  })
+
+  it("prefers the foundation's own '@uniweb/schemas' — a fallback, not a redirect", async () => {
+    installSchemaPackage(dir, '@uniweb/schemas', {
+      person: { name: 'person', fields: { marker: { type: 'string' } } },
+    })
+    const out = await resolveSchemaRef('@std/person', { srcDir: dir })
+    expect(out.fields.marker).toEqual({ type: 'string' })
   })
 })

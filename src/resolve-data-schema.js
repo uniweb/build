@@ -426,12 +426,29 @@ async function loadSchemaFile(filePath) {
 }
 
 /**
- * Load an org's schema package from the FOUNDATION's context and pull the named
- * schema. Resolving from the foundation (not the build) lets each foundation pin
- * its own version of a shared schema package. The standard schemas ship in
- * `@uniweb/schemas` (referenced as `@std`); an org's own schemas ship in its
- * `@org/schemas` package — commonly a workspace package shared across the team's
- * foundations during local development.
+ * Load a scope's schema package and pull the named schema.
+ *
+ * The FOUNDATION's context is the primary resolution and stays that way: it is
+ * what lets each foundation pin its own version of a shared schema package. An
+ * `@org/schemas` is genuinely third-party — we cannot know it exists — so a
+ * foundation that references one must declare it.
+ *
+ * ⭐ `@std` IS THE ONE EXCEPTION, BECAUSE IT IS OURS. It ships in
+ * `@uniweb/schemas`, a framework package `@uniweb/build` already depends on and
+ * imports directly (the `@uniweb/schemas/format` import at the top of this
+ * file). Requiring a foundation author to install a package the tool doing the
+ * resolution is already carrying is a requirement with nothing behind it, so
+ * when the foundation has no copy we fall back to ours.
+ *
+ * ⚠️ A FALLBACK, NOT A REDIRECT. A foundation that installs `@uniweb/schemas`
+ * still gets its own — pinning and vendoring keep working — and `@org`
+ * behaviour does not change at all.
+ *
+ * ⛔ AND IT THROWS RATHER THAN DEGRADING. Neighbouring code soft-skips a schema
+ * it cannot resolve (a collection falls back to delivery-only), which is right
+ * for "the author never asked for one" and wrong here: a `@std/` ref IS the
+ * asking. Answering it with silence would turn a missing package into a schema
+ * that merely appears not to exist.
  */
 async function resolveScopedSchema(pkg, name, srcDir) {
   const req = createRequire(join(srcDir, 'package.json'))
@@ -439,12 +456,40 @@ async function resolveScopedSchema(pkg, name, srcDir) {
   try {
     entry = req.resolve(pkg)
   } catch {
+    if (pkg === SCOPE_PACKAGE.std) return readNamedSchema(await loadOwnStandardSchemas(pkg), name)
     throw new Error(
       `'${pkg}' is not installed in this foundation, but a schema ref needs it. ` +
-        `Add '${pkg}' to the foundation's dependencies to resolve those refs.`
+        `Add '${pkg}' to the foundation's devDependencies to resolve those refs ` +
+        `(it is needed to BUILD the foundation; nothing it provides reaches the bundle).`
     )
   }
-  const mod = await import(pathToFileURL(entry).href)
+  return readNamedSchema(await import(pathToFileURL(entry).href), name)
+}
+
+/** Pull one named schema out of a loaded schemas package. */
+function readNamedSchema(mod, name) {
   if (typeof mod.getSchema === 'function') return mod.getSchema(name)
   return mod.schemas?.[name] ?? mod.default?.[name]
+}
+
+/**
+ * The build's own copy of the standard schemas — the `@std` fallback above.
+ *
+ * Imported by bare specifier so it resolves from THIS module's context, i.e.
+ * `@uniweb/build`'s own dependency rather than the foundation's. It cannot
+ * realistically be missing: this file statically imports `@uniweb/schemas/format`,
+ * so the module would not have loaded. Throwing anyway, with the reason, beats
+ * returning undefined and having the caller report it as "exports no schema
+ * named X" — which would name the wrong problem.
+ */
+async function loadOwnStandardSchemas(pkg) {
+  try {
+    return await import('@uniweb/schemas')
+  } catch (err) {
+    throw new Error(
+      `'${pkg}' is not installed in this foundation, and @uniweb/build's own copy could not ` +
+        `be loaded either (${err.message}). Reinstall @uniweb/build; if the install omitted ` +
+        `optional or otherwise-skippable packages, run it again without that flag.`
+    )
+  }
 }
