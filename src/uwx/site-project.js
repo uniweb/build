@@ -39,6 +39,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToCollectionsYml } from './collections-project.js'
+import { authorableFetch } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
@@ -303,7 +304,8 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   if (theme_override !== undefined) frontmatter.theme = theme_override
   if (preset !== undefined) frontmatter.preset = preset
   if (input !== undefined) frontmatter.input = input
-  if (fetch !== undefined) frontmatter.fetch = fetch
+  // Invert the build's resolution rather than copy it — see fetch-shapes.js.
+  if (fetch !== undefined) frontmatter.fetch = authorableFetch(fetch)
   if (stable_id !== undefined) frontmatter.id = stable_id
 
   const body = insets ? reinlineInsets(sourceContent, insets) : sourceContent
@@ -424,7 +426,8 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (record.rewrite !== undefined) y.rewrite = record.rewrite
   if (record.layout !== undefined) y.layout = record.layout
   if (record.seo !== undefined) y.seo = record.seo
-  if (record.fetch !== undefined) y.fetch = record.fetch
+  // Invert the build's resolution rather than copy it — see fetch-shapes.js.
+  if (record.fetch !== undefined) y.fetch = authorableFetch(record.fetch)
   // `sections:` exists to preserve ORDER and NESTING, which the projected filenames
   // can't carry (they're `<stableId>.md`, with no numeric prefix). It must not also
   // decide MEMBERSHIP — and a bare list does: the collector reads a list without

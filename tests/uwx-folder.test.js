@@ -202,3 +202,47 @@ describe('folder hash is identity-independent', () => {
     expect(await hashOf([minted[1], minted[0]])).not.toBe(await hashOf(minted))
   })
 })
+
+/**
+ * ⛔ A PROJECTION MUST INVERT THE BUILD'S RESOLUTION, NOT COPY IT.
+ *
+ * A `fetch:` declaration has three shapes and they accept different keys. The build
+ * resolves a `collection:` shorthand into a concrete location, so the declaration on
+ * the sync wire carries BOTH the authored `collection` and the derived `path`.
+ * Writing that back verbatim produces a file that is neither shape cleanly:
+ * `collection` wins the classification and the `path` beside it is unrecognized.
+ *
+ * ⚠️ Measured on matinee 2026-08-29 — `push → pull → push`, where the third step was
+ * rejected by our own validator against a file our own projector had just written:
+ * "unrecognized key \"path\" … recognized: collection, detailPage, filter, limit,
+ * merge, prerender, schema, sort, transform, where."
+ *
+ * ⭐ `/data/<name>.json` is a materialization of a collection, never its definition,
+ * so it is exactly what an authored file should not contain.
+ *
+ * ⚖️ The last case is the one that keeps this honest: dropping everything
+ * unrecognized would make every pull quietly lossy for a key a newer producer wrote.
+ * Only derivable keys go.
+ */
+describe('authorableFetch', () => {
+  it('drops the derived location from a resolved collection fetch', async () => {
+    const { authorableFetch } = await import('../src/site/fetch-shapes.js')
+    expect(
+      authorableFetch({ path: '/data/members.json', schema: 'members', collection: 'members' })
+    ).toEqual({ schema: 'members', collection: 'members' })
+  })
+
+  it('keeps path on a source-shaped fetch, where it is what the author wrote', async () => {
+    const { authorableFetch } = await import('../src/site/fetch-shapes.js')
+    const source = { path: '/data/custom.json', schema: 'things' }
+    expect(authorableFetch(source)).toEqual(source)
+  })
+
+  it('keeps a key it does not recognize, rather than making the pull lossy', async () => {
+    const { authorableFetch } = await import('../src/site/fetch-shapes.js')
+    expect(authorableFetch({ collection: 'members', somethingNewer: 42 })).toEqual({
+      collection: 'members',
+      somethingNewer: 42
+    })
+  })
+})
