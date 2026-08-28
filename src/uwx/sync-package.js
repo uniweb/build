@@ -285,7 +285,14 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     ...(opts.folderItemUuids ? { itemUuids: opts.folderItemUuids } : {}),
   })
 
-  const siteDoc = includeSite ? await siteProjectToDocument(siteRoot, { sourceLocale }) : null
+  // `collectionUuids` — identity for the `collections` section, keyed by collection
+  // NAME because a declaration has no file of its own (see collectionsNested).
+  const siteDoc = includeSite
+    ? await siteProjectToDocument(siteRoot, {
+        sourceLocale,
+        ...(opts.collectionUuids ? { collectionUuids: opts.collectionUuids } : {})
+      })
+    : null
   // Deploy-derived `info` fields (e.g. `data_bundle`, the static-data ball URL) are
   // stamped here — NOT authored in site.yml, so they ride the wire but never project
   // back on pull (the `info.assets` precedent). They are part of the hashed content,

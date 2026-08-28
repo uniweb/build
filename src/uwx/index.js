@@ -90,6 +90,7 @@ export {
   collectSiteUnits,
   walkSiteUnits,
   collectUnitUuids,
+  collectCollectionUuids,
   stampUnitUuids,
 } from './site-diff.js'
 export {

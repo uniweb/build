@@ -292,3 +292,26 @@ export function describeSiteDiff(diff, { limit = 8 } = {}) {
   }
   return lines
 }
+
+
+/**
+ * Collection-declaration identity from a document the BACKEND produced (a pull, or a
+ * push response's `finalized[].document`): `{ <collection name>: <$uuid> }`.
+ *
+ * ⛔ The sibling of collectFolderItemUuids, and it exists for the same reason: these
+ * items have no file of their own, so nothing in a path-keyed map can hold their
+ * identity, and a push that omits it re-sends the whole section uuid-less. The
+ * backend refuses that rather than deleting every stored row — see collectionsNested.
+ *
+ * Keyed by `name`, which the backend enforces unique within the section. `$id` is
+ * deliberately not consulted: it is a payload-local handle the backend never stores.
+ */
+export function collectCollectionUuids(doc) {
+  const out = {}
+  for (const item of doc?.collections || []) {
+    const name = item?.name
+    const uuid = item?.$uuid
+    if (typeof name === 'string' && typeof uuid === 'string' && name && uuid) out[name] = uuid
+  }
+  return out
+}

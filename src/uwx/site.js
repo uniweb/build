@@ -639,7 +639,39 @@ export function isSiteRelativeExtensionUrl(decl) {
 // The collection DECLARATIONS carried inside site-content `info`-adjacent metadata.
 // Merges the co-located `collections.yml` (the home for file-based decls) over the
 // legacy `site.yml::collections` (kept for remote `url:` sources + back-compat).
-function collectionsNested(declarations) {
+/**
+ * The site's collection DECLARATIONS as `$`-records.
+ *
+ * ⛔ IDENTITY IS KEYED BY `name`, AND IT HAS TO BE.
+ *
+ * Every other item on this entity gets its `$uuid` from a map keyed by the file it
+ * was projected to — but a collection declaration has no file of its own: they all
+ * come from one `collections/collections.yml`. So a path-keyed map has no shape a
+ * declaration could occupy, nothing is ever recorded for one, and every push re-sent
+ * this whole section uuid-less. The backend refuses that (an all-blank section over
+ * stored items would delete every stored row), which is why `push` worked once and
+ * every push after it was refused. Measured 2026-08-29; collab framework-backend-812b.
+ *
+ * ⭐ `name` is the right key and not merely the available one — the backend enforces
+ * `unique_field(name, scope: section)` on this section, and it is the join key its
+ * `resolve_collection_model` matches and the `/data/{name}.json` serve segment. An
+ * author-facing rename is `label`, so the key does not move under either lane.
+ *
+ * ⛔ NOT `$id`, though it happens to hold the same string. `$id` is a payload-local
+ * handle the backend skips on parse and never stores, correlated by submission index
+ * rather than by value — keying on it would key on something that exists only inside
+ * our own outgoing document.
+ *
+ * ⚠️ Because `name` IS the identity, renaming a collection is by design
+ * indistinguishable from delete-plus-create. Rename one of two and the mix passes;
+ * rename every collection at once and the section goes all-blank and is refused.
+ * That is the semantics, not a defect.
+ *
+ * @param {object} declarations resolved collection declarations, keyed by name
+ * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push
+ *        response or a pull. Absent on a first sync, where minting is correct.
+ */
+function collectionsNested(declarations, uuids = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     const data = {}
@@ -655,7 +687,10 @@ function collectionsNested(declarations) {
     setIf(data, 'deferred', d.deferred)
     setIf(data, 'detail_url', d.detailUrl)
     setIf(data, 'queryable', d.queryable)
-    out.push(withIdentity(name, { name, ...data }))
+    const rec = withIdentity(name, { name, ...data })
+    const uuid = uuids?.[name]
+    if (typeof uuid === 'string' && uuid) rec.$uuid = uuid
+    out.push(rec)
   }
   return out
 }
@@ -860,7 +895,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   doc.pages = pages
   doc.layout_sections = layoutSections
   doc.extensions = extensionsNested(siteYml)
-  doc.collections = collectionsNested(colConfig.declarations)
+  doc.collections = collectionsNested(colConfig.declarations, opts.collectionUuids)
   return doc
 }
 
