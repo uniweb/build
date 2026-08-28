@@ -2,7 +2,7 @@
  * Hash utilities for i18n translation units
  */
 
-import { createHash } from 'crypto'
+import { createHash } from 'node:crypto'
 
 /**
  * Compute an 8-character hash for translation unit identification

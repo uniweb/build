@@ -19,8 +19,8 @@
  */
 
 import { readFile, readdir, stat } from 'fs/promises'
-import { existsSync } from 'fs'
-import { join, relative, dirname } from 'path'
+import { existsSync } from 'node:fs'
+import { join, relative, dirname } from 'node:path'
 import yaml from 'js-yaml'
 
 // Try to import content-reader for markdown → ProseMirror conversion

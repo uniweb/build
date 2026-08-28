@@ -11,9 +11,9 @@
  */
 
 import { readFile, writeFile, readdir, mkdir } from 'fs/promises'
-import { existsSync } from 'fs'
-import { join } from 'path'
-import { pathToFileURL } from 'url'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { DATA_DIR } from '@uniweb/core'
 import { computeHash } from './hash.js'
 import { loadFreeformCollectionItem } from './freeform.js'

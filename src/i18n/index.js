@@ -8,8 +8,8 @@
  */
 
 import { readFile, writeFile, mkdir, readdir } from 'fs/promises'
-import { existsSync } from 'fs'
-import { join, dirname } from 'path'
+import { existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
 
 import { computeHash, normalizeText } from './hash.js'
 import { extractTranslatableContent } from './extract.js'
