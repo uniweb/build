@@ -153,7 +153,7 @@ function parseCollectionConfig(name, config) {
     // `queryable:` declares the queryable surface — which fields a
     // foundation can offer for filtering UI, with their type and
     // type-specific metadata (enum options, range bounds). Foundations
-    // read this metadata via the kit's useCollectionQueryable hook to
+    // read this metadata via the kit's useQueryable hook to
     // render filter controls and compose where-objects from user
     // interactions. The framework doesn't validate the shape here —
     // foundations get whatever the author wrote; documentation defines

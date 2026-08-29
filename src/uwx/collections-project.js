@@ -7,13 +7,13 @@
 // Identity & placement. A record's on-disk home is `(collection, slug)`:
 //   - `slug` and `collection` come from the FOLDER document — each ref leaf is
 //     `{ entry: { model, entity: <uuid> }, path_segment: <slug> }` inside a branch
-//     (its `$children`) whose `path_segment` is the collection name (folder.js
-//     `defaultContents`). The
-//     folder is the authoritative organization on a read (the record document's
-//     own `$id` envelope is not guaranteed to be echoed back), with the record
-//     document's `$id` (`<collection>/<slug>`) used as a fallback when present.
-//   - the collection's directory is resolved from the collections config
-//     (`collections.yml`/`site.yml` `path:`), defaulting to `collections/<name>`.
+//     (its `$children`) whose `path_segment` names the folder it was placed in.
+//     The folder is the authoritative organization on a read (the record
+//     document's own `$id` envelope is not guaranteed to be echoed back), with
+//     the record document's `$id` (its pool identity) as a fallback when present.
+//   - the record's directory comes from its `$model` — `entities/{schema}/` is
+//     where a thing of that model lives. Not from any query: a query has no
+//     directory, and which query selects a record is not a fact about it.
 //   - an existing local file carrying the same `$uuid` is re-rendered in place;
 //     otherwise a new single-record file is placed at `<slug>.<ext>`, its format
 //     matched to the collection's existing files, else markdown when the Model's
