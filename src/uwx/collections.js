@@ -46,6 +46,7 @@ import { join, resolve } from 'node:path'
 
 import { resolveCollectionsConfig } from './collections-config.js'
 import { readEntityFile } from './collection-source.js'
+import { readRecordsConfig, resolveFolder, RECORDS_YML_RELPATH } from '../site/records-config.js'
 import {
   readEntityPool,
   groupPoolBySchema,
@@ -486,11 +487,15 @@ function resolveDeclaration(schema, modelName) {
 // how" with one directory, and only the first two were ever the same question.
 //
 // Remote (`url:`) queries have no local files; the caller warns and skips.
-function loadSourceRecordsFromPool(poolBySchema, decl) {
+function loadSourceRecordsFromPool(poolBySchema, decl, placements) {
   if (!decl.schema) return null
   const entities = poolBySchema.get(decl.schema)
   if (!entities) return null
-  return entities
+  // ⛔ ONLY WHAT `records.yml` REFERENCES. An entity of the right schema that no
+  // entry places is not a record, so syncing it would create something nobody can
+  // reach — and would make the payload disagree with the folder describing it.
+  const placed = entities.filter((e) => placements.has(e.id))
+  return placed.length ? placed : null
 }
 
 /**
@@ -572,6 +577,24 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   // files instead of two.
   const pool = await readEntityPool(siteRoot)
   const poolBySchema = groupPoolBySchema(pool.entities)
+
+  // ⭐ `records.yml` IS THE FOLDER, AND IT DECIDES WHAT SYNCS. Listing an entity
+  // is what makes it a record; an entity nothing references exists but cannot be
+  // publicly fetched — so it is a draft, for free, with no flag to set. This is
+  // why `collections.yml::sync` is deleted rather than ported: "do not sync" is
+  // now "reference nothing", which is the actual round trip.
+  //
+  // ⛔ AND `missing` IS NOT `empty`. Missing means do not sync at all and leave
+  // the server's folder untouched; empty means sync an empty folder, REMOVING
+  // what is there. The safe state is the absence of a file, so a live folder
+  // cannot be wiped by deleting one — the destructive act requires affirmatively
+  // creating one, and the CLI asks before it happens.
+  const recordsCfg = await readRecordsConfig(siteRoot)
+  if (recordsCfg.error) throw new Error(`uwx/collections: ${recordsCfg.error}`)
+  const folder = resolveFolder(recordsCfg.entries, pool.entities)
+  if (folder.errors.length) {
+    throw new Error(`uwx/collections: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
+  }
   // ⛔ A MALFORMED POOL IS AN ERROR, NOT A SMALLER SET. Every shape the reader
   // refuses (a file with no schema folder above it, a folder nested below one)
   // would otherwise mean records that build locally and are silently absent from
@@ -663,7 +686,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
             : '')
       )
     }
-    const poolEntities = loadSourceRecordsFromPool(poolBySchema, decl)
+    const poolEntities = loadSourceRecordsFromPool(poolBySchema, decl, folder.placements)
     if (poolEntities == null) {
       // No entities of this schema on disk. A remote (`url:`) query has none by
       // definition; a file-based one with an empty pool is an author state worth
@@ -690,6 +713,15 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
         }
         const rec = { ...r.data, slug: r.slug }
         if (r.body !== undefined) rec.$body = r.body
+        // ⭐ THE RECORD'S IDENTITY IS ITS POOL POSITION, not `<query>/<slug>`. It
+        // has to be: the folder places entities and must reference the very ones
+        // the payload carries, and two queries over one schema would otherwise
+        // mint two identities for one file. `<dirs>/<slug>` is unique by
+        // construction and derivable on both sides.
+        //
+        // ⚠️ A multi-record file (array YAML, BibTeX) contributes several records
+        // from one path, so the slug — not the file stem — completes the id.
+        rec.$id = rec.$id || [...pooled.dirs, r.slug].join('/')
         flat.push(rec)
         sourceBySlug.set(r.slug, r)
       }
@@ -747,7 +779,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     warnings.push(...mappedOut.warnings)
   }
 
-  return { entities, index, warnings, schemaless, mappedCount: mapped.length, colConfig }
+  return { entities, index, warnings, schemaless, mappedCount: mapped.length, colConfig, folder, recordsState: recordsCfg.state }
 }
 
 /**

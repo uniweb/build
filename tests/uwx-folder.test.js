@@ -1,26 +1,47 @@
 import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 
-// The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the
-// collection-record entities. A brand-new record is pointed at by `$ref` (its
-// payload-local `<collection>/<slug>` handle); an already-minted one by the
-// entity_ref open form `entry: { model, entity: uuid }`.
+// The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the record
+// entities. A brand-new record is pointed at by `$ref` (its payload-local pool-id
+// handle); an already-minted one by the entity_ref open form
+// `entry: { model, entity: uuid }`.
 // The folder carries NO `$uuid` of its own — the backend owns the site's folder,
 // keyed by the site-content uuid, so the framework never holds a folder uuid.
+//
+// ⭐ THE TREE IS AUTHORED, in `records.yml`, and `folderNodes` is what its resolver
+// produced. It used to be DERIVED — one branch per collection — so these tests used
+// to pass record entities alone and get a shape back. There is no default now: a
+// site with no `records.yml` has no folder, which is the model's `missing ⇒ inert`
+// ruling rather than an empty one.
 
 // Minimal record-entity descriptors (the shape buildCollectionEntities emits).
-function rec(collection, slug, uuid = null) {
-  return { id: `${collection}/${slug}`, slug, uuid, collection, model: '@acme/x' }
+// `id` is the entity's POOL id — `<schema dirs>/<slug>` — which is what a folder
+// leaf references.
+function rec(dir, slug, uuid = null) {
+  return { id: `${dir}/${slug}`, slug, uuid, model: '@acme/x' }
 }
 
+// A resolved `records.yml` branch holding the given entities as leaves.
+const branch = (segment, ids, label) => ({
+  kind: 'branch',
+  path_segment: segment,
+  ...(label ? { name: label } : {}),
+  $children: ids.map((id) => ({ kind: 'ref', $entityId: id })),
+})
+const leaves = (ids) => ids.map((id) => ({ kind: 'ref', $entityId: id }))
+
 describe('buildFolderEntity', () => {
-  it('returns null when there are no records', () => {
-    expect(buildFolderEntity({ recordEntities: [] })).toBeNull()
-    expect(buildFolderEntity({ recordEntities: null })).toBeNull()
+  it('returns null when the folder declares nothing', () => {
+    expect(buildFolderEntity({ recordEntities: [rec('article', 'hello')], folderNodes: [] })).toBeNull()
+    expect(buildFolderEntity({ recordEntities: [], folderNodes: [] })).toBeNull()
   })
 
-  it('default org: one branch per collection, records as leaves ($ref when new)', () => {
+  it('builds the authored tree, records as leaves ($ref when new)', () => {
     const folder = buildFolderEntity({
       recordEntities: [rec('articles', 'hello'), rec('articles', 'world'), rec('team', 'ada')],
+      folderNodes: [
+        branch('articles', ['articles/hello', 'articles/world']),
+        branch('team', ['team/ada']),
+      ],
     })
     expect(folder.model).toBe('@uniweb/folder')
     expect(folder.document.$id).toBe('@folder')
@@ -38,6 +59,7 @@ describe('buildFolderEntity', () => {
   it('uses entry: uuid for an already-minted record, $ref for a new one', () => {
     const folder = buildFolderEntity({
       recordEntities: [rec('articles', 'hello', 'uuid-1'), rec('articles', 'world')],
+      folderNodes: [branch('articles', ['articles/hello', 'articles/world'])],
     })
     const leaves = folder.document.contents[0].$children
     expect(leaves[0]).toEqual({ kind: 'ref', path_segment: 'hello', entry: { model: '@acme/x', entity: 'uuid-1' } })
@@ -45,26 +67,31 @@ describe('buildFolderEntity', () => {
   })
 
   it('carries no folder $uuid — the backend owns it (keyed by the site-content uuid)', () => {
-    const folder = buildFolderEntity({ recordEntities: [rec('articles', 'hello')] })
+    const folder = buildFolderEntity({
+      recordEntities: [rec('articles', 'hello')],
+      folderNodes: leaves(['articles/hello']),
+    })
     expect(folder.uuid).toBeNull()
     expect(folder.document).not.toHaveProperty('$uuid')
     expect(Object.keys(folder.document)).toEqual(['$id', '$model', 'contents'])
   })
 
-  it('virtual org: collections.yml folders build a branch tree, decoupled from layout', () => {
+  it('nests branches to any depth, decoupled from the pool layout', () => {
     const folder = buildFolderEntity({
       recordEntities: [rec('articles', 'hello'), rec('team', 'ada')],
-      folders: [
-        { segment: 'blog', label: 'Blog', entries: ['articles'] },
-        { segment: 'about', entries: [{ segment: 'people', entries: ['team'] }] },
+      folderNodes: [
+        branch('blog', ['articles/hello'], 'Blog'),
+        {
+          kind: 'branch',
+          path_segment: 'about',
+          $children: [branch('people', ['team/ada'])],
+        },
       ],
     })
     const [blog, about] = folder.document.contents
     expect(blog.path_segment).toBe('blog')
     expect(blog.name).toBe('Blog')
-    // a bare collection name inside `entries` expands to its leaves IN this branch
     expect(blog.$children).toEqual([{ kind: 'ref', path_segment: 'hello', $ref: 'articles/hello' }])
-    // a nested { segment, entries } makes a sub-branch
     expect(about.$children[0].kind).toBe('branch')
     expect(about.$children[0].path_segment).toBe('people')
     expect(about.$children[0].$children[0]).toEqual({
@@ -72,6 +99,19 @@ describe('buildFolderEntity', () => {
       path_segment: 'ada',
       $ref: 'team/ada',
     })
+  })
+
+  // ⛔ A placement whose entity never materialized is DROPPED AND REPORTED, never
+  // emitted as a ref pointing at nothing. The backend cannot resolve such a leaf,
+  // so the failure would surface there, as somebody else's error.
+  it('drops and reports a placement with no record entity', () => {
+    const folder = buildFolderEntity({
+      recordEntities: [rec('articles', 'hello')],
+      folderNodes: leaves(['articles/hello', 'articles/vanished']),
+    })
+    expect(folder.document.contents).toHaveLength(1)
+    expect(folder.warnings).toHaveLength(1)
+    expect(folder.warnings[0]).toContain('articles/vanished')
   })
 })
 
@@ -88,9 +128,10 @@ describe('buildFolderEntity', () => {
 // and framework simply never harvested them.
 describe('folder placement identity', () => {
   const records = [
-    { id: 'members/alice', slug: 'alice', collection: 'members', model: '@acme/member', uuid: 'R1' },
-    { id: 'members/bob', slug: 'bob', collection: 'members', model: '@acme/member', uuid: 'R2' },
+    { id: 'members/alice', slug: 'alice', model: '@acme/member', uuid: 'R1' },
+    { id: 'members/bob', slug: 'bob', model: '@acme/member', uuid: 'R2' },
   ]
+  const membersFolder = [branch('members', ['members/alice', 'members/bob'])]
 
   it('harvests every level — branches AND the records under $children', () => {
     // ⛔ A walk of the top level alone sees the branch and misses every record
@@ -118,6 +159,7 @@ describe('folder placement identity', () => {
   it('stamps banked identity back onto a folder about to be sent', () => {
     const folder = buildFolderEntity({
       recordEntities: records,
+      folderNodes: membersFolder,
       itemUuids: { members: 'B1', 'members/alice': 'I1', 'members/bob': 'I2' },
     })
     const branch = folder.document.contents[0]
@@ -128,15 +170,16 @@ describe('folder placement identity', () => {
   it('⛔ CONTROL — a first push carries NO identity, because every item is new', () => {
     // Without this the suite cannot tell "stamps what it was given" from "always
     // stamps something", and a first push must mint rather than address.
-    const folder = buildFolderEntity({ recordEntities: records })
-    const branch = folder.document.contents[0]
-    expect(branch.$uuid).toBeUndefined()
-    expect(branch.$children.every((c) => c.$uuid === undefined)).toBe(true)
+    const folder = buildFolderEntity({ recordEntities: records, folderNodes: membersFolder })
+    const node = folder.document.contents[0]
+    expect(node.$uuid).toBeUndefined()
+    expect(node.$children.every((c) => c.$uuid === undefined)).toBe(true)
   })
 
   it('leaves an unknown placement unstamped rather than guessing', () => {
     const folder = buildFolderEntity({
       recordEntities: records,
+      folderNodes: membersFolder,
       itemUuids: { 'members/alice': 'I1' }, // bob absent — genuinely new
     })
     const kids = folder.document.contents[0].$children
@@ -176,7 +219,8 @@ describe('folder placement identity', () => {
 describe('folder hash is identity-independent', () => {
   const hashOf = async (recordEntities) => {
     const { entityContentHash } = await import('../src/uwx/collections.js')
-    return entityContentHash(buildFolderEntity({ recordEntities }).document)
+    const nodes = [branch('team', recordEntities.map((r) => r.id))]
+    return entityContentHash(buildFolderEntity({ recordEntities, folderNodes: nodes }).document)
   }
 
   const nu = [rec('team', 'ada'), rec('team', 'grace')]

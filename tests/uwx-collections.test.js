@@ -161,6 +161,9 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
       declaration,
     })
     expect(Object.keys(entities[0].document)).toEqual(['$id', '$model', 'product'])
+    // ⚠️ The caller supplies `$id` now — it is the entity's POOL id, and only the
+    // caller knows the pool position. This unit exercises the mapper alone, so it
+    // falls back to `<collectionName>/<slug>`; the real producer always sets it.
     expect(entities[0].document.$id).toBe('products/a')
   })
 
@@ -416,6 +419,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
       JSON.stringify({ name: 'site', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
     writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'widget-x.yml'), 'title: Widget X\nprice: 9.99\n')
+    writeFileSync(join(siteDir, 'records.yml'), '- acme/product/*.yml\n')
     writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'gadget-y.yml'), 'title: Gadget Y\nprice: 19.5\n')
 
     // Foundation: a built schema.json defining the @acme/product data-schema.
@@ -485,6 +489,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
       join(reSite, 'entities', 'acme', 'product', 'widget-x.yml'),
       '"$uuid": existing-uuid-1\ntitle: Widget X\n'
     )
+    writeFileSync(join(reSite, 'records.yml'), '- acme/product/*.yml\n')
 
     const { buffer } = await emitCollectionSyncPackage(reSite)
     const { manifest, byFile } = unzip(buffer)
@@ -533,6 +538,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
       'name: T\nqueries:\n  products:\n    model: \"@std/product\"\n'
     )
     writeFileSync(join(siteDir, 'entities', 'std', 'product', 'a.yml'), 'title: A\nprice: 5\n')
+    writeFileSync(join(siteDir, 'records.yml'), '- std/product/*.yml\n')
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
@@ -573,6 +579,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
       JSON.stringify({ name: 'l', dependencies: { '@acme/marketing': 'file:../local-foundation' } })
     )
     writeFileSync(join(localSite, 'entities', 'acme', 'product', 'a.yml'), 'title: A\n')
+    writeFileSync(join(localSite, 'records.yml'), '- acme/product/*.yml\n')
     writeFileSync(
       join(foundationDir, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -634,6 +641,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     )
     writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'a.yml'), 'title: A\nprice: 1\n')
     writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'b.yml'), 'title: B\nprice: 2\n')
+    writeFileSync(join(siteDir, 'records.yml'), '- acme/product/*.yml\n')
     writeFileSync(
       join(fdn, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -654,8 +662,8 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     expect(entityCount).toBe(2)
     expect(skipped).toBe(0)
     expect(Object.keys(hashes).sort()).toEqual([
-      '@acme/product products/a',
-      '@acme/product products/b',
+      '@acme/product acme/product/a',
+      '@acme/product acme/product/b',
     ])
   })
 
@@ -677,7 +685,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     })
     expect(entityCount).toBe(1)
     expect(skipped).toBe(1)
-    expect(index[0].id).toBe('products/b')
+    expect(index[0].id).toBe('acme/product/b')
   })
 
   it('sendAll bypasses the cache', async () => {
@@ -721,6 +729,7 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
       join(siteDir, 'entities', 'acme', 'article', 'hello.md'),
       '---\ntitle: Hello\n---\nHello world\n'
     )
+    writeFileSync(join(siteDir, 'records.yml'), '- acme/article/*.md\n')
     // Free-form Spanish body — a full rewrite, not a per-string map.
     writeFileSync(
       join(siteDir, 'locales', 'freeform', 'es', 'entities', 'acme', 'article', 'hello.md'),
@@ -789,6 +798,7 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
       join(siteDir, 'entities', 'member', 'alice.md'),
       '---\nname: Alice\n---\nBio\n'
     )
+    writeFileSync(join(siteDir, 'records.yml'), '- member/*.md\n')
     writeFileSync(
       join(foundationDir, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -841,6 +851,7 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
       JSON.stringify({ name: 'site2', dependencies: { '@acme/fnd': 'file:../foundation' } })
     )
     writeFileSync(join(alt, 'entities', 'acme', 'member', 'alice.md'), '---\nname: Alice\n---\nBio\n')
+    writeFileSync(join(alt, 'records.yml'), '- acme/member/*.md\n')
 
     const { entities } = await buildCollectionEntities(alt, { org: '@proximify' })
     expect(entities[0].model).toBe('@acme/member')

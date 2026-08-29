@@ -167,13 +167,20 @@ export async function readEntityPool(siteRoot, opts = {}) {
         )
         continue
       }
-      const stem = basename(e.name, ext)
+      // ⛔ THE SLUG IS THE FILENAME STEM, WHOLE — nothing is stripped from it.
+      // A leading number orders a set (`01-`, `02-`) at least as often as it is a
+      // DATE (`2026-03-…`), and the two are indistinguishable by shape, so
+      // consuming one into the record's name mangles the other. A number is read
+      // to SORT by (`compareByNumericPrefix`) and never to rename.
+      const slug = basename(e.name, ext)
       entities.push({
-        id: [...dirs, stem].join('/'),
+        id: [...dirs, slug].join('/'),
         schema: schemaForPoolDirs(dirs),
-        slug: stem,
+        slug,
+        file: e.name,
         dirs: [...dirs],
         relPath: [rel, ...dirs, e.name].join('/'),
+        poolPath: [...dirs, e.name].join('/'),
         absPath: full,
         ext,
       })

@@ -42,6 +42,9 @@ beforeEach(() => {
   w('layout/header.md', '---\ntype: Header\n---\n# H\n')
   // a syncable query (resolvable @/article schema) + queries.yml
   w('queries.yml', 'articles:\n  schema: "@/article"\n  sort: date desc\n')
+  // ⭐ and the FOLDER — listing an entity is what makes it a record, and what
+  // makes it sync. An unlisted entity is a draft, for free.
+  w('records.yml', '- article/*.md\n')
   w('entities/article/hello.md', '---\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
   w('entities/article/world.md', '---\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
   writeFileSync(
@@ -79,15 +82,19 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(pkg.collections.entityCount).toBe(3)
     expect(pkg.collections.models).toContain('@uniweb/folder')
     expect(pkg.collections.index[0]).toEqual({ kind: 'folder' })
-    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['articles/hello', 'articles/world'])
+    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
 
     // the folder references both records by $ref (uuid-less first push) and carries no
     // $uuid of its own (the backend owns it, keyed by the site-content uuid)
     const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder.$model).toBe('@uniweb/folder')
     expect(folder).not.toHaveProperty('$uuid')
-    const leaves = folder.contents[0].$children
-    expect(leaves.map((l) => l.$ref)).toEqual(['articles/hello', 'articles/world'])
+    // ⭐ FLAT, because `records.yml` lists the records at the root and declares no
+    // folder. That is the model's common case — the pool is usually flat and
+    // QUERIES do the organizing, not the folder. The old producer derived one
+    // branch per collection whether the author wanted structure or not.
+    expect(folder.contents.map((l) => l.$ref)).toEqual(['article/hello', 'article/world'])
+    expect(folder.contents.every((l) => l.kind === 'ref')).toBe(true)
   })
 
   it('the site-content .uwx carries $id but no per-item $uuid', async () => {
@@ -116,7 +123,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(second.siteContent).toBeNull()
     expect(second.collections).toBeTruthy()
     // folder (always, for $ref closure) + the one changed record
-    expect(second.collections.index.map((e) => e.kind ?? e.id)).toEqual(['folder', 'articles/hello'])
+    expect(second.collections.index.map((e) => e.kind ?? e.id)).toEqual(['folder', 'article/hello'])
   })
 
   it('editing a page fires ONLY the site-content lane', async () => {
@@ -144,6 +151,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
     w('queries.yml', 'articles:\n  schema: "@/article"\nnotes: {}\n')
     w('entities/notes/first.md', '---\ntitle: First\n---\nNote body\n')
+    w('records.yml', '- article/*.md\n- notes/*.md\n')
     const pkg = await emitSyncPackages(SITE)
 
     // `model` carries the name the convention looked for and did not find. The CLI
@@ -160,7 +168,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // the CLI at warn level — see cli/src/utils/schemaless-report.js.
     expect((pkg.warnings || []).join('\n')).not.toMatch(/not synced/i)
     // articles still syncs as entities — the partition routes each collection to one lane
-    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['articles/hello', 'articles/world'])
+    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
   })
 
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {

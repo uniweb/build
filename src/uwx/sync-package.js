@@ -270,13 +270,16 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // buildCollectionEntities warns rather than throws.
     ...(opts.org ? { org: opts.org } : {}),
   })
-  const warnings = [...col.warnings]
+  const warnings = [...col.warnings, ...(col.folder?.warnings ?? [])]
 
   // The folder rides over the FULL record set (before filtering) so its references
   // are complete — new records by `$ref`, already-minted ones by `entry: <uuid>`.
   const folder = buildFolderEntity({
     recordEntities: col.entities,
-    folders: col.colConfig?.folders ?? null,
+    // ⭐ AUTHORED, from `records.yml`. It used to be derived — one branch per
+    // collection — which made the folder a shadow of a directory layout rather
+    // than something the author states.
+    folderNodes: col.folder?.nodes ?? [],
     // Placement identity from the folder document a previous push returned.
     // Absent on a first push — every item is genuinely new then. Its ABSENCE on a
     // later push is what made `publish` after `push` fail: send-only-changed skips
@@ -284,6 +287,11 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // the payload whose item identity has to survive.
     ...(opts.folderItemUuids ? { itemUuids: opts.folderItemUuids } : {}),
   })
+  // ⚠️ A placement that produced no entity is dropped by the builder rather than
+  // sent pointing at nothing — but it must still be SAID. It means an entity was
+  // placed in records.yml and then skipped upstream (a schema that did not
+  // resolve, most often), and the record is simply absent from the site.
+  if (folder?.warnings?.length) warnings.push(...folder.warnings)
 
   // `collectionUuids` — identity for the `collections` section, keyed by collection
   // NAME because a declaration has no file of its own (see collectionsNested).

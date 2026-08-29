@@ -51,6 +51,11 @@ beforeEach(() => {
   writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'widget-x.yml'), PRODUCT_YML)
   writeFileSync(join(siteDir, 'entities', 'acme', 'article', 'hello.md'), ARTICLE_MD)
   writeFileSync(join(siteDir, 'entities', 'acme', 'tag', 'all.yml'), TAGS_YML)
+  // ⭐ The folder: listing an entity is what makes it a record, and what syncs.
+  writeFileSync(
+    join(siteDir, 'records.yml'),
+    '- acme/product/*.yml\n- acme/article/*.md\n- acme/tag/*.yml\n'
+  )
 
   const schema = {
     _self: { name: '@acme/marketing', version: '1.0.0', role: 'foundation' },

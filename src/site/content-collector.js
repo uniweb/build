@@ -25,6 +25,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { resolveCollectionsConfig, toConfigCollections } from './collections-config.js'
+import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { join, parse, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
@@ -578,13 +579,9 @@ function resolveDisplayTitle(declaredTitle, segment, sections) {
   return extractH1(sections[0]?.content) || prettifySlug(segment)
 }
 
-function parseNumericPrefix(filename) {
-  const match = filename.match(/^(\d+(?:\.\d+)*)-?(.*)$/)
-  if (match) {
-    return { prefix: match[1], name: match[2] || match[1] }
-  }
-  return { prefix: null, name: filename }
-}
+// ⭐ The rule now lives in `utils/numeric-prefix.js` — `records.yml` needs the
+// identical one, and a records reader cannot import this module without closing
+// a cycle. Imported at the top; still re-exported below for existing callers.
 
 /**
  * Compare filenames for sorting by numeric prefix.
@@ -593,23 +590,7 @@ function parseNumericPrefix(filename) {
 function compareFilenames(a, b) {
   const nameA = isChildSection(parse(a).name) ? stripAtPrefix(parse(a).name) : parse(a).name
   const nameB = isChildSection(parse(b).name) ? stripAtPrefix(parse(b).name) : parse(b).name
-  const { prefix: prefixA } = parseNumericPrefix(nameA)
-  const { prefix: prefixB } = parseNumericPrefix(nameB)
-
-  if (!prefixA && !prefixB) return a.localeCompare(b)
-  if (!prefixA) return 1
-  if (!prefixB) return -1
-
-  const partsA = prefixA.split('.').map(Number)
-  const partsB = prefixB.split('.').map(Number)
-
-  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-    const numA = partsA[i] ?? 0
-    const numB = partsB[i] ?? 0
-    if (numA !== numB) return numA - numB
-  }
-
-  return 0
+  return compareByNumericPrefix(nameA, nameB)
 }
 
 /**
