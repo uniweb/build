@@ -448,7 +448,7 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
 
   const folderIndex = indexFolder(folderDoc)
   // Captures target-locale translations of localized record fields: SCALARs →
-  // locales/collections/{locale}.json (structural maps too), and a prosemirror
+  // locales/records/{locale}.json (structural maps too), and a prosemirror
   // BODY's free-form per-locale override → locales/freeform/{locale}/collections/.
   const collector = createTranslationCollector(sourceLocale)
   const updated = []
@@ -526,9 +526,9 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
   const records = folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid })
   warnings.push(...records.warnings)
 
-  // Flush localized record-field translations to locales/collections/{locale}.json,
+  // Flush localized record-field translations to locales/records/{locale}.json,
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
-  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'collections')
+  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'records')
   const freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
 
   return { updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status }

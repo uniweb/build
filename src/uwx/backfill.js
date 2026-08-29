@@ -235,7 +235,7 @@ function briefHasContentBody(declaration) {
  * @param {string} params.format       - 'yaml' | 'json' | 'md'
  * @param {string} [params.sourceLocale]
  * @param {object} [params.collector]  - translation collector; target locales of
- *        localized SCALAR fields are captured into it (→ locales/collections/{locale}.json),
+ *        localized SCALAR fields are captured into it (→ locales/records/{locale}.json),
  *        and a localized prosemirror BODY's target locales are captured as either a
  *        structural map or, when `freeformRelPath` is given, a free-form body override.
  * @param {string} [params.freeformRelPath] - the free-form path for this record's

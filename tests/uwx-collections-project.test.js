@@ -205,7 +205,7 @@ describe('collectionsToProject — prosemirror content field (B)', () => {
   const resolvePm = (n) => (n === '@acme/article' ? pmDecl : null)
   const pmDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello world' }] }] }
 
-  it('renders a PM-doc body to markdown (.md) and flushes its structural map to locales/collections', () => {
+  it('renders a PM-doc body to markdown (.md) and flushes its structural map to locales/records', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     const recordDocs = [
       { $uuid: 'U1', $model: '@acme/article', article: { title: { en: 'Hello' }, body: { en: pmDoc, es: { 'Hello world': 'Hola mundo' } } } },
@@ -217,14 +217,14 @@ describe('collectionsToProject — prosemirror content field (B)', () => {
     const f = join(dir, 'entities/acme/article/hello.md')
     expect(report.placed).toContain(f)
     expect(readFileSync(f, 'utf8')).toContain('Hello world')
-    // the target structural map → locales/collections/es.json by source-text hash
-    const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
+    // the target structural map → locales/records/es.json by source-text hash
+    const es = JSON.parse(readFileSync(join(dir, 'locales/records/es.json'), 'utf8'))
     expect(es[computeHash('Hello world')]).toBe('Hola mundo')
   })
 })
 
 describe('collectionsToProject — localized record scalars (B)', () => {
-  it('writes the source field inline and target locales to locales/collections/{locale}.json', () => {
+  it('writes the source field inline and target locales to locales/records/{locale}.json', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     // A record with a multi-locale title scalar (and a source-only markup-text body).
     const recordDocs = [
@@ -236,8 +236,8 @@ describe('collectionsToProject — localized record scalars (B)', () => {
     // source-locale title stays inline in the record file
     const f = join(dir, 'entities/acme/article/hello.md')
     expect(readFileSync(f, 'utf8')).toContain('title: Hello')
-    // target locale → locales/collections/es.json keyed by hash(source)
-    const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
+    // target locale → locales/records/es.json keyed by hash(source)
+    const es = JSON.parse(readFileSync(join(dir, 'locales/records/es.json'), 'utf8'))
     expect(es[computeHash('Hello')]).toBe('Hola')
     expect(report.locales.es).toBe('updated')
   })
@@ -284,7 +284,7 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
     expect(readFileSync(ff, 'utf8')).toContain('Hola distinto')
   })
 
-  it('a structural-map target stays a map in locales/collections (no free-form file)', () => {
+  it('a structural-map target stays a map in locales/records (no free-form file)', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U2', slug: 'hello', collection: 'articles' }], 'F1')
     const recordDocs = [
       { $uuid: 'U2', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: { 'Hi there': 'Hola ahi' } } } },
@@ -292,7 +292,7 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
 
     const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
 
-    const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
+    const es = JSON.parse(readFileSync(join(dir, 'locales/records/es.json'), 'utf8'))
     expect(es[computeHash('Hi there')]).toBe('Hola ahi')
     expect(report.freeform.written).toEqual([])
     expect(existsSync(join(dir, 'locales/freeform/es/entities/acme/article/hello.md'))).toBe(false)

@@ -55,11 +55,11 @@ if (!values.entities) {
   process.exit(1)
 }
 
-const COLLECTIONS_DIR = resolve(values.entities)
+const ENTITIES_ROOT = resolve(values.entities)
 const PORT = Number(values.port)
 
-if (!existsSync(COLLECTIONS_DIR)) {
-  console.error(`Collections directory not found: ${COLLECTIONS_DIR}`)
+if (!existsSync(ENTITIES_ROOT)) {
+  console.error(`Entities directory not found: ${ENTITIES_ROOT}`)
   process.exit(1)
 }
 
@@ -95,10 +95,10 @@ async function loadCollection(dir) {
 }
 
 async function loadAllCollections() {
-  const entries = await readdir(COLLECTIONS_DIR)
+  const entries = await readdir(ENTITIES_ROOT)
   const collections = {}
   for (const name of entries) {
-    const fullPath = join(COLLECTIONS_DIR, name)
+    const fullPath = join(ENTITIES_ROOT, name)
     const s = await stat(fullPath)
     if (!s.isDirectory()) continue
     collections[name] = await loadCollection(fullPath)

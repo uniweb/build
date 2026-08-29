@@ -28,8 +28,8 @@ const FREEFORM_MANIFEST = '.manifest.json'
 
 // The `locales/` directory for a site (the i18n localesDir default; `paths` can
 // override it, but the default is `locales` — keep this the single place to change).
-// `subdir` scopes a lane: '' → site-content (locales/), 'collections' → collection
-// records (locales/collections/), matching the i18n manifest layout.
+// `subdir` scopes a lane: '' → site-content (locales/), 'records' → record
+// translations (locales/records/), matching the i18n manifest layout.
 export function localesDir(siteRoot, subdir = '') {
   return subdir ? join(siteRoot, 'locales', subdir) : join(siteRoot, 'locales')
 }

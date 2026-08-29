@@ -299,7 +299,7 @@ export function parseFreeformPath(relativePath) {
     return { type: 'pageId', pageId, stableId }
   }
 
-  if (parts[0] === 'collections') {
+  if (parts[0] === ENTITIES_DIR) {
     // collections/articles/getting-started.md → { type: 'collection', collectionName: 'articles', slug: 'getting-started' }
     const slug = parts[parts.length - 1].replace('.md', '')
     const collectionName = parts[1]

@@ -22,6 +22,8 @@ import { loadFreeformCollectionItem } from './freeform.js'
 // answer for a tagged data block's payload — a `label` is prose and an `href`
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
+import { resolveCollectionsConfig } from '../site/collections-config.js'
+import { poolDirsForSchema } from '../site/entity-pool.js'
 import {
   NON_TRANSLATABLE_TYPES,
   HEURISTIC_SKIP_FIELDS,
@@ -29,7 +31,13 @@ import {
   isStructuralString,
 } from './data-strings.js'
 
-export const COLLECTIONS_DIR = 'collections'
+// ⛔ `records`, NOT `collections`. The manifest holds translations of RECORDS —
+// what a site stores — and a record has nothing to do with any query that
+// selects it. The old name kept the two conflated, and the conflation was live:
+// contexts were keyed by the QUERY, so two queries over one schema produced two
+// entries for one record, each invisible from the other, and a renamed query
+// orphaned every translation under it.
+export const RECORDS_DIR = 'records'
 
 // ---------------------------------------------------------------------------
 // Schema resolution
@@ -154,9 +162,9 @@ function isFieldTranslatable(fieldDef) {
  * @param {string} collectionName
  * @param {Object} units - Accumulator
  */
-function extractWithSchema(item, schema, collectionName, units) {
+function extractWithSchema(item, schema, recordDir, units) {
   const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { collection: collectionName, item: slug }
+  const context = { record: `${recordDir}/${slug}` }
 
   extractFromItemWithSchema(item, schema.fields, '', context, units)
 
@@ -216,9 +224,9 @@ function extractFromItemWithSchema(data, fields, pathPrefix, context, units) {
  * Extract translatable fields from an item using heuristics.
  * Recursively walks the data, extracting strings that look like human-readable text.
  */
-function extractHeuristic(item, collectionName, units) {
+function extractHeuristic(item, recordDir, units) {
   const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { collection: collectionName, item: slug }
+  const context = { record: `${recordDir}/${slug}` }
 
   extractFromItemHeuristic(item, '', context, units, 0)
 
@@ -377,6 +385,35 @@ function translateItemHeuristic(data, context, translations, depth) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Query name → the pool directory its records live in (`article`, `std/person`).
+ *
+ * ⛔ A TRANSLATION BELONGS TO A RECORD, NOT TO A QUERY. The manifest is keyed by
+ * the record's pool identity for exactly the reason the freeform tree is: two
+ * queries can cover one schema, so keying by the query would ask an author to
+ * translate the same record once per query, find neither from the other, and
+ * lose both when a query is renamed. A record's identity is a fact about the
+ * site; a query's name is a choice.
+ *
+ * Falls back to the query name for a source with no local pool (a remote `url:`),
+ * where there is no record on disk to be identified.
+ */
+async function poolDirsByQuery(siteRoot) {
+  const out = new Map()
+  try {
+    const { declarations } = await resolveCollectionsConfig(siteRoot)
+    for (const [name, decl] of Object.entries(declarations || {})) {
+      const dirs = decl.schema ? poolDirsForSchema(decl.schema) : null
+      out.set(name, dirs ? dirs.join('/') : name)
+    }
+  } catch {
+    // No resolvable config — every record keys by its query name, which is what
+    // the extractor did before records existed.
+  }
+  return out
+}
+
+
+/**
  * Extract translatable content from all collections
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Options
@@ -390,6 +427,7 @@ export async function extractCollectionContent(siteRoot, options = {}) {
   }
 
   const units = {}
+  const poolDirs = await poolDirsByQuery(siteRoot)
 
   let files
   try {
@@ -412,12 +450,13 @@ export async function extractCollectionContent(siteRoot, options = {}) {
 
       // Resolve schema once per collection
       const schema = await resolveSchema(collectionName, siteRoot)
+      const recordDir = poolDirs.get(collectionName) ?? collectionName
 
       for (const item of items) {
         if (schema?.fields) {
-          extractWithSchema(item, schema, collectionName, units)
+          extractWithSchema(item, schema, recordDir, units)
         } else {
-          extractHeuristic(item, collectionName, units)
+          extractHeuristic(item, recordDir, units)
         }
       }
     } catch (err) {
@@ -512,10 +551,8 @@ function addUnit(units, source, field, context) {
   if (units[hash]) {
     const existingContexts = units[hash].contexts || []
     units[hash].contexts = existingContexts
-    const contextKey = `${context.collection}:${context.item}`
-    const exists = existingContexts.some(
-      c => `${c.collection}:${c.item}` === contextKey
-    )
+    const contextKey = context.record
+    const exists = existingContexts.some((c) => c.record === contextKey)
     if (!exists) {
       existingContexts.push({ ...context })
     }
@@ -543,7 +580,7 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
   const {
     locales = [],
     outputDir = join(siteRoot, 'dist'),
-    collectionsLocalesDir = join(siteRoot, 'locales', COLLECTIONS_DIR),
+    collectionsLocalesDir = join(siteRoot, 'locales', RECORDS_DIR),
     localesDir = join(siteRoot, 'locales'),
     freeformEnabled = true
   } = options
@@ -609,11 +646,12 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
 
         // Resolve schema once per collection
         const schema = await resolveSchema(collectionName, siteRoot)
+        const recordDir = poolDirs.get(collectionName) ?? collectionName
 
         // Translate each item (with free-form support)
         const translatedItems = await Promise.all(
           items.map(item =>
-            translateItemAsync(item, collectionName, translations, schema, {
+            translateItemAsync(item, recordDir, translations, schema, {
               locale,
               localesDir,
               freeformEnabled: hasFreeform
@@ -640,15 +678,15 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
  * 1. Check for free-form translation (complete or partial replacement)
  * 2. Fall back to hash-based translation (schema-guided or heuristic)
  */
-async function translateItemAsync(item, collectionName, translations, schema, options = {}) {
+async function translateItemAsync(item, recordDir, translations, schema, options = {}) {
   const { locale, localesDir, freeformEnabled } = options
   const translated = { ...item }
   const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { collection: collectionName, item: slug }
+  const context = { record: `${recordDir}/${slug}` }
 
   // Check for free-form translation first
   if (freeformEnabled && locale && localesDir) {
-    const freeform = await loadFreeformCollectionItem(item, collectionName, locale, localesDir)
+    const freeform = await loadFreeformCollectionItem(item, recordDir, locale, localesDir)
 
     if (freeform) {
       // Merge free-form data (supports partial: frontmatter only, body only, or both)
@@ -668,16 +706,16 @@ async function translateItemAsync(item, collectionName, translations, schema, op
   }
 
   // Fall back to hash-based translation
-  return translateItemSync(translated, collectionName, translations, schema)
+  return translateItemSync(translated, recordDir, translations, schema)
 }
 
 /**
  * Apply translations to a collection item (sync, hash-based only)
  */
-function translateItemSync(item, collectionName, translations, schema) {
+function translateItemSync(item, recordDir, translations, schema) {
   const translated = { ...item }
   const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { collection: collectionName, item: slug }
+  const context = { record: `${recordDir}/${slug}` }
 
   if (schema?.fields) {
     return translateWithSchema(translated, schema, context, translations)
@@ -744,7 +782,8 @@ function lookupTranslation(source, context, translations) {
   }
 
   if (typeof translation === 'object' && translation !== null) {
-    const contextKey = `${context.collection}:${context.item}`
+    // Same key shape the manifest writes — a record's identity.
+    const contextKey = context.record
     if (translation.overrides?.[contextKey]) {
       return translation.overrides[contextKey]
     }
@@ -765,7 +804,7 @@ function lookupTranslation(source, context, translations) {
  * Used by dev server middleware for on-the-fly translation.
  *
  * @param {Array} items - Collection items array
- * @param {string} collectionName - Collection name (e.g., 'articles')
+ * @param {string} recordDir - The record's pool directory (e.g. 'article')
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Translation options
  * @param {string} options.locale - Target locale code
@@ -784,7 +823,7 @@ export async function translateCollectionData(items, collectionName, siteRoot, o
   if (freeformEnabled) {
     return Promise.all(
       items.map(item =>
-        translateItemAsync(item, collectionName, translations, schema, {
+        translateItemAsync(item, recordDir, translations, schema, {
           locale,
           localesDir,
           freeformEnabled
@@ -808,7 +847,7 @@ export async function translateCollectionData(items, collectionName, siteRoot, o
  * @returns {Promise<string[]>} Array of locale codes
  */
 export async function getCollectionLocales(localesPath) {
-  const collectionsDir = join(localesPath, COLLECTIONS_DIR)
+  const collectionsDir = join(localesPath, RECORDS_DIR)
   if (!existsSync(collectionsDir)) return []
 
   try {

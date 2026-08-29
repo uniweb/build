@@ -21,7 +21,7 @@ import {
   buildLocalizedCollections,
   getCollectionLocales,
   translateCollectionData,
-  COLLECTIONS_DIR
+  RECORDS_DIR
 } from './collections.js'
 import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
 
@@ -71,7 +71,7 @@ export {
   buildLocalizedCollections,
   getCollectionLocales,
   translateCollectionData,
-  COLLECTIONS_DIR,
+  RECORDS_DIR,
 
   // Locale resolution
   getAvailableLocales,
@@ -228,7 +228,7 @@ export async function extractCollectionManifest(siteRoot, options = {}) {
   const manifest = await extractCollectionContent(siteRoot)
 
   // Ensure collections locales directory exists
-  const collectionsDir = join(siteRoot, localesDir, COLLECTIONS_DIR)
+  const collectionsDir = join(siteRoot, localesDir, RECORDS_DIR)
   if (!existsSync(collectionsDir)) {
     await mkdir(collectionsDir, { recursive: true })
   }

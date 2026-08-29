@@ -608,7 +608,7 @@ export function siteContentPlugin(options = {}) {
       return collectionTranslations[locale]
     }
 
-    const localePath = join(resolvedSitePath, localesDir, 'collections', `${locale}.json`)
+    const localePath = join(resolvedSitePath, localesDir, 'records', `${locale}.json`)
     if (!existsSync(localePath)) {
       return null
     }
@@ -1048,7 +1048,7 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Watch collection translations directory
-        const collectionsLocalesPath = resolve(localesPath, 'collections')
+        const collectionsLocalesPath = resolve(localesPath, 'records')
         if (existsSync(collectionsLocalesPath)) {
           try {
             const collWatcher = watch(collectionsLocalesPath, { recursive: false }, () => {

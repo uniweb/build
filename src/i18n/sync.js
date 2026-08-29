@@ -98,8 +98,9 @@ function contextsEqual(contexts1, contexts2) {
   const c2 = contexts2 || []
   if (c1.length !== c2.length) return false
 
-  const set1 = new Set(c1.map(c => `${c.page || c.collection}:${c.section || c.item}`))
-  const set2 = new Set(c2.map(c => `${c.page || c.collection}:${c.section || c.item}`))
+  const key = (c) => (c.record ? `record:${c.record}` : `${c.page}:${c.section}`)
+  const set1 = new Set(c1.map(key))
+  const set2 = new Set(c2.map(key))
 
   if (set1.size !== set2.size) return false
   for (const key of set1) {
@@ -113,14 +114,14 @@ function contextsEqual(contexts1, contexts2) {
  * Returns the previous unit info if found
  */
 function findMatchingContext(currentContexts, previousUnits) {
+  // One key shape for both lanes: a page/section pair, or a record's identity.
+  const key = (c) => (c.record ? `record:${c.record}` : `${c.page}:${c.section}`)
   for (const context of currentContexts) {
-    const contextKey = `${context.page}:${context.section}`
+    const contextKey = key(context)
 
     for (const [hash, unit] of Object.entries(previousUnits)) {
       const unitContexts = unit.contexts || []
-      const hasContext = unitContexts.some(
-        c => `${c.page || c.collection}:${c.section || c.item}` === contextKey
-      )
+      const hasContext = unitContexts.some((c) => key(c) === contextKey)
       if (hasContext) {
         return { hash, source: unit.source, contexts: unit.contexts }
       }
@@ -198,8 +199,8 @@ export function formatSyncReport(report) {
  */
 function formatContext(context) {
   if (!context) return ''
-  const location = context.page || context.collection || ''
-  const section = context.section || context.item || ''
+  const location = context.page || context.record || ''
+  const section = context.section || ''
   if (!location && !section) return ''
   return `(${location}:${section})`
 }

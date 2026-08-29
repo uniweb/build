@@ -146,7 +146,7 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
   if (isProseMirrorField(field)) {
     // markdown source → ProseMirror doc. When localized, wrap per-locale exactly
     // like a page section's content (source doc + target structural maps) — same
-    // path, flushed to locales/collections/{locale}.json by the caller.
+    // path, flushed to locales/records/{locale}.json by the caller.
     const doc = typeof value === 'string' ? markdownToProseMirror(value) : value
     if (!field.localized) return doc
     const localized = localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations)
@@ -160,7 +160,7 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     // A markup `text` BODY (format markdown|html) rides as a RAW string, wrapped
     // per-locale wholesale (its per-string translations live in the i18n manifest /
     // free-form, not the scalar map). Other localized scalars wrap per-string from
-    // locales/collections/{locale}.json.
+    // locales/records/{locale}.json.
     return isMarkupTextField(field)
       ? localize(value, sourceLocale)
       : localizeScalar(value, sourceLocale, translations)
@@ -579,14 +579,14 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
 
   // Target locales for wrapping localized record fields per-locale: those with a
-  // structural-translation file (locales/collections/{locale}.json) UNIONED with
+  // structural-translation file (locales/records/{locale}.json) UNIONED with
   // those that only have a free-form override dir (locales/freeform/{locale}/) — a
   // record localized solely by a free-form body would otherwise go undiscovered.
   const targetLocales = [
-    ...new Set([...discoverLocales(siteRoot, 'collections'), ...discoverFreeformLocales(siteRoot)]),
+    ...new Set([...discoverLocales(siteRoot, 'records'), ...discoverFreeformLocales(siteRoot)]),
   ].filter((l) => l !== sourceLocale)
   const translations =
-    targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'collections') : null
+    targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'records') : null
 
   const entities = []
   const index = []
