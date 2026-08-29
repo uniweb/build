@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { validateDataInputs } from '../src/validate-data.js'
 // Derived, never re-spelled — the convention is pinned once, in
 // `@uniweb/core`'s tests/data-paths.test.js.
-import { collectionDataUrl } from '@uniweb/core'
+import { queryDataUrl } from '@uniweb/core'
 
 // End-to-end over a real on-disk project: a foundation that binds a section's
 // `projects` input to a foundation-local `@/project` schema, and a site whose
@@ -112,7 +112,7 @@ describe('validateDataInputs — end-to-end join', () => {
     const onBad = report.violations.filter((v) => v.item === 'bad')
     expect(onBad).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: 'name', rule: 'required', schema: '@/project', file: collectionDataUrl('projects') }),
+        expect.objectContaining({ field: 'name', rule: 'required', schema: '@/project', file: queryDataUrl('projects') }),
         expect.objectContaining({ field: 'status', rule: 'enum' }),
       ])
     )

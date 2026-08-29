@@ -37,7 +37,7 @@ const setup = (recordsYml) => {
   return join(ROOT, 'site')
 }
 const folderDoc = (pkg) =>
-  JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
+  JSON.parse(readZip(pkg.records.buffer).get('entities/folder.json').toString('utf8'))
 
 beforeEach(() => { ROOT = mkdtempSync(join(tmpdir(), 'sync-rule-')) })
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
@@ -47,13 +47,13 @@ describe('missing vs empty — ruled, and both pinned', () => {
     const site = setup(null)
     const pkg = await emitSyncPackages(site)
     // Not an empty folder — no folder. The server's is left untouched.
-    expect(pkg.collections).toBeNull()
+    expect(pkg.records).toBeNull()
   })
 
   it('⛔ EMPTY is destructive: a folder that holds nothing, so the backend removes', async () => {
     const site = setup('')
     const pkg = await emitSyncPackages(site)
-    expect(pkg.collections).toBeTruthy()
+    expect(pkg.records).toBeTruthy()
     const doc = folderDoc(pkg)
     expect(doc.$model).toBe('@uniweb/folder')
     expect(doc.contents).toEqual([])
@@ -65,7 +65,7 @@ describe('missing vs empty — ruled, and both pinned', () => {
   it('CONTROL — a populated records.yml sends its records', async () => {
     const site = setup('- article/*.md\n')
     const pkg = await emitSyncPackages(site)
-    expect(pkg.collections).toBeTruthy()
+    expect(pkg.records).toBeTruthy()
     expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual([
       'article/hello',
       'article/world',
@@ -77,7 +77,7 @@ describe('only what is referenced syncs', () => {
   it('an unreferenced entity is absent from the payload — and REPORTED', async () => {
     const site = setup('- article/hello.md\n')
     const pkg = await emitSyncPackages(site)
-    const ids = pkg.collections.index.slice(1).map((e) => e.id)
+    const ids = pkg.records.index.slice(1).map((e) => e.id)
     // the subject
     expect(ids).not.toContain('article/world')
     // ⛔ CONTROL — its referenced sibling IS present, so the absence above is
@@ -101,7 +101,7 @@ describe('only what is referenced syncs', () => {
     // A stray `sync: false` is now just a query named `sync`, honoured by nothing.
     w('site/queries.yml', 'sync: false\narticles:\n  schema: "@/article"\n')
     const pkg = await emitSyncPackages(site)
-    expect(pkg.collections).toBeTruthy()
+    expect(pkg.records).toBeTruthy()
     expect(folderDoc(pkg).contents).toHaveLength(1)
   })
 })
@@ -118,7 +118,7 @@ describe('a site with nothing to sync never emits a removing folder', () => {
     w('site/site.yml', 'name: T\nfoundation: "@acme/base"\n')
     w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
     const pkg = await emitSyncPackages(join(ROOT, 'site'))
-    expect(pkg.collections).toBeNull()
+    expect(pkg.records).toBeNull()
   })
 
   it('CONTROL — the same site WITH an empty records.yml does emit one', async () => {
@@ -126,7 +126,7 @@ describe('a site with nothing to sync never emits a removing folder', () => {
     w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
     w('site/records.yml', '')
     const pkg = await emitSyncPackages(join(ROOT, 'site'))
-    expect(pkg.collections).toBeTruthy()
+    expect(pkg.records).toBeTruthy()
     expect(folderDoc(pkg).contents).toEqual([])
   })
 })

@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import {
-  buildCollectionEntities,
+  buildRecordEntities,
   buildFolderEntity,
-  collectionsToProject,
+  recordsToProject,
   toDataSchemaDeclaration,
 } from '../src/uwx/index.js'
 
@@ -63,7 +63,7 @@ const seed = (dir) => {
 }
 
 const produce = async (siteRoot) => {
-  const col = await buildCollectionEntities(siteRoot, { org: '@acme' })
+  const col = await buildRecordEntities(siteRoot, { org: '@acme' })
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     folderNodes: col.folder.nodes,
@@ -92,7 +92,7 @@ describe('push → pull → push is a fixed point', () => {
     writeDest('dest/site.yml', '$org: acme\nname: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
     writeDest('dest/package.json', { name: 'dest', dependencies: { '@acme/base': 'file:../fdn' } })
 
-    const report = collectionsToProject({
+    const report = recordsToProject({
       folderDoc: first.folder.document,
       recordDocs: first.col.entities.map((e) => e.document),
       siteRoot: dest,
@@ -123,7 +123,7 @@ describe('push → pull → push is a fixed point', () => {
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', '$org: acme\nname: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
     writeDest('dest/package.json', { name: 'dest', dependencies: { '@acme/base': 'file:../fdn' } })
-    collectionsToProject({
+    recordsToProject({
       folderDoc: folder.document,
       recordDocs: col.entities.map((e) => e.document),
       siteRoot: dest,
@@ -144,7 +144,7 @@ describe('push → pull → push is a fixed point', () => {
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\n')
     writeDest('dest/records.yml', '- article/kept.md\n')
-    const report = collectionsToProject({
+    const report = recordsToProject({
       folderDoc: { contents: [] },
       recordDocs: [],
       siteRoot: dest,
@@ -159,7 +159,7 @@ describe('push → pull → push is a fixed point', () => {
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\n')
     writeDest('dest/records.yml', '- article/kept.md\n')
-    const report = collectionsToProject({
+    const report = recordsToProject({
       folderDoc: {
         contents: [{ kind: 'ref', path_segment: 'ghost', entry: { model: '@acme/article', entity: 'U9' } }],
       },

@@ -6,7 +6,7 @@
  *
  * It began in `./config.js`, which imports a Vite plugin. That made it unreachable
  * from any lane that must not pull Vite — and the sync lane, needing exactly this
- * answer, grew its own weaker copy instead (`../uwx/collections.js`), which read
+ * answer, grew its own weaker copy instead (`../uwx/records.js`), which read
  * `package.json` `dependencies.foundation`: a key no current template produces, so
  * it returned null for every scaffolded site. A third copy in the CLI describes
  * itself as mirroring "a subset of" this one.

@@ -16,13 +16,13 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DATA_DIR } from '@uniweb/core'
 import { computeHash } from './hash.js'
-import { loadFreeformCollectionItem } from './freeform.js'
+import { loadFreeformRecord } from './freeform.js'
 // The heuristic judgement about which strings inside structured data are prose.
 // It lives in its own module because the page lane needs exactly the same
 // answer for a tagged data block's payload — a `label` is prose and an `href`
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
-import { resolveCollectionsConfig } from '../site/collections-config.js'
+import { resolveQueriesConfig } from '../site/queries-config.js'
 import { poolDirsForSchema } from '../site/entity-pool.js'
 import {
   NON_TRANSLATABLE_TYPES,
@@ -54,13 +54,13 @@ const schemaCache = new Map()
  * 2. Standard schema: @uniweb/schemas by collection name (with naive singularization)
  * 3. null (no schema found → heuristic fallback)
  *
- * @param {string} collectionName
+ * @param {string} queryName
  * @param {string} siteRoot
  * @returns {Promise<Object|null>}
  */
-async function resolveSchema(collectionName, siteRoot) {
-  if (schemaCache.has(collectionName)) {
-    return schemaCache.get(collectionName)
+async function resolveSchema(queryName, siteRoot) {
+  if (schemaCache.has(queryName)) {
+    return schemaCache.get(queryName)
   }
 
   let schema = null
@@ -72,12 +72,12 @@ async function resolveSchema(collectionName, siteRoot) {
   // an author to write into it was the one remaining place the framework
   // contradicted its own rule that `collections/` is the only way to provide
   // structured data. The schema describes the source, so it lives with it.
-  const companionPath = join(siteRoot, 'collections', `${collectionName}.schema.js`)
+  const companionPath = join(siteRoot, 'collections', `${queryName}.schema.js`)
   if (existsSync(companionPath)) {
     try {
       const mod = await import(pathToFileURL(companionPath).href)
       schema = mod.default || mod
-      schemaCache.set(collectionName, schema)
+      schemaCache.set(queryName, schema)
       return schema
     } catch (err) {
       console.warn(`[i18n] Failed to load companion schema ${companionPath}: ${err.message}`)
@@ -87,7 +87,7 @@ async function resolveSchema(collectionName, siteRoot) {
   // 2. Standard schema from @uniweb/schemas (try exact name + singularized)
   try {
     const schemasModule = await import('@uniweb/schemas')
-    const names = [collectionName, singularize(collectionName)]
+    const names = [queryName, singularize(queryName)]
 
     for (const name of names) {
       if (schemasModule.schemas?.[name]) {
@@ -99,7 +99,7 @@ async function resolveSchema(collectionName, siteRoot) {
     // @uniweb/schemas not installed — that's fine
   }
 
-  schemaCache.set(collectionName, schema)
+  schemaCache.set(queryName, schema)
   return schema
 }
 
@@ -159,7 +159,7 @@ function isFieldTranslatable(fieldDef) {
  *
  * @param {Object} item - Data item
  * @param {Object} schema - Schema with `fields`
- * @param {string} collectionName
+ * @param {string} queryName
  * @param {Object} units - Accumulator
  */
 function extractWithSchema(item, schema, recordDir, units) {
@@ -400,7 +400,7 @@ function translateItemHeuristic(data, context, translations, depth) {
 async function poolDirsByQuery(siteRoot) {
   const out = new Map()
   try {
-    const { declarations } = await resolveCollectionsConfig(siteRoot)
+    const { declarations } = await resolveQueriesConfig(siteRoot)
     for (const [name, decl] of Object.entries(declarations || {})) {
       const dirs = decl.schema ? poolDirsForSchema(decl.schema) : null
       out.set(name, dirs ? dirs.join('/') : name)
@@ -419,7 +419,7 @@ async function poolDirsByQuery(siteRoot) {
  * @param {Object} options - Options
  * @returns {Promise<Object>} Manifest with translation units
  */
-export async function extractCollectionContent(siteRoot, options = {}) {
+export async function extractRecordContent(siteRoot, options = {}) {
   const dataDir = join(siteRoot, 'public', DATA_DIR)
 
   if (!existsSync(dataDir)) {
@@ -439,7 +439,7 @@ export async function extractCollectionContent(siteRoot, options = {}) {
   const jsonFiles = files.filter(f => f.endsWith('.json'))
 
   for (const file of jsonFiles) {
-    const collectionName = file.replace('.json', '')
+    const queryName = file.replace('.json', '')
     const filePath = join(dataDir, file)
 
     try {
@@ -449,8 +449,8 @@ export async function extractCollectionContent(siteRoot, options = {}) {
       if (!Array.isArray(items)) continue
 
       // Resolve schema once per collection
-      const schema = await resolveSchema(collectionName, siteRoot)
-      const recordDir = poolDirs.get(collectionName) ?? collectionName
+      const schema = await resolveSchema(queryName, siteRoot)
+      const recordDir = poolDirs.get(queryName) ?? queryName
 
       for (const item of items) {
         if (schema?.fields) {
@@ -576,11 +576,11 @@ function addUnit(units, source, field, context) {
  * @param {boolean} [options.freeformEnabled=true] - Enable free-form translation support
  * @returns {Promise<Object>} Map of locale to output paths
  */
-export async function buildLocalizedCollections(siteRoot, options = {}) {
+export async function buildLocalizedRecords(siteRoot, options = {}) {
   const {
     locales = [],
     outputDir = join(siteRoot, 'dist'),
-    collectionsLocalesDir = join(siteRoot, 'locales', RECORDS_DIR),
+    recordLocalesDir = join(siteRoot, 'locales', RECORDS_DIR),
     localesDir = join(siteRoot, 'locales'),
     freeformEnabled = true
   } = options
@@ -617,7 +617,7 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
 
   for (const locale of locales) {
     // Load translations for this locale
-    const localePath = join(collectionsLocalesDir, `${locale}.json`)
+    const localePath = join(recordLocalesDir, `${locale}.json`)
     let translations = {}
     if (existsSync(localePath)) {
       try {
@@ -638,7 +638,7 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
     outputs[locale] = {}
 
     for (const file of jsonFiles) {
-      const collectionName = file.replace('.json', '')
+      const queryName = file.replace('.json', '')
       const sourcePath = join(dataDir, file)
 
       try {
@@ -649,13 +649,13 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
           // Copy as-is if not an array
           const destPath = join(localeDataDir, file)
           await writeFile(destPath, raw)
-          outputs[locale][collectionName] = destPath
+          outputs[locale][queryName] = destPath
           continue
         }
 
         // Resolve schema once per collection
-        const schema = await resolveSchema(collectionName, siteRoot)
-        const recordDir = poolDirs.get(collectionName) ?? collectionName
+        const schema = await resolveSchema(queryName, siteRoot)
+        const recordDir = poolDirs.get(queryName) ?? queryName
 
         // Translate each item (with free-form support)
         const translatedItems = await Promise.all(
@@ -670,7 +670,7 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
 
         const destPath = join(localeDataDir, file)
         await writeFile(destPath, JSON.stringify(translatedItems, null, 2))
-        outputs[locale][collectionName] = destPath
+        outputs[locale][queryName] = destPath
       } catch (err) {
         // ⛔ A FAILURE HERE USED TO BE A `console.warn` AND NOTHING ELSE, and it
         // hid a real bug for the length of a session: a `ReferenceError` in this
@@ -710,7 +710,7 @@ async function translateItemAsync(item, recordDir, translations, schema, options
 
   // Check for free-form translation first
   if (freeformEnabled && locale && localesDir) {
-    const freeform = await loadFreeformCollectionItem(item, recordDir, locale, localesDir)
+    const freeform = await loadFreeformRecord(item, recordDir, locale, localesDir)
 
     if (freeform) {
       // Merge free-form data (supports partial: frontmatter only, body only, or both)
@@ -837,12 +837,12 @@ function lookupTranslation(source, context, translations) {
  * @param {boolean} [options.freeformEnabled=false] - Enable free-form translations
  * @returns {Promise<Array>} Translated items
  */
-export async function translateCollectionData(items, collectionName, siteRoot, options = {}) {
+export async function translateRecordData(items, queryName, siteRoot, options = {}) {
   const { locale, localesDir, translations = {}, freeformEnabled = false } = options
 
   if (!Array.isArray(items)) return items
 
-  const schema = await resolveSchema(collectionName, siteRoot)
+  const schema = await resolveSchema(queryName, siteRoot)
 
   if (freeformEnabled) {
     return Promise.all(
@@ -857,7 +857,7 @@ export async function translateCollectionData(items, collectionName, siteRoot, o
   }
 
   return items.map(item =>
-    translateItemSync(item, collectionName, translations, schema)
+    translateItemSync(item, queryName, translations, schema)
   )
 }
 
@@ -870,12 +870,12 @@ export async function translateCollectionData(items, collectionName, siteRoot, o
  * @param {string} localesPath - Path to locales directory
  * @returns {Promise<string[]>} Array of locale codes
  */
-export async function getCollectionLocales(localesPath) {
-  const collectionsDir = join(localesPath, RECORDS_DIR)
-  if (!existsSync(collectionsDir)) return []
+export async function getRecordLocales(localesPath) {
+  const recordLocalesDir = join(localesPath, RECORDS_DIR)
+  if (!existsSync(recordLocalesDir)) return []
 
   try {
-    const files = await readdir(collectionsDir)
+    const files = await readdir(recordLocalesDir)
     return files
       .filter(f => f.endsWith('.json') && f !== 'manifest.json')
       .map(f => f.replace('.json', ''))

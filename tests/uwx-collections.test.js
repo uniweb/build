@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   emitEntityPackage,
-  emitCollectionSyncPackage,
-  buildCollectionEntities,
+  emitRecordSyncPackage,
+  buildRecordEntities,
   readZip,
   mintUuidV7,
-  collectionRecordsToEntities,
+  recordsToEntities,
   entityContentHash,
 } from '../src/uwx/index.js'
 import { toDataSchemaDeclaration } from '../src/uwx/data-schema.js'
@@ -87,9 +87,9 @@ describe('emitEntityPackage — model-by-name', () => {
   })
 })
 
-// ── Step B: collectionRecordsToEntities → `$`-document (pure mapper) ──────────
+// ── Step B: recordsToEntities → `$`-document (pure mapper) ──────────
 
-describe('collectionRecordsToEntities — flat record → brief section `$`-document', () => {
+describe('recordsToEntities — flat record → brief section `$`-document', () => {
   const declaration = lower(
     {
       name: 'product',
@@ -111,8 +111,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('maps each record to one by-name entity-content document (no $uuid on first sync)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [
         { slug: 'widget-x', title: 'Widget X', price: 9.99, published: '2026-01-01', sku: 'WX-1' },
       ],
@@ -135,8 +135,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('wraps a localized scalar field per-locale from translations (B)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'a', title: 'Hello' }],
       declaration,
       translations: { es: { [computeHash('Hello')]: 'Hola' } },
@@ -146,8 +146,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('without translations a localized scalar stays source-only (backward compatible)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'a', title: 'Hello' }],
       declaration,
     })
@@ -155,21 +155,21 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('canonical key order: $id, $model, then the section (no leading $uuid first sync)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'a', title: 'A' }],
       declaration,
     })
     expect(Object.keys(entities[0].document)).toEqual(['$id', '$model', 'product'])
     // ⚠️ The caller supplies `$id` now — it is the entity's POOL id, and only the
     // caller knows the pool position. This unit exercises the mapper alone, so it
-    // falls back to `<collectionName>/<slug>`; the real producer always sets it.
+    // falls back to `<queryName>/<slug>`; the real producer always sets it.
     expect(entities[0].document.$id).toBe('products/a')
   })
 
   it('emits the brief fields in schema-declared order', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'a', sku: 'S', published: '2026-01-01', price: 1, title: 'A' }],
       declaration,
     })
@@ -183,8 +183,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('wraps localized fields, leaves scalars/dates raw, drops slug', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [
         { slug: 'widget-x', title: 'Widget X', price: 9.99, published: '2026-01-01', sku: 'WX-1' },
       ],
@@ -200,8 +200,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('emits a `date` field as YYYY-MM-DD (not full ISO — backend rejects the latter)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'd', title: 'D', published: new Date('2026-03-01T00:00:00Z') }],
       declaration, // `published` is type `date`
     })
@@ -214,8 +214,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
       '@/event',
       '@acme/event'
     )
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'events',
+    const { entities } = recordsToEntities({
+      queryName: 'events',
       records: [{ slug: 'e', title: 'E', at: new Date('2026-03-01T12:30:00Z') }],
       declaration: dt,
     })
@@ -223,8 +223,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('round-trips a back-filled $uuid for re-sync (as the leading key)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'widget-x', $uuid: 'abc-123', title: 'Widget X' }],
       declaration,
     })
@@ -235,8 +235,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('honors an explicit $id over the slug', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'file-name', $id: 'explicit-id', title: 'X' }],
       declaration,
     })
@@ -247,8 +247,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('warns about + drops a field not on the Model', () => {
-    const { entities, warnings } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities, warnings } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'g', title: 'G', color: 'red' }],
       declaration,
     })
@@ -257,8 +257,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
   })
 
   it('skips a record without a slug (with a warning)', () => {
-    const { entities, warnings } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { entities, warnings } = recordsToEntities({
+      queryName: 'products',
       records: [{ title: 'No slug' }],
       declaration,
     })
@@ -274,8 +274,8 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
     )
     expect(declNoBrief.brief).toBeFalsy()
     expect(() =>
-      collectionRecordsToEntities({
-        collectionName: 'logs',
+      recordsToEntities({
+        queryName: 'logs',
         records: [{ slug: 'a', msg: 'hi' }],
         declaration: declNoBrief,
       })
@@ -285,7 +285,7 @@ describe('collectionRecordsToEntities — flat record → brief section `$`-docu
 
 // ── Step B2: markdown body → the brief's content body field ──────────────────
 
-describe('collectionRecordsToEntities — markdown body → content body field', () => {
+describe('recordsToEntities — markdown body → content body field', () => {
   const decl = lower(
     { name: 'article', fields: { title: { type: 'string' }, body: { type: 'markdown' } } },
     '@/article',
@@ -293,8 +293,8 @@ describe('collectionRecordsToEntities — markdown body → content body field',
   )
 
   it('maps $body to the brief content field as the raw value (localized-wrapped, not ProseMirror)', () => {
-    const { entities, warnings } = collectionRecordsToEntities({
-      collectionName: 'articles',
+    const { entities, warnings } = recordsToEntities({
+      queryName: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: '\n# Welcome\n' }],
       declaration: decl,
       sourceLocale: 'en',
@@ -306,8 +306,8 @@ describe('collectionRecordsToEntities — markdown body → content body field',
   })
 
   it('lets an explicit frontmatter value win over the body', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'articles',
+    const { entities } = recordsToEntities({
+      queryName: 'articles',
       records: [{ slug: 'h', title: 'H', body: 'explicit', $body: 'from-md-body' }],
       declaration: decl,
     })
@@ -315,8 +315,8 @@ describe('collectionRecordsToEntities — markdown body → content body field',
   })
 
   it('never treats $body as an unknown field', () => {
-    const { warnings } = collectionRecordsToEntities({
-      collectionName: 'articles',
+    const { warnings } = recordsToEntities({
+      queryName: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'x' }],
       declaration: decl,
     })
@@ -329,8 +329,8 @@ describe('collectionRecordsToEntities — markdown body → content body field',
       '@/product',
       '@acme/product'
     )
-    const { warnings } = collectionRecordsToEntities({
-      collectionName: 'products',
+    const { warnings } = recordsToEntities({
+      queryName: 'products',
       records: [{ slug: 'p', title: 'P', $body: 'orphan body' }],
       declaration: noRich,
     })
@@ -338,7 +338,7 @@ describe('collectionRecordsToEntities — markdown body → content body field',
   })
 })
 
-describe('collectionRecordsToEntities — markdown body → prosemirror content field (B)', () => {
+describe('recordsToEntities — markdown body → prosemirror content field (B)', () => {
   // The declaration form a `format: prosemirror` constraint lowers to. Hand-built —
   // the producer consumes the declaration, independent of the authoring sugar.
   const decl = {
@@ -355,8 +355,8 @@ describe('collectionRecordsToEntities — markdown body → prosemirror content 
   }
 
   it('converts the markdown body to a ProseMirror doc on the wire (not the raw string)', () => {
-    const { entities, warnings } = collectionRecordsToEntities({
-      collectionName: 'articles',
+    const { entities, warnings } = recordsToEntities({
+      queryName: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
       declaration: decl,
     })
@@ -369,8 +369,8 @@ describe('collectionRecordsToEntities — markdown body → prosemirror content 
   })
 
   it('wraps per-locale as a self-contained doc (resolved from translations)', () => {
-    const { entities } = collectionRecordsToEntities({
-      collectionName: 'articles',
+    const { entities } = recordsToEntities({
+      queryName: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
       declaration: decl,
       translations: { es: { [computeHash('Hello world')]: 'Hola mundo' } },
@@ -385,9 +385,9 @@ describe('collectionRecordsToEntities — markdown body → prosemirror content 
   })
 })
 
-// ── Step C: emitCollectionSyncPackage (orchestrator, real fs) ────────────────
+// ── Step C: emitRecordSyncPackage (orchestrator, real fs) ────────────────
 
-describe('emitCollectionSyncPackage — site + local foundation → .uwx', () => {
+describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
   let root
   let siteDir
 
@@ -438,7 +438,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
   it('emits one by-name `$`-document per record, all of the mapped Model', async () => {
-    const { buffer, models, entityCount } = await emitCollectionSyncPackage(siteDir, {
+    const { buffer, models, entityCount } = await emitRecordSyncPackage(siteDir, {
       exportedAt: '2026-05-27T00:00:00Z',
     })
     expect(models).toEqual(['@acme/product'])
@@ -491,7 +491,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     )
     writeFileSync(join(reSite, 'records.yml'), '- acme/product/*.yml\n')
 
-    const { buffer } = await emitCollectionSyncPackage(reSite)
+    const { buffer } = await emitRecordSyncPackage(reSite)
     const { manifest, byFile } = unzip(buffer)
     const entry = manifest.entries.find((e) => e.kind === 'entity')
     const doc = byFile(entry.file)
@@ -505,13 +505,13 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     const bare = join(root, 'bare')
     mkdirSync(bare, { recursive: true })
     writeFileSync(join(bare, 'site.yml'), 'name: Bare\nqueries:\n  posts: {}\n')
-    await expect(emitCollectionSyncPackage(bare)).rejects.toThrow(/no records to export/)
+    await expect(emitRecordSyncPackage(bare)).rejects.toThrow(/no records to export/)
   })
 })
 
 // ── B3: non-local Model resolution via the injected resolveModel ─────────────
 
-describe('emitCollectionSyncPackage — non-local Model via resolveModel', () => {
+describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
   let root
   let siteDir
 
@@ -548,7 +548,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
       calls.push(name)
       return name === '@std/product' ? productDecl : null
     }
-    const { buffer, models, entityCount } = await emitCollectionSyncPackage(siteDir, { resolveModel })
+    const { buffer, models, entityCount } = await emitRecordSyncPackage(siteDir, { resolveModel })
     expect(calls).toEqual(['@std/product'])
     expect(models).toEqual(['@std/product'])
     expect(entityCount).toBe(1)
@@ -560,7 +560,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
   })
 
   it('errors clearly when the resolver returns null (Model not registered)', async () => {
-    await expect(emitCollectionSyncPackage(siteDir, { resolveModel: async () => null })).rejects.toThrow(
+    await expect(emitRecordSyncPackage(siteDir, { resolveModel: async () => null })).rejects.toThrow(
       /register it first/
     )
   })
@@ -595,7 +595,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
       called = true
       throw new Error('resolver should not be called when the Model is local')
     }
-    const { models } = await emitCollectionSyncPackage(localSite, { resolveModel })
+    const { models } = await emitRecordSyncPackage(localSite, { resolveModel })
     expect(models).toEqual(['@acme/product'])
     expect(called).toBe(false)
   })
@@ -621,7 +621,7 @@ describe('entityContentHash', () => {
   })
 })
 
-describe('emitCollectionSyncPackage — send only changed', () => {
+describe('emitRecordSyncPackage — send only changed', () => {
   let root
   let siteDir
 
@@ -658,7 +658,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
   it('first sync sends all + returns the full hash map', async () => {
-    const { entityCount, skipped, hashes } = await emitCollectionSyncPackage(siteDir)
+    const { entityCount, skipped, hashes } = await emitRecordSyncPackage(siteDir)
     expect(entityCount).toBe(2)
     expect(skipped).toBe(0)
     expect(Object.keys(hashes).sort()).toEqual([
@@ -668,8 +668,8 @@ describe('emitCollectionSyncPackage — send only changed', () => {
   })
 
   it('skips records whose content hash matches the prior cache (nothing to send)', async () => {
-    const first = await emitCollectionSyncPackage(siteDir)
-    const { entityCount, skipped, buffer } = await emitCollectionSyncPackage(siteDir, {
+    const first = await emitRecordSyncPackage(siteDir)
+    const { entityCount, skipped, buffer } = await emitRecordSyncPackage(siteDir, {
       priorHashes: first.hashes,
     })
     expect(entityCount).toBe(0)
@@ -678,9 +678,9 @@ describe('emitCollectionSyncPackage — send only changed', () => {
   })
 
   it('sends only the changed record after an edit (index correlates to the subset)', async () => {
-    const first = await emitCollectionSyncPackage(siteDir)
+    const first = await emitRecordSyncPackage(siteDir)
     writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'b.yml'), 'title: B2\nprice: 2\n')
-    const { entityCount, skipped, index } = await emitCollectionSyncPackage(siteDir, {
+    const { entityCount, skipped, index } = await emitRecordSyncPackage(siteDir, {
       priorHashes: first.hashes,
     })
     expect(entityCount).toBe(1)
@@ -689,8 +689,8 @@ describe('emitCollectionSyncPackage — send only changed', () => {
   })
 
   it('sendAll bypasses the cache', async () => {
-    const first = await emitCollectionSyncPackage(siteDir)
-    const { entityCount, skipped } = await emitCollectionSyncPackage(siteDir, {
+    const first = await emitRecordSyncPackage(siteDir)
+    const { entityCount, skipped } = await emitRecordSyncPackage(siteDir, {
       priorHashes: first.hashes,
       sendAll: true,
     })
@@ -701,7 +701,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
 
 // ── B-1: free-form per-locale body override on a prosemirror content field ────
 
-describe('buildCollectionEntities — free-form collection body override (B-1)', () => {
+describe('buildRecordEntities — free-form collection body override (B-1)', () => {
   let root
   let siteDir
 
@@ -752,7 +752,7 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
   it('reads the free-form body as the per-locale value (override wins) even with no structural translations', async () => {
-    const { entities } = await buildCollectionEntities(siteDir)
+    const { entities } = await buildRecordEntities(siteDir)
     expect(entities).toHaveLength(1)
     const body = entities[0].document.article.body
     // Wrapped per-locale: source doc + the free-form Spanish doc (not a map).
@@ -773,9 +773,9 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
 //
 // ⭐ This pins the PAIR, not the fix: both paths must agree on one alias. The
 // register-side rule lives in `uwx/registry-package.js` (`scoped`), this side in
-// `buildCollectionEntities`, and a test that only asserted one would let them
+// `buildRecordEntities`, and a test that only asserted one would let them
 // drift again.
-describe('buildCollectionEntities — `@/` model refs resolve into the publish org', () => {
+describe('buildRecordEntities — `@/` model refs resolve into the publish org', () => {
   let root
   let siteDir
 
@@ -816,7 +816,7 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
   it('resolves `@/member` to `@org/member` on the entity and leaves `@uniweb/*` alone', async () => {
-    const { entities } = await buildCollectionEntities(siteDir, { org: '@proximify' })
+    const { entities } = await buildRecordEntities(siteDir, { org: '@proximify' })
     expect(entities).toHaveLength(1)
     // The value that becomes `$model` on the wire, and `models_required` in the manifest.
     expect(entities[0].model).toBe('@proximify/member')
@@ -824,14 +824,14 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
   })
 
   it('accepts a bare org handle as well as `@handle`', async () => {
-    const { entities } = await buildCollectionEntities(siteDir, { org: 'proximify' })
+    const { entities } = await buildRecordEntities(siteDir, { org: 'proximify' })
     expect(entities[0].model).toBe('@proximify/member')
   })
 
   it('⛔ WARNS rather than throwing when no org is known — a `status` probe has none', async () => {
     // Throwing here would break `probeUnpushed`, which is offline and orgless and
     // must still be able to count changed entities on a never-pushed site.
-    const { entities, warnings } = await buildCollectionEntities(siteDir)
+    const { entities, warnings } = await buildRecordEntities(siteDir)
     expect(entities[0].model).toBe('@/member')
     expect(warnings.join('\n')).toMatch(/foundation-relative/)
   })
@@ -853,7 +853,7 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
     writeFileSync(join(alt, 'entities', 'acme', 'member', 'alice.md'), '---\nname: Alice\n---\nBio\n')
     writeFileSync(join(alt, 'records.yml'), '- acme/member/*.md\n')
 
-    const { entities } = await buildCollectionEntities(alt, { org: '@proximify' })
+    const { entities } = await buildRecordEntities(alt, { org: '@proximify' })
     expect(entities[0].model).toBe('@acme/member')
   })
 })

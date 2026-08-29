@@ -44,8 +44,8 @@ import yaml from 'js-yaml'
 import { detectFoundationType } from '../site/foundation-ref.js'
 import { join, resolve } from 'node:path'
 
-import { resolveCollectionsConfig } from './collections-config.js'
-import { readEntityFile } from './collection-source.js'
+import { resolveQueriesConfig } from './queries-config.js'
+import { readEntityFile } from './entity-source.js'
 import { readRecordsConfig, resolveFolder, RECORDS_YML_RELPATH } from '../site/records-config.js'
 import {
   readEntityPool,
@@ -59,7 +59,7 @@ import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
-import { loadFreeformCollectionItem } from '../i18n/freeform.js'
+import { loadFreeformRecord } from '../i18n/freeform.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 // Identity/transport keys on a source record — never Model fields, never warned.
@@ -181,7 +181,7 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * already carries `$uuid` (back-filled from a prior sync) round-trips it.
  *
  * @param {object} params
- * @param {string} params.collectionName  - the site.yml collection name
+ * @param {string} params.queryName  - the site.yml collection name
  * @param {object[]} params.records        - [{ slug, ...fields }]
  * @param {object} params.declaration      - the `@uniweb/data-schema` declaration
  *        (from toDataSchemaDeclaration): `{ name, brief, sections }`
@@ -191,8 +191,8 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * @returns {{ entities: object[], warnings: string[] }} each entity is
  *   `{ id, uuid, model, file, document }` — `document` is the section-keyed body.
  */
-export function collectionRecordsToEntities({
-  collectionName,
+export function recordsToEntities({
+  queryName,
   records,
   declaration,
   sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale,
@@ -261,7 +261,7 @@ export function collectionRecordsToEntities({
   const warnings = []
   if (contentMatches.length > 1) {
     warnings.push(
-      `${collectionName}: ${declaration.name} has more than one content ` +
+      `${queryName}: ${declaration.name} has more than one content ` +
         `(markdown / html / prosemirror) field — the markdown body maps to ` +
         `"${bodyTarget.secName}.${bodyTarget.key}"`
     )
@@ -269,13 +269,13 @@ export function collectionRecordsToEntities({
   for (const record of records || []) {
     const slug = record.slug
     if (!slug) {
-      warnings.push(`${collectionName}: a record without a slug was skipped`)
+      warnings.push(`${queryName}: a record without a slug was skipped`)
       continue
     }
     // `$id` is the payload-local handle = the record's path under collections/
     // (`<collection>/<slug>`), globally unique within one sync so the @uniweb/folder
     // entity can point a leaf at it via `$ref`. An explicit frontmatter `$id` wins.
-    const id = record.$id || `${collectionName}/${slug}`
+    const id = record.$id || `${queryName}/${slug}`
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
@@ -304,13 +304,13 @@ export function collectionRecordsToEntities({
     for (const key of Object.keys(record)) {
       if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
       warnings.push(
-        `${collectionName}/${slug}: field "${key}" is not on ` +
+        `${queryName}/${slug}: field "${key}" is not on ` +
           `${declaration.name} — not synced`
       )
     }
     if (hasBody && !bodyTarget) {
       warnings.push(
-        `${collectionName}/${slug}: markdown body present but ` +
+        `${queryName}/${slug}: markdown body present but ` +
           `${declaration.name} has no content body field — body not synced`
       )
     }
@@ -331,9 +331,9 @@ export function collectionRecordsToEntities({
       id,
       uuid,
       slug,
-      collection: collectionName, // the @uniweb/folder groups leaves by this
+      collection: queryName, // the @uniweb/folder groups leaves by this
       model: declaration.name, // reference the Model BY NAME — importer resolves it
-      file: `entities/${collectionName}/${slug}.json`,
+      file: `entities/${queryName}/${slug}.json`,
       document,
     })
   }
@@ -346,9 +346,9 @@ export function collectionRecordsToEntities({
 // (site.js localizeContentTree). Only a `format: prosemirror` localized field can
 // take it (it is a PM doc on the wire; a markup `text` body stays a raw string).
 // Mutates the entity documents in place. Async — the free-form read hits the disk.
-async function applyFreeformCollectionOverrides({
+async function applyFreeformRecordOverrides({
   entities,
-  collectionName,
+  queryName,
   declaration,
   sourceLocale,
   targetLocales,
@@ -369,8 +369,8 @@ async function applyFreeformCollectionOverrides({
     // still a bare doc because no structural translation was present).
     const sourceDoc = isLocalizedContent(localized) ? localized[sourceLocale] : localized
     for (const locale of targetLocales) {
-      // loadFreeformCollectionItem returns { content, frontmatter, … } — doc is `.content`.
-      const body = (await loadFreeformCollectionItem({ slug: entity.slug }, entity.model, locale, localesBase))?.content
+      // loadFreeformRecord returns { content, frontmatter, … } — doc is `.content`.
+      const body = (await loadFreeformRecord({ slug: entity.slug }, entity.model, locale, localesBase))?.content
       if (!body) continue
       if (!isLocalizedContent(localized)) localized = { [sourceLocale]: sourceDoc }
       localized[locale] = body // free-form full body overrides the structural map
@@ -384,9 +384,9 @@ async function applyFreeformCollectionOverrides({
 // The collections in site.yml that opt into export (an object decl with `model:`).
 // The declared collections that opt into sync: a resolvable data schema present
 // (explicit or convention-defaulted) and not opted out (`sync: false`). Takes the
-// merged declarations from resolveCollectionsConfig (collections.yml over
+// merged declarations from resolveQueriesConfig (collections.yml over
 // site.yml::collections), so collections.yml is honored without re-reading.
-function syncableCollections(declarations) {
+function syncableQueries(declarations) {
   const out = []
   for (const decl of Object.values(declarations)) {
     if ((decl.schema || decl.model) && decl.sync !== false) out.push({ name: decl.name, decl })
@@ -476,7 +476,7 @@ function resolveDeclaration(schema, modelName) {
 
 // Load a query's ORIGINAL source records for export — the author's files,
 // untouched (raw frontmatter + raw markdown body, raw YAML/JSON, raw BibTeX). This
-// is deliberately NOT `processCollections` (the delivery pipeline that builds
+// is deliberately NOT `processQueries` (the delivery pipeline that builds
 // public/data, converts bodies to ProseMirror, and copies assets). Sync carries
 // the source.
 //
@@ -520,7 +520,7 @@ function loadSourceRecordsFromPool(poolBySchema, decl, placements) {
  *   default soft-skip) — not synced as entities; the composite deploy delivers
  *   them statically via the data ball.
  */
-export async function buildCollectionEntities(siteRoot, opts = {}) {
+export async function buildRecordEntities(siteRoot, opts = {}) {
   // Merged collections config (collections.yml over site.yml::collections). Reused
   // from the caller when provided (sync-package shares it with the folder builder).
   // ⭐ `records.yml` IS THE FOLDER, AND IT DECIDES WHAT SYNCS. Listing an entity
@@ -544,11 +544,11 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   if (recordsCfg.error) throw new Error(`uwx/collections: ${recordsCfg.error}`)
   const recordsState = recordsCfg.state
 
-  const colConfig = opts.collectionsConfig || (await resolveCollectionsConfig(siteRoot))
+  const colConfig = opts.queriesConfig || (await resolveQueriesConfig(siteRoot))
   if (!colConfig.folderSync) {
     return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
   }
-  const mapped = syncableCollections(colConfig.declarations)
+  const mapped = syncableQueries(colConfig.declarations)
   if (mapped.length === 0) return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
 
   // A Model declaration comes from a LOCAL foundation (offline) or, for a
@@ -728,8 +728,8 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
       }
     }
 
-    const mappedOut = collectionRecordsToEntities({
-      collectionName: name,
+    const mappedOut = recordsToEntities({
+      queryName: name,
       records: flat,
       declaration,
       sourceLocale,
@@ -738,9 +738,9 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     // Free-form per-locale body overrides (a full localized doc beats the structural
     // map) — only meaningful for a multi-locale site with a prosemirror content field.
     if (targetLocales.length > 0) {
-      await applyFreeformCollectionOverrides({
+      await applyFreeformRecordOverrides({
         entities: mappedOut.entities,
-        collectionName: name,
+        queryName: name,
         declaration,
         sourceLocale,
         targetLocales,
@@ -815,19 +815,19 @@ export function filterChanged(entities, index, { priorHashes = {}, sendAll = fal
 
 /**
  * Build a collection-only sync package. Thin composition over
- * `buildCollectionEntities` + `filterChanged` + `emitEntitySyncPackage`, kept for
+ * `buildRecordEntities` + `filterChanged` + `emitEntitySyncPackage`, kept for
  * the collection-only callers/tests. The combined site+collections path is
  * `emitSyncPackage` (sync-package.js).
  *
  * @param {string} siteRoot
- * @param {object} [opts] - buildCollectionEntities opts, plus `priorHashes`,
+ * @param {object} [opts] - buildRecordEntities opts, plus `priorHashes`,
  *        `sendAll`, `exporter`, `exportedAt`.
  * @returns {Promise<{ buffer: Buffer|null, models: string[], entityCount: number,
  *        warnings: string[], index: object[], hashes: Object<string,string>,
  *        skipped: number }>}
  */
-export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
-  const { entities, index, warnings, mappedCount } = await buildCollectionEntities(siteRoot, opts)
+export async function emitRecordSyncPackage(siteRoot, opts = {}) {
+  const { entities, index, warnings, mappedCount } = await buildRecordEntities(siteRoot, opts)
   if (mappedCount === 0) {
     throw new Error(
       'uwx/collections: no query declares a schema — nothing to export. ' +

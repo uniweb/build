@@ -14,9 +14,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  extractCollectionContent,
-  buildLocalizedCollections,
-} from '../../src/i18n/collections.js'
+  extractRecordContent,
+  buildLocalizedRecords,
+} from '../../src/i18n/records.js'
 
 let ROOT
 const w = (rel, body) => {
@@ -41,7 +41,7 @@ afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 describe('the manifest is keyed by the record', () => {
   it('contexts carry the record identity, not a query name', async () => {
     site()
-    const manifest = await extractCollectionContent(ROOT)
+    const manifest = await extractRecordContent(ROOT)
     const unit = Object.values(manifest.units).find((u) => u.source === 'Hello there')
     expect(unit).toBeTruthy()
     expect(unit.contexts).toEqual([{ record: 'article/hello' }])
@@ -55,7 +55,7 @@ describe('the manifest is keyed by the record', () => {
   // translate twice and can find neither of from the other.
   it('two queries over one schema produce ONE context, not two', async () => {
     site()
-    const manifest = await extractCollectionContent(ROOT)
+    const manifest = await extractRecordContent(ROOT)
     const unit = Object.values(manifest.units).find((u) => u.source === 'Hello there')
     expect(unit.contexts).toHaveLength(1)
   })
@@ -67,7 +67,7 @@ describe('the manifest is keyed by the record', () => {
     w('entities/std/person/ada.md', '---\nname: Ada Lovelace\n---\n')
     w('public/data/people.json', [{ slug: 'ada', name: 'Ada Lovelace' }])
 
-    const manifest = await extractCollectionContent(ROOT)
+    const manifest = await extractRecordContent(ROOT)
     const unit = Object.values(manifest.units).find((u) => u.source === 'Ada Lovelace')
     expect(unit.contexts).toEqual([{ record: 'std/person/ada' }])
   })
@@ -77,7 +77,7 @@ describe('the manifest is keyed by the record', () => {
   // right reason and all of them for the wrong one.
   it('CONTROL — extraction really produced units', async () => {
     site()
-    const manifest = await extractCollectionContent(ROOT)
+    const manifest = await extractRecordContent(ROOT)
     expect(Object.keys(manifest.units).length).toBeGreaterThan(0)
   })
 })
@@ -85,13 +85,13 @@ describe('the manifest is keyed by the record', () => {
 describe('extract → translate agree on the key', () => {
   it('a translation written against the manifest actually lands', async () => {
     site()
-    const manifest = await extractCollectionContent(ROOT)
+    const manifest = await extractRecordContent(ROOT)
     const [hash] = Object.entries(manifest.units).find(([, u]) => u.source === 'Hello there')
 
     // The locale file the author would write, keyed by the manifest's own hash.
     w(`locales/records/es.json`, { [hash]: 'Hola a todos' })
 
-    const outputs = await buildLocalizedCollections(ROOT, { locales: ['es'] })
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(outputs.es).toBeTruthy()
     const translated = JSON.parse(readFileSync(outputs.es.recent, 'utf8'))
     // ⚠️ THE WHOLE POINT: if extraction and translation derived the key
@@ -101,13 +101,13 @@ describe('extract → translate agree on the key', () => {
 
   it('the manifest lives at locales/records/, not locales/collections/', async () => {
     site()
-    const manifest = await extractCollectionContent(ROOT)
+    const manifest = await extractRecordContent(ROOT)
     const [hash] = Object.entries(manifest.units).find(([, u]) => u.source === 'Hello there')
     w('locales/records/es.json', { [hash]: 'Hola' })
     // a file at the OLD path is not consulted
     w('locales/collections/es.json', { [hash]: 'WRONG' })
 
-    const outputs = await buildLocalizedCollections(ROOT, { locales: ['es'] })
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(JSON.parse(readFileSync(outputs.es.recent, 'utf8'))[0].title).toBe('Hola')
   })
 })
@@ -124,7 +124,7 @@ describe('a translation failure is reported, not only logged', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     w('public/data/broken.json', '[{"slug": "x", ')  // truncated JSON
 
-    const outputs = await buildLocalizedCollections(ROOT, { locales: ['es'] })
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(outputs.failures).toBeTruthy()
     expect(outputs.failures[0]).toMatchObject({ locale: 'es', file: 'broken.json' })
     expect(err).toHaveBeenCalled()
@@ -137,7 +137,7 @@ describe('a translation failure is reported, not only logged', () => {
 
   it('CONTROL — a clean run reports no failures at all', async () => {
     site()
-    const outputs = await buildLocalizedCollections(ROOT, { locales: ['es'] })
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(outputs.failures).toBeUndefined()
   })
 })

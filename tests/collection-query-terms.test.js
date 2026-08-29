@@ -2,7 +2,7 @@
 // the build materializes it.
 //
 // ⛔ WHY. `where:` is the canonical predicate; `filter:` is the deprecated string
-// DSL it replaced. Until 2026-08-29 `parseCollectionConfig` read `filter` and never
+// DSL it replaced. Until 2026-08-29 `parseQueryConfig` read `filter` and never
 // `where`, and `collection-processor` applied only `filter` — so `where:` was
 // parsed, put on the sync wire, stored, and NEVER APPLIED. The deprecated term
 // worked and the canonical one did not.
@@ -19,8 +19,8 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveCollectionsConfig } from '../src/site/collections-config.js'
-import { processCollections } from '../src/site/collection-processor.js'
+import { resolveQueriesConfig } from '../src/site/queries-config.js'
+import { processQueries } from '../src/site/query-processor.js'
 
 let ROOT
 beforeEach(() => { ROOT = mkdtempSync(join(tmpdir(), 'query-terms-')) })
@@ -38,8 +38,8 @@ async function items(declExtra) {
   w('site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n  posts:\n    schema: "@/post"\n${declExtra}`)
   w('entities/post/a.md', '---\ntitle: A\ntier: gold\n---\n\nA\n')
   w('entities/post/b.md', '---\ntitle: B\ntier: silver\n---\n\nB\n')
-  const cfg = await resolveCollectionsConfig(SITE)
-  const out = await processCollections(SITE, cfg.declarations)
+  const cfg = await resolveQueriesConfig(SITE)
+  const out = await processQueries(SITE, cfg.declarations)
   return (out.posts?.items || out.posts || []).map((i) => i.title)
 }
 

@@ -10,7 +10,7 @@
  *   locales/freeform/{locale}/
  *     pages/{pageRoute}/{stableId}.md      - By route
  *     page-ids/{pageId}/{stableId}.md      - By page ID (stable)
- *     collections/{collectionName}/{slug}.md - Collection items
+ *     collections/{queryName}/{slug}.md - Collection items
  *
  * Resolution order for sections:
  *   1. page-ids/{pageId}/{stableId}.md (if page has id:)
@@ -146,7 +146,7 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
  * Path: entities/{schema dirs}/{slug}.md — mirroring the pool exactly.
  *
  * ⛔ KEYED BY THE ENTITY, NOT BY A QUERY. It used to be
- * `collections/{collectionName}/{slug}.md`, which was fine only while a
+ * `collections/{queryName}/{slug}.md`, which was fine only while a
  * collection was also a directory of files. With `entities/{schema}/` as the pool,
  * TWO queries can cover one schema — so a query-keyed path would make an author
  * write the same translation once per query, and finding neither from the other.
@@ -159,11 +159,11 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
  * @param {string} localesDir - Path to locales directory
  * @returns {Promise<Object|null>} Parsed translation { frontmatter, content } or null
  */
-export async function loadFreeformCollectionItem(item, schema, locale, localesDir) {
+export async function loadFreeformRecord(item, schema, locale, localesDir) {
   const slug = item.slug
   if (!slug) return null
 
-  const rel = buildFreeformCollectionPath(schema, slug)
+  const rel = buildFreeformRecordPath(schema, slug)
   if (!rel) return null
 
   const freeformDir = join(localesDir, 'freeform', locale)
@@ -279,7 +279,7 @@ export async function getFreeformFileMeta(filePath) {
  * Parse a free-form translation file path to extract metadata
  *
  * @param {string} relativePath - Path relative to locale's freeform dir
- * @returns {Object} { type, pageRoute?, pageId?, collectionName?, stableId, slug? }
+ * @returns {Object} { type, pageRoute?, pageId?, queryName?, stableId, slug? }
  */
 export function parseFreeformPath(relativePath) {
   const parts = relativePath.split('/')
@@ -300,10 +300,10 @@ export function parseFreeformPath(relativePath) {
   }
 
   if (parts[0] === ENTITIES_DIR) {
-    // collections/articles/getting-started.md → { type: 'collection', collectionName: 'articles', slug: 'getting-started' }
+    // collections/articles/getting-started.md → { type: 'collection', queryName: 'articles', slug: 'getting-started' }
     const slug = parts[parts.length - 1].replace('.md', '')
-    const collectionName = parts[1]
-    return { type: 'collection', collectionName, slug }
+    const queryName = parts[1]
+    return { type: 'collection', queryName, slug }
   }
 
   return { type: 'unknown', relativePath }
@@ -350,7 +350,7 @@ export function buildFreeformPath(section, page, preferPageId = true) {
  * @returns {string|null} e.g. `entities/article/getting-started.md`, or null for a
  *   ref this layout cannot express
  */
-export function buildFreeformCollectionPath(schema, slug) {
+export function buildFreeformRecordPath(schema, slug) {
   const dirs = poolDirsForSchema(schema)
   return dirs ? `${ENTITIES_DIR}/${dirs.join('/')}/${slug}.md` : null
 }

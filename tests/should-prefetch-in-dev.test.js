@@ -2,7 +2,7 @@ import { shouldPrefetchInDev } from '../src/site/plugin.js'
 import { parseFetchConfig } from '../src/site/data-fetcher.js'
 // Derived, never re-spelled — the convention is pinned once, in
 // `@uniweb/core`'s tests/data-paths.test.js.
-import { collectionDataUrl } from '@uniweb/core'
+import { queryDataUrl } from '@uniweb/core'
 
 // In dev there is no prerender, so we embed a fetch into the boot payload only
 // when the browser cannot fetch it live itself. Local file collections and
@@ -12,7 +12,7 @@ describe('shouldPrefetchInDev', () => {
   it('does not embed a local file-based collection (runtime fetches /data/*.json live)', () => {
     // { query: 'books' } → { path: '/data/books.json', prerender: true, ... }
     const cfg = parseFetchConfig({ query: 'books' })
-    expect(cfg.path).toBe(collectionDataUrl('books'))
+    expect(cfg.path).toBe(queryDataUrl('books'))
     expect(cfg.url).toBeUndefined()
     expect(shouldPrefetchInDev(cfg)).toBe(false)
   })

@@ -1,6 +1,6 @@
 // Read a file-based collection's ORIGINAL source records for sync — the author's
-// files, untouched. This is deliberately NOT `processCollections`
-// (`build/src/site/collection-processor.js`): that is the DELIVERY pipeline that
+// files, untouched. This is deliberately NOT `processQueries`
+// (`build/src/site/query-processor.js`): that is the DELIVERY pipeline that
 // builds `public/data/<name>.json` — it converts markdown bodies to ProseMirror,
 // derives excerpt/image, rewrites asset paths, and copies files into
 // `public/collections/`. Sync carries the source, so it must read the source:

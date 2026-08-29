@@ -17,23 +17,23 @@ import { syncManifests, formatSyncReport } from './sync.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
 import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
 import {
-  extractCollectionContent,
-  buildLocalizedCollections,
-  getCollectionLocales,
-  translateCollectionData,
+  extractRecordContent,
+  buildLocalizedRecords,
+  getRecordLocales,
+  translateRecordData,
   RECORDS_DIR
-} from './collections.js'
+} from './records.js'
 import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
 
 // Free-form translation support
 import {
   loadFreeformTranslation,
-  loadFreeformCollectionItem,
+  loadFreeformRecord,
   discoverFreeformTranslations,
   getFreeformFileMeta,
   parseFreeformPath,
   buildFreeformPath,
-  buildFreeformCollectionPath
+  buildFreeformRecordPath
 } from './freeform.js'
 import {
   computeSourceHash,
@@ -67,10 +67,10 @@ export {
   formatAuditReport,
 
   // Collection functions
-  extractCollectionContent,
-  buildLocalizedCollections,
-  getCollectionLocales,
-  translateCollectionData,
+  extractRecordContent,
+  buildLocalizedRecords,
+  getRecordLocales,
+  translateRecordData,
   RECORDS_DIR,
 
   // Locale resolution
@@ -79,12 +79,12 @@ export {
 
   // Free-form translation functions
   loadFreeformTranslation,
-  loadFreeformCollectionItem,
+  loadFreeformRecord,
   discoverFreeformTranslations,
   getFreeformFileMeta,
   parseFreeformPath,
   buildFreeformPath,
-  buildFreeformCollectionPath,
+  buildFreeformRecordPath,
 
   // Free-form manifest functions
   computeSourceHash,
@@ -221,19 +221,19 @@ export async function extractManifest(siteRoot, siteContent, options = {}) {
  * @param {Object} options - Options
  * @returns {Promise<Object>} { manifest, report }
  */
-export async function extractCollectionManifest(siteRoot, options = {}) {
+export async function extractRecordManifest(siteRoot, options = {}) {
   const { localesDir = DEFAULTS.localesDir, dryRun = false } = options
 
   // Extract translatable content from collections
-  const manifest = await extractCollectionContent(siteRoot)
+  const manifest = await extractRecordContent(siteRoot)
 
   // Ensure collections locales directory exists
-  const collectionsDir = join(siteRoot, localesDir, RECORDS_DIR)
-  if (!existsSync(collectionsDir)) {
-    await mkdir(collectionsDir, { recursive: true })
+  const recordLocalesDir = join(siteRoot, localesDir, RECORDS_DIR)
+  if (!existsSync(recordLocalesDir)) {
+    await mkdir(recordLocalesDir, { recursive: true })
   }
 
-  const manifestPath = join(collectionsDir, 'manifest.json')
+  const manifestPath = join(recordLocalesDir, 'manifest.json')
 
   // Load previous manifest for comparison
   let previousManifest = null

@@ -13,7 +13,7 @@ import {
   pageSectionsToFiles,
   siteContentDocumentToProject,
   siteProjectToDocument,
-  declarationsToCollectionsYml,
+  declarationsToQueriesYml,
 } from '../src/uwx/index.js'
 import { computeHash } from '../src/i18n/hash.js'
 
@@ -597,7 +597,7 @@ describe('collection declarations — round-trip against the real producer', () 
       // which is what this case is asserting. Same for the default pool path.
       queries: [{ $id: 'articles', name: 'articles', schema: '@/articles' }],
     }
-    const report = declarationsToCollectionsYml({ document, siteRoot: site })
+    const report = declarationsToQueriesYml({ document, siteRoot: site })
     expect(report.collections).toBe('updated')
 
     const out = yaml.load(readFileSync(join(site, 'queries.yml'), 'utf8'))

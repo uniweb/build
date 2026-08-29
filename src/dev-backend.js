@@ -65,7 +65,7 @@ if (!existsSync(ENTITIES_ROOT)) {
 
 // ─── Load collections from disk ─────────────────────────────────────────────
 
-async function loadCollection(dir) {
+async function loadRecords(dir) {
   const files = await readdir(dir)
   const items = []
   for (const file of files) {
@@ -94,14 +94,14 @@ async function loadCollection(dir) {
   return items
 }
 
-async function loadAllCollections() {
+async function loadAllRecords() {
   const entries = await readdir(ENTITIES_ROOT)
   const collections = {}
   for (const name of entries) {
     const fullPath = join(ENTITIES_ROOT, name)
     const s = await stat(fullPath)
     if (!s.isDirectory()) continue
-    collections[name] = await loadCollection(fullPath)
+    collections[name] = await loadRecords(fullPath)
     console.log(`[dev-backend] Loaded ${collections[name].length} items from "${name}"`)
   }
   return collections
@@ -189,9 +189,9 @@ async function handleRequest(req, res, collections) {
   const match = url.pathname.match(/^\/api\/([^/]+)(?:\/([^/]+))?$/)
   if (!match) return send(res, 404, { error: 'Not found' })
 
-  const [, collectionName, slug] = match
-  const items = collections[collectionName]
-  if (!items) return send(res, 404, { error: `Unknown collection: ${collectionName}` })
+  const [, queryName, slug] = match
+  const items = collections[queryName]
+  if (!items) return send(res, 404, { error: `Unknown collection: ${queryName}` })
 
   // Single record by slug.
   if (slug) {
@@ -221,9 +221,9 @@ async function handleRequest(req, res, collections) {
 
 // ─── Boot ───────────────────────────────────────────────────────────────────
 
-const collections = await loadAllCollections()
-const knownCollections = Object.keys(collections)
-if (knownCollections.length === 0) {
+const collections = await loadAllRecords()
+const knownQueries = Object.keys(collections)
+if (knownQueries.length === 0) {
   console.warn('[dev-backend] No collections found.')
 }
 
@@ -236,9 +236,9 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`[dev-backend] Listening on http://localhost:${PORT}`)
-  console.log(`[dev-backend] Collections: ${knownCollections.join(', ') || '(none)'}`)
+  console.log(`[dev-backend] Collections: ${knownQueries.join(', ') || '(none)'}`)
   console.log('[dev-backend] Endpoints:')
-  for (const name of knownCollections) {
+  for (const name of knownQueries) {
     console.log(`  GET  /api/${name}                  — full collection`)
     console.log(`  GET  /api/${name}?_where=<JSON>    — filtered`)
     console.log(`  GET  /api/${name}/{slug}            — single record`)

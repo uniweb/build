@@ -9,7 +9,7 @@ import {
 } from '../src/site/data-fetcher.js'
 // Derived, never re-spelled — the convention is pinned once, in
 // `@uniweb/core`'s tests/data-paths.test.js.
-import { collectionDataUrl } from '@uniweb/core'
+import { queryDataUrl } from '@uniweb/core'
 
 describe('parseFetchConfig', () => {
   it('returns null for falsy input', () => {
@@ -139,7 +139,7 @@ describe('parseFetchConfig', () => {
       const config = { query: 'articles' }
       const result = parseFetchConfig(config)
 
-      expect(result.path).toBe(collectionDataUrl('articles'))
+      expect(result.path).toBe(queryDataUrl('articles'))
       expect(result.schema).toBe('articles')
       expect(result.prerender).toBe(true)
     })
@@ -148,7 +148,7 @@ describe('parseFetchConfig', () => {
       const config = { query: 'articles', limit: 3 }
       const result = parseFetchConfig(config)
 
-      expect(result.path).toBe(collectionDataUrl('articles'))
+      expect(result.path).toBe(queryDataUrl('articles'))
       expect(result.limit).toBe(3)
     })
 
@@ -183,7 +183,7 @@ describe('parseFetchConfig', () => {
       }
       const result = parseFetchConfig(config)
 
-      expect(result.path).toBe(collectionDataUrl('articles'))
+      expect(result.path).toBe(queryDataUrl('articles'))
       expect(result.schema).toBe('posts')
       expect(result.limit).toBe(5)
       expect(result.sort).toBe('date desc')

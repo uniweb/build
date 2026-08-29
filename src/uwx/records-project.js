@@ -35,13 +35,13 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
-import { parseFrontmatter } from './collection-source.js'
+import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
-import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
+import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
 import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import { isContentBodyField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
-import { buildFreeformCollectionPath } from '../i18n/freeform.js'
+import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
 // Single-record source extensions we scan + place (BibTeX is multi-record → out).
 const EXT_FOR_FORMAT = { md: '.md', yaml: '.yml', json: '.json' }
@@ -73,16 +73,16 @@ function readFileUuid(filePath, format) {
 }
 
 /**
- * Find the single-record file in `collectionDir` whose `$uuid` matches, or null.
+ * Find the single-record file in `poolDir` whose `$uuid` matches, or null.
  * @returns {{ path: string, format: 'md'|'yaml'|'json' }|null}
  */
-export function findRecordFileByUuid(collectionDir, uuid) {
-  if (!uuid || !existsSync(collectionDir)) return null
-  for (const entry of readdirSync(collectionDir)) {
+export function findRecordFileByUuid(poolDir, uuid) {
+  if (!uuid || !existsSync(poolDir)) return null
+  for (const entry of readdirSync(poolDir)) {
     if (entry.startsWith('_')) continue
     const format = formatForExt(extname(entry).toLowerCase())
     if (!format) continue
-    const path = join(collectionDir, entry)
+    const path = join(poolDir, entry)
     if (readFileUuid(path, format) === uuid) return { path, format }
   }
   return null
@@ -91,9 +91,9 @@ export function findRecordFileByUuid(collectionDir, uuid) {
 // The format to give a NEW record file in a collection: match the collection's
 // existing single-record files, else markdown when the Model's brief carries a
 // content body field (so the body has a home), else YAML.
-function defaultFormat(collectionDir, declaration) {
-  if (existsSync(collectionDir)) {
-    for (const entry of readdirSync(collectionDir)) {
+function defaultFormat(poolDir, declaration) {
+  if (existsSync(poolDir)) {
+    for (const entry of readdirSync(poolDir)) {
       if (entry.startsWith('_')) continue
       const format = formatForExt(extname(entry).toLowerCase())
       if (format) return format
@@ -201,7 +201,7 @@ function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
 }
 
-// Invert one wire declaration (`collectionsNested` output) back to its file-side
+// Invert one wire declaration (`queriesNested` output) back to its file-side
 // shape. Returns `{ name, decl }`.
 //
 //  - `path:` is written VERBATIM, and omitted entirely when it equals the default
@@ -294,7 +294,7 @@ function declToFileShape(d, dataSchemas = null) {
   setIf(decl, 'queryable', d.queryable)
 
   // ⛔ PRESERVE WHAT WE DO NOT MODEL — the pull half of the same rule the emitter
-  // follows (`site.js::collectionsNested`). A wire field this function has not been
+  // follows (`site.js::queriesNested`). A wire field this function has not been
   // taught is dropped here and then absent on the next push, where the backend's
   // wholesale `data` replace destroys it. Two allowlists facing each other make the
   // round trip lossy in BOTH directions with nothing reporting it.
@@ -312,10 +312,10 @@ function declToFileShape(d, dataSchemas = null) {
 
 /**
  * Project the QUERY declarations carried in a site-content document
- * (`document.queries`, the inverse of site.js `collectionsNested`) back to
+ * (`document.queries`, the inverse of site.js `queriesNested`) back to
  * `queries.yml` — the one home. Untouched queries are preserved via the
  * shallow-merge writer. The record FILES are written elsewhere
- * (collectionsToProject); this is only the declaration config.
+ * (recordsToProject); this is only the declaration config.
  *
  * Idempotent and non-destructive: with no declarations it writes nothing (so a
  * pull that doesn't carry collections never clobbers a hand-authored file).
@@ -325,7 +325,7 @@ function declToFileShape(d, dataSchemas = null) {
  * @param {string} params.siteRoot
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
-export function declarationsToCollectionsYml({ document, siteRoot }) {
+export function declarationsToQueriesYml({ document, siteRoot }) {
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
   if (decls.length === 0) return report
@@ -377,7 +377,7 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
  * @param {string} params.siteRoot
  * @param {Map<string,string>} params.poolPathByUuid - record `$uuid` → the path
  *        under `entities/` of the file just written for it. Supplied by
- *        `collectionsToProject`, which is the only thing that knows the extension
+ *        `recordsToProject`, which is the only thing that knows the extension
  *        each record landed with.
  * @returns {{ status: 'updated'|'unchanged'|'skipped', entries: Array, warnings: string[] }}
  */
@@ -436,7 +436,7 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid }) {
  * @param {string} [params.opts.sourceLocale]
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
-export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
+export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
   const { resolveDeclaration, sourceLocale = 'en' } = opts
   // The site's own org, so a `@org/x` model the producer resolved from `@/x` is
   // placed back where the author wrote it. Read from `site.yml::$org` unless the
@@ -474,8 +474,8 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
       continue
     }
 
-    const collectionDir = recordDirFor(siteRoot, document.$model, selfOrg)
-    if (!collectionDir) {
+    const poolDir = recordDirFor(siteRoot, document.$model, selfOrg)
+    if (!poolDir) {
       skipped.push({
         uuid: document.$uuid,
         slug: where.slug,
@@ -483,7 +483,7 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
       })
       continue
     }
-    const existing = document.$uuid ? findRecordFileByUuid(collectionDir, document.$uuid) : null
+    const existing = document.$uuid ? findRecordFileByUuid(poolDir, document.$uuid) : null
 
     let filePath
     let format
@@ -493,14 +493,14 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
       format = existing.format
       isNew = false
     } else {
-      format = defaultFormat(collectionDir, declaration)
-      filePath = join(collectionDir, where.slug + EXT_FOR_FORMAT[format])
+      format = defaultFormat(poolDir, declaration)
+      filePath = join(poolDir, where.slug + EXT_FOR_FORMAT[format])
       isNew = true
     }
 
     // The free-form home for this record's content body (locale-independent); a
     // target-locale full-doc body is written under locales/freeform/{locale}/here.
-    const freeformRelPath = buildFreeformCollectionPath(document.$model, where.slug)
+    const freeformRelPath = buildFreeformRecordPath(document.$model, where.slug)
 
     let status
     try {

@@ -24,7 +24,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { resolveCollectionsConfig, toConfigCollections } from './collections-config.js'
+import { resolveQueriesConfig, toConfigQueries } from './queries-config.js'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { join, parse, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
@@ -824,8 +824,8 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // data: [team, articles] → fetch: { query: team } (first item, others via inheritData)
   let resolvedFetch = fetch
   if (!fetch && data) {
-    const collectionName = Array.isArray(data) ? data[0] : data
-    resolvedFetch = { query: collectionName }
+    const queryName = Array.isArray(data) ? data[0] : data
+    resolvedFetch = { query: queryName }
   }
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null
@@ -2164,8 +2164,8 @@ export async function collectSiteContent(sitePath, options = {}) {
   // The backend's projector never emits it (their measurement: 17 `config` keys,
   // not this one), and hosting renders with framework's code. There was nobody to
   // coordinate with, which is exactly why it had no excuse to stay wrong.
-  const collections = toConfigCollections(
-    (await resolveCollectionsConfig(sitePath, { siteYml: siteConfig })).declarations
+  const collections = toConfigQueries(
+    (await resolveQueriesConfig(sitePath, { siteYml: siteConfig })).declarations
   )
   if (collections) siteConfig.queries = collections
 

@@ -20,7 +20,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { processCollections } from '../src/site/collection-processor.js'
+import { processQueries } from '../src/site/query-processor.js'
 import { applyWhere } from '../src/site/data-fetcher.js'
 
 let ROOT
@@ -31,7 +31,7 @@ const w = (rel, body) => {
 }
 const entity = (title) => `---\ntitle: ${title}\n---\n\nBody.\n`
 const deliver = () =>
-  processCollections(ROOT, { pubs: { name: 'pubs', schema: '@/publication' } }, undefined, '/')
+  processQueries(ROOT, { pubs: { name: 'pubs', schema: '@/publication' } }, undefined, '/')
 
 let warn, log
 beforeEach(() => {
@@ -121,7 +121,7 @@ describe('⛔ records.yml decides what is PUBLISHED here, not only what syncs', 
 // ⚠️ The tersest thing an author can write in `queries.yml` is a bare key —
 // `articles:` — which YAML parses as NULL. The resolver normalizes it away, so
 // the build path never sees it; a caller reading raw config (as
-// `processCollections`'s own docstring shows) crashed on it.
+// `processQueries`'s own docstring shows) crashed on it.
 describe('a bare query key', () => {
   it('does not crash the processor, and says it matched nothing', async () => {
     w('entities/publication/a.md', entity('A'))
@@ -129,7 +129,7 @@ describe('a bare query key', () => {
     // resolver, and a second copy here is exactly the drift this codebase keeps
     // paying for. Through the real path the resolver has already filled
     // `schema: '@/publication'`, which the tests above exercise.
-    const out = await processCollections(ROOT, { publication: null }, undefined, '/')
+    const out = await processQueries(ROOT, { publication: null }, undefined, '/')
     expect(out.publication).toEqual([])
     expect(warn.mock.calls.map((c) => String(c[0])).some((m) => m.includes('matches no records'))).toBe(true)
   })

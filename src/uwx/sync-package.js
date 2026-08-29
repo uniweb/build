@@ -2,7 +2,7 @@
 // lanes, each its own `.uwx`:
 //
 //   - site-content lane  → one `@uniweb/site-content` entity (the static half).
-//   - collections lane   → one `@uniweb/folder` entity + the collection records it
+//   - records lane      → one `@uniweb/folder` entity + the record entities it
 //                          references (the dynamic half; the `$ref` closure rides
 //                          together so brand-new records resolve in one call).
 //
@@ -14,12 +14,12 @@
 //
 // "Send only changed" spans both lanes via one content-hash map (the sync-cache):
 //   - site-content lane fires iff the site entity changed.
-//   - collections lane fires iff the folder changed OR any record changed — and when
+//   - records lane fires iff the folder changed OR any record changed — and when
 //     it fires it carries the FULL folder (for the `$ref` closure + binding) plus the
-//     changed records. An untouched site with collections pushes nothing on either
+//     changed records. An untouched site with records pushes nothing on either
 //     lane (the idempotent no-op).
 
-import { buildCollectionEntities, entityContentHash } from './collections.js'
+import { buildRecordEntities, entityContentHash } from './records.js'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
@@ -235,11 +235,11 @@ function rewriteEntityAssets(node, map, ids) {
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
- *   collections: { buffer, entityCount, index, models }|null,
+ *   records: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], skipped: number,
  *   schemaless: Array<{name: string, model: string}>, localAssets: string[],
  *   applied: object }>}
- *   `schemaless` lists collections that resolved no data schema (soft-skipped from
+ *   `schemaless` lists queries that resolved no data schema (soft-skipped from
  *   the sync) — the composite deploy delivers these statically via the data ball.
  *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
  *   must upload + rewrite to serve URLs; co-located refs are warned and skipped.
@@ -247,7 +247,7 @@ function rewriteEntityAssets(node, map, ids) {
  *   (`assetRewrite` / `assetIds` / `injectInfo` / `injectExtensions`), ready to be
  *   passed straight back as opts. A caller that banks the `hashes` must bank this
  *   beside them, or an offline re-emit cannot reproduce the document they describe.
- *   Each lane is null when it has nothing to push. The collections `index` keeps a
+ *   Each lane is null when it has nothing to push. The records `index` keeps a
  *   leading `{ kind: 'folder' }` placeholder (submission position 0 → the folder
  *   entity) so record back-fill stays positionally aligned; the folder itself has no
  *   uuid to back-fill.
@@ -261,13 +261,13 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const exporter = opts.exporter
   const exportedAt = opts.exportedAt
 
-  const col = await buildCollectionEntities(siteRoot, {
+  const col = await buildRecordEntities(siteRoot, {
     ...(opts.foundationDir ? { foundationDir: opts.foundationDir } : {}),
     ...(opts.resolveModel ? { resolveModel: opts.resolveModel } : {}),
     ...(sourceLocale ? { sourceLocale } : {}),
     // The publish org — resolves a foundation-relative `@/x` model ref into
     // `@org/x` before it ships. Absent on an offline probe, which is why
-    // buildCollectionEntities warns rather than throws.
+    // buildRecordEntities warns rather than throws.
     ...(opts.org ? { org: opts.org } : {}),
   })
   const warnings = [...col.warnings, ...(col.folder?.warnings ?? [])]
@@ -299,12 +299,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // resolve, most often), and the record is simply absent from the site.
   if (folder?.warnings?.length) warnings.push(...folder.warnings)
 
-  // `collectionUuids` — identity for the `collections` section, keyed by collection
-  // NAME because a declaration has no file of its own (see collectionsNested).
+  // `queryUuids` — identity for the `queries` section, keyed by query
+  // NAME because a declaration has no file of its own (see queriesNested).
   const siteDoc = includeSite
     ? await siteProjectToDocument(siteRoot, {
         sourceLocale,
-        ...(opts.collectionUuids ? { collectionUuids: opts.collectionUuids } : {})
+        ...(opts.queryUuids ? { queryUuids: opts.queryUuids } : {})
       })
     : null
   // Deploy-derived `info` fields (e.g. `data_bundle`, the static-data ball URL) are
@@ -412,14 +412,14 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     return isChanged
   }
 
-  // --- collections lane --------------------------------------------------------
+  // --- records lane ------------------------------------------------------------
   // changed() has side effects (hashes/skipped), so evaluate every entity exactly
   // once, in a stable order: folder, then each record.
   const folderChanged = folder ? changed(folder) : false
   const recordChanged = col.entities.map((e, i) => ({ entity: e, index: col.index[i], changed: changed(e) }))
   const changedRecords = recordChanged.filter((r) => r.changed)
 
-  let collections = null
+  let records = null
   if (folder && (folderChanged || changedRecords.length > 0)) {
     // Folder first (always, for the `$ref` closure), then changed records. The
     // leading `{ kind: 'folder' }` keeps submission position 0 aligned for record
@@ -430,7 +430,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // filtered out here by send-only-changed. Declare them all (the backend rejects a
     // folder that references an undeclared Model).
     const referencedModels = [...collectReferencedModels(folder.document, new Set())]
-    collections = { ...emitLane(entities, exporter, exportedAt, referencedModels), index }
+    records = { ...emitLane(entities, exporter, exportedAt, referencedModels), index }
   }
 
   // --- site-content lane -------------------------------------------------------
@@ -469,7 +469,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   }
 
   return {
-    siteContent, collections, siteContentUuid, hashes, warnings, skipped,
+    siteContent, records, siteContentUuid, hashes, warnings, skipped,
     schemaless: col.schemaless, localAssets, applied,
     // { stamped, unknown } when identity was applied; null when the caller passed
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed

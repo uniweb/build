@@ -1,5 +1,5 @@
 // Using Jest (built-in globals, no imports needed)
-import { processCollections, writeCollectionFiles } from '../src/site/collection-processor.js'
+import { processQueries, writeQueryFiles } from '../src/site/query-processor.js'
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -47,7 +47,7 @@ describe('Collection Processor', () => {
       const root = join(testDir, 'entities', 'note')
       writeRecord(root, 'notes.md', 'From markdown')
       writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
-      await processCollections(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
+      await processQueries(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
       const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('slug "notes"'))
       expect(msg).toBeTruthy()
       warn.mockRestore()
@@ -60,7 +60,7 @@ describe('Collection Processor', () => {
       const root = join(testDir, 'entities', 'note')
       writeRecord(root, 'notes.md', 'From markdown')
       writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
-      const out = await processCollections(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
+      const out = await processQueries(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
       expect(out.notes).toHaveLength(2)
       warn.mockRestore()
     })
@@ -69,7 +69,7 @@ describe('Collection Processor', () => {
       const root = join(testDir, 'entities', 'flat')
       writeRecord(root, 'a.md', 'A')
       writeRecord(root, 'b.md', 'B')
-      const out = await processCollections(
+      const out = await processQueries(
         testDir,
         { flat: { name: 'flat', schema: '@/flat', route: '/f' } },
         undefined,
@@ -81,7 +81,7 @@ describe('Collection Processor', () => {
     })
   })
 
-  describe('processCollections', () => {
+  describe('processQueries', () => {
     it('should process markdown files into collection items', async () => {
       // Create test library folder
       const contentDir = join(testDir, 'entities', 'articles')
@@ -100,7 +100,7 @@ tags: [test, example]
 This is a test article.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         articles: {
           schema: '@/articles',
           sort: 'date desc'
@@ -142,7 +142,7 @@ published: false
 Draft content.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         articles: '@/articles'
       })
 
@@ -168,7 +168,7 @@ category: news
 Content.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         posts: {
           schema: '@/posts',
           filter: 'category == tutorial'
@@ -201,7 +201,7 @@ order: 2
 ---
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         items: {
           schema: '@/items',
           sort: 'order asc'
@@ -223,7 +223,7 @@ order: ${i}
 `)
       }
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         posts: {
           schema: '@/posts',
           sort: 'order asc',
@@ -235,7 +235,7 @@ order: ${i}
     })
 
     it('should handle missing collection folder gracefully', async () => {
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         articles: '@/nonexistent'
       })
 
@@ -243,7 +243,7 @@ order: ${i}
     })
 
     it('should return empty object for no collections config', async () => {
-      const collections = await processCollections(testDir, null)
+      const collections = await processQueries(testDir, null)
       expect(collections).toEqual({})
     })
 
@@ -258,7 +258,7 @@ title: My Article
 Content here.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         articles: {
           schema: '@/articles',
           route: '/blog'
@@ -280,7 +280,7 @@ title: Test Post
 Content.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         posts: {
           schema: '@/posts',
           route: '/news/'
@@ -301,7 +301,7 @@ title: Item
 Content.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         items: '@/items'
       })
 
@@ -309,7 +309,7 @@ Content.
     })
   })
 
-  describe('writeCollectionFiles', () => {
+  describe('writeQueryFiles', () => {
     it('should write JSON files to public/data/', async () => {
       const collections = {
         articles: [
@@ -317,7 +317,7 @@ Content.
         ]
       }
 
-      await writeCollectionFiles(testDir, collections)
+      await writeQueryFiles(testDir, collections)
 
       const outputPath = join(testDir, 'public', DATA_DIR, 'articles.json')
       expect(existsSync(outputPath)).toBe(true)
@@ -328,7 +328,7 @@ Content.
     })
 
     it('should handle empty collections', async () => {
-      await writeCollectionFiles(testDir, {})
+      await writeQueryFiles(testDir, {})
       // Should not throw
     })
   })
@@ -349,7 +349,7 @@ Content.
   role: writer
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         team: '@/team'
       })
 
@@ -373,7 +373,7 @@ Content.
 role: writer
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         team: '@/team'
       })
 
@@ -391,7 +391,7 @@ role: writer
 role: engineer
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         team: '@/team'
       })
 
@@ -421,7 +421,7 @@ role: engineer
 }
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         bibliography: '@/bibliography'
       })
 
@@ -458,7 +458,7 @@ title: "On the Tendency of Varieties"
 year: 1858
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         bibliography: '@/bibliography'
       })
 
@@ -491,7 +491,7 @@ year: 1858
 }
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         bibliography: '@/bibliography'
       })
 
@@ -511,14 +511,14 @@ year: 1858
 }
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         bibliography: {
           schema: '@/bibliography',
           deferred: ['author']
         }
       })
 
-      await writeCollectionFiles(testDir, collections, {
+      await writeQueryFiles(testDir, collections, {
         bibliography: {
           schema: '@/bibliography',
           deferred: ['author']
@@ -547,7 +547,7 @@ This is the first paragraph of the article that should become the excerpt.
 This is the second paragraph.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         posts: '@/posts'
       })
 
@@ -566,7 +566,7 @@ excerpt: Custom excerpt here
 This is the body content.
 `)
 
-      const collections = await processCollections(testDir, {
+      const collections = await processQueries(testDir, {
         posts: '@/posts'
       })
 

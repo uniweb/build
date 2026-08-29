@@ -61,7 +61,7 @@ async function readJsonTree(dir) {
 
 // The collection a `dist/data` relpath belongs to: the first path segment, minus a
 // trailing `.json`. `articles.json` → `articles`; `articles/hello.json` → `articles`.
-function collectionOf(relPath) {
+function queryOf(relPath) {
   const first = relPath.split('/')[0]
   return first.endsWith('.json') ? first.slice(0, -5) : first
 }
@@ -79,7 +79,7 @@ export async function collectSchemalessData(distDir, schemalessNames = []) {
   const allData = await readJsonTree(join(distDir, DATA_DIR))
   const data = {}
   for (const [relPath, value] of Object.entries(allData)) {
-    if (schemaless.has(collectionOf(relPath))) data[relPath] = value
+    if (schemaless.has(queryOf(relPath))) data[relPath] = value
   }
   // Agent projections deliberately do NOT ride the ball.
   //

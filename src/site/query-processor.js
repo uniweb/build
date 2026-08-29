@@ -45,8 +45,8 @@
  *   sort: date desc
  *
  * // Usage
- * const collections = await processCollections(siteDir, config.queries)
- * await writeCollectionFiles(siteDir, collections)
+ * const collections = await processQueries(siteDir, config.queries)
+ * await writeQueryFiles(siteDir, collections)
  */
 
 import { readFile, readdir, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
@@ -87,10 +87,10 @@ try {
  *
  * @example
  * // Simple form
- * parseCollectionConfig('articles', 'collections/articles')
+ * parseQueryConfig('articles', 'collections/articles')
  *
  * // Extended form
- * parseCollectionConfig('articles', {
+ * parseQueryConfig('articles', {
  *   path: 'collections/articles',
  *   route: '/blog',
  *   sort: 'date desc',
@@ -98,7 +98,7 @@ try {
  *   limit: 100
  * })
  */
-function parseCollectionConfig(name, config) {
+function parseQueryConfig(name, config) {
   // ⚠️ `queries.yml`'s TERSEST form is a bare key — `articles:` — which YAML
   // parses as NULL. The resolver normalizes that away, so the build path never
   // sees it; a caller reading raw config (as this function's own docstring
@@ -326,14 +326,14 @@ function isExternalUrl(src) {
  * @param {Object} content - ProseMirror document
  * @param {string} itemPath - Path to the markdown file
  * @param {string} siteRoot - Site root directory
- * @param {string} collectionName - Name of the collection (e.g., 'articles')
+ * @param {string} queryName - Name of the collection (e.g., 'articles')
  * @returns {Promise<Object>} Asset manifest for this item
  */
-async function processCollectionAssets(content, itemPath, siteRoot, collectionName, basePath) {
+async function processRecordAssets(content, itemPath, siteRoot, queryName, basePath) {
   const assets = {}
   const itemDir = dirname(itemPath)
   const publicDir = join(siteRoot, 'public')
-  const targetDir = join(publicDir, 'collections', collectionName)
+  const targetDir = join(publicDir, 'collections', queryName)
 
   // Walk content and collect asset paths
   const assetNodes = []
@@ -366,7 +366,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         await copyFile(result.resolved, targetPath)
 
         // Update path to site-root-relative
-        finalPath = `${basePath}collections/${collectionName}/${assetFilename}`
+        finalPath = `${basePath}collections/${queryName}/${assetFilename}`
 
         assets[src] = {
           original: src,
@@ -401,7 +401,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         const posterTarget = join(targetDir, posterFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(posterResult.resolved, posterTarget)
-        node.attrs.poster = `${basePath}collections/${collectionName}/${posterFilename}`
+        node.attrs.poster = `${basePath}collections/${queryName}/${posterFilename}`
       }
     }
 
@@ -412,7 +412,7 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
         const previewTarget = join(targetDir, previewFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(previewResult.resolved, previewTarget)
-        node.attrs.preview = `${basePath}collections/${collectionName}/${previewFilename}`
+        node.attrs.preview = `${basePath}collections/${queryName}/${previewFilename}`
       }
     }
   }
@@ -429,11 +429,11 @@ async function processCollectionAssets(content, itemPath, siteRoot, collectionNa
  * @param {Object} data - Parsed data object (mutated in place)
  * @param {string} itemPath - Path to the data file
  * @param {string} siteRoot - Site root directory
- * @param {string} collectionName - Name of the collection
+ * @param {string} queryName - Name of the collection
  * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
  */
-async function processDataItemAssets(data, itemPath, siteRoot, collectionName, basePath) {
-  const targetDir = join(siteRoot, 'public', 'collections', collectionName)
+async function processDataItemAssets(data, itemPath, siteRoot, queryName, basePath) {
+  const targetDir = join(siteRoot, 'public', 'collections', queryName)
 
   async function walk(parent, key) {
     const val = parent[key]
@@ -444,7 +444,7 @@ async function processDataItemAssets(data, itemPath, siteRoot, collectionName, b
           const filename = basename(resolved)
           await mkdir(targetDir, { recursive: true })
           await copyFile(resolved, join(targetDir, filename))
-          parent[key] = `${basePath}collections/${collectionName}/${filename}`
+          parent[key] = `${basePath}collections/${queryName}/${filename}`
         }
       } else if (val.startsWith('/')) {
         // Absolute site path — just prepend base
@@ -484,7 +484,7 @@ async function processDataItemAssets(data, itemPath, siteRoot, collectionName, b
  * @param {string} filename - YAML filename (.yml or .yaml)
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processDataItem(dir, filename, siteRoot, collectionName, basePath) {
+async function processDataItem(dir, filename, siteRoot, queryName, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const data = yaml.load(raw) || {}
@@ -493,7 +493,7 @@ async function processDataItem(dir, filename, siteRoot, collectionName, basePath
   if (Array.isArray(data)) {
     for (const item of data) {
       if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+        await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
       }
     }
     return data
@@ -503,7 +503,7 @@ async function processDataItem(dir, filename, siteRoot, collectionName, basePath
   if (data.published === false) return null
   const slug = basename(filename, extname(filename))
   const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+  await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
   return item
 }
 
@@ -518,7 +518,7 @@ async function processDataItem(dir, filename, siteRoot, collectionName, basePath
  * @param {string} filename - JSON filename
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processJsonItem(dir, filename, siteRoot, collectionName, basePath) {
+async function processJsonItem(dir, filename, siteRoot, queryName, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, '.json')
@@ -528,7 +528,7 @@ async function processJsonItem(dir, filename, siteRoot, collectionName, basePath
   if (Array.isArray(data)) {
     for (const item of data) {
       if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+        await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
       }
     }
     return data
@@ -537,7 +537,7 @@ async function processJsonItem(dir, filename, siteRoot, collectionName, basePath
   // Object → single item
   if (data.published === false) return null
   const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, collectionName, basePath)
+  await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
   return item
 }
 
@@ -591,13 +591,13 @@ async function processContentItem(dir, filename, config, siteRoot, basePath) {
 
   // Process assets (resolve paths, copy co-located files)
   // This modifies content in place, updating paths to site-root-relative
-  await processCollectionAssets(content, filepath, siteRoot, config.name, basePath)
+  await processRecordAssets(content, filepath, siteRoot, config.name, basePath)
 
   // Extract excerpt
   const excerpt = extractExcerpt(frontmatter, content, config.excerpt)
 
   // Extract first image (frontmatter takes precedence)
-  // Note: paths in content have already been updated by processCollectionAssets
+  // Note: paths in content have already been updated by processRecordAssets
   const image = frontmatter.image || extractFirstImage(content)
 
   return {
@@ -648,7 +648,7 @@ async function collectSourceFiles(dir, rel = '') {
  * whichever sorts last wins the route and the per-record file. That is a real
  * ambiguity only the author can resolve, so it is reported rather than repaired.
  */
-function warnDuplicateSlugs(items, collectionName) {
+function warnDuplicateSlugs(items, queryName) {
   const seen = new Map()
   for (const item of items) {
     if (!item || item.slug === undefined) continue
@@ -656,7 +656,7 @@ function warnDuplicateSlugs(items, collectionName) {
     const where = item.path ? `${item.path}/` : ''
     if (seen.has(slug)) {
       console.warn(
-        `[collection-processor] Collection "${collectionName}" has more than one record with ` +
+        `[collection-processor] Collection "${queryName}" has more than one record with ` +
           `slug "${slug}" (${seen.get(slug)}${slug}, ${where}${slug}). Its detail route and ` +
           `per-record file resolve to only one of them — give them distinct slugs.`
       )
@@ -743,7 +743,7 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // to `/data/<name>.json`; that one runs a page-level `fetch:`), so a difference
   // in order is a difference in RESULT for any query that both narrows and limits.
   //
-  // ⚠️ `where` was missing here entirely until 2026-08-29: `parseCollectionConfig`
+  // ⚠️ `where` was missing here entirely until 2026-08-29: `parseQueryConfig`
   // read `filter` and never `where`, so the CANONICAL predicate was parsed, put on
   // the sync wire, stored — and never applied, while the DEPRECATED one it replaced
   // worked. An author following current guidance got silence and shipped unfiltered
@@ -774,19 +774,19 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
  * Process all content collections defined in site.yml
  *
  * @param {string} siteDir - Site root directory
- * @param {Object} collectionsConfig - the resolved QUERY declarations
+ * @param {Object} queriesConfig - the resolved QUERY declarations
  * @param {string} [entitiesDir] - pool directory override (`site.yml::paths.entities`)
  * @returns {Promise<Object>} Map of collection name to items array
  *
  * @example
- * const collections = await processCollections('/path/to/site', {
+ * const collections = await processQueries('/path/to/site', {
  *   articles: { path: 'collections/articles', sort: 'date desc' },
  *   products: 'collections/products'
  * })
  * // { articles: [...], products: [...] }
  */
-export async function processCollections(siteDir, collectionsConfig, entitiesDir, basePath = '/') {
-  if (!collectionsConfig || typeof collectionsConfig !== 'object') {
+export async function processQueries(siteDir, queriesConfig, entitiesDir, basePath = '/') {
+  if (!queriesConfig || typeof queriesConfig !== 'object') {
     return {}
   }
 
@@ -822,8 +822,8 @@ export async function processCollections(siteDir, collectionsConfig, entitiesDir
 
   const results = {}
 
-  for (const [name, config] of Object.entries(collectionsConfig)) {
-    const parsed = parseCollectionConfig(name, config)
+  for (const [name, config] of Object.entries(queriesConfig)) {
+    const parsed = parseQueryConfig(name, config)
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
     parsed.placements = folder?.placements ?? null
     if (parsed.poolEntities.length === 0 && !parsed.url) {
@@ -905,12 +905,12 @@ async function pruneOrphanedRecords(dataDir, name, expected) {
  * @returns {Promise<void>}
  *
  * @example
- * await writeCollectionFiles('/path/to/site', {
+ * await writeQueryFiles('/path/to/site', {
  *   articles: [{ slug: 'hello', title: 'Hello World', ... }]
  * })
  * // Creates public/data/articles.json
  */
-export async function writeCollectionFiles(siteDir, collections, collectionsConfig = null) {
+export async function writeQueryFiles(siteDir, collections, queriesConfig = null) {
   if (!collections || Object.keys(collections).length === 0) {
     return
   }
@@ -919,8 +919,8 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
   await mkdir(dataDir, { recursive: true })
 
   for (const [name, items] of Object.entries(collections)) {
-    const rawConfig = collectionsConfig?.[name]
-    const parsed = rawConfig ? parseCollectionConfig(name, rawConfig) : null
+    const rawConfig = queriesConfig?.[name]
+    const parsed = rawConfig ? parseQueryConfig(name, rawConfig) : null
     const deferred = parsed?.deferred
 
     if (deferred && deferred.length > 0) {
@@ -988,15 +988,15 @@ export async function writeCollectionFiles(siteDir, collections, collectionsConf
  * @param {Object} config - Collection config
  * @returns {Promise<Date|null>} Most recent modification time
  */
-export async function getCollectionLastModified(siteDir, config) {
-  const parsed = parseCollectionConfig('temp', config)
-  const collectionDir = join(siteDir, parsed.path)
+export async function getQueryLastModified(siteDir, config) {
+  const parsed = parseQueryConfig('temp', config)
+  const poolDir = join(siteDir, parsed.path)
 
-  if (!existsSync(collectionDir)) {
+  if (!existsSync(poolDir)) {
     return null
   }
 
-  const files = await readdir(collectionDir)
+  const files = await readdir(poolDir)
   const itemFiles = files.filter(f =>
     !f.startsWith('_') &&
     (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json') || f.endsWith('.bib'))
@@ -1005,7 +1005,7 @@ export async function getCollectionLastModified(siteDir, config) {
   let lastModified = null
 
   for (const file of itemFiles) {
-    const fileStat = await stat(join(collectionDir, file))
+    const fileStat = await stat(join(poolDir, file))
     if (!lastModified || fileStat.mtime > lastModified) {
       lastModified = fileStat.mtime
     }

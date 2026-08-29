@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { collectSiteContent } from '../src/site/content-collector.js'
-import { resolveCollectionsConfig, toConfigCollections } from '../src/site/collections-config.js'
+import { resolveQueriesConfig, toConfigQueries } from '../src/site/queries-config.js'
 
 let ROOT
 
@@ -70,18 +70,18 @@ describe('the site build sees queries.yml', () => {
   })
 })
 
-describe('toConfigCollections — what reaches the payload', () => {
+describe('toConfigQueries — what reaches the payload', () => {
   it('strips schemaExplicit, an internal resolution detail', async () => {
     setup('name: T\nfoundation: "@a/x"\n', 'news:\n  path: collections/news\n')
-    const resolved = await resolveCollectionsConfig(ROOT)
+    const resolved = await resolveQueriesConfig(ROOT)
     expect('schemaExplicit' in resolved.declarations.news).toBe(true)
-    expect('schemaExplicit' in toConfigCollections(resolved.declarations).news).toBe(false)
+    expect('schemaExplicit' in toConfigQueries(resolved.declarations).news).toBe(false)
     expect('schemaExplicit' in (await collections()).news).toBe(false)
   })
 
   it('returns undefined rather than an empty object', () => {
-    expect(toConfigCollections({})).toBeUndefined()
-    expect(toConfigCollections(null)).toBeUndefined()
+    expect(toConfigQueries({})).toBeUndefined()
+    expect(toConfigQueries(null)).toBeUndefined()
   })
 
   it('carries the resolved schema, which the build previously never saw', async () => {

@@ -112,7 +112,7 @@ function normalizeQueryDecl(name, decl) {
  *   folders: Array|null,            // the folder's virtual org, or null
  * }>}
  */
-export async function resolveCollectionsConfig(siteRoot, opts = {}) {
+export async function resolveQueriesConfig(siteRoot, opts = {}) {
   const siteYml = opts.siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
   const ymlPath = join(siteRoot, QUERIES_YML_RELPATH)
   const hasQueriesYml = existsSync(ymlPath)
@@ -178,7 +178,7 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
   //   `folderSync` was `collections.yml::sync`. The model DELETES that mechanism
   //   rather than porting it: "do not sync" becomes "reference nothing in
   //   `records.yml`" — the actual round trip. Its one reader is
-  //   `uwx/collections.js`, and it goes when `records.yml` supplies the real
+  //   `uwx/records.js`, and it goes when `records.yml` supplies the real
   //   control. Until then it must stay TRUE, or nothing syncs at all.
   //
   //   `folders` was `collections.yml::folders`, the virtual org. Its one reader is
@@ -208,7 +208,7 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
  * stays absent rather than becoming an empty object — an empty object reads as
  * "declared, and empty" to anything checking for presence.
  */
-export function toConfigCollections(declarations) {
+export function toConfigQueries(declarations) {
   const names = Object.keys(declarations || {})
   if (names.length === 0) return undefined
   const out = {}

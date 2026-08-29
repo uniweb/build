@@ -22,7 +22,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DATA_DIR } from '@uniweb/core'
-import { writeCollectionFiles } from '../src/site/collection-processor.js'
+import { writeQueryFiles } from '../src/site/query-processor.js'
 
 const DEFERRED = { articles: { path: 'collections/articles', deferred: ['body'] } }
 
@@ -47,7 +47,7 @@ describe('per-record file pruning', () => {
   })
 
   it('removes the file for a record that is gone on the next build', async () => {
-    await writeCollectionFiles(
+    await writeQueryFiles(
       siteDir,
       { articles: [rec('public-post'), rec('secret-draft')] },
       DEFERRED
@@ -60,7 +60,7 @@ describe('per-record file pruning', () => {
     // The author unpublishes `secret-draft`. The collection processor drops it
     // upstream of here, so this build simply receives one fewer record — which
     // is also what deleting the source file looks like.
-    await writeCollectionFiles(siteDir, { articles: [rec('public-post')] }, DEFERRED)
+    await writeQueryFiles(siteDir, { articles: [rec('public-post')] }, DEFERRED)
 
     expect(await recordFiles(siteDir, 'articles')).toEqual(['public-post.json'])
     expect(
@@ -69,12 +69,12 @@ describe('per-record file pruning', () => {
   })
 
   it('clears the directory when a collection stops declaring deferred:', async () => {
-    await writeCollectionFiles(siteDir, { articles: [rec('a'), rec('b')] }, DEFERRED)
+    await writeQueryFiles(siteDir, { articles: [rec('a'), rec('b')] }, DEFERRED)
     expect(await recordFiles(siteDir, 'articles')).toEqual(['a.json', 'b.json'])
 
     // Without deferred: nothing will ever write this directory again, so every
     // file in it is stale from this point on.
-    await writeCollectionFiles(
+    await writeQueryFiles(
       siteDir,
       { articles: [rec('a'), rec('b')] },
       { articles: { path: 'collections/articles' } }
@@ -84,8 +84,8 @@ describe('per-record file pruning', () => {
   })
 
   it('leaves records that are still present untouched', async () => {
-    await writeCollectionFiles(siteDir, { articles: [rec('keep'), rec('drop')] }, DEFERRED)
-    await writeCollectionFiles(siteDir, { articles: [rec('keep')] }, DEFERRED)
+    await writeQueryFiles(siteDir, { articles: [rec('keep'), rec('drop')] }, DEFERRED)
+    await writeQueryFiles(siteDir, { articles: [rec('keep')] }, DEFERRED)
 
     const kept = JSON.parse(
       await import('node:fs/promises').then((fs) =>
@@ -103,13 +103,13 @@ describe('per-record file pruning', () => {
     // its extension. (An earlier revision of this test asserted the opposite,
     // from a docs section that invited hand-authoring here; that section is
     // gone and the pattern with it.)
-    await writeCollectionFiles(siteDir, { articles: [rec('a')] }, DEFERRED)
+    await writeQueryFiles(siteDir, { articles: [rec('a')] }, DEFERRED)
     const dir = join(siteDir, 'public', DATA_DIR, 'articles')
     writeFileSync(join(dir, 'NOTES.md'), 'stale')
     mkdirSync(join(dir, 'attachments'))
     writeFileSync(join(dir, 'attachments', 'paper.pdf'), 'stale')
 
-    await writeCollectionFiles(siteDir, { articles: [] }, DEFERRED)
+    await writeQueryFiles(siteDir, { articles: [] }, DEFERRED)
 
     expect(existsSync(join(dir, 'NOTES.md'))).toBe(false)
     expect(existsSync(join(dir, 'attachments'))).toBe(false)
@@ -124,7 +124,7 @@ describe('per-record file pruning', () => {
     mkdirSync(outside, { recursive: true })
     writeFileSync(join(outside, 'keep.json'), 'not in the output directory')
 
-    await writeCollectionFiles(siteDir, { '../sibling': [] }, {
+    await writeQueryFiles(siteDir, { '../sibling': [] }, {
       '../sibling': { path: 'collections/x', deferred: ['body'] }
     })
 
@@ -132,12 +132,12 @@ describe('per-record file pruning', () => {
   })
 
   it('does not touch the cascade file or a sibling collection', async () => {
-    await writeCollectionFiles(
+    await writeQueryFiles(
       siteDir,
       { articles: [rec('a')], team: [rec('alice')] },
       { ...DEFERRED, team: { path: 'collections/team', deferred: ['body'] } }
     )
-    await writeCollectionFiles(
+    await writeQueryFiles(
       siteDir,
       { articles: [], team: [rec('alice')] },
       { ...DEFERRED, team: { path: 'collections/team', deferred: ['body'] } }
@@ -152,7 +152,7 @@ describe('per-record file pruning', () => {
 
   it('is a no-op for a collection that never had per-record files', async () => {
     const plain = { articles: { path: 'collections/articles' } }
-    await writeCollectionFiles(siteDir, { articles: [rec('a')] }, plain)
+    await writeQueryFiles(siteDir, { articles: [rec('a')] }, plain)
     expect(existsSync(join(siteDir, 'public', DATA_DIR, 'articles.json'))).toBe(true)
     expect(await recordFiles(siteDir, 'articles')).toEqual([])
   })

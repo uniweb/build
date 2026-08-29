@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
-import { parseFrontmatter } from './collection-source.js'
+import { parseFrontmatter } from './entity-source.js'
 import { isProseMirrorField, isContentBodyField } from './data-schema.js'
 import { unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
@@ -35,9 +35,9 @@ const SOURCE_EXTENSIONS = ['.yml', '.yaml', '.json', '.md', '.bib']
  * probing the supported extensions. Returns the absolute path or null (e.g. an
  * array-form file holding many records, whose name is not `<slug>.<ext>`).
  */
-export function findRecordFile(collectionDir, slug) {
+export function findRecordFile(poolDir, slug) {
   for (const ext of SOURCE_EXTENSIONS) {
-    const p = join(collectionDir, slug + ext)
+    const p = join(poolDir, slug + ext)
     if (existsSync(p)) return p
   }
   return null
@@ -239,7 +239,7 @@ function briefHasContentBody(declaration) {
  *        and a localized prosemirror BODY's target locales are captured as either a
  *        structural map or, when `freeformRelPath` is given, a free-form body override.
  * @param {string} [params.freeformRelPath] - the free-form path for this record's
- *        content body (buildFreeformCollectionPath); lets a target-locale full-doc
+ *        content body (buildFreeformRecordPath); lets a target-locale full-doc
  *        body be written under locales/freeform/{locale}/ instead of being dropped.
  * @returns {string} the source-file text
  */

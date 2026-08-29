@@ -27,7 +27,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
-import { collectionNameFromUrl } from '@uniweb/core'
+import { queryNameFromUrl } from '@uniweb/core'
 
 import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema } from './resolve-data-schema.js'
@@ -39,7 +39,7 @@ export { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
 import { buildSchema } from './schema.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
-import { processCollections } from './site/collection-processor.js'
+import { processQueries } from './site/query-processor.js'
 
 // --- the join: sections ↔ schemas -------------------------------------------
 
@@ -86,12 +86,12 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const basePath = typeof config.base === 'string' ? config.base : '/'
 
   // Compile file-based collections in-memory (the same step the data-only
-  // pipeline runs). Full records — `writeCollectionFiles` is the stage that
+  // pipeline runs). Full records — `writeQueryFiles` is the stage that
   // strips `deferred:` fields, and we skip it.
   let collections = {}
   if (config.queries && typeof config.queries === 'object') {
 
-    collections = await processCollections(siteRoot, config.queries, config.paths?.entities, basePath)
+    collections = await processQueries(siteRoot, config.queries, config.paths?.entities, basePath)
   }
 
   // Pass 1 — discover unique (file, schema-ref) pairs and who uses each.
@@ -250,7 +250,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
  * works on a link-mode site whose foundation is a registry ref with nothing
  * local), and an unresolved tag must be silent rather than an error. So the
  * package is resolved from this build's own graph, where it is an
- * optionalDependency, exactly as `i18n/collections.js` resolves it.
+ * optionalDependency, exactly as `i18n/records.js` resolves it.
  *
  * @param {Object} site - collected site content (`{ pages }`)
  * @returns {Promise<{ violations: Array, schemas: Set<string>, checked: number }>}
@@ -467,7 +467,7 @@ function walkSections(sections, visit) {
 async function resolveRecords(path, { collections, siteRoot }) {
   // A compiled-collection URL → a declared collection? Use the compiled
   // records. Anything else falls through to the file read below.
-  const name = collectionNameFromUrl(path)
+  const name = queryNameFromUrl(path)
   let records
   if (Object.prototype.hasOwnProperty.call(collections, name)) {
     records = collections[name]

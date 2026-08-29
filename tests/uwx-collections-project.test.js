@@ -1,4 +1,4 @@
-// Collections-lane pull projection (collectionsToProject, P1).
+// Collections-lane pull projection (recordsToProject, P1).
 //
 // The folder document is built with the REAL producer (buildFolderEntity) so the
 // projection is exercised against the exact wire shape it inverts.
@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import yaml from 'js-yaml'
 import {
   buildFolderEntity,
-  collectionsToProject,
+  recordsToProject,
   findRecordFileByUuid,
 } from '../src/uwx/index.js'
 import { computeHash } from '../src/i18n/hash.js'
@@ -64,12 +64,12 @@ const folderFor = (records) =>
     })),
   }).document
 
-describe('collectionsToProject — placement', () => {
+describe('recordsToProject — placement', () => {
   it('places a new markdown record under collections/<collection>/<slug>.md (slug+collection from the folder)', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     const recordDocs = [articleDoc('U1', 'Hello', '\n# Hi\n')]
 
-    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
+    const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
     const f = join(dir, 'entities/acme/article/hello.md')
     expect(report.placed).toEqual([f])
@@ -80,7 +80,7 @@ describe('collectionsToProject — placement', () => {
     const folderDoc = folderFor([{ id: 'widgets/w1', uuid: 'W1', slug: 'w1', collection: 'widgets' }], 'F1')
     const recordDocs = [{ $uuid: 'W1', $model: '@acme/widget', widget: { title: 'Gear', price: 9.99 } }]
 
-    collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
+    recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
     const f = join(dir, 'entities/acme/widget/w1.yml')
     expect(existsSync(f)).toBe(true)
@@ -95,7 +95,7 @@ describe('collectionsToProject — placement', () => {
   it('places by the MODEL, not by any query that happens to select the record', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
 
-    collectionsToProject({
+    recordsToProject({
       folderDoc,
       recordDocs: [articleDoc('U1', 'Hello', '\nHi\n')],
       siteRoot: dir,
@@ -110,7 +110,7 @@ describe('collectionsToProject — placement', () => {
     const folderDoc = folderFor([{ id: 'x/hello', uuid: 'U1', slug: 'hello', collection: 'x' }], 'F1')
     const doc = { ...articleDoc('U1', 'Hello', '\nHi\n'), $model: 'not-a-ref' }
 
-    const report = collectionsToProject({
+    const report = recordsToProject({
       folderDoc,
       recordDocs: [doc],
       siteRoot: dir,
@@ -125,13 +125,13 @@ describe('collectionsToProject — placement', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     const orphan = { ...articleDoc('U9', 'Bonus', '\nExtra\n'), $id: 'extras/bonus' }
 
-    const report = collectionsToProject({ folderDoc, recordDocs: [orphan], siteRoot: dir, opts: { resolveDeclaration } })
+    const report = recordsToProject({ folderDoc, recordDocs: [orphan], siteRoot: dir, opts: { resolveDeclaration } })
 
     expect(report.placed).toEqual([join(dir, 'entities/acme/article/bonus.md')])
   })
 })
 
-describe('collectionsToProject — update in place by $uuid', () => {
+describe('recordsToProject — update in place by $uuid', () => {
   it('re-renders over an existing file matched by $uuid, preserving its format and filename', () => {
     // Existing file: a different filename than the slug, in YAML, carrying U2.
     mkdirSync(join(dir, 'entities/acme/article'), { recursive: true })
@@ -141,7 +141,7 @@ describe('collectionsToProject — update in place by $uuid', () => {
     expect(findRecordFileByUuid(join(dir, 'entities/acme/article'), 'U2')).toEqual({ path: existing, format: 'yaml' })
 
     const folderDoc = folderFor([{ id: 'articles/fresh', uuid: 'U2', slug: 'fresh', collection: 'articles' }], 'F1')
-    const report = collectionsToProject({
+    const report = recordsToProject({
       folderDoc,
       recordDocs: [articleDoc('U2', 'New Title', '\nbody\n')],
       siteRoot: dir,
@@ -159,17 +159,17 @@ describe('collectionsToProject — update in place by $uuid', () => {
     const recordDocs = [articleDoc('U1', 'Hello', '\n# Hi\n')]
     const o = { resolveDeclaration }
 
-    collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
-    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
+    recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
+    const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
     expect(report.unchanged).toEqual([join(dir, 'entities/acme/article/hello.md')])
     expect(report.placed).toEqual([])
   })
 })
 
-describe('collectionsToProject — folder identity + no silent skips', () => {
+describe('recordsToProject — folder identity + no silent skips', () => {
   it('does not persist a folder $uuid — the backend owns the folder (keyed by the site-content uuid)', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }])
-    collectionsToProject({ folderDoc, recordDocs: [articleDoc('U1', 'Hi', '\nx\n')], siteRoot: dir, opts: { resolveDeclaration } })
+    recordsToProject({ folderDoc, recordDocs: [articleDoc('U1', 'Hi', '\nx\n')], siteRoot: dir, opts: { resolveDeclaration } })
 
     // the record is placed, but no folder identity is written to collections.yml
     expect(existsSync(join(dir, 'entities/acme/article/hello.md'))).toBe(true)
@@ -178,7 +178,7 @@ describe('collectionsToProject — folder identity + no silent skips', () => {
 
   it('skips (does not crash on) a record whose model cannot be resolved', () => {
     const folderDoc = folderFor([{ id: 'mystery/x', uuid: 'M1', slug: 'x', collection: 'mystery' }], 'F1')
-    const report = collectionsToProject({
+    const report = recordsToProject({
       folderDoc,
       recordDocs: [{ $uuid: 'M1', $model: '@acme/unknown', mystery: {} }],
       siteRoot: dir,
@@ -189,7 +189,7 @@ describe('collectionsToProject — folder identity + no silent skips', () => {
   })
 })
 
-describe('collectionsToProject — prosemirror content field (B)', () => {
+describe('recordsToProject — prosemirror content field (B)', () => {
   const pmDecl = {
     name: '@acme/article',
     sections: {
@@ -211,7 +211,7 @@ describe('collectionsToProject — prosemirror content field (B)', () => {
       { $uuid: 'U1', $model: '@acme/article', article: { title: { en: 'Hello' }, body: { en: pmDoc, es: { 'Hello world': 'Hola mundo' } } } },
     ]
 
-    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: resolvePm } })
+    const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: resolvePm } })
 
     // body field (prosemirror) → markdown body in a .md file (briefHasContentBody → md format)
     const f = join(dir, 'entities/acme/article/hello.md')
@@ -223,7 +223,7 @@ describe('collectionsToProject — prosemirror content field (B)', () => {
   })
 })
 
-describe('collectionsToProject — localized record scalars (B)', () => {
+describe('recordsToProject — localized record scalars (B)', () => {
   it('writes the source field inline and target locales to locales/records/{locale}.json', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     // A record with a multi-locale title scalar (and a source-only markup-text body).
@@ -231,7 +231,7 @@ describe('collectionsToProject — localized record scalars (B)', () => {
       { $uuid: 'U1', $model: '@acme/article', article: { $uuid: 'rec', title: { en: 'Hello', es: 'Hola' }, body: { en: '\nHi\n' } } },
     ]
 
-    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
+    const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
     // source-locale title stays inline in the record file
     const f = join(dir, 'entities/acme/article/hello.md')
@@ -243,7 +243,7 @@ describe('collectionsToProject — localized record scalars (B)', () => {
   })
 })
 
-describe('collectionsToProject — prosemirror body free-form override (B-1)', () => {
+describe('recordsToProject — prosemirror body free-form override (B-1)', () => {
   // A Model whose brief body is a `format: prosemirror` json field (a PM doc on the
   // wire), so a target locale can carry a full free-form body, not just a map.
   const pmDecl = {
@@ -273,7 +273,7 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
       { $uuid: 'U1', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: ffDoc } } },
     ]
 
-    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
+    const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
 
     // source-locale body → the record .md, in ITS model's pool folder
     expect(readFileSync(join(dir, 'entities/acme/pmarticle/hello.md'), 'utf8')).toContain('Hi there')
@@ -290,7 +290,7 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
       { $uuid: 'U2', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: { 'Hi there': 'Hola ahi' } } } },
     ]
 
-    const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
+    const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
 
     const es = JSON.parse(readFileSync(join(dir, 'locales/records/es.json'), 'utf8'))
     expect(es[computeHash('Hi there')]).toBe('Hola ahi')

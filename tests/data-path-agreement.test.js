@@ -23,9 +23,9 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
-import { collectionDataUrl, recordDataUrl, DATA_DIR } from '@uniweb/core'
+import { queryDataUrl, recordDataUrl, DATA_DIR } from '@uniweb/core'
 import { resolveFetchConfigs } from '@uniweb/core/fetch-config'
-import { writeCollectionFiles } from '../src/site/collection-processor.js'
+import { writeQueryFiles } from '../src/site/query-processor.js'
 import { parseFetchConfig } from '../src/site/data-fetcher.js'
 
 /** Every file under `dir`, as paths relative to it. */
@@ -54,11 +54,11 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     { slug: 'design-tips', title: 'Design Tips', body: 'long body A' },
     { slug: 'getting-started', title: 'Getting Started', body: 'long body B' }
   ]
-  const collectionsConfig = { articles: { schema: '@/article', deferred: ['body'] } }
+  const queriesConfig = { articles: { schema: '@/article', deferred: ['body'] } }
 
   beforeAll(async () => {
     siteDir = mkdtempSync(join(tmpdir(), 'data-path-agreement-'))
-    await writeCollectionFiles(siteDir, { articles: items }, collectionsConfig)
+    await writeQueryFiles(siteDir, { articles: items }, queriesConfig)
     const publicDir = join(siteDir, 'public')
     emittedUrls = new Set((await walk(publicDir)).map(servedUrl))
   })
@@ -78,13 +78,13 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     const resolved = parseFetchConfig({ query: 'articles' })
     expect(emittedUrls.has(resolved.path)).toBe(true)
     // and it is the same URL the shared helper builds
-    expect(resolved.path).toBe(collectionDataUrl('articles'))
+    expect(resolved.path).toBe(queryDataUrl('articles'))
   })
 
   it("core's auto-injected detail pattern points at emitted per-record files", () => {
     const configs = resolveFetchConfigs(
-      [{ schema: 'articles', path: collectionDataUrl('articles') }],
-      { queries: collectionsConfig }
+      [{ schema: 'articles', path: queryDataUrl('articles') }],
+      { queries: queriesConfig }
     )
     const pattern = configs.get('articles').detail
     expect(pattern).toBeTruthy()
@@ -101,8 +101,8 @@ describe('compiled collection data: emit ↔ request agreement', () => {
   it('the cascade payload and the per-record payload are different URLs', () => {
     // A rename that collapsed these (e.g. dropping the `.json` suffix rule)
     // would make the lean list and the full record fight over one path.
-    expect(collectionDataUrl('articles')).not.toBe(recordDataUrl('articles', 'design-tips'))
-    expect(emittedUrls.has(collectionDataUrl('articles'))).toBe(true)
+    expect(queryDataUrl('articles')).not.toBe(recordDataUrl('articles', 'design-tips'))
+    expect(emittedUrls.has(queryDataUrl('articles'))).toBe(true)
   })
 
   it('the emitted cascade drops deferred fields and the per-record file keeps them', () => {
@@ -110,6 +110,6 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     // if both carried the same payload the per-record lane would be dead
     // weight and its path could rot unnoticed — which is how it did.
     expect(emittedUrls.has(recordDataUrl('articles', 'design-tips'))).toBe(true)
-    expect(emittedUrls.has(collectionDataUrl('articles'))).toBe(true)
+    expect(emittedUrls.has(queryDataUrl('articles'))).toBe(true)
   })
 })

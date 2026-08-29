@@ -15,9 +15,9 @@ import { join, resolve, dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import yaml from 'js-yaml'
 import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-writer'
-import { parseFrontmatter } from './collection-source.js'
+import { parseFrontmatter } from './entity-source.js'
 import { renderEntityDocument } from './backfill.js'
-import { queriesYmlPath } from './collections-config.js'
+import { queriesYmlPath } from './queries-config.js'
 import { recordsYmlPath } from '../site/records-config.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local

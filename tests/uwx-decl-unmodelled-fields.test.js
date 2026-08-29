@@ -20,7 +20,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { siteProjectToDocument, declarationsToCollectionsYml } from '../src/uwx/index.js'
+import { siteProjectToDocument, declarationsToQueriesYml } from '../src/uwx/index.js'
 
 let dir
 beforeEach(() => {
@@ -79,7 +79,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
   })
 
   it('⛔ withholds framework-local fields the Model has no slot for', async () => {
-    // `route:` is a REAL authored field — `parseCollectionConfig` reads it and
+    // `route:` is a REAL authored field — `parseQueryConfig` reads it and
     // `collectItems` composes each item link as `<route>/<slug>` — but it is
     // framework's, not the Model's. Sending it would push build-time config into a
     // store that validates writes against a declared schema.
@@ -138,7 +138,7 @@ describe('pull — an unmodelled decl field returns to the authored file', () =>
       ]
     }
 
-    declarationsToCollectionsYml({ document, siteRoot: src })
+    declarationsToQueriesYml({ document, siteRoot: src })
     const written = yaml.load(readFileSync(join(src, 'queries.yml'), 'utf8'))
     const decl = written.members // a BARE map — no root key
 
@@ -158,7 +158,7 @@ describe('round trip — push(pull(x)) is a fixed point on an unmodelled field',
     const src = makeSite(withUnmodelled)
 
     const first = await siteProjectToDocument(src)
-    declarationsToCollectionsYml({ document: first, siteRoot: src })
+    declarationsToQueriesYml({ document: first, siteRoot: src })
     const second = await siteProjectToDocument(src)
 
     const a = first.queries.find((c) => c.name === 'members')

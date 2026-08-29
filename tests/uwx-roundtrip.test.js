@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { emitCollectionSyncPackage, backfillEntityUuids, readZip } from '../src/uwx/index.js'
+import { emitRecordSyncPackage, backfillEntityUuids, readZip } from '../src/uwx/index.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 let root
@@ -86,7 +86,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }))
 // `index` (the real response shape `{ index, uuid, changed, document }`). Then
 // back-fill, which renders each document over its source file (variant A).
 async function syncCycle() {
-  const { buffer, index, warnings } = await emitCollectionSyncPackage(siteDir)
+  const { buffer, index, warnings } = await emitRecordSyncPackage(siteDir)
   const files = readZip(buffer)
   const manifest = JSON.parse(files.get('manifest.json').toString('utf8'))
   const finalized = manifest.entries.map((entry, i) => {

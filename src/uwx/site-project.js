@@ -38,7 +38,7 @@ import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, 
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
-import { declarationsToCollectionsYml } from './collections-project.js'
+import { declarationsToQueriesYml } from './records-project.js'
 import { authorableFetch } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath } from '../i18n/freeform.js'
@@ -628,12 +628,12 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
 /**
  * Project a whole `@uniweb/site-content` document to a site's files: `info` →
  * config (siteInfoToConfig), `collections[]` declarations →
- * `collections.yml::collections` (declarationsToCollectionsYml), `pages[]` →
+ * `collections.yml::collections` (declarationsToQueriesYml), `pages[]` →
  * `pages/**`, `layout_sections` → `layout/**`. Idempotent. Matches by
  * stableId-name (clean overwrite); orphan deletion + content-similarity matching
  * is the reconcile layer.
  *
- * The collection RECORDS are the separate collections lane (collectionsToProject);
+ * The collection RECORDS are the separate collections lane (recordsToProject);
  * this writes only their config declarations.
  *
  * @param {object} params
@@ -661,7 +661,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   report.assets = restoreAssetRefs(document, readAssetMap(siteRoot))
 
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector, keepAuthoredFoundation })
-  report.collections = declarationsToCollectionsYml({ document, siteRoot })
+  report.collections = declarationsToQueriesYml({ document, siteRoot })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

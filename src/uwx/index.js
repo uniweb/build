@@ -50,21 +50,21 @@ export {
   isSiteRelativeExtensionUrl,
 } from './site.js'
 export {
-  resolveCollectionsConfig,
+  resolveQueriesConfig,
   queriesYmlPath,
   QUERIES_YML_RELPATH,
-} from './collections-config.js'
+} from './queries-config.js'
 export { upsertYamlScalar } from './yaml-upsert.js'
 export { buildFolderEntity,
   collectFolderItemUuids,
   stampFolderItemUuids
 } from './folder.js'
 export {
-  collectionsToProject,
-  declarationsToCollectionsYml,
+  recordsToProject,
+  declarationsToQueriesYml,
   folderToRecordsYml,
   findRecordFileByUuid,
-} from './collections-project.js'
+} from './records-project.js'
 export {
   siteInfoToConfig,
   sectionRecordToFile,
@@ -91,17 +91,17 @@ export {
   collectSiteUnits,
   walkSiteUnits,
   collectUnitUuids,
-  collectCollectionUuids,
+  collectQueryUuids,
   stampUnitUuids,
 } from './site-diff.js'
 export {
-  collectionRecordsToEntities,
-  buildCollectionEntities,
+  recordsToEntities,
+  buildRecordEntities,
   filterChanged,
-  emitCollectionSyncPackage,
+  emitRecordSyncPackage,
   entityContentHash,
-} from './collections.js'
-export { readEntityFile, parseFrontmatter } from './collection-source.js'
+} from './records.js'
+export { readEntityFile, parseFrontmatter } from './entity-source.js'
 
 // The folder's own vocabulary, so a verb can ask what `records.yml` SAYS without
 // re-reading or re-parsing it. ⛔ Note the allowlist: an export added to

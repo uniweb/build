@@ -95,9 +95,9 @@ queries:
   articles:
     schema: '@/article'
 `)
-    const collectionDir = join(siteRoot, 'entities', 'article')
-    mkdirSync(collectionDir, { recursive: true })
-    writeFileSync(join(collectionDir, 'first.md'), `---
+    const poolDir = join(siteRoot, 'entities', 'article')
+    mkdirSync(poolDir, { recursive: true })
+    writeFileSync(join(poolDir, 'first.md'), `---
 title: First Article
 slug: first
 ---

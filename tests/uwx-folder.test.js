@@ -13,7 +13,7 @@ import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 // site with no `records.yml` has no folder, which is the model's `missing ⇒ inert`
 // ruling rather than an empty one.
 
-// Minimal record-entity descriptors (the shape buildCollectionEntities emits).
+// Minimal record-entity descriptors (the shape buildRecordEntities emits).
 // `id` is the entity's POOL id — `<schema dirs>/<slug>` — which is what a folder
 // leaf references.
 function rec(dir, slug, uuid = null) {
@@ -218,7 +218,7 @@ describe('folder placement identity', () => {
  */
 describe('folder hash is identity-independent', () => {
   const hashOf = async (recordEntities) => {
-    const { entityContentHash } = await import('../src/uwx/collections.js')
+    const { entityContentHash } = await import('../src/uwx/records.js')
     const nodes = [branch('team', recordEntities.map((r) => r.id))]
     return entityContentHash(buildFolderEntity({ recordEntities, folderNodes: nodes }).document)
   }

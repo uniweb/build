@@ -54,13 +54,13 @@ import {
   processMarkdownFile,
 } from '../site/content-collector.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
-import { resolveDefaultLocale, validateLanguageConfig, collectionDataUrl } from '@uniweb/core'
+import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
-import { resolveCollectionsConfig } from './collections-config.js'
+import { resolveQueriesConfig } from './queries-config.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
 
@@ -259,7 +259,7 @@ function buildPageData(config, ctx) {
     // validating — so `fetch` is a blob they carry and framework owns its
     // vocabulary. ⇒ There was nothing to coordinate, and inventing a coordination
     // is how a name stays wrong.
-    fetch = { query, path: collectionDataUrl(query), schema: query, ...rest }
+    fetch = { query, path: queryDataUrl(query), schema: query, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {
@@ -679,13 +679,13 @@ export function isSiteRelativeExtensionUrl(decl) {
  * The backend destructures exactly two — `name` and `schema` — and projects none of
  * this Section into a published payload, so the rest read as dead weight. ⛔ THEY ARE
  * OURS, AND THAT IS REASON ENOUGH: `excerpt`, `deferred`, `detailUrl` and `queryable`
- * are read across FRAMEWORK's own runtime, build and kit — `useCollectionQueryable`
+ * are read across FRAMEWORK's own runtime, build and kit — `useQueryable`
  * is a public hook a foundation calls to render a filter UI. They drive the file
  * lane, where they work. "The backend does not read it" was never an argument that
  * nothing reads it.
  *
  * ⚠️ There may be a second reason, and it is NOT ours to assert. Backend states that
- * `SiteCollectionDecl` reaches the app lane verbatim and that their reconcile
+ * their decl type reaches the app lane verbatim and that their reconcile
  * replaces an item's `data` wholesale with no field-grain merge — from which an
  * omitted field the EDITOR set would be destroyed on the next push. The mechanism is
  * their code and theirs to state. **Whether the editor reads or writes this decl at
@@ -706,15 +706,15 @@ export function isSiteRelativeExtensionUrl(decl) {
  */
 // ⛔ KEYS THAT MUST NOT REACH THE WIRE. Everything else on an authored declaration
 // is emitted, including fields this build does not model — see the note in
-// `collectionsNested`. Enumerated here rather than inverted into an allowlist
+// `queriesNested`. Enumerated here rather than inverted into an allowlist
 // because framework OWNS this vocabulary and can therefore enumerate it
 // truthfully; it does not own the Model's, and cannot.
 //
-// Sources, both framework's own: `site/collection-processor.js::parseCollectionConfig`
-// (the decl parser) and `site/collections-config.js` (normalization). Pinned by
+// Sources, both framework's own: `site/query-processor.js::parseQueryConfig`
+// (the decl parser) and `site/queries-config.js` (normalization). Pinned by
 // `tests/uwx-decl-unmodelled-fields.test.js`, which fails if either gains a field
 // that is neither emitted nor listed here.
-// Authored keys the explicit block in `collectionsNested` already consumes. Kept
+// Authored keys the explicit block in `queriesNested` already consumes. Kept
 // separate from the framework-local set below because these DO reach the wire —
 // just under a wire spelling. ⚠️ `detailUrl` is the one that matters: it is emitted
 // as `detail_url`, so a pass-through keyed on "is it already in `data`?" does not
@@ -743,10 +743,10 @@ const DECL_NOT_ON_WIRE = new Set([
   'model',
   // Build state: whether the AUTHOR asked for the schema or the subfolder-name
   // convention supplied it. Decides hard-error vs soft-skip during sync;
-  // `collections-config.js::toConfigCollections` strips it downstream too.
+  // `collections-config.js::toConfigQueries` strips it downstream too.
   'schemaExplicit',
   // ⭐ FRAMEWORK-LOCAL, and the one that proves the rule. `route:` is a real
-  // authored field — `parseCollectionConfig` reads it, and `collectItems` composes
+  // authored field — `parseQueryConfig` reads it, and `collectItems` composes
   // each item's link as `<route>/<slug>` — but the backend's Model has no slot for
   // it, so emitting it would be sending build-time config to a store that validates
   // against a declared schema. Measured 2026-08-29: a first version of this change
@@ -758,7 +758,7 @@ const DECL_NOT_ON_WIRE = new Set([
   'filter'
 ])
 
-function collectionsNested(declarations, uuids = null) {
+function queriesNested(declarations, uuids = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     const data = {}
@@ -995,7 +995,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
 
   // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
   // config (the records themselves are separate entities; this is just the config).
-  const colConfig = await resolveCollectionsConfig(siteRoot, { siteYml })
+  const colConfig = await resolveQueriesConfig(siteRoot, { siteYml })
 
   // `$uuid?` then `$id` `$model`, then sections in Model-declared order. The entity
   // `$uuid` lives in site.yml (back-filled after first sync); absent on first sync.
@@ -1014,9 +1014,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // RUNTIME rather than rendered, which is framework's own model of it
   // (`records-model.md` §1: a query is second-order site content).
   //
-  // ⚠️ `collectionsNested` keeps its name. §2's rule: rename what an author or a
+  // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
-  doc.queries = collectionsNested(colConfig.declarations, opts.collectionUuids)
+  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids)
   return doc
 }
 

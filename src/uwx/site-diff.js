@@ -46,7 +46,7 @@
 // Either base may be missing; the affected side degrades to "unknown" and is
 // reported as unattributed rather than guessed at.
 
-import { entityContentHash } from './collections.js'
+import { entityContentHash } from './records.js'
 import { recordStableId, safeStableIdFilename, pageDirName } from './site-project.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
@@ -301,12 +301,12 @@ export function describeSiteDiff(diff, { limit = 8 } = {}) {
  * ⛔ The sibling of collectFolderItemUuids, and it exists for the same reason: these
  * items have no file of their own, so nothing in a path-keyed map can hold their
  * identity, and a push that omits it re-sends the whole section uuid-less. The
- * backend refuses that rather than deleting every stored row — see collectionsNested.
+ * backend refuses that rather than deleting every stored row — see queriesNested.
  *
  * Keyed by `name`, which the backend enforces unique within the section. `$id` is
  * deliberately not consulted: it is a payload-local handle the backend never stores.
  */
-export function collectCollectionUuids(doc) {
+export function collectQueryUuids(doc) {
   const out = {}
   for (const item of doc?.queries || []) {
     const name = item?.name

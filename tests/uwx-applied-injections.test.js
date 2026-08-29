@@ -51,7 +51,7 @@ afterEach(() => {
 
 /** `changed` as `uniweb status --json` computes it. */
 const changedCount = (pkg) =>
-  (pkg.siteContent?.entityCount || 0) + (pkg.collections?.entityCount || 0)
+  (pkg.siteContent?.entityCount || 0) + (pkg.records?.entityCount || 0)
 
 const REWRITE = { assetRewrite: { '/images/shot.svg': 'https://cdn.example/assets/abc/base.svg' } }
 const PIN = { injectInfo: { foundation: '@acme/marketing@1.4.2' } }

@@ -22,7 +22,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { siteProjectToDocument, declarationsToCollectionsYml } from '../src/uwx/index.js'
+import { siteProjectToDocument, declarationsToQueriesYml } from '../src/uwx/index.js'
 
 let ROOT, SITE
 const SCHEMA = {
@@ -51,7 +51,7 @@ function makeSite(declExtra = '') {
 }
 
 const pulledDecl = (doc) => {
-  declarationsToCollectionsYml({ document: doc, siteRoot: SITE })
+  declarationsToQueriesYml({ document: doc, siteRoot: SITE })
   const p = join(SITE, 'queries.yml')
   // A BARE map — `queries.yml` has no root key, so the query is read directly.
   return existsSync(p) ? (yaml.load(readFileSync(p, 'utf8'))?.articles ?? {}) : {}

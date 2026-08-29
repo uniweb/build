@@ -13,7 +13,7 @@
  * path (where the static-host extras — sitemap, robots, search-index,
  * `_pages/*` for split content — are actually consumed). Both paths use
  * the same underlying building blocks (`collectSiteContent`,
- * `processCollections`, `processAssets`, etc.), so behavior stays
+ * `processQueries`, `processAssets`, etc.), so behavior stays
  * consistent without forcing one path through the other's lifecycle.
  */
 
@@ -23,7 +23,7 @@ import { join, resolve, dirname } from 'node:path'
 
 import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
-import { processCollections, writeCollectionFiles } from './collection-processor.js'
+import { processQueries, writeQueryFiles } from './query-processor.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import {
@@ -60,7 +60,7 @@ import {
  *     ⇒ The rule stands on its own: we do not know which consumers
  *     re-derive, so we always ship enough for the ones that do.
  *   - `data/<collection>.json` (+ per-record files for `deferred:`
- *     collections) — same shape `processCollections` produces today.
+ *     collections) — same shape `processQueries` produces today.
  *   - `assets/<media>` — processed images / video posters / PDF
  *     thumbnails. Filtered by the deploy CLI to MEDIA only at upload time.
  *
@@ -129,7 +129,7 @@ export async function buildSiteData({
   let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true, base: basePath, strict: true })
 
   // 2. Compile content collections (file-based markdown/yaml/json).
-  //    `writeCollectionFiles` lands them under `<siteRoot>/public/data/`;
+  //    `writeQueryFiles` lands them under `<siteRoot>/public/data/`;
   //    in the vite plugin path that's fine because vite copies
   //    `public/` into `dist/` at build time. The link-mode pipeline
   //    has no vite, so we mirror that copy ourselves into
@@ -138,13 +138,13 @@ export async function buildSiteData({
   //    2026-08-18; no such function has existed for some time.) Same output bytes, same paths, just
   //    without the vite intermediary.
   if (siteContent.config?.queries) {
-    const collections = await processCollections(
+    const collections = await processQueries(
       resolvedSiteRoot,
       siteContent.config.queries,
       siteContent.config?.paths?.entities,
       basePath
     )
-    await writeCollectionFiles(resolvedSiteRoot, collections, siteContent.config.queries)
+    await writeQueryFiles(resolvedSiteRoot, collections, siteContent.config.queries)
 
     const publicDataDir = join(resolvedSiteRoot, 'public', DATA_DIR)
     const distDataDir = join(resolvedDistDir, DATA_DIR)

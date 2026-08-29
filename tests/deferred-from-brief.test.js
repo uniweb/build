@@ -8,9 +8,9 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveCollectionsConfig } from '../src/site/collections-config.js'
+import { resolveQueriesConfig } from '../src/site/queries-config.js'
 import { collectSiteContent } from '../src/site/content-collector.js'
-import { processCollections, writeCollectionFiles } from '../src/site/collection-processor.js'
+import { processQueries, writeQueryFiles } from '../src/site/query-processor.js'
 
 let ROOT
 let SITE
@@ -37,7 +37,7 @@ const setup = ({ siteCollections, schemas = { '@/article': SCHEMA }, foundation 
 }
 
 const declared = async () =>
-  (await resolveCollectionsConfig(SITE)).declarations.articles
+  (await resolveQueriesConfig(SITE)).declarations.articles
 
 beforeEach(() => {
   ROOT = mkdtempSync(join(tmpdir(), 'deferred-brief-'))
@@ -92,8 +92,8 @@ describe('deriving deferred from the brief', () => {
 describe('what the derived split actually emits', () => {
   const build = async () => {
     const site = await collectSiteContent(SITE, {})
-    const cols = await processCollections(SITE, site.config.queries, null, '/')
-    await writeCollectionFiles(SITE, cols, site.config.queries)
+    const cols = await processQueries(SITE, site.config.queries, null, '/')
+    await writeQueryFiles(SITE, cols, site.config.queries)
     return {
       cascade: JSON.parse(readFileSync(join(SITE, 'public/data/articles.json'), 'utf8')),
       recordPath: join(SITE, 'public/data/articles/hi.json'),

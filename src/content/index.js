@@ -17,10 +17,10 @@ export { collectSiteContent } from '../site/content-collector.js'
 // can resolve `queries:` declarations without importing
 // `@uniweb/build/site` (which pulls Vite via its plugin index).
 export {
-  processCollections,
-  writeCollectionFiles,
-  getCollectionLastModified,
-} from '../site/collection-processor.js'
+  processQueries,
+  writeQueryFiles,
+  getQueryLastModified,
+} from '../site/query-processor.js'
 export {
   parseFetchConfig,
   executeFetch,

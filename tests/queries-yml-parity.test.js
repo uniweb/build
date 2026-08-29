@@ -1,7 +1,7 @@
 // `queries.yml` resolves a declaration exactly as `collections.yml` did.
 //
 // ⭐ THE EXPECTATIONS BELOW WERE CAPTURED FROM THE OLD RESOLVER, not written by
-// hand. Before `resolveCollectionsConfig` was changed, the equivalent
+// hand. Before `resolveQueriesConfig` was changed, the equivalent
 // `collections/collections.yml` fixture was run through it and its
 // `declarations` dumped; that dump is what `EXPECTED` holds. So this pins a
 // MEASURED parity rather than a belief about what the old code did.
@@ -13,7 +13,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveCollectionsConfig, QUERIES_YML_RELPATH } from '../src/site/collections-config.js'
+import { resolveQueriesConfig, QUERIES_YML_RELPATH } from '../src/site/queries-config.js'
 
 // Captured 2026-08-29 from the pre-change resolver, given the same declarations
 // written as `collections/collections.yml::collections`.
@@ -86,7 +86,7 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
 
   it('resolves declarations identically to the captured baseline', async () => {
     const dir = site({ 'site.yml': 'name: Parity\n', [QUERIES_YML_RELPATH]: QUERIES_YML })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(declarations).toEqual(EXPECTED)
   })
 
@@ -97,7 +97,7 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
       'site.yml': 'name: Parity\n',
       [QUERIES_YML_RELPATH]: 'queries:\n  members:\n    schema: "@/member"\n',
     })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(Object.keys(declarations)).toEqual(['queries'])
     expect(declarations.members).toBeUndefined()
   })
@@ -107,7 +107,7 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
       'site.yml': 'name: Parity\nqueries:\n  members:\n    sort: name asc\n    limit: 5\n',
       [QUERIES_YML_RELPATH]: 'members:\n  sort: order asc\n',
     })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(declarations.members.sort).toBe('order asc') // queries.yml wins
     expect(declarations.members.limit).toBe(5) // site.yml sibling survives
   })
@@ -116,20 +116,20 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
     const dir = site({
       'site.yml': "name: Parity\nqueries:\n  members:\n    schema: '@/member'\n    sort: order asc\n",
     })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(declarations.members).toEqual(EXPECTED.members)
   })
 
   it('a file-based query carries NO path — the schema addresses the pool', async () => {
     const dir = site({ 'site.yml': 'name: Parity\n', [QUERIES_YML_RELPATH]: 'posts: {}\n' })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(declarations.posts.path).toBeUndefined()
     expect(declarations.posts.schema).toBe('@/posts') // the query-name convention
   })
 
   it('the string shorthand names the SCHEMA', async () => {
     const dir = site({ 'site.yml': 'name: Parity\n', [QUERIES_YML_RELPATH]: "posts: '@/article'\n" })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(declarations.posts.schema).toBe('@/article')
     expect(declarations.posts.schemaExplicit).toBe(true)
     expect(declarations.posts.path).toBeUndefined()
@@ -137,7 +137,7 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
 
   it('no queries.yml and no site.yml::queries → no declarations', async () => {
     const dir = site({ 'site.yml': 'name: Parity\n' })
-    const cfg = await resolveCollectionsConfig(dir)
+    const cfg = await resolveQueriesConfig(dir)
     expect(cfg.hasQueriesYml).toBe(false)
     expect(cfg.declarations).toEqual({})
   })
@@ -150,7 +150,7 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
       'site.yml': 'name: Parity\n',
       'collections/collections.yml': "collections:\n  members:\n    schema: '@/member'\n",
     })
-    const { declarations } = await resolveCollectionsConfig(dir)
+    const { declarations } = await resolveQueriesConfig(dir)
     expect(declarations).toEqual({})
   })
 })

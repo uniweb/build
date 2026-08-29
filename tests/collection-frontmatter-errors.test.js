@@ -15,7 +15,7 @@
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { processCollections } from '../src/site/collection-processor.js'
+import { processQueries } from '../src/site/query-processor.js'
 
 const dirs = []
 
@@ -31,7 +31,7 @@ async function collectionWith(files) {
 }
 
 const run = (root) =>
-  processCollections(root, { articles: { schema: '@/article' } })
+  processQueries(root, { articles: { schema: '@/article' } })
 
 afterAll(async () => {
   for (const d of dirs) await rm(d, { recursive: true, force: true })

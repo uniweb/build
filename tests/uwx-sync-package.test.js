@@ -78,15 +78,15 @@ describe('emitSyncPackages — two directional lanes', () => {
 
     // collections lane: folder + 2 records, folder first (the leading { kind: 'folder' }
     // is a positional placeholder so record back-fill stays aligned)
-    expect(pkg.collections).toBeTruthy()
-    expect(pkg.collections.entityCount).toBe(3)
-    expect(pkg.collections.models).toContain('@uniweb/folder')
-    expect(pkg.collections.index[0]).toEqual({ kind: 'folder' })
-    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
+    expect(pkg.records).toBeTruthy()
+    expect(pkg.records.entityCount).toBe(3)
+    expect(pkg.records.models).toContain('@uniweb/folder')
+    expect(pkg.records.index[0]).toEqual({ kind: 'folder' })
+    expect(pkg.records.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
 
     // the folder references both records by $ref (uuid-less first push) and carries no
     // $uuid of its own (the backend owns it, keyed by the site-content uuid)
-    const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
+    const folder = JSON.parse(readZip(pkg.records.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder.$model).toBe('@uniweb/folder')
     expect(folder).not.toHaveProperty('$uuid')
     // ⭐ FLAT, because `records.yml` lists the records at the root and declares no
@@ -112,7 +112,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     const first = await emitSyncPackages(SITE)
     const second = await emitSyncPackages(SITE, { priorHashes: first.hashes })
     expect(second.siteContent).toBeNull()
-    expect(second.collections).toBeNull()
+    expect(second.records).toBeNull()
     expect(second.skipped).toBe(4) // site + folder + 2 records
   })
 
@@ -121,9 +121,9 @@ describe('emitSyncPackages — two directional lanes', () => {
     w('entities/article/hello.md', '---\ntitle: Hello edited\ndate: 2026-01-01\n---\nBody\n')
     const second = await emitSyncPackages(SITE, { priorHashes: first.hashes })
     expect(second.siteContent).toBeNull()
-    expect(second.collections).toBeTruthy()
+    expect(second.records).toBeTruthy()
     // folder (always, for $ref closure) + the one changed record
-    expect(second.collections.index.map((e) => e.kind ?? e.id)).toEqual(['folder', 'article/hello'])
+    expect(second.records.index.map((e) => e.kind ?? e.id)).toEqual(['folder', 'article/hello'])
   })
 
   it('editing a page fires ONLY the site-content lane', async () => {
@@ -131,7 +131,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     w('pages/1-home/@detail.md', '---\ntype: Detail\nid: detail\n---\n# Much more\n')
     const second = await emitSyncPackages(SITE, { priorHashes: first.hashes })
     expect(second.siteContent).toBeTruthy()
-    expect(second.collections).toBeNull()
+    expect(second.records).toBeNull()
   })
 
   it('the folder never carries a $uuid', async () => {
@@ -140,8 +140,8 @@ describe('emitSyncPackages — two directional lanes', () => {
     // `$uuid:` key that was read by nothing; `queries.yml` has no reserved keys at
     // all — a `$uuid:` line there would simply declare a query named `$uuid`.)
     const pkg = await emitSyncPackages(SITE)
-    expect(pkg.collections).not.toHaveProperty('bind')
-    const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
+    expect(pkg.records).not.toHaveProperty('bind')
+    const folder = JSON.parse(readZip(pkg.records.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder).not.toHaveProperty('$uuid')
   })
 
@@ -168,7 +168,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // the CLI at warn level — see cli/src/utils/schemaless-report.js.
     expect((pkg.warnings || []).join('\n')).not.toMatch(/not synced/i)
     // articles still syncs as entities — the partition routes each collection to one lane
-    expect(pkg.collections.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
+    expect(pkg.records.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
   })
 
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {
@@ -177,7 +177,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     w('entities/article/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
 
     const first = await emitSyncPackages(SITE)
-    const articleModel = first.collections.models.find((m) => m !== '@uniweb/folder')
+    const articleModel = first.records.models.find((m) => m !== '@uniweb/folder')
     expect(articleModel).toBeTruthy()
 
     // Re-emit with the RECORD hashes cached but the folder's dropped → the folder fires
@@ -186,11 +186,11 @@ describe('emitSyncPackages — two directional lanes', () => {
     for (const k of Object.keys(priorHashes)) if (k.startsWith('@uniweb/folder ')) delete priorHashes[k]
     const second = await emitSyncPackages(SITE, { priorHashes })
 
-    expect(second.collections).toBeTruthy()
+    expect(second.records).toBeTruthy()
     // the package carries only the folder (records filtered) …
-    expect(second.collections.index.filter((e) => e.kind !== 'folder').length).toBe(0)
+    expect(second.records.index.filter((e) => e.kind !== 'folder').length).toBe(0)
     // … yet the article Model the folder references is still declared in models_required.
-    expect(second.collections.models).toContain(articleModel)
+    expect(second.records.models).toContain(articleModel)
   })
 })
 

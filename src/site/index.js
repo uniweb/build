@@ -38,10 +38,10 @@ export {
   isPdfFile
 } from './advanced-processors.js'
 export {
-  processCollections,
-  writeCollectionFiles,
-  getCollectionLastModified
-} from './collection-processor.js'
+  processQueries,
+  writeQueryFiles,
+  getQueryLastModified
+} from './query-processor.js'
 export { collectSchemalessData, collectSchemalessDataAssets, rewriteSchemalessDataAssets } from './schemaless-data.js'
 export {
   parseFetchConfig,

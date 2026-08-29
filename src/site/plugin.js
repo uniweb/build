@@ -49,7 +49,7 @@ import {
 import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
-import { processCollections, writeCollectionFiles } from './collection-processor.js'
+import { processQueries, writeQueryFiles } from './query-processor.js'
 import { ENTITIES_DIR } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
@@ -567,9 +567,9 @@ export function siteContentPlugin(options = {}) {
   let watcher = null
   let server = null
   let localeTranslations = {} // Cache: { locale: translations }
-  let collectionTranslations = {} // Cache: { locale: collection translations }
+  let recordTranslations = {} // Cache: { locale: collection translations }
   let localesDir = 'locales' // Default, updated from site config
-  let collectionsConfig = null // Cached for watcher setup
+  let queriesConfig = null // Cached for watcher setup
   let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
   let resolvedMountPaths = [] // Absolute dirs mounted under pages/ via site.yml paths:
   let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
@@ -603,9 +603,9 @@ export function siteContentPlugin(options = {}) {
   /**
    * Load collection translations for a specific locale
    */
-  async function loadCollectionTranslations(locale) {
-    if (collectionTranslations[locale]) {
-      return collectionTranslations[locale]
+  async function loadRecordTranslations(locale) {
+    if (recordTranslations[locale]) {
+      return recordTranslations[locale]
     }
 
     const localePath = join(resolvedSitePath, localesDir, 'records', `${locale}.json`)
@@ -616,7 +616,7 @@ export function siteContentPlugin(options = {}) {
     try {
       const content = await readFile(localePath, 'utf-8')
       const translations = JSON.parse(content)
-      collectionTranslations[locale] = translations
+      recordTranslations[locale] = translations
       return translations
     } catch {
       return null
@@ -793,7 +793,7 @@ export function siteContentPlugin(options = {}) {
         try {
           // Do an early content collection to get the collections config
           const earlyContent = await collectForBundle(resolvedSitePath, { foundationPath })
-          collectionsConfig = earlyContent.config?.queries
+          queriesConfig = earlyContent.config?.queries
 
           // Resolve content directory paths from site.yml paths: group
           const paths = earlyContent?.config?.paths || {}
@@ -806,10 +806,10 @@ export function siteContentPlugin(options = {}) {
           resolvedEntitiesDir = paths.entities || null
           resolvedMountPaths = mountEntriesOf(paths).map(([, rel]) => resolve(resolvedSitePath, rel))
 
-          if (collectionsConfig) {
+          if (queriesConfig) {
             console.log('[site-content] Processing content collections...')
-            const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedEntitiesDir, basePath)
-            await writeCollectionFiles(resolvedSitePath, collections, collectionsConfig)
+            const collections = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath)
+            await writeQueryFiles(resolvedSitePath, collections, queriesConfig)
           }
         } catch (err) {
           console.warn('[site-content] Early collection processing failed:', err.message)
@@ -847,8 +847,8 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.queries) {
           console.log('[site-content] Materializing queries...')
-          const collections = await processCollections(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
-          await writeCollectionFiles(resolvedSitePath, collections, siteContent.config.queries)
+          const collections = await processQueries(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
+          await writeQueryFiles(resolvedSitePath, collections, siteContent.config.queries)
         }
 
         // Execute data fetches in dev mode
@@ -864,7 +864,7 @@ export function siteContentPlugin(options = {}) {
 
         // Clear translation cache on rebuild
         localeTranslations = {}
-        collectionTranslations = {}
+        recordTranslations = {}
       } catch (err) {
         console.error('[site-content] Failed to collect content:', err.message)
         // Production: a failed collect must fail the build — falling through
@@ -906,17 +906,17 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Debounce collection rebuilds separately (writes to file system)
-        let collectionRebuildTimeout = null
-        const scheduleCollectionRebuild = () => {
-          if (collectionRebuildTimeout) clearTimeout(collectionRebuildTimeout)
-          collectionRebuildTimeout = setTimeout(async () => {
+        let recordRebuildTimeout = null
+        const scheduleRecordRebuild = () => {
+          if (recordRebuildTimeout) clearTimeout(recordRebuildTimeout)
+          recordRebuildTimeout = setTimeout(async () => {
             console.log('[site-content] Collection content changed, regenerating JSON...')
             try {
-              // Use collectionsConfig (cached from configResolved) or siteContent
-              const collections = collectionsConfig || siteContent?.config?.queries
+              // Use queriesConfig (cached from configResolved) or siteContent
+              const collections = queriesConfig || siteContent?.config?.queries
               if (collections) {
-                const processed = await processCollections(resolvedSitePath, collections, resolvedEntitiesDir, basePath)
-                await writeCollectionFiles(resolvedSitePath, processed, collections)
+                const processed = await processQueries(resolvedSitePath, collections, resolvedEntitiesDir, basePath)
+                await writeQueryFiles(resolvedSitePath, processed, collections)
               }
               // Send full reload to client
               server.ws.send({ type: 'full-reload' })
@@ -1001,7 +1001,7 @@ export function siteContentPlugin(options = {}) {
           for (const contentPath of contentPaths) {
             if (existsSync(contentPath)) {
               try {
-                watchers.push(watch(contentPath, { recursive: true }, scheduleCollectionRebuild))
+                watchers.push(watch(contentPath, { recursive: true }, scheduleRecordRebuild))
                 console.log(`[site-content] Watching ${contentPath} for collection changes`)
               } catch (err) {
                 console.warn('[site-content] Could not watch content directory:', err.message)
@@ -1023,7 +1023,7 @@ export function siteContentPlugin(options = {}) {
           const localeWatcher = watch(localesPath, { recursive: false }, () => {
             console.log('[site-content] Translation files changed, clearing cache...')
             localeTranslations = {}
-            collectionTranslations = {}
+            recordTranslations = {}
             server.ws.send({ type: 'full-reload' })
           })
           additionalWatchers.push(localeWatcher)
@@ -1048,16 +1048,16 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Watch collection translations directory
-        const collectionsLocalesPath = resolve(localesPath, 'records')
-        if (existsSync(collectionsLocalesPath)) {
+        const recordLocalesPath = resolve(localesPath, 'records')
+        if (existsSync(recordLocalesPath)) {
           try {
-            const collWatcher = watch(collectionsLocalesPath, { recursive: false }, () => {
+            const collWatcher = watch(recordLocalesPath, { recursive: false }, () => {
               console.log('[site-content] Collection translations changed, clearing cache...')
-              collectionTranslations = {}
+              recordTranslations = {}
               server.ws.send({ type: 'full-reload' })
             })
             additionalWatchers.push(collWatcher)
-            console.log(`[site-content] Watching ${collectionsLocalesPath} for collection translation changes`)
+            console.log(`[site-content] Watching ${recordLocalesPath} for collection translation changes`)
           } catch (err) {
             // collections locales dir may not exist, that's ok
           }
@@ -1207,7 +1207,7 @@ export function siteContentPlugin(options = {}) {
         if (localeDataMatch) {
           const locale = localeDataMatch[1]
           const filename = localeDataMatch[2]
-          const collectionName = filename.replace('.json', '')
+          const queryName = filename.replace('.json', '')
           const sourcePath = join(resolvedSitePath, 'public', DATA_DIR, filename)
 
           if (existsSync(sourcePath)) {
@@ -1216,15 +1216,15 @@ export function siteContentPlugin(options = {}) {
               const items = JSON.parse(raw)
 
               // Load collection translations for this locale
-              const translations = await loadCollectionTranslations(locale) || {}
+              const translations = await loadRecordTranslations(locale) || {}
 
               // Check for free-form translations
               const freeformDir = join(resolvedSitePath, localesDir, 'freeform', locale)
               const hasFreeform = existsSync(freeformDir)
 
               // Translate using the collections module
-              const { translateCollectionData } = await import('../i18n/collections.js')
-              const translated = await translateCollectionData(items, collectionName, resolvedSitePath, {
+              const { translateRecordData } = await import('../i18n/records.js')
+              const translated = await translateRecordData(items, queryName, resolvedSitePath, {
                 locale,
                 localesDir: join(resolvedSitePath, localesDir),
                 translations,
