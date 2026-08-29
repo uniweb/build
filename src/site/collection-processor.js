@@ -56,7 +56,7 @@ import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
 import { DATA_DIR } from '@uniweb/core'
-import { applyFilter, applySort } from './data-fetcher.js'
+import { applyWhere, applyFilter, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 
 // Try to import content-reader for markdown parsing
@@ -104,6 +104,7 @@ function parseCollectionConfig(name, config) {
       path: config,
       route: null,
       sort: null,
+      where: null,
       filter: null,
       limit: 0,
       excerpt: { maxLength: 160 },
@@ -116,6 +117,10 @@ function parseCollectionConfig(name, config) {
     path: config.path,
     route: config.route || null,
     sort: config.sort || null,
+    // `where:` is the CANONICAL predicate; `filter:` is the deprecated string DSL
+    // it replaced. Both are carried and both are applied below, in the same order
+    // `data-fetcher.js::applyPostProcessing` uses — see the note there.
+    where: config.where || null,
     filter: config.filter || null,
     limit: config.limit || 0,
     excerpt: {
@@ -713,7 +718,21 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
     }))
   }
 
-  // Apply custom filter
+  // ⛔ ORDER MATCHES `data-fetcher.js::applyPostProcessing` — where, filter, sort,
+  // limit. Two lanes evaluate the same declaration (this one materializes a query
+  // to `/data/<name>.json`; that one runs a page-level `fetch:`), so a difference
+  // in order is a difference in RESULT for any query that both narrows and limits.
+  //
+  // ⚠️ `where` was missing here entirely until 2026-08-29: `parseCollectionConfig`
+  // read `filter` and never `where`, so the CANONICAL predicate was parsed, put on
+  // the sync wire, stored — and never applied, while the DEPRECATED one it replaced
+  // worked. An author following current guidance got silence and shipped unfiltered
+  // data. Pinned by `tests/collection-query-terms.test.js`.
+  if (config.where) {
+    items = applyWhere(items, config.where)
+  }
+
+  // Apply the legacy filter expression (deprecated)
   if (config.filter) {
     items = applyFilter(items, config.filter)
   }
