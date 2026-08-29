@@ -2173,12 +2173,16 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
 
-  // Collections are declared in TWO files — `site.yml::collections` and
-  // `collections/collections.yml`, the latter winning per key — and resolving
-  // them is one question with one answer. This used to read `site.yml` alone
-  // while the sync lane merged both, so a collection declared only in
-  // `collections.yml` was invisible here: never compiled, `data: <name>`
-  // delivering nothing, while sync pushed it fine.
+  // Queries are declared in TWO files — `site.yml::queries` and `queries.yml`,
+  // the latter winning per key — and resolving them is one question with one
+  // answer. The site build used to read `site.yml` alone while the sync lane
+  // merged both, so a declaration in the second file was invisible here: never
+  // compiled, `data: <name>` delivering nothing, while sync pushed it fine.
+  //
+  // ⚠️ `siteConfig.collections` KEEPS ITS NAME. That is the payload key the
+  // runtime reads and the wire Section the backend stores — neither is an
+  // authoring surface, and neither is framework's alone to rename. Only what an
+  // AUTHOR writes moved.
   const collections = toConfigCollections(
     (await resolveCollectionsConfig(sitePath, { siteYml: siteConfig })).declarations
   )

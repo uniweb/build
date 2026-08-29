@@ -36,8 +36,8 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve, extname, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
-import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
-import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
+import { writeRecordFile, writeQueriesConfig } from './project-writer.js'
+import { defaultSchema, defaultPoolPath, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
 import { isContentBodyField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformCollectionPath } from '../i18n/freeform.js'
@@ -152,25 +152,28 @@ function locate(document, folderIndex) {
   return fromFolder || null
 }
 
-const COLLECTIONS_PREFIX = 'collections/'
-
 // Skip undefined when copying optional fields into a projected declaration.
 function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
 }
 
 // Invert one wire declaration (`collectionsNested` output) back to its file-side
-// shape, and decide its home. Returns `{ target: 'col'|'site', name, decl }`.
+// shape. Returns `{ name, decl }`.
 //
-//  - A `path:` under `collections/` is the canonical collections.yml home; the
-//    prefix is stripped (collections.yml `path:` is relative to `collections/`)
-//    and omitted entirely when it equals the default (the collection name).
-//  - A `path:` NOT under `collections/` is a legacy `site.yml::collections` local
-//    path (kept verbatim there — collections.yml can't express it), so it routes
-//    back to site.yml to round-trip faithfully.
-//  - `url:` (remote source) and a bare `source:` object go to collections.yml.
-//  - `schema:` is dropped when it only restates the subfolder-name convention
-//    default, so a terse author file stays terse.
+//  - `path:` is written VERBATIM, and omitted entirely when it equals the default
+//    (the query's own name under the pool).
+//  - `url:` (remote source) and a bare `source:` object are carried as-is.
+//  - `schema:` is dropped when it only restates the query-name convention default,
+//    so a terse author file stays terse.
+//
+// ⛔ THE `collections/`-PREFIX STRIP AND THE site.yml ROUTING ARE BOTH GONE, and
+// they went together. They existed because `collections.yml` sat INSIDE
+// `collections/` and so could not express a path outside it: a path elsewhere had
+// to be sent back to `site.yml` to survive the round trip. `queries.yml` is at the
+// site root and its `path:` is site-root-relative, so there is one home and no
+// path it cannot state. ⚠️ Leaving the strip in place would have written
+// `path: items` for a source path `collections/items`, which the reader then
+// resolves as `items` — a round trip that silently relocates a query's pool.
 // Wire keys `declToFileShape` consumes explicitly — mapped, renamed, or folded into
 // the file-side `path`/`url`. `$id`/`$uuid`/`name` are identity, not content.
 const DECL_WIRE_CONSUMED = new Set([
@@ -203,19 +206,13 @@ function isDerivedDeferred(d, dataSchemas) {
 function declToFileShape(d, dataSchemas = null) {
   const name = d.name || d.$id
   const decl = {}
-  let target = 'col'
 
   const source = d.source || {}
   if (typeof source.url === 'string') {
     decl.url = source.url
   } else if (typeof source.path === 'string') {
-    if (source.path.startsWith(COLLECTIONS_PREFIX)) {
-      const rel = source.path.slice(COLLECTIONS_PREFIX.length)
-      if (rel !== name) decl.path = rel
-    } else {
-      target = 'site'
-      decl.path = source.path
-    }
+    // Omit a path that merely restates the default pool location for this name.
+    if (source.path !== defaultPoolPath(name)) decl.path = source.path
   } else if (source && typeof source === 'object' && Object.keys(source).length > 0) {
     decl.source = source
   }
@@ -263,18 +260,15 @@ function declToFileShape(d, dataSchemas = null) {
     decl[key] = value
   }
 
-  return { target, name, decl }
+  return { name, decl }
 }
 
 /**
- * Project the collection DECLARATIONS carried in a site-content document
+ * Project the QUERY declarations carried in a site-content document
  * (`document.collections`, the inverse of site.js `collectionsNested`) back to
- * their config home — `collections/collections.yml::collections` for the canonical
- * file-based + remote sources, `site.yml::collections` for legacy local paths
- * outside `collections/`. Sibling keys (`$uuid`, `sync`, `folders`, untouched
- * collections) are preserved via the shallow-merge writers. The record FILES and
- * the folder `$uuid` are written elsewhere (collectionsToProject); this is only
- * the declaration config.
+ * `queries.yml` — the one home. Untouched queries are preserved via the
+ * shallow-merge writer. The record FILES are written elsewhere
+ * (collectionsToProject); this is only the declaration config.
  *
  * Idempotent and non-destructive: with no declarations it writes nothing (so a
  * pull that doesn't carry collections never clobbers a hand-authored file).
@@ -282,7 +276,7 @@ function declToFileShape(d, dataSchemas = null) {
  * @param {object} params
  * @param {object} params.document - a site-content `$`-document (`{ collections }`)
  * @param {string} params.siteRoot
- * @returns {{ collections?: 'updated'|'unchanged', site?: 'updated'|'unchanged' }}
+ * @returns {{ collections?: 'updated'|'unchanged' }}
  */
 export function declarationsToCollectionsYml({ document, siteRoot }) {
   const decls = Array.isArray(document?.collections) ? document.collections : []
@@ -303,20 +297,15 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
   }
   const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
 
-  const colCollections = {}
-  const siteCollections = {}
+  const queries = {}
   for (const d of decls) {
-    const { target, name, decl } = declToFileShape(d, dataSchemas)
+    const { name, decl } = declToFileShape(d, dataSchemas)
     if (!name) continue
-    if (target === 'site') siteCollections[name] = decl
-    else colCollections[name] = decl
+    queries[name] = decl
   }
 
-  if (Object.keys(colCollections).length > 0) {
-    report.collections = writeCollectionsConfig(siteRoot, { collections: colCollections })
-  }
-  if (Object.keys(siteCollections).length > 0) {
-    report.site = writeSiteConfig(siteRoot, { collections: siteCollections })
+  if (Object.keys(queries).length > 0) {
+    report.collections = writeQueriesConfig(siteRoot, queries)
   }
   return report
 }

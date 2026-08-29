@@ -51,8 +51,8 @@ export {
 } from './site.js'
 export {
   resolveCollectionsConfig,
-  collectionsYmlPath,
-  COLLECTIONS_YML_RELPATH,
+  queriesYmlPath,
+  QUERIES_YML_RELPATH,
 } from './collections-config.js'
 export { upsertYamlScalar } from './yaml-upsert.js'
 export { buildFolderEntity,

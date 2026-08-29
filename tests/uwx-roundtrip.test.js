@@ -34,7 +34,7 @@ beforeEach(() => {
     [
       'name: Test',
       'foundation: "@acme/marketing"',
-      'collections:',
+      'queries:',
       '  products:',
       '    path: collections/products',
       '    model: "@acme/product"',

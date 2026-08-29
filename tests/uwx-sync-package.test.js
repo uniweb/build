@@ -11,7 +11,7 @@ import {
 
 // The two directional sync lanes: site-content (static) and collections (folder +
 // records). Each fires independently on "send only changed"; the entity uuids live
-// in files (site.yml / collections.yml / record files). Site-content items carry a
+// in files (site.yml / queries.yml / record files). Site-content items carry a
 // per-item `$uuid` when the caller supplies `itemUuids` — without it the backend
 // recreates every row — so the no-identity cases below are the un-stamped path.
 
@@ -40,8 +40,8 @@ beforeEach(() => {
   w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n')
   w('pages/1-home/@detail.md', '---\ntype: Detail\nid: detail\n---\n# More\n')
   w('layout/header.md', '---\ntype: Header\n---\n# H\n')
-  // a syncable collection (resolvable @/article schema) + collections.yml
-  w('collections/collections.yml', 'collections:\n  articles:\n    schema: "@/article"\n    sort: date desc\n')
+  // a syncable query (resolvable @/article schema) + queries.yml
+  w('queries.yml', 'articles:\n  schema: "@/article"\n  sort: date desc\n')
   w('collections/articles/hello.md', '---\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
   w('collections/articles/world.md', '---\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
   writeFileSync(
@@ -127,10 +127,11 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(second.collections).toBeNull()
   })
 
-  it('the folder never carries a $uuid, even when collections.yml has one', async () => {
-    // A stray collections.yml::$uuid (e.g. left over from an old project) is ignored —
-    // the backend owns the folder, keyed by the site-content uuid.
-    w('collections/collections.yml', '$uuid: folder-existing\ncollections:\n  articles:\n    schema: "@/article"\n')
+  it('the folder never carries a $uuid', async () => {
+    // The backend owns the site's folder, keyed by the site-content uuid, so the
+    // framework never mints, holds or sends one. (`collections.yml` used to have a
+    // `$uuid:` key that was read by nothing; `queries.yml` has no reserved keys at
+    // all — a `$uuid:` line there would simply declare a query named `$uuid`.)
     const pkg = await emitSyncPackages(SITE)
     expect(pkg.collections).not.toHaveProperty('bind')
     const folder = JSON.parse(readZip(pkg.collections.buffer).get('entities/folder.json').toString('utf8'))
@@ -141,7 +142,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // `notes` declares no schema and the foundation defines none → it resolves via
     // the subfolder-name convention, finds nothing, and soft-skips the sync. It
     // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
-    w('collections/collections.yml', 'collections:\n  articles:\n    schema: "@/article"\n  notes: {}\n')
+    w('queries.yml', 'articles:\n  schema: "@/article"\nnotes: {}\n')
     w('collections/notes/first.md', '---\ntitle: First\n---\nNote body\n')
     const pkg = await emitSyncPackages(SITE)
 

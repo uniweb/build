@@ -28,21 +28,20 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-// A site with one collection whose decl carries a field this build has never
-// heard of, alongside one it models.
+// A site with one query whose decl carries a field this build has never heard of,
+// alongside one it models.
 function makeSite(declYml) {
   const src = join(dir, 'src')
   mkdirSync(join(src, 'collections', 'members'), { recursive: true })
   writeFileSync(join(src, 'site.yml'), "name: T\nfoundation: '@acme/base@1.0.0'\n")
-  writeFileSync(join(src, 'collections', 'collections.yml'), declYml)
+  writeFileSync(join(src, 'queries.yml'), declYml)
   return src
 }
 
-const withUnmodelled = `collections:
-  members:
-    schema: '@std/person'
-    limit: 10
-    displayHeading: Our Team
+const withUnmodelled = `members:
+  schema: '@std/person'
+  limit: 10
+  displayHeading: Our Team
 `
 
 describe('push — an unmodelled decl field reaches the wire', () => {
@@ -69,7 +68,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     // across the seam. The two controls above (`limit`, `schema`) keep their names,
     // so neither could have caught it. A rename needs a renamed field to test it.
     const src = makeSite(
-      "collections:\n  members:\n    schema: '@std/person'\n    detailUrl: /api/m/{slug}\n"
+"members:\n  schema: '@std/person'\n  detailUrl: /api/m/{slug}\n"
     )
 
     const doc = await siteProjectToDocument(src)
@@ -85,7 +84,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     // framework's, not the Model's. Sending it would push build-time config into a
     // store that validates writes against a declared schema.
     const src = makeSite(
-      "collections:\n  members:\n    schema: '@std/person'\n    route: /team\n"
+"members:\n  schema: '@std/person'\n  route: /team\n"
     )
 
     const doc = await siteProjectToDocument(src)
@@ -132,8 +131,8 @@ describe('pull — an unmodelled decl field returns to the authored file', () =>
     }
 
     declarationsToCollectionsYml({ document, siteRoot: src })
-    const written = yaml.load(readFileSync(join(src, 'collections', 'collections.yml'), 'utf8'))
-    const decl = written.collections.members
+    const written = yaml.load(readFileSync(join(src, 'queries.yml'), 'utf8'))
+    const decl = written.members // a BARE map — no root key
 
     // The subject.
     expect(decl.displayHeading).toBe('Our Team')

@@ -3,9 +3,10 @@
 // not reach it and answered differently. Re-exported so no caller moved.
 export {
   resolveCollectionsConfig,
-  collectionsYmlPath,
+  queriesYmlPath,
   defaultSchema,
+  defaultPoolPath,
   deferredFromSchema,
   foundationDataSchemas,
-  COLLECTIONS_YML_RELPATH,
+  QUERIES_YML_RELPATH,
 } from '../site/collections-config.js'

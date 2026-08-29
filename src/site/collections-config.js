@@ -1,4 +1,4 @@
-// A site's collection declarations — the ONE resolution, for every lane.
+// A site's QUERY declarations — the ONE resolution, for every lane.
 //
 // ⛔ THIS LIVED IN `uwx/` AND THE SITE BUILD COULD NOT SEE IT, so the site build
 // used `site.yml::collections` directly and the two disagreed. Measured before the
@@ -11,21 +11,23 @@
 // The broken case was the one the public docs recommend. See
 // `kb/framework/plans/one-collections-config.md`.
 //
-// Resolve a site's collection configuration from the (optional, local-first)
-// `collections/collections.yml`, layered over the legacy `site.yml::collections`
-// and the zero-config subfolder-name convention.
+// ⭐ A QUERY IS SECOND-ORDER SITE CONTENT — it describes how to REACH content, and
+// is evaluated rather than rendered. `queries.yml` is a BARE MAP of name → query at
+// the site root; `site.yml::queries` is the same vocabulary for a site that would
+// rather keep one file. Precedence (per-query, per-key): queries.yml > site.yml.
 //
-// `collections.yml` is the co-located home for FILE-BASED collection declarations
-// (it sits with the data it describes). It is useful with NO backend at all — it
-// maps each subfolder to a data schema, declares query/display config, and can lay
-// out a VIRTUAL folder organization decoupled from the on-disk layout. (Sync holds no
-// folder uuid here — the backend owns the site's `@uniweb/folder`, keyed by the
-// site-content uuid.)
+// ⛔ THE THREE JOBS `collections/<name>/` USED TO FUSE ARE NOW THREE THINGS.
+// `entities/{schema}/` is the pool, `records.yml` is the folder (what makes an
+// entity a record), and a query asks the folder for a set. This file resolves the
+// LAST of those only. Model: `kb/framework/plans/records-model.md`.
 //
-// Precedence (per-collection, per-key): collections.yml  >  site.yml::collections.
-// `site.yml::collections` stays valid for remote `url:` sources and back-compat.
-// When neither declares a schema, the subfolder-name convention fills it
-// (`articles` → `@/article`). Absent the file entirely, behavior is unchanged.
+// ⚠️ `collections.yml` and `site.yml::collections` are GONE, with no alias and no
+// deprecation path — the model's §5 ruling, and there is nothing outside this
+// workspace on the old paths. Do not reintroduce dual support.
+//
+// When a query declares no schema, the query-name convention fills it
+// (`articles` → `@/articles`). Absent the file entirely, a site simply has no
+// queries — and therefore delivers no collection data.
 
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
@@ -48,9 +50,9 @@ async function readYamlFile(filePath) {
   }
 }
 
-export const COLLECTIONS_YML_RELPATH = 'collections/collections.yml'
+export const QUERIES_YML_RELPATH = 'queries.yml'
 
-// The default data-schema ref for a collection that declares none: the collection's
+// The default data-schema ref for a query that declares none: the query's
 // OWN NAME, unchanged. `@/` is the self scope — the local foundation's `schemas/` —
 // so this stays backend-independent.
 //
@@ -70,70 +72,89 @@ export const COLLECTIONS_YML_RELPATH = 'collections/collections.yml'
 // name writes `schema:`, which is one line and says what it means.
 //
 // Exported so the inverse (projection) can drop a `schema:` that merely restates
-// this default, keeping a projected collections.yml as terse as the author left it.
+// this default, keeping a projected queries.yml as terse as the author left it.
 export function defaultSchema(name) {
   return `@/${name}`
 }
 
-// Normalize one site.yml::collections entry (string shorthand or object) to the
-// internal decl shape. Paths here are already site-root-relative (legacy contract).
-function normalizeSiteDecl(name, decl) {
+// Normalize one query entry (string shorthand or object) to the internal decl shape.
+//
+// ⚠️ `path:` IS SITE-ROOT-RELATIVE HERE, where `collections.yml`'s was relative to
+// `collections/`. Both files' entries default to the same pool (`collections/<name>`),
+// so the two agree everywhere an author did not write `path:` — and where one did,
+// a root-level file naming a path from anywhere but the root would be the surprise.
+// `tests/queries-yml-parity.test.js` pins both halves of that, the difference
+// included.
+//
+// ⛔ `path:` is VESTIGIAL for a file-based query and goes away with the pool move —
+// a query names a `schema:` and the folder supplies the records. It survives for
+// REMOTE sources (`url:`), where the address is genuinely external.
+function normalizeQueryDecl(name, decl) {
   if (typeof decl === 'string') return { name, path: decl }
   const d = decl && typeof decl === 'object' ? decl : {}
-  return { name, ...d }
-}
-
-// Normalize one collections.yml::collections entry. Its `path:` is relative to the
-// collections/ directory (default = the collection name); we lift it to a
-// site-root-relative path so downstream readers resolve it uniformly.
-function normalizeYmlDecl(name, decl) {
-  const d = decl && typeof decl === 'object' ? decl : {}
-  const rel = typeof d.path === 'string' ? d.path : name
-  return { name, ...d, path: `collections/${rel}` }
+  return { name, path: defaultPoolPath(name), ...d }
 }
 
 /**
- * Resolve the merged collection configuration for a site.
+ * Where a query's records live when it names no `path:`.
  *
- * @param {string} siteRoot - directory containing site.yml + collections/
+ * ⛔ ONE IMPLEMENTATION, TWO CALLERS, and that is the point — the same rule
+ * `deferredFromSchema` follows. `normalizeQueryDecl` above uses it to FILL an
+ * unstated path; `uwx/collections-project.js` uses it to RECOGNIZE one on the way
+ * back in, so a pull does not write a default into the author's file as though
+ * they had typed it. Two copies would drift, and the drift would be invisible:
+ * the filler and the dropper would simply stop agreeing about which value is
+ * "the default one", and the pull would start persisting paths nobody wrote.
+ */
+export function defaultPoolPath(name) {
+  return `collections/${name}`
+}
+
+/**
+ * Resolve a site's merged QUERY declarations.
+ *
+ * @param {string} siteRoot - directory containing site.yml + queries.yml
  * @param {object} [opts]
  * @param {object} [opts.siteYml] - an already-read site.yml (avoids a re-read)
  * @returns {Promise<{
- *   folderSync: boolean,            // collections.yml `sync` (whole-folder opt-out)
- *   hasCollectionsYml: boolean,
+ *   folderSync: boolean,            // vestigial — see below; always true
+ *   hasQueriesYml: boolean,
  *   declarations: object,           // { name: decl }  — merged, schema-defaulted
- *   folders: Array|null,            // collections.yml `folders` (virtual org) or null
+ *   folders: Array|null,            // the folder's virtual org, or null
  * }>}
  */
 export async function resolveCollectionsConfig(siteRoot, opts = {}) {
   const siteYml = opts.siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
-  const ymlPath = join(siteRoot, COLLECTIONS_YML_RELPATH)
-  const hasCollectionsYml = existsSync(ymlPath)
-  const colYml = hasCollectionsYml ? await readYamlFile(ymlPath) : {}
+  const ymlPath = join(siteRoot, QUERIES_YML_RELPATH)
+  const hasQueriesYml = existsSync(ymlPath)
+  // ⛔ A BARE MAP — `queries.yml` has no root key. The file IS the map, the way
+  // `records.yml` IS the list. A `queries:` key inside it would be a name a query
+  // could then collide with.
+  const queriesYml = hasQueriesYml ? await readYamlFile(ymlPath) : {}
 
   const declarations = {}
 
-  // Legacy site.yml::collections first (lower precedence).
-  const siteCols = siteYml?.collections
-  if (siteCols && typeof siteCols === 'object' && !Array.isArray(siteCols)) {
-    for (const [name, decl] of Object.entries(siteCols)) {
-      declarations[name] = normalizeSiteDecl(name, decl)
+  // site.yml::queries first (lower precedence) — the same vocabulary, for a site
+  // that would rather not carry a second file.
+  const siteQueries = siteYml?.queries
+  if (siteQueries && typeof siteQueries === 'object' && !Array.isArray(siteQueries)) {
+    for (const [name, decl] of Object.entries(siteQueries)) {
+      declarations[name] = normalizeQueryDecl(name, decl)
     }
   }
 
-  // collections.yml::collections overlay (higher precedence; per-key merge).
-  const ymlCols = colYml?.collections
-  if (ymlCols && typeof ymlCols === 'object' && !Array.isArray(ymlCols)) {
-    for (const [name, decl] of Object.entries(ymlCols)) {
-      const incoming = normalizeYmlDecl(name, decl)
+  // queries.yml overlay (higher precedence; per-key merge).
+  if (queriesYml && typeof queriesYml === 'object' && !Array.isArray(queriesYml)) {
+    for (const [name, decl] of Object.entries(queriesYml)) {
+      const incoming = normalizeQueryDecl(name, decl)
       declarations[name] = { ...(declarations[name] || {}), ...incoming, name }
     }
   }
 
-  // Schema default (subfolder-name convention) + `model:`→`schema:` synonym.
+  // Schema default (query-name convention) + `model:`→`schema:` synonym.
   // `schemaExplicit` records whether the author asked for this schema: an explicit
   // schema that fails to resolve is a hard error; a convention-defaulted one that
-  // fails to resolve soft-skips (so a delivery-only collection never breaks sync).
+  // fails to resolve soft-skips (so a delivery-only query never breaks sync).
   for (const decl of Object.values(declarations)) {
     if (decl.schema) {
       decl.schemaExplicit = true
@@ -141,19 +162,32 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
       decl.schema = decl.model // migration synonym
       decl.schemaExplicit = true
     } else if (decl.path || !decl.url) {
-      decl.schema = defaultSchema(decl.name) // subfolder-name convention
+      decl.schema = defaultSchema(decl.name) // query-name convention
       decl.schemaExplicit = false
     }
   }
 
   await deriveDeferredFromSchemas(siteRoot, siteYml, declarations)
 
-  const folderSync = colYml?.sync !== false
+  // ⛔ BOTH OF THESE ARE VESTIGIAL FOR ONE STEP, and deliberately not deleted here.
+  //
+  //   `folderSync` was `collections.yml::sync`. The model DELETES that mechanism
+  //   rather than porting it: "do not sync" becomes "reference nothing in
+  //   `records.yml`" — the actual round trip. Its one reader is
+  //   `uwx/collections.js`, and it goes when `records.yml` supplies the real
+  //   control. Until then it must stay TRUE, or nothing syncs at all.
+  //
+  //   `folders` was `collections.yml::folders`, the virtual org. Its one reader is
+  //   `uwx/sync-package.js`, and `records.yml` replaces it. Null meanwhile is the
+  //   long-standing default (`folder.js::defaultContents` — one branch per query).
+  //
+  // ⚠️ Leaving them as literals rather than ripping out their readers keeps this
+  // step revertible on its own, which is the whole reason the work is ordered.
   return {
-    folderSync,
-    hasCollectionsYml,
+    folderSync: true,
+    hasQueriesYml,
     declarations,
-    folders: Array.isArray(colYml?.folders) ? colYml.folders : null,
+    folders: null,
   }
 }
 
@@ -166,7 +200,7 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
  * downstream. It is stripped here rather than at each consumer, so the payload
  * has one shape and no consumer has to know the field existed.
  *
- * Returns undefined for a site with no collections, so `config.collections`
+ * Returns undefined for a site with no queries, so `config.collections`
  * stays absent rather than becoming an empty object — an empty object reads as
  * "declared, and empty" to anything checking for presence.
  */
@@ -280,7 +314,7 @@ function loadFoundationDataSchemas(siteRoot, siteYml) {
   }
 }
 
-/** Path to the collections.yml file (whether or not it exists yet). */
-export function collectionsYmlPath(siteRoot) {
-  return join(siteRoot, COLLECTIONS_YML_RELPATH)
+/** Path to the queries.yml file (whether or not it exists yet). */
+export function queriesYmlPath(siteRoot) {
+  return join(siteRoot, QUERIES_YML_RELPATH)
 }

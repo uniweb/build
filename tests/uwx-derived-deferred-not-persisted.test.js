@@ -7,7 +7,7 @@
 // authored one, and the projection wrote it back.
 //
 // ⚠️ Measured 2026-08-29: one push + one pull turned an unstated `deferred:` into a
-// hardcoded list in `collections.yml` — a DIFFERENT file, at HIGHER precedence than the
+// hardcoded list in the query config — a DIFFERENT file, at HIGHER precedence than the
 // `site.yml` the collection was declared in. The collection then stopped tracking its
 // schema's brief permanently, and nothing reported it. Add a field to the brief and the
 // site would never see it.
@@ -44,7 +44,7 @@ function makeSite(declExtra = '') {
     mkdirSync(join(p, '..'), { recursive: true })
     writeFileSync(p, typeof body === 'string' ? body : JSON.stringify(body))
   }
-  w('site/site.yml', `name: T\nfoundation: "@acme/base"\ncollections:\n  articles:\n    path: collections/articles\n    schema: "@/article"\n${declExtra}`)
+  w('site/site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    path: collections/articles\n    schema: "@/article"\n${declExtra}`)
   w('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
   w('site/collections/articles/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody.\n')
   w('fdn/dist/meta/schema.json', { dataSchemas: { '@/article': SCHEMA } })
@@ -52,8 +52,9 @@ function makeSite(declExtra = '') {
 
 const pulledDecl = (doc) => {
   declarationsToCollectionsYml({ document: doc, siteRoot: SITE })
-  const p = join(SITE, 'collections', 'collections.yml')
-  return existsSync(p) ? (yaml.load(readFileSync(p, 'utf8'))?.collections?.articles ?? {}) : {}
+  const p = join(SITE, 'queries.yml')
+  // A BARE map — `queries.yml` has no root key, so the query is read directly.
+  return existsSync(p) ? (yaml.load(readFileSync(p, 'utf8'))?.articles ?? {}) : {}
 }
 
 describe('a derived deferred does not become authored config', () => {

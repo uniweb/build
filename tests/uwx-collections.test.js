@@ -401,7 +401,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
       [
         'name: Test Site',
         'foundation: "@acme/marketing"',
-        'collections:',
+        'queries:',
         '  products:',
         '    path: data/products',
         '    model: "@acme/product"',
@@ -476,7 +476,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     mkdirSync(join(reSite, 'data', 'products'), { recursive: true })
     writeFileSync(
       join(reSite, 'site.yml'),
-      'name: Re\nfoundation: "@acme/marketing"\ncollections:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+      'name: Re\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
     )
     writeFileSync(
       join(reSite, 'package.json'),
@@ -500,7 +500,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     // `@/post`, which doesn't resolve (no foundation) → soft-skipped → no records.
     const bare = join(root, 'bare')
     mkdirSync(bare, { recursive: true })
-    writeFileSync(join(bare, 'site.yml'), 'name: Bare\ncollections:\n  posts:\n    path: data/posts\n')
+    writeFileSync(join(bare, 'site.yml'), 'name: Bare\nqueries:\n  posts:\n    path: data/posts\n')
     await expect(emitCollectionSyncPackage(bare)).rejects.toThrow(/no records to export/)
   })
 })
@@ -531,7 +531,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
     // NO foundation dependency — the Model is non-local (e.g. a @std schema).
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: T\ncollections:\n  products:\n    path: data/products\n    model: "@std/product"\n'
+      'name: T\nqueries:\n  products:\n    path: data/products\n    model: "@std/product"\n'
     )
     writeFileSync(join(siteDir, 'data', 'products', 'a.yml'), 'title: A\nprice: 5\n')
   })
@@ -567,7 +567,7 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
     writeFileSync(
       join(localSite, 'site.yml'),
-      'name: L\nfoundation: "@acme/marketing"\ncollections:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+      'name: L\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
     )
     writeFileSync(
       join(localSite, 'package.json'),
@@ -627,7 +627,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     mkdirSync(join(fdn, 'dist', 'meta'), { recursive: true })
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: T\nfoundation: "@acme/marketing"\ncollections:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+      'name: T\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
     )
     writeFileSync(
       join(siteDir, 'package.json'),
@@ -709,7 +709,7 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
 
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: S\nfoundation: "@acme/blog"\ncollections:\n  articles:\n    path: collections/articles\n    model: "@acme/article"\n'
+      'name: S\nfoundation: "@acme/blog"\nqueries:\n  articles:\n    path: collections/articles\n    model: "@acme/article"\n'
     )
     writeFileSync(
       join(siteDir, 'package.json'),
@@ -778,7 +778,7 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
 
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: S\nfoundation: "@acme/fnd"\ncollections:\n  members:\n    path: collections/members\n    schema: "@/member"\n'
+      'name: S\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    path: collections/members\n    schema: "@/member"\n'
     )
     writeFileSync(
       join(siteDir, 'package.json'),
@@ -833,7 +833,7 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
     mkdirSync(join(alt, 'collections', 'members'), { recursive: true })
     writeFileSync(
       join(alt, 'site.yml'),
-      'name: S2\nfoundation: "@acme/fnd"\ncollections:\n  members:\n    path: collections/members\n    schema: "@acme/member"\n'
+      'name: S2\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    path: collections/members\n    schema: "@acme/member"\n'
     )
     writeFileSync(
       join(alt, 'package.json'),

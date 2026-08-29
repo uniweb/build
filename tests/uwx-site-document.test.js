@@ -33,7 +33,7 @@ beforeAll(() => {
       'index: home',
       'extensions:',
       '  - https://cdn.example.com/stats/entry.js',
-      'collections:',
+      'queries:',
       '  articles:',
       '    path: collections/articles',
       '    sort: date desc',

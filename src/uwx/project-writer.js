@@ -17,7 +17,7 @@ import yaml from 'js-yaml'
 import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-writer'
 import { parseFrontmatter } from './collection-source.js'
 import { renderEntityDocument } from './backfill.js'
-import { collectionsYmlPath } from './collections-config.js'
+import { queriesYmlPath } from './collections-config.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
 // authoring, not to externally-editable params. On a section write an existing
@@ -259,16 +259,21 @@ export function writeMergedYaml(filePath, projected, managedKeys) {
 }
 
 /**
- * Merge `config` into `collections/collections.yml` (shallow). Preserves sibling
- * keys the update doesn't touch — the folder `$uuid`, `sync`, `folders`, and any
- * collections not in the incoming set. A `collections:` object value is merged one
- * level deep (per-collection), so each declaration is replaced wholesale while
- * untouched collections stay. Same key-preserving (comment-dropping) bar as
- * `writeSiteConfig`.
+ * Merge `queries` into `queries.yml` (shallow). Preserves queries not in the
+ * incoming set; each incoming one is replaced wholesale. Same key-preserving
+ * (comment-dropping) bar as `writeSiteConfig`.
+ *
+ * ⛔ `queries.yml` IS THE MAP — there is no root key, so `queries` is passed bare.
+ * The predecessor wrote `{ collections: {...} }` into `collections.yml`; handing
+ * that same wrapper to this file would produce a query NAMED `collections`, which
+ * is a silent corruption rather than an error. The one caller was updated with it.
+ *
+ * @param {string} siteRoot
+ * @param {object} queries - `{ [name]: decl }`, bare
  * @returns {'updated'|'unchanged'}
  */
-export function writeCollectionsConfig(siteRoot, config) {
-  return mergeYamlConfig(collectionsYmlPath(siteRoot), config)
+export function writeQueriesConfig(siteRoot, queries) {
+  return mergeYamlConfig(queriesYmlPath(siteRoot), queries)
 }
 
 /**

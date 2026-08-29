@@ -531,31 +531,30 @@ describe('collection declarations — round-trip against the real producer', () 
   const SITE_YML =
     "name: Decls\nfoundation: '@acme/base@1.0.0'\n"
 
-  // A source collections.yml exercising: a default-schema collection (no schema
-  // key, default path), an explicit-schema collection with a path override, and a
-  // full set of query/display fields incl. detailUrl (camelCase on the file side).
-  const COLLECTIONS_YML =
-    'collections:\n' +
-    '  articles:\n' +
-    '    where:\n' +
-    '      published: true\n' +
-    '    sort: -date\n' +
-    '    deferred:\n' +
-    '      - body\n' +
-    '    detailUrl: /api/articles/{slug}\n' +
-    '  products:\n' +
-    '    path: items\n' +
-    "    schema: '@acme/product'\n" +
-    '    limit: 20\n' +
-    '    queryable:\n' +
-    '      category:\n' +
-    '        type: enum\n'
+  // A source queries.yml exercising: a default-schema query (no schema key,
+  // default path), an explicit-schema query with a path override, and a full set
+  // of query/display fields incl. detailUrl (camelCase on the file side).
+  const QUERIES_YML =
+    'articles:\n' +
+    '  where:\n' +
+    '    published: true\n' +
+    '  sort: -date\n' +
+    '  deferred:\n' +
+    '    - body\n' +
+    '  detailUrl: /api/articles/{slug}\n' +
+    'products:\n' +
+    '  path: items\n' +
+    "  schema: '@acme/product'\n" +
+    '  limit: 20\n' +
+    '  queryable:\n' +
+    '    category:\n' +
+    '      type: enum\n'
 
-  it('projecting document.collections back to collections.yml is a producer fixed point', async () => {
+  it('projecting document.collections back to queries.yml is a producer fixed point', async () => {
     const src = join(dir, 'src')
     mkdirSync(join(src, 'collections'), { recursive: true })
     writeFileSync(join(src, 'site.yml'), SITE_YML)
-    writeFileSync(join(src, 'collections', 'collections.yml'), COLLECTIONS_YML)
+    writeFileSync(join(src, 'queries.yml'), QUERIES_YML)
 
     const document = await siteProjectToDocument(src)
     expect(document.collections.length).toBe(2)
@@ -569,38 +568,36 @@ describe('collection declarations — round-trip against the real producer', () 
     const reproduced = await siteProjectToDocument(dest)
     expect(reproduced.collections).toEqual(document.collections)
 
-    // The projected file stays terse: the default-schema collection gains no
-    // explicit schema, and the default-path collection gains no path.
-    const projected = yaml.load(readFileSync(join(dest, 'collections', 'collections.yml'), 'utf8'))
-    expect(projected.collections.articles.schema).toBeUndefined()
-    expect(projected.collections.articles.path).toBeUndefined()
-    expect(projected.collections.articles.detailUrl).toBe('/api/articles/{slug}')
-    expect(projected.collections.products).toMatchObject({ path: 'items', schema: '@acme/product', limit: 20 })
+    // The projected file stays terse: the default-schema query gains no explicit
+    // schema, and the default-path query gains no path. A BARE map — no root key.
+    const projected = yaml.load(readFileSync(join(dest, 'queries.yml'), 'utf8'))
+    expect(projected.articles.schema).toBeUndefined()
+    expect(projected.articles.path).toBeUndefined()
+    expect(projected.articles.detailUrl).toBe('/api/articles/{slug}')
+    // ⚠️ `items` is written back VERBATIM, not as `collections/items`. The prefix
+    // strip that used to sit here relocated a query's pool on every round trip
+    // once `path:` became site-root-relative.
+    expect(projected.products).toMatchObject({ path: 'items', schema: '@acme/product', limit: 20 })
   })
 
-  it('preserves sibling keys ($uuid, sync) when rewriting the collections: block', () => {
+  it('preserves untouched queries when rewriting the ones it carries', () => {
     const site = join(dir, 'site')
-    mkdirSync(join(site, 'collections'), { recursive: true })
-    writeFileSync(
-      join(site, 'collections', 'collections.yml'),
-      '$uuid: F-123\nsync: false\ncollections:\n  old:\n    schema: stale\n'
-    )
+    mkdirSync(site, { recursive: true })
+    writeFileSync(join(site, 'queries.yml'), 'old:\n  schema: stale\n')
 
     const document = {
-      // `@/articles` IS the convention default for a collection named `articles`
+      // `@/articles` IS the convention default for a query named `articles`
       // (identity, not a singular guess), so the projection drops it as redundant —
-      // which is what this case is asserting.
+      // which is what this case is asserting. Same for the default pool path.
       collections: [{ $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/articles' }],
     }
     const report = declarationsToCollectionsYml({ document, siteRoot: site })
     expect(report.collections).toBe('updated')
 
-    const out = yaml.load(readFileSync(join(site, 'collections', 'collections.yml'), 'utf8'))
-    expect(out.$uuid).toBe('F-123')
-    expect(out.sync).toBe(false)
+    const out = yaml.load(readFileSync(join(site, 'queries.yml'), 'utf8'))
     // the incoming `articles` is added; the pre-existing `old` is left in place
-    expect(out.collections.articles).toEqual({})
-    expect(out.collections.old).toEqual({ schema: 'stale' })
+    expect(out.articles).toEqual({})
+    expect(out.old).toEqual({ schema: 'stale' })
   })
 })
 
