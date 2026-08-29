@@ -74,8 +74,8 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     expect(emittedUrls.size).toBeGreaterThan(0)
   })
 
-  it("the build's own `collection:` resolution points at an emitted file", () => {
-    const resolved = parseFetchConfig({ collection: 'articles' })
+  it("the build's own `query:` resolution points at an emitted file", () => {
+    const resolved = parseFetchConfig({ query: 'articles' })
     expect(emittedUrls.has(resolved.path)).toBe(true)
     // and it is the same URL the shared helper builds
     expect(resolved.path).toBe(collectionDataUrl('articles'))

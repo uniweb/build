@@ -820,12 +820,12 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const insets = extractInsets(proseMirrorContent)
 
   // Support 'data:' shorthand for collection fetch
-  // data: team → fetch: { collection: team }
-  // data: [team, articles] → fetch: { collection: team } (first item, others via inheritData)
+  // data: team → fetch: { query: team }
+  // data: [team, articles] → fetch: { query: team } (first item, others via inheritData)
   let resolvedFetch = fetch
   if (!fetch && data) {
     const collectionName = Array.isArray(data) ? data[0] : data
-    resolvedFetch = { collection: collectionName }
+    resolvedFetch = { query: collectionName }
   }
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null
@@ -1407,10 +1407,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 
       // Data fetching
       // Support 'data:' shorthand at page level
-      // data: team → fetch: { collection: team }
+      // data: team → fetch: { query: team }
       fetch: parseFetchConfig(
         pageConfig.fetch || (pageConfig.data
-          ? { collection: Array.isArray(pageConfig.data) ? pageConfig.data[0] : pageConfig.data }
+          ? { query: Array.isArray(pageConfig.data) ? pageConfig.data[0] : pageConfig.data }
           : undefined)
       ),
 

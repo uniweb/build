@@ -4,12 +4,17 @@
 // accepts differ (`data-fetcher.js` RECOGNIZED_FETCH_KEYS):
 //
 //   refine      refine · inherit · detail · limit · sort · where · filter
-//   collection  collection · schema · … — and NOT `path`/`url`
+//   query       query · schema · … — and NOT `path`/`url`
 //   source      path · url · schema · …
 //
-// The build RESOLVES a `collection:` shorthand into a concrete location, so the
-// declaration that rides the sync wire carries BOTH the authored `collection` and
-// the derived `path`. Projecting that back verbatim writes a file that is neither
+// ⚠️ THIS SEES THE WIRE, WHERE THE FIELD IS STILL `collection`. The authoring name
+// is `query:` (queries.yml); the wire field is on the backend's Model and is not
+// framework's to rename. So the shape is recognized by the wire spelling and
+// written back under the authoring one — the same crossing `detail_url` makes.
+//
+// The build RESOLVES a `query:` shorthand into a concrete location, so the
+// declaration that rides the sync wire carries BOTH the authored `query` and the
+// derived `path`. Projecting that back verbatim writes a file that is neither
 // shape cleanly: `collection` wins the classification, and the `path` beside it is
 // then an unrecognized key on its own declaration.
 //
@@ -19,33 +24,33 @@
 //   fetch:
 //     path: /data/members.json     ← derived; also a build artifact path
 //     schema: members
-//     collection: members          ← what the author actually wrote
+//     query: members               ← what the author actually wrote
 //
 //   [uniweb] fetch: unrecognized key "path" was ignored. Keys recognized on this
-//   declaration: collection, detailPage, filter, limit, merge, prerender, schema,
+//   declaration: detailPage, filter, limit, merge, prerender, query, schema,
 //   sort, transform, where.
 //
 // ⭐ The round trip has to invert the resolution, not copy it. `/data/<name>.json`
-// is a materialization of a collection, never its definition — so it is precisely
-// the thing an authored file should not contain.
+// is a materialization of a query, never its definition — so it is precisely the
+// thing an authored file should not contain.
 //
 // ⚖️ DROPS ONLY WHAT IS DERIVABLE, not everything unrecognized. A key we do not know
 // might be one a newer producer authored, and silently discarding it on every pull
 // would make the round trip lossy in a way nothing reports. `path` and `url` beside
-// a `collection` are recoverable from the collection itself; anything else survives
-// and the validator's warning stays the honest signal.
+// a `query` are recoverable from the query itself; anything else survives and the
+// validator's warning stays the honest signal.
 
 /** Which of the three shapes a declaration is — the same order `data-fetcher` uses. */
 export function fetchShapeOf(fetch) {
   if (!fetch || typeof fetch !== 'object') return null
   if (fetch.refine === true || fetch.inherit === true) return 'refine'
-  if (fetch.collection) return 'collection'
+  if (fetch.collection || fetch.query) return 'query'
   return 'source'
 }
 
 /** Keys a shape derives rather than the author writing them. */
 const DERIVED_BY_SHAPE = {
-  collection: ['path', 'url'],
+  query: ['path', 'url'],
   refine: [],
   source: []
 }
@@ -64,6 +69,13 @@ export function authorableFetch(fetch) {
   const out = {}
   for (const [k, v] of Object.entries(fetch)) {
     if (derived.includes(k)) continue
+    // Wire `collection` → authored `query`. ⚠️ Writing the wire spelling back
+    // would produce a file the build now REFUSES (`parseFetchConfig` throws on
+    // the retired name), so a pull would author a site that cannot build.
+    if (k === 'collection') {
+      out.query = v
+      continue
+    }
     out[k] = v
   }
   return out

@@ -7,7 +7,7 @@
  * Supports:
  * - Simple string paths: "/data/team.json"
  * - Full config objects with schema, prerender, merge, transform options
- * - Collection references: { collection: 'articles', limit: 3 }
+ * - Named-query references: { query: 'articles', limit: 3 }
  * - Local JSON/YAML files
  * - Remote URLs
  * - Transform paths to extract nested data
@@ -236,7 +236,7 @@ export function applyPostProcessing(data, config) {
  * // Returns: { path: '/team', schema: 'person', prerender: false, merge: false }
  *
  * // Collection reference
- * parseFetchConfig({ collection: 'articles', limit: 3, sort: 'date desc' })
+ * parseFetchConfig({ query: 'articles', limit: 3, sort: 'date desc' })
  * // Returns: { path: '/data/articles.json', schema: 'articles', limit: 3, sort: 'date desc', ... }
  */
 // ─── Unrecognized-key reporting ───────────────────────────────────────
@@ -252,8 +252,8 @@ export function applyPostProcessing(data, config) {
 // once per key name per process so a 200-record build does not print 200 lines.
 const RECOGNIZED_FETCH_KEYS = {
   refine: new Set(['refine', 'inherit', 'detail', 'limit', 'sort', 'where', 'filter']),
-  collection: new Set([
-    'collection', 'schema', 'prerender', 'merge', 'transform',
+  query: new Set([
+    'query', 'schema', 'prerender', 'merge', 'transform',
     'where', 'limit', 'sort', 'detailPage', 'filter',
   ]),
   source: new Set([
@@ -331,14 +331,27 @@ export function parseFetchConfig(fetch) {
     }
   }
 
-  // Collection reference: { collection: 'articles', limit: 3 }
-  if (fetch.collection) {
-    warnUnknownFetchKeys(fetch, 'collection')
+  // ⛔ THE RETIRED SPELLING IS AN ERROR, NOT A WARNING. An unrecognized key is
+  // warned about and IGNORED, so `fetch: { collection: X }` would fall through to
+  // the source shape, find neither `path` nor `url`, and resolve to null — a
+  // SILENTLY EMPTY result, which is worse than the old name simply working. The
+  // author sees a page render with no data and nothing saying why.
+  if (fetch.collection !== undefined) {
+    throw new Error(
+      `[uniweb] fetch: \`collection: ${JSON.stringify(fetch.collection)}\` is retired. ` +
+        `Write \`query: ${JSON.stringify(fetch.collection)}\` and declare it in queries.yml. ` +
+        `A query names a schema and the folder supplies its records.`
+    )
+  }
+
+  // Named-query reference: { query: 'articles', limit: 3 }
+  if (fetch.query) {
+    warnUnknownFetchKeys(fetch, 'query')
     if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
-      path: collectionDataUrl(fetch.collection),
+      path: collectionDataUrl(fetch.query),
       url: undefined,
-      schema: fetch.schema || fetch.collection,
+      schema: fetch.schema || fetch.query,
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,

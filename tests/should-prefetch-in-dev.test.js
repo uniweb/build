@@ -10,8 +10,8 @@ import { collectionDataUrl } from '@uniweb/core'
 // reload); remote build-time endpoints stay embedded.
 describe('shouldPrefetchInDev', () => {
   it('does not embed a local file-based collection (runtime fetches /data/*.json live)', () => {
-    // { collection: 'books' } → { path: '/data/books.json', prerender: true, ... }
-    const cfg = parseFetchConfig({ collection: 'books' })
+    // { query: 'books' } → { path: '/data/books.json', prerender: true, ... }
+    const cfg = parseFetchConfig({ query: 'books' })
     expect(cfg.path).toBe(collectionDataUrl('books'))
     expect(cfg.url).toBeUndefined()
     expect(shouldPrefetchInDev(cfg)).toBe(false)
@@ -36,7 +36,7 @@ describe('shouldPrefetchInDev', () => {
   })
 
   it('does not embed a local collection explicitly set to prerender:false', () => {
-    const cfg = parseFetchConfig({ collection: 'books', prerender: false })
+    const cfg = parseFetchConfig({ query: 'books', prerender: false })
     expect(shouldPrefetchInDev(cfg)).toBe(false)
   })
 

@@ -136,7 +136,7 @@ describe('parseFetchConfig', () => {
 
   describe('collection reference', () => {
     it('parses collection shorthand', () => {
-      const config = { collection: 'articles' }
+      const config = { query: 'articles' }
       const result = parseFetchConfig(config)
 
       expect(result.path).toBe(collectionDataUrl('articles'))
@@ -145,7 +145,7 @@ describe('parseFetchConfig', () => {
     })
 
     it('parses collection with limit', () => {
-      const config = { collection: 'articles', limit: 3 }
+      const config = { query: 'articles', limit: 3 }
       const result = parseFetchConfig(config)
 
       expect(result.path).toBe(collectionDataUrl('articles'))
@@ -153,21 +153,21 @@ describe('parseFetchConfig', () => {
     })
 
     it('parses collection with sort', () => {
-      const config = { collection: 'articles', sort: 'date desc' }
+      const config = { query: 'articles', sort: 'date desc' }
       const result = parseFetchConfig(config)
 
       expect(result.sort).toBe('date desc')
     })
 
     it('parses collection with filter', () => {
-      const config = { collection: 'articles', filter: 'tags contains featured' }
+      const config = { query: 'articles', filter: 'tags contains featured' }
       const result = parseFetchConfig(config)
 
       expect(result.filter).toBe('tags contains featured')
     })
 
     it('allows schema override', () => {
-      const config = { collection: 'articles', schema: 'posts' }
+      const config = { query: 'articles', schema: 'posts' }
       const result = parseFetchConfig(config)
 
       expect(result.schema).toBe('posts')
@@ -175,7 +175,7 @@ describe('parseFetchConfig', () => {
 
     it('parses collection with all options', () => {
       const config = {
-        collection: 'articles',
+        query: 'articles',
         limit: 5,
         sort: 'date desc',
         filter: 'published != false',
@@ -530,7 +530,7 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
   })
 
   it('names it on a collection declaration too', () => {
-    parseFetchConfig({ collection: 'articles', recursive: true })
+    parseFetchConfig({ query: 'articles', recursive: true })
     expect(messages().some((m) => m.includes('"recursive"'))).toBe(true)
   })
 
@@ -540,22 +540,22 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
   })
 
   it('lists what IS recognized, so the message is actionable', () => {
-    parseFetchConfig({ collection: 'articles', nope: 1 })
+    parseFetchConfig({ query: 'articles', nope: 1 })
     const m = messages().find((x) => x.includes('"nope"'))
-    expect(m).toContain('collection')
+    expect(m).toContain('query')
     expect(m).toContain('where')
   })
 
   it('reports once per key, not once per record', () => {
-    parseFetchConfig({ collection: 'a', recursive: true })
-    parseFetchConfig({ collection: 'b', recursive: true })
+    parseFetchConfig({ query: 'a', recursive: true })
+    parseFetchConfig({ query: 'b', recursive: true })
     expect(messages().filter((m) => m.includes('"recursive"'))).toHaveLength(1)
   })
 
   it('stays silent on every recognized shape', () => {
     // The control. Without it, a warn-on-everything bug would pass every
     // assertion above while making the build unusable.
-    parseFetchConfig({ collection: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
+    parseFetchConfig({ query: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
     parseFetchConfig({ path: '/data/x.json', schema: 'x', transform: 'data.items', merge: true })
     parseFetchConfig({ url: 'https://example.com/api', schema: 'x', prerender: false })
     parseFetchConfig({ refine: true, detail: false, limit: 3 })
@@ -565,7 +565,7 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
   it('does not confuse a dropped key with a deprecated one', () => {
     // `filter:` is recognized-but-deprecated; it must warn about deprecation,
     // never about being unrecognized.
-    parseFetchConfig({ collection: 'articles', filter: 'a == 1' })
+    parseFetchConfig({ query: 'articles', filter: 'a == 1' })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
 })

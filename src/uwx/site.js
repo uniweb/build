@@ -223,36 +223,43 @@ function buildPageData(config, ctx) {
   let fetch =
     config.fetch ??
     (config.data
-      ? { collection: Array.isArray(config.data) ? config.data[0] : config.data }
+      ? { query: Array.isArray(config.data) ? config.data[0] : config.data }
       : undefined)
-  // Resolve the build-time `collection:` shorthand to the runtime-fetchable
+  // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
   // A shell/backend-hosted site renders client-side with NO prerender, so the
-  // runtime fetches this decl directly — and `collection:` is build-time-only, so
+  // runtime fetches this decl directly — and `query:` is build-time-only, so
   // it would never resolve at render (the static build resolves it the same way
   // in site/data-fetcher.js parseFetchConfig). The gateway serves the collection
   // at `<base>/data/<name>.json`.
-  if (fetch && typeof fetch.collection === 'string') {
-    const { collection, ...rest } = fetch
+  if (fetch && typeof fetch.query === 'string') {
+    const { query, ...rest } = fetch
     // ⭐ BOTH, deliberately, and they are not redundant.
     //
-    //   `collection` — the author's query, unresolved. A consumer that can ask
-    //     a host where collections live (`config.records`) resolves it there,
-    //     which is the only way a live lane is reachable at all: a resolved
-    //     path names one place and closes the question.
+    //   `query` — the author's named query, unresolved. A consumer that can ask
+    //     a host where records live (`config.records`) resolves it there, which
+    //     is the only way a live lane is reachable at all: a resolved path names
+    //     one place and closes the question.
     //
     //   `path` — the compiled artifact, the answer when nobody declares a lane.
     //     Also what a consumer still reading `fetch.path` gets, so teaching the
     //     wire a new field does not break one that has not learned it.
     //
-    // `@uniweb/core`'s resolveFetchConfigs gives `collection` precedence and
-    // drops `path` once it has resolved an address — matching parseFetchConfig,
-    // which has always returned early on `collection`.
+    // `@uniweb/core`'s resolveFetchConfigs gives the query precedence and drops
+    // `path` once it has resolved an address — matching parseFetchConfig, which
+    // has always returned early on the shorthand.
     //
-    // `schema` (the collection name) is BOTH the content.data key and part of the
+    // `schema` (the query name) is BOTH the content.data key and part of the
     // dataStore cache key (deriveCacheKey hashes {path,url,endpoint,schema,…};
-    // `collection` is ignored). Mirrors the static build's parseFetchConfig.
-    fetch = { collection, path: collectionDataUrl(collection), schema: collection, ...rest }
+    // the shorthand is ignored). Mirrors the static build's parseFetchConfig.
+    // ⛔ THE WIRE KEEPS SAYING `collection`, AND THAT IS NOT A FUDGE. The authoring
+    // name moved to `query:`; the wire field is on the BACKEND's Model and is not
+    // framework's to rename — `queries` is our position and they have not agreed.
+    // Same shape as `detailUrl` → `detail_url`, which the emitter has always done.
+    // ⚠️ `@uniweb/core`'s resolveFetchConfigs and every host reading a published
+    // payload key on this name, so changing it here is a cross-lane break with no
+    // authoring benefit whatsoever.
+    fetch = { collection: query, path: collectionDataUrl(query), schema: query, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {

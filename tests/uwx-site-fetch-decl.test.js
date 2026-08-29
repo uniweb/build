@@ -5,13 +5,18 @@ import { siteProjectToDocument } from '../src/uwx/index.js'
 
 // What the sync wire carries for a page's `data:` / `fetch:` declaration.
 //
-// The author's `collection:` shorthand is build-time sugar over a path, and for
+// The author's `query:` shorthand is build-time sugar over a path, and for
 // a long time that is all that crossed: the producer resolved it and sent the
 // resolved path. A resolved path names one place and closes the question — so a
 // host able to serve those records live had no way to say so, and the site had
 // no way to ask.
 //
-// The wire now carries BOTH: the query (`collection`) for a consumer that can
+// ⚠️ THE WIRE FIELD IS STILL `collection`. The AUTHORING name moved to `query:`
+// (queries.yml); this field is on the backend's Model and is not framework's to
+// rename — `queries` is our position and they have not agreed. The build crosses
+// the two names the same way it crosses `detailUrl` → `detail_url`.
+//
+// The wire carries BOTH: the query name (`collection`) for a consumer that can
 // resolve it against a host's declared lane, and the compiled artifact (`path`)
 // for one that cannot, or has not learned to yet.
 
@@ -38,9 +43,12 @@ beforeEach(() => {
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 
 describe('a page fetch declaration on the sync wire', () => {
-  it('carries the collection name — the query, unresolved', async () => {
+  it('carries the query name under the WIRE spelling, unresolved', async () => {
     const blog = await buildSite()
     expect(blog.fetch.collection).toBe('articles')
+    // ⛔ and never the authoring spelling — a consumer keying on the Model's field
+    // would not find it, and every host reading a published payload does.
+    expect(blog.fetch.query).toBeUndefined()
   })
 
   it('carries the compiled artifact path alongside it', async () => {
@@ -56,7 +64,7 @@ describe('a page fetch declaration on the sync wire', () => {
   })
 
   it('never leaks the build-time shorthand as the only source', async () => {
-    // `collection:` alone would not resolve at render on a consumer that knows
+    // `query:` alone would not resolve at render on a consumer that knows
     // nothing about a lane — the regression this pairing exists to prevent.
     const blog = await buildSite()
     expect(blog.fetch.path || blog.fetch.url).toBeTruthy()

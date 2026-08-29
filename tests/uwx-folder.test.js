@@ -251,7 +251,7 @@ describe('folder hash is identity-independent', () => {
  * ⛔ A PROJECTION MUST INVERT THE BUILD'S RESOLUTION, NOT COPY IT.
  *
  * A `fetch:` declaration has three shapes and they accept different keys. The build
- * resolves a `collection:` shorthand into a concrete location, so the declaration on
+ * resolves a `query:` shorthand into a concrete location, so the declaration on
  * the sync wire carries BOTH the authored `collection` and the derived `path`.
  * Writing that back verbatim produces a file that is neither shape cleanly:
  * `collection` wins the classification and the `path` beside it is unrecognized.
@@ -272,8 +272,8 @@ describe('authorableFetch', () => {
   it('drops the derived location from a resolved collection fetch', async () => {
     const { authorableFetch } = await import('../src/site/fetch-shapes.js')
     expect(
-      authorableFetch({ path: '/data/members.json', schema: 'members', collection: 'members' })
-    ).toEqual({ schema: 'members', collection: 'members' })
+      authorableFetch({ path: '/data/members.json', schema: 'members', query: 'members' })
+    ).toEqual({ schema: 'members', query: 'members' })
   })
 
   it('keeps path on a source-shaped fetch, where it is what the author wrote', async () => {
@@ -284,8 +284,8 @@ describe('authorableFetch', () => {
 
   it('keeps a key it does not recognize, rather than making the pull lossy', async () => {
     const { authorableFetch } = await import('../src/site/fetch-shapes.js')
-    expect(authorableFetch({ collection: 'members', somethingNewer: 42 })).toEqual({
-      collection: 'members',
+    expect(authorableFetch({ query: 'members', somethingNewer: 42 })).toEqual({
+      query: 'members',
       somethingNewer: 42
     })
   })

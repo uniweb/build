@@ -58,7 +58,7 @@ beforeAll(() => {
     [
       'name: fixture',
       'foundation: foundation',
-      'collections:',
+      'queries:',
       '  projects:',
       '    schema: "@/project"',
       '',
