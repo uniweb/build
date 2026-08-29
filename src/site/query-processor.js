@@ -329,11 +329,17 @@ function isExternalUrl(src) {
  * @param {string} queryName - Name of the collection (e.g., 'articles')
  * @returns {Promise<Object>} Asset manifest for this item
  */
-async function processRecordAssets(content, itemPath, siteRoot, queryName, basePath) {
+async function processRecordAssets(content, itemPath, siteRoot, poolDirs, basePath) {
   const assets = {}
   const itemDir = dirname(itemPath)
   const publicDir = join(siteRoot, 'public')
-  const targetDir = join(publicDir, 'collections', queryName)
+  // ⭐ THE RECORD'S OWN HOME, keyed by its pool position — `public/records/<schema
+  // dirs>/`. It was `public/collections/<queryName>/`, which meant the SAME image
+  // was copied once per query that returned the record, under two URLs. Third
+  // instance of the same conflation (after the freeform locale tree and the
+  // translation manifest): an asset belongs to a record, and which query selects
+  // it is not a fact about it.
+  const targetDir = join(publicDir, 'records', poolDirs)
 
   // Walk content and collect asset paths
   const assetNodes = []
@@ -366,7 +372,7 @@ async function processRecordAssets(content, itemPath, siteRoot, queryName, baseP
         await copyFile(result.resolved, targetPath)
 
         // Update path to site-root-relative
-        finalPath = `${basePath}collections/${queryName}/${assetFilename}`
+        finalPath = `${basePath}records/${poolDirs}/${assetFilename}`
 
         assets[src] = {
           original: src,
@@ -401,7 +407,7 @@ async function processRecordAssets(content, itemPath, siteRoot, queryName, baseP
         const posterTarget = join(targetDir, posterFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(posterResult.resolved, posterTarget)
-        node.attrs.poster = `${basePath}collections/${queryName}/${posterFilename}`
+        node.attrs.poster = `${basePath}records/${poolDirs}/${posterFilename}`
       }
     }
 
@@ -412,7 +418,7 @@ async function processRecordAssets(content, itemPath, siteRoot, queryName, baseP
         const previewTarget = join(targetDir, previewFilename)
         await mkdir(targetDir, { recursive: true })
         await copyFile(previewResult.resolved, previewTarget)
-        node.attrs.preview = `${basePath}collections/${queryName}/${previewFilename}`
+        node.attrs.preview = `${basePath}records/${poolDirs}/${previewFilename}`
       }
     }
   }
@@ -432,8 +438,8 @@ async function processRecordAssets(content, itemPath, siteRoot, queryName, baseP
  * @param {string} queryName - Name of the collection
  * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
  */
-async function processDataItemAssets(data, itemPath, siteRoot, queryName, basePath) {
-  const targetDir = join(siteRoot, 'public', 'collections', queryName)
+async function processDataItemAssets(data, itemPath, siteRoot, poolDirs, basePath) {
+  const targetDir = join(siteRoot, 'public', 'records', poolDirs)
 
   async function walk(parent, key) {
     const val = parent[key]
@@ -444,7 +450,7 @@ async function processDataItemAssets(data, itemPath, siteRoot, queryName, basePa
           const filename = basename(resolved)
           await mkdir(targetDir, { recursive: true })
           await copyFile(resolved, join(targetDir, filename))
-          parent[key] = `${basePath}collections/${queryName}/${filename}`
+          parent[key] = `${basePath}records/${poolDirs}/${filename}`
         }
       } else if (val.startsWith('/')) {
         // Absolute site path — just prepend base
@@ -484,7 +490,7 @@ async function processDataItemAssets(data, itemPath, siteRoot, queryName, basePa
  * @param {string} filename - YAML filename (.yml or .yaml)
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processDataItem(dir, filename, siteRoot, queryName, basePath) {
+async function processDataItem(dir, filename, siteRoot, poolDirs, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const data = yaml.load(raw) || {}
@@ -493,7 +499,7 @@ async function processDataItem(dir, filename, siteRoot, queryName, basePath) {
   if (Array.isArray(data)) {
     for (const item of data) {
       if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
+        await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
       }
     }
     return data
@@ -503,7 +509,7 @@ async function processDataItem(dir, filename, siteRoot, queryName, basePath) {
   if (data.published === false) return null
   const slug = basename(filename, extname(filename))
   const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
+  await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
   return item
 }
 
@@ -518,7 +524,7 @@ async function processDataItem(dir, filename, siteRoot, queryName, basePath) {
  * @param {string} filename - JSON filename
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processJsonItem(dir, filename, siteRoot, queryName, basePath) {
+async function processJsonItem(dir, filename, siteRoot, poolDirs, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, '.json')
@@ -528,7 +534,7 @@ async function processJsonItem(dir, filename, siteRoot, queryName, basePath) {
   if (Array.isArray(data)) {
     for (const item of data) {
       if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
+        await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
       }
     }
     return data
@@ -537,7 +543,7 @@ async function processJsonItem(dir, filename, siteRoot, queryName, basePath) {
   // Object → single item
   if (data.published === false) return null
   const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, queryName, basePath)
+  await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
   return item
 }
 
@@ -573,7 +579,7 @@ async function processBibtexItem(dir, filename) {
  * @param {string} siteRoot - Site root directory for asset resolution
  * @returns {Promise<Object|null>} Processed item or null if unpublished
  */
-async function processContentItem(dir, filename, config, siteRoot, basePath) {
+async function processContentItem(dir, filename, config, siteRoot, basePath, poolDirs) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, extname(filename))
@@ -591,7 +597,7 @@ async function processContentItem(dir, filename, config, siteRoot, basePath) {
 
   // Process assets (resolve paths, copy co-located files)
   // This modifies content in place, updating paths to site-root-relative
-  await processRecordAssets(content, filepath, siteRoot, config.name, basePath)
+  await processRecordAssets(content, filepath, siteRoot, poolDirs, basePath)
 
   // Extract excerpt
   const excerpt = extractExcerpt(frontmatter, content, config.excerpt)
@@ -693,12 +699,12 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
         return processBibtexItem(dir, file)
       }
       if (e.ext === '.json') {
-        return processJsonItem(dir, file, siteDir, config.name, basePath)
+        return processJsonItem(dir, file, siteDir, e.dirs.join('/'), basePath)
       }
       if (e.ext === '.yml' || e.ext === '.yaml') {
-        return processDataItem(dir, file, siteDir, config.name, basePath)
+        return processDataItem(dir, file, siteDir, e.dirs.join('/'), basePath)
       }
-      return processContentItem(dir, file, config, siteDir, basePath)
+      return processContentItem(dir, file, config, siteDir, basePath, e.dirs.join('/'))
     })
   )
 

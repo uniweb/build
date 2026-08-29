@@ -807,7 +807,7 @@ export function siteContentPlugin(options = {}) {
           resolvedMountPaths = mountEntriesOf(paths).map(([, rel]) => resolve(resolvedSitePath, rel))
 
           if (queriesConfig) {
-            console.log('[site-content] Processing content collections...')
+            console.log('[site-content] Materializing queries...')
             const collections = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath)
             await writeQueryFiles(resolvedSitePath, collections, queriesConfig)
           }

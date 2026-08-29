@@ -2,7 +2,7 @@
 /**
  * Dev backend for testing Uniweb sites with `supports: [where, limit, sort]`.
  *
- * Reads a directory of YAML collections (each subfolder is a collection,
+ * Reads a directory of YAML recordsByQuery (each subfolder is a collection,
  * each .yml file inside is a record) and exposes them via HTTP. Evaluates
  * where-objects on the server side using @uniweb/core's matchWhere — the
  * exact same evaluator the runtime uses as a fallback. This lets you
@@ -11,7 +11,7 @@
  * Wire format matches the framework default fetcher's pushdown conventions
  * (see framework/runtime/src/default-fetcher.js):
  *
- *   GET  /api/{collection}                        — full collection
+ *   GET  /api/{collection}                        — all records
  *   GET  /api/{collection}?_where=<JSON>          — filtered by where-object
  *   GET  /api/{collection}?_limit=N               — first N records
  *   GET  /api/{collection}?_sort=field:dir        — sorted
@@ -19,11 +19,11 @@
  *   GET  /api/{collection}/{slug}                 — single record
  *
  * Usage:
- *   node scripts/framework/dev-backend.js --collections <path> [--port N]
+ *   node scripts/framework/dev-backend.js --recordsByQuery <path> [--port N]
  *
  * Example (academic-metrics):
  *   node scripts/framework/dev-backend.js \
- *     --collections framework/templates/academic-metrics/site/collections \
+ *     --recordsByQuery framework/templates/academic-metrics/site/recordsByQuery \
  *     --port 8080
  *
  * Then in the site's site.yml:
@@ -63,7 +63,7 @@ if (!existsSync(ENTITIES_ROOT)) {
   process.exit(1)
 }
 
-// ─── Load collections from disk ─────────────────────────────────────────────
+// ─── Load recordsByQuery from disk ─────────────────────────────────────────────
 
 async function loadRecords(dir) {
   const files = await readdir(dir)
@@ -96,15 +96,15 @@ async function loadRecords(dir) {
 
 async function loadAllRecords() {
   const entries = await readdir(ENTITIES_ROOT)
-  const collections = {}
+  const recordsByQuery = {}
   for (const name of entries) {
     const fullPath = join(ENTITIES_ROOT, name)
     const s = await stat(fullPath)
     if (!s.isDirectory()) continue
-    collections[name] = await loadRecords(fullPath)
-    console.log(`[dev-backend] Loaded ${collections[name].length} items from "${name}"`)
+    recordsByQuery[name] = await loadRecords(fullPath)
+    console.log(`[dev-backend] Loaded ${recordsByQuery[name].length} items from "${name}"`)
   }
-  return collections
+  return recordsByQuery
 }
 
 // ─── Operator handling (mirrors default-fetcher pushdown wire format) ───────
@@ -182,7 +182,7 @@ function send(res, status, body) {
   res.end(typeof body === 'string' ? body : JSON.stringify(body))
 }
 
-async function handleRequest(req, res, collections) {
+async function handleRequest(req, res, recordsByQuery) {
   if (req.method === 'OPTIONS') return send(res, 204, '')
 
   const url = new URL(req.url, `http://${req.headers.host}`)
@@ -190,8 +190,8 @@ async function handleRequest(req, res, collections) {
   if (!match) return send(res, 404, { error: 'Not found' })
 
   const [, queryName, slug] = match
-  const items = collections[queryName]
-  if (!items) return send(res, 404, { error: `Unknown collection: ${queryName}` })
+  const items = recordsByQuery[queryName]
+  if (!items) return send(res, 404, { error: `Unknown query: ${queryName}` })
 
   // Single record by slug.
   if (slug) {
@@ -221,14 +221,14 @@ async function handleRequest(req, res, collections) {
 
 // ─── Boot ───────────────────────────────────────────────────────────────────
 
-const collections = await loadAllRecords()
-const knownQueries = Object.keys(collections)
+const recordsByQuery = await loadAllRecords()
+const knownQueries = Object.keys(recordsByQuery)
 if (knownQueries.length === 0) {
-  console.warn('[dev-backend] No collections found.')
+  console.warn('[dev-backend] No recordsByQuery found.')
 }
 
 const server = createServer((req, res) => {
-  handleRequest(req, res, collections).catch((err) => {
+  handleRequest(req, res, recordsByQuery).catch((err) => {
     console.error('[dev-backend] Request handler threw:', err)
     send(res, 500, { error: 'Internal server error' })
   })
@@ -239,7 +239,7 @@ server.listen(PORT, () => {
   console.log(`[dev-backend] Collections: ${knownQueries.join(', ') || '(none)'}`)
   console.log('[dev-backend] Endpoints:')
   for (const name of knownQueries) {
-    console.log(`  GET  /api/${name}                  — full collection`)
+    console.log(`  GET  /api/${name}                  — all records`)
     console.log(`  GET  /api/${name}?_where=<JSON>    — filtered`)
     console.log(`  GET  /api/${name}/{slug}            — single record`)
     console.log(`  POST /api/${name}  body: { where } — operators in body`)

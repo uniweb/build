@@ -458,7 +458,7 @@ async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
 
     // Check for unregistered translations (new files)
     const discovered = await discoverFreeformTranslations(locale, dirname(dirname(freeformDir)))
-    const allPaths = [...discovered.pages, ...discovered.pageIds, ...discovered.collections]
+    const allPaths = [...discovered.pages, ...discovered.pageIds, ...discovered.records]
     const unregistered = await getUnregisteredTranslations(freeformDir, allPaths)
     for (const path of unregistered) {
       // Auto-register new free-form translations

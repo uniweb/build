@@ -598,7 +598,7 @@ describe('collection declarations — round-trip against the real producer', () 
       queries: [{ $id: 'articles', name: 'articles', schema: '@/articles' }],
     }
     const report = declarationsToQueriesYml({ document, siteRoot: site })
-    expect(report.collections).toBe('updated')
+    expect(report.queries).toBe('updated')
 
     const out = yaml.load(readFileSync(join(site, 'queries.yml'), 'utf8'))
     // the incoming `articles` is added; the pre-existing `old` is left in place

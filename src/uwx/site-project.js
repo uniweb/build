@@ -661,7 +661,7 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   report.assets = restoreAssetRefs(document, readAssetMap(siteRoot))
 
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector, keepAuthoredFoundation })
-  report.collections = declarationsToQueriesYml({ document, siteRoot })
+  report.queries = declarationsToQueriesYml({ document, siteRoot })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

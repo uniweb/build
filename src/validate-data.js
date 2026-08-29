@@ -58,7 +58,7 @@ import { processQueries } from './site/query-processor.js'
  * this command and the build disagree about what feeds what.
  *
  * Data is acquired without a full build: the foundation schema via schema
- * discovery, the site sections via the content collector, the collections via
+ * discovery, the site sections via the content collector, the byQuery via
  * the collection processor (in-memory, full records — so `deferred:`
  * field-stripping never causes a false "missing required").
  *
@@ -85,13 +85,13 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const config = site.config || {}
   const basePath = typeof config.base === 'string' ? config.base : '/'
 
-  // Compile file-based collections in-memory (the same step the data-only
+  // Compile file-based byQuery in-memory (the same step the data-only
   // pipeline runs). Full records — `writeQueryFiles` is the stage that
   // strips `deferred:` fields, and we skip it.
-  let collections = {}
+  let byQuery = {}
   if (config.queries && typeof config.queries === 'object') {
 
-    collections = await processQueries(siteRoot, config.queries, config.paths?.entities, basePath)
+    byQuery = await processQueries(siteRoot, config.queries, config.paths?.entities, basePath)
   }
 
   // Pass 1 — discover unique (file, schema-ref) pairs and who uses each.
@@ -142,7 +142,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   let recordCount = 0
 
   for (const entry of work.values()) {
-    const { records, error } = await resolveRecords(entry.path, { collections, siteRoot })
+    const { records, error } = await resolveRecords(entry.path, { byQuery, siteRoot })
     if (error) {
       setupErrors.push({ file: entry.path, message: error, users: entry.users })
       continue
@@ -335,7 +335,7 @@ function nodesOfType(doc, type) {
  * This is the pass that closes an odd hole: a component declares
  * `data: { form: '@std/form' }`, an author writes a ```` ```yaml:form ```` block,
  * and until now **nothing checked one against the other**. The join walked
- * `section.fetch` — collections and fetches — so a schema bound to a key that a
+ * `section.fetch` — byQuery and fetches — so a schema bound to a key that a
  * tagged block fills was never applied to anything. `@std/form` existed for
  * exactly this and had never run outside its own contract test.
  *
@@ -460,17 +460,17 @@ function walkSections(sections, visit) {
 }
 
 /**
- * Resolve a fetch `path` to its records. Declared collections come from the
+ * Resolve a fetch `path` to its records. Declared byQuery come from the
  * in-memory compile (full records, current); a bare file under `public/`
  * (hand-authored data) is read from disk. Either way no prior build is needed.
  */
-async function resolveRecords(path, { collections, siteRoot }) {
+async function resolveRecords(path, { byQuery, siteRoot }) {
   // A compiled-collection URL → a declared collection? Use the compiled
   // records. Anything else falls through to the file read below.
   const name = queryNameFromUrl(path)
   let records
-  if (Object.prototype.hasOwnProperty.call(collections, name)) {
-    records = collections[name]
+  if (Object.prototype.hasOwnProperty.call(byQuery, name)) {
+    records = byQuery[name]
   } else {
     // Otherwise read the file from public/ (the data-fetcher's resolution root).
     const filePath = join(siteRoot, 'public', path)

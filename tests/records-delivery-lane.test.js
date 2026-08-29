@@ -17,7 +17,7 @@
 // placements — from `resolveFolder`, which was correct all along. Nothing
 // crossed from there into what the build actually delivers. A unit that is right
 // proves nothing about a consumer that never calls it.
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { processQueries } from '../src/site/query-processor.js'
@@ -132,5 +132,34 @@ describe('a bare query key', () => {
     const out = await processQueries(ROOT, { publication: null }, undefined, '/')
     expect(out.publication).toEqual([])
     expect(warn.mock.calls.map((c) => String(c[0])).some((m) => m.includes('matches no records'))).toBe(true)
+  })
+})
+
+// ⛔ A RECORD'S CO-LOCATED ASSETS BELONG TO THE RECORD, not to a query.
+//
+// They were copied to `public/collections/<queryName>/`, so the SAME image was
+// written once per query that returned the record, under two URLs. Third
+// instance of the same conflation, after the freeform locale tree and the
+// translation manifest — and the only one that duplicated bytes.
+describe('record assets are keyed by the record, not the query', () => {
+  it('two queries over one schema copy an image ONCE, to one URL', async () => {
+    w('entities/article/hello.md', '---\ntitle: Hello\n---\n\n![pic](./pic.png)\n')
+    writeFileSync(join(ROOT, 'entities/article/pic.png'), 'PNGDATA')
+    w('records.yml', '- article/*.md\n')
+
+    const out = await processQueries(
+      ROOT,
+      { recent: { name: 'recent', schema: '@/article' }, all: { name: 'all', schema: '@/article' } },
+      undefined,
+      '/'
+    )
+    // both queries return the record
+    expect(out.recent).toHaveLength(1)
+    expect(out.all).toHaveLength(1)
+
+    // ⭐ ONE home, named for the record's pool position — not two named for queries
+    expect(existsSync(join(ROOT, 'public/records/article/pic.png'))).toBe(true)
+    expect(existsSync(join(ROOT, 'public/collections/recent'))).toBe(false)
+    expect(existsSync(join(ROOT, 'public/collections/all'))).toBe(false)
   })
 })

@@ -352,7 +352,7 @@ export function declarationsToQueriesYml({ document, siteRoot }) {
   }
 
   if (Object.keys(queries).length > 0) {
-    report.collections = writeQueriesConfig(siteRoot, queries)
+    report.queries = writeQueriesConfig(siteRoot, queries)
   }
   return report
 }

@@ -253,7 +253,7 @@ export async function discoverFreeformTranslations(locale, localesDir) {
   // Discover entity translations
   const entitiesDir = join(freeformDir, ENTITIES_DIR)
   if (existsSync(entitiesDir)) {
-    result.collections = await discoverMarkdownFiles(entitiesDir, entitiesDir)
+    result.records = await discoverMarkdownFiles(entitiesDir, entitiesDir)
   }
 
   return result
