@@ -523,12 +523,33 @@ function loadSourceRecordsFromPool(poolBySchema, decl, placements) {
 export async function buildCollectionEntities(siteRoot, opts = {}) {
   // Merged collections config (collections.yml over site.yml::collections). Reused
   // from the caller when provided (sync-package shares it with the folder builder).
+  // ⭐ `records.yml` IS THE FOLDER, AND IT DECIDES WHAT SYNCS. Listing an entity
+  // is what makes it a record; an entity nothing references exists but cannot be
+  // publicly fetched — so it is a draft, for free, with no flag to set. This is
+  // why `collections.yml::sync` is deleted rather than ported: "do not sync" is
+  // now "reference nothing", which is the actual round trip.
+  //
+  // ⛔ AND `missing` IS NOT `empty`. Missing means do not sync at all and leave
+  // the server's folder untouched; empty means sync an empty folder, REMOVING
+  // what is there. The safe state is the absence of a file, so a live folder
+  // cannot be wiped by deleting one — the destructive act requires affirmatively
+  // creating one, and the CLI asks before it happens.
+  //
+  // ⚠️ READ FIRST, ABOVE EVERY EARLY RETURN. `recordsState` has to ride out of
+  // this function on every path, because its ABSENCE reads as "not missing" to a
+  // caller — measured: a site with no queries returned no state, the folder
+  // builder took that for `declared`, and a site with no `records.yml` at all
+  // emitted an empty folder that would have removed everything.
+  const recordsCfg = await readRecordsConfig(siteRoot)
+  if (recordsCfg.error) throw new Error(`uwx/collections: ${recordsCfg.error}`)
+  const recordsState = recordsCfg.state
+
   const colConfig = opts.collectionsConfig || (await resolveCollectionsConfig(siteRoot))
   if (!colConfig.folderSync) {
-    return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig }
+    return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
   }
   const mapped = syncableCollections(colConfig.declarations)
-  if (mapped.length === 0) return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig }
+  if (mapped.length === 0) return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
 
   // A Model declaration comes from a LOCAL foundation (offline) or, for a
   // non-local Model, from the injected async `resolveModel(name)` — the verb wires
@@ -578,29 +599,9 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   const pool = await readEntityPool(siteRoot)
   const poolBySchema = groupPoolBySchema(pool.entities)
 
-  // ⭐ `records.yml` IS THE FOLDER, AND IT DECIDES WHAT SYNCS. Listing an entity
-  // is what makes it a record; an entity nothing references exists but cannot be
-  // publicly fetched — so it is a draft, for free, with no flag to set. This is
-  // why `collections.yml::sync` is deleted rather than ported: "do not sync" is
-  // now "reference nothing", which is the actual round trip.
-  //
-  // ⛔ AND `missing` IS NOT `empty`. Missing means do not sync at all and leave
-  // the server's folder untouched; empty means sync an empty folder, REMOVING
-  // what is there. The safe state is the absence of a file, so a live folder
-  // cannot be wiped by deleting one — the destructive act requires affirmatively
-  // creating one, and the CLI asks before it happens.
-  const recordsCfg = await readRecordsConfig(siteRoot)
-  if (recordsCfg.error) throw new Error(`uwx/collections: ${recordsCfg.error}`)
   const folder = resolveFolder(recordsCfg.entries, pool.entities)
   if (folder.errors.length) {
     throw new Error(`uwx/collections: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
-  }
-  // ⛔ A MALFORMED POOL IS AN ERROR, NOT A SMALLER SET. Every shape the reader
-  // refuses (a file with no schema folder above it, a folder nested below one)
-  // would otherwise mean records that build locally and are silently absent from
-  // the sync — the exact failure the `entities/` layout was chosen to close.
-  if (pool.errors.length) {
-    throw new Error(`uwx/collections: the entity pool is malformed —\n  ${pool.errors.join('\n  ')}`)
   }
 
   // ⛔ `@/x` IS A FOUNDATION-RELATIVE ALIAS AND MUST BE RESOLVED BEFORE IT SHIPS.
@@ -779,7 +780,7 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     warnings.push(...mappedOut.warnings)
   }
 
-  return { entities, index, warnings, schemaless, mappedCount: mapped.length, colConfig, folder, recordsState: recordsCfg.state }
+  return { entities, index, warnings, schemaless, mappedCount: mapped.length, colConfig, folder, recordsState }
 }
 
 /**

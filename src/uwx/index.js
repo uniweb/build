@@ -101,6 +101,17 @@ export {
   entityContentHash,
 } from './collections.js'
 export { readEntityFile, parseFrontmatter } from './collection-source.js'
+
+// The folder's own vocabulary, so a verb can ask what `records.yml` SAYS without
+// re-reading or re-parsing it. ⛔ Note the allowlist: an export added to
+// `site/records-config.js` does not reach a caller until it is named here.
+export {
+  readRecordsConfig,
+  RECORDS_YML_RELPATH,
+  FOLDER_MISSING,
+  FOLDER_EMPTY,
+  FOLDER_DECLARED,
+} from '../site/records-config.js'
 export {
   findRecordFile,
   backfillUuid,

@@ -159,13 +159,28 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  * @param {object[]} params.recordEntities - the record entities (full set, BEFORE
  *        send-only-changed filtering), each `{ id, uuid, slug, model }`
  * @param {Array} params.folderNodes - the resolved `records.yml` tree
+ * @param {boolean} [params.declared] - whether `records.yml` EXISTS. See below.
  * @param {Record<string,string>} [params.itemUuids] - path → `$uuid`, harvested
  *        from the folder document a previous push returned. Absent on a first
  *        push, where every item is genuinely new.
  * @returns {{ id, uuid, model, file, document, warnings }|null}
  */
-export function buildFolderEntity({ recordEntities, folderNodes = [], itemUuids = null }) {
-  if (!Array.isArray(folderNodes) || folderNodes.length === 0) return null
+export function buildFolderEntity({ recordEntities, folderNodes = [], declared, itemUuids = null }) {
+  // ⛔ `missing` AND `empty` ARE DIFFERENT, AND THE ASYMMETRY IS DELIBERATE.
+  //
+  //   no records.yml       → null. INERT: nothing is sent, and the server's
+  //                          folder is left exactly as it is.
+  //   records.yml, empty   → a folder with `contents: []`. DESTRUCTIVE: it says
+  //                          the folder holds nothing, so the backend removes
+  //                          what is there.
+  //
+  // ⭐ The safe state is the ABSENCE of a file and the destructive act requires
+  // affirmatively CREATING one — so a live folder cannot be wiped by deleting
+  // something. ⛔ Do not "simplify" these into one behaviour to avoid the
+  // placeholder hazard (an empty file created meaning to fill it in): that would
+  // delete a capability to avoid writing a prompt. The CLI asks, with a count.
+  const empty = !Array.isArray(folderNodes) || folderNodes.length === 0
+  if (empty && !declared) return null
 
   const byEntityId = new Map()
   for (const e of recordEntities || []) byEntityId.set(e.id, e)

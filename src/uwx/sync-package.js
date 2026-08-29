@@ -280,6 +280,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // collection — which made the folder a shadow of a directory layout rather
     // than something the author states.
     folderNodes: col.folder?.nodes ?? [],
+    // ⛔ Whether `records.yml` EXISTS — not whether it holds anything. Missing is
+    // inert; empty is a folder that REMOVES. Compared against the affirmative
+    // value, never `!== 'missing'`: an absent state would read as declared, and
+    // that is precisely how a site with no records.yml once emitted a folder that
+    // would have emptied the live one.
+    declared: col.recordsState === 'empty' || col.recordsState === 'declared',
     // Placement identity from the folder document a previous push returned.
     // Absent on a first push — every item is genuinely new then. Its ABSENCE on a
     // later push is what made `publish` after `push` fail: send-only-changed skips
