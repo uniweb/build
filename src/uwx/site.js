@@ -697,6 +697,60 @@ export function isSiteRelativeExtensionUrl(decl) {
  * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push
  *        response or a pull. Absent on a first sync, where minting is correct.
  */
+// ⛔ KEYS THAT MUST NOT REACH THE WIRE. Everything else on an authored declaration
+// is emitted, including fields this build does not model — see the note in
+// `collectionsNested`. Enumerated here rather than inverted into an allowlist
+// because framework OWNS this vocabulary and can therefore enumerate it
+// truthfully; it does not own the Model's, and cannot.
+//
+// Sources, both framework's own: `site/collection-processor.js::parseCollectionConfig`
+// (the decl parser) and `site/collections-config.js` (normalization). Pinned by
+// `tests/uwx-decl-unmodelled-fields.test.js`, which fails if either gains a field
+// that is neither emitted nor listed here.
+// Authored keys the explicit block in `collectionsNested` already consumes. Kept
+// separate from the framework-local set below because these DO reach the wire —
+// just under a wire spelling. ⚠️ `detailUrl` is the one that matters: it is emitted
+// as `detail_url`, so a pass-through keyed on "is it already in `data`?" does not
+// see it and the field rides TWICE. Measured 2026-08-29, in the first draft of this
+// very change — and the push test missed it because both its controls (`limit`,
+// `schema`) keep their names.
+const DECL_EMITTED_ABOVE = new Set([
+  'source',
+  'schema',
+  'sort',
+  'where',
+  'limit',
+  'excerpt',
+  'deferred',
+  'detailUrl',
+  'queryable'
+])
+
+const DECL_NOT_ON_WIRE = new Set([
+  // Identity — rides as the record's own `name`, not inside `data`.
+  'name',
+  // Folded into `source` above.
+  'path',
+  'url',
+  // Folded into `schema` above (the migration synonym).
+  'model',
+  // Build state: whether the AUTHOR asked for the schema or the subfolder-name
+  // convention supplied it. Decides hard-error vs soft-skip during sync;
+  // `collections-config.js::toConfigCollections` strips it downstream too.
+  'schemaExplicit',
+  // ⭐ FRAMEWORK-LOCAL, and the one that proves the rule. `route:` is a real
+  // authored field — `parseCollectionConfig` reads it, and `collectItems` composes
+  // each item's link as `<route>/<slug>` — but the backend's Model has no slot for
+  // it, so emitting it would be sending build-time config to a store that validates
+  // against a declared schema. Measured 2026-08-29: a first version of this change
+  // passed unknown keys through blindly and would have started sending `route` from
+  // every site that declares one.
+  'route',
+  // Legacy predicate, translated to the canonical `where` upstream. No legacy
+  // fields on the wire.
+  'filter'
+])
+
 function collectionsNested(declarations, uuids = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
@@ -713,6 +767,33 @@ function collectionsNested(declarations, uuids = null) {
     setIf(data, 'deferred', d.deferred)
     setIf(data, 'detail_url', d.detailUrl)
     setIf(data, 'queryable', d.queryable)
+    // ⛔ EMIT WHAT WE DO NOT MODEL. The decl's field set is the BACKEND's Model
+    // (this document mirrors `@uniweb/site-content` — see the lane header), and
+    // their reconcile replaces `data` WHOLESALE with no field-grain merge. So an
+    // allowlist here does not merely fail to send an unmodelled field: it DESTROYS
+    // whatever was stored under it, silently, on every push.
+    //
+    // ⚠️ Measured 2026-08-29: the Model declares ELEVEN decl fields and this emitter
+    // knew ten. The eleventh is `label`, which framework has no authoring concept
+    // for — `label` in framework is a `folders:` BRANCH field (`{segment, label,
+    // entries}`), not a property of a collection.
+    //
+    // ⭐ `label` is the instance, not the defect. Any field the Model gains that we
+    // have not taught this function repeats it, and nothing reports the loss. Hence
+    // a DENY-list: framework can enumerate its own vocabulary truthfully and cannot
+    // enumerate the Model's, so the safe inversion is "withhold what is ours".
+    //
+    // ⚖️ We do NOT warn on an unrecognized key. Framework cannot tell a valid Model
+    // field from a typo — only the server can, and it validates every write against
+    // the declared schema. Its rejection is the honest signal; a guess from here
+    // would cry wolf on every legitimate new field. Same rule and same reasoning as
+    // `site/fetch-shapes.js`: drop only what is DERIVABLE, never what is merely
+    // unrecognized.
+    for (const [key, value] of Object.entries(d)) {
+      if (value === undefined) continue
+      if (DECL_EMITTED_ABOVE.has(key) || DECL_NOT_ON_WIRE.has(key)) continue
+      data[key] = value
+    }
     const rec = withIdentity(name, { name, ...data })
     const uuid = uuids?.[name]
     if (typeof uuid === 'string' && uuid) rec.$uuid = uuid

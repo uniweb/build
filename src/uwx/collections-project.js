@@ -171,6 +171,23 @@ function setIf(obj, key, value) {
 //  - `url:` (remote source) and a bare `source:` object go to collections.yml.
 //  - `schema:` is dropped when it only restates the subfolder-name convention
 //    default, so a terse author file stays terse.
+// Wire keys `declToFileShape` consumes explicitly — mapped, renamed, or folded into
+// the file-side `path`/`url`. `$id`/`$uuid`/`name` are identity, not content.
+const DECL_WIRE_CONSUMED = new Set([
+  'name',
+  '$id',
+  '$uuid',
+  'source',
+  'schema',
+  'sort',
+  'where',
+  'limit',
+  'excerpt',
+  'deferred',
+  'detail_url',
+  'queryable'
+])
+
 function declToFileShape(d) {
   const name = d.name || d.$id
   const decl = {}
@@ -200,6 +217,20 @@ function declToFileShape(d) {
   // wire `detail_url` → file-side `detailUrl` (the key the producer reads).
   if (d.detail_url !== undefined) decl.detailUrl = d.detail_url
   setIf(decl, 'queryable', d.queryable)
+
+  // ⛔ PRESERVE WHAT WE DO NOT MODEL — the pull half of the same rule the emitter
+  // follows (`site.js::collectionsNested`). A wire field this function has not been
+  // taught is dropped here and then absent on the next push, where the backend's
+  // wholesale `data` replace destroys it. Two allowlists facing each other make the
+  // round trip lossy in BOTH directions with nothing reporting it.
+  //
+  // An unknown WIRE key is safe to keep verbatim: unlike the push direction there is
+  // no framework-local vocabulary to filter out, because everything here came off the
+  // backend's Model.
+  for (const [key, value] of Object.entries(d)) {
+    if (value === undefined || DECL_WIRE_CONSUMED.has(key)) continue
+    decl[key] = value
+  }
 
   return { target, name, decl }
 }
