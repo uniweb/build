@@ -670,17 +670,28 @@ export function isSiteRelativeExtensionUrl(decl) {
  * ⛔ DO NOT TRIM THE FIELDS BELOW, even the ones the backend never reads.
  *
  * The backend destructures exactly two — `name` and `schema` — and projects none of
- * this Section into a published payload, so the rest look like dead weight. They are
- * not: `SiteCollectionDecl` is returned VERBATIM to the app lane, and the visual
- * editor reads and writes it. This Section has TWO producers, and the reconcile
- * replaces an item's `data` wholesale rather than merging at field grain — so a push
- * that omits a field the editor set destroys it, silently, on the next push.
+ * this Section into a published payload, so the rest read as dead weight. ⛔ THEY ARE
+ * OURS, AND THAT IS REASON ENOUGH: `excerpt`, `deferred`, `detailUrl` and `queryable`
+ * are read across FRAMEWORK's own runtime, build and kit — `useCollectionQueryable`
+ * is a public hook a foundation calls to render a filter UI. They drive the file
+ * lane, where they work. "The backend does not read it" was never an argument that
+ * nothing reads it.
  *
- * ⚠️ Already live on `label`, which we do not emit and which is not a field we have:
- * framework's `label` belongs to a `folders:` BRANCH, not to a collection. Whether
- * the editor writes one on a decl is frontend's to confirm; the mechanism is not in
- * doubt. See `kb/framework/build/uwx-format.md` § *the decl is written by two
- * producers* — measured with backend 2026-08-29, collab framework-backend-2dfa.
+ * ⚠️ There may be a second reason, and it is NOT ours to assert. Backend states that
+ * `SiteCollectionDecl` reaches the app lane verbatim and that their reconcile
+ * replaces an item's `data` wholesale with no field-grain merge — from which an
+ * omitted field the EDITOR set would be destroyed on the next push. The mechanism is
+ * their code and theirs to state. **Whether the editor reads or writes this decl at
+ * all is FRONTEND's, and neither framework nor backend has established it.** Treat it
+ * as an open hypothesis, not a fact — see the doc below.
+ *
+ * ⚠️ Separately measured: framework does not emit `label` and has no such collection
+ * field — ours belongs to a `folders:` BRANCH. Backend's fixture asserted we mirror a
+ * `site.yml collections.<name>.label`; no such field has ever existed, and they have
+ * corrected it.
+ *
+ * ⇒ Full record, including what is established vs merely claimed:
+ * `kb/framework/build/collections-decl-open-questions.md`.
  *
  * @param {object} declarations resolved collection declarations, keyed by name
  * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push
