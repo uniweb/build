@@ -793,7 +793,7 @@ export function siteContentPlugin(options = {}) {
         try {
           // Do an early content collection to get the collections config
           const earlyContent = await collectForBundle(resolvedSitePath, { foundationPath })
-          collectionsConfig = earlyContent.config?.collections
+          collectionsConfig = earlyContent.config?.queries
 
           // Resolve content directory paths from site.yml paths: group
           const paths = earlyContent?.config?.paths || {}
@@ -842,11 +842,11 @@ export function siteContentPlugin(options = {}) {
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
-        // Process content collections if defined in site.yml
+        // Materialize each query if the site declares any.
         // In dev mode, this was already done in configResolved (before server starts)
         // In production, do it here
-        if (isProduction && siteContent.config?.collections) {
-          console.log('[site-content] Processing content collections...')
+        if (isProduction && siteContent.config?.queries) {
+          console.log('[site-content] Materializing queries...')
           const collections = await processCollections(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
           await writeCollectionFiles(resolvedSitePath, collections, siteContent.config.queries)
         }
@@ -913,7 +913,7 @@ export function siteContentPlugin(options = {}) {
             console.log('[site-content] Collection content changed, regenerating JSON...')
             try {
               // Use collectionsConfig (cached from configResolved) or siteContent
-              const collections = collectionsConfig || siteContent?.config?.collections
+              const collections = collectionsConfig || siteContent?.config?.queries
               if (collections) {
                 const processed = await processCollections(resolvedSitePath, collections, resolvedEntitiesDir, basePath)
                 await writeCollectionFiles(resolvedSitePath, processed, collections)

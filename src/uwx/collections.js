@@ -830,13 +830,16 @@ export async function emitCollectionSyncPackage(siteRoot, opts = {}) {
   const { entities, index, warnings, mappedCount } = await buildCollectionEntities(siteRoot, opts)
   if (mappedCount === 0) {
     throw new Error(
-      'uwx/collections: no collection declares `model:` — nothing to export. ' +
-        'Add `model: "@org/name"` to a collection in site.yml.'
+      'uwx/collections: no query declares a schema — nothing to export. ' +
+        'Add a query to queries.yml naming the schema its records use, e.g.\n' +
+        "  articles:\n    schema: '@/article'"
     )
   }
   if (entities.length === 0) {
     throw new Error(
-      'uwx/collections: no records to export (mapped collections were empty or skipped)'
+      'uwx/collections: no records to export. Either records.yml references ' +
+        'nothing, or every query matched an empty pool — an entity is only a ' +
+        'record once records.yml lists it.'
     )
   }
 

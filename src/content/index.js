@@ -12,9 +12,9 @@
 
 export { collectSiteContent } from '../site/content-collector.js'
 
-// Collections + fetch resolution. Pure functions on the clean dep
+// Query + fetch resolution. Pure functions on the clean dep
 // chain — re-exported here so headless callers (unipress, sidecars)
-// can resolve `collections:` declarations without importing
+// can resolve `queries:` declarations without importing
 // `@uniweb/build/site` (which pulls Vite via its plugin index).
 export {
   processCollections,

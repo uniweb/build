@@ -39,11 +39,10 @@
  * @module @uniweb/build/site/collection-processor
  *
  * @example
- * // site.yml
- * collections:
- *   articles:
- *     path: collections/articles
- *     sort: date desc
+ * // queries.yml
+ * articles:
+ *   schema: '@/article'
+ *   sort: date desc
  *
  * // Usage
  * const collections = await processCollections(siteDir, config.queries)

@@ -45,17 +45,17 @@ import { matchWhere } from '@uniweb/core'
 
 const { values } = parseArgs({
   options: {
-    collections: { type: 'string', short: 'c' },
+    entities: { type: 'string', short: 'e' },
     port: { type: 'string', short: 'p', default: '8080' },
   },
 })
 
-if (!values.collections) {
-  console.error('Usage: dev-backend.js --collections <path> [--port N]')
+if (!values.entities) {
+  console.error('Usage: dev-backend.js --entities <path> [--port N]')
   process.exit(1)
 }
 
-const COLLECTIONS_DIR = resolve(values.collections)
+const COLLECTIONS_DIR = resolve(values.entities)
 const PORT = Number(values.port)
 
 if (!existsSync(COLLECTIONS_DIR)) {
