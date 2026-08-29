@@ -58,6 +58,7 @@ import { DATA_DIR } from '@uniweb/core'
 import { applyWhere, applyFilter, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
+import { readRecordsConfig, resolveFolder, FOLDER_MISSING } from './records-config.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -98,6 +99,11 @@ try {
  * })
  */
 function parseCollectionConfig(name, config) {
+  // ⚠️ `queries.yml`'s TERSEST form is a bare key — `articles:` — which YAML
+  // parses as NULL. The resolver normalizes that away, so the build path never
+  // sees it; a caller reading raw config (as this function's own docstring
+  // shows) would have crashed on the shortest thing an author can write.
+  if (config === null || config === undefined) config = {}
   if (typeof config === 'string') {
     // The string shorthand names the SCHEMA — `entities/{schema}/` supplies the
     // records, so there is no directory for a query to name.
@@ -696,20 +702,20 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
     })
   )
 
-  // ⛔ `path` IS A PLACEMENT, AND PLACEMENT NOW COMES FROM `records.yml`.
-  // It used to be the record's directory position INSIDE its collection — the
-  // one thing `entities/{schema}/` deliberately cannot express, since that path
-  // declares a model and nothing else. Until the folder producer lands, every
-  // record is at the pool root, which is what a site with no `records.yml`
-  // structure means anyway (the model's common case: a flat pool, queries doing
-  // the organizing).
+  // ⭐ `path` IS THE PLACEMENT `records.yml` GAVE THE RECORD, and it is the whole
+  // reason folders exist: `where: { path: { under: 'archive' } }` is how a query
+  // asks for a slice. Structure is query scope, not navigation.
   //
-  // ⚠️ It stays a SCALAR. `where: { path: { under: 'archive' } }` is evaluated by
-  // `core/src/where.js::matchUnder`, which is string-only — an array would match
-  // nothing, silently. One placement per entity is the ruling; many-to-many is a
-  // predicate change to agree with backend first.
-  items = items.map((result) => {
-    const path = ''
+  // ⛔ THIS WAS HARDCODED TO `''` FOR A WHILE, AND THE COMMENT SAID "until the
+  // folder producer lands". It landed, and this was not revisited — so every
+  // folder slice matched NOTHING on the delivery lane, silently, which is the one
+  // failure mode the whole design is built to prevent. Measured before the fix: a
+  // two-record site with an `archive` folder returned `[]` for its own slice.
+  //
+  // ⚠️ It stays a SCALAR. `matchUnder` in `core/src/where.js` is string-only, so
+  // an array would match nothing — one placement per entity is the ruling.
+  items = items.map((result, i) => {
+    const path = pooled[i] ? (config.placements?.get(pooled[i].id)?.path ?? '') : ''
     if (Array.isArray(result)) return result.map((item) => item && { ...item, path })
     return result && { ...result, path }
   })
@@ -790,17 +796,41 @@ export async function processCollections(siteDir, collectionsConfig, entitiesDir
   if (pool.errors.length) {
     for (const e of pool.errors) console.warn(`[collection-processor] ${e}`)
   }
-  const poolBySchema = groupPoolBySchema(pool.entities)
+
+  // ⛔ `records.yml` DECIDES WHAT IS PUBLISHED ON THIS LANE TOO, and it did not
+  // until now. Only the sync lane honoured it, so removing a record from
+  // `records.yml` left it shipping in `/data/<name>.json` on every static host —
+  // an author unpublishes a draft and it stays public. Measured before the fix.
+  //
+  // ⚖️ MISSING IS NOT EMPTY HERE EITHER, but it means something different from
+  // what it means to sync. There is no server folder to leave alone, so a site
+  // with no `records.yml` is simply not managing publication, and its whole pool
+  // is delivered. (Making missing mean "publish nothing" would turn every site
+  // without the file into a silently empty one.)
+  const recordsCfg = await readRecordsConfig(siteDir)
+  if (recordsCfg.error) console.warn(`[collection-processor] ${recordsCfg.error}`)
+  const managed = recordsCfg.state !== FOLDER_MISSING
+  const folder = managed ? resolveFolder(recordsCfg.entries, pool.entities) : null
+  if (folder) {
+    for (const e of folder.errors) console.error(`[collection-processor] ${e}`)
+  }
+  const published = folder
+    ? pool.entities.filter((e) => folder.placements.has(e.id))
+    : pool.entities
+
+  const poolBySchema = groupPoolBySchema(published)
 
   const results = {}
 
   for (const [name, config] of Object.entries(collectionsConfig)) {
     const parsed = parseCollectionConfig(name, config)
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
+    parsed.placements = folder?.placements ?? null
     if (parsed.poolEntities.length === 0 && !parsed.url) {
       console.warn(
-        `[collection-processor] Query "${name}" matches no entities — ` +
-          `nothing in entities/ declares ${parsed.schema || '(no schema)'}.`
+        `[collection-processor] Query "${name}" matches no records — nothing ` +
+          `published declares ${parsed.schema || '(no schema)'}. ` +
+          (managed ? 'Check records.yml lists them.' : 'Check entities/.')
       )
     }
     const items = await collectItems(siteDir, parsed, entitiesDir, basePath)
