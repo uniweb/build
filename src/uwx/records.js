@@ -199,7 +199,7 @@ export function recordsToEntities({
   translations,
 }) {
   if (!declaration || !declaration.name) {
-    throw new Error('uwx/collections: a declaration with a name is required')
+    throw new Error('uwx/records: a declaration with a name is required')
   }
   // A record (one source file) maps to the Model's SINGLE sections in declared
   // order — the brief (the card) plus any sibling single sections, e.g. a body
@@ -212,7 +212,7 @@ export function recordsToEntities({
   const briefEntry = sectionEntries.find(([, s]) => s && s.brief === true)
   const briefName = briefEntry?.[0]
   if (!briefName) {
-    throw new Error(`uwx/collections: Model ${declaration.name} has no brief section`)
+    throw new Error(`uwx/records: Model ${declaration.name} has no brief section`)
   }
   // The single sections one record can populate (the brief + sibling singles).
   //
@@ -331,7 +331,6 @@ export function recordsToEntities({
       id,
       uuid,
       slug,
-      collection: queryName, // the @uniweb/folder groups leaves by this
       model: declaration.name, // reference the Model BY NAME — importer resolves it
       file: `entities/${queryName}/${slug}.json`,
       document,
@@ -433,7 +432,7 @@ function loadLocalFoundationSchema(siteRoot, opts, { required }) {
   if (!foundationDir) {
     if (required) {
       throw new Error(
-        'uwx/collections: could not locate a local foundation. Pass foundationDir, ' +
+        'uwx/records: could not locate a local foundation. Pass foundationDir, ' +
           'use a `file:` foundation dependency, or run via `uniweb sync` so non-local ' +
           'Models resolve from the registry.'
       )
@@ -444,7 +443,7 @@ function loadLocalFoundationSchema(siteRoot, opts, { required }) {
   if (!existsSync(schemaPath)) {
     if (required) {
       throw new Error(
-        `uwx/collections: ${schemaPath} not found — build the foundation first ` +
+        `uwx/records: ${schemaPath} not found — build the foundation first ` +
           '(`uniweb build`).'
       )
     }
@@ -541,7 +540,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // builder took that for `declared`, and a site with no `records.yml` at all
   // emitted an empty folder that would have removed everything.
   const recordsCfg = await readRecordsConfig(siteRoot)
-  if (recordsCfg.error) throw new Error(`uwx/collections: ${recordsCfg.error}`)
+  if (recordsCfg.error) throw new Error(`uwx/records: ${recordsCfg.error}`)
   const recordsState = recordsCfg.state
 
   const colConfig = opts.queriesConfig || (await resolveQueriesConfig(siteRoot))
@@ -601,7 +600,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
 
   const folder = resolveFolder(recordsCfg.entries, pool.entities)
   if (folder.errors.length) {
-    throw new Error(`uwx/collections: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
+    throw new Error(`uwx/records: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
   }
 
   // ⛔ `@/x` IS A FOUNDATION-RELATIVE ALIAS AND MUST BE RESOLVED BEFORE IT SHIPS.
@@ -643,7 +642,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     // the backend's refusal names a missing Model and cannot name this cause.
     if (modelName === declaredModel && typeof declaredModel === 'string' && declaredModel.startsWith('@/')) {
       warnings.push(
-        `collection "${name}": \`${declaredModel}\` is foundation-relative and no org is known, ` +
+        `query "${name}": \`${declaredModel}\` is foundation-relative and no org is known, ` +
           `so it ships unresolved. The backend resolves Models by name and will refuse it. ` +
           `Pass \`--org @handle\`, or push once so the site records its org.`
       )
@@ -674,7 +673,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       const dirs = poolDirsForSchema(modelName)
       const { alternative } = dirs ? poolPathReadings(dirs) : { alternative: null }
       throw new Error(
-        `uwx/collections: Model "${modelName}" (query "${name}") could not be ` +
+        `uwx/records: Model "${modelName}" (query "${name}") could not be ` +
           'resolved — not defined by a local foundation' +
           (resolveModel
             ? ', and the backend has no such Model (register it first).'
@@ -751,8 +750,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       const dupKey = `${e.model} ${e.id}`
       if (seen.has(dupKey)) {
         throw new Error(
-          `uwx/collections: duplicate ($model, $id) in one sync — "${e.id}" of ` +
-            `${e.model} appears in more than one collection. Each ($model, $id) ` +
+          `uwx/records: duplicate ($model, $id) in one sync — "${e.id}" of ` +
+            `${e.model} appears in more than one query. Each ($model, $id) ` +
             'must be unique within a sync; make the slugs unique.'
         )
       }
@@ -830,14 +829,14 @@ export async function emitRecordSyncPackage(siteRoot, opts = {}) {
   const { entities, index, warnings, mappedCount } = await buildRecordEntities(siteRoot, opts)
   if (mappedCount === 0) {
     throw new Error(
-      'uwx/collections: no query declares a schema — nothing to export. ' +
+      'uwx/records: no query declares a schema — nothing to export. ' +
         'Add a query to queries.yml naming the schema its records use, e.g.\n' +
         "  articles:\n    schema: '@/article'"
     )
   }
   if (entities.length === 0) {
     throw new Error(
-      'uwx/collections: no records to export. Either records.yml references ' +
+      'uwx/records: no records to export. Either records.yml references ' +
         'nothing, or every query matched an empty pool — an entity is only a ' +
         'record once records.yml lists it.'
     )

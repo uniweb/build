@@ -119,14 +119,14 @@ function briefHasContentBody(declaration) {
 // differ — see the module header).
 function indexFolder(folderDoc) {
   const byUuid = new Map()
-  const walk = (nodes, collection) => {
+  const walk = (nodes, folderPath) => {
     for (const node of nodes || []) {
       if (node?.kind === 'branch') {
-        walk(node.$children, node.path_segment ?? collection)
+        walk(node.$children, node.path_segment ?? folderPath)
       } else if (node?.kind === 'ref' && node.entry) {
         // `entry` is `{ model, entity: <uuid> }`; tolerate a bare uuid defensively.
         const uuid = typeof node.entry === 'object' ? node.entry.entity : node.entry
-        if (uuid) byUuid.set(uuid, { collection, slug: node.path_segment })
+        if (uuid) byUuid.set(uuid, { folderPath, slug: node.path_segment })
       }
     }
   }
@@ -178,10 +178,10 @@ export function unresolveSelfScope(model, selfOrg) {
 // a read), the record document's `$id` (`<collection>/<slug>`) as a fallback.
 function locate(document, folderIndex) {
   const fromFolder = document.$uuid ? folderIndex.get(document.$uuid) : null
-  if (fromFolder?.collection && fromFolder.slug) return fromFolder
+  if (fromFolder?.slug) return fromFolder
   if (typeof document.$id === 'string' && document.$id.includes('/')) {
-    const [collection, ...rest] = document.$id.split('/')
-    return { collection, slug: rest.join('/') }
+    const parts = document.$id.split('/')
+    return { folderPath: parts.slice(0, -1).join('/'), slug: parts[parts.length - 1] }
   }
   return fromFolder || null
 }
@@ -443,7 +443,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // caller already has it.
   const selfOrg = opts.org ?? readSiteOrg(siteRoot)
   if (typeof resolveDeclaration !== 'function') {
-    throw new Error('uwx/collections-project: opts.resolveDeclaration(modelName) is required')
+    throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')
   }
 
   const folderIndex = indexFolder(folderDoc)
@@ -464,8 +464,8 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
 
   for (const document of recordDocs) {
     const where = locate(document, folderIndex)
-    if (!where?.collection || !where?.slug) {
-      skipped.push({ uuid: document.$uuid, reason: 'no collection/slug (not in folder, no $id)' })
+    if (!where?.slug) {
+      skipped.push({ uuid: document.$uuid, reason: 'no slug (not in the folder, no $id)' })
       continue
     }
     const declaration = document.$model ? resolveDeclaration(document.$model) : null
@@ -506,7 +506,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     try {
       status = writeRecordFile({ filePath, document, declaration, format, sourceLocale, collector, freeformRelPath })
     } catch (err) {
-      warnings.push(`${where.collection}/${where.slug}: ${err.message}`)
+      warnings.push(`${where.slug}: ${err.message}`)
       continue
     }
     if (status === 'unchanged') unchanged.push(filePath)

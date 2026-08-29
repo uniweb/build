@@ -567,7 +567,7 @@ export function siteContentPlugin(options = {}) {
   let watcher = null
   let server = null
   let localeTranslations = {} // Cache: { locale: translations }
-  let recordTranslations = {} // Cache: { locale: collection translations }
+  let recordTranslations = {} // Cache: { locale: record translations }
   let localesDir = 'locales' // Default, updated from site config
   let queriesConfig = null // Cached for watcher setup
   let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
@@ -808,11 +808,11 @@ export function siteContentPlugin(options = {}) {
 
           if (queriesConfig) {
             console.log('[site-content] Materializing queries...')
-            const collections = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath)
-            await writeQueryFiles(resolvedSitePath, collections, queriesConfig)
+            const byQuery = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath)
+            await writeQueryFiles(resolvedSitePath, byQuery, queriesConfig)
           }
         } catch (err) {
-          console.warn('[site-content] Early collection processing failed:', err.message)
+          console.warn('[site-content] Early query materialization failed:', err.message)
         }
       }
 
@@ -847,8 +847,8 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.queries) {
           console.log('[site-content] Materializing queries...')
-          const collections = await processQueries(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
-          await writeQueryFiles(resolvedSitePath, collections, siteContent.config.queries)
+          const byQuery = await processQueries(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
+          await writeQueryFiles(resolvedSitePath, byQuery, siteContent.config.queries)
         }
 
         // Execute data fetches in dev mode
@@ -910,18 +910,18 @@ export function siteContentPlugin(options = {}) {
         const scheduleRecordRebuild = () => {
           if (recordRebuildTimeout) clearTimeout(recordRebuildTimeout)
           recordRebuildTimeout = setTimeout(async () => {
-            console.log('[site-content] Collection content changed, regenerating JSON...')
+            console.log('[site-content] Records changed, regenerating JSON...')
             try {
               // Use queriesConfig (cached from configResolved) or siteContent
-              const collections = queriesConfig || siteContent?.config?.queries
-              if (collections) {
-                const processed = await processQueries(resolvedSitePath, collections, resolvedEntitiesDir, basePath)
-                await writeQueryFiles(resolvedSitePath, processed, collections)
+              const byQuery = queriesConfig || siteContent?.config?.queries
+              if (byQuery) {
+                const processed = await processQueries(resolvedSitePath, byQuery, resolvedEntitiesDir, basePath)
+                await writeQueryFiles(resolvedSitePath, processed, byQuery)
               }
               // Send full reload to client
               server.ws.send({ type: 'full-reload' })
             } catch (err) {
-              console.error('[site-content] Collection rebuild failed:', err.message)
+              console.error('[site-content] Record rebuild failed:', err.message)
             }
           }, 100)
         }
@@ -1002,7 +1002,7 @@ export function siteContentPlugin(options = {}) {
             if (existsSync(contentPath)) {
               try {
                 watchers.push(watch(contentPath, { recursive: true }, scheduleRecordRebuild))
-                console.log(`[site-content] Watching ${contentPath} for collection changes`)
+                console.log(`[site-content] Watching ${contentPath} for record changes`)
               } catch (err) {
                 console.warn('[site-content] Could not watch content directory:', err.message)
               }
@@ -1052,12 +1052,12 @@ export function siteContentPlugin(options = {}) {
         if (existsSync(recordLocalesPath)) {
           try {
             const collWatcher = watch(recordLocalesPath, { recursive: false }, () => {
-              console.log('[site-content] Collection translations changed, clearing cache...')
+              console.log('[site-content] Record translations changed, clearing cache...')
               recordTranslations = {}
               server.ws.send({ type: 'full-reload' })
             })
             additionalWatchers.push(collWatcher)
-            console.log(`[site-content] Watching ${recordLocalesPath} for collection translation changes`)
+            console.log(`[site-content] Watching ${recordLocalesPath} for record translation changes`)
           } catch (err) {
             // collections locales dir may not exist, that's ok
           }
@@ -1235,7 +1235,7 @@ export function siteContentPlugin(options = {}) {
               res.end(JSON.stringify(translated, null, 2))
               return
             } catch (err) {
-              console.warn(`[site-content] Failed to serve localized collection ${filename}: ${err.message}`)
+              console.warn(`[site-content] Failed to serve localized records ${filename}: ${err.message}`)
               // Fall through to Vite's static server
             }
           }

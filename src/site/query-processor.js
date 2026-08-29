@@ -1,7 +1,7 @@
 /**
  * Collection Processor
  *
- * Processes content collections from markdown and YAML files into JSON data.
+ * Materializes each named QUERY over the site's records into JSON data.
  * Collections are defined in site.yml and processed at build time.
  *
  * ⛔ A COLLECTION `.md` IS NOT A PAGE-SECTION `.md`. Same extension, unrelated
@@ -18,7 +18,7 @@
  * ⭐ And `.md` is the HYBRID case, not the general one. It exists for records
  * that are part data and part prose — a blog article. YAML and JSON records are
  * data only, have no body, and express nesting and arrays natively; they are the
- * plain case rather than the exception. Reasoning about collections from the
+ * plain case rather than the exception. Reasoning about records from the
  * markdown shape alone imports a body and a content field that most records
  * do not have.
  *
@@ -45,8 +45,8 @@
  *   sort: date desc
  *
  * // Usage
- * const collections = await processQueries(siteDir, config.queries)
- * await writeQueryFiles(siteDir, collections)
+ * const byQuery = await processQueries(siteDir, config.queries)
+ * await writeQueryFiles(siteDir, byQuery)
  */
 
 import { readFile, readdir, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
@@ -87,7 +87,7 @@ try {
  *
  * @example
  * // Simple form
- * parseQueryConfig('articles', 'collections/articles')
+ * parseQueryConfig('articles', '@/article')
  *
  * // Extended form
  * parseQueryConfig('articles', {
@@ -148,12 +148,12 @@ function parseQueryConfig(name, config) {
     // singular detail there) or via the kit's useEntityDetail hook.
     deferred: Array.isArray(config.deferred) ? config.deferred.slice() : null,
     // `detailUrl:` names the per-record endpoint pattern for API-backed
-    // collections (where the build emits no per-record files because
+    // remote sources (where the build emits no per-record files because
     // there are no on-disk source files to materialize). Used by the
     // runtime's auto-detail injection and the useEntityDetail kit hook.
     // Pattern uses {slug} as the placeholder; substitution at runtime
     // pulls from the dynamic-route param (entity-store) or the record's
-    // slug field (useEntityDetail). Markdown-backed collections leave
+    // slug field (useEntityDetail). File-backed queries leave
     // this null and get the static-file default /data/<name>/<slug>.json.
     detailUrl: typeof config.detailUrl === 'string' ? config.detailUrl : null,
     // `queryable:` declares the queryable surface — which fields a
@@ -187,7 +187,7 @@ function parseQueryConfig(name, config) {
  * fields and moved the page from /blog/docs-sites to /blog/11_docs_sites. The
  * only trace was
  *
- *   [collection-processor] YAML parse error: bad indentation of a mapping entry (4:72)
+ *   [query-processor] YAML parse error: bad indentation of a mapping entry (4:72)
  *
  * on line 16 of 857 lines of build output, naming no file, nine lines above
  * "Processed articles: 6 items" — a success line that reads as everything
@@ -320,7 +320,7 @@ function isExternalUrl(src) {
 /**
  * Process assets in collection content
  * - Resolves relative paths to site-root-relative paths
- * - Copies co-located assets to public/collections/<collection>/
+ * - Copies co-located assets to public/records/<schema>/
  * - Updates paths in the content in place
  *
  * @param {Object} content - ProseMirror document
@@ -429,7 +429,7 @@ async function processRecordAssets(content, itemPath, siteRoot, poolDirs, basePa
 /**
  * Process assets in a data item (YAML/JSON)
  * - Recursively walks the data object looking for local asset paths
- * - Copies co-located assets to public/collections/<collection>/
+ * - Copies co-located assets to public/records/<schema>/
  * - Rewrites paths to absolute URLs (with base path)
  *
  * @param {Object} data - Parsed data object (mutated in place)
@@ -662,7 +662,7 @@ function warnDuplicateSlugs(items, queryName) {
     const where = item.path ? `${item.path}/` : ''
     if (seen.has(slug)) {
       console.warn(
-        `[collection-processor] Collection "${queryName}" has more than one record with ` +
+        `[query-processor] Query "${queryName}" has more than one record with ` +
           `slug "${slug}" (${seen.get(slug)}${slug}, ${where}${slug}). Its detail route and ` +
           `per-record file resolve to only one of them — give them distinct slugs.`
       )
@@ -800,7 +800,7 @@ export async function processQueries(siteDir, queriesConfig, entitiesDir, basePa
   // set of files; a query reads none of another schema's.
   const pool = await readEntityPool(siteDir, { dir: entitiesDir })
   if (pool.errors.length) {
-    for (const e of pool.errors) console.warn(`[collection-processor] ${e}`)
+    for (const e of pool.errors) console.warn(`[query-processor] ${e}`)
   }
 
   // ⛔ `records.yml` DECIDES WHAT IS PUBLISHED ON THIS LANE TOO, and it did not
@@ -814,11 +814,11 @@ export async function processQueries(siteDir, queriesConfig, entitiesDir, basePa
   // is delivered. (Making missing mean "publish nothing" would turn every site
   // without the file into a silently empty one.)
   const recordsCfg = await readRecordsConfig(siteDir)
-  if (recordsCfg.error) console.warn(`[collection-processor] ${recordsCfg.error}`)
+  if (recordsCfg.error) console.warn(`[query-processor] ${recordsCfg.error}`)
   const managed = recordsCfg.state !== FOLDER_MISSING
   const folder = managed ? resolveFolder(recordsCfg.entries, pool.entities) : null
   if (folder) {
-    for (const e of folder.errors) console.error(`[collection-processor] ${e}`)
+    for (const e of folder.errors) console.error(`[query-processor] ${e}`)
   }
   const published = folder
     ? pool.entities.filter((e) => folder.placements.has(e.id))
@@ -834,14 +834,14 @@ export async function processQueries(siteDir, queriesConfig, entitiesDir, basePa
     parsed.placements = folder?.placements ?? null
     if (parsed.poolEntities.length === 0 && !parsed.url) {
       console.warn(
-        `[collection-processor] Query "${name}" matches no records — nothing ` +
+        `[query-processor] Query "${name}" matches no records — nothing ` +
           `published declares ${parsed.schema || '(no schema)'}. ` +
           (managed ? 'Check records.yml lists them.' : 'Check entities/.')
       )
     }
     const items = await collectItems(siteDir, parsed, entitiesDir, basePath)
     results[name] = items
-    console.log(`[collection-processor] Processed ${name}: ${items.length} items`)
+    console.log(`[query-processor] Processed ${name}: ${items.length} items`)
   }
 
   return results
@@ -887,7 +887,7 @@ async function pruneOrphanedRecords(dataDir, name, expected) {
   const contained = resolve(recordsDir)
   if (contained !== resolve(dataDir, name) || !contained.startsWith(resolve(dataDir) + sep)) {
     console.warn(
-      `[collection-processor] Refusing to prune "${name}" — it does not resolve ` +
+      `[query-processor] Refusing to prune "${name}" — it does not resolve ` +
       `inside ${dataDir}`
     )
     return []
@@ -916,15 +916,15 @@ async function pruneOrphanedRecords(dataDir, name, expected) {
  * })
  * // Creates public/data/articles.json
  */
-export async function writeQueryFiles(siteDir, collections, queriesConfig = null) {
-  if (!collections || Object.keys(collections).length === 0) {
+export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
+  if (!byQuery || Object.keys(byQuery).length === 0) {
     return
   }
 
   const dataDir = join(siteDir, 'public', DATA_DIR)
   await mkdir(dataDir, { recursive: true })
 
-  for (const [name, items] of Object.entries(collections)) {
+  for (const [name, items] of Object.entries(byQuery)) {
     const rawConfig = queriesConfig?.[name]
     const parsed = rawConfig ? parseQueryConfig(name, rawConfig) : null
     const deferred = parsed?.deferred
@@ -957,21 +957,21 @@ export async function writeQueryFiles(siteDir, collections, queriesConfig = null
       const cascadePath = join(dataDir, `${name}.json`)
       await writeFile(cascadePath, JSON.stringify(stripped, null, 2))
       console.log(
-        `[collection-processor] Generated ${cascadePath} (${items.length} items, ` +
+        `[query-processor] Generated ${cascadePath} (${items.length} items, ` +
         `deferred: [${deferred.join(', ')}]) + ${perRecordCount} per-record files`
       )
       if (pruned.length > 0) {
         // A deletion is always worth naming. These files were public a moment
         // ago, so "which ones went" is the question an author will have.
         console.log(
-          `[collection-processor] Removed ${pruned.length} stale per-record ` +
+          `[query-processor] Removed ${pruned.length} stale per-record ` +
           `file(s) from ${recordsDir}: ${pruned.join(', ')}`
         )
       }
     } else {
       const filepath = join(dataDir, `${name}.json`)
       await writeFile(filepath, JSON.stringify(items, null, 2))
-      console.log(`[collection-processor] Generated ${filepath} (${items.length} items)`)
+      console.log(`[query-processor] Generated ${filepath} (${items.length} items)`)
 
       // This collection is not deferred, so it has no per-record files. If it
       // used to, the directory is still there and will never be written again
@@ -979,7 +979,7 @@ export async function writeQueryFiles(siteDir, collections, queriesConfig = null
       const pruned = await pruneOrphanedRecords(dataDir, name, new Set())
       if (pruned.length > 0) {
         console.log(
-          `[collection-processor] Removed ${pruned.length} per-record file(s) ` +
+          `[query-processor] Removed ${pruned.length} per-record file(s) ` +
           `from ${join(dataDir, name)} — "${name}" no longer declares deferred:`
         )
       }

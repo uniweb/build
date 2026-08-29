@@ -138,13 +138,13 @@ export async function buildSiteData({
   //    2026-08-18; no such function has existed for some time.) Same output bytes, same paths, just
   //    without the vite intermediary.
   if (siteContent.config?.queries) {
-    const collections = await processQueries(
+    const byQuery = await processQueries(
       resolvedSiteRoot,
       siteContent.config.queries,
       siteContent.config?.paths?.entities,
       basePath
     )
-    await writeQueryFiles(resolvedSiteRoot, collections, siteContent.config.queries)
+    await writeQueryFiles(resolvedSiteRoot, byQuery, siteContent.config.queries)
 
     const publicDataDir = join(resolvedSiteRoot, 'public', DATA_DIR)
     const distDataDir = join(resolvedDistDir, DATA_DIR)

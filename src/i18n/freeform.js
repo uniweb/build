@@ -186,7 +186,7 @@ export async function loadFreeformRecord(item, schema, locale, localesDir) {
       relativePath: relative(join(localesDir, 'freeform', locale), filePath)
     }
   } catch (err) {
-    console.warn(`[i18n] Failed to load free-form collection item ${filePath}: ${err.message}`)
+    console.warn(`[i18n] Failed to load free-form record ${filePath}: ${err.message}`)
     return null
   }
 }
@@ -233,7 +233,7 @@ export async function discoverFreeformTranslations(locale, localesDir) {
   const result = {
     pages: [],
     pageIds: [],
-    collections: []
+    records: []
   }
 
   if (!existsSync(freeformDir)) return result
@@ -303,7 +303,7 @@ export function parseFreeformPath(relativePath) {
     // collections/articles/getting-started.md → { type: 'collection', queryName: 'articles', slug: 'getting-started' }
     const slug = parts[parts.length - 1].replace('.md', '')
     const queryName = parts[1]
-    return { type: 'collection', queryName, slug }
+    return { type: 'record', queryName, slug }
   }
 
   return { type: 'unknown', relativePath }

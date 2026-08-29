@@ -23,7 +23,7 @@ import { loadFreeformRecord } from './freeform.js'
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
 import { resolveQueriesConfig } from '../site/queries-config.js'
-import { poolDirsForSchema } from '../site/entity-pool.js'
+import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import {
   NON_TRANSLATABLE_TYPES,
   HEURISTIC_SKIP_FIELDS,
@@ -43,7 +43,7 @@ export const RECORDS_DIR = 'records'
 // Schema resolution
 // ---------------------------------------------------------------------------
 
-/** Cache for resolved schemas (collection name → schema or null) */
+/** Cache for resolved schemas (query name → schema or null) */
 const schemaCache = new Map()
 
 /**
@@ -72,7 +72,7 @@ async function resolveSchema(queryName, siteRoot) {
   // an author to write into it was the one remaining place the framework
   // contradicted its own rule that `collections/` is the only way to provide
   // structured data. The schema describes the source, so it lives with it.
-  const companionPath = join(siteRoot, 'collections', `${queryName}.schema.js`)
+  const companionPath = join(siteRoot, ENTITIES_DIR, `${queryName}.schema.js`)
   if (existsSync(companionPath)) {
     try {
       const mod = await import(pathToFileURL(companionPath).href)
@@ -461,7 +461,7 @@ export async function extractRecordContent(siteRoot, options = {}) {
       }
     } catch (err) {
       // Skip files that can't be parsed
-      console.warn(`[i18n] Skipping collection ${file}: ${err.message}`)
+      console.warn(`[i18n] Skipping ${file}: ${err.message}`)
     }
   }
 

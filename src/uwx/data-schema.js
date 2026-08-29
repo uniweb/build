@@ -313,9 +313,9 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     // Note the local checker is unaffected and still stricter: `validateItem`
     // works on the IR, where the field is `type: array`, so it verifies the value
     // IS a list. Only what the registry is told changes.
-    const { items: _items, ...collection } = field
+    const { items: _items, ...rest } = field
     return lowerLeaf(
-      { ...collection, ...items, type: items ? items.type : 'json' },
+      { ...rest, ...items, type: items ? items.type : 'json' },
       resolve,
       optResolve,
       { multiple: true }

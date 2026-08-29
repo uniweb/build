@@ -2164,10 +2164,10 @@ export async function collectSiteContent(sitePath, options = {}) {
   // The backend's projector never emits it (their measurement: 17 `config` keys,
   // not this one), and hosting renders with framework's code. There was nobody to
   // coordinate with, which is exactly why it had no excuse to stay wrong.
-  const collections = toConfigQueries(
+  const byQuery = toConfigQueries(
     (await resolveQueriesConfig(sitePath, { siteYml: siteConfig })).declarations
   )
-  if (collections) siteConfig.queries = collections
+  if (byQuery) siteConfig.queries = byQuery
 
   // Record the RESOLVED base (--base > UNIWEB_BASE > site.yml::base) on the
   // config so every consumer reads one value. Prerender sets website.basePath

@@ -236,7 +236,7 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`[dev-backend] Listening on http://localhost:${PORT}`)
-  console.log(`[dev-backend] Collections: ${knownQueries.join(', ') || '(none)'}`)
+  console.log(`[dev-backend] Queries: ${knownQueries.join(', ') || '(none)'}`)
   console.log('[dev-backend] Endpoints:')
   for (const name of knownQueries) {
     console.log(`  GET  /api/${name}                  — all records`)

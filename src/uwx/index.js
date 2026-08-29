@@ -106,6 +106,14 @@ export { readEntityFile, parseFrontmatter } from './entity-source.js'
 // The folder's own vocabulary, so a verb can ask what `records.yml` SAYS without
 // re-reading or re-parsing it. ⛔ Note the allowlist: an export added to
 // `site/records-config.js` does not reach a caller until it is named here.
+// The pool's grammar — a schema ref to its directory and back. ⛔ Allowlist: an
+// export added to `site/entity-pool.js` does not reach a caller until it is here.
+export {
+  poolDirsForSchema,
+  schemaForPoolDirs,
+  ENTITIES_DIR,
+} from '../site/entity-pool.js'
+
 export {
   readRecordsConfig,
   RECORDS_YML_RELPATH,
