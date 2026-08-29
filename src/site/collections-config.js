@@ -225,14 +225,40 @@ async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
   if (!dataSchemas) return
 
   for (const decl of pending) {
-    const schema = dataSchemas[decl.schema]
-    if (!schema) continue
-    const brief = briefFields(schema)
-    if (!brief) continue
-    const all = Object.keys(flatRecordFields(schema) || {})
-    const heavy = all.filter((f) => !brief.has(f))
-    if (heavy.length) decl.deferred = heavy
+    const heavy = deferredFromSchema(dataSchemas[decl.schema])
+    if (heavy) decl.deferred = heavy
   }
+}
+
+/**
+ * The `deferred:` a schema implies — every record field its **brief** does not name.
+ *
+ * ⛔ ONE IMPLEMENTATION, TWO CALLERS, and that is the point. `deriveDeferredFromSchemas`
+ * above uses it to FILL an unstated `deferred:`; `uwx/collections-project.js` uses it to
+ * RECOGNIZE a derived value on the way back in, so a pull does not write a derivation
+ * into the author's file as though they had typed it.
+ *
+ * ⚠️ A second copy would drift, and the drift would be invisible: the deriver and the
+ * inverter would simply stop agreeing about which values are "the derived one", and the
+ * pull would start persisting values it was written to drop.
+ *
+ * @param {object|undefined} schema a data schema, or undefined when it does not resolve
+ * @returns {string[]|null} the implied deferred list, or null when the schema states no
+ *   brief (a root list, say) or implies nothing heavy — in both cases there is no
+ *   derivation to recognize
+ */
+export function deferredFromSchema(schema) {
+  if (!schema) return null
+  const brief = briefFields(schema)
+  if (!brief) return null
+  const all = Object.keys(flatRecordFields(schema) || {})
+  const heavy = all.filter((f) => !brief.has(f))
+  return heavy.length ? heavy : null
+}
+
+/** The data schemas a site's foundation declares, or null when unresolvable. */
+export function foundationDataSchemas(siteRoot, siteYml) {
+  return loadFoundationDataSchemas(siteRoot, siteYml)
 }
 
 /** The foundation's built data-schema map, or null when there is nothing to read. */

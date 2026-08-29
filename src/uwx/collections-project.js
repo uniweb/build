@@ -37,7 +37,7 @@ import { join, resolve, extname, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
 import { writeRecordFile, writeCollectionsConfig, writeSiteConfig } from './project-writer.js'
-import { defaultSchema } from './collections-config.js'
+import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
 import { isContentBodyField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformCollectionPath } from '../i18n/freeform.js'
@@ -188,7 +188,19 @@ const DECL_WIRE_CONSUMED = new Set([
   'queryable'
 ])
 
-function declToFileShape(d) {
+// Is this wire `deferred` exactly what the schema's brief would have derived? Compared
+// as an ORDER-INSENSITIVE set: the deriver walks `flatRecordFields`, and a round trip
+// through YAML and the store is not obliged to preserve that order. Comparing as a list
+// would classify a reordered-but-identical value as authored, and persist it.
+function isDerivedDeferred(d, dataSchemas) {
+  if (!dataSchemas || !Array.isArray(d.deferred)) return false
+  const derived = deferredFromSchema(dataSchemas[d.schema])
+  if (!derived || derived.length !== d.deferred.length) return false
+  const a = new Set(derived)
+  return d.deferred.every((f) => a.has(f))
+}
+
+function declToFileShape(d, dataSchemas = null) {
   const name = d.name || d.$id
   const decl = {}
   let target = 'col'
@@ -213,7 +225,26 @@ function declToFileShape(d) {
   setIf(decl, 'where', d.where)
   setIf(decl, 'limit', d.limit)
   setIf(decl, 'excerpt', d.excerpt)
-  setIf(decl, 'deferred', d.deferred)
+  // ⛔ DO NOT WRITE A DERIVATION INTO THE AUTHOR'S FILE. `deferred:` is derived from
+  // the schema's brief when unstated (`collections-config.js::deriveDeferredFromSchemas`)
+  // — framework's own test opens with "derived from a collection's data schema, NOT
+  // written by hand". But the deriver mutates the declaration in place, so by the time
+  // it reaches the wire an emitted `deferred` is indistinguishable from an authored one.
+  //
+  // ⚠️ Measured 2026-08-29: one push + one pull turned an unstated `deferred:` into a
+  // hardcoded list in `collections.yml` — a DIFFERENT file, at HIGHER precedence than
+  // the `site.yml` the collection was declared in. The collection then stopped tracking
+  // its schema's brief permanently, and nothing reported it.
+  //
+  // ⭐ This is exactly what the `schema` line above already does: emit on push (the
+  // backend needs the effective value), drop on pull when it merely restates what would
+  // be derived, so a terse author file stays terse and keeps tracking its schema.
+  //
+  // ⚖️ Only an EQUAL value is dropped. An author who deliberately writes a narrower or
+  // wider `deferred:` than the brief implies has expressed intent, and that survives.
+  if (d.deferred !== undefined && !isDerivedDeferred(d, dataSchemas)) {
+    decl.deferred = d.deferred
+  }
   // wire `detail_url` → file-side `detailUrl` (the key the producer reads).
   if (d.detail_url !== undefined) decl.detailUrl = d.detail_url
   setIf(decl, 'queryable', d.queryable)
@@ -258,10 +289,24 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
   const report = {}
   if (decls.length === 0) return report
 
+  // The foundation's data schemas, loaded ONCE for the whole projection — they are what
+  // lets `declToFileShape` tell a derived `deferred:` from an authored one. Absent (no
+  // foundation on disk, unbuilt, unresolvable) the inverter simply never fires and every
+  // `deferred` is treated as authored: the pre-2026-08-29 behaviour, which is the safe
+  // direction to fail — persisting a value that did not need persisting loses nothing,
+  // where dropping an AUTHORED one would.
+  let siteYml = null
+  try {
+    siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8')) || null
+  } catch {
+    siteYml = null
+  }
+  const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
+
   const colCollections = {}
   const siteCollections = {}
   for (const d of decls) {
-    const { target, name, decl } = declToFileShape(d)
+    const { target, name, decl } = declToFileShape(d, dataSchemas)
     if (!name) continue
     if (target === 'site') siteCollections[name] = decl
     else colCollections[name] = decl

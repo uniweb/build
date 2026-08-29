@@ -5,5 +5,7 @@ export {
   resolveCollectionsConfig,
   collectionsYmlPath,
   defaultSchema,
+  deferredFromSchema,
+  foundationDataSchemas,
   COLLECTIONS_YML_RELPATH,
 } from '../site/collections-config.js'
