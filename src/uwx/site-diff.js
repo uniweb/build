@@ -295,8 +295,8 @@ export function describeSiteDiff(diff, { limit = 8 } = {}) {
 
 
 /**
- * Collection-declaration identity from a document the BACKEND produced (a pull, or a
- * push response's `finalized[].document`): `{ <collection name>: <$uuid> }`.
+ * Query-declaration identity from a document the BACKEND produced (a pull, or a
+ * push response's `finalized[].document`): `{ <query name>: <$uuid> }`.
  *
  * ⛔ The sibling of collectFolderItemUuids, and it exists for the same reason: these
  * items have no file of their own, so nothing in a path-keyed map can hold their
@@ -308,7 +308,7 @@ export function describeSiteDiff(diff, { limit = 8 } = {}) {
  */
 export function collectCollectionUuids(doc) {
   const out = {}
-  for (const item of doc?.collections || []) {
+  for (const item of doc?.queries || []) {
     const name = item?.name
     const uuid = item?.$uuid
     if (typeof name === 'string' && typeof uuid === 'string' && name && uuid) out[name] = uuid

@@ -312,7 +312,7 @@ function declToFileShape(d, dataSchemas = null) {
 
 /**
  * Project the QUERY declarations carried in a site-content document
- * (`document.collections`, the inverse of site.js `collectionsNested`) back to
+ * (`document.queries`, the inverse of site.js `collectionsNested`) back to
  * `queries.yml` — the one home. Untouched queries are preserved via the
  * shallow-merge writer. The record FILES are written elsewhere
  * (collectionsToProject); this is only the declaration config.
@@ -321,12 +321,12 @@ function declToFileShape(d, dataSchemas = null) {
  * pull that doesn't carry collections never clobbers a hand-authored file).
  *
  * @param {object} params
- * @param {object} params.document - a site-content `$`-document (`{ collections }`)
+ * @param {object} params.document - a site-content `$`-document (`{ queries }`)
  * @param {string} params.siteRoot
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
 export function declarationsToCollectionsYml({ document, siteRoot }) {
-  const decls = Array.isArray(document?.collections) ? document.collections : []
+  const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
   if (decls.length === 0) return report
 

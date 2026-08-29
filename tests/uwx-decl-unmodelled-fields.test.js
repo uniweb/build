@@ -49,7 +49,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     const src = makeSite(withUnmodelled)
 
     const doc = await siteProjectToDocument(src)
-    const decl = doc.collections.find((c) => c.name === 'members')
+    const decl = doc.queries.find((c) => c.name === 'members')
 
     // The subject.
     expect(decl.displayHeading).toBe('Our Team')
@@ -72,7 +72,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     )
 
     const doc = await siteProjectToDocument(src)
-    const decl = doc.collections.find((c) => c.name === 'members')
+    const decl = doc.queries.find((c) => c.name === 'members')
 
     expect(decl.detail_url).toBe('/api/m/{slug}')
     expect(decl.detailUrl).toBeUndefined()
@@ -88,7 +88,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     )
 
     const doc = await siteProjectToDocument(src)
-    const decl = doc.collections.find((c) => c.name === 'members')
+    const decl = doc.queries.find((c) => c.name === 'members')
 
     expect(decl.route).toBeUndefined()
     // CONTROL — the record exists and carries its modelled fields, so the assertion
@@ -100,7 +100,7 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     const src = makeSite(withUnmodelled)
 
     const doc = await siteProjectToDocument(src)
-    const decl = doc.collections.find((c) => c.name === 'members')
+    const decl = doc.queries.find((c) => c.name === 'members')
 
     // `schemaExplicit` is build state: it records whether the AUTHOR asked for the
     // schema or the query-name convention supplied it, and decides hard-error vs
@@ -127,7 +127,7 @@ describe('pull — an unmodelled decl field returns to the authored file', () =>
     writeFileSync(join(src, 'site.yml'), "name: T\nfoundation: '@acme/base@1.0.0'\n")
 
     const document = {
-      collections: [
+      queries: [
         {
           name: 'members',
           source: { path: 'collections/members' },
@@ -161,8 +161,8 @@ describe('round trip — push(pull(x)) is a fixed point on an unmodelled field',
     declarationsToCollectionsYml({ document: first, siteRoot: src })
     const second = await siteProjectToDocument(src)
 
-    const a = first.collections.find((c) => c.name === 'members')
-    const b = second.collections.find((c) => c.name === 'members')
+    const a = first.queries.find((c) => c.name === 'members')
+    const b = second.queries.find((c) => c.name === 'members')
 
     expect(b.displayHeading).toBe('Our Team')
     // The whole record is stable, not just the field under test — a round trip that

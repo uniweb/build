@@ -35,7 +35,7 @@ beforeAll(() => {
       '  - https://cdn.example.com/stats/entry.js',
       'queries:',
       '  articles:',
-      '    path: collections/articles',
+      "    schema: '@/article'",
       '    sort: date desc',
       '',
     ].join('\n')
@@ -98,7 +98,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
       'pages',
       'layout_sections',
       'extensions',
-      'collections',
+      'queries',
     ])
   })
 
@@ -168,16 +168,19 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     expect(header.content.en.type).toBe('doc') // per-locale keyed
   })
 
-  it('emits extensions (url = $id) and collections (name = $id)', async () => {
+  it('emits extensions (url = $id) and queries (name = $id)', async () => {
     const doc = await siteProjectToDocument(ROOT)
     expect(doc.extensions).toEqual([
       { $id: 'https://cdn.example.com/stats/entry.js', url: 'https://cdn.example.com/stats/entry.js' },
     ])
-    const col = doc.collections[0]
+    const col = doc.queries[0]
     expect(col.$id).toBe('articles')
     expect(col.name).toBe('articles')
-    expect(col.source).toEqual({ path: 'collections/articles' })
+    expect(col.schema).toBe('@/article')
     expect(col.sort).toBe('date desc')
+    // ⛔ No `source`. A file-based query addresses `entities/{schema}/` through
+    // its schema; a path would be a derivation shipped as authored config.
+    expect(col.source).toBeUndefined()
   })
 
   it('the ENTITY $uuid leads the document; nested items never carry $uuid', async () => {

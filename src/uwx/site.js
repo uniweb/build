@@ -10,7 +10,7 @@
 //
 // The document mirrors the @uniweb/site-content Model: `info` (brief) · `pages`
 // (self-nesting; each page carries its `page_sections` as an inline field) ·
-// `layout_sections` · `extensions` · `collections`. `info.foundation`
+// `layout_sections` · `extensions` · `queries`. `info.foundation`
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
 // truth).
 //
@@ -823,7 +823,7 @@ function collectionsNested(declarations, uuids = null) {
  *        the site's effective default locale (`defaultLanguage || languages[0] ||
  *        'en'` — the shared `resolveDefaultLocale` rule), NOT a bare 'en'.
  * @returns {Promise<object>} the section-keyed `$`-document:
- *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, collections }`
+ *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, queries }`
  */
 export async function siteProjectToDocument(siteRoot, opts = {}) {
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
@@ -1009,7 +1009,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   doc.pages = pages
   doc.layout_sections = layoutSections
   doc.extensions = extensionsNested(siteYml)
-  doc.collections = collectionsNested(colConfig.declarations, opts.collectionUuids)
+  // ⭐ THE SECTION IS `queries`. Backend renamed it on `@uniweb/site-content`
+  // (2026-08-29) and explains it as named queries — content that is RESOLVED AT
+  // RUNTIME rather than rendered, which is framework's own model of it
+  // (`records-model.md` §1: a query is second-order site content).
+  //
+  // ⚠️ `collectionsNested` keeps its name. §2's rule: rename what an author or a
+  // consumer sees, leave the identifier alone.
+  doc.queries = collectionsNested(colConfig.declarations, opts.collectionUuids)
   return doc
 }
 

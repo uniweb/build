@@ -63,7 +63,7 @@ describe('a derived deferred does not become authored config', () => {
     // anything at all: "not written back" and "never existed" look identical in the file.
     makeSite()
     const doc = await siteProjectToDocument(SITE)
-    expect(doc.collections.find((c) => c.name === 'articles').deferred).toEqual([
+    expect(doc.queries.find((c) => c.name === 'articles').deferred).toEqual([
       'content',
       'footnotes'
     ])
@@ -98,7 +98,7 @@ describe('a derived deferred does not become authored config', () => {
     // not obliged to preserve that order. A list comparison would call this authored.
     makeSite()
     const doc = await siteProjectToDocument(SITE)
-    const decl = doc.collections.find((c) => c.name === 'articles')
+    const decl = doc.queries.find((c) => c.name === 'articles')
     decl.deferred = [...decl.deferred].reverse()
     expect(pulledDecl(doc).deferred).toBeUndefined()
   })

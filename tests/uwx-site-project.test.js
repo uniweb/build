@@ -551,14 +551,14 @@ describe('collection declarations — round-trip against the real producer', () 
     '    category:\n' +
     '      type: enum\n'
 
-  it('projecting document.collections back to queries.yml is a producer fixed point', async () => {
+  it('projecting document.queries back to queries.yml is a producer fixed point', async () => {
     const src = join(dir, 'src')
     mkdirSync(join(src, 'collections'), { recursive: true })
     writeFileSync(join(src, 'site.yml'), SITE_YML)
     writeFileSync(join(src, 'queries.yml'), QUERIES_YML)
 
     const document = await siteProjectToDocument(src)
-    expect(document.collections.length).toBe(2)
+    expect(document.queries.length).toBe(2)
 
     // Project into a fresh destination, then re-produce and compare the wire decls.
     const dest = join(dir, 'dest')
@@ -567,7 +567,7 @@ describe('collection declarations — round-trip against the real producer', () 
     siteContentDocumentToProject({ document, siteRoot: dest })
 
     const reproduced = await siteProjectToDocument(dest)
-    expect(reproduced.collections).toEqual(document.collections)
+    expect(reproduced.queries).toEqual(document.queries)
 
     // The projected file stays terse: the default-schema query gains no explicit
     // schema, and the default-path query gains no path. A BARE map — no root key.
@@ -595,7 +595,7 @@ describe('collection declarations — round-trip against the real producer', () 
       // `@/articles` IS the convention default for a query named `articles`
       // (identity, not a singular guess), so the projection drops it as redundant —
       // which is what this case is asserting. Same for the default pool path.
-      collections: [{ $id: 'articles', name: 'articles', schema: '@/articles' }],
+      queries: [{ $id: 'articles', name: 'articles', schema: '@/articles' }],
     }
     const report = declarationsToCollectionsYml({ document, siteRoot: site })
     expect(report.collections).toBe('updated')
@@ -1021,7 +1021,7 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
   it('produce → project → produce recovers the same document', async () => {
     const seed = {
       info: { name: { en: 'Atlas' }, foundation: '@acme/base@3.0.0', languages: ['en'], base: '/atlas/' },
-      collections: [
+      queries: [
         { $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/article', sort: '-date' },
       ],
       pages: [
