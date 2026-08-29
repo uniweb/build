@@ -234,13 +234,20 @@ export function resolveFolder(entries, pool) {
     }
 
     if (entry.folder !== undefined) {
-      const segment = String(entry.folder || '').trim()
+      // ⚠️ COERCED, because YAML types a bare `2024` as a NUMBER — and a folder
+      // named for a year is the single most likely one anybody writes. Both the
+      // segment and the label reach the wire as strings; passing a number through
+      // would surface as a type error on the far side, far from the file that
+      // caused it. `0` is a legal folder name, so this tests for absence rather
+      // than falsiness.
+      const raw = entry.folder
+      const segment = raw === null || raw === undefined ? '' : String(raw).trim()
       if (!segment) {
         errors.push(`${RECORDS_YML_RELPATH}: ${where} declares a folder with no name.`)
         return []
       }
       const branch = { kind: 'branch', path_segment: segment }
-      if (entry.label !== undefined) branch.name = entry.label
+      if (entry.label !== undefined && entry.label !== null) branch.name = String(entry.label)
       const kids = Array.isArray(entry.records) ? entry.records : []
       if (kids.length === 0) {
         warnings.push(

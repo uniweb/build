@@ -242,3 +242,31 @@ describe('pattern matching', () => {
     ])
   })
 })
+
+// ⚠️ YAML TYPES A BARE `2024` AS A NUMBER, and a folder named for a year is the
+// single most likely one anybody writes — the docs' own nested example uses one.
+// Both the segment and the label reach the wire as strings, so a number passed
+// through would surface as a type error on the far side, far from the file that
+// caused it.
+describe('a year-named folder', () => {
+  it('coerces a numeric folder name and label to strings', async () => {
+    w('entities/news/spring.md')
+    const { nodes, errors } = await folder(
+      '- folder: 2024\n  label: 2024\n  records:\n    - news/*.md\n'
+    )
+    expect(errors).toEqual([])
+    expect(nodes[0].path_segment).toBe('2024')
+    expect(nodes[0].name).toBe('2024')
+    expect(typeof nodes[0].path_segment).toBe('string')
+    expect(typeof nodes[0].name).toBe('string')
+  })
+
+  it('still refuses a folder with no name — and `0` is a legal name', async () => {
+    w('entities/news/spring.md')
+    const empty = await folder('- folder: ""\n  records:\n    - news/*.md\n')
+    expect(empty.errors[0]).toContain('no name')
+    const zero = await folder('- folder: 0\n  records:\n    - news/*.md\n')
+    expect(zero.errors).toEqual([])
+    expect(zero.nodes[0].path_segment).toBe('0')
+  })
+})
