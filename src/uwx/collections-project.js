@@ -33,10 +33,10 @@
 // unplaceable or unresolvable record is reported.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { join, resolve, extname, basename } from 'node:path'
+import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
-import { writeRecordFile, writeQueriesConfig } from './project-writer.js'
+import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
 import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import { isContentBodyField } from './data-schema.js'
@@ -145,9 +145,33 @@ function indexFolder(folderDoc) {
 // `schemaForPoolDirs`, and deliberately not a second rule: if the two disagreed,
 // a pulled record would land somewhere the next build reads as a different
 // schema — silently, because both paths are well-formed.
-function recordDirFor(siteRoot, model) {
-  const dirs = poolDirsForSchema(model)
+function recordDirFor(siteRoot, model, selfOrg) {
+  const dirs = poolDirsForSchema(unresolveSelfScope(model, selfOrg))
   return dirs ? join(siteRoot, ENTITIES_DIR, ...dirs) : null
+}
+
+/**
+ * Undo the self-scope resolution the producer applies before shipping.
+ *
+ * ⛔ WITHOUT THIS THE ROUND TRIP IS NOT A FIXED POINT, and the failure is silent
+ * on both ends. `@/article` is a FOUNDATION-RELATIVE alias: the producer resolves
+ * it to `@acme/article` before it ships, because the backend resolves Models by
+ * name and never mints. So a record authored under `entities/article/` comes back
+ * as `@acme/article` and, placed literally, lands under `entities/acme/article/` —
+ * a different schema folder, which the next build reads as a different schema.
+ *
+ * ⚠️ It did not show before records were placed by their model: every record went
+ * to `collections/<collection>/` regardless, so the resolution had nowhere to leak.
+ *
+ * ⭐ The site records its own org at create (`site.yml::$org` — "whose this is"),
+ * which is exactly the inverse. A model scoped to ANOTHER org is left alone: it
+ * genuinely is that org's, and `@/` would be a lie.
+ */
+export function unresolveSelfScope(model, selfOrg) {
+  if (typeof model !== 'string' || !selfOrg) return model
+  const org = String(selfOrg).replace(/^@/, '').replace(/\/.*$/, '')
+  if (!org) return model
+  return model.startsWith(`@${org}/`) ? `@/${model.slice(org.length + 2)}` : model
 }
 
 // Resolve a record's (collection, slug): the folder index first (authoritative on
@@ -160,6 +184,16 @@ function locate(document, folderIndex) {
     return { collection, slug: rest.join('/') }
   }
   return fromFolder || null
+}
+
+/** `site.yml::$org`, bare (`acme`), or null. Stored bare — see `writeSiteOrg`. */
+function readSiteOrg(siteRoot) {
+  try {
+    const y = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8')) || {}
+    return typeof y.$org === 'string' && y.$org ? y.$org : null
+  } catch {
+    return null
+  }
 }
 
 // Skip undefined when copying optional fields into a projected declaration.
@@ -324,7 +358,70 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
 }
 
 /**
- * Project a pulled folder + its record entities to `collections/**` files.
+ * Project a pulled `@uniweb/folder` document back to `records.yml`.
+ *
+ * ⭐ THE FOLDER IS THE ONE THING THAT ROUND-TRIPS TRIVIALLY, and that is by design
+ * rather than luck: `records.yml` holds concrete refs on both sides, so there is
+ * nothing to invert. The old shape put QUERY MACROS in the folder — a virtual
+ * `folders:` tree naming collections — and inverting a macro is not possible in
+ * general, which is why rewriting it stayed deferred for as long as it existed.
+ * Taking queries out of the folder is what dissolved that.
+ *
+ * ⛔ AN EMPTY RESULT IS NOT WRITTEN. An empty `records.yml` means "the folder holds
+ * nothing" and REMOVES on the next push, so a pull that carried no folder — or one
+ * whose leaves could not be placed — must leave the file alone rather than author
+ * the destructive state on the author's behalf.
+ *
+ * @param {object} params
+ * @param {object} params.folderDoc - the stored `@uniweb/folder` document
+ * @param {string} params.siteRoot
+ * @param {Map<string,string>} params.poolPathByUuid - record `$uuid` → the path
+ *        under `entities/` of the file just written for it. Supplied by
+ *        `collectionsToProject`, which is the only thing that knows the extension
+ *        each record landed with.
+ * @returns {{ status: 'updated'|'unchanged'|'skipped', entries: Array, warnings: string[] }}
+ */
+export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid }) {
+  const warnings = []
+
+  const walk = (nodes) => {
+    const out = []
+    for (const node of nodes || []) {
+      if (!node || typeof node !== 'object') continue
+      if (node.kind === 'branch') {
+        const entry = { folder: node.path_segment }
+        // Only a BRANCH takes a label. A record carries its own title; the folder
+        // does not caption its rows.
+        if (node.name !== undefined) entry.label = node.name
+        entry.records = walk(node.$children)
+        out.push(entry)
+        continue
+      }
+      const uuid = node.entry?.entity ?? node.entry
+      const rel = typeof uuid === 'string' ? poolPathByUuid.get(uuid) : null
+      if (!rel) {
+        // ⚠️ Reported, never dropped in silence. A leaf whose record did not land
+        // means the folder and the pool disagree, and writing the file without it
+        // would quietly unpublish that record on the next push.
+        warnings.push(
+          `records.yml: a folder leaf ("${node.path_segment ?? '?'}") references a record that ` +
+            `was not written locally — the file was left unchanged rather than dropping it.`
+        )
+        return null
+      }
+      out.push(rel)
+    }
+    return out
+  }
+
+  const entries = walk(folderDoc?.contents)
+  if (entries === null) return { status: 'skipped', entries: [], warnings }
+  if (entries.length === 0) return { status: 'skipped', entries: [], warnings }
+  return { status: writeRecordsConfig(siteRoot, entries), entries, warnings }
+}
+
+/**
+ * Project a pulled folder + its record entities to `entities/**` files.
  *
  * @param {object} params
  * @param {object} params.folderDoc   - the `@uniweb/folder` document `{ contents }` (no `$uuid`)
@@ -333,11 +430,18 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
  * @param {object} params.opts
  * @param {(modelName: string) => object|null|undefined} params.opts.resolveDeclaration
  *        - resolve a Model's data-schema declaration by name (`$model`).
+ * @param {string} [params.opts.org] - the site's own org, so a `@org/x` model the
+ *        producer resolved from `@/x` is placed back where the author wrote it.
+ *        Defaults to `site.yml::$org`.
  * @param {string} [params.opts.sourceLocale]
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
   const { resolveDeclaration, sourceLocale = 'en' } = opts
+  // The site's own org, so a `@org/x` model the producer resolved from `@/x` is
+  // placed back where the author wrote it. Read from `site.yml::$org` unless the
+  // caller already has it.
+  const selfOrg = opts.org ?? readSiteOrg(siteRoot)
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/collections-project: opts.resolveDeclaration(modelName) is required')
   }
@@ -352,6 +456,11 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
   const unchanged = []
   const skipped = []
   const warnings = []
+  // uuid → the path under `entities/` the record landed at. Only this loop knows
+  // the extension each one got, so `records.yml` is written from it rather than
+  // re-derived (a second rule could pick a different extension and the folder
+  // would name a file that is not there).
+  const poolPathByUuid = new Map()
 
   for (const document of recordDocs) {
     const where = locate(document, folderIndex)
@@ -365,7 +474,7 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
       continue
     }
 
-    const collectionDir = recordDirFor(siteRoot, document.$model)
+    const collectionDir = recordDirFor(siteRoot, document.$model, selfOrg)
     if (!collectionDir) {
       skipped.push({
         uuid: document.$uuid,
@@ -403,17 +512,24 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
     if (status === 'unchanged') unchanged.push(filePath)
     else if (isNew) placed.push(filePath)
     else updated.push(filePath)
+    if (document.$uuid) {
+      poolPathByUuid.set(document.$uuid, relative(join(siteRoot, ENTITIES_DIR), filePath).split(sep).join('/'))
+    }
   }
 
-  // The folder carries no `$uuid` we persist — the backend owns the site's folder,
-  // keyed by the site-content uuid (the folder pull lane is keyed by `site.yml::$uuid`).
-  // The virtual `folders:` org + declarations for newly-introduced collections are a
-  // later, comment-sensitive rewrite.
+  // ⭐ THE FOLDER ITSELF, written back as `records.yml`. Steps that only touched the
+  // READ path would leave every pull authoring the old shape — the site would build
+  // from the new layout and be projected back into the one it replaced.
+  //
+  // The folder ENTITY still carries no `$uuid` we persist: the backend owns the
+  // site's folder, keyed by the site-content uuid.
+  const records = folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid })
+  warnings.push(...records.warnings)
 
   // Flush localized record-field translations to locales/collections/{locale}.json,
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
   const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'collections')
   const freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
 
-  return { updated, placed, unchanged, skipped, warnings, locales, freeform }
+  return { updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status }
 }

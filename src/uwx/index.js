@@ -62,6 +62,7 @@ export { buildFolderEntity,
 export {
   collectionsToProject,
   declarationsToCollectionsYml,
+  folderToRecordsYml,
   findRecordFileByUuid,
 } from './collections-project.js'
 export {

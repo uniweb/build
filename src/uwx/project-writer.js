@@ -18,6 +18,7 @@ import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-wri
 import { parseFrontmatter } from './collection-source.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './collections-config.js'
+import { recordsYmlPath } from '../site/records-config.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
 // authoring, not to externally-editable params. On a section write an existing
@@ -274,6 +275,26 @@ export function writeMergedYaml(filePath, projected, managedKeys) {
  */
 export function writeQueriesConfig(siteRoot, queries) {
   return mergeYamlConfig(queriesYmlPath(siteRoot), queries)
+}
+
+/**
+ * Write `records.yml` — the site's folder, as a LIST.
+ *
+ * ⛔ A FULL WRITE, NOT A MERGE, and that is the one place this differs from every
+ * other projected config. `records.yml` IS the folder: concrete refs on both
+ * sides, nothing to invert, so a pull is a mirror rather than an update. There is
+ * also nothing a shallow merge could mean here — the file is a sequence, and
+ * merging two lists either duplicates entries or silently drops them.
+ *
+ * ⚠️ WHICH IS WHY AN EMPTY LIST IS NOT WRITTEN AS A FILE-WITH-NOTHING BY ACCIDENT.
+ * An empty `records.yml` is DESTRUCTIVE on the next push — it says the folder holds
+ * nothing. A pull that carried no folder must leave the file alone, so the caller
+ * decides, and this only writes what it was actually given.
+ *
+ * @returns {'updated'|'unchanged'}
+ */
+export function writeRecordsConfig(siteRoot, entries) {
+  return writeYamlFile(recordsYmlPath(siteRoot), entries)
 }
 
 /**

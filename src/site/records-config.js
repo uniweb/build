@@ -52,6 +52,11 @@ import { compareByNumericPrefix } from '../utils/numeric-prefix.js'
 
 export const RECORDS_YML_RELPATH = 'records.yml'
 
+/** Path to the records.yml file (whether or not it exists yet). */
+export function recordsYmlPath(siteRoot) {
+  return join(siteRoot, RECORDS_YML_RELPATH)
+}
+
 /** What `records.yml` says about syncing, before any entry is resolved. */
 export const FOLDER_MISSING = 'missing'
 export const FOLDER_EMPTY = 'empty'
