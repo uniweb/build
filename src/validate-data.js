@@ -90,10 +90,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   // strips `deferred:` fields, and we skip it.
   let collections = {}
   if (config.collections && typeof config.collections === 'object') {
-    const collectionsBase = config.paths?.collections
-      ? resolve(siteRoot, config.paths.collections)
-      : null
-    collections = await processCollections(siteRoot, config.collections, collectionsBase, basePath)
+
+    collections = await processCollections(siteRoot, config.collections, config.paths?.entities, basePath)
   }
 
   // Pass 1 — discover unique (file, schema-ref) pairs and who uses each.

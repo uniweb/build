@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readCollectionRecords, parseFrontmatter } from '../src/uwx/index.js'
+import { readEntityFile, parseFrontmatter } from '../src/uwx/index.js'
 
 let dir
 beforeEach(() => {
@@ -9,13 +9,18 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-describe('readCollectionRecords — reads source, NOT processed delivery data', () => {
+// ⭐ THE FILE IS THE UNIT. The directory scan this reader used to do moved to
+// `site/entity-pool.js`, which pairs each file with the schema its path declares —
+// so both lanes walk one pool instead of each recursing a collection dir their own
+// way. (They did that differently, and the disagreement was silent: a nested
+// record built and rendered locally while being absent from every sync.)
+describe('readEntityFile — reads source, NOT processed delivery data', () => {
   it('reads a markdown record as raw frontmatter + raw body (no ProseMirror, no derived fields)', async () => {
     writeFileSync(
       join(dir, 'hello.md'),
       '---\ntitle: Hello\nprice: 9.99\n---\n\n# Welcome\n\nThe body.\n'
     )
-    const [rec] = await readCollectionRecords(dir)
+    const [rec] = await readEntityFile(join(dir, 'hello.md'))
     expect(rec.format).toBe('md')
     expect(rec.slug).toBe('hello')
     expect(rec.data).toEqual({ title: 'Hello', price: 9.99 })
@@ -31,13 +36,13 @@ describe('readCollectionRecords — reads source, NOT processed delivery data', 
 
   it('honors an explicit frontmatter slug over the filename', async () => {
     writeFileSync(join(dir, 'file-name.md'), '---\nslug: real-slug\ntitle: X\n---\nbody\n')
-    const [rec] = await readCollectionRecords(dir)
+    const [rec] = await readEntityFile(join(dir, 'file-name.md'))
     expect(rec.slug).toBe('real-slug')
   })
 
   it('reads a single-record YAML mapping untouched, slug from filename', async () => {
     writeFileSync(join(dir, 'widget.yml'), 'title: Widget\nprice: 5\n')
-    const [rec] = await readCollectionRecords(dir)
+    const [rec] = await readEntityFile(join(dir, 'widget.yml'))
     expect(rec.format).toBe('yaml')
     expect(rec.slug).toBe('widget')
     expect(rec.data).toEqual({ title: 'Widget', price: 5 })
@@ -47,7 +52,7 @@ describe('readCollectionRecords — reads source, NOT processed delivery data', 
 
   it('reads a single-record JSON object', async () => {
     writeFileSync(join(dir, 'g.json'), JSON.stringify({ title: 'G' }))
-    const [rec] = await readCollectionRecords(dir)
+    const [rec] = await readEntityFile(join(dir, 'g.json'))
     expect(rec.format).toBe('json')
     expect(rec.slug).toBe('g')
     expect(rec.data).toEqual({ title: 'G' })
@@ -55,7 +60,7 @@ describe('readCollectionRecords — reads source, NOT processed delivery data', 
 
   it('reads an array-form YAML file as many multiRecord records, each its own slug', async () => {
     writeFileSync(join(dir, 'all.yml'), '- slug: a\n  title: A\n- slug: b\n  title: B\n')
-    const recs = await readCollectionRecords(dir)
+    const recs = await readEntityFile(join(dir, 'all.yml'))
     expect(recs).toHaveLength(2)
     expect(recs.map((r) => r.slug)).toEqual(['a', 'b'])
     expect(recs.every((r) => r.multiRecord === true)).toBe(true)
@@ -63,20 +68,16 @@ describe('readCollectionRecords — reads source, NOT processed delivery data', 
 
   it('reads BibTeX entries with the cite key as slug (multiRecord)', async () => {
     writeFileSync(join(dir, 'refs.bib'), '@article{smith2026, title={On Rust}, year={2026}}\n')
-    const recs = await readCollectionRecords(dir)
+    const recs = await readEntityFile(join(dir, 'refs.bib'))
     expect(recs).toHaveLength(1)
     expect(recs[0].slug).toBe('smith2026')
     expect(recs[0].format).toBe('bib')
     expect(recs[0].multiRecord).toBe(true)
   })
 
-  it('skips _-prefixed files and orders records stably', async () => {
-    writeFileSync(join(dir, '_draft.md'), '---\ntitle: Draft\n---\n')
-    writeFileSync(join(dir, 'b.yml'), 'title: B\n')
-    writeFileSync(join(dir, 'a.yml'), 'title: A\n')
-    const recs = await readCollectionRecords(dir)
-    expect(recs.map((r) => r.slug)).toEqual(['a', 'b'])
-  })
+  // ⛔ Skipping `_`-prefixed files and ordering the set stably belong to the POOL
+  // reader now — they are questions about a directory, and this reader no longer
+  // sees one. Pinned in `entity-pool.test.js` so neither went missing in the move.
 })
 
 describe('parseFrontmatter', () => {

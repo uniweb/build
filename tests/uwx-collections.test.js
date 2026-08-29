@@ -392,7 +392,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     root = mkdtempSync(join(tmpdir(), 'uwx-sync-'))
     siteDir = join(root, 'site')
     const foundationDir = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'data', 'products'), { recursive: true })
+    mkdirSync(join(siteDir, 'entities', 'acme', 'product'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
     // Site: a file collection mapped to a registry Model by name.
@@ -403,7 +403,6 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
         'foundation: "@acme/marketing"',
         'queries:',
         '  products:',
-        '    path: data/products',
         '    model: "@acme/product"',
         '',
       ].join('\n')
@@ -416,8 +415,8 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
       // that read `dependencies.foundation` — a key no template produces.
       JSON.stringify({ name: 'site', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
-    writeFileSync(join(siteDir, 'data', 'products', 'widget-x.yml'), 'title: Widget X\nprice: 9.99\n')
-    writeFileSync(join(siteDir, 'data', 'products', 'gadget-y.yml'), 'title: Gadget Y\nprice: 19.5\n')
+    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'widget-x.yml'), 'title: Widget X\nprice: 9.99\n')
+    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'gadget-y.yml'), 'title: Gadget Y\nprice: 19.5\n')
 
     // Foundation: a built schema.json defining the @acme/product data-schema.
     const schema = {
@@ -473,17 +472,17 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
   it('round-trips a back-filled $uuid on re-sync', async () => {
     // A second site whose record already carries a $uuid (a prior back-fill).
     const reSite = join(root, 'resync-site')
-    mkdirSync(join(reSite, 'data', 'products'), { recursive: true })
+    mkdirSync(join(reSite, 'entities', 'acme', 'product'), { recursive: true })
     writeFileSync(
       join(reSite, 'site.yml'),
-      'name: Re\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+      'name: Re\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    model: \"@acme/product\"\n'
     )
     writeFileSync(
       join(reSite, 'package.json'),
       JSON.stringify({ name: 're', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
     writeFileSync(
-      join(reSite, 'data', 'products', 'widget-x.yml'),
+      join(reSite, 'entities', 'acme', 'product', 'widget-x.yml'),
       '"$uuid": existing-uuid-1\ntitle: Widget X\n'
     )
 
@@ -500,7 +499,7 @@ describe('emitCollectionSyncPackage — site + local foundation → .uwx', () =>
     // `@/post`, which doesn't resolve (no foundation) → soft-skipped → no records.
     const bare = join(root, 'bare')
     mkdirSync(bare, { recursive: true })
-    writeFileSync(join(bare, 'site.yml'), 'name: Bare\nqueries:\n  posts:\n    path: data/posts\n')
+    writeFileSync(join(bare, 'site.yml'), 'name: Bare\nqueries:\n  posts: {}\n')
     await expect(emitCollectionSyncPackage(bare)).rejects.toThrow(/no records to export/)
   })
 })
@@ -527,13 +526,13 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'uwx-b3-'))
     siteDir = join(root, 'site')
-    mkdirSync(join(siteDir, 'data', 'products'), { recursive: true })
+    mkdirSync(join(siteDir, 'entities', 'std', 'product'), { recursive: true })
     // NO foundation dependency — the Model is non-local (e.g. a @std schema).
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: T\nqueries:\n  products:\n    path: data/products\n    model: "@std/product"\n'
+      'name: T\nqueries:\n  products:\n    model: \"@std/product\"\n'
     )
-    writeFileSync(join(siteDir, 'data', 'products', 'a.yml'), 'title: A\nprice: 5\n')
+    writeFileSync(join(siteDir, 'entities', 'std', 'product', 'a.yml'), 'title: A\nprice: 5\n')
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
@@ -563,17 +562,17 @@ describe('emitCollectionSyncPackage — non-local Model via resolveModel', () =>
   it('prefers a local foundation when it defines the Model (resolver untouched)', async () => {
     const localSite = join(root, 'local')
     const foundationDir = join(root, 'local-foundation')
-    mkdirSync(join(localSite, 'data', 'products'), { recursive: true })
+    mkdirSync(join(localSite, 'entities', 'acme', 'product'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
     writeFileSync(
       join(localSite, 'site.yml'),
-      'name: L\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+      'name: L\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    model: \"@acme/product\"\n'
     )
     writeFileSync(
       join(localSite, 'package.json'),
       JSON.stringify({ name: 'l', dependencies: { '@acme/marketing': 'file:../local-foundation' } })
     )
-    writeFileSync(join(localSite, 'data', 'products', 'a.yml'), 'title: A\n')
+    writeFileSync(join(localSite, 'entities', 'acme', 'product', 'a.yml'), 'title: A\n')
     writeFileSync(
       join(foundationDir, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -623,18 +622,18 @@ describe('emitCollectionSyncPackage — send only changed', () => {
     root = mkdtempSync(join(tmpdir(), 'uwx-b4-'))
     siteDir = join(root, 'site')
     const fdn = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'data', 'products'), { recursive: true })
+    mkdirSync(join(siteDir, 'entities', 'acme', 'product'), { recursive: true })
     mkdirSync(join(fdn, 'dist', 'meta'), { recursive: true })
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: T\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    path: data/products\n    model: "@acme/product"\n'
+      'name: T\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    model: \"@acme/product\"\n'
     )
     writeFileSync(
       join(siteDir, 'package.json'),
       JSON.stringify({ name: 's', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
-    writeFileSync(join(siteDir, 'data', 'products', 'a.yml'), 'title: A\nprice: 1\n')
-    writeFileSync(join(siteDir, 'data', 'products', 'b.yml'), 'title: B\nprice: 2\n')
+    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'a.yml'), 'title: A\nprice: 1\n')
+    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'b.yml'), 'title: B\nprice: 2\n')
     writeFileSync(
       join(fdn, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -672,7 +671,7 @@ describe('emitCollectionSyncPackage — send only changed', () => {
 
   it('sends only the changed record after an edit (index correlates to the subset)', async () => {
     const first = await emitCollectionSyncPackage(siteDir)
-    writeFileSync(join(siteDir, 'data', 'products', 'b.yml'), 'title: B2\nprice: 2\n')
+    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'b.yml'), 'title: B2\nprice: 2\n')
     const { entityCount, skipped, index } = await emitCollectionSyncPackage(siteDir, {
       priorHashes: first.hashes,
     })
@@ -702,14 +701,16 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
     root = mkdtempSync(join(tmpdir(), 'uwx-ff-'))
     siteDir = join(root, 'site')
     const foundationDir = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'collections', 'articles'), { recursive: true })
-    // The free-form override lives in the parallel locales/ tree, body-only markdown.
-    mkdirSync(join(siteDir, 'locales', 'freeform', 'es', 'collections', 'articles'), { recursive: true })
+    mkdirSync(join(siteDir, 'entities', 'acme', 'article'), { recursive: true })
+    // ⭐ The free-form override lives in the parallel locales/ tree, body-only
+    // markdown, MIRRORING THE POOL — keyed by the entity, not by the query that
+    // selects it, so two queries over one schema share one translation.
+    mkdirSync(join(siteDir, 'locales', 'freeform', 'es', 'entities', 'acme', 'article'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: S\nfoundation: "@acme/blog"\nqueries:\n  articles:\n    path: collections/articles\n    model: "@acme/article"\n'
+      'name: S\nfoundation: "@acme/blog"\nqueries:\n  articles:\n    model: "@acme/article"\n'
     )
     writeFileSync(
       join(siteDir, 'package.json'),
@@ -717,12 +718,12 @@ describe('buildCollectionEntities — free-form collection body override (B-1)',
     )
     // Source record: a markdown body that maps to the prosemirror content field.
     writeFileSync(
-      join(siteDir, 'collections', 'articles', 'hello.md'),
+      join(siteDir, 'entities', 'acme', 'article', 'hello.md'),
       '---\ntitle: Hello\n---\nHello world\n'
     )
     // Free-form Spanish body — a full rewrite, not a per-string map.
     writeFileSync(
-      join(siteDir, 'locales', 'freeform', 'es', 'collections', 'articles', 'hello.md'),
+      join(siteDir, 'locales', 'freeform', 'es', 'entities', 'acme', 'article', 'hello.md'),
       'Hola mundo distinto\n'
     )
 
@@ -773,19 +774,19 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
     root = mkdtempSync(join(tmpdir(), 'uwx-selfscope-'))
     siteDir = join(root, 'site')
     const foundationDir = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'collections', 'members'), { recursive: true })
+    mkdirSync(join(siteDir, 'entities', 'member'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
     writeFileSync(
       join(siteDir, 'site.yml'),
-      'name: S\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    path: collections/members\n    schema: "@/member"\n'
+      'name: S\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    schema: "@/member"\n'
     )
     writeFileSync(
       join(siteDir, 'package.json'),
       JSON.stringify({ name: 'site', dependencies: { '@acme/fnd': 'file:../foundation' } })
     )
     writeFileSync(
-      join(siteDir, 'collections', 'members', 'alice.md'),
+      join(siteDir, 'entities', 'member', 'alice.md'),
       '---\nname: Alice\n---\nBio\n'
     )
     writeFileSync(
@@ -830,16 +831,16 @@ describe('buildCollectionEntities — `@/` model refs resolve into the publish o
     // the publish org", and the second would silently re-home a shared or
     // other-org Model onto whoever happened to run the push.
     const alt = join(root, 'site2')
-    mkdirSync(join(alt, 'collections', 'members'), { recursive: true })
+    mkdirSync(join(alt, 'entities', 'acme', 'member'), { recursive: true })
     writeFileSync(
       join(alt, 'site.yml'),
-      'name: S2\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    path: collections/members\n    schema: "@acme/member"\n'
+      'name: S2\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    schema: "@acme/member"\n'
     )
     writeFileSync(
       join(alt, 'package.json'),
       JSON.stringify({ name: 'site2', dependencies: { '@acme/fnd': 'file:../foundation' } })
     )
-    writeFileSync(join(alt, 'collections', 'members', 'alice.md'), '---\nname: Alice\n---\nBio\n')
+    writeFileSync(join(alt, 'entities', 'acme', 'member', 'alice.md'), '---\nname: Alice\n---\nBio\n')
 
     const { entities } = await buildCollectionEntities(alt, { org: '@proximify' })
     expect(entities[0].model).toBe('@acme/member')

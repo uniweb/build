@@ -100,7 +100,7 @@ export {
   emitCollectionSyncPackage,
   entityContentHash,
 } from './collections.js'
-export { readCollectionRecords, parseFrontmatter } from './collection-source.js'
+export { readEntityFile, parseFrontmatter } from './collection-source.js'
 export {
   findRecordFile,
   backfillUuid,

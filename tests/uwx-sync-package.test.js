@@ -42,8 +42,8 @@ beforeEach(() => {
   w('layout/header.md', '---\ntype: Header\n---\n# H\n')
   // a syncable query (resolvable @/article schema) + queries.yml
   w('queries.yml', 'articles:\n  schema: "@/article"\n  sort: date desc\n')
-  w('collections/articles/hello.md', '---\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
-  w('collections/articles/world.md', '---\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
+  w('entities/article/hello.md', '---\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
+  w('entities/article/world.md', '---\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
   writeFileSync(
     join(fdn, 'dist', 'meta', 'schema.json'),
     JSON.stringify({
@@ -111,7 +111,7 @@ describe('emitSyncPackages — two directional lanes', () => {
 
   it('editing a record fires ONLY the collections lane', async () => {
     const first = await emitSyncPackages(SITE)
-    w('collections/articles/hello.md', '---\ntitle: Hello edited\ndate: 2026-01-01\n---\nBody\n')
+    w('entities/article/hello.md', '---\ntitle: Hello edited\ndate: 2026-01-01\n---\nBody\n')
     const second = await emitSyncPackages(SITE, { priorHashes: first.hashes })
     expect(second.siteContent).toBeNull()
     expect(second.collections).toBeTruthy()
@@ -143,7 +143,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // the subfolder-name convention, finds nothing, and soft-skips the sync. It
     // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
     w('queries.yml', 'articles:\n  schema: "@/article"\nnotes: {}\n')
-    w('collections/notes/first.md', '---\ntitle: First\n---\nNote body\n')
+    w('entities/notes/first.md', '---\ntitle: First\n---\nNote body\n')
     const pkg = await emitSyncPackages(SITE)
 
     // `model` carries the name the convention looked for and did not find. The CLI
@@ -165,8 +165,8 @@ describe('emitSyncPackages — two directional lanes', () => {
 
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {
     // Articles with embedded $uuid → the folder references them by `entry.model` (minted form).
-    w('collections/articles/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
-    w('collections/articles/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
+    w('entities/article/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
+    w('entities/article/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
 
     const first = await emitSyncPackages(SITE)
     const articleModel = first.collections.models.find((m) => m !== '@uniweb/folder')

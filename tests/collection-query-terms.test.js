@@ -35,9 +35,9 @@ async function items(declExtra) {
     mkdirSync(join(p, '..'), { recursive: true })
     writeFileSync(p, body)
   }
-  w('site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n  posts:\n    path: collections/posts\n${declExtra}`)
-  w('collections/posts/a.md', '---\ntitle: A\ntier: gold\n---\n\nA\n')
-  w('collections/posts/b.md', '---\ntitle: B\ntier: silver\n---\n\nB\n')
+  w('site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n  posts:\n    schema: "@/post"\n${declExtra}`)
+  w('entities/post/a.md', '---\ntitle: A\ntier: gold\n---\n\nA\n')
+  w('entities/post/b.md', '---\ntitle: B\ntier: silver\n---\n\nB\n')
   const cfg = await resolveCollectionsConfig(SITE)
   const out = await processCollections(SITE, cfg.declarations)
   return (out.posts?.items || out.posts || []).map((i) => i.title)

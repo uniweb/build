@@ -45,7 +45,13 @@ import { detectFoundationType } from '../site/foundation-ref.js'
 import { join, resolve } from 'node:path'
 
 import { resolveCollectionsConfig } from './collections-config.js'
-import { readCollectionRecords } from './collection-source.js'
+import { readEntityFile } from './collection-source.js'
+import {
+  readEntityPool,
+  groupPoolBySchema,
+  poolPathReadings,
+  poolDirsForSchema,
+} from '../site/entity-pool.js'
 import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isContentBodyField } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
@@ -334,7 +340,7 @@ export function collectionRecordsToEntities({
 }
 
 // Post-pass: override a collection record's localized CONTENT body with a per-locale
-// FREE-FORM body when `locales/freeform/{locale}/collections/<col>/<slug>.md` exists
+// FREE-FORM body when `locales/freeform/{locale}/entities/<schema>/<slug>.md` exists
 // — the override wins over the structural map, exactly like site-content sections
 // (site.js localizeContentTree). Only a `format: prosemirror` localized field can
 // take it (it is a PM doc on the wire; a markup `text` body stays a raw string).
@@ -363,7 +369,7 @@ async function applyFreeformCollectionOverrides({
     const sourceDoc = isLocalizedContent(localized) ? localized[sourceLocale] : localized
     for (const locale of targetLocales) {
       // loadFreeformCollectionItem returns { content, frontmatter, … } — doc is `.content`.
-      const body = (await loadFreeformCollectionItem({ slug: entity.slug }, collectionName, locale, localesBase))?.content
+      const body = (await loadFreeformCollectionItem({ slug: entity.slug }, entity.model, locale, localesBase))?.content
       if (!body) continue
       if (!isLocalizedContent(localized)) localized = { [sourceLocale]: sourceDoc }
       localized[locale] = body // free-form full body overrides the structural map
@@ -467,15 +473,24 @@ function resolveDeclaration(schema, modelName) {
   return null
 }
 
-// Load a collection's ORIGINAL source records for export — the author's files,
+// Load a query's ORIGINAL source records for export — the author's files,
 // untouched (raw frontmatter + raw markdown body, raw YAML/JSON, raw BibTeX). This
 // is deliberately NOT `processCollections` (the delivery pipeline that builds
 // public/data, converts bodies to ProseMirror, and copies assets). Sync carries
-// the source. Only file-based (`path:`) collections export; remote (`url:`) data
-// is not a local file collection.
-async function loadSourceRecords(siteRoot, decl) {
-  if (!decl.path) return null // not file-based — caller warns + skips
-  return readCollectionRecords(resolve(siteRoot, decl.path))
+// the source.
+//
+// ⭐ THE QUERY NAMES A SCHEMA AND THE POOL FOLLOWS. It does not name a directory,
+// and there is no disk path for it to name: `entities/{schema}/` declares the
+// model, so the entities of a schema ARE its records. That is the de-conflation —
+// `collections/<name>/` used to answer "which files", "which schema" and "grouped
+// how" with one directory, and only the first two were ever the same question.
+//
+// Remote (`url:`) queries have no local files; the caller warns and skips.
+function loadSourceRecordsFromPool(poolBySchema, decl) {
+  if (!decl.schema) return null
+  const entities = poolBySchema.get(decl.schema)
+  if (!entities) return null
+  return entities
 }
 
 /**
@@ -551,6 +566,20 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
   const index = []
   const warnings = []
 
+  // ⭐ THE POOL, READ ONCE. A query names a `schema:` and the entities of that
+  // schema are its records — so the pool is walked once here rather than a
+  // directory per declaration, and two queries over one schema read one set of
+  // files instead of two.
+  const pool = await readEntityPool(siteRoot)
+  const poolBySchema = groupPoolBySchema(pool.entities)
+  // ⛔ A MALFORMED POOL IS AN ERROR, NOT A SMALLER SET. Every shape the reader
+  // refuses (a file with no schema folder above it, a folder nested below one)
+  // would otherwise mean records that build locally and are silently absent from
+  // the sync — the exact failure the `entities/` layout was chosen to close.
+  if (pool.errors.length) {
+    throw new Error(`uwx/collections: the entity pool is malformed —\n  ${pool.errors.join('\n  ')}`)
+  }
+
   // ⛔ `@/x` IS A FOUNDATION-RELATIVE ALIAS AND MUST BE RESOLVED BEFORE IT SHIPS.
   //
   // `register` resolves it (`uwx/registry-package.js` builds `scoped` from the
@@ -613,19 +642,36 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
         schemaless.push({ name, model: modelName })
         continue
       }
+      // ⚠️ NAME BOTH READINGS OF A DEPTH-2 POOL PATH. `entities/person/2024/ada.md`
+      // resolves as `@person/2024` — the rule is total, so it is not ambiguous —
+      // but an author who meant "records organised by year inside the `person`
+      // schema" needs to be told what the build actually read, not only that
+      // something failed to resolve. The wrong reading is the plausible one.
+      const dirs = poolDirsForSchema(modelName)
+      const { alternative } = dirs ? poolPathReadings(dirs) : { alternative: null }
       throw new Error(
-        `uwx/collections: Model "${modelName}" (collection "${name}") could not be ` +
+        `uwx/collections: Model "${modelName}" (query "${name}") could not be ` +
           'resolved — not defined by a local foundation' +
           (resolveModel
             ? ', and the backend has no such Model (register it first).'
             : '. Run via `uniweb sync` (which fetches non-local Models from the ' +
-              'registry), or provide a local foundation that defines it.')
+              'registry), or provide a local foundation that defines it.') +
+          (alternative
+            ? ` If you meant \`entities/${dirs[0]}/\` (${alternative}) organised by ` +
+              `\`${dirs[1]}\`, note that a folder inside a schema folder is read as an ` +
+              `org scope. Organise records in records.yml, not on disk.`
+            : '')
       )
     }
-    const sourceRecords = await loadSourceRecords(siteRoot, decl)
-    if (sourceRecords == null) {
+    const poolEntities = loadSourceRecordsFromPool(poolBySchema, decl)
+    if (poolEntities == null) {
+      // No entities of this schema on disk. A remote (`url:`) query has none by
+      // definition; a file-based one with an empty pool is an author state worth
+      // naming, because "nothing synced" and "nothing there" look identical.
       warnings.push(
-        `${name}: not a file-based (\`path:\`) collection — skipped`
+        decl.url
+          ? `${name}: a remote (\`url:\`) query has no local entities — skipped`
+          : `${name}: no entities of ${decl.schema} in the pool — nothing to sync`
       )
       continue
     }
@@ -636,15 +682,17 @@ export async function buildCollectionEntities(siteRoot, opts = {}) {
     // deferred (no single-record file to rewrite in place).
     const flat = []
     const sourceBySlug = new Map()
-    for (const r of sourceRecords) {
-      if (!r.slug) {
-        warnings.push(`${name}: a record without a slug was skipped`)
-        continue
+    for (const pooled of poolEntities) {
+      for (const r of await readEntityFile(pooled.absPath)) {
+        if (!r.slug) {
+          warnings.push(`${name}: a record without a slug was skipped`)
+          continue
+        }
+        const rec = { ...r.data, slug: r.slug }
+        if (r.body !== undefined) rec.$body = r.body
+        flat.push(rec)
+        sourceBySlug.set(r.slug, r)
       }
-      const rec = { ...r.data, slug: r.slug }
-      if (r.body !== undefined) rec.$body = r.body
-      flat.push(rec)
-      sourceBySlug.set(r.slug, r)
     }
 
     const mappedOut = collectionRecordsToEntities({

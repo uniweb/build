@@ -138,13 +138,10 @@ export async function buildSiteData({
   //    2026-08-18; no such function has existed for some time.) Same output bytes, same paths, just
   //    without the vite intermediary.
   if (siteContent.config?.collections) {
-    const collectionsBase = siteContent.config?.paths?.collections
-      ? resolve(resolvedSiteRoot, siteContent.config.paths.collections)
-      : null
     const collections = await processCollections(
       resolvedSiteRoot,
       siteContent.config.collections,
-      collectionsBase,
+      siteContent.config?.paths?.entities,
       basePath
     )
     await writeCollectionFiles(resolvedSiteRoot, collections, siteContent.config.collections)

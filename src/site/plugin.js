@@ -50,6 +50,7 @@ import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { processCollections, writeCollectionFiles } from './collection-processor.js'
+import { ENTITIES_DIR } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { FONT_LINKS_MARKER } from './head-markers.js'
@@ -572,7 +573,7 @@ export function siteContentPlugin(options = {}) {
   let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
   let resolvedMountPaths = [] // Absolute dirs mounted under pages/ via site.yml paths:
   let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
-  let resolvedCollectionsBase = null // Resolved from site.yml collectionsDir
+  let resolvedEntitiesDir = null // site.yml `paths.entities`, site-root-relative
   let headHtml = '' // Contents of site/head.html for injection
   let basePath = '/' // Vite's config.base, always has trailing slash
 
@@ -802,14 +803,12 @@ export function siteContentPlugin(options = {}) {
           resolvedLayoutPath = paths.layout
             ? resolve(resolvedSitePath, paths.layout)
             : resolve(resolvedSitePath, 'layout')
-          resolvedCollectionsBase = paths.collections
-            ? resolve(resolvedSitePath, paths.collections)
-            : null
+          resolvedEntitiesDir = paths.entities || null
           resolvedMountPaths = mountEntriesOf(paths).map(([, rel]) => resolve(resolvedSitePath, rel))
 
           if (collectionsConfig) {
             console.log('[site-content] Processing content collections...')
-            const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedCollectionsBase, basePath)
+            const collections = await processCollections(resolvedSitePath, collectionsConfig, resolvedEntitiesDir, basePath)
             await writeCollectionFiles(resolvedSitePath, collections, collectionsConfig)
           }
         } catch (err) {
@@ -828,9 +827,7 @@ export function siteContentPlugin(options = {}) {
         resolvedLayoutPath = paths.layout
           ? resolve(resolvedSitePath, paths.layout)
           : resolve(resolvedSitePath, 'layout')
-        resolvedCollectionsBase = paths.collections
-          ? resolve(resolvedSitePath, paths.collections)
-          : null
+        resolvedEntitiesDir = paths.entities || null
       }
     },
 
@@ -850,7 +847,7 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.collections) {
           console.log('[site-content] Processing content collections...')
-          const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedCollectionsBase, basePath)
+          const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedEntitiesDir, basePath)
           await writeCollectionFiles(resolvedSitePath, collections, siteContent.config.collections)
         }
 
@@ -918,7 +915,7 @@ export function siteContentPlugin(options = {}) {
               // Use collectionsConfig (cached from configResolved) or siteContent
               const collections = collectionsConfig || siteContent?.config?.collections
               if (collections) {
-                const processed = await processCollections(resolvedSitePath, collections, resolvedCollectionsBase, basePath)
+                const processed = await processCollections(resolvedSitePath, collections, resolvedEntitiesDir, basePath)
                 await writeCollectionFiles(resolvedSitePath, processed, collections)
               }
               // Send full reload to client
@@ -991,17 +988,15 @@ export function siteContentPlugin(options = {}) {
           // head.html may not exist, that's ok
         }
 
-        // Watch content/ folder for collection changes
-        // Use collectionsConfig cached from configResolved (siteContent may be null here)
-        if (collectionsConfig) {
-          const contentPaths = new Set()
-          const collectionBase = resolvedCollectionsBase || resolvedSitePath
-          for (const config of Object.values(collectionsConfig)) {
-            const collectionPath = typeof config === 'string' ? config : config.path
-            if (collectionPath) {
-              contentPaths.add(resolve(collectionBase, collectionPath))
-            }
-          }
+        // ⭐ WATCH THE POOL, NOT A DIRECTORY PER QUERY. This used to resolve
+        // `config.path` for each declaration and watch each one, so a schema
+        // folder no query had mentioned yet — a new one, mid-session — was
+        // watched by nothing and its records never rebuilt. `entities/` is one
+        // recursive root and covers every schema, present and future.
+        {
+          const contentPaths = new Set([
+            resolve(resolvedSitePath, resolvedEntitiesDir || ENTITIES_DIR)
+          ])
 
           for (const contentPath of contentPaths) {
             if (existsSync(contentPath)) {

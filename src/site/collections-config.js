@@ -79,36 +79,25 @@ export function defaultSchema(name) {
 
 // Normalize one query entry (string shorthand or object) to the internal decl shape.
 //
-// ⚠️ `path:` IS SITE-ROOT-RELATIVE HERE, where `collections.yml`'s was relative to
-// `collections/`. Both files' entries default to the same pool (`collections/<name>`),
-// so the two agree everywhere an author did not write `path:` — and where one did,
-// a root-level file naming a path from anywhere but the root would be the surprise.
-// `tests/queries-yml-parity.test.js` pins both halves of that, the difference
-// included.
-//
-// ⛔ `path:` is VESTIGIAL for a file-based query and goes away with the pool move —
-// a query names a `schema:` and the folder supplies the records. It survives for
-// REMOTE sources (`url:`), where the address is genuinely external.
+// ⛔ NO `path:` IS FILLED IN. A query names a `schema:` and the folder supplies
+// the records; `path:`/`source:` mean something only for a REMOTE source, whose
+// address nothing local can derive.
 function normalizeQueryDecl(name, decl) {
-  if (typeof decl === 'string') return { name, path: decl }
+  // ⭐ THE STRING SHORTHAND NAMES THE SCHEMA, because that is what a file-based
+  // query actually needs — `entities/{schema}/` supplies the records, so there is
+  // no directory left to name. (It named a PATH while the pool was
+  // `collections/<name>/` and the same directory answered both questions.)
+  if (typeof decl === 'string') return { name, schema: decl }
   const d = decl && typeof decl === 'object' ? decl : {}
-  return { name, path: defaultPoolPath(name), ...d }
+  return { name, ...d }
 }
 
-/**
- * Where a query's records live when it names no `path:`.
- *
- * ⛔ ONE IMPLEMENTATION, TWO CALLERS, and that is the point — the same rule
- * `deferredFromSchema` follows. `normalizeQueryDecl` above uses it to FILL an
- * unstated path; `uwx/collections-project.js` uses it to RECOGNIZE one on the way
- * back in, so a pull does not write a default into the author's file as though
- * they had typed it. Two copies would drift, and the drift would be invisible:
- * the filler and the dropper would simply stop agreeing about which value is
- * "the default one", and the pull would start persisting paths nobody wrote.
- */
-export function defaultPoolPath(name) {
-  return `collections/${name}`
-}
+// ⛔ `defaultPoolPath` WAS DELETED, NOT KEPT AS A DEFAULT. A file-based query
+// carries no `path:` at all now: the pool location is derivable from `schema:` on
+// both sides (`site/entity-pool.js::poolDirsForSchema`), so shipping it would be
+// emitting a derivation as though the author had written it — the exact defect
+// `deferred:` taught. `source:` survives on the wire for REMOTE (`url:`) queries,
+// where the address is genuinely external and nothing can derive it.
 
 /**
  * Resolve a site's merged QUERY declarations.
@@ -161,9 +150,24 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
     } else if (decl.model) {
       decl.schema = decl.model // migration synonym
       decl.schemaExplicit = true
-    } else if (decl.path || !decl.url) {
+    } else if (!decl.url) {
       decl.schema = defaultSchema(decl.name) // query-name convention
       decl.schemaExplicit = false
+    }
+  }
+
+  // ⛔ A `path:` ON A FILE-BASED QUERY DOES NOTHING, so say so. It resolved the
+  // pool while the pool was `collections/<name>/`; now `schema:` does, and a key
+  // that is quietly inert is how an author spends an afternoon on a query that
+  // was reading a different set of files all along. It stays meaningful for a
+  // REMOTE source, whose address nothing local can derive.
+  for (const decl of Object.values(declarations)) {
+    if (decl.path && !decl.url) {
+      console.warn(
+        `[uniweb] query "${decl.name}": \`path: ${decl.path}\` is ignored. A query names a ` +
+          `\`schema:\` and \`entities/{schema}/\` supplies its records — there is no directory ` +
+          `for it to name. Move the files under the schema folder instead.`
+      )
     }
   }
 

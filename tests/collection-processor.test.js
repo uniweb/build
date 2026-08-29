@@ -23,80 +23,33 @@ describe('Collection Processor', () => {
     }
   })
 
-  describe('nested records — a collection has an internal structure', () => {
-    // Before recursion a record in a subdirectory was not skipped with a
-    // warning, it was INVISIBLE: `readdir` returned the directory name, the
-    // extension filter dropped it, and the site rendered without those records.
+  // ⛔ THE 'NESTED RECORDS' BLOCK WAS DELETED, NOT MIGRATED. It exercised
+  // recursion into subdirectories of a collection — a capability
+  // `entities/{schema}/` deliberately does not have, because that path declares
+  // a model and nothing else. Placement moved to `records.yml`, and the pool
+  // reader refuses nesting outright (`entity-pool.test.js`).
+  //
+  // ⭐ Deleting it CLOSED a divergence rather than losing coverage: the sync lane
+  // never followed that recursion, so a nested record built and rendered locally
+  // while being silently absent from every push — which the sync-lane reader
+  // itself warned about. One flat pool, both lanes.
+  //
+  // What survives is the slug-collision report, which the pool can still reach
+  // via two extensions of one stem.
+  describe('slug collisions inside a schema folder', () => {
     const writeRecord = (dir, name, title) => {
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, name), `---\ntitle: ${title}\n---\n\nBody.\n`)
     }
 
-    const buildNews = async () => {
-      const root = join(testDir, 'collections', 'news')
-      writeRecord(root, 'hello.md', 'Top level')
-      writeRecord(join(root, '2024'), 'spring.md', 'Spring')
-      writeRecord(join(root, '2024', 'q1'), 'report.md', 'Q1 report')
-      writeRecord(join(root, '_drafts'), 'secret.md', 'Draft')
-      const out = await processCollections(
-        testDir,
-        { news: { name: 'news', path: 'collections/news' } },
-        testDir,
-        '/'
-      )
-      return out.news
-    }
-
-    it('finds records at any depth', async () => {
-      const items = await buildNews()
-      expect(items.map((i) => i.slug).sort()).toEqual(['hello', 'report', 'spring'])
-    })
-
-    it('stamps each record with its directory inside the collection', async () => {
-      const items = await buildNews()
-      const bySlug = Object.fromEntries(items.map((i) => [i.slug, i.path]))
-      expect(bySlug.hello).toBe('')
-      expect(bySlug.spring).toBe('2024')
-      expect(bySlug.report).toBe('2024/q1')
-    })
-
-    it('skips underscore-prefixed directories, as it always has for files', async () => {
-      const items = await buildNews()
-      expect(items.some((i) => i.slug === 'secret')).toBe(false)
-    })
-
-    it('leaves a flat collection byte-for-byte as it was — path is the empty string', async () => {
-      // The control. Recursion must be additive: a collection with no
-      // subdirectories has to behave exactly as before.
-      const dir = join(testDir, 'collections', 'flat')
-      writeRecord(dir, 'a.md', 'A')
-      writeRecord(dir, 'b.md', 'B')
-      const out = await processCollections(
-        testDir,
-        { flat: { name: 'flat', path: 'collections/flat', route: '/f' } },
-        testDir,
-        '/'
-      )
-      expect(out.flat.map((i) => i.slug).sort()).toEqual(['a', 'b'])
-      expect(out.flat.every((i) => i.path === '')).toBe(true)
-      expect(out.flat.map((i) => i.route).sort()).toEqual(['/f/a', '/f/b'])
-    })
-
-    it('warns when two branches hold the same slug, naming both', async () => {
+    it('warns when two files in one schema folder share a slug', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const root = join(testDir, 'collections', 'dupes')
-      writeRecord(join(root, '2024'), 'notes.md', 'New')
-      writeRecord(join(root, '2023'), 'notes.md', 'Old')
-      await processCollections(
-        testDir,
-        { dupes: { name: 'dupes', path: 'collections/dupes' } },
-        testDir,
-        '/'
-      )
+      const root = join(testDir, 'entities', 'note')
+      writeRecord(root, 'notes.md', 'From markdown')
+      writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
+      await processCollections(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
       const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('slug "notes"'))
       expect(msg).toBeTruthy()
-      expect(msg).toContain('2023/notes')
-      expect(msg).toContain('2024/notes')
       warn.mockRestore()
     })
 
@@ -104,24 +57,34 @@ describe('Collection Processor', () => {
       // Reporting is the remedy, not repair — only the author can decide which
       // record owns the slug, so the build must not choose for them.
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const root = join(testDir, 'collections', 'dupes')
-      writeRecord(join(root, '2024'), 'notes.md', 'New')
-      writeRecord(join(root, '2023'), 'notes.md', 'Old')
+      const root = join(testDir, 'entities', 'note')
+      writeRecord(root, 'notes.md', 'From markdown')
+      writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
+      const out = await processCollections(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
+      expect(out.notes).toHaveLength(2)
+      warn.mockRestore()
+    })
+
+    it('every record in a flat pool carries the empty path', async () => {
+      const root = join(testDir, 'entities', 'flat')
+      writeRecord(root, 'a.md', 'A')
+      writeRecord(root, 'b.md', 'B')
       const out = await processCollections(
         testDir,
-        { dupes: { name: 'dupes', path: 'collections/dupes' } },
-        testDir,
+        { flat: { name: 'flat', schema: '@/flat', route: '/f' } },
+        undefined,
         '/'
       )
-      expect(out.dupes).toHaveLength(2)
-      warn.mockRestore()
+      expect(out.flat.map((i) => i.slug).sort()).toEqual(['a', 'b'])
+      expect(out.flat.every((i) => i.path === '')).toBe(true)
+      expect(out.flat.map((i) => i.route).sort()).toEqual(['/f/a', '/f/b'])
     })
   })
 
   describe('processCollections', () => {
     it('should process markdown files into collection items', async () => {
       // Create test library folder
-      const contentDir = join(testDir, 'collections', 'articles')
+      const contentDir = join(testDir, 'entities', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       // Create test markdown file
@@ -139,7 +102,7 @@ This is a test article.
 
       const collections = await processCollections(testDir, {
         articles: {
-          path: 'collections/articles',
+          schema: '@/articles',
           sort: 'date desc'
         }
       })
@@ -161,7 +124,7 @@ This is a test article.
     })
 
     it('should exclude unpublished items', async () => {
-      const contentDir = join(testDir, 'collections', 'articles')
+      const contentDir = join(testDir, 'entities', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'published.md'), `---
@@ -180,7 +143,7 @@ Draft content.
 `)
 
       const collections = await processCollections(testDir, {
-        articles: 'collections/articles'
+        articles: '@/articles'
       })
 
       expect(collections.articles).toHaveLength(1)
@@ -188,7 +151,7 @@ Draft content.
     })
 
     it('should apply filter expressions', async () => {
-      const contentDir = join(testDir, 'collections', 'posts')
+      const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post1.md'), `---
@@ -207,7 +170,7 @@ Content.
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'collections/posts',
+          schema: '@/posts',
           filter: 'category == tutorial'
         }
       })
@@ -217,7 +180,7 @@ Content.
     })
 
     it('should sort items by field', async () => {
-      const contentDir = join(testDir, 'collections', 'items')
+      const contentDir = join(testDir, 'entities', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'a.md'), `---
@@ -240,7 +203,7 @@ order: 2
 
       const collections = await processCollections(testDir, {
         items: {
-          path: 'collections/items',
+          schema: '@/items',
           sort: 'order asc'
         }
       })
@@ -249,7 +212,7 @@ order: 2
     })
 
     it('should limit number of items', async () => {
-      const contentDir = join(testDir, 'collections', 'posts')
+      const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       for (let i = 1; i <= 5; i++) {
@@ -262,7 +225,7 @@ order: ${i}
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'collections/posts',
+          schema: '@/posts',
           sort: 'order asc',
           limit: 3
         }
@@ -273,7 +236,7 @@ order: ${i}
 
     it('should handle missing collection folder gracefully', async () => {
       const collections = await processCollections(testDir, {
-        articles: 'collections/nonexistent'
+        articles: '@/nonexistent'
       })
 
       expect(collections.articles).toEqual([])
@@ -285,7 +248,7 @@ order: ${i}
     })
 
     it('should add route to items when collection has route config', async () => {
-      const contentDir = join(testDir, 'collections', 'articles')
+      const contentDir = join(testDir, 'entities', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'my-article.md'), `---
@@ -297,7 +260,7 @@ Content here.
 
       const collections = await processCollections(testDir, {
         articles: {
-          path: 'collections/articles',
+          schema: '@/articles',
           route: '/blog'
         }
       })
@@ -307,7 +270,7 @@ Content here.
     })
 
     it('should handle trailing slash in route config', async () => {
-      const contentDir = join(testDir, 'collections', 'posts')
+      const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'test-post.md'), `---
@@ -319,7 +282,7 @@ Content.
 
       const collections = await processCollections(testDir, {
         posts: {
-          path: 'collections/posts',
+          schema: '@/posts',
           route: '/news/'
         }
       })
@@ -328,7 +291,7 @@ Content.
     })
 
     it('should not add route when route config is absent', async () => {
-      const contentDir = join(testDir, 'collections', 'items')
+      const contentDir = join(testDir, 'entities', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'item.md'), `---
@@ -339,7 +302,7 @@ Content.
 `)
 
       const collections = await processCollections(testDir, {
-        items: 'collections/items'
+        items: '@/items'
       })
 
       expect(collections.items[0].route).toBeUndefined()
@@ -372,7 +335,7 @@ Content.
 
   describe('YAML array-form items', () => {
     it('should parse a top-level YAML array as multiple items', async () => {
-      const contentDir = join(testDir, 'collections', 'team')
+      const contentDir = join(testDir, 'entities', 'team')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'all.yml'), `- slug: alice
@@ -387,7 +350,7 @@ Content.
 `)
 
       const collections = await processCollections(testDir, {
-        team: 'collections/team'
+        team: '@/team'
       })
 
       expect(collections.team).toHaveLength(3)
@@ -397,7 +360,7 @@ Content.
     })
 
     it('should mix array-form and mapping-form YAML in the same folder', async () => {
-      const contentDir = join(testDir, 'collections', 'team')
+      const contentDir = join(testDir, 'entities', 'team')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'core.yml'), `- slug: alice
@@ -411,7 +374,7 @@ role: writer
 `)
 
       const collections = await processCollections(testDir, {
-        team: 'collections/team'
+        team: '@/team'
       })
 
       expect(collections.team).toHaveLength(3)
@@ -421,7 +384,7 @@ role: writer
     })
 
     it('should preserve mapping-form YAML behavior (slug from filename)', async () => {
-      const contentDir = join(testDir, 'collections', 'team')
+      const contentDir = join(testDir, 'entities', 'team')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'alice.yml'), `name: Alice
@@ -429,7 +392,7 @@ role: engineer
 `)
 
       const collections = await processCollections(testDir, {
-        team: 'collections/team'
+        team: '@/team'
       })
 
       expect(collections.team).toHaveLength(1)
@@ -440,7 +403,7 @@ role: engineer
 
   describe('BibTeX collections', () => {
     it('should parse a .bib file into CSL-JSON items with id as slug', async () => {
-      const contentDir = join(testDir, 'collections', 'bibliography')
+      const contentDir = join(testDir, 'entities', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'refs.bib'), `@book{darwin1859,
@@ -459,7 +422,7 @@ role: engineer
 `)
 
       const collections = await processCollections(testDir, {
-        bibliography: 'collections/bibliography'
+        bibliography: '@/bibliography'
       })
 
       expect(collections.bibliography).toHaveLength(2)
@@ -478,7 +441,7 @@ role: engineer
     })
 
     it('should merge .bib and .yml entries in the same collection folder', async () => {
-      const contentDir = join(testDir, 'collections', 'bibliography')
+      const contentDir = join(testDir, 'entities', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'main.bib'), `@book{darwin1859,
@@ -496,7 +459,7 @@ year: 1858
 `)
 
       const collections = await processCollections(testDir, {
-        bibliography: 'collections/bibliography'
+        bibliography: '@/bibliography'
       })
 
       const slugs = collections.bibliography.map(i => i.slug).sort()
@@ -504,7 +467,7 @@ year: 1858
     })
 
     it('should merge entries from multiple .bib files in the same folder', async () => {
-      const contentDir = join(testDir, 'collections', 'bibliography')
+      const contentDir = join(testDir, 'entities', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'primary.bib'), `@book{darwin1859,
@@ -529,7 +492,7 @@ year: 1858
 `)
 
       const collections = await processCollections(testDir, {
-        bibliography: 'collections/bibliography'
+        bibliography: '@/bibliography'
       })
 
       expect(collections.bibliography).toHaveLength(3)
@@ -538,7 +501,7 @@ year: 1858
     })
 
     it('should treat the BibTeX cite key as slug for per-record file emission', async () => {
-      const contentDir = join(testDir, 'collections', 'bibliography')
+      const contentDir = join(testDir, 'entities', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'refs.bib'), `@book{darwin1859,
@@ -550,14 +513,14 @@ year: 1858
 
       const collections = await processCollections(testDir, {
         bibliography: {
-          path: 'collections/bibliography',
+          schema: '@/bibliography',
           deferred: ['author']
         }
       })
 
       await writeCollectionFiles(testDir, collections, {
         bibliography: {
-          path: 'collections/bibliography',
+          schema: '@/bibliography',
           deferred: ['author']
         }
       })
@@ -572,7 +535,7 @@ year: 1858
 
   describe('excerpt extraction', () => {
     it('should auto-extract excerpt from content', async () => {
-      const contentDir = join(testDir, 'collections', 'posts')
+      const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -585,14 +548,14 @@ This is the second paragraph.
 `)
 
       const collections = await processCollections(testDir, {
-        posts: 'collections/posts'
+        posts: '@/posts'
       })
 
       expect(collections.posts[0].excerpt).toContain('first paragraph')
     })
 
     it('should prefer explicit excerpt from frontmatter', async () => {
-      const contentDir = join(testDir, 'collections', 'posts')
+      const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -604,7 +567,7 @@ This is the body content.
 `)
 
       const collections = await processCollections(testDir, {
-        posts: 'collections/posts'
+        posts: '@/posts'
       })
 
       expect(collections.posts[0].excerpt).toBe('Custom excerpt here')

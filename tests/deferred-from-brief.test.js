@@ -31,7 +31,7 @@ const SCHEMA = {
 const setup = ({ siteCollections, schemas = { '@/article': SCHEMA }, foundation = true } = {}) => {
   w('site/site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n${siteCollections}`)
   w('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
-  w('site/collections/articles/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody text.\n')
+  w('site/entities/article/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody text.\n')
   w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
   if (foundation) w('fdn/dist/meta/schema.json', { dataSchemas: schemas })
 }
@@ -45,7 +45,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 
-const WITH_SCHEMA = '  articles:\n    path: collections/articles\n    schema: "@/article"\n'
+const WITH_SCHEMA = '  articles:\n    schema: "@/article"\n'
 
 describe('deriving deferred from the brief', () => {
   it('defers every field the brief does not name', async () => {
@@ -84,7 +84,7 @@ describe('deriving deferred from the brief', () => {
   it('stays silent for a collection with no schema at all — the control', async () => {
     // Without this, a bug that deferred unconditionally would pass every
     // assertion above while emptying the cascade of untyped collections.
-    setup({ siteCollections: '  articles:\n    path: collections/articles\n' })
+    setup({ siteCollections: '  articles:\n' })
     expect((await declared()).deferred).toBeUndefined()
   })
 })

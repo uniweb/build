@@ -56,7 +56,7 @@ describe('collectionsToProject — placement', () => {
 
     const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
-    const f = join(dir, 'collections/articles/hello.md')
+    const f = join(dir, 'entities/acme/article/hello.md')
     expect(report.placed).toEqual([f])
     expect(readFileSync(f, 'utf8')).toBe('---\n$uuid: U1\ntitle: Hello\n---\n\n# Hi\n')
   })
@@ -67,23 +67,43 @@ describe('collectionsToProject — placement', () => {
 
     collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
-    const f = join(dir, 'collections/widgets/w1.yml')
+    const f = join(dir, 'entities/acme/widget/w1.yml')
     expect(existsSync(f)).toBe(true)
     expect(yaml.load(readFileSync(f, 'utf8'))).toEqual({ $uuid: 'W1', title: 'Gear', price: 9.99 })
   })
 
-  it('honors a collections-config path override', () => {
+  // ⛔ THE 'path override' CASE IS GONE, and its replacement is the assertion that
+  // a record's home is decided by WHAT IT IS. A query has no directory to
+  // override — `entities/{schema}/` is the pool — so placement follows `$model`
+  // and survives a query being renamed, added or deleted, none of which is a fact
+  // about the record.
+  it('places by the MODEL, not by any query that happens to select the record', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
-    const collectionsConfig = { declarations: { articles: { name: 'articles', path: 'content/arts' } } }
 
     collectionsToProject({
       folderDoc,
       recordDocs: [articleDoc('U1', 'Hello', '\nHi\n')],
       siteRoot: dir,
-      opts: { resolveDeclaration, collectionsConfig },
+      // No config at all: nothing about a query can change where this lands.
+      opts: { resolveDeclaration },
     })
 
-    expect(existsSync(join(dir, 'content/arts/hello.md'))).toBe(true)
+    expect(existsSync(join(dir, 'entities/acme/article/hello.md'))).toBe(true)
+  })
+
+  it('reports — never silently drops — a model that names no pool folder', () => {
+    const folderDoc = folderFor([{ id: 'x/hello', uuid: 'U1', slug: 'hello', collection: 'x' }], 'F1')
+    const doc = { ...articleDoc('U1', 'Hello', '\nHi\n'), $model: 'not-a-ref' }
+
+    const report = collectionsToProject({
+      folderDoc,
+      recordDocs: [doc],
+      siteRoot: dir,
+      opts: { resolveDeclaration: () => resolveDeclaration('@acme/article') },
+    })
+
+    expect(report.placed).toEqual([])
+    expect(report.skipped[0].reason).toContain('names no pool folder')
   })
 
   it('falls back to the record $id when the record is not in the folder', () => {
@@ -92,18 +112,18 @@ describe('collectionsToProject — placement', () => {
 
     const report = collectionsToProject({ folderDoc, recordDocs: [orphan], siteRoot: dir, opts: { resolveDeclaration } })
 
-    expect(report.placed).toEqual([join(dir, 'collections/extras/bonus.md')])
+    expect(report.placed).toEqual([join(dir, 'entities/acme/article/bonus.md')])
   })
 })
 
 describe('collectionsToProject — update in place by $uuid', () => {
   it('re-renders over an existing file matched by $uuid, preserving its format and filename', () => {
     // Existing file: a different filename than the slug, in YAML, carrying U2.
-    mkdirSync(join(dir, 'collections/articles'), { recursive: true })
-    const existing = join(dir, 'collections/articles/legacy-name.yml')
+    mkdirSync(join(dir, 'entities/acme/article'), { recursive: true })
+    const existing = join(dir, 'entities/acme/article/legacy-name.yml')
     writeFileSync(existing, '$uuid: U2\ntitle: Old Title\n')
 
-    expect(findRecordFileByUuid(join(dir, 'collections/articles'), 'U2')).toEqual({ path: existing, format: 'yaml' })
+    expect(findRecordFileByUuid(join(dir, 'entities/acme/article'), 'U2')).toEqual({ path: existing, format: 'yaml' })
 
     const folderDoc = folderFor([{ id: 'articles/fresh', uuid: 'U2', slug: 'fresh', collection: 'articles' }], 'F1')
     const report = collectionsToProject({
@@ -115,7 +135,7 @@ describe('collectionsToProject — update in place by $uuid', () => {
 
     // Updated the existing file (not placed a new fresh.md); stayed YAML.
     expect(report.updated).toEqual([existing])
-    expect(existsSync(join(dir, 'collections/articles/fresh.md'))).toBe(false)
+    expect(existsSync(join(dir, 'entities/acme/article/fresh.md'))).toBe(false)
     expect(yaml.load(readFileSync(existing, 'utf8'))).toEqual({ $uuid: 'U2', title: 'New Title', body: '\nbody\n' })
   })
 
@@ -126,7 +146,7 @@ describe('collectionsToProject — update in place by $uuid', () => {
 
     collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
     const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
-    expect(report.unchanged).toEqual([join(dir, 'collections/articles/hello.md')])
+    expect(report.unchanged).toEqual([join(dir, 'entities/acme/article/hello.md')])
     expect(report.placed).toEqual([])
   })
 })
@@ -137,7 +157,7 @@ describe('collectionsToProject — folder identity + no silent skips', () => {
     collectionsToProject({ folderDoc, recordDocs: [articleDoc('U1', 'Hi', '\nx\n')], siteRoot: dir, opts: { resolveDeclaration } })
 
     // the record is placed, but no folder identity is written to collections.yml
-    expect(existsSync(join(dir, 'collections/articles/hello.md'))).toBe(true)
+    expect(existsSync(join(dir, 'entities/acme/article/hello.md'))).toBe(true)
     expect(existsSync(join(dir, 'collections/collections.yml'))).toBe(false)
   })
 
@@ -179,7 +199,7 @@ describe('collectionsToProject — prosemirror content field (B)', () => {
     const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: resolvePm } })
 
     // body field (prosemirror) → markdown body in a .md file (briefHasContentBody → md format)
-    const f = join(dir, 'collections/articles/hello.md')
+    const f = join(dir, 'entities/acme/article/hello.md')
     expect(report.placed).toContain(f)
     expect(readFileSync(f, 'utf8')).toContain('Hello world')
     // the target structural map → locales/collections/es.json by source-text hash
@@ -199,7 +219,7 @@ describe('collectionsToProject — localized record scalars (B)', () => {
     const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
     // source-locale title stays inline in the record file
-    const f = join(dir, 'collections/articles/hello.md')
+    const f = join(dir, 'entities/acme/article/hello.md')
     expect(readFileSync(f, 'utf8')).toContain('title: Hello')
     // target locale → locales/collections/es.json keyed by hash(source)
     const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
@@ -232,7 +252,7 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
     { type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto dos' }] },
   ] }
 
-  it('writes a target-locale full-doc body to locales/freeform/{locale}/collections/', () => {
+  it('writes a target-locale full-doc body to locales/freeform/{locale}/entities/', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     const recordDocs = [
       { $uuid: 'U1', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: ffDoc } } },
@@ -240,10 +260,11 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
 
     const report = collectionsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
 
-    // source-locale body → the record .md
-    expect(readFileSync(join(dir, 'collections/articles/hello.md'), 'utf8')).toContain('Hi there')
-    // target-locale full body → locales/freeform/es/collections/articles/hello.md
-    const ff = join(dir, 'locales/freeform/es/collections/articles/hello.md')
+    // source-locale body → the record .md, in ITS model's pool folder
+    expect(readFileSync(join(dir, 'entities/acme/pmarticle/hello.md'), 'utf8')).toContain('Hi there')
+    // ⭐ the target-locale full body mirrors the pool, NOT any query name — so two
+    // queries over one schema find one translation instead of needing two copies.
+    const ff = join(dir, 'locales/freeform/es/entities/acme/pmarticle/hello.md')
     expect(report.freeform.written).toContain(ff)
     expect(readFileSync(ff, 'utf8')).toContain('Hola distinto')
   })
@@ -259,6 +280,6 @@ describe('collectionsToProject — prosemirror body free-form override (B-1)', (
     const es = JSON.parse(readFileSync(join(dir, 'locales/collections/es.json'), 'utf8'))
     expect(es[computeHash('Hi there')]).toBe('Hola ahi')
     expect(report.freeform.written).toEqual([])
-    expect(existsSync(join(dir, 'locales/freeform/es/collections/articles/hello.md'))).toBe(false)
+    expect(existsSync(join(dir, 'locales/freeform/es/entities/acme/article/hello.md'))).toBe(false)
   })
 })

@@ -51,7 +51,7 @@ beforeAll(() => {
   )
 
   // --- site ---
-  mkdirSync(join(siteRoot, 'collections', 'projects'), { recursive: true })
+  mkdirSync(join(siteRoot, 'entities', 'project'), { recursive: true })
   mkdirSync(join(siteRoot, 'pages', 'data'), { recursive: true })
   writeFileSync(
     join(siteRoot, 'site.yml'),
@@ -60,7 +60,7 @@ beforeAll(() => {
       'foundation: foundation',
       'collections:',
       '  projects:',
-      '    path: collections/projects',
+      '    schema: "@/project"',
       '',
     ].join('\n')
   )
@@ -70,12 +70,12 @@ beforeAll(() => {
   // ships as an ISO string in /data/*.json, so it must NOT trip the string/date
   // check. This guards the JSON-shipped-shape normalization.
   writeFileSync(
-    join(siteRoot, 'collections', 'projects', 'atlas.yml'),
+    join(siteRoot, 'entities', 'project', 'atlas.yml'),
     ['name: Atlas', 'status: active', 'when: 2024-01-01', 'url: https://atlas.example.org', ''].join('\n')
   )
   // bad — missing required `name`, and `status` not in the enum.
   writeFileSync(
-    join(siteRoot, 'collections', 'projects', 'bad.yml'),
+    join(siteRoot, 'entities', 'project', 'bad.yml'),
     ['status: 42', ''].join('\n')
   )
 

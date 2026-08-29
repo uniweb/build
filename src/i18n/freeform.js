@@ -22,6 +22,7 @@ import { readFile, readdir, stat } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative, dirname } from 'node:path'
 import yaml from 'js-yaml'
+import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 
 // Try to import content-reader for markdown → ProseMirror conversion
 let markdownToProseMirror
@@ -140,24 +141,35 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
 }
 
 /**
- * Load free-form translation for a collection item
+ * Load a free-form translation for one ENTITY.
  *
- * Path: collections/{collectionName}/{slug}.md
+ * Path: entities/{schema dirs}/{slug}.md — mirroring the pool exactly.
  *
- * @param {Object} item - Collection item with slug
- * @param {string} collectionName - Name of the collection
+ * ⛔ KEYED BY THE ENTITY, NOT BY A QUERY. It used to be
+ * `collections/{collectionName}/{slug}.md`, which was fine only while a
+ * collection was also a directory of files. With `entities/{schema}/` as the pool,
+ * TWO queries can cover one schema — so a query-keyed path would make an author
+ * write the same translation once per query, and finding neither from the other.
+ * ⚠️ And a query is renameable where a record's model is not: keying on the query
+ * orphaned every translation the moment someone renamed one.
+ *
+ * @param {Object} item - entity with a slug
+ * @param {string} schema - the entity's model ref (`@/name` or `@org/name`)
  * @param {string} locale - Locale code
  * @param {string} localesDir - Path to locales directory
  * @returns {Promise<Object|null>} Parsed translation { frontmatter, content } or null
  */
-export async function loadFreeformCollectionItem(item, collectionName, locale, localesDir) {
+export async function loadFreeformCollectionItem(item, schema, locale, localesDir) {
   const slug = item.slug
   if (!slug) return null
+
+  const rel = buildFreeformCollectionPath(schema, slug)
+  if (!rel) return null
 
   const freeformDir = join(localesDir, 'freeform', locale)
   if (!existsSync(freeformDir)) return null
 
-  const filePath = join(freeformDir, 'collections', collectionName, `${slug}.md`)
+  const filePath = join(freeformDir, rel)
   if (!existsSync(filePath)) return null
 
   try {
@@ -238,10 +250,10 @@ export async function discoverFreeformTranslations(locale, localesDir) {
     result.pageIds = await discoverMarkdownFiles(pageIdsDir, pageIdsDir)
   }
 
-  // Discover collection translations
-  const collectionsDir = join(freeformDir, 'collections')
-  if (existsSync(collectionsDir)) {
-    result.collections = await discoverMarkdownFiles(collectionsDir, collectionsDir)
+  // Discover entity translations
+  const entitiesDir = join(freeformDir, ENTITIES_DIR)
+  if (existsSync(entitiesDir)) {
+    result.collections = await discoverMarkdownFiles(entitiesDir, entitiesDir)
   }
 
   return result
@@ -325,12 +337,20 @@ export function buildFreeformPath(section, page, preferPageId = true) {
 }
 
 /**
- * Build the expected free-form translation path for a collection item
+ * The free-form translation path for one entity — the pool's own layout, under
+ * `locales/freeform/{locale}/`.
  *
- * @param {string} collectionName - Name of the collection
- * @param {string} slug - Item slug
- * @returns {string} Relative path (e.g., 'collections/articles/getting-started.md')
+ * ⛔ ONE DERIVATION, shared by the producer (which looks a translation up) and the
+ * projector (which writes one). `poolDirsForSchema` is the same inverse the pull
+ * side places records with, so a translation cannot land beside a record it is not
+ * for.
+ *
+ * @param {string} schema - the entity's model ref (`@/name` or `@org/name`)
+ * @param {string} slug - the entity's slug
+ * @returns {string|null} e.g. `entities/article/getting-started.md`, or null for a
+ *   ref this layout cannot express
  */
-export function buildFreeformCollectionPath(collectionName, slug) {
-  return `collections/${collectionName}/${slug}.md`
+export function buildFreeformCollectionPath(schema, slug) {
+  const dirs = poolDirsForSchema(schema)
+  return dirs ? `${ENTITIES_DIR}/${dirs.join('/')}/${slug}.md` : null
 }

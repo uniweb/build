@@ -17,12 +17,18 @@ import { resolveCollectionsConfig, QUERIES_YML_RELPATH } from '../src/site/colle
 
 // Captured 2026-08-29 from the pre-change resolver, given the same declarations
 // written as `collections/collections.yml::collections`.
+//
+// ⚠️ ONE FIELD WAS SINCE DROPPED, DELIBERATELY: `path`. The captured baseline had
+// it, because while the pool was `collections/<name>/` a declaration had to name a
+// directory. `entities/{schema}/` addresses the pool by schema, so a file-based
+// query has no path to carry — emitting one would ship a derivation as authored
+// config, which is the defect `deferred:` already taught. Everything else is
+// byte-for-byte the value the old resolver produced.
 const EXPECTED = {
   members: {
     name: 'members',
     schema: '@/member',
     sort: 'order asc',
-    path: 'collections/members',
     schemaExplicit: true,
   },
   people: {
@@ -30,7 +36,6 @@ const EXPECTED = {
     schema: '@std/person',
     where: { active: true },
     limit: 10,
-    path: 'collections/people',
     schemaExplicit: true,
   },
   articles: {
@@ -40,7 +45,6 @@ const EXPECTED = {
     detailUrl: '/api/articles/{slug}',
     deferred: ['content'],
     queryable: { tags: { type: 'enum' } },
-    path: 'collections/articles',
     schema: '@/articles',
     schemaExplicit: false,
   },
@@ -116,23 +120,19 @@ describe('queries.yml — parity with the collections.yml it replaces', () => {
     expect(declarations.members).toEqual(EXPECTED.members)
   })
 
-  // ⚠️ THE ONE INTENTIONAL DIFFERENCE, pinned rather than left to be discovered.
-  // `collections.yml::path` was relative to `collections/`; `queries.yml` sits at
-  // the site root, so its `path:` is site-root-relative. The two agree wherever an
-  // author wrote no `path:` — which is every entry above, and the common case.
-  it('an explicit `path:` is SITE-ROOT-relative, unlike collections.yml', async () => {
-    const dir = site({
-      'site.yml': 'name: Parity\n',
-      [QUERIES_YML_RELPATH]: 'posts:\n  path: blog-posts\n',
-    })
-    const { declarations } = await resolveCollectionsConfig(dir)
-    expect(declarations.posts.path).toBe('blog-posts') // was 'collections/blog-posts'
-  })
-
-  it('a query with no path defaults to the pool the old default named', async () => {
+  it('a file-based query carries NO path — the schema addresses the pool', async () => {
     const dir = site({ 'site.yml': 'name: Parity\n', [QUERIES_YML_RELPATH]: 'posts: {}\n' })
     const { declarations } = await resolveCollectionsConfig(dir)
-    expect(declarations.posts.path).toBe('collections/posts')
+    expect(declarations.posts.path).toBeUndefined()
+    expect(declarations.posts.schema).toBe('@/posts') // the query-name convention
+  })
+
+  it('the string shorthand names the SCHEMA', async () => {
+    const dir = site({ 'site.yml': 'name: Parity\n', [QUERIES_YML_RELPATH]: "posts: '@/article'\n" })
+    const { declarations } = await resolveCollectionsConfig(dir)
+    expect(declarations.posts.schema).toBe('@/article')
+    expect(declarations.posts.schemaExplicit).toBe(true)
+    expect(declarations.posts.path).toBeUndefined()
   })
 
   it('no queries.yml and no site.yml::queries → no declarations', async () => {

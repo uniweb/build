@@ -22,7 +22,7 @@ const dirs = []
 async function collectionWith(files) {
   const root = await mkdtemp(join(tmpdir(), 'uniweb-coll-'))
   dirs.push(root)
-  const dir = join(root, 'collections', 'articles')
+  const dir = join(root, 'entities', 'article')
   await mkdir(dir, { recursive: true })
   for (const [name, body] of Object.entries(files)) {
     await writeFile(join(dir, name), body, 'utf8')
@@ -31,7 +31,7 @@ async function collectionWith(files) {
 }
 
 const run = (root) =>
-  processCollections(root, { articles: { path: 'collections/articles' } })
+  processCollections(root, { articles: { schema: '@/article' } })
 
 afterAll(async () => {
   for (const d of dirs) await rm(d, { recursive: true, force: true })

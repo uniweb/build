@@ -5,7 +5,6 @@ export {
   resolveCollectionsConfig,
   queriesYmlPath,
   defaultSchema,
-  defaultPoolPath,
   deferredFromSchema,
   foundationDataSchemas,
   QUERIES_YML_RELPATH,

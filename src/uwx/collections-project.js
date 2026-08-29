@@ -37,7 +37,8 @@ import { join, resolve, extname, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { parseFrontmatter } from './collection-source.js'
 import { writeRecordFile, writeQueriesConfig } from './project-writer.js'
-import { defaultSchema, defaultPoolPath, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
+import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './collections-config.js'
+import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import { isContentBodyField } from './data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformCollectionPath } from '../i18n/freeform.js'
@@ -133,11 +134,20 @@ function indexFolder(folderDoc) {
   return byUuid
 }
 
-// Resolve a collection's directory from the collections config `path:` (already
-// site-root-relative), defaulting to `collections/<name>`.
-function collectionDirFor(siteRoot, collection, collectionsConfig) {
-  const declPath = collectionsConfig?.declarations?.[collection]?.path
-  return declPath ? resolve(siteRoot, declPath) : join(siteRoot, 'collections', collection)
+// Where a pulled record is written: the pool folder its MODEL names.
+//
+// ⛔ NOT THE QUERY'S DIRECTORY — a query has none. A record's home is decided by
+// what it IS, and `entities/{schema}/` is the one place a thing of that model
+// lives. That is also why the placement survives a query being renamed, added or
+// deleted, none of which is a fact about the record.
+//
+// ⚠️ Derived by `poolDirsForSchema`, the exact inverse of the reader's
+// `schemaForPoolDirs`, and deliberately not a second rule: if the two disagreed,
+// a pulled record would land somewhere the next build reads as a different
+// schema — silently, because both paths are well-formed.
+function recordDirFor(siteRoot, model) {
+  const dirs = poolDirsForSchema(model)
+  return dirs ? join(siteRoot, ENTITIES_DIR, ...dirs) : null
 }
 
 // Resolve a record's (collection, slug): the folder index first (authoritative on
@@ -211,8 +221,11 @@ function declToFileShape(d, dataSchemas = null) {
   if (typeof source.url === 'string') {
     decl.url = source.url
   } else if (typeof source.path === 'string') {
-    // Omit a path that merely restates the default pool location for this name.
-    if (source.path !== defaultPoolPath(name)) decl.path = source.path
+    // ⛔ A FILE-BASED QUERY HAS NO PATH TO WRITE BACK. `entities/{schema}/` is the
+    // pool and `schema:` addresses it, so a `path` arriving on the wire is either
+    // stale storage or something only a remote source could have meant. Dropping
+    // it keeps the author's file saying what the build actually reads.
+    decl.path = source.path
   } else if (source && typeof source === 'object' && Object.keys(source).length > 0) {
     decl.source = source
   }
@@ -320,13 +333,11 @@ export function declarationsToCollectionsYml({ document, siteRoot }) {
  * @param {object} params.opts
  * @param {(modelName: string) => object|null|undefined} params.opts.resolveDeclaration
  *        - resolve a Model's data-schema declaration by name (`$model`).
- * @param {object} [params.opts.collectionsConfig] - from resolveCollectionsConfig
- *        (for `path:` overrides); optional — defaults to `collections/<name>`.
  * @param {string} [params.opts.sourceLocale]
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
-  const { resolveDeclaration, collectionsConfig, sourceLocale = 'en' } = opts
+  const { resolveDeclaration, sourceLocale = 'en' } = opts
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/collections-project: opts.resolveDeclaration(modelName) is required')
   }
@@ -354,7 +365,15 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
       continue
     }
 
-    const collectionDir = collectionDirFor(siteRoot, where.collection, collectionsConfig)
+    const collectionDir = recordDirFor(siteRoot, document.$model)
+    if (!collectionDir) {
+      skipped.push({
+        uuid: document.$uuid,
+        slug: where.slug,
+        reason: `model ${document.$model} names no pool folder (expected @/name or @org/name)`,
+      })
+      continue
+    }
     const existing = document.$uuid ? findRecordFileByUuid(collectionDir, document.$uuid) : null
 
     let filePath
@@ -372,7 +391,7 @@ export function collectionsToProject({ folderDoc, recordDocs = [], siteRoot, opt
 
     // The free-form home for this record's content body (locale-independent); a
     // target-locale full-doc body is written under locales/freeform/{locale}/here.
-    const freeformRelPath = buildFreeformCollectionPath(where.collection, where.slug)
+    const freeformRelPath = buildFreeformCollectionPath(document.$model, where.slug)
 
     let status
     try {

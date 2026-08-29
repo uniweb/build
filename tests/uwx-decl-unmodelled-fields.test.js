@@ -103,12 +103,20 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     const decl = doc.collections.find((c) => c.name === 'members')
 
     // `schemaExplicit` is build state: it records whether the AUTHOR asked for the
-    // schema or the subfolder-name convention supplied it, and decides hard-error
-    // vs soft-skip during sync. The backend has no field for it.
+    // schema or the query-name convention supplied it, and decides hard-error vs
+    // soft-skip during sync. The backend has no field for it.
     expect(decl.schemaExplicit).toBeUndefined()
-    // `path` folds into `source`; the flat key must not ride alongside it.
+    // ⛔ A FILE-BASED QUERY EMITS NO `source` AT ALL. `entities/{schema}/` is the
+    // pool and `schema:` addresses it, so a path here would be a derivation shipped
+    // as though it were authored — and the pull would then write it into the
+    // author's file, which is exactly the `deferred:` defect. `source:` stays in the
+    // vocabulary for REMOTE (`url:`) queries, whose address nothing local derives.
     expect(decl.path).toBeUndefined()
-    expect(decl.source).toEqual({ path: 'collections/members' })
+    expect(decl.source).toBeUndefined()
+    // CONTROL — the decl is really here and carries its modelled fields, so the two
+    // absences above are about withholding rather than an empty record.
+    expect(decl.schema).toBe('@std/person')
+    expect(decl.limit).toBe(10)
   })
 })
 

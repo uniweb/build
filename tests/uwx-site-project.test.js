@@ -531,9 +531,10 @@ describe('collection declarations — round-trip against the real producer', () 
   const SITE_YML =
     "name: Decls\nfoundation: '@acme/base@1.0.0'\n"
 
-  // A source queries.yml exercising: a default-schema query (no schema key,
-  // default path), an explicit-schema query with a path override, and a full set
-  // of query/display fields incl. detailUrl (camelCase on the file side).
+  // A source queries.yml exercising: a default-schema file-based query (no schema
+  // key, no path — the pool answers), a REMOTE query whose `url:` is the one source
+  // that survives the round trip, and a full set of query/display fields incl.
+  // detailUrl (camelCase on the file side).
   const QUERIES_YML =
     'articles:\n' +
     '  where:\n' +
@@ -543,7 +544,7 @@ describe('collection declarations — round-trip against the real producer', () 
     '    - body\n' +
     '  detailUrl: /api/articles/{slug}\n' +
     'products:\n' +
-    '  path: items\n' +
+    "  url: https://api.example.com/products\n" +
     "  schema: '@acme/product'\n" +
     '  limit: 20\n' +
     '  queryable:\n' +
@@ -574,10 +575,15 @@ describe('collection declarations — round-trip against the real producer', () 
     expect(projected.articles.schema).toBeUndefined()
     expect(projected.articles.path).toBeUndefined()
     expect(projected.articles.detailUrl).toBe('/api/articles/{slug}')
-    // ⚠️ `items` is written back VERBATIM, not as `collections/items`. The prefix
-    // strip that used to sit here relocated a query's pool on every round trip
-    // once `path:` became site-root-relative.
-    expect(projected.products).toMatchObject({ path: 'items', schema: '@acme/product', limit: 20 })
+    // ⭐ A REMOTE source is the one that still round-trips a `source`. A file-based
+    // query emits none: `entities/{schema}/` is the pool and `schema:` addresses it,
+    // so a path on the wire would be a derivation written back as authored config.
+    expect(projected.products).toMatchObject({
+      url: 'https://api.example.com/products',
+      schema: '@acme/product',
+      limit: 20,
+    })
+    expect(projected.articles.path).toBeUndefined()
   })
 
   it('preserves untouched queries when rewriting the ones it carries', () => {
@@ -589,7 +595,7 @@ describe('collection declarations — round-trip against the real producer', () 
       // `@/articles` IS the convention default for a query named `articles`
       // (identity, not a singular guess), so the projection drops it as redundant —
       // which is what this case is asserting. Same for the default pool path.
-      collections: [{ $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/articles' }],
+      collections: [{ $id: 'articles', name: 'articles', schema: '@/articles' }],
     }
     const report = declarationsToCollectionsYml({ document, siteRoot: site })
     expect(report.collections).toBe('updated')

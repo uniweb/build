@@ -58,6 +58,7 @@ import { parseBibtex } from '@citestyle/bibtex'
 import { DATA_DIR } from '@uniweb/core'
 import { applyWhere, applyFilter, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
+import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -99,9 +100,12 @@ try {
  */
 function parseCollectionConfig(name, config) {
   if (typeof config === 'string') {
+    // The string shorthand names the SCHEMA — `entities/{schema}/` supplies the
+    // records, so there is no directory for a query to name.
     return {
       name,
-      path: config,
+      schema: config,
+      url: null,
       route: null,
       sort: null,
       where: null,
@@ -114,7 +118,10 @@ function parseCollectionConfig(name, config) {
 
   return {
     name,
-    path: config.path,
+    // The query's schema selects its records from the pool — `entities/{schema}/`
+    // declares the model, so the entities of a schema ARE the query's records.
+    schema: config.schema || null,
+    url: config.url || null,
     route: config.route || null,
     sort: config.sort || null,
     // `where:` is the CANONICAL predicate; `filter:` is the deprecated string DSL
@@ -661,41 +668,49 @@ function warnDuplicateSlugs(items, collectionName) {
  * @param {Object} config - Parsed collection config
  * @returns {Promise<Array>} Array of processed items
  */
-async function collectItems(siteDir, config, collectionsBase, basePath) {
-  const base = collectionsBase || siteDir
-  const collectionDir = resolve(base, config.path)
+async function collectItems(siteDir, config, entitiesDir, basePath) {
+  // ⭐ THE QUERY NAMES A SCHEMA AND THE POOL FOLLOWS — the same resolution the
+  // sync lane makes, from the same reader, so the two lanes cannot disagree
+  // about which files are a query's records. They used to: this one recursed
+  // into a collection directory and sync did not.
+  const pooled = config.poolEntities || []
+  if (pooled.length === 0) return []
 
-  // Check if collection directory exists
-  if (!existsSync(collectionDir)) {
-    console.warn(`[collection-processor] Collection folder not found: ${config.path}`)
-    return []
-  }
+  const dirOf = (e) => resolve(siteDir, entitiesDir || ENTITIES_DIR, ...e.dirs)
 
-  const itemFiles = await collectSourceFiles(collectionDir)
-
-  // Process all collection files (markdown → content items, YAML/JSON → data
-  // items, BibTeX → CSL-JSON bibliography items).
+  // Process all entity files (markdown → content items, YAML/JSON → data items,
+  // BibTeX → CSL-JSON bibliography items).
   let items = await Promise.all(
-    itemFiles.map(file => {
-      if (file.endsWith('.bib')) {
-        return processBibtexItem(collectionDir, file)
+    pooled.map((e) => {
+      const dir = dirOf(e)
+      const file = `${e.slug}${e.ext}`
+      if (e.ext === '.bib') {
+        return processBibtexItem(dir, file)
       }
-      if (file.endsWith('.json')) {
-        return processJsonItem(collectionDir, file, siteDir, config.name, basePath)
+      if (e.ext === '.json') {
+        return processJsonItem(dir, file, siteDir, config.name, basePath)
       }
-      if (file.endsWith('.yml') || file.endsWith('.yaml')) {
-        return processDataItem(collectionDir, file, siteDir, config.name, basePath)
+      if (e.ext === '.yml' || e.ext === '.yaml') {
+        return processDataItem(dir, file, siteDir, config.name, basePath)
       }
-      return processContentItem(collectionDir, file, config, siteDir, basePath)
+      return processContentItem(dir, file, config, siteDir, basePath)
     })
   )
 
-  // Stamp each record's position inside the collection BEFORE flattening, while
-  // a result is still aligned with the file it came from. A file's own array
-  // entries (array-form YAML/JSON, every .bib entry) all share its directory.
-  items = items.map((result, i) => {
-    const dir = dirname(itemFiles[i])
-    const path = dir === '.' ? '' : dir
+  // ⛔ `path` IS A PLACEMENT, AND PLACEMENT NOW COMES FROM `records.yml`.
+  // It used to be the record's directory position INSIDE its collection — the
+  // one thing `entities/{schema}/` deliberately cannot express, since that path
+  // declares a model and nothing else. Until the folder producer lands, every
+  // record is at the pool root, which is what a site with no `records.yml`
+  // structure means anyway (the model's common case: a flat pool, queries doing
+  // the organizing).
+  //
+  // ⚠️ It stays a SCALAR. `where: { path: { under: 'archive' } }` is evaluated by
+  // `core/src/where.js::matchUnder`, which is string-only — an array would match
+  // nothing, silently. One placement per entity is the ruling; many-to-many is a
+  // predicate change to agree with backend first.
+  items = items.map((result) => {
+    const path = ''
     if (Array.isArray(result)) return result.map((item) => item && { ...item, path })
     return result && { ...result, path }
   })
@@ -754,7 +769,8 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
  * Process all content collections defined in site.yml
  *
  * @param {string} siteDir - Site root directory
- * @param {Object} collectionsConfig - Collections config from site.yml
+ * @param {Object} collectionsConfig - the resolved QUERY declarations
+ * @param {string} [entitiesDir] - pool directory override (`site.yml::paths.entities`)
  * @returns {Promise<Object>} Map of collection name to items array
  *
  * @example
@@ -764,16 +780,31 @@ async function collectItems(siteDir, config, collectionsBase, basePath) {
  * })
  * // { articles: [...], products: [...] }
  */
-export async function processCollections(siteDir, collectionsConfig, collectionsBase, basePath = '/') {
+export async function processCollections(siteDir, collectionsConfig, entitiesDir, basePath = '/') {
   if (!collectionsConfig || typeof collectionsConfig !== 'object') {
     return {}
   }
+
+  // ⭐ ONE POOL WALK FOR EVERY QUERY. Two queries over the same schema read one
+  // set of files; a query reads none of another schema's.
+  const pool = await readEntityPool(siteDir, { dir: entitiesDir })
+  if (pool.errors.length) {
+    for (const e of pool.errors) console.warn(`[collection-processor] ${e}`)
+  }
+  const poolBySchema = groupPoolBySchema(pool.entities)
 
   const results = {}
 
   for (const [name, config] of Object.entries(collectionsConfig)) {
     const parsed = parseCollectionConfig(name, config)
-    const items = await collectItems(siteDir, parsed, collectionsBase, basePath)
+    parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
+    if (parsed.poolEntities.length === 0 && !parsed.url) {
+      console.warn(
+        `[collection-processor] Query "${name}" matches no entities — ` +
+          `nothing in entities/ declares ${parsed.schema || '(no schema)'}.`
+      )
+    }
+    const items = await collectItems(siteDir, parsed, entitiesDir, basePath)
     results[name] = items
     console.log(`[collection-processor] Processed ${name}: ${items.length} items`)
   }
