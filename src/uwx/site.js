@@ -667,6 +667,21 @@ export function isSiteRelativeExtensionUrl(decl) {
  * rename every collection at once and the section goes all-blank and is refused.
  * That is the semantics, not a defect.
  *
+ * ⛔ DO NOT TRIM THE FIELDS BELOW, even the ones the backend never reads.
+ *
+ * The backend destructures exactly two — `name` and `schema` — and projects none of
+ * this Section into a published payload, so the rest look like dead weight. They are
+ * not: `SiteCollectionDecl` is returned VERBATIM to the app lane, and the visual
+ * editor reads and writes it. This Section has TWO producers, and the reconcile
+ * replaces an item's `data` wholesale rather than merging at field grain — so a push
+ * that omits a field the editor set destroys it, silently, on the next push.
+ *
+ * ⚠️ Already live on `label`, which we do not emit and which is not a field we have:
+ * framework's `label` belongs to a `folders:` BRANCH, not to a collection. Whether
+ * the editor writes one on a decl is frontend's to confirm; the mechanism is not in
+ * doubt. See `kb/framework/build/uwx-format.md` § *the decl is written by two
+ * producers* — measured with backend 2026-08-29, collab framework-backend-2dfa.
+ *
  * @param {object} declarations resolved collection declarations, keyed by name
  * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push
  *        response or a pull. Absent on a first sync, where minting is correct.
