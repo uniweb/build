@@ -54,7 +54,7 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     { slug: 'design-tips', title: 'Design Tips', body: 'long body A' },
     { slug: 'getting-started', title: 'Getting Started', body: 'long body B' }
   ]
-  const collectionsConfig = { articles: { path: 'collections/articles', deferred: ['body'] } }
+  const collectionsConfig = { articles: { schema: '@/article', deferred: ['body'] } }
 
   beforeAll(async () => {
     siteDir = mkdtempSync(join(tmpdir(), 'data-path-agreement-'))
@@ -84,7 +84,7 @@ describe('compiled collection data: emit ↔ request agreement', () => {
   it("core's auto-injected detail pattern points at emitted per-record files", () => {
     const configs = resolveFetchConfigs(
       [{ schema: 'articles', path: collectionDataUrl('articles') }],
-      { collections: collectionsConfig }
+      { queries: collectionsConfig }
     )
     const pattern = configs.get('articles').detail
     expect(pattern).toBeTruthy()

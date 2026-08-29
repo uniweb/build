@@ -252,14 +252,14 @@ function buildPageData(config, ctx) {
     // `schema` (the query name) is BOTH the content.data key and part of the
     // dataStore cache key (deriveCacheKey hashes {path,url,endpoint,schema,…};
     // the shorthand is ignored). Mirrors the static build's parseFetchConfig.
-    // ⛔ THE WIRE KEEPS SAYING `collection`, AND THAT IS NOT A FUDGE. The authoring
-    // name moved to `query:`; the wire field is on the BACKEND's Model and is not
-    // framework's to rename — `queries` is our position and they have not agreed.
-    // Same shape as `detailUrl` → `detail_url`, which the emitter has always done.
-    // ⚠️ `@uniweb/core`'s resolveFetchConfigs and every host reading a published
-    // payload key on this name, so changing it here is a cross-lane break with no
-    // authoring benefit whatsoever.
-    fetch = { collection: query, path: collectionDataUrl(query), schema: query, ...rest }
+    // ⭐ `query`, END TO END — no crossing. An earlier version emitted `collection`
+    // here on the belief that this field was the backend's to name. MEASURED
+    // otherwise: framework already ships `transform`, `detailPage`, `merge` and
+    // `prerender` inside this same `fetch` object, which no backend could be
+    // validating — so `fetch` is a blob they carry and framework owns its
+    // vocabulary. ⇒ There was nothing to coordinate, and inventing a coordination
+    // is how a name stays wrong.
+    fetch = { query, path: collectionDataUrl(query), schema: query, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {

@@ -89,9 +89,9 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   // pipeline runs). Full records — `writeCollectionFiles` is the stage that
   // strips `deferred:` fields, and we skip it.
   let collections = {}
-  if (config.collections && typeof config.collections === 'object') {
+  if (config.queries && typeof config.queries === 'object') {
 
-    collections = await processCollections(siteRoot, config.collections, config.paths?.entities, basePath)
+    collections = await processCollections(siteRoot, config.queries, config.paths?.entities, basePath)
   }
 
   // Pass 1 — discover unique (file, schema-ref) pairs and who uses each.

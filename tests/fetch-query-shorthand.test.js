@@ -47,21 +47,22 @@ describe('⛔ the retired name errors', () => {
   })
 })
 
-describe('the wire crossing', () => {
-  // ⚠️ The WIRE field is still `collection` — it is on the backend's Model and not
-  // framework's to rename. The two names cross at the authoring boundary, the same
-  // way `detailUrl` and `detail_url` do.
-  it('recognizes the wire spelling as the query shape', () => {
-    expect(fetchShapeOf({ collection: 'articles', path: '/data/articles.json' })).toBe('query')
-    expect(fetchShapeOf({ query: 'articles' })).toBe('query')
+describe('one name, end to end — no crossing', () => {
+  // ⭐ `query` on the wire too. An earlier version emitted `collection` there, on
+  // the belief that the field was the backend's to name. Measured otherwise:
+  // framework already ships `transform`, `detailPage`, `merge` and `prerender`
+  // inside this same object, which no backend could be validating — so `fetch` is
+  // a blob they carry, and framework owns its vocabulary.
+  it('recognizes the query shape', () => {
+    expect(fetchShapeOf({ query: 'articles', path: '/data/articles.json' })).toBe('query')
     expect(fetchShapeOf({ path: '/data/x.json' })).toBe('source')
+    // the retired name is not a shape — it is an error at parse
+    expect(fetchShapeOf({ collection: 'articles' })).toBe('source')
   })
 
-  it('writes the wire spelling back as the AUTHORING one', () => {
-    // ⛔ Writing `collection:` back would author a file the build now refuses —
-    // a pull would produce a site that cannot build.
+  it('drops the derived path, keeping what the author wrote', () => {
     expect(
-      authorableFetch({ collection: 'members', path: '/data/members.json', schema: 'members' })
+      authorableFetch({ query: 'members', path: '/data/members.json', schema: 'members' })
     ).toEqual({ query: 'members', schema: 'members' })
   })
 

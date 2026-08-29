@@ -46,7 +46,7 @@
  *     sort: date desc
  *
  * // Usage
- * const collections = await processCollections(siteDir, config.collections)
+ * const collections = await processCollections(siteDir, config.queries)
  * await writeCollectionFiles(siteDir, collections)
  */
 

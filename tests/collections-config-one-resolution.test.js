@@ -29,7 +29,7 @@ const setup = (siteYml, queriesYml) => {
   w('pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
 }
 
-const collections = async () => (await collectSiteContent(ROOT, {})).config?.collections ?? null
+const collections = async () => (await collectSiteContent(ROOT, {})).config?.queries ?? null
 
 beforeEach(() => { ROOT = mkdtempSync(join(tmpdir(), 'coll-cfg-')) })
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
@@ -61,7 +61,7 @@ describe('the site build sees queries.yml', () => {
     expect(news.sort).toBe('date asc')
   })
 
-  it('keeps config.collections absent when a site declares none', async () => {
+  it('keeps config.queries absent when a site declares none', async () => {
     // Absent, not `{}` — an empty object reads as "declared, and empty" to
     // anything testing for presence.
     w('site.yml', 'name: T\nfoundation: "@a/x"\n')

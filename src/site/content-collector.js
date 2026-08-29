@@ -2160,14 +2160,14 @@ export async function collectSiteContent(sitePath, options = {}) {
   // merged both, so a declaration in the second file was invisible here: never
   // compiled, `data: <name>` delivering nothing, while sync pushed it fine.
   //
-  // ⚠️ `siteConfig.collections` KEEPS ITS NAME. That is the payload key the
-  // runtime reads and the wire Section the backend stores — neither is an
-  // authoring surface, and neither is framework's alone to rename. Only what an
-  // AUTHOR writes moved.
+  // ⭐ `config.queries` — framework's own payload key, framework's own readers.
+  // The backend's projector never emits it (their measurement: 17 `config` keys,
+  // not this one), and hosting renders with framework's code. There was nobody to
+  // coordinate with, which is exactly why it had no excuse to stay wrong.
   const collections = toConfigCollections(
     (await resolveCollectionsConfig(sitePath, { siteYml: siteConfig })).declarations
   )
-  if (collections) siteConfig.collections = collections
+  if (collections) siteConfig.queries = collections
 
   // Record the RESOLVED base (--base > UNIWEB_BASE > site.yml::base) on the
   // config so every consumer reads one value. Prerender sets website.basePath

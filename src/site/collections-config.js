@@ -196,7 +196,7 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
 }
 
 /**
- * The declarations as `config.collections` should carry them.
+ * The declarations as `config.queries` should carry them.
  *
  * `schemaExplicit` records whether the AUTHOR asked for a schema or the
  * subfolder-name convention supplied one. That decides how a failed resolution
@@ -204,7 +204,7 @@ export async function resolveCollectionsConfig(siteRoot, opts = {}) {
  * downstream. It is stripped here rather than at each consumer, so the payload
  * has one shape and no consumer has to know the field existed.
  *
- * Returns undefined for a site with no queries, so `config.collections`
+ * Returns undefined for a site with no queries, so `config.queries`
  * stays absent rather than becoming an empty object — an empty object reads as
  * "declared, and empty" to anything checking for presence.
  */

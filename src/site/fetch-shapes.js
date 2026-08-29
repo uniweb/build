@@ -6,11 +6,7 @@
 //   refine      refine · inherit · detail · limit · sort · where · filter
 //   query       query · schema · … — and NOT `path`/`url`
 //   source      path · url · schema · …
-//
-// ⚠️ THIS SEES THE WIRE, WHERE THE FIELD IS STILL `collection`. The authoring name
-// is `query:` (queries.yml); the wire field is on the backend's Model and is not
-// framework's to rename. So the shape is recognized by the wire spelling and
-// written back under the authoring one — the same crossing `detail_url` makes.
+
 //
 // The build RESOLVES a `query:` shorthand into a concrete location, so the
 // declaration that rides the sync wire carries BOTH the authored `query` and the
@@ -44,7 +40,7 @@
 export function fetchShapeOf(fetch) {
   if (!fetch || typeof fetch !== 'object') return null
   if (fetch.refine === true || fetch.inherit === true) return 'refine'
-  if (fetch.collection || fetch.query) return 'query'
+  if (fetch.query) return 'query'
   return 'source'
 }
 
@@ -69,13 +65,6 @@ export function authorableFetch(fetch) {
   const out = {}
   for (const [k, v] of Object.entries(fetch)) {
     if (derived.includes(k)) continue
-    // Wire `collection` → authored `query`. ⚠️ Writing the wire spelling back
-    // would produce a file the build now REFUSES (`parseFetchConfig` throws on
-    // the retired name), so a pull would author a site that cannot build.
-    if (k === 'collection') {
-      out.query = v
-      continue
-    }
     out[k] = v
   }
   return out

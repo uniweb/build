@@ -91,11 +91,11 @@ A short tagline.
     writeFileSync(join(siteRoot, 'site.yml'), `name: test-site
 foundation: src
 index: home
-collections:
+queries:
   articles:
-    path: collections/articles
+    schema: '@/article'
 `)
-    const collectionDir = join(siteRoot, 'collections', 'articles')
+    const collectionDir = join(siteRoot, 'entities', 'article')
     mkdirSync(collectionDir, { recursive: true })
     writeFileSync(join(collectionDir, 'first.md'), `---
 title: First Article

@@ -137,14 +137,14 @@ export async function buildSiteData({
   //    publish time. (This named `uniweb deploy::collectDataFiles` until
   //    2026-08-18; no such function has existed for some time.) Same output bytes, same paths, just
   //    without the vite intermediary.
-  if (siteContent.config?.collections) {
+  if (siteContent.config?.queries) {
     const collections = await processCollections(
       resolvedSiteRoot,
-      siteContent.config.collections,
+      siteContent.config.queries,
       siteContent.config?.paths?.entities,
       basePath
     )
-    await writeCollectionFiles(resolvedSiteRoot, collections, siteContent.config.collections)
+    await writeCollectionFiles(resolvedSiteRoot, collections, siteContent.config.queries)
 
     const publicDataDir = join(resolvedSiteRoot, 'public', DATA_DIR)
     const distDataDir = join(resolvedDistDir, DATA_DIR)

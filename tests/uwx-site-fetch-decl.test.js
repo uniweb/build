@@ -11,12 +11,7 @@ import { siteProjectToDocument } from '../src/uwx/index.js'
 // host able to serve those records live had no way to say so, and the site had
 // no way to ask.
 //
-// ⚠️ THE WIRE FIELD IS STILL `collection`. The AUTHORING name moved to `query:`
-// (queries.yml); this field is on the backend's Model and is not framework's to
-// rename — `queries` is our position and they have not agreed. The build crosses
-// the two names the same way it crosses `detailUrl` → `detail_url`.
-//
-// The wire carries BOTH: the query name (`collection`) for a consumer that can
+// The wire carries BOTH: the query name (`query`) for a consumer that can
 // resolve it against a host's declared lane, and the compiled artifact (`path`)
 // for one that cannot, or has not learned to yet.
 
@@ -43,12 +38,13 @@ beforeEach(() => {
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 
 describe('a page fetch declaration on the sync wire', () => {
-  it('carries the query name under the WIRE spelling, unresolved', async () => {
+  it('carries the query name, unresolved', async () => {
     const blog = await buildSite()
-    expect(blog.fetch.collection).toBe('articles')
-    // ⛔ and never the authoring spelling — a consumer keying on the Model's field
-    // would not find it, and every host reading a published payload does.
-    expect(blog.fetch.query).toBeUndefined()
+    expect(blog.fetch.query).toBe('articles')
+    // ⛔ and never the retired name. `fetch` is a blob the backend carries, not one
+    // it models — framework already ships `transform`/`detailPage`/`merge` inside
+    // it — so there was never a second spelling to keep in step.
+    expect(blog.fetch.collection).toBeUndefined()
   })
 
   it('carries the compiled artifact path alongside it', async () => {

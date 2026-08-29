@@ -92,8 +92,8 @@ describe('deriving deferred from the brief', () => {
 describe('what the derived split actually emits', () => {
   const build = async () => {
     const site = await collectSiteContent(SITE, {})
-    const cols = await processCollections(SITE, site.config.collections, null, '/')
-    await writeCollectionFiles(SITE, cols, site.config.collections)
+    const cols = await processCollections(SITE, site.config.queries, null, '/')
+    await writeCollectionFiles(SITE, cols, site.config.queries)
     return {
       cascade: JSON.parse(readFileSync(join(SITE, 'public/data/articles.json'), 'utf8')),
       recordPath: join(SITE, 'public/data/articles/hi.json'),

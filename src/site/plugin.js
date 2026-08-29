@@ -847,8 +847,8 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.collections) {
           console.log('[site-content] Processing content collections...')
-          const collections = await processCollections(resolvedSitePath, siteContent.config.collections, resolvedEntitiesDir, basePath)
-          await writeCollectionFiles(resolvedSitePath, collections, siteContent.config.collections)
+          const collections = await processCollections(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
+          await writeCollectionFiles(resolvedSitePath, collections, siteContent.config.queries)
         }
 
         // Execute data fetches in dev mode
