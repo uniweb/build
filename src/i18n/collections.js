@@ -604,7 +604,16 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
     return {}
   }
 
+  // ⚠️ The translate side derives the record key the SAME way extraction does.
+  // These two agreeing is the whole contract, and a mismatch is SILENT: lookups
+  // simply miss and every string falls back to its source. (This was missing for
+  // a while and the failure was swallowed by the per-file catch below — the build
+  // stayed green while nothing was translated.)
+  const poolDirs = await poolDirsByQuery(siteRoot)
+
   const outputs = {}
+  // Reported rather than only logged — see the catch below.
+  const failures = []
 
   for (const locale of locales) {
     // Load translations for this locale
@@ -663,11 +672,26 @@ export async function buildLocalizedCollections(siteRoot, options = {}) {
         await writeFile(destPath, JSON.stringify(translatedItems, null, 2))
         outputs[locale][collectionName] = destPath
       } catch (err) {
-        console.warn(`[i18n] Failed to translate collection ${file}: ${err.message}`)
+        // ⛔ A FAILURE HERE USED TO BE A `console.warn` AND NOTHING ELSE, and it
+        // hid a real bug for the length of a session: a `ReferenceError` in this
+        // lane — a programming error, not bad data — was caught by a handler
+        // meant for an unparseable file, downgraded to a warning, and the
+        // locale's output silently omitted. The build stayed green while NOTHING
+        // was translated.
+        //
+        // ⇒ It is an ERROR, and it is reported in the RESULT. A caller cannot act
+        // on a line of stderr it did not read; `failures` is the thing a build can
+        // count and refuse on. Still not thrown, because one unparseable data file
+        // must not take down a whole multi-locale build.
+        console.error(`[i18n] Failed to translate ${file} for ${locale}: ${err.message}`)
+        failures.push({ locale, file, message: err.message })
       }
     }
   }
 
+  // ⚠️ Attached rather than merged into the locale map, so an existing reader
+  // that indexes `outputs[locale][name]` is unaffected while a new one can ask.
+  if (failures.length) Object.defineProperty(outputs, 'failures', { value: failures, enumerable: false })
   return outputs
 }
 
