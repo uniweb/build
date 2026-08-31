@@ -187,10 +187,17 @@ export function buildFolderEntity({ recordEntities, folderNodes = [], declared, 
 
   const missing = []
   const contents = contentsFromNodes(folderNodes, byEntityId, missing)
+  // ⚠️ `id` IS THE ENTITY'S POOL PATH, NOT A FOLDER PATH — say so, because the two
+  // read identically and a reader who takes it for a placement concludes the
+  // emitter is dropping a branch it never had. *(Measured 2026-08-31: the backend
+  // lane read `folder: "articles/outdoor-hygge"` as a placement under an
+  // `articles` branch and opened a channel about a missing branch node; the string
+  // was naming `entities/articles/outdoor-hygge.md`.)*
   const warnings = missing.map(
     (id) =>
-      `folder: "${id}" is placed in records.yml but produced no record entity — ` +
-      `the placement was dropped rather than sent pointing at nothing.`
+      `records.yml: "${id}" — a path under entities/ — is listed, but no record ` +
+      `entity was produced for it (check that its schema resolves). The placement ` +
+      `was dropped rather than sent pointing at nothing.`
   )
 
   const document = {
