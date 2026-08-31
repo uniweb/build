@@ -361,6 +361,47 @@ describe('resolveSchemaRef — org scope resolution', () => {
     }
   })
 
+  // ── The `@std` fallback ────────────────────────────────────────────────────────
+  //
+  // Handed over by the flows suite, and correctly: both halves run with no backend and
+  // no second client, so `uniweb build` alone answers them and they belong to the lane
+  // that owns the rule rather than to a cross-client suite.
+  //
+  // The requirement they remove is real history: until @uniweb/build@0.29.0 a foundation
+  // referencing `@std/person` had to declare `@uniweb/schemas` itself or the build failed.
+  // See kb/framework/build/std-schema-dependency.md.
+
+  it("resolves '@std/<name>' from a foundation that declares NOTHING", async () => {
+    // `dir` has a bare package.json and no node_modules. The foundation's own context is
+    // still tried first — this asserts the fallback to @uniweb/build's own copy, which is
+    // the whole point: requiring an author to install a package the resolving tool is
+    // already carrying was a requirement with nothing behind it.
+    const out = await resolveSchemaRef('@std/article', { srcDir: dir })
+    expect(out).toBeTruthy()
+    expect(out.name).toBe('article')
+  })
+
+  it("⛔ does NOT extend the fallback to '@org' — the control, and the valuable half", async () => {
+    // Duplicates the assertion below on purpose, and the duplication is the point: this
+    // one is here to be read NEXT TO the `@std` case. A regression that made every scope
+    // fall back to the build's own copy would keep the positive test green while silently
+    // resolving an `@acme` ref to the WRONG schemas package — worse than the requirement
+    // that was removed, because it answers instead of refusing.
+    await expect(resolveSchemaRef('@acme/thing', { srcDir: dir })).rejects.toThrow(
+      /'@acme\/schemas' is not installed/
+    )
+  })
+
+  it('a foundation that DOES install @uniweb/schemas gets its own copy, not ours', async () => {
+    // Fallback, not redirect. Pinning and vendoring have to keep working, and the only
+    // way to see the difference is to install a copy whose contents we would never ship.
+    installSchemaPackage(dir, '@uniweb/schemas', {
+      article: { name: 'article', fields: { sentinel: { type: 'string' } } },
+    })
+    const out = await resolveSchemaRef('@std/article', { srcDir: dir })
+    expect(out.fields.sentinel).toEqual({ type: 'string' })
+  })
+
   it("rejects '@uniweb/<name>' as the reserved system namespace, pointing to '@std'", async () => {
     await expect(resolveSchemaRef('@uniweb/person', { srcDir: dir })).rejects.toThrow(
       /reserved platform system namespace.*Use '@std\/person'/
