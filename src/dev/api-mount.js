@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
@@ -45,19 +45,29 @@ import yaml from 'js-yaml'
  * too, and would exercise CORS and third-party-cookie rules that production does
  * not have — so a problem found that way might not be a real one.
  *
+ * ## ⛔ Registered SYNCHRONOUSLY, and that is not a style choice
+ *
+ * Vite adds middleware registered during `configureServer` BEFORE its own — but
+ * only what is registered before that hook returns. An `await` first, and the
+ * middleware lands after the SPA fallback, which answers every path with
+ * `index.html`: the API returns a 200 of HTML, the client fails to parse it, and
+ * nothing in the log says why. So the config is read with `readFileSync` and the
+ * middleware goes on the stack immediately; only the module load is deferred, and
+ * the middleware awaits it on the first request.
+ *
  * @param {import('vite').ViteDevServer} server
  * @param {object} options
  * @param {string} options.root - the site directory
- * @returns {Promise<boolean>} whether a handler was mounted
+ * @returns {boolean} whether a handler was mounted
  */
-export async function mountDevApi(server, { root }) {
+export function mountDevApi(server, { root }) {
   // ⛔ Read from the RAW site.yml, never from the collected `config`. `$`-prefixed
   // keys are stripped from the payload precisely because they are local to a
   // checkout — so the one place that needs this one goes to the file. That is the
   // rule working: if it were readable from `config`, it would also be published.
   let site
   try {
-    site = yaml.load(await readFile(join(root, 'site.yml'), 'utf8')) || {}
+    site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8')) || {}
   } catch {
     return false
   }
@@ -72,20 +82,28 @@ export async function mountDevApi(server, { root }) {
     return false
   }
 
-  let handler
-  try {
-    const loaded = await server.ssrLoadModule(pathToFileURL(resolve(root, spec)).href)
-    handler = loaded?.default ?? loaded?.fetch
-  } catch (err) {
-    // ⚠️ Loud and specific. A dev API that silently fails to load looks exactly
-    // like a backend that is refusing every request, and a developer debugs their
-    // own client for an hour before finding a typo in a path.
-    console.error(`[dev-api] could not load '${spec}': ${err.message}`)
-    return false
-  }
-  if (typeof handler !== 'function') {
-    console.error(`[dev-api] '${spec}' must default-export a function (request) => Response.`)
-    return false
+  // Loaded once, lazily, and awaited by the middleware. ⚠️ Loud and specific on
+  // failure: a dev API that silently fails to load looks exactly like a backend
+  // refusing every request, and a developer debugs their own client for an hour
+  // before finding a typo in a path.
+  let loading = null
+  const getHandler = () => {
+    if (!loading) {
+      loading = server
+        .ssrLoadModule(pathToFileURL(resolve(root, spec)).href)
+        .then((loaded) => {
+          const handler = loaded?.default ?? loaded?.fetch
+          if (typeof handler !== 'function') {
+            throw new Error(`'${spec}' must default-export a function (request) => Response`)
+          }
+          return handler
+        })
+        .catch((err) => {
+          console.error(`[dev-api] could not load '${spec}': ${err.message}`)
+          throw err
+        })
+    }
+    return loading
   }
 
   const prefix = mount.endsWith('/') ? mount.slice(0, -1) : mount
@@ -106,6 +124,7 @@ export async function mountDevApi(server, { root }) {
     }
 
     try {
+      const handler = await getHandler()
       const response = await handler(new Request(new URL(inner, origin), init))
       res.statusCode = response.status
       response.headers.forEach((value, key) => res.setHeader(key, value))

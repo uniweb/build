@@ -883,9 +883,14 @@ export function siteContentPlugin(options = {}) {
       // A site's own backend, answered locally in development. `site.yml::$devApi`
       // names a module that default-exports a fetch handler, mounted at the site's
       // own `api:` address so the address is identical in dev and in production.
-      mountDevApi(devServer, { root: resolvedSitePath }).catch((err) =>
-        console.error(`[dev-api] ${err.message}`),
-      )
+      // ⚠️ Synchronous on purpose — see mountDevApi. An await here and the
+      // middleware lands after Vite's SPA fallback, which answers the API with
+      // index.html and says nothing about why.
+      try {
+        mountDevApi(devServer, { root: resolvedSitePath })
+      } catch (err) {
+        console.error(`[dev-api] ${err.message}`)
+      }
 
       // Watch for content changes in dev mode
       if (shouldWatch) {
