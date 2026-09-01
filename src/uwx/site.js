@@ -809,6 +809,121 @@ function queriesNested(declarations, uuids = null) {
   return out
 }
 
+// ── `services` + `secrets` — a site's own service records ─────────────────────
+//
+// ⭐ THE FILE KEYS ARE `$services` / `$secrets`, NOT `services` / `secrets`, and the
+// `$` is load-bearing rather than decorative. `site.yml::services` is ALREADY TAKEN,
+// on the other lane: the bundle lane spreads site.yml whole into the payload, so a
+// `services:` block there lands at `config.services` — the HOST tier — which is the
+// documented way to simulate a host locally (`kit/src/utils/submitTarget.js`).
+// Reusing the name would give one key two meanings that differ per lane, which is
+// the shape of bug nobody finds.
+//
+// `$` already means "backend-scoped, round-tripped, not hand-authored" in this file
+// (`$uuid`, `$org`, `$backend`), and that is exactly what these are: a service's
+// config is bound where the service is provisioned, and arrives here by `pull`.
+//
+// ⚖️ WHAT THESE ARE NOT. A site's OWN service declarations — `search:`, `submit:`,
+// `assistant:`, `tracking:` — stay top-level `info.*` keys and are untouched. Those
+// are authored, they resolve at the SITE tier (`config.<name>`, first choice in
+// `@uniweb/core`'s `resolveService`), and moving them here would flip them to the
+// host tier, where a block's mere presence declines every service it does not name.
+// These Sections carry the services a site is PROVISIONED with — `api` above all,
+// which has no file-authored form because it is bought, not declared.
+//
+// ⛔ ABSENT IS NOT EMPTY, and the difference is destructive. The Section is
+// REPLACED by what we send, so `[]` means "drop every stored config row" while a
+// missing key means "I am not telling you about this". A project that has never
+// pulled has no `$services`, and its ordinary push must not read as a request to
+// wipe a service the operator configured in the app. So: emit the Section only when
+// the file declares the key. Clearing is available and explicit — `$services: []`.
+//
+// ⚠️ The push gate is NOT what makes this safe, though it usually catches it: its
+// tokens live in a gitignored per-clone cache, so a fresh clone pushes
+// unconditionally. Correctness has to sit here.
+
+/**
+ * `$services` / `$secrets` → Section records, or undefined when the key is absent.
+ *
+ * ⭐ PASSTHROUGH, NOT AN ALLOWLIST — the same rule and the same reason as
+ * `queriesNested` above. The field set belongs to the backend's Model, a service's
+ * `config` is opaque and per-service, and reconcile replaces `data` wholesale — so
+ * enumerating keys here would not merely fail to send a field we do not know, it
+ * would DESTROY whatever is stored under it on every push. Framework can enumerate
+ * its own vocabulary and cannot enumerate theirs; withhold ours, forward the rest.
+ *
+ * @param {*} declared - the raw `$services` / `$secrets` value from site.yml
+ * @param {(entry: object) => string|null} identify - the record's stable `$id`
+ * @param {string} label - the key name, for the one warning below
+ * @returns {object[]|undefined}
+ */
+function serviceRecords(declared, identify, label) {
+  if (declared === undefined || declared === null) return undefined
+  if (!Array.isArray(declared)) {
+    console.warn(
+      `uwx/site: \`${label}:\` must be a list of entries — ignoring a ${typeof declared}.`
+    )
+    return undefined
+  }
+  const out = []
+  for (const entry of declared) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const id = identify(entry)
+    // ⚠️ `name` is OUR OWN declared-required field, so a warning here is honest —
+    // unlike an unrecognized key, which only the server can judge. And the loss is
+    // otherwise invisible: on a replaced Section a dropped entry reads as a
+    // deliberate removal of its config row.
+    if (!id) {
+      console.warn(
+        `uwx/site: \`${label}:\` has an entry with no \`name\` — skipping it. On a replaced ` +
+          'section a dropped entry reads as a deliberate removal of its config.'
+      )
+      continue
+    }
+    const data = {}
+    for (const [key, value] of Object.entries(entry)) {
+      if (value === undefined) continue
+      data[key] = value
+    }
+    out.push(withIdentity(id, data))
+  }
+  return out
+}
+
+/** One service per `name` — the same keyspace `config.services` uses at runtime. */
+function servicesNested(siteYml) {
+  return serviceRecords(
+    siteYml.$services,
+    (e) => (typeof e.name === 'string' && e.name ? e.name : null),
+    '$services'
+  )
+}
+
+/**
+ * One secret per `(service, name)` — the pair the backend merges on. A site-level
+ * secret belongs to no service, so `service` is optional and the handle degrades to
+ * the bare name.
+ *
+ * ⛔ `value` IS FORWARDED VERBATIM, INCLUDING A LITERAL. A pulled secret carries the
+ * marker `#ref` meaning "a secret is set", never the value, and pushing the marker
+ * back means "leave it alone" — so the ordinary round trip sends nothing sensitive.
+ * A literal typed into the file is refused by the server, which is where that
+ * judgement belongs; framework does not strip it, because silently dropping a value
+ * an author typed would leave them believing a secret was set.
+ */
+function secretsNested(siteYml) {
+  return serviceRecords(
+    siteYml.$secrets,
+    (e) => {
+      if (typeof e.name !== 'string' || !e.name) return null
+      return typeof e.service === 'string' && e.service
+        ? `${e.service}:${e.name}`
+        : e.name
+    },
+    '$secrets'
+  )
+}
+
 /**
  * Map a file site project to the nested `@uniweb/site-content` `$`-document
  * (see the lane header above). PURE — reads the project, never mints, never writes.
@@ -957,6 +1072,25 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // secret store is the only right home either way.
 
   setIf(info, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
+  // ⛔ `api` IS DELIBERATELY NOT HERE, and this note exists because every comment
+  // above it argues the opposite — three services are on this allowlist precisely so
+  // an authored block cannot work on a static host and vanish on the synced one.
+  // Without this paragraph the next reader adds the missing fourth line and calls it
+  // a bug fix.
+  //
+  // ⭐ `api` is the one service a site does not AUTHOR. It is a real backend that is
+  // provisioned and paid for, so its address is the host's to supply — it arrives as
+  // `config.services.api` and `@uniweb/api` reads it there (`resolveBase`). An
+  // authored `api:` is the SITE tier, which outranks the host permanently.
+  //
+  // ⇒ Carrying it would turn a local-dev override into a production one the moment
+  // someone pushed: the host would store `info.api` and serve it back as `config.api`,
+  // which wins over the address of the backend the site actually has. The vanish on
+  // this lane is the correct behaviour, not the bug the comments above describe —
+  // there, a dropped block leaves a site with NO endpoint; here it leaves the site
+  // with the RIGHT one.
+  //
+  // The provisioned record rides the `$services` section instead (see servicesNested).
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
   // ⛔ `app` IS RETIRED — do not reintroduce it, in either direction. It carried an
@@ -1023,6 +1157,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
   doc.queries = queriesNested(colConfig.declarations, opts.queryUuids)
+  // Emitted ONLY when the file declares the key — see the header above
+  // `serviceRecords`: on a replaced Section, absent and empty are different
+  // requests and one of them is destructive.
+  const services = servicesNested(siteYml)
+  if (services) doc.services = services
+  const secrets = secretsNested(siteYml)
+  if (secrets) doc.secrets = secrets
   return doc
 }
 

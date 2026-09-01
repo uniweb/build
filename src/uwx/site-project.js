@@ -207,6 +207,32 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
     : []
   if (extensions.length > 0) siteChanges.extensions = extensions
 
+  // services[] → site.yml::$services · secrets[] → site.yml::$secrets.
+  //
+  // ⭐ The `$` prefix, and not the bare name, for the reason spelled out in
+  // `uwx/site.js`: `site.yml::services` already means "pretend a host offers these"
+  // on the bundle lane, and one key cannot mean two things.
+  //
+  // ⭐ `$id` is DROPPED — it is derived (a service's `name`; a secret's
+  // `service:name` pair), so writing it back would put a redundant handle in the
+  // author's file and invite them to edit the one field that must not drift from
+  // the fields it is derived from. Same call as `extensions` above.
+  //
+  // ⛔ Everything else rides VERBATIM, `config` included: it is opaque, per-service
+  // and will grow, so projecting a known subset would quietly drop whatever the
+  // service gained since this line was written — and the next push would then send
+  // the truncated version back as authoritative.
+  //
+  // ⚠️ An EMPTY section is written as an empty list, not skipped. `[]` is a real
+  // state — "this site has no service rows" — and it is the state a `pull` must be
+  // able to deliver after the last one was removed. Skipping would leave a stale
+  // `$services` on disk that the next push would resurrect.
+  for (const [section, ymlKey] of [['services', '$services'], ['secrets', '$secrets']]) {
+    const records = document?.[section]
+    if (!Array.isArray(records)) continue
+    siteChanges[ymlKey] = records.map(({ $id: _id, ...fields }) => fields)
+  }
+
   const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
 
   // theme (whole object) → theme.yml.

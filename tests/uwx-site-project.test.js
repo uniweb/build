@@ -869,6 +869,138 @@ describe('info.favicon / info.assets (A5)', () => {
 //     declare, so every push of every site fails, not just this one;
 //   - projecting it again is SILENT — a stray key reappears in the author's
 //     site.yml, and the next push is the loud half.
+describe('$services / $secrets — the service records a site is provisioned with', () => {
+  const write = (yml) => {
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(join(src, 'site.yml'), yml)
+    return src
+  }
+
+  it('omits both sections entirely when the file declares neither', async () => {
+    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n"))
+    // ⛔ Not `[]`. The section is REPLACED by what we send, so an empty list asks the
+    // backend to drop every stored config row — which is what an ordinary push from a
+    // project that has never pulled would then do to a service configured in the app.
+    expect('services' in document).toBe(false)
+    expect('secrets' in document).toBe(false)
+  })
+
+  it('an explicit empty list IS sent — clearing is available, just never implicit', async () => {
+    const document = await siteProjectToDocument(
+      write("name: S\nfoundation: '@a/base'\n$services: []\n")
+    )
+    expect(document.services).toEqual([])
+  })
+
+  it('forwards a service verbatim, treating `config` as opaque', async () => {
+    const document = await siteProjectToDocument(
+      write(
+        "name: S\nfoundation: '@a/base'\n" +
+          '$services:\n' +
+          '  - name: api\n' +
+          '    config:\n' +
+          '      grade: small\n' +
+          '      auth:\n' +
+          '        providers: [google]\n' +
+          '      billing:\n' +
+          '        currency: CAD\n' +
+          '      somethingAddedLater: 7\n'
+      )
+    )
+    expect(document.services).toEqual([
+      {
+        $id: 'api',
+        name: 'api',
+        config: {
+          grade: 'small',
+          auth: { providers: ['google'] },
+          billing: { currency: 'CAD' },
+          // The point of the passthrough: a key this emitter has never heard of
+          // survives. An allowlist would delete it from the store on every push.
+          somethingAddedLater: 7
+        }
+      }
+    ])
+  })
+
+  it('keys a secret by (service, name), and by the bare name when site-level', async () => {
+    const document = await siteProjectToDocument(
+      write(
+        "name: S\nfoundation: '@a/base'\n" +
+          '$secrets:\n' +
+          '  - service: api\n' +
+          '    name: stripe_key\n' +
+          "    value: '#ref'\n" +
+          '    consumer: leaseholder\n' +
+          '  - name: site_wide\n'
+      )
+    )
+    expect(document.secrets).toEqual([
+      {
+        $id: 'api:stripe_key',
+        service: 'api',
+        name: 'stripe_key',
+        // The marker means "a secret is set"; pushing it back means "leave it alone".
+        value: '#ref',
+        consumer: 'leaseholder'
+      },
+      { $id: 'site_wide', name: 'site_wide' }
+    ])
+  })
+
+  it('skips an entry with no name rather than sending an unkeyed record', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const document = await siteProjectToDocument(
+      write("name: S\nfoundation: '@a/base'\n$services:\n  - config: { grade: small }\n")
+    )
+    expect(document.services).toEqual([])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('leaves site.yml::services alone — it is the other lane, and the other tier', async () => {
+    // `services:` (no `$`) simulates a HOST offer on the bundle lane, where config is
+    // site.yml spread whole. It must not be mistaken for the site's own records.
+    const document = await siteProjectToDocument(
+      write("name: S\nfoundation: '@a/base'\nservices:\n  submit:\n    endpoint: /forms\n")
+    )
+    expect('services' in document).toBe(false)
+    expect(document.info.services).toBeUndefined()
+  })
+
+  it('projects both sections back under the $ keys, dropping the derived $id', () => {
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({
+      document: {
+        info: { name: 'S', foundation: '@a/base' },
+        services: [{ $id: 'api', name: 'api', config: { grade: 'small' } }],
+        secrets: [{ $id: 'api:k', service: 'api', name: 'k', value: '#ref' }]
+      },
+      siteRoot: dest
+    })
+    const yml = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+    expect(yml.$services).toEqual([{ name: 'api', config: { grade: 'small' } }])
+    expect(yml.$secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
+  })
+
+  it('round-trips produce → project → produce unchanged', async () => {
+    const src = write(
+      "name: S\nfoundation: '@a/base'\n" +
+        '$services:\n  - name: api\n    config: { grade: small }\n' +
+        "$secrets:\n  - service: api\n    name: k\n    value: '#ref'\n"
+    )
+    const first = await siteProjectToDocument(src)
+    const dest = join(dir, 'dest2')
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({ document: first, siteRoot: dest })
+    const second = await siteProjectToDocument(dest)
+    expect(second.services).toEqual(first.services)
+    expect(second.secrets).toEqual(first.secrets)
+  })
+})
+
 describe('info.app — retired, and must not come back', () => {
   it('does not emit info.app even when site.yml still carries an app: key', async () => {
     const src = join(dir, 'src')
