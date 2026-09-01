@@ -959,11 +959,17 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   setIf(info, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
-  // `app` — the deployment's `@uniweb/app-spec` reference (a bare uuid string),
-  // bound when the site is hosted as a composite. Authored config that round-trips
-  // verbatim/opaque (like `foundation`), so a pull→edit→push preserves it; it is
-  // deployment-LOCAL (not portable across deployments). (uwx-format.md → info.app.)
-  setIf(info, 'app', siteYml.app)
+  // ⛔ `app` IS RETIRED — do not reintroduce it, in either direction. It carried an
+  // opaque uuid naming a separate entity a host bound to the site; that entity is
+  // gone, a site's services belong to the site itself, and NOTHING replaces the key.
+  //
+  // ⚠️ Removing the emit is the FIRST of two steps and the order is forced: a host
+  // refuses a key it does not declare, so the producer stops sending before the
+  // declaration is dropped. The reverse order fails every push in between.
+  //
+  // ✅ Unobservable, because nothing ever originated the key — no template writes
+  // `site.yml::app`. The line round-tripped a value that was never set.
+  // (uwx-format.md → info.app.)
   // `template: true` designates this site as a clonable SITE-TEMPLATE: on push the
   // backend applies a clonability designation to this site-content entity (it is
   // NOT a registry artifact). Verbatim; absent → a normal (non-template) site.

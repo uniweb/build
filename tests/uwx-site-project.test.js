@@ -859,30 +859,47 @@ describe('info.favicon / info.assets (A5)', () => {
   })
 })
 
-describe('info.app — deploy-composite @uniweb/app-spec ref (deploy-push-publish)', () => {
-  it('round-trips site.yml::app (a bare uuid) verbatim through produce → project', async () => {
-    const APP_UUID = '019e3c01-0000-7c0d-8a03-000000000002'
+// ⛔ `info.app` is RETIRED. It named a separate entity a host bound to the site;
+// that entity is gone and NOTHING replaces it. (uwx-format.md → info.app.)
+//
+// These two cases used to assert the round trip; they now assert its absence, in
+// BOTH directions, because reintroducing it fails differently on each side:
+//
+//   - producing it again is LOUD but late — a host refuses a key it does not
+//     declare, so every push of every site fails, not just this one;
+//   - projecting it again is SILENT — a stray key reappears in the author's
+//     site.yml, and the next push is the loud half.
+describe('info.app — retired, and must not come back', () => {
+  it('does not emit info.app even when site.yml still carries an app: key', async () => {
     const src = join(dir, 'src')
     mkdirSync(src, { recursive: true })
-    writeFileSync(join(src, 'site.yml'), `name: S\nfoundation: '@a/base'\napp: '${APP_UUID}'\n`)
-
-    // produce: site.yml::app → info.app (carried verbatim, like foundation)
-    const document = await siteProjectToDocument(src)
-    expect(document.info.app).toBe(APP_UUID)
-
-    // project: info.app → site.yml::app (authored config round-trips)
-    const dest = join(dir, 'dest')
-    mkdirSync(dest, { recursive: true })
-    siteInfoToConfig({ document, siteRoot: dest })
-    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).app).toBe(APP_UUID)
-  })
-
-  it('a site without app: produces no info.app (setIf skips undefined)', async () => {
-    const src = join(dir, 'src')
-    mkdirSync(src, { recursive: true })
-    writeFileSync(join(src, 'site.yml'), "name: S\nfoundation: '@a/base'\n")
+    // An old project that was pulled while the key still round-tripped. The key on
+    // disk is not an instruction to send it.
+    writeFileSync(
+      join(src, 'site.yml'),
+      "name: S\nfoundation: '@a/base'\napp: '019e3c01-0000-7c0d-8a03-000000000002'\n"
+    )
     const document = await siteProjectToDocument(src)
     expect(document.info.app).toBeUndefined()
+    expect('app' in document.info).toBe(false)
+  })
+
+  it('does not write app: into site.yml when a document still carries info.app', async () => {
+    // A backend that has not yet dropped the declaration may still return the field.
+    // The projection is an explicit allowlist, so an unlisted key is simply ignored.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({
+      document: {
+        info: {
+          name: 'S',
+          foundation: '@a/base',
+          app: '019e3c01-0000-7c0d-8a03-000000000002'
+        }
+      },
+      siteRoot: dest
+    })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).app).toBeUndefined()
   })
 })
 
