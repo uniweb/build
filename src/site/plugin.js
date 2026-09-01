@@ -200,6 +200,7 @@ async function processDevSectionFetches(sections, fetchOptions) {
 }
 import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
 import { mergeTranslations } from '../i18n/merge.js'
+import { mountDevApi } from '../dev/api-mount.js'
 
 /*
  * `applyRouteTranslation` now comes from `@uniweb/projections` (imported
@@ -878,6 +879,13 @@ export function siteContentPlugin(options = {}) {
 
     configureServer(devServer) {
       server = devServer
+
+      // A site's own backend, answered locally in development. `site.yml::$devApi`
+      // names a module that default-exports a fetch handler, mounted at the site's
+      // own `api:` address so the address is identical in dev and in production.
+      mountDevApi(devServer, { root: resolvedSitePath }).catch((err) =>
+        console.error(`[dev-api] ${err.message}`),
+      )
 
       // Watch for content changes in dev mode
       if (shouldWatch) {
