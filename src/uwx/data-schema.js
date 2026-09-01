@@ -78,7 +78,8 @@ export function isContentBodyField(field) {
  * @param {(ref: string) => string} [opts.resolveOptions] - maps an `options`
  *   (item_ref) ref to its full `@org/model/<section>` path. Falls back to
  *   `resolveName` (model only) when not supplied.
- * @returns {Object} the declaration (`{ name, description?, linkable?, sections }`).
+ * @returns {Object} the declaration (`{ name, label?, description?, source_locale?,
+ *          creatable_by?, linkable?, sections }`).
  */
 export function toDataSchemaDeclaration(normalized, { name, resolveName, resolveOptions } = {}) {
   if (!name) throw new Error('toDataSchemaDeclaration: a registry name is required')
@@ -100,10 +101,40 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   }
 
   const decl = { name }
+  if (normalized.label) decl.label = normalized.label
   if (normalized.description) decl.description = normalized.description
-  // A brief-less model has no card to hydrate as an entity_ref target, so it is
-  // not linkable; a model with a brief defaults to linkable (omit ⇒ true).
-  if (!brief) decl.linkable = false
+  if (normalized.sourceLocale) decl.source_locale = normalized.sourceLocale
+  // `creatable_by` — who may instantiate this Model. Omitted when the author
+  // declares nothing, because the registry's own default (open) is the absent
+  // meaning; sending it explicitly would state a policy the author did not.
+  if (normalized.creatableBy) decl.creatable_by = normalized.creatableBy
+
+  // `linkable` — DERIVED AND AUTHORED, and the two compose in one direction only.
+  //
+  // A brief-less model has no card to hydrate as an `entity_ref` target, so it
+  // cannot be linkable whatever it says; a model with a brief is linkable by
+  // default (omit ⇒ true). ⇒ **The derivation is a ceiling and the authored value
+  // may only lower it.** An author may say `linkable: false` on a model with a
+  // brief — a real choice, "do not let other models point at this" — and that is
+  // honoured.
+  //
+  // ⛔ The contradiction is refused rather than silently resolved: `linkable: true`
+  // on a brief-less model asks for something that cannot exist, and quietly
+  // ignoring it is how an author comes to believe a ref target works. Naming it
+  // costs one line and the message says which half to change.
+  if (!brief) {
+    if (normalized.linkable === true) {
+      throw new Error(
+        `Data schema '${name}': 'linkable: true' needs a brief section — a model with no brief ` +
+          `has no card to hydrate when another model references it. Mark a section 'brief: true', ` +
+          `or drop 'linkable'.`
+      )
+    }
+    decl.linkable = false
+  } else if (normalized.linkable === false) {
+    decl.linkable = false
+  }
+
   decl.sections = sections
   return decl
 }

@@ -705,3 +705,78 @@ describe('toDataSchemaDeclaration — leafless sections are refused', () => {
     ).toThrow(/section 'empty' declares no fields/)
   })
 })
+
+/**
+ * Model-level keys reach the declaration — and `linkable` composes in one direction.
+ *
+ * The validator half is `@uniweb/schemas`' own suite; this is the lowering: what
+ * actually lands on the wire for the registry to store.
+ */
+describe('model-level keys on the declaration', () => {
+  const normalize = (extra) =>
+    validateAndNormalizeSchema(
+      {
+        name: '@demo/session',
+        sections: { identity: { brief: true, fields: { title: { type: 'string' } } } },
+        ...extra
+      },
+      '@demo/session'
+    )
+
+  it('emits label, description, source_locale and creatable_by', () => {
+    const decl = toDataSchemaDeclaration(
+      normalize({
+        label: 'Session',
+        description: 'A talk.',
+        source_locale: 'en',
+        creatable_by: 'unit_members'
+      }),
+      { name: '@demo/session' }
+    )
+    expect(decl.label).toBe('Session')
+    expect(decl.description).toBe('A talk.')
+    expect(decl.source_locale).toBe('en')
+    expect(decl.creatable_by).toBe('unit_members')
+  })
+
+  it('omits creatable_by when unstated — absent is the registry default, and saying it would state a policy the author did not', () => {
+    const decl = toDataSchemaDeclaration(normalize({}), { name: '@demo/session' })
+    expect('creatable_by' in decl).toBe(false)
+  })
+
+  it('honours an authored `linkable: false` on a model that has a brief', () => {
+    // A real choice — "do not let other models point at this" — and distinct from
+    // the derived case below.
+    const decl = toDataSchemaDeclaration(normalize({ linkable: false }), { name: '@demo/session' })
+    expect(decl.linkable).toBe(false)
+  })
+
+  it('derives linkable:false for a brief-less model, with nothing authored', () => {
+    const decl = toDataSchemaDeclaration(
+      validateAndNormalizeSchema(
+        { name: '@demo/log', sections: { entries: { many: true, fields: { at: { type: 'string' } } } } },
+        '@demo/log'
+      ),
+      { name: '@demo/log' }
+    )
+    expect(decl.linkable).toBe(false)
+  })
+
+  it('refuses `linkable: true` on a brief-less model instead of ignoring it', () => {
+    // ⛔ The contradiction is named rather than silently resolved: quietly dropping
+    // it is how an author comes to believe a ref target works when it cannot.
+    expect(() =>
+      toDataSchemaDeclaration(
+        validateAndNormalizeSchema(
+          {
+            name: '@demo/log',
+            linkable: true,
+            sections: { entries: { many: true, fields: { at: { type: 'string' } } } }
+          },
+          '@demo/log'
+        ),
+        { name: '@demo/log' }
+      )
+    ).toThrow(/needs a brief section/)
+  })
+})
