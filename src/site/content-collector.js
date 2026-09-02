@@ -159,13 +159,44 @@ function buildVersionMetadata(detectedVersions, pageConfig = {}) {
 }
 
 /**
- * Parse YAML string using js-yaml
+ * Malformed YAML met during the current collect.
+ *
+ * ⛔ **A PARSE FAILURE USED TO BE A `console.warn` AND AN EMPTY OBJECT**, and
+ * this function reads `site.yml`, `page.yml`, `folder.yml`, `theme.yml` and
+ * every section's frontmatter — i.e. every configuration surface an author
+ * writes. So a single typo silently discarded that file's entire contribution:
+ * page order, nesting, `sections:`, `data:` declarations, theme. **The build
+ * succeeded and shipped a site missing what the author asked for**, with one
+ * line on stderr that named no file.
+ *
+ * ⭐ **Collected rather than thrown at the point of failure, on purpose.**
+ * Throwing from `parseYaml` would end the collect at the FIRST bad file, so an
+ * author with three typos fixes one, rebuilds, and learns about the next.
+ * Accumulating lets `collectSiteContent` report every one at once and then
+ * decide, which is also where the `strict` flag already lives.
+ *
+ * ⚠️ **Module-scoped, so it assumes one collect at a time in a process.** True
+ * of the production path (`build-site-data.js` runs one) and harmless in dev,
+ * where the outcome is a warning either way and an interleaved rebuild can only
+ * mis-attribute a message. Do not read this as a general-purpose registry.
  */
-function parseYaml(yamlString) {
+let yamlFailures = []
+
+/**
+ * Parse YAML, recording a failure against the file it came from.
+ *
+ * @param {string} yamlString
+ * @param {string} source - path or label of the file this text came from. It is
+ *   the whole point of the record: the old message named nothing, so an author
+ *   with a typo learned only that *some* YAML somewhere was bad.
+ * @returns {Object} the parsed value, or `{}` when it could not be parsed
+ */
+function parseYaml(yamlString, source = '<unknown>') {
   try {
     return yaml.load(yamlString) || {}
   } catch (err) {
-    console.warn('[content-collector] YAML parse error:', err.message)
+    yamlFailures.push({ source, message: err.message })
+    console.warn(`[content-collector] YAML parse error in ${source}: ${err.message}`)
     return {}
   }
 }
@@ -176,7 +207,7 @@ function parseYaml(yamlString) {
 async function readYamlFile(filePath) {
   try {
     const content = await readFile(filePath, 'utf8')
-    return parseYaml(content)
+    return parseYaml(content, filePath)
   } catch (err) {
     if (err.code === 'ENOENT') return {}
     throw err
@@ -806,7 +837,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   if (content.trim().startsWith('---')) {
     const parts = content.split('---\n')
     if (parts.length >= 3) {
-      frontMatter = parseYaml(parts[1])
+      frontMatter = parseYaml(parts[1], filePath)
       markdown = parts.slice(2).join('---\n')
     }
   }
@@ -2151,6 +2182,11 @@ async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
 export async function collectSiteContent(sitePath, options = {}) {
   const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/', strict = false } = options
 
+  // Fresh accounting per collect — see `yamlFailures`. A dev rebuild runs this
+  // function again, so without the reset a typo fixed three saves ago would
+  // still be counted.
+  yamlFailures = []
+
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
 
@@ -2405,6 +2441,38 @@ export async function collectSiteContent(sitePath, options = {}) {
   // something an `export` should publish.
   for (const key of Object.keys(runtimeSiteConfig)) {
     if (key.startsWith('$')) delete runtimeSiteConfig[key]
+  }
+
+  // ⛔ **A production build does not ship a site whose config failed to parse.**
+  // `strict` is already this codebase's word for "this is a real build" — set by
+  // `build-site-data.js` and by `plugin.js` as `strict: isProduction` — so the
+  // decision lands where the flag already is, rather than in `parseYaml`, which
+  // cannot know.
+  //
+  // ⭐ Every bad file at once, not the first. Ending the collect at the first
+  // failure would make an author with three typos fix one, rebuild, and meet the
+  // next; the list is the difference between one round trip and three.
+  //
+  // ⚖️ **Dev deliberately continues.** The author is mid-keystroke and a
+  // half-typed `page.yml` must not blank their site — they have the per-file
+  // warning above, and the next save fixes it. The asymmetry is the same one
+  // `plugin.js` already draws around the collect as a whole (`if (isProduction)
+  // throw err`); this puts the author's own files on the same footing as the
+  // machinery around them.
+  // ⚠️ De-duplicated by source: several call sites legitimately read the same
+  // file (a directory's `page.yml` is read once as its own config and again when
+  // its parent resolves nesting), so the raw list counts one typo twice and
+  // "2 files" would be a lie about the author's tree.
+  const distinctFailures = [...new Map(yamlFailures.map((f) => [f.source, f])).values()]
+  if (distinctFailures.length > 0 && strict) {
+    const lines = distinctFailures.map((f) => `  ${f.source}\n    ${f.message}`)
+    throw new Error(
+      `${distinctFailures.length} file${distinctFailures.length === 1 ? '' : 's'} could not be parsed as YAML:\n` +
+        `${lines.join('\n')}\n\n` +
+        `  Each one contributed NOTHING to this build — page order, nesting,\n` +
+        `  sections:, data: and theme settings in these files were dropped.\n` +
+        `  Fix them and rebuild; the dev server reports the same files without failing.`
+    )
   }
 
   return {
