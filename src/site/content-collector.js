@@ -2027,7 +2027,14 @@ export async function loadFoundationInfo(foundationPath) {
       const layoutNames = new Set(schema._layouts ? Object.keys(schema._layouts) : [])
       return { vars, layoutNames }
     } catch (err) {
-      console.warn('[content-collector] Failed to load foundation schema:', err.message)
+      // Names the file, because "failed to load foundation schema" sent a reader
+      // looking for a foundation and the answer is one specific artifact — and
+      // `schema.json` is GENERATED, so an unparseable one is a broken build
+      // output rather than something an author typed.
+      console.warn(
+        `[content-collector] Could not read ${schemaPath}: ${err.message}\n` +
+          `[content-collector]   Falling back to the foundation's source config for theme vars.`
+      )
       // Fall through to the source-config fallback below.
     }
   }
@@ -2046,7 +2053,22 @@ export async function loadFoundationInfo(foundationPath) {
     const config = await loadFoundationConfig(srcDir)
     return { vars: config?.vars || {}, layoutNames: new Set() }
   } catch (err) {
-    console.warn('[content-collector] Failed to load foundation source config:', err.message)
+    // ⛔ Both tiers have now failed, so this is the message that matters, and it
+    // used to name neither the foundation nor the consequence. The site still
+    // BUILDS — which is why this is a warning and not a throw — but it builds
+    // with no foundation theme vars at all, and the symptom shows up as layout
+    // rather than as an error: components using `py-[var(--section-padding-y)]`
+    // render with collapsed spacing and nothing says why.
+    console.warn(
+      `[content-collector] Could not read the foundation's declared theme vars from ` +
+        `${foundationPath}: ${err.message}\n` +
+        `[content-collector]   Continuing WITHOUT them — the wrapped error above is about ` +
+        `loading that config, not about this build stopping.\n` +
+        `[content-collector]   Every foundation theme var is therefore undefined, and sections ` +
+        `styled with var(--…) will render with collapsed spacing.\n` +
+        `[content-collector]   Building the foundation (\`uniweb build\` in it) regenerates ` +
+        `dist/meta/schema.json, which is read first.`
+    )
     return { vars: {}, layoutNames: new Set() }
   }
 }
