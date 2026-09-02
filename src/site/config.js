@@ -31,6 +31,7 @@ import {
 import { importMapPlugin } from '../import-map-plugin.js'
 import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
+import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
 import { detectFoundationType } from './foundation-ref.js'
 
 /**
@@ -191,7 +192,7 @@ export async function defineSiteConfig(options = {}) {
   // Plugin to ensure foundation entry file exists (for bundled mode with local foundation)
   const ensureFoundationEntryPlugin = !isRuntimeMode && foundationInfo.type === 'local' ? {
     name: 'uniweb:ensure-foundation-entry',
-    async config() {
+    async config(_config, env) {
       const srcDir = resolveFoundationSrcPath(foundationInfo.path)
       const entryPath = join(srcDir, '_entry.generated.js')
 
@@ -202,8 +203,50 @@ export async function defineSiteConfig(options = {}) {
         try {
           await generateEntryPoint(srcDir, entryPath)
         } catch (err) {
-          console.warn('[site] Failed to generate foundation entry:', err.message)
+          // ⛔ **Swallowing this on a BUILD is how you get vite's opaque
+          // `Failed to resolve entry for package "<name>"` 50ms later**: we
+          // decline to write the entry, say so in a `console.warn` that scrolls
+          // past, and hand vite a package whose `main` points at a file nobody
+          // created. The message naming the actual cause is the one we printed
+          // and discarded.
+          //
+          // ⚖️ **But only when there is no entry to fall back on.** If a previous
+          // build left one, it is stale rather than absent and the build can
+          // still complete — turning that into a hard failure would break a
+          // build that works today, which is a worse trade than a loud warning.
+          // Dev keeps warning either way: a transient error mid-session must not
+          // kill a running server.
+          const haveFallback = existsSync(entryPath)
+          if (env?.command === 'build' && !haveFallback) {
+            throw new Error(
+              `[site] Could not generate the foundation entry for "${foundationInfo.name}".\n` +
+                `  ${err.message}\n\n` +
+                `  ${entryPath} does not exist, so the build cannot resolve the\n` +
+                `  foundation. Fixing the error above is the fix; vite's next\n` +
+                `  message about resolving package "${foundationInfo.name}" is a\n` +
+                `  symptom of this one.`,
+              { cause: err }
+            )
+          }
+          console.warn(
+            `[site] ⛔ Failed to generate foundation entry: ${err.message}` +
+              (haveFallback
+                ? `\n[site]    Continuing with the EXISTING ${entryPath}, which is now STALE.`
+                : '')
+          )
         }
+
+        // Do we and vite agree on which directory that was? Two resolutions run
+        // here — ours by path, vite's by the bare specifier below
+        // (`alias['#foundation'] = foundationInfo.name`) — and when they diverge
+        // the quiet outcome is worse than the loud one: a stale entry in vite's
+        // directory builds the WRONG foundation and reports success.
+        const agreement = checkFoundationResolution({
+          name: foundationInfo.name,
+          generatedInto: srcDir,
+          siteRoot,
+        })
+        if (!agreement.ok) console.warn(`\n${agreement.message}\n`)
       }
     },
 
