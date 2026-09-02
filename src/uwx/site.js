@@ -251,7 +251,11 @@ function buildPageData(config, ctx) {
     //
     // `schema` (the query name) is BOTH the content.data key and part of the
     // dataStore cache key (deriveCacheKey hashes {path,url,endpoint,schema,…};
-    // the shorthand is ignored). Mirrors the static build's parseFetchConfig.
+    // the shorthand is ignored). Mirrors the static build's parseFetchConfig —
+    // ⚠️ which it did NOT until 2026-09-02. This line emitted `query` and that
+    // one did not, for the same declaration, so `resolveQuerySource` fired on a
+    // published site and never on a `--link`-deployed one: same site, two verbs,
+    // two data sources. The claim was here the whole time; the mirroring was not.
     // ⭐ `query`, END TO END — no crossing. An earlier version emitted `collection`
     // here on the belief that this field was the backend's to name. MEASURED
     // otherwise: framework already ships `transform`, `detailPage`, `merge` and

@@ -349,8 +349,28 @@ export function parseFetchConfig(fetch) {
     warnUnknownFetchKeys(fetch, 'query')
     if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
+      // ⭐ **`query` IS EMITTED, and that is what makes the two producers agree.**
+      // The sync lane has always emitted it (`uwx/site.js`) and this one did not,
+      // for the same declaration — so `resolveQuerySource` fired on a published
+      // site and never on a `--link`-deployed one. Measured 2026-09-02 against a
+      // host declaring `config.records`:
+      //
+      //   --link   endpoint undefined, path /data/articles.json   ← the STATIC file
+      //   publish  endpoint /_api/q/articles                       ← the live lane
+      //
+      // Same site, same declaration, two verbs, two data sources. Publishing to a
+      // platform that declares a live lane is supposed to READ from it — the
+      // compiled `/data/*.json` is the escape hatch for entities with no known
+      // data schema, which never sync, not a second way to serve the ones that do.
+      //
+      // ⚠️ Not in the cache key: `deriveCacheKey` hashes {path,url,endpoint,schema,
+      // transform}, so adding this moves no cached entry.
+      query: fetch.query,
       path: queryDataUrl(fetch.query),
       url: undefined,
+      // The BINDING KEY — the `content.data.<key>` a component reads. Defaults to
+      // the query name, which is why the two were confusable; `query` above now
+      // carries the identity so this one only has to carry the key.
       schema: fetch.schema || fetch.query,
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
