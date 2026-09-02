@@ -165,7 +165,7 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
   } catch {
     // new file
   }
-  const { frontmatter, body: existingBody } = parseFrontmatter(existing)
+  const { frontmatter, body: existingBody } = parseFrontmatter(existing, filePath)
 
   const nextFrontmatter = { ...frontmatter }
   if (params) {

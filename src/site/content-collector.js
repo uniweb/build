@@ -36,6 +36,7 @@ import { parseFetchConfig } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
+import { parseFrontmatter } from '../utils/frontmatter.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -833,13 +834,22 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   let frontMatter = {}
   let markdown = content
 
-  // Extract frontmatter
-  if (content.trim().startsWith('---')) {
-    const parts = content.split('---\n')
-    if (parts.length >= 3) {
-      frontMatter = parseYaml(parts[1], filePath)
-      markdown = parts.slice(2).join('---\n')
-    }
+  // Extract frontmatter through the ONE splitter (`utils/frontmatter.js`),
+  // rather than re-implementing the `---\n` split for a fourth time.
+  //
+  // ⭐ **The catch is the point, not a workaround.** That function always
+  // throws, and its header says a caller wanting tolerance should say so with a
+  // `try` — explicit and local, instead of a helper that swallowed on behalf of
+  // everyone. This IS that caller: a collect accumulates failures so it can
+  // report every bad file at once and let `strict` decide, which is a policy
+  // only the collect can hold.
+  try {
+    const parsed = parseFrontmatter(content, filePath)
+    frontMatter = parsed.frontmatter
+    markdown = parsed.body
+  } catch (err) {
+    yamlFailures.push({ source: filePath, message: err.message })
+    console.warn(`[content-collector] ${err.message}`)
   }
 
   const { type, component, preset, input, props, fetch, data, id: frontmatterId, ...params } = frontMatter
@@ -2443,22 +2453,27 @@ export async function collectSiteContent(sitePath, options = {}) {
     if (key.startsWith('$')) delete runtimeSiteConfig[key]
   }
 
-  // ⛔ **A production build does not ship a site whose config failed to parse.**
-  // `strict` is already this codebase's word for "this is a real build" — set by
-  // `build-site-data.js` and by `plugin.js` as `strict: isProduction` — so the
-  // decision lands where the flag already is, rather than in `parseYaml`, which
-  // cannot know.
+  // ⛔ **A BUILD does not ship a site whose config failed to parse.**
+  // `strict` is already this codebase's word for it — `build-site-data.js` sets
+  // it, and `plugin.js` passes `strict: isProduction` — so the decision lands
+  // where the flag already is, rather than in `parseYaml`, which cannot know.
+  //
+  // ⚠️ **`isProduction` is a misnomer worth not repeating: it is
+  // `config.command === 'build'`** (`plugin.js:788`), i.e. a vite BUILD rather
+  // than a dev server. It says nothing about deployment environments, which
+  // backend a site talks to, or `NODE_ENV`. Both build lanes get it — `export`
+  // and `deploy --host` through vite, `publish` through `build-site-data.js` —
+  // and only `uniweb dev` does not.
   //
   // ⭐ Every bad file at once, not the first. Ending the collect at the first
   // failure would make an author with three typos fix one, rebuild, and meet the
   // next; the list is the difference between one round trip and three.
   //
-  // ⚖️ **Dev deliberately continues.** The author is mid-keystroke and a
-  // half-typed `page.yml` must not blank their site — they have the per-file
-  // warning above, and the next save fixes it. The asymmetry is the same one
-  // `plugin.js` already draws around the collect as a whole (`if (isProduction)
-  // throw err`); this puts the author's own files on the same footing as the
-  // machinery around them.
+  // ⚖️ **The dev server deliberately continues.** The author is mid-keystroke
+  // and a half-typed `page.yml` must not blank their running site — they have
+  // the per-file warning above, and the next save fixes it. The asymmetry is the
+  // same one `plugin.js` already draws around the collect as a whole; this puts
+  // the author's own files on the same footing as the machinery around them.
   // ⚠️ De-duplicated by source: several call sites legitimately read the same
   // file (a directory's `page.yml` is read once as its own config and again when
   // its parent resolves nesting), so the raw list counts one typo twice and

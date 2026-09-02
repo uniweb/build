@@ -23,6 +23,7 @@ import { existsSync } from 'node:fs'
 import { join, relative, dirname } from 'node:path'
 import yaml from 'js-yaml'
 import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
+import { parseFrontmatter } from '../utils/frontmatter.js'
 
 // Try to import content-reader for markdown → ProseMirror conversion
 let markdownToProseMirror
@@ -42,29 +43,6 @@ try {
   })
 }
 
-/**
- * Parse YAML frontmatter from markdown content
- * @param {string} content - Raw markdown content
- * @returns {{ frontmatter: Object, body: string }}
- */
-function parseFrontmatter(content) {
-  if (!content.trim().startsWith('---')) {
-    return { frontmatter: {}, body: content }
-  }
-
-  const parts = content.split('---\n')
-  if (parts.length < 3) {
-    return { frontmatter: {}, body: content }
-  }
-
-  try {
-    const frontmatter = yaml.load(parts[1]) || {}
-    const body = parts.slice(2).join('---\n')
-    return { frontmatter, body }
-  } catch {
-    return { frontmatter: {}, body: content }
-  }
-}
 
 /**
  * Normalize route for filesystem path
@@ -120,7 +98,7 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
 
     try {
       const content = await readFile(filePath, 'utf-8')
-      const { frontmatter, body } = parseFrontmatter(content)
+      const { frontmatter, body } = parseFrontmatter(content, filePath)
 
       // Convert markdown body to ProseMirror
       const proseMirrorContent = markdownToProseMirror(body)
@@ -174,7 +152,7 @@ export async function loadFreeformRecord(item, schema, locale, localesDir) {
 
   try {
     const content = await readFile(filePath, 'utf-8')
-    const { frontmatter, body } = parseFrontmatter(content)
+    const { frontmatter, body } = parseFrontmatter(content, filePath)
 
     // Convert markdown body to ProseMirror (if body exists)
     const proseMirrorContent = body.trim() ? markdownToProseMirror(body) : null

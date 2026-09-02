@@ -94,7 +94,7 @@ export function backfillUuid(filePath, uuid) {
     }
     next = yaml.dump(withUuidFirst(obj && typeof obj === 'object' ? obj : {}, uuid))
   } else if (ext === '.md') {
-    const { frontmatter, body } = parseFrontmatter(text)
+    const { frontmatter, body } = parseFrontmatter(text, filePath)
     next = `---\n${yaml.dump(withUuidFirst(frontmatter, uuid))}---\n${body}`
   } else {
     return { status: 'deferred', message: `${ext || '(no extension)'} back-fill is not yet implemented` }

@@ -27,31 +27,19 @@ import { parseBibtex } from '@citestyle/bibtex'
 
 const SOURCE_EXTENSIONS = new Set(['.md', '.yml', '.yaml', '.json', '.bib'])
 
-/**
- * Split YAML frontmatter from a markdown body. Mirrors the collection
- * processor's split (`---\n` delimited) so a record read here re-renders to the
- * same shape the back-fill writer produces. A file with no frontmatter yields an
- * empty mapping and the whole text as body.
- *
- * @param {string} raw
- * @returns {{ frontmatter: object, body: string }}
- */
-export function parseFrontmatter(raw) {
-  if (!raw.trimStart().startsWith('---')) {
-    return { frontmatter: {}, body: raw }
-  }
-  const parts = raw.split('---\n')
-  if (parts.length < 3) {
-    return { frontmatter: {}, body: raw }
-  }
-  try {
-    const frontmatter = yaml.load(parts[1]) || {}
-    const body = parts.slice(2).join('---\n')
-    return { frontmatter, body }
-  } catch {
-    return { frontmatter: {}, body: raw }
-  }
-}
+// ⭐ `parseFrontmatter` is re-exported, not reimplemented. This file had its own
+// copy whose `catch {}` returned `{ frontmatter: {}, body: raw }` — silent, and
+// with the unparsed `---` block left in the BODY, so a typo on this lane pushed
+// a record to a backend with its fields dropped and its own broken frontmatter
+// embedded as content. The shared version throws and names the file; a caller
+// that wants tolerance says so with a `try` (see `records-project.js`'s
+// `readFileUuid`, which correctly treats "does not parse" as "not a match").
+// ⛔ Imported AND re-exported: this module calls `parseFrontmatter` itself
+// (below), and a bare `export … from` creates NO local binding — the same
+// trap `core/src/index.js` carries a note about. It fails at runtime, not at
+// import time, so the suite is what catches it.
+import { parseFrontmatter } from '../utils/frontmatter.js'
+export { parseFrontmatter }
 
 // Format key from a file extension. Single source of the format vocabulary the
 // reader emits and the writer dispatches on.
@@ -86,7 +74,7 @@ async function readOneFile(filepath) {
   const raw = await readFile(filepath, 'utf-8')
 
   if (format === 'md') {
-    const { frontmatter, body } = parseFrontmatter(raw)
+    const { frontmatter, body } = parseFrontmatter(raw, filepath)
     const slug = frontmatter.slug || slugFromName
     return [{ slug, format, data: frontmatter, body, sourceFile: filepath, multiRecord: false }]
   }

@@ -63,7 +63,7 @@ function readFileUuid(filePath, format) {
     return null
   }
   try {
-    if (format === 'md') return parseFrontmatter(raw).frontmatter?.$uuid ?? null
+    if (format === 'md') return parseFrontmatter(raw, filePath).frontmatter?.$uuid ?? null
     const parsed = format === 'json' ? JSON.parse(raw) : yaml.load(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     return parsed.$uuid ?? null
