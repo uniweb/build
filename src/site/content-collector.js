@@ -2007,70 +2007,60 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 export async function loadFoundationInfo(foundationPath) {
   if (!foundationPath) return { vars: {}, layoutNames: new Set() }
 
-  // Try dist/meta/schema.json first (built foundation), then root schema.json
-  const distSchemaPath = join(foundationPath, 'dist', 'meta', 'schema.json')
-  const rootSchemaPath = join(foundationPath, 'schema.json')
+  // ⛔ **NOT `dist/meta/schema.json`.** That file is the EDITOR's artifact — the
+  // rich per-section declaration a visual editor needs to render parameter forms
+  // and component pickers — and it is not a source of truth for a site build.
+  // The architecture is explicit that the declaration is emitted in two shapes
+  // for two audiences (`kb/framework/architecture/site-foundation-runtime-model.md`
+  // § The two-audience schema): the lean runtime half ships INSIDE `dist/entry.js`
+  // as `capabilities`, and the rich half is for authoring tools only.
+  //
+  // Reading the editor's copy here was wrong twice over. It made a site build
+  // depend on the foundation having been BUILT, and it read a derived artifact
+  // when the source it derives from is right there — `generate-entry.js` calls
+  // these same two functions (`:197` for vars, `:287` for layouts) to produce the
+  // very `schema.json` this used to read back.
+  //
+  // ⭐ **And it made dev and build classify layouts differently.** The old
+  // fallback returned an EMPTY layout set whenever no built schema existed —
+  // "the normal state for `uniweb dev`" — and `collectLayouts` treats a
+  // `layout/<Name>/` directory as a named layout only when `<Name>` is in that
+  // set, otherwise as a folder-form area of the DEFAULT layout. So the same site
+  // rendered `layout/Wide/` as the Wide layout after a build and as a default
+  // area called "Wide" in dev. Measured 2026-09-02 before this change:
+  //   built   layouts ["default","Wide"], default areas ["footer","header"]
+  //   dev     layouts ["default"],        default areas ["Wide","footer","header"]
+  // Reading from source removes the asymmetry: there is one answer, and it does
+  // not depend on whether `dist/` happens to exist.
+  const { resolveFoundationSrcPath } = await import('../utils/foundation-source-root.js')
+  const { loadFoundationConfig, discoverLayoutsInPath } = await import('../schema.js')
+  const srcDir = resolveFoundationSrcPath(foundationPath)
 
-  const schemaPath = existsSync(distSchemaPath)
-    ? distSchemaPath
-    : existsSync(rootSchemaPath)
-      ? rootSchemaPath
-      : null
-
-  if (schemaPath) {
-    try {
-      const schemaContent = await readFile(schemaPath, 'utf8')
-      const schema = JSON.parse(schemaContent)
-      // Foundation config is in _self, support both 'vars' (new) and 'themeVars' (legacy)
-      const vars = schema._self?.vars || schema._self?.themeVars || schema.themeVars || {}
-      // Layout names from _layouts (keys are layout component names)
-      const layoutNames = new Set(schema._layouts ? Object.keys(schema._layouts) : [])
-      return { vars, layoutNames }
-    } catch (err) {
-      // Names the file, because "failed to load foundation schema" sent a reader
-      // looking for a foundation and the answer is one specific artifact — and
-      // `schema.json` is GENERATED, so an unparseable one is a broken build
-      // output rather than something an author typed.
-      console.warn(
-        `[content-collector] Could not read ${schemaPath}: ${err.message}\n` +
-          `[content-collector]   Falling back to the foundation's source config for theme vars.`
-      )
-      // Fall through to the source-config fallback below.
-    }
-  }
-
-  // No built schema.json — the normal state for `uniweb dev` on a bundled-mode
-  // site that was never built (dev doesn't build the foundation to dist/). Read
-  // the foundation's declared vars straight from its source config
-  // (main.js / foundation.js) so theme tokens like --section-padding-y are
-  // defined; without them, components using py-[var(--section-padding-y)] render
-  // with collapsed section spacing. Layouts aren't resolved from source (they
-  // need component discovery), but they aren't needed to build the theme CSS.
+  // Two independent reads, so a failure in one does not cost the other. The
+  // previous single try/catch lost the layouts when only the config was broken.
+  let vars = {}
   try {
-    const { resolveFoundationSrcPath } = await import('../utils/foundation-source-root.js')
-    const { loadFoundationConfig } = await import('../schema.js')
-    const srcDir = resolveFoundationSrcPath(foundationPath)
     const config = await loadFoundationConfig(srcDir)
-    return { vars: config?.vars || {}, layoutNames: new Set() }
+    vars = config?.vars || {}
   } catch (err) {
-    // ⛔ Both tiers have now failed, so this is the message that matters, and it
-    // used to name neither the foundation nor the consequence. The site still
-    // BUILDS — which is why this is a warning and not a throw — but it builds
-    // with no foundation theme vars at all, and the symptom shows up as layout
-    // rather than as an error: components using `py-[var(--section-padding-y)]`
-    // render with collapsed spacing and nothing says why.
     console.warn(
-      `[content-collector] Could not read the foundation's declared theme vars from ` +
-        `${foundationPath}: ${err.message}\n` +
-        `[content-collector]   Continuing WITHOUT them — the wrapped error above is about ` +
-        `loading that config, not about this build stopping.\n` +
-        `[content-collector]   Every foundation theme var is therefore undefined, and sections ` +
-        `styled with var(--…) will render with collapsed spacing.\n` +
-        `[content-collector]   Building the foundation (\`uniweb build\` in it) regenerates ` +
-        `dist/meta/schema.json, which is read first.`
+      `[content-collector] Could not read the foundation's declared theme vars from ${srcDir}: ${err.message}\n` +
+        `[content-collector]   Continuing WITHOUT them — the wrapped error above is about loading that config, not about this build stopping.\n` +
+        `[content-collector]   Every foundation theme var is therefore undefined, and sections styled with var(--…) will render with collapsed spacing.`
     )
-    return { vars: {}, layoutNames: new Set() }
   }
+
+  let layoutNames = new Set()
+  try {
+    layoutNames = new Set(Object.keys(await discoverLayoutsInPath(srcDir)))
+  } catch (err) {
+    console.warn(
+      `[content-collector] Could not discover the foundation's layouts in ${srcDir}: ${err.message}\n` +
+        `[content-collector]   Continuing WITHOUT them — a site \`layout/<Name>/\` directory will be collected as an area of the default layout rather than as that named layout.`
+    )
+  }
+
+  return { vars, layoutNames }
 }
 
 /**
