@@ -94,6 +94,10 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
     byQuery = await processQueries(siteRoot, config.queries, config.paths?.entities, basePath)
   }
 
+  // Declared here rather than beside pass 2's other accumulators because pass 1
+  // now writes to it as well — see THE JOIN, RUN THE OTHER WAY below.
+  const setupErrors = []
+
   // Pass 1 — discover unique (file, schema-ref) pairs and who uses each.
   const work = new Map() // pairKey -> { path, ref, schema, users: [{ route, section, key }] }
   const deferred = []
@@ -103,7 +107,46 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       const type = section.type
       if (!type) return
       const bindings = foundation[type]?.data
-      for (const input of collectInputs(section, page.fetch, config.fetch)) {
+      const inputs = collectInputs(section, page.fetch, config.fetch)
+
+      // ⭐ **THE JOIN, RUN THE OTHER WAY: data arrived, but under no name this
+      // section reads.** Everything below asks "for each input, is there a
+      // binding?". This asks "for each binding, was anything delivered?" — and
+      // the answer was silence until 2026-09-02.
+      //
+      // A section reads `content.data.<key>` for the keys its `meta.js` `data:`
+      // declares. When the page delivers a query under a DIFFERENT name, the
+      // section renders its heading and nothing else: no error, no warning, HTTP
+      // 200, a clean console. Reported by `flows`, measured in a real browser —
+      // two records-backed sections carrying 8 and 6 characters of text beside
+      // static ones carrying 182/572/289/529/99.
+      //
+      // ⚖️ **Narrow on purpose: only when SOMETHING was delivered.** `data:` in
+      // `meta.js` is a hint rather than a delivery gate (`docs/reference/
+      // data-fetching.md`), so a section declaring keys on a page with no data at
+      // all is ordinary and silent. What is not ordinary is a page that fetched
+      // something and a section on it that reads none of it — there the author
+      // demonstrably intended data to arrive and the names did not meet.
+      const declaredKeys = bindings ? Object.keys(bindings) : []
+      if (declaredKeys.length > 0 && inputs.length > 0) {
+        const delivered = inputs.map((i) => i.as ?? i.schema).filter(Boolean)
+        if (delivered.length > 0 && !declaredKeys.some((k) => delivered.includes(k))) {
+          setupErrors.push({
+            file: `${page.route || '/'} · ${type}`,
+            message:
+              `section reads ${declaredKeys.map((k) => `content.data.${k}`).join(' or ')}, ` +
+              `but this page delivers ${delivered.map((k) => `\`${k}\``).join(', ')}. ` +
+              `The section will render with no data and nothing else will say so. ` +
+              `Name the query for the key the section reads, or give the section its own ` +
+              `\`fetch: { query: <name> }\`.`,
+            // One user per declared key, so `uniweb validate` can print
+            // `used by /team › Team › data.team` — the key is the thing to rename.
+            users: declaredKeys.map((k) => ({ route: page.route, section: type, key: k })),
+          })
+        }
+      }
+
+      for (const input of inputs) {
         const key = input.as ?? input.schema // the content.data KEY; `schema` is its pre-2026-09-02 name
 
         if (input.url) {
@@ -137,7 +180,6 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
 
   // Pass 2 — validate each unique pair ONCE, attribute findings to its users.
   const violations = []
-  const setupErrors = []
   const schemasSeen = new Set()
   let recordCount = 0
 
