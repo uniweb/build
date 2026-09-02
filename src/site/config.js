@@ -320,7 +320,31 @@ export async function defineSiteConfig(options = {}) {
     // Point #foundation at a virtual noop module.
     alias['#foundation'] = '\0__foundation-noop__'
   } else if (foundationInfo.type !== 'url') {
-    // Bundled mode: #foundation points to the actual package
+    // Bundled mode: #foundation points to the actual package.
+    //
+    // ⛔ **A BARE SPECIFIER, NOT `foundationInfo.path` — and the obvious
+    // "improvement" is measured and wrong.** We hold the resolved path right
+    // here, and handing vite the *name* instead is what lets its node_modules
+    // lookup disagree with ours (the whole reason
+    // `uniweb:ensure-foundation-entry` now runs `checkFoundationResolution`).
+    // Collapsing the two by aliasing to the path looks like it deletes that bug
+    // class. It does not:
+    //
+    //   A vite alias is PREFIX replacement, so `#foundation/styles` — which the
+    //   site's own `entry.js` imports — becomes `<path>/styles`, a filesystem
+    //   path. That bypasses the foundation's `exports` map, and the map is where
+    //   `./styles` → `./styles.css` lives (along with `./dist` and
+    //   `./dist/styles`). Measured 2026-09-01 on a stock marketing scaffold:
+    //   `[vite:load-fallback] Could not load <path>/src/styles (imported by
+    //   entry.js): ENOENT`. A HEALTHY project fails to build.
+    //
+    // Splitting it — exact `#foundation` → path, `#foundation/*` → name — is
+    // worse still: on a diverged tree the entry would come from one directory
+    // and the stylesheet from another, which is a state neither consistent
+    // option can reach.
+    //
+    // ⇒ **The name is load-bearing because the exports map is.** Detecting the
+    // disagreement is the correct shape; eliminating it costs the exports map.
     alias['#foundation'] = foundationInfo.name
   }
 
