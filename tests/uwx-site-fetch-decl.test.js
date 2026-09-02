@@ -54,9 +54,9 @@ describe('a page fetch declaration on the sync wire', () => {
     expect(blog.fetch.path).toBe('/data/articles.json')
   })
 
-  it('carries the schema, which keys content.data and the cache', async () => {
+  it('carries `as`, the binding key for content.data and the cache', async () => {
     const blog = await buildSite()
-    expect(blog.fetch.schema).toBe('articles')
+    expect(blog.fetch.as).toBe('articles')
   })
 
   it('never leaks the build-time shorthand as the only source', async () => {

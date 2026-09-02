@@ -253,11 +253,11 @@ export function applyPostProcessing(data, config) {
 const RECOGNIZED_FETCH_KEYS = {
   refine: new Set(['refine', 'inherit', 'detail', 'limit', 'sort', 'where', 'filter']),
   query: new Set([
-    'query', 'schema', 'prerender', 'merge', 'transform',
+    'query', 'as', 'schema', 'prerender', 'merge', 'transform',
     'where', 'limit', 'sort', 'detailPage', 'filter',
   ]),
   source: new Set([
-    'path', 'url', 'schema', 'prerender', 'merge', 'transform', 'detail',
+    'path', 'url', 'as', 'schema', 'prerender', 'merge', 'transform', 'detail',
     'detailPage', 'where', 'limit', 'sort', 'filter',
   ]),
 }
@@ -288,11 +288,11 @@ export function parseFetchConfig(fetch) {
 
   // Simple string: "/data/team.json"
   if (typeof fetch === 'string') {
-    const schema = inferSchemaFromPath(fetch)
+    const inferred = inferSchemaFromPath(fetch)
     return {
       path: fetch,
       url: undefined,
-      schema,
+      as: inferred,
       prerender: true,
       merge: false,
       transform: undefined,
@@ -368,10 +368,12 @@ export function parseFetchConfig(fetch) {
       query: fetch.query,
       path: queryDataUrl(fetch.query),
       url: undefined,
-      // The BINDING KEY — the `content.data.<key>` a component reads. Defaults to
-      // the query name, which is why the two were confusable; `query` above now
-      // carries the identity so this one only has to carry the key.
-      schema: fetch.schema || fetch.query,
+      // ⭐ **`as`, not `schema`.** The BINDING KEY — the `content.data.<key>` a
+      // component reads — defaults to the query name. It was called `schema`
+      // until 2026-09-02, which collided with the MODEL REF of the same name on a
+      // `queries` declaration; `fetch.schema` is still accepted as input so
+      // existing content keeps working, and is never emitted.
+      as: fetch.as || fetch.schema || fetch.query,
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
@@ -391,6 +393,7 @@ export function parseFetchConfig(fetch) {
   const {
     path,
     url,
+    as,
     schema,
     prerender = url ? false : true,
     merge = false,
@@ -413,7 +416,9 @@ export function parseFetchConfig(fetch) {
   return {
     path,
     url,
-    schema: schema || inferSchemaFromPath(path || url),
+    // `as` is the binding key; `schema` is its pre-2026-09-02 spelling, accepted
+    // from existing content and never emitted.
+    as: as ?? schema ?? inferSchemaFromPath(path || url),
     prerender,
     merge,
     transform,

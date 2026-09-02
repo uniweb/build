@@ -23,7 +23,7 @@ describe('parseFetchConfig', () => {
       expect(parseFetchConfig('/data/team.json')).toEqual({
         path: '/data/team.json',
         url: undefined,
-        schema: 'team',
+        as: 'team',
         prerender: true,
         merge: false,
         transform: undefined,
@@ -31,19 +31,19 @@ describe('parseFetchConfig', () => {
     })
 
     it('infers schema from filename', () => {
-      expect(parseFetchConfig('/data/team-members.json').schema).toBe('team-members')
-      expect(parseFetchConfig('/api/events.yaml').schema).toBe('events')
-      expect(parseFetchConfig('/public/config.yml').schema).toBe('config')
+      expect(parseFetchConfig('/data/team-members.json').as).toBe('team-members')
+      expect(parseFetchConfig('/api/events.yaml').as).toBe('events')
+      expect(parseFetchConfig('/public/config.yml').as).toBe('config')
     })
 
     it('handles paths without extension', () => {
-      expect(parseFetchConfig('/api/users').schema).toBe('users')
+      expect(parseFetchConfig('/api/users').as).toBe('users')
     })
 
     it('handles deep paths', () => {
       const result = parseFetchConfig('/data/archive/2024/posts.json')
       expect(result.path).toBe('/data/archive/2024/posts.json')
-      expect(result.schema).toBe('posts')
+      expect(result.as).toBe('posts')
     })
   })
 
@@ -58,7 +58,7 @@ describe('parseFetchConfig', () => {
       expect(parseFetchConfig(config)).toEqual({
         path: '/data/team.json',
         url: undefined,
-        schema: 'person',
+        as: 'person',
         prerender: false,
         merge: true,
         transform: undefined,
@@ -72,7 +72,7 @@ describe('parseFetchConfig', () => {
       }
       const result = parseFetchConfig(config)
       expect(result.url).toBe('https://api.example.com/team')
-      expect(result.schema).toBe('team')
+      expect(result.as).toBe('team')
       expect(result.prerender).toBe(false)
       expect(result.merge).toBe(false)
     })
@@ -85,7 +85,7 @@ describe('parseFetchConfig', () => {
       }
       const result = parseFetchConfig(config)
       expect(result.url).toBe('https://api.example.com/response')
-      expect(result.schema).toBe('items')
+      expect(result.as).toBe('items')
       expect(result.prerender).toBe(false)
       expect(result.merge).toBe(false)
       expect(result.transform).toBe('data.items')
@@ -108,12 +108,12 @@ describe('parseFetchConfig', () => {
 
     it('infers schema from path when not provided', () => {
       const config = { path: '/data/articles.json' }
-      expect(parseFetchConfig(config).schema).toBe('articles')
+      expect(parseFetchConfig(config).as).toBe('articles')
     })
 
     it('infers schema from url when not provided', () => {
       const config = { url: 'https://api.example.com/events' }
-      expect(parseFetchConfig(config).schema).toBe('events')
+      expect(parseFetchConfig(config).as).toBe('events')
     })
 
     it('returns null when neither path nor url provided', () => {
@@ -140,7 +140,7 @@ describe('parseFetchConfig', () => {
       const result = parseFetchConfig(config)
 
       expect(result.path).toBe(queryDataUrl('articles'))
-      expect(result.schema).toBe('articles')
+      expect(result.as).toBe('articles')
       expect(result.prerender).toBe(true)
     })
 
@@ -170,7 +170,7 @@ describe('parseFetchConfig', () => {
       const config = { query: 'articles', schema: 'posts' }
       const result = parseFetchConfig(config)
 
-      expect(result.schema).toBe('posts')
+      expect(result.as).toBe('posts')
     })
 
     it('parses collection with all options', () => {
@@ -184,7 +184,7 @@ describe('parseFetchConfig', () => {
       const result = parseFetchConfig(config)
 
       expect(result.path).toBe(queryDataUrl('articles'))
-      expect(result.schema).toBe('posts')
+      expect(result.as).toBe('posts')
       expect(result.limit).toBe(5)
       expect(result.sort).toBe('date desc')
       expect(result.filter).toBe('published != false')

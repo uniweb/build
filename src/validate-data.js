@@ -104,7 +104,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       if (!type) return
       const bindings = foundation[type]?.data
       for (const input of collectInputs(section, page.fetch, config.fetch)) {
-        const key = input.schema // the content.data KEY (the `fetch.schema` field is mis-named)
+        const key = input.as ?? input.schema // the content.data KEY; `schema` is its pre-2026-09-02 name
 
         if (input.url) {
           deferred.push({ route: page.route, section: type, key, reason: 'remote url: source', url: input.url })
@@ -437,8 +437,14 @@ async function loadStandardSchemas() {
 function collectInputs(section, pageFetch, siteFetch) {
   const byKey = new Map()
   for (const f of [siteFetch, pageFetch, section.fetch]) {
-    if (f && (f.path || f.url) && typeof f.schema === 'string') {
-      byKey.set(f.schema, f)
+    // ⛔ The binding key is `as`; `schema` is its pre-2026-09-02 name and still
+    // arrives on stored payloads. A gate on the old name alone silently yields
+    // NOTHING here — no inputs collected, no violations found, a green run — which
+    // is exactly how this was caught: the integration test went from flagging the
+    // seeded violations to flagging none.
+    const key = f?.as ?? f?.schema
+    if (f && (f.path || f.url) && typeof key === 'string') {
+      byKey.set(key, f)
     }
   }
   return [...byKey.values()]

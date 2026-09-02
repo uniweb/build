@@ -263,7 +263,11 @@ function buildPageData(config, ctx) {
     // validating — so `fetch` is a blob they carry and framework owns its
     // vocabulary. ⇒ There was nothing to coordinate, and inventing a coordination
     // is how a name stays wrong.
-    fetch = { query, path: queryDataUrl(query), schema: query, ...rest }
+    // ⛔ `as`, the BINDING KEY — not to be confused with `schema` at
+    // DECL_EMITTED_ABOVE / `setIf(data,'schema',d.schema)` below, which is a
+    // queries decl's MODEL REF and keeps its name. One word meant both until
+    // 2026-09-02; this is the half that moved.
+    fetch = { query, path: queryDataUrl(query), as: query, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {

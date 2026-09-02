@@ -15,13 +15,13 @@ describe('the authoring shorthand', () => {
   it('resolves query: to the compiled artifact and the content.data key', () => {
     const cfg = parseFetchConfig({ query: 'articles', limit: 3, sort: 'date desc' })
     expect(cfg.path).toBe('/data/articles.json')
-    expect(cfg.schema).toBe('articles')
+    expect(cfg.as).toBe('articles')
     expect(cfg.limit).toBe(3)
     expect(cfg.sort).toBe('date desc')
   })
 
   it('lets an explicit schema override the query name', () => {
-    expect(parseFetchConfig({ query: 'recent', schema: 'article' }).schema).toBe('article')
+    expect(parseFetchConfig({ query: 'recent', schema: 'article' }).as).toBe('article')
   })
 })
 
