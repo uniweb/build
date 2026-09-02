@@ -344,9 +344,7 @@ export function parseFetchConfig(fetch) {
     return {
       path: fetch,
       url: undefined,
-      // Both spellings — see the note in the named-query branch below.
       as: inferred,
-      schema: inferred,
       prerender: true,
       merge: false,
       transform: undefined,
@@ -422,27 +420,15 @@ export function parseFetchConfig(fetch) {
       query: fetch.query,
       path: queryDataUrl(fetch.query),
       url: undefined,
-      // ⭐ **`as`, not `schema`.** The BINDING KEY — the `content.data.<key>` a
-      // component reads — defaults to the query name. It was called `schema`
-      // until 2026-09-02, which collided with the MODEL REF of the same name on a
-      // `queries` declaration; `fetch.schema` is still accepted as input so
-      // existing content keeps working, and is never emitted.
-      // ⛔ **BOTH SPELLINGS ARE EMITTED, and this is not the overload coming back.**
-      // `bindingKey()` reads `as ?? schema`, so NEW core needs only `as`. But a
-      // published site renders at ITS OWN pinned runtime version, and every
-      // runtime shipped to date bundles a core whose resolver does
-      // `if (!cfg?.schema) continue` — so an `as`-only payload served by an older
-      // runtime is SKIPPED ENTIRELY. No data, nothing thrown, nothing logged.
-      //
-      // ⭐ The compatibility runs the OTHER WAY from `bindingKey`'s: that one is
-      // old payloads meeting new code, this one is new payloads meeting old code,
-      // and only the first was covered. Caught by frontend before it shipped.
-      //
-      // ⇒ Emit both until every serving runtime carries `bindingKey`, then drop
-      // `schema` here. Until then a reader may see this as redundant; it is a
-      // compatibility duplicate and the comment is what tells them apart.
+      // ⭐ **`as` is the BINDING KEY** — the `content.data.<key>` a component
+      // reads — defaulting to the query name. It was called `schema` until
+      // 2026-09-02, which collided with the MODEL REF of the same name on a
+      // `queries` declaration. `fetch.schema` is still accepted as INPUT, so
+      // content authored before the rename keeps working; it is never emitted.
+      // ⭐ `fetch.schema` here is an AUTHOR's older spelling in a content file —
+      // the same boundary normalization as the source-shape branch below, not
+      // the internal alias (removed 2026-09-02). One name travels inside.
       as: fetch.as || fetch.schema || fetch.query,
-      schema: fetch.as || fetch.schema || fetch.query,
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
@@ -485,9 +471,12 @@ export function parseFetchConfig(fetch) {
   return {
     path,
     url,
-    // Both spellings — see the note in the named-query branch above.
+    // ⭐ **The one place `schema` is still read, and it is a BOUNDARY
+    // normalization — not the internal alias.** An author may have written
+    // `fetch: { schema: person }` before the 2026-09-02 rename; that is content
+    // on someone's disk, not a field our own packages pass to each other.
+    // Translating it here means one name — `as` — everywhere inside.
     as: as ?? schema ?? inferSchemaFromPath(path || url),
-    schema: as ?? schema ?? inferSchemaFromPath(path || url),
     prerender,
     merge,
     transform,
@@ -663,7 +652,7 @@ export function mergeDataIntoContent(content, fetchedData, schema, merge = false
  *
  * @param {object[]} configs - Array of normalized fetch configs
  * @param {object} options - Execution options (same as executeFetch)
- * @returns {Promise<Map<string, any>>} Map of schema -> data
+ * @returns {Promise<Map<string, any>>} Map of binding key (`as`) -> data
  */
 export async function executeMultipleFetches(configs, options = {}) {
   if (!configs || configs.length === 0) {
@@ -673,7 +662,7 @@ export async function executeMultipleFetches(configs, options = {}) {
   const results = await Promise.all(
     configs.map(async (config) => {
       const result = await executeFetch(config, options)
-      return { schema: config.schema, data: result.data }
+      return { schema: config.as, data: result.data }
     })
   )
 

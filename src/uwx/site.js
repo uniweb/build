@@ -258,9 +258,9 @@ function buildPageData(config, ctx) {
     // `path` once it has resolved an address — matching parseFetchConfig, which
     // has always returned early on the shorthand.
     //
-    // `schema` (the query name) is BOTH the content.data key and part of the
-    // dataStore cache key (deriveCacheKey hashes {path,url,endpoint,schema,…};
-    // the shorthand is ignored). Mirrors the static build's parseFetchConfig —
+    // `as` (the query name) is BOTH the content.data key and part of the
+    // dataStore cache key (deriveCacheKey hashes {path,url,endpoint,as,…}; the
+    // shorthand is ignored). Mirrors the static build's parseFetchConfig —
     // ⚠️ which it did NOT until 2026-09-02. This line emitted `query` and that
     // one did not, for the same declaration, so `resolveQuerySource` fired on a
     // published site and never on a `--link`-deployed one: same site, two verbs,
@@ -275,11 +275,10 @@ function buildPageData(config, ctx) {
     // ⛔ `as`, the BINDING KEY — not to be confused with `schema` at
     // DECL_EMITTED_ABOVE / `setIf(data,'schema',d.schema)` below, which is a
     // queries decl's MODEL REF and keeps its name. One word meant both until
-    // 2026-09-02; this is the half that moved.
-    // Both spellings, deliberately — an `as`-only payload is skipped entirely by
-    // any runtime older than `bindingKey` (`if (!cfg?.schema) continue`), with no
-    // data and no error. Drop `schema` when every serving runtime carries it.
-    return { query, path: queryDataUrl(query), as: query, schema: query, ...rest }
+    // 2026-09-02; this is the half that moved, and the compatibility duplicate
+    // that briefly rode alongside it was dropped 2026-09-02 once frontend and
+    // hosting had dropped theirs. ⇒ A site synced before that must be re-pushed.
+    return { query, path: queryDataUrl(query), as: query, ...rest }
   }
   fetch = Array.isArray(fetch) ? fetch.map(resolveWireFetch) : resolveWireFetch(fetch)
   setIf(data, 'fetch', fetch)

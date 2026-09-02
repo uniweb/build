@@ -83,7 +83,7 @@ describe('compiled collection data: emit ↔ request agreement', () => {
 
   it("core's auto-injected detail pattern points at emitted per-record files", () => {
     const configs = resolveFetchConfigs(
-      [{ schema: 'articles', path: queryDataUrl('articles') }],
+      [{ as: 'articles', path: queryDataUrl('articles') }],
       { queries: queriesConfig }
     )
     const pattern = configs.get('articles').detail

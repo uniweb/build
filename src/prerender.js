@@ -131,7 +131,7 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
         // collector; `expandDynamicPages` is what reads this back.
         if (!pageFetchedData.has(page.route)) {
           pageFetchedData.set(page.route, {
-            schema: oneFetch.as ?? oneFetch.schema,
+            schema: oneFetch.as,
             data: result.data,
           })
         }
@@ -313,7 +313,7 @@ async function processSectionFetches(sections, fetchOptions, onProgress) {
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           result.data,
-          sectionFetch.as ?? sectionFetch.schema,
+          sectionFetch.as,
           sectionFetch.merge
         )
       }

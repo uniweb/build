@@ -21,11 +21,13 @@ describe('parseFetchConfig', () => {
 
   describe('simple string input', () => {
     it('parses simple path string', () => {
+      // ⛔ `as` only. `schema` was emitted alongside it as a compatibility
+      // duplicate until 2026-09-02; the duplicate is gone and one name is the
+      // point of the rename.
       expect(parseFetchConfig('/data/team.json')).toEqual({
         path: '/data/team.json',
         url: undefined,
         as: 'team',
-        schema: 'team',
         prerender: true,
         merge: false,
         transform: undefined,
@@ -51,6 +53,10 @@ describe('parseFetchConfig', () => {
 
   describe('full config object', () => {
     it('parses config with path', () => {
+      // ⭐ An author's `schema:` is normalized to `as` AT THE BOUNDARY and not
+      // echoed back. That input spelling predates the 2026-09-02 rename and is
+      // content on someone's disk, so it is still read — but nothing inside
+      // carries two names for one thing.
       const config = {
         path: '/data/team.json',
         schema: 'person',
@@ -61,7 +67,6 @@ describe('parseFetchConfig', () => {
         path: '/data/team.json',
         url: undefined,
         as: 'person',
-        schema: 'person',
         prerender: false,
         merge: true,
         transform: undefined,

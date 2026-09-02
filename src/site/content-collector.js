@@ -1429,7 +1429,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   let parentSchema = null
   if (isDynamic && parentFetch) {
     const [first] = toFetchList(parentFetch)
-    parentSchema = first ? (first.as ?? first.schema) : null
+    parentSchema = first ? first.as : null
   }
 
   return {

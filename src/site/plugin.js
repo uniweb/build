@@ -185,7 +185,7 @@ async function processDevSectionFetches(sections, fetchOptions) {
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           result.data,
-          sectionFetch.as ?? sectionFetch.schema,
+          sectionFetch.as,
           sectionFetch.merge
         )
       }

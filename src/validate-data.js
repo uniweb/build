@@ -130,7 +130,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       // demonstrably intended data to arrive and the names did not meet.
       const declaredKeys = bindings ? Object.keys(bindings) : []
       if (declaredKeys.length > 0 && inputs.length > 0) {
-        const delivered = inputs.map((i) => i.as ?? i.schema).filter(Boolean)
+        const delivered = inputs.map((i) => i.as).filter(Boolean)
         if (delivered.length > 0 && !declaredKeys.some((k) => delivered.includes(k))) {
           setupErrors.push({
             file: `${page.route || '/'} · ${type}`,
@@ -148,7 +148,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       }
 
       for (const input of inputs) {
-        const key = input.as ?? input.schema // the content.data KEY; `schema` is its pre-2026-09-02 name
+        const key = input.as // the content.data KEY
 
         if (input.url) {
           deferred.push({ route: page.route, section: type, key, reason: 'remote url: source', url: input.url })
@@ -484,12 +484,11 @@ function collectInputs(section, pageFetch, siteFetch) {
   // overwrites, which is what makes a section's declaration win the key.
   for (const source of [siteFetch, pageFetch, section.fetch]) {
     for (const f of toFetchList(source)) {
-      // ⛔ The binding key is `as`; `schema` is its pre-2026-09-02 name and still
-      // arrives on stored payloads. A gate on the old name alone silently yields
-      // NOTHING here — no inputs collected, no violations found, a green run — which
-      // is exactly how this was caught: the integration test went from flagging the
-      // seeded violations to flagging none.
-      const key = f?.as ?? f?.schema
+      // ⛔ Gate on the BINDING KEY. A gate on the wrong name silently yields
+      // NOTHING here — no inputs collected, no violations found, a green run —
+      // which is exactly how the rename was caught: the integration test went
+      // from flagging the seeded violations to flagging none.
+      const key = f?.as
       if (f && (f.path || f.url) && typeof key === 'string') {
         byKey.set(key, f)
       }
