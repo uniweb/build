@@ -283,8 +283,60 @@ export function _resetUnknownFetchKeyWarnings() {
   warnedUnknownFetchKeys.clear()
 }
 
+/**
+ * Normalize a parsed `fetch` to a list. **Use this at every consumption point.**
+ *
+ * `parseFetchConfig` returns an object for one declaration and an array for
+ * several, so `cfg.path` on a multi-fetch page reads `undefined` rather than
+ * throwing — the silent-empty class. Reaching for this instead of a property is
+ * what keeps that from happening.
+ *
+ * @param {Object|Array|null} fetch - a PARSED fetch (post-`parseFetchConfig`).
+ * @returns {Array<Object>} zero, one, or many configs.
+ */
+export function toFetchList(fetch) {
+  if (!fetch) return []
+  return Array.isArray(fetch) ? fetch : [fetch]
+}
+
+/**
+ * Parse a `fetch:` (or desugared `data:`) declaration.
+ *
+ * ⭐ **A LIST MEANS "FETCH EACH".** `data: [team, articles]` declares two needs
+ * and they land under two keys in `content.data` — a component reads
+ * `content.data.team` and `content.data.articles` independently, so the
+ * declaration is plural by necessity.
+ *
+ * ⚖️ **Plural DECLARATIONS are not plural REQUESTS.** How many round trips this
+ * becomes belongs to the fetcher: `EntityStore` already assembles every config
+ * before dispatching any of them and awaits them together, which is exactly
+ * where a batching source would coalesce. Nothing here should encode a
+ * transport assumption — the file lane genuinely has two artifacts, and most
+ * sources cannot batch at all.
+ *
+ * ⛔ **A one-entry list collapses to an object, deliberately.** The returned
+ * shape reflects the cardinality of the RESULT, not of the input syntax, so
+ * every declaration that resolves to a single fetch is byte-identical to what
+ * this emitted before — the array shape appears only where content could not
+ * previously have worked. (Before 2026-09-02 a list kept `[0]` and discarded the
+ * rest silently, so the only content whose shape changes is content that was
+ * already broken.)
+ *
+ * @param {string|Object|Array|null} fetch
+ * @returns {Object|Array<Object>|null}
+ */
 export function parseFetchConfig(fetch) {
   if (!fetch) return null
+
+  if (Array.isArray(fetch)) {
+    const parsed = fetch.map((f) => parseFetchConfig(f)).filter(Boolean)
+    // Flatten: a nested array is not a meaningful authoring shape, and letting
+    // one through would put an array inside an array where every consumer
+    // expects configs.
+    const flat = parsed.flat()
+    if (flat.length === 0) return null
+    return flat.length === 1 ? flat[0] : flat
+  }
 
   // Simple string: "/data/team.json"
   if (typeof fetch === 'string') {

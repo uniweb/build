@@ -220,10 +220,13 @@ function buildPageData(config, ctx) {
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)
   setIf(data, 'seo', config.seo)
+  // ⭐ A `data:` LIST means "fetch each" — one declaration per entry. Before
+  // 2026-09-02 this kept `[0]` and dropped the rest silently, so the wire
+  // carried one dataset for a page that asked for several.
   let fetch =
     config.fetch ??
     (config.data
-      ? { query: Array.isArray(config.data) ? config.data[0] : config.data }
+      ? (Array.isArray(config.data) ? config.data.map((query) => ({ query })) : { query: config.data })
       : undefined)
   // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
@@ -232,8 +235,14 @@ function buildPageData(config, ctx) {
   // it would never resolve at render (the static build resolves it the same way
   // in site/data-fetcher.js parseFetchConfig). The gateway serves the collection
   // at `<base>/data/<name>.json`.
-  if (fetch && typeof fetch.query === 'string') {
-    const { query, ...rest } = fetch
+  // ⛔ **Mapped, not read.** A `data:`/`fetch:` LIST reaches here as an array, and
+  // `fetch.query` on one is `undefined` — so a property test would skip the
+  // resolution below and put bare `{ query }` entries on the wire with no
+  // `path`, no `as` and no `schema`. That is the silent-empty class: a payload
+  // that arrives, parses, and resolves to nothing.
+  const resolveWireFetch = (one) => {
+    if (!one || typeof one.query !== 'string') return one
+    const { query, ...rest } = one
     // ⭐ BOTH, deliberately, and they are not redundant.
     //
     //   `query` — the author's named query, unresolved. A consumer that can ask
@@ -270,8 +279,9 @@ function buildPageData(config, ctx) {
     // Both spellings, deliberately — an `as`-only payload is skipped entirely by
     // any runtime older than `bindingKey` (`if (!cfg?.schema) continue`), with no
     // data and no error. Drop `schema` when every serving runtime carries it.
-    fetch = { query, path: queryDataUrl(query), as: query, schema: query, ...rest }
+    return { query, path: queryDataUrl(query), as: query, schema: query, ...rest }
   }
+  fetch = Array.isArray(fetch) ? fetch.map(resolveWireFetch) : resolveWireFetch(fetch)
   setIf(data, 'fetch', fetch)
   if (isDynamic) {
     data.is_dynamic = true

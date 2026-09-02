@@ -51,7 +51,7 @@ import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
 import { ENTITIES_DIR } from './entity-pool.js'
-import { executeFetch, mergeDataIntoContent } from './data-fetcher.js'
+import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { FONT_LINKS_MARKER } from './head-markers.js'
 import { collectExtensionAssets } from './emit-extensions.js'
@@ -137,9 +137,9 @@ async function executeDevFetches(siteContent, siteDir) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
   const fetchedData = []
 
-  // Site-level fetch
-  const siteFetch = siteContent.config?.fetch
-  if (shouldPrefetchInDev(siteFetch)) {
+  // Site-level fetch — every declaration.
+  for (const siteFetch of toFetchList(siteContent.config?.fetch)) {
+    if (!shouldPrefetchInDev(siteFetch)) continue
     const result = await executeFetch(siteFetch, fetchOptions)
     if (result.data && !result.error) {
       fetchedData.push({ config: siteFetch, data: result.data })
@@ -148,9 +148,9 @@ async function executeDevFetches(siteContent, siteDir) {
 
   // Process each page
   for (const page of siteContent.pages || []) {
-    // Page-level fetch
-    const pageFetch = page.fetch
-    if (shouldPrefetchInDev(pageFetch)) {
+    // Page-level fetch — every declaration.
+    for (const pageFetch of toFetchList(page.fetch)) {
+      if (!shouldPrefetchInDev(pageFetch)) continue
       const result = await executeFetch(pageFetch, fetchOptions)
       if (result.data && !result.error) {
         fetchedData.push({ config: pageFetch, data: result.data })
@@ -176,17 +176,16 @@ async function processDevSectionFetches(sections, fetchOptions) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
-    // Execute section-level fetch
-    const sectionFetch = section.fetch
-    if (shouldPrefetchInDev(sectionFetch)) {
+    // Execute every section-level fetch, so dev shows what prerender will.
+    for (const sectionFetch of toFetchList(section.fetch)) {
+      if (!shouldPrefetchInDev(sectionFetch)) continue
       const result = await executeFetch(sectionFetch, fetchOptions)
       if (result.data && !result.error) {
-        // Merge fetched data into section's parsedContent (not cascadedData)
-        // This matches prerender behavior - section's own fetch goes to content.data
+        // A section's own fetch goes to content.data, matching prerender.
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           result.data,
-          sectionFetch.schema,
+          sectionFetch.as ?? sectionFetch.schema,
           sectionFetch.merge
         )
       }

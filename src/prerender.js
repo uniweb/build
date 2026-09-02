@@ -12,7 +12,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveDefaultLocale, isDataUrl } from '@uniweb/core'
-import { executeFetch, mergeDataIntoContent } from './site/data-fetcher.js'
+import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
@@ -98,11 +98,13 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
     ? { siteRoot: localeInfo.distDir, publicDir: '.' }
     : fetchOptions
 
-  // 1. Site-level fetch
-  const siteFetch = siteContent.config?.fetch
-  if (siteFetch && siteFetch.prerender !== false) {
-    const cfg = localizeFetch(siteFetch)
-    const opts = cfg !== siteFetch ? localizedFetchOptions : fetchOptions
+  // 1. Site-level fetch. ⛔ `toFetchList` rather than a property read: a `fetch:`
+  // or `data:` LIST parses to an array, and `siteFetch.prerender` on one is
+  // `undefined` — which passes the `!== false` test and then fetches nothing.
+  for (const oneFetch of toFetchList(siteContent.config?.fetch)) {
+    if (oneFetch.prerender === false) continue
+    const cfg = localizeFetch(oneFetch)
+    const opts = cfg !== oneFetch ? localizedFetchOptions : fetchOptions
     onProgress(`  Fetching site data: ${cfg.path || cfg.url}`)
     const result = await executeFetch(cfg, opts)
     if (result.data && !result.error) {
@@ -114,20 +116,25 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
   const pageFetchedData = new Map()
 
   for (const page of siteContent.pages || []) {
-    // Page-level fetch
-    const pageFetch = page.fetch
-    if (pageFetch && pageFetch.prerender !== false) {
-      const cfg = localizeFetch(pageFetch)
-      const opts = cfg !== pageFetch ? localizedFetchOptions : fetchOptions
+    // Page-level fetch — every declaration on the page.
+    for (const oneFetch of toFetchList(page.fetch)) {
+      if (oneFetch.prerender === false) continue
+      const cfg = localizeFetch(oneFetch)
+      const opts = cfg !== oneFetch ? localizedFetchOptions : fetchOptions
       onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
       const result = await executeFetch(cfg, opts)
       if (result.data && !result.error) {
         fetchedData.push({ config: cfg, data: result.data, _scope: page.route })
-        // Store for dynamic route expansion
-        pageFetchedData.set(page.route, {
-          schema: pageFetch.schema,
-          data: result.data,
-        })
+        // ⚖️ Dynamic-route expansion consumes ONE query — a `[slug]` template
+        // expands over a single record set. With several declared, the first
+        // that prerenders is the route query, matching `parentSchema` in the
+        // collector; `expandDynamicPages` is what reads this back.
+        if (!pageFetchedData.has(page.route)) {
+          pageFetchedData.set(page.route, {
+            schema: oneFetch.as ?? oneFetch.schema,
+            data: result.data,
+          })
+        }
       }
     }
 
@@ -295,17 +302,18 @@ async function processSectionFetches(sections, fetchOptions, onProgress) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
-    // Execute section-level fetch
-    const sectionFetch = section.fetch
-    if (sectionFetch && sectionFetch.prerender !== false) {
+    // Execute every section-level fetch. Each merges under its own key, so
+    // several accumulate into one `parsedContent.data` — the same keyed map the
+    // runtime's EntityStore builds.
+    for (const sectionFetch of toFetchList(section.fetch)) {
+      if (sectionFetch.prerender === false) continue
       onProgress(`  Fetching section data: ${sectionFetch.path || sectionFetch.url}`)
       const result = await executeFetch(sectionFetch, fetchOptions)
       if (result.data && !result.error) {
-        // Merge fetched data into section's parsedContent
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           result.data,
-          sectionFetch.schema,
+          sectionFetch.as ?? sectionFetch.schema,
           sectionFetch.merge
         )
       }

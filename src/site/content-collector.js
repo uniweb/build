@@ -32,7 +32,7 @@ import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
-import { parseFetchConfig } from './data-fetcher.js'
+import { parseFetchConfig, toFetchList } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
@@ -125,6 +125,28 @@ function detectVersions(folderNames) {
   versions.sort((a, b) => b.sortKey - a.sortKey)
 
   return versions
+}
+
+/**
+ * Desugar a `data:` declaration into a `fetch:` one.
+ *
+ * `data: team` → `{ query: 'team' }`; `data: [team, articles]` → one config per
+ * entry. ⭐ **A list means "fetch each"** — see `parseFetchConfig` for why the
+ * declaration is plural by necessity and why that is not a statement about
+ * request count.
+ *
+ * ⛔ Before 2026-09-02 a list kept `[0]` and dropped the rest **silently**: no
+ * warning, no error, and the array was not carried forward on the section, so
+ * nothing downstream could recover it. An author writing a list got one dataset
+ * and a section rendering empty.
+ *
+ * @param {string|Array<string>|undefined} data
+ * @returns {Object|Array<Object>|undefined}
+ */
+function fetchFromDataShorthand(data) {
+  if (!data) return undefined
+  if (Array.isArray(data)) return data.map((query) => ({ query }))
+  return { query: data }
 }
 
 /**
@@ -881,11 +903,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   //
   // ⚠️ The list form appears in no `docs/` page, so nothing promises it works.
   // Whether it should mean "fetch each" or be refused outright is undecided.
-  let resolvedFetch = fetch
-  if (!fetch && data) {
-    const queryName = Array.isArray(data) ? data[0] : data
-    resolvedFetch = { query: queryName }
-  }
+  const resolvedFetch = fetch || fetchFromDataShorthand(data)
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null
   // This ID is stable across reordering (unlike the positional id)
@@ -1396,11 +1414,22 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   // Layout panel visibility (from object form of layout config)
   const layoutObj = typeof layoutConfig === 'object' && layoutConfig !== null ? layoutConfig : {}
 
-  // For dynamic routes, determine the parent's data schema
-  // This tells prerender which data array to iterate over
+  // For dynamic routes, determine the parent's data schema — this tells
+  // prerender which data array to iterate over.
+  //
+  // ⚖️ **A `[slug]` template expands over exactly ONE record set**, so a plural
+  // parent declaration has to resolve to one query here. The first is taken,
+  // matching what prerender records in `pageFetchedData`; the two must agree or
+  // expansion iterates a set the route was not built from.
+  //
+  // ⛔ This is a genuine cardinality constraint, not a limit worth lifting: a
+  // route pattern names one variable, and "which collection does `:slug` index"
+  // has no second answer. A page that needs another dataset alongside its
+  // dynamic one still declares it — plurality is what makes that sayable.
   let parentSchema = null
   if (isDynamic && parentFetch) {
-    parentSchema = parentFetch.schema
+    const [first] = toFetchList(parentFetch)
+    parentSchema = first ? (first.as ?? first.schema) : null
   }
 
   return {
@@ -1468,9 +1497,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       // Support 'data:' shorthand at page level
       // data: team → fetch: { query: team }
       fetch: parseFetchConfig(
-        pageConfig.fetch || (pageConfig.data
-          ? { query: Array.isArray(pageConfig.data) ? pageConfig.data[0] : pageConfig.data }
-          : undefined)
+        pageConfig.fetch || fetchFromDataShorthand(pageConfig.data)
       ),
 
       hasContent: hierarchicalSections.length > 0,

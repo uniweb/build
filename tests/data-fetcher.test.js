@@ -6,6 +6,7 @@ import {
   applyFilter,
   applySort,
   applyPostProcessing,
+  toFetchList,
 } from '../src/site/data-fetcher.js'
 // Derived, never re-spelled — the convention is pinned once, in
 // `@uniweb/core`'s tests/data-paths.test.js.
@@ -133,7 +134,66 @@ describe('parseFetchConfig', () => {
 
   it('returns null for non-object, non-string input', () => {
     expect(parseFetchConfig(123)).toBeNull()
-    expect(parseFetchConfig(['array'])).toBeNull()
+    expect(parseFetchConfig(true)).toBeNull()
+  })
+
+  /**
+   * ⭐ **A list means "fetch each."** It used to keep `[0]` and drop the rest
+   * silently — an author writing `data: [team, articles]` got one dataset and a
+   * section rendering empty, with no warning at any stage.
+   *
+   * These pin the two properties that keep that from coming back by another
+   * route: every entry survives, and a list that resolves to ONE fetch is
+   * indistinguishable from having declared it singly.
+   */
+  describe('a list of declarations', () => {
+    it('parses every entry, in order', () => {
+      const result = parseFetchConfig([{ query: 'team' }, { query: 'articles' }])
+      expect(result.map((c) => c.as)).toEqual(['team', 'articles'])
+    })
+
+    it('gives each entry its own address', () => {
+      // The failure this guards against is one config overwriting another's
+      // path and both keys resolving to the same file.
+      const result = parseFetchConfig([{ query: 'team' }, { query: 'articles' }])
+      expect(new Set(result.map((c) => c.path)).size).toBe(2)
+    })
+
+    it('⛔ collapses a ONE-entry list to an object', () => {
+      // The shape reflects the cardinality of the RESULT, not of the syntax, so
+      // no declaration that resolves to a single fetch changes shape. That is
+      // what keeps this from being a silent break for every existing consumer
+      // reading `fetch.path`.
+      const result = parseFetchConfig([{ query: 'team' }])
+      expect(Array.isArray(result)).toBe(false)
+      expect(result.as).toBe('team')
+    })
+
+    it('drops unparseable entries rather than emitting holes', () => {
+      // A null in the list would reach consumers as `cfg.path` on undefined.
+      const result = parseFetchConfig([{ query: 'team' }, { nothing: true }, { query: 'x' }])
+      expect(result.map((c) => c.as)).toEqual(['team', 'x'])
+    })
+
+    it('returns null when nothing in the list parses', () => {
+      expect(parseFetchConfig([{ nothing: true }])).toBeNull()
+      expect(parseFetchConfig([])).toBeNull()
+    })
+
+    it('accepts the string form inside a list, as it does alone', () => {
+      const result = parseFetchConfig(['/data/a.json', '/data/b.json'])
+      expect(result.map((c) => c.path)).toEqual(['/data/a.json', '/data/b.json'])
+    })
+  })
+
+  describe('toFetchList', () => {
+    it('normalizes all three shapes to a list', () => {
+      // ⛔ The reason every consumer must use this: `cfg.path` on an array is
+      // `undefined`, which reads as "no address" rather than as an error.
+      expect(toFetchList(null)).toEqual([])
+      expect(toFetchList({ as: 'a' })).toHaveLength(1)
+      expect(toFetchList([{ as: 'a' }, { as: 'b' }])).toHaveLength(2)
+    })
   })
 
   describe('collection reference', () => {

@@ -37,6 +37,7 @@ import { validateAndNormalizeSchema } from './resolve-data-schema.js'
 // reach it here) even though the implementation moved next to the vocabulary.
 export { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
 import { buildSchema } from './schema.js'
+import { toFetchList } from './site/data-fetcher.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
 import { processQueries } from './site/query-processor.js'
@@ -478,15 +479,20 @@ async function loadStandardSchemas() {
  */
 function collectInputs(section, pageFetch, siteFetch) {
   const byKey = new Map()
-  for (const f of [siteFetch, pageFetch, section.fetch]) {
-    // ⛔ The binding key is `as`; `schema` is its pre-2026-09-02 name and still
-    // arrives on stored payloads. A gate on the old name alone silently yields
-    // NOTHING here — no inputs collected, no violations found, a green run — which
-    // is exactly how this was caught: the integration test went from flagging the
-    // seeded violations to flagging none.
-    const key = f?.as ?? f?.schema
-    if (f && (f.path || f.url) && typeof key === 'string') {
-      byKey.set(key, f)
+  // ⭐ Each level may declare SEVERAL — `data: [team, articles]` — so each is
+  // flattened rather than read. Order is least- to most-specific and `set`
+  // overwrites, which is what makes a section's declaration win the key.
+  for (const source of [siteFetch, pageFetch, section.fetch]) {
+    for (const f of toFetchList(source)) {
+      // ⛔ The binding key is `as`; `schema` is its pre-2026-09-02 name and still
+      // arrives on stored payloads. A gate on the old name alone silently yields
+      // NOTHING here — no inputs collected, no violations found, a green run — which
+      // is exactly how this was caught: the integration test went from flagging the
+      // seeded violations to flagging none.
+      const key = f?.as ?? f?.schema
+      if (f && (f.path || f.url) && typeof key === 'string') {
+        byKey.set(key, f)
+      }
     }
   }
   return [...byKey.values()]
