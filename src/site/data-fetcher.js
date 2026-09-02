@@ -292,7 +292,9 @@ export function parseFetchConfig(fetch) {
     return {
       path: fetch,
       url: undefined,
+      // Both spellings — see the note in the named-query branch below.
       as: inferred,
+      schema: inferred,
       prerender: true,
       merge: false,
       transform: undefined,
@@ -373,7 +375,22 @@ export function parseFetchConfig(fetch) {
       // until 2026-09-02, which collided with the MODEL REF of the same name on a
       // `queries` declaration; `fetch.schema` is still accepted as input so
       // existing content keeps working, and is never emitted.
+      // ⛔ **BOTH SPELLINGS ARE EMITTED, and this is not the overload coming back.**
+      // `bindingKey()` reads `as ?? schema`, so NEW core needs only `as`. But a
+      // published site renders at ITS OWN pinned runtime version, and every
+      // runtime shipped to date bundles a core whose resolver does
+      // `if (!cfg?.schema) continue` — so an `as`-only payload served by an older
+      // runtime is SKIPPED ENTIRELY. No data, nothing thrown, nothing logged.
+      //
+      // ⭐ The compatibility runs the OTHER WAY from `bindingKey`'s: that one is
+      // old payloads meeting new code, this one is new payloads meeting old code,
+      // and only the first was covered. Caught by frontend before it shipped.
+      //
+      // ⇒ Emit both until every serving runtime carries `bindingKey`, then drop
+      // `schema` here. Until then a reader may see this as redundant; it is a
+      // compatibility duplicate and the comment is what tells them apart.
       as: fetch.as || fetch.schema || fetch.query,
+      schema: fetch.as || fetch.schema || fetch.query,
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
@@ -416,9 +433,9 @@ export function parseFetchConfig(fetch) {
   return {
     path,
     url,
-    // `as` is the binding key; `schema` is its pre-2026-09-02 spelling, accepted
-    // from existing content and never emitted.
+    // Both spellings — see the note in the named-query branch above.
     as: as ?? schema ?? inferSchemaFromPath(path || url),
+    schema: as ?? schema ?? inferSchemaFromPath(path || url),
     prerender,
     merge,
     transform,

@@ -267,7 +267,10 @@ function buildPageData(config, ctx) {
     // DECL_EMITTED_ABOVE / `setIf(data,'schema',d.schema)` below, which is a
     // queries decl's MODEL REF and keeps its name. One word meant both until
     // 2026-09-02; this is the half that moved.
-    fetch = { query, path: queryDataUrl(query), as: query, ...rest }
+    // Both spellings, deliberately — an `as`-only payload is skipped entirely by
+    // any runtime older than `bindingKey` (`if (!cfg?.schema) continue`), with no
+    // data and no error. Drop `schema` when every serving runtime carries it.
+    fetch = { query, path: queryDataUrl(query), as: query, schema: query, ...rest }
   }
   setIf(data, 'fetch', fetch)
   if (isDynamic) {
