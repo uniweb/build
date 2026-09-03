@@ -429,12 +429,10 @@ export function parseFetchConfig(fetch) {
       // ⭐ **`as` is the BINDING KEY** — the `content.data.<key>` a component
       // reads — defaulting to the query name. It was called `schema` until
       // 2026-09-02, which collided with the MODEL REF of the same name on a
-      // `queries` declaration. `fetch.schema` is still accepted as INPUT, so
-      // content authored before the rename keeps working; it is never emitted.
-      // ⭐ `fetch.schema` here is an AUTHOR's older spelling in a content file —
-      // the same boundary normalization as the source-shape branch below, not
-      // the internal alias (removed 2026-09-02). One name travels inside.
-      as: fetch.as || fetch.schema || fetch.query,
+      // `queries` declaration. ⛔ **The old spelling is NOT read here, by
+      // ruling (2026-09-03): one name, no alias.** A fetch authored as
+      // `schema: posts` binds to nothing and is re-authored, not translated.
+      as: fetch.as || fetch.query,
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
@@ -455,7 +453,6 @@ export function parseFetchConfig(fetch) {
     path,
     url,
     as,
-    schema,
     prerender = url ? false : true,
     merge = false,
     transform,
@@ -477,12 +474,10 @@ export function parseFetchConfig(fetch) {
   return {
     path,
     url,
-    // ⭐ **The one place `schema` is still read, and it is a BOUNDARY
-    // normalization — not the internal alias.** An author may have written
-    // `fetch: { schema: person }` before the 2026-09-02 rename; that is content
-    // on someone's disk, not a field our own packages pass to each other.
-    // Translating it here means one name — `as` — everywhere inside.
-    as: as ?? schema ?? inferSchemaFromPath(path || url),
+    // ⛔ `schema` is NOT read here — by ruling (2026-09-03), the retired
+    // spelling has no alias anywhere, authored content included. A fetch that
+    // still says `schema:` gets the inferred key and is re-authored to `as:`.
+    as: as ?? inferSchemaFromPath(path || url),
     prerender,
     merge,
     transform,

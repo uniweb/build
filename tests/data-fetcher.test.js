@@ -53,13 +53,9 @@ describe('parseFetchConfig', () => {
 
   describe('full config object', () => {
     it('parses config with path', () => {
-      // ⭐ An author's `schema:` is normalized to `as` AT THE BOUNDARY and not
-      // echoed back. That input spelling predates the 2026-09-02 rename and is
-      // content on someone's disk, so it is still read — but nothing inside
-      // carries two names for one thing.
       const config = {
         path: '/data/team.json',
-        schema: 'person',
+        as: 'person',
         prerender: false,
         merge: true,
       }
@@ -76,7 +72,7 @@ describe('parseFetchConfig', () => {
     it('parses config with url', () => {
       const config = {
         url: 'https://api.example.com/team',
-        schema: 'team',
+        as: 'team',
       }
       const result = parseFetchConfig(config)
       expect(result.url).toBe('https://api.example.com/team')
@@ -88,7 +84,7 @@ describe('parseFetchConfig', () => {
     it('parses config with transform', () => {
       const config = {
         url: 'https://api.example.com/response',
-        schema: 'items',
+        as: 'items',
         transform: 'data.items',
       }
       const result = parseFetchConfig(config)
@@ -233,11 +229,19 @@ describe('parseFetchConfig', () => {
       expect(result.filter).toBe('tags contains featured')
     })
 
-    it('allows schema override', () => {
-      const config = { query: 'articles', schema: 'posts' }
+    it('allows an `as` override', () => {
+      const config = { query: 'articles', as: 'posts' }
       const result = parseFetchConfig(config)
 
       expect(result.as).toBe('posts')
+    })
+
+    it('⛔ does NOT read the retired `schema:` spelling — no alias, by ruling (2026-09-03)', () => {
+      // Pinned in the negative: a fetch authored as `schema: posts` binds to the query name, not to
+      // `posts`. Restoring the fallback turns this red, which is the point — one name, no alias,
+      // authored content included; a pre-rename file is re-authored, not translated.
+      expect(parseFetchConfig({ query: 'articles', schema: 'posts' }).as).toBe('articles')
+      expect(parseFetchConfig({ path: '/data/team.json', schema: 'person' }).as).toBe('team')
     })
 
     it('parses collection with all options', () => {
@@ -246,7 +250,7 @@ describe('parseFetchConfig', () => {
         limit: 5,
         sort: 'date desc',
         filter: 'published != false',
-        schema: 'posts',
+        as: 'posts',
       }
       const result = parseFetchConfig(config)
 

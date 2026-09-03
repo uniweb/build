@@ -20,8 +20,12 @@ describe('the authoring shorthand', () => {
     expect(cfg.sort).toBe('date desc')
   })
 
-  it('lets an explicit schema override the query name', () => {
-    expect(parseFetchConfig({ query: 'recent', schema: 'article' }).as).toBe('article')
+  it('lets an explicit `as` override the query name', () => {
+    expect(parseFetchConfig({ query: 'recent', as: 'article' }).as).toBe('article')
+  })
+
+  it('⛔ the retired `schema:` spelling is not read — the query name wins', () => {
+    expect(parseFetchConfig({ query: 'recent', schema: 'article' }).as).toBe('recent')
   })
 })
 
@@ -62,12 +66,12 @@ describe('one name, end to end — no crossing', () => {
 
   it('drops the derived path, keeping what the author wrote', () => {
     expect(
-      authorableFetch({ query: 'members', path: '/data/members.json', schema: 'members' })
-    ).toEqual({ query: 'members', schema: 'members' })
+      authorableFetch({ query: 'members', path: '/data/members.json', as: 'members' })
+    ).toEqual({ query: 'members', as: 'members' })
   })
 
   it('CONTROL — a source-shaped fetch keeps its path, which the author wrote', () => {
-    const source = { path: '/data/custom.json', schema: 'things' }
+    const source = { path: '/data/custom.json', as: 'things' }
     expect(authorableFetch(source)).toEqual(source)
   })
 })
