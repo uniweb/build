@@ -272,6 +272,13 @@ function buildPageData(config, ctx) {
     // validating — so `fetch` is a blob they carry and framework owns its
     // vocabulary. ⇒ There was nothing to coordinate, and inventing a coordination
     // is how a name stays wrong.
+    // ⚠️ Owning the vocabulary is not the same as nobody reading it. A backend
+    // that re-implements the render payload for a lane with no build step reads
+    // ONE key out of this blob — `as`, to derive which record set a dynamic route
+    // iterates — and that read went silently empty when the key moved on
+    // 2026-09-02. So `fetch.as` is on the coupled surface even though `fetch`
+    // is carried: a consumer that interprets a name is a reader of it, however
+    // little of the object it looks at.
     // ⛔ `as`, the BINDING KEY — not to be confused with `schema` at
     // DECL_EMITTED_ABOVE / `setIf(data,'schema',d.schema)` below, which is a
     // queries decl's MODEL REF and keeps its name. One word meant both until
