@@ -567,8 +567,7 @@ export async function prerenderSite(siteDir, options = {}) {
     initPrerender,
     hydrateDataStore,
     prefetchIcons,
-    renderPage,
-    injectPageContent,
+    createPageRenderer,
     generate404Html,
   } = await import('@uniweb/runtime/ssr')
 
@@ -702,6 +701,10 @@ export async function prerenderSite(siteDir, options = {}) {
     // Initialize the Uniweb runtime using the shared SSR module
     const uniweb = initPrerender(siteContent, foundation, loadedExtensions, { onProgress })
 
+    // One renderer for this run: the Website is already built and the shell is
+    // fixed, so it is created once and asked per page.
+    const renderer = createPageRenderer({ website: uniweb.activeWebsite, shell: htmlShell })
+
     // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender.
     // hydrateDataStore handles cache-key derivation + value-shape wrapping
     // — same helper used by the browser SPA boot and by the Cloudflare
@@ -765,28 +768,37 @@ export async function prerenderSite(siteDir, options = {}) {
 
       onProgress(`Rendering ${outputRoute}...`)
 
-      const result = renderPage(page, website)
+      // ⭐ `renderer.render` IS the sequence this loop used to spell out —
+      // renderPage → classify → injectPageContent. It was moved into
+      // `@uniweb/runtime/ssr` because an SSR isolate assembles the same three steps
+      // per request, and two hand-written copies of one sequence is how the two
+      // lanes drift. This lane passes the Page it already holds; the isolate passes
+      // a route. See `runtime/src/page-renderer.js` for what it leaves to the host.
+      const result = renderer.render(page)
 
-      if (result.error) {
-        if (result.error.type === 'hooks' || result.error.type === 'null-component') {
+      if (result.outcome === 'failed') {
+        const { type, message } = result.error
+        if (type === 'hooks' || type === 'null-component') {
           console.warn(
-            `  Skipped SSG for ${outputRoute} — ${result.error.message}. ` +
+            `  Skipped SSG for ${outputRoute} — ${message}. ` +
             `The page will render correctly client-side.`
           )
         } else {
-          console.warn(`  Warning: Failed to render ${outputRoute}: ${result.error.message}`)
-        }
-
-        if (process.env.UNIWEB_DEBUG) {
-          // renderPage swallows the stack, but the classification message is informative
+          console.warn(`  Warning: Failed to render ${outputRoute}: ${message}`)
         }
         continue
       }
 
-      // Shared injection: #root, title, meta, section override CSS
-      let html = injectPageContent(htmlShell, result.renderedContent, page, {
-        sectionOverrideCSS: result.sectionOverrideCSS,
-      })
+      // ⛔ `notFound` cannot happen here — this loop iterates pages it already has,
+      // so `render` never resolves. Handled anyway: silently writing nothing for a
+      // page the loop selected would be the same shape of empty-success bug that
+      // `renderPage`'s content-not-loaded guard exists to catch.
+      if (result.outcome === 'notFound') {
+        console.warn(`  Warning: ${outputRoute} resolved to no page; skipped`)
+        continue
+      }
+
+      let html = result.html
 
       // Build-specific: theme CSS, __SITE_CONTENT__, icon cache.
       // scopeRoutes mirrors the runtime data cascade (page → page.parent → site)
