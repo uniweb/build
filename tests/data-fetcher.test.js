@@ -636,3 +636,17 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
 })
+
+describe('parseFetchConfig — the retired inherit: alias is an error', () => {
+  // Same treatment as `collection:`, for the same reason: warned-and-ignored,
+  // `{ inherit: true, limit: 3 }` falls through to the source shape, finds no
+  // location, and resolves to null — a silently empty block.
+  it('stops the build and names the current spelling', () => {
+    expect(() => parseFetchConfig({ inherit: true, limit: 3 })).toThrow(/inherit: true/)
+    expect(() => parseFetchConfig({ inherit: true, limit: 3 })).toThrow(/refine: true/)
+  })
+
+  it('refine: true still parses as a refinement — the control', () => {
+    expect(parseFetchConfig({ refine: true, limit: 3 })).toMatchObject({ refine: true, limit: 3 })
+  })
+})

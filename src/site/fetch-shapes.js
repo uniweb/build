@@ -3,7 +3,7 @@
 // ⛔ WHY THIS EXISTS. A `fetch:` declaration has three shapes, and the keys each one
 // accepts differ (`data-fetcher.js` RECOGNIZED_FETCH_KEYS):
 //
-//   refine      refine · inherit · detail · limit · sort · where · filter
+//   refine      refine · detail · limit · sort · where · filter
 //   query       query · schema · … — and NOT `path`/`url`
 //   source      path · url · schema · …
 
@@ -39,7 +39,7 @@
 /** Which of the three shapes a declaration is — the same order `data-fetcher` uses. */
 export function fetchShapeOf(fetch) {
   if (!fetch || typeof fetch !== 'object') return null
-  if (fetch.refine === true || fetch.inherit === true) return 'refine'
+  if (fetch.refine === true) return 'refine'
   if (fetch.query) return 'query'
   return 'source'
 }

@@ -251,7 +251,7 @@ export function applyPostProcessing(data, config) {
 // not understand, but we can refuse to pretend it was never there. Reported
 // once per key name per process so a 200-record build does not print 200 lines.
 const RECOGNIZED_FETCH_KEYS = {
-  refine: new Set(['refine', 'inherit', 'detail', 'limit', 'sort', 'where', 'filter']),
+  refine: new Set(['refine', 'detail', 'limit', 'sort', 'where', 'filter']),
   query: new Set([
     'query', 'as', 'schema', 'prerender', 'merge', 'transform',
     'where', 'limit', 'sort', 'detailPage', 'filter',
@@ -354,24 +354,30 @@ export function parseFetchConfig(fetch) {
   // Full config object
   if (typeof fetch !== 'object') return null
 
+  // ⛔ THE RETIRED ALIAS IS AN ERROR, NOT A WARNING — same reasoning as
+  // `collection:` below. `inherit: true` was the earlier spelling of
+  // `refine: true`, accepted with a warning from April 2026 and removed on
+  // 2026-09-02. Ignored, `{ inherit: true, limit: 3 }` would fall through to
+  // the source shape, find neither `path` nor `url`, and resolve to null — a
+  // silently empty block.
+  if (fetch.inherit !== undefined) {
+    throw new Error(
+      '[uniweb] fetch: `inherit: true` is retired. Write `refine: true` — the same ' +
+        'per-instance refinement of the ancestor fetch, under its current name.'
+    )
+  }
+
   // Refine config: { refine: true, detail: false, limit: 3 }
   // No URL — merges with the parent fetch config at runtime; only carries
-  // override props. The legacy spelling `inherit: true` is accepted for one
-  // release with a warning, then removed.
+  // override props.
   //
   // Note on build-vs-runtime scope: this parser passes `sort` and `filter`
   // through on refine configs, but the runtime EntityStore only applies
   // `detail`, `limit`, and `order` overrides. `sort` / `filter` on a refine
   // block are currently accepted by the parser but not honored at runtime.
   // Preserved as-is in this rename commit; revisit separately if needed.
-  if (fetch.refine === true || fetch.inherit === true) {
+  if (fetch.refine === true) {
     warnUnknownFetchKeys(fetch, 'refine')
-    if (fetch.inherit === true && fetch.refine !== true) {
-      console.warn(
-        "[uniweb] 'fetch: { inherit: true }' is deprecated; rename to 'fetch: { refine: true }'. " +
-        'Accepted for one release; will be removed in the next minor.'
-      )
-    }
     if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
       refine: true,
