@@ -28,6 +28,7 @@
  */
 
 import { isRichSchema } from '@uniweb/core'
+import { flatRecordFields } from '@uniweb/schemas/conform'
 
 /**
  * Parse data string into structured object
@@ -211,8 +212,22 @@ function leanDataSchema(value, dataSchemaMap) {
     : (value && typeof value.schema === 'string' ? value.schema : null)
   if (ref) {
     const resolved = dataSchemaMap[ref]
-    if (!resolved?.fields) return null
-    const lean = extractSchemaFields(resolved.fields)
+    // ⛔ `flatRecordFields`, NOT `resolved.fields`. `dataSchemaMap` holds each
+    // schema AS AUTHORED — resolution and lowering are different steps, and only
+    // the second normalizes the two authoring forms. `fields:` at the top is the
+    // SUGAR for a one-section model; a sections-form schema has no such key, so
+    // reading it directly returned null for every `@std/*` binding and the
+    // section's `data:` declaration supplied no field defaults at all. Silent:
+    // the data still arrived, just without its defaults.
+    //
+    // This helper is the reader that takes both forms (`if (schema.fields)
+    // return schema.fields`, else walk the single sections), and
+    // `site/queries-config.js` already used it for exactly this reason.
+    // Measured 2026-09-03: `@std/article` → undefined here, 15 fields through
+    // the helper; `@/member` (sugar) → 4 either way.
+    const fields = flatRecordFields(resolved)
+    if (!fields) return null
+    const lean = extractSchemaFields(fields)
     return Object.keys(lean).length > 0 ? lean : null
   }
 

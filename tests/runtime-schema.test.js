@@ -92,6 +92,66 @@ describe('extractRuntimeSchema', () => {
         schemas: { member: { name: 'string', role: 'string' } },
       })
     })
+
+    // ⛔ THE REGRESSION THIS SUITE MISSED FOR ITS WHOLE LIFE. Every case above
+    // hands `dataSchemaMap` a schema in the FIELDS-FORM — the authoring sugar for
+    // a one-section model. `leanDataSchema` read `resolved.fields` directly, which
+    // only that form has, so a SECTIONS-FORM schema resolved to null and the
+    // section's `data:` binding supplied no field defaults at all. Every `@std/*`
+    // schema is sections-form, so that was every standard binding — and the suite
+    // stayed green because it contained no sections-form schema to fail on.
+    //
+    // ⚖️ `dataSchemaMap` holds each schema AS AUTHORED: resolution and lowering
+    // are different steps, and only lowering (on the way to the registry)
+    // normalizes the two forms. A reader here must therefore accept both.
+    it('resolves a SECTIONS-FORM named ref, not just the fields-form sugar', () => {
+      const meta = { data: { articles: '@std/article' } }
+      const result = extractRuntimeSchema(meta, {
+        '@std/article': {
+          name: 'article',
+          sections: {
+            article: {
+              brief: true,
+              fields: { title: 'string', slug: 'string' },
+            },
+            article_body: {
+              fields: { status: { type: 'string', default: 'published' } },
+            },
+          },
+        },
+      })
+      expect(result).toEqual({
+        schemas: {
+          articles: {
+            title: 'string',
+            slug: 'string',
+            status: { type: 'string', default: 'published' },
+          },
+        },
+      })
+    })
+
+    it('skips a `multi` section when flattening — those are items, not record fields', () => {
+      const meta = { data: { x: '@/thing' } }
+      const result = extractRuntimeSchema(meta, {
+        '@/thing': {
+          name: 'thing',
+          sections: {
+            thing: { brief: true, fields: { title: 'string' } },
+            entries: { kind: 'multi', fields: { note: 'string' } },
+          },
+        },
+      })
+      expect(result.schemas.x).toEqual({ title: 'string' })
+      expect(result.schemas.x.note).toBeUndefined()
+    })
+
+    it('a ref that resolves to neither form yields no schema', () => {
+      // The control: the guard must still return null rather than an empty object,
+      // or a component would receive a schema key it can do nothing with.
+      const meta = { data: { x: '@/empty' } }
+      expect(extractRuntimeSchema(meta, { '@/empty': { name: 'empty' } })).toBeNull()
+    })
   })
 
   describe('param defaults extraction', () => {
