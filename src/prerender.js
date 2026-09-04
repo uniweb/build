@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolveDefaultLocale, isDataUrl } from '@uniweb/core'
+import { resolveDefaultLocale, resolveFetchConfigs } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent, toFetchList, stripBuildOnlyFetchKeys } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -78,37 +78,50 @@ export function resolveExtensionPath(url, distDir, projectRoot, base) {
  * @param {string} [localeInfo.distDir] - Path to dist directory (where locale-specific data lives)
  * @returns {Object} { pageFetchedData, fetchedData } - Fetched data for dynamic route expansion and DataStore pre-population
  */
-async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
+export async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
   const fetchedData = [] // Collected for DataStore pre-population
 
   // For non-default locales, translated collection data lives in dist/{locale}/data/
-  // instead of public/data/. Create a localized fetch helper.
+  // instead of public/data/.
   const isNonDefaultLocale = localeInfo &&
     localeInfo.locale !== localeInfo.defaultLocale &&
     localeInfo.distDir
 
-  function localizeFetch(config) {
-    if (!isNonDefaultLocale || !isDataUrl(config.path)) return config
-    return { ...config, path: `/${localeInfo.locale}${config.path}` }
+  // ⭐ RESOLVED THE WAY THE RUNTIME RESOLVES IT — the one rule in
+  // `@uniweb/core/fetch-config`, which is what makes the entries below hydrate:
+  // the SPA looks each one up under `deriveCacheKey(config)` of ITS resolved
+  // config, so the config baked here must be the same object — the same
+  // localized path (this used to prefix `/{locale}` by hand), the same `depth`
+  // (a `deferred:` query's compiled file is a list of briefs), the same detail
+  // pattern. A hand-built copy of that rule is how a prerendered site came to
+  // refetch on boot without anyone noticing.
+  const resolveOptions = {
+    locale: localeInfo?.locale ?? null,
+    defaultLocale: localeInfo?.defaultLocale ?? null,
+    queries: siteContent.config?.queries ?? null,
+    records: null, // the build lane: no live records; the compiled file answers
   }
+  const resolveForBuild = (oneFetch) =>
+    resolveFetchConfigs([oneFetch], resolveOptions).get(oneFetch.as) ?? oneFetch
 
   // Fetch options pointing to dist/ for localized data
   const localizedFetchOptions = isNonDefaultLocale
     ? { siteRoot: localeInfo.distDir, publicDir: '.' }
     : fetchOptions
+  const optionsFor = (cfg, oneFetch) => (cfg.path !== oneFetch.path ? localizedFetchOptions : fetchOptions)
+  const entry = (cfg, data, scope) => ({ config: cfg, data, meta: { depth: cfg.depth }, _scope: scope })
 
   // 1. Site-level fetch. ⛔ `toFetchList` rather than a property read: a `fetch:`
   // or `data:` LIST parses to an array, and `siteFetch.prerender` on one is
   // `undefined` — which passes the `!== false` test and then fetches nothing.
   for (const oneFetch of toFetchList(siteContent.config?.fetch)) {
     if (oneFetch.prerender === false) continue
-    const cfg = localizeFetch(oneFetch)
-    const opts = cfg !== oneFetch ? localizedFetchOptions : fetchOptions
+    const cfg = resolveForBuild(oneFetch)
     onProgress(`  Fetching site data: ${cfg.path || cfg.url}`)
-    const result = await executeFetch(cfg, opts)
+    const result = await executeFetch(cfg, optionsFor(cfg, oneFetch))
     if (result.data && !result.error) {
-      fetchedData.push({ config: cfg, data: result.data, _scope: '__site__' })
+      fetchedData.push(entry(cfg, result.data, '__site__'))
     }
   }
 
@@ -119,12 +132,11 @@ async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
     // Page-level fetch — every declaration on the page.
     for (const oneFetch of toFetchList(page.fetch)) {
       if (oneFetch.prerender === false) continue
-      const cfg = localizeFetch(oneFetch)
-      const opts = cfg !== oneFetch ? localizedFetchOptions : fetchOptions
+      const cfg = resolveForBuild(oneFetch)
       onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
-      const result = await executeFetch(cfg, opts)
+      const result = await executeFetch(cfg, optionsFor(cfg, oneFetch))
       if (result.data && !result.error) {
-        fetchedData.push({ config: cfg, data: result.data, _scope: page.route })
+        fetchedData.push(entry(cfg, result.data, page.route))
         // ⚖️ Dynamic-route expansion consumes ONE query — a `[slug]` template
         // expands over a single record set. With several declared, the first
         // that prerenders is the route query, matching `parentSchema` in the

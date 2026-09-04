@@ -33,7 +33,7 @@
 import { resolve, join } from 'node:path'
 import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
-import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
+import { resolveDefaultLocale, resolveFetchConfigs, DATA_DIR } from '@uniweb/core'
 import {
   renderSiteIndex,
   renderPageMarkdown,
@@ -136,13 +136,24 @@ export function shouldPrefetchInDev(cfg) {
 async function executeDevFetches(siteContent, siteDir) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
   const fetchedData = []
+  // Resolved the way the runtime resolves it (see prerender.js::executeAllFetches
+  // for why): the SPA hydrates by the cache key of ITS resolved config.
+  const resolveOptions = {
+    locale: siteContent.config?.activeLocale ?? null,
+    defaultLocale: resolveDefaultLocale(siteContent.config) ?? null,
+    queries: siteContent.config?.queries ?? null,
+    records: null,
+  }
+  const resolveForDev = (one) => resolveFetchConfigs([one], resolveOptions).get(one.as) ?? one
+  const entry = (cfg, data) => ({ config: cfg, data, meta: { depth: cfg.depth } })
 
   // Site-level fetch — every declaration.
   for (const siteFetch of toFetchList(siteContent.config?.fetch)) {
     if (!shouldPrefetchInDev(siteFetch)) continue
-    const result = await executeFetch(siteFetch, fetchOptions)
+    const cfg = resolveForDev(siteFetch)
+    const result = await executeFetch(cfg, fetchOptions)
     if (result.data && !result.error) {
-      fetchedData.push({ config: siteFetch, data: result.data })
+      fetchedData.push(entry(cfg, result.data))
     }
   }
 
@@ -151,9 +162,10 @@ async function executeDevFetches(siteContent, siteDir) {
     // Page-level fetch — every declaration.
     for (const pageFetch of toFetchList(page.fetch)) {
       if (!shouldPrefetchInDev(pageFetch)) continue
-      const result = await executeFetch(pageFetch, fetchOptions)
+      const cfg = resolveForDev(pageFetch)
+      const result = await executeFetch(cfg, fetchOptions)
       if (result.data && !result.error) {
-        fetchedData.push({ config: pageFetch, data: result.data })
+        fetchedData.push(entry(cfg, result.data))
       }
     }
 
