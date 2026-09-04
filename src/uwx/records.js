@@ -2,7 +2,7 @@
 // referenced BY NAME, on the entity-content SYNC lane.
 //
 // Each record becomes a section-keyed `$`-document (docs/reference/entity-content.md):
-// `$id` (the slug — the producer-local handle), `$model` (the Model by name), and
+// `$id` (the producer-local handle), `$model` (the Model by name), and
 // each SINGLE section keyed by its name — the brief plus any sibling singles, not
 // the brief alone. The backend MINTS `$uuid` on first sync and
 // returns it in the finalized response; the verb back-fills it into the source
@@ -272,9 +272,16 @@ export function recordsToEntities({
       warnings.push(`${queryName}: a record without a slug was skipped`)
       continue
     }
-    // `$id` is the payload-local handle = the record's path under collections/
-    // (`<collection>/<slug>`), globally unique within one sync so the @uniweb/folder
-    // entity can point a leaf at it via `$ref`. An explicit frontmatter `$id` wins.
+    // ⛔ `$id` IS NOT THE SLUG. It is the payload-local handle: the record's path
+    // under collections/ (`<collection>/<slug>`), globally unique within one sync so
+    // the @uniweb/folder entity can point a leaf at it via `$ref`. An explicit
+    // frontmatter `$id` wins.
+    //
+    // The qualification is a CONSTRAINT, not a style: the sync response is keyed per
+    // (`$model`, `$id`), so a bare slug would collide whenever two collections on the
+    // same Model reuse one (see the duplicate check below). ⇒ Do not describe this
+    // value as "the slug" — the folder leaf's `path_segment` is the bare segment, and
+    // conflating the two has already misdirected a naming decision.
     const id = record.$id || `${queryName}/${slug}`
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
