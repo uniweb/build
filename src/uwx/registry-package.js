@@ -159,6 +159,11 @@ function buildInfo(self, org, digest, runtime) {
   // be satisfied. Same lift as `digest`: stated by the producer, opaque to the
   // backend, acted on by whoever resolves a whole site.
   if (runtime) info.runtime = runtime
+  // The host services this foundation is BUILT AGAINST, from package.json's
+  // `uniweb.supports`. `Array.isArray` and not truthiness: `[]` is an explicit
+  // "none" and must survive as one, while an ABSENT key means UNKNOWN — the
+  // same three-state rule `runtime` states above, for the same reason.
+  if (Array.isArray(self.supports)) info.supports = self.supports
   return info
 }
 
@@ -166,7 +171,11 @@ function buildInfo(self, org, digest, runtime) {
 // as one opaque object the backend never reads into (custodian).
 function buildSchemaBlob(schema) {
   const { dataSchemas: _ds, ...rest } = schema
-  const { name: _n, version: _v, description: _d, role: _r, ...selfConfig } = rest._self || {}
+  // Every key hoisted into `info` is stripped here, so the wire carries each
+  // fact ONCE. Two copies of one fact is a drift liability, and the copy inside
+  // an opaque blob is the one nobody would think to update.
+  const { name: _n, version: _v, description: _d, role: _r, supports: _s, ...selfConfig } =
+    rest._self || {}
   return { ...rest, _self: selfConfig }
 }
 

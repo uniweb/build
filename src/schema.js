@@ -68,6 +68,74 @@ export async function loadComponentMeta(componentDir) {
 }
 
 /**
+ * Normalize `package.json`'s `uniweb.supports` — the host services this
+ * foundation is BUILT AGAINST.
+ *
+ * A foundation states what it is prepared to honour; a host states what it
+ * offers (`config.services.<name>`, read by `@uniweb/core/services`). The two
+ * declarations point in opposite directions across the same seam, which is why
+ * this one is spelled `supports` and never `services`.
+ *
+ * ## ⭐ THREE STATES, AND COLLAPSING THE FIRST TWO IS THE WHOLE POINT
+ *
+ *   absent        UNKNOWN — an older CLI, or a developer who never met this key
+ *   `[]`          an explicit NONE
+ *   `['search']`  these, and only these
+ *
+ * Same lift as `info.runtime` (`uwx/registry-package.js::buildInfo`), whose
+ * comment states the rule this follows: *"a consumer must read the omission as
+ * UNKNOWN rather than unconstrained, since a floor nobody stated cannot be shown
+ * to be satisfied."* An unstated support set is not a refusal, and a reader that
+ * treats it as one blocks every foundation built before this existed.
+ *
+ * ⛔ **So this returns `{}` for absent and `{ supports: [] }` for empty**, and
+ * they must not be flattened downstream. A default of any kind here — assuming
+ * search is present because most foundations have one — would claim a service on
+ * behalf of the developer who never heard of the feature, which is the same
+ * person as the developer who forgot to declare it. That trades a loud failure
+ * (a capability reported unknown) for a silent one (an operator paying for
+ * something their site will not render).
+ *
+ * ⚖️ Whether an unknown service is still worth offering is a POLICY question
+ * about that service, and policy on this seam is not the framework's: this
+ * package is public, and it encodes no tiers, no plan names and no entitlement
+ * (`core/src/services.js`). We report faithfully, including reporting that we do
+ * not know.
+ *
+ * Sorted and de-duplicated so a re-export of one foundation version is
+ * byte-identical — the same reason `buildRefs` sorts.
+ *
+ * @param {*} value - the raw `uniweb.supports` value, if any
+ * @param {string} packagePath - for the warning message
+ * @returns {{supports?: string[]}} `{}` when undeclared
+ */
+function normalizeSupports(value, packagePath) {
+  if (value === undefined || value === null) return {}
+
+  if (!Array.isArray(value)) {
+    console.warn(
+      `Warning: ${packagePath} declares \`uniweb.supports\` as ${typeof value}; expected an array of service names. Ignoring it.\n` +
+        `  An ignored declaration reads downstream as UNKNOWN, not as "supports nothing".`,
+    )
+    return {}
+  }
+
+  const names = []
+  const dropped = []
+  for (const entry of value) {
+    if (typeof entry === 'string' && entry.trim()) names.push(entry.trim())
+    else dropped.push(entry)
+  }
+  if (dropped.length > 0) {
+    console.warn(
+      `Warning: ${packagePath} has ${dropped.length} non-name entr${dropped.length === 1 ? 'y' : 'ies'} in \`uniweb.supports\`. Ignoring ${dropped.length === 1 ? 'it' : 'them'}.`,
+    )
+  }
+
+  return { supports: [...new Set(names)].sort() }
+}
+
+/**
  * Load package.json from a foundation's root.
  * Extracts identity fields: name, version, description.
  *
@@ -104,6 +172,11 @@ export async function loadPackageJson(srcDir) {
       name: pkg.uniweb?.id || pkg.name,
       version: pkg.version,
       description: pkg.description,
+      // `uniweb.supports` joins them because it is the same KIND of fact: static,
+      // publish-time, read by whoever resolves a whole site, never executed here.
+      // Spread rather than assigned so an absent declaration stays ABSENT — see
+      // normalizeSupports for why that is load-bearing.
+      ...normalizeSupports(pkg.uniweb?.supports, packagePath),
     }
   } catch (error) {
     console.warn(`Warning: Failed to load package.json:`, error.message)

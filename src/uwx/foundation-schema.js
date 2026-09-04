@@ -4,9 +4,10 @@
 // The entity has FOUR Sections — decompose only what a consumer needs to read
 // on its own; keep coarse what is shipped whole:
 //
-//   info    single, brief — identity ONLY: name, version, role, description.
-//                           Field-decomposed so identity is readable without
-//                           opening the rest. This is the summary card.
+//   info    single, brief — identity: name, version, role, description, plus the
+//                           producer statements a consumer must act on without
+//                           opening the rest (`digest`, `runtime`, `supports`).
+//                           Field-decomposed. This is the summary card.
 //   schema  single — ONE opaque `schema` json field: the whole renderable
 //                    schema.json MINUS identity and MINUS dataSchemas
 //                    (components, layouts, outputs, plus foundation-wide config
@@ -84,6 +85,11 @@ export function foundationSchemaToEntity(schema, opts = {}) {
     role: self.role || 'foundation',
   }
   if (self.description !== undefined) info.description = self.description
+  // The host services this foundation is built against (package.json's
+  // `uniweb.supports`). `Array.isArray`, not truthiness: `[]` is an explicit
+  // "none"; an ABSENT key means UNKNOWN. Mirrors `buildInfo` in
+  // `registry-package.js`, which is the path `uniweb register` actually takes.
+  if (Array.isArray(self.supports)) info.supports = self.supports
 
   // ── schema — the whole renderable schema.json minus identity and minus
   // dataSchemas, shipped WHOLE as one opaque blob. ───────────────────────────
@@ -93,6 +99,7 @@ export function foundationSchemaToEntity(schema, opts = {}) {
     version: _v,
     description: _d,
     role: _r,
+    supports: _s,
     ...selfConfig
   } = rest._self || {}
   const schemaBlob = { ...rest, _self: selfConfig }
