@@ -318,6 +318,21 @@ Content.
       expect(byTitle.Ok).toBe('/blog/ok')
     })
 
+    it('a route naming a [...path] page bakes the record\'s placement into its href', async () => {
+      const contentDir = join(testDir, 'entities', 'articles')
+      mkdirSync(contentDir, { recursive: true })
+      writeFileSync(join(contentDir, 'deep.md'), `---\ntitle: Deep\n---\n\nBody\n`)
+      writeFileSync(join(contentDir, 'top.md'), `---\ntitle: Top\n---\n\nBody\n`)
+      writeFileSync(join(testDir, 'records.yml'), ['- articles/top.md', '- folder: field/2026', '  records:', '    - articles/deep.md', ''].join('\n'))
+
+      const collections = await processQueries(testDir, {
+        articles: { schema: '@/articles', route: '/logbook/[...path]' }
+      })
+      const byTitle = Object.fromEntries(collections.articles.map((i) => [i.title, i.route]))
+      expect(byTitle.Deep).toBe('/logbook/field/2026/deep')
+      expect(byTitle.Top).toBe('/logbook/top')
+    })
+
     it('should not add route when route config is absent', async () => {
       const contentDir = join(testDir, 'entities', 'items')
       mkdirSync(contentDir, { recursive: true })

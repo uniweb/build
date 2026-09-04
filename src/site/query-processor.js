@@ -685,8 +685,16 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // compared unequal to `location.pathname`, and a slug with a `/` became an
   // extra route segment. A record with no slug gets no route rather than
   // `/blog/undefined`.
+  //
+  // `route: /blog` names the base of a `[slug]` page, so the template is
+  // `/blog/:slug`. `route: /blog/[...path]` names a `[...path]` page: the
+  // template is `/blog/:path*` and the record's placement (`path`, the folder
+  // `records.yml` put it in) becomes part of its href — `/blog/field/my-post`.
   if (config.route) {
-    const template = `${config.route.replace(/\/$/, '')}/:slug`
+    const base = config.route.replace(/\/$/, '')
+    const template = base.endsWith('/[...path]')
+      ? `${base.slice(0, -'/[...path]'.length)}/:path*`
+      : `${base}/:slug`
     items = items.map((item) => {
       const route = fillRoutePattern(template, item)
       return route === null ? item : { ...item, route }
