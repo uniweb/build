@@ -627,8 +627,8 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     // The control. Without it, a warn-on-everything bug would pass every
     // assertion above while making the build unusable.
     parseFetchConfig({ query: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
-    parseFetchConfig({ path: '/data/x.json', schema: 'x', transform: 'data.items', merge: true })
-    parseFetchConfig({ url: 'https://example.com/api', schema: 'x', prerender: false })
+    parseFetchConfig({ path: '/data/x.json', as: 'x', transform: 'data.items', merge: true })
+    parseFetchConfig({ url: 'https://example.com/api', as: 'x', prerender: false })
     parseFetchConfig({ refine: true, detail: false, limit: 3 })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
@@ -638,6 +638,81 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     // never about being unrecognized.
     parseFetchConfig({ query: 'articles', filter: 'a == 1' })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
+  })
+})
+
+describe('parseFetchConfig — the retired `schema:` binding key is REPORTED, not swallowed', () => {
+  // ⛔ The regression this exists to prevent, measured 2026-09-03. `schema:`
+  // stopped being READ on 2026-09-02 (`e4fe077`) but was left on
+  // RECOGNIZED_FETCH_KEYS, which exempted it from the unrecognized-key report.
+  // So the one key guaranteed to appear in every pre-rename site was the one key
+  // that vanished in total silence — and the data still arrived, under a
+  // different `content.data` name, so the failure surfaced as an empty component
+  // rather than as anything pointing at the fetch. Five of six sections in
+  // `templates/dynamic` shipped broken this way.
+  let warn
+  beforeEach(async () => {
+    const mod = await import('../src/site/data-fetcher.js')
+    mod._resetRetiredSchemaWarnings()
+    mod._resetUnknownFetchKeyWarnings()
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => warn.mockRestore())
+
+  const messages = () => warn.mock.calls.map((c) => String(c[0]))
+
+  it('warns on a source declaration and names the key it actually bound to', () => {
+    // The diagnostic value is the SECOND name: the author can see at a glance
+    // that `/data/site-config.json` bound to `site-config`, not to `config`.
+    parseFetchConfig({ path: '/data/site-config.json', schema: 'config' })
+    const m = messages().find((x) => x.includes("'schema: config'"))
+    expect(m).toBeDefined()
+    expect(m).toContain('content.data.site-config')
+    expect(m).toContain("Write 'as: config'")
+  })
+
+  it('warns on a query declaration too', () => {
+    parseFetchConfig({ query: 'articles', schema: 'posts' })
+    const m = messages().find((x) => x.includes("'schema: posts'"))
+    expect(m).toBeDefined()
+    expect(m).toContain('content.data.articles')
+  })
+
+  it('says "(nothing)" when the inferred key is empty and the config is dropped', () => {
+    // `https://randomuser.me/api/?results=6` → last segment `?results=6` → ''.
+    // A falsy binding key is skipped by resolveFetchConfigs, so the fetch does
+    // not merely land elsewhere — it does not land at all.
+    const parsed = parseFetchConfig({ url: 'https://randomuser.me/api/?results=6', schema: 'donors' })
+    expect(parsed.as).toBe('')
+    expect(messages().some((m) => m.includes('content.data.(nothing)'))).toBe(true)
+  })
+
+  it('warns even when the inferred key happens to match, because the next edit breaks it', () => {
+    parseFetchConfig({ path: '/data/team.json', schema: 'team' })
+    expect(messages().some((m) => m.includes("'schema: team'"))).toBe(true)
+  })
+
+  it('does not ALSO report it as an unrecognized key', () => {
+    // It has a specific message; the generic one would understate it and double
+    // the noise. This is what RETIRED_FETCH_KEYS buys — the key is still dropped.
+    parseFetchConfig({ path: '/data/x.json', schema: 'x' })
+    expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
+  })
+
+  it('reports once per distinct (written → bound) pair', () => {
+    parseFetchConfig({ path: '/data/a.json', schema: 'x' })
+    parseFetchConfig({ path: '/data/a.json', schema: 'x' })
+    parseFetchConfig({ path: '/data/b.json', schema: 'x' })
+    expect(messages().filter((m) => m.includes("'schema: x'"))).toHaveLength(2)
+  })
+
+  it('stays silent on `as:` and on a queries-declaration `schema:`', () => {
+    // The control. `schema:` on a `queries:` entry is a different, CURRENT key —
+    // the Model ref — and never reaches this parser. Warning on `as:` would make
+    // the build unusable while every assertion above still passed.
+    parseFetchConfig({ path: '/data/team.json', as: 'team' })
+    parseFetchConfig({ query: 'articles', as: 'posts' })
+    expect(messages().filter((m) => m.includes('is retired as the binding key'))).toHaveLength(0)
   })
 })
 

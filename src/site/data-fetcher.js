@@ -252,15 +252,31 @@ export function applyPostProcessing(data, config) {
 // once per key name per process so a 200-record build does not print 200 lines.
 const RECOGNIZED_FETCH_KEYS = {
   refine: new Set(['refine', 'detail', 'limit', 'sort', 'where', 'filter']),
+  // ⛔ `schema` IS NOT ON EITHER LIST, and its absence is the point. It was the
+  // binding key until 2026-09-02 and stopped being READ on 2026-09-03 (`e4fe077`,
+  // one name no alias) — but it was left on these lists, which exempted it from
+  // the very report this table exists to produce. So the retired spelling was
+  // dropped in the one way the author could not see: no warning, and a plausible
+  // key inferred from the path in its place. It has its own message below, since
+  // "unrecognized" understates a key that used to work.
   query: new Set([
-    'query', 'as', 'schema', 'prerender', 'merge', 'transform',
+    'query', 'as', 'prerender', 'merge', 'transform',
     'where', 'limit', 'sort', 'detailPage', 'filter',
   ]),
   source: new Set([
-    'path', 'url', 'as', 'schema', 'prerender', 'merge', 'transform', 'detail',
+    'path', 'url', 'as', 'prerender', 'merge', 'transform', 'detail',
     'detailPage', 'where', 'limit', 'sort', 'filter',
   ]),
 }
+
+// Keys that are neither recognized nor merely unknown: they USED to work, and a
+// generic "unrecognized key" line understates that. Each has a dedicated message
+// naming its replacement, so this table only has to keep the generic report from
+// firing a second, vaguer time on the same key.
+//
+// ⛔ This is not the recognized list wearing another name. A key here is still
+// dropped from the parsed config; what it buys is a better sentence.
+const RETIRED_FETCH_KEYS = new Set(['schema'])
 
 const warnedUnknownFetchKeys = new Set()
 
@@ -268,6 +284,7 @@ function warnUnknownFetchKeys(fetch, shape) {
   const recognized = RECOGNIZED_FETCH_KEYS[shape]
   for (const key of Object.keys(fetch)) {
     if (recognized.has(key)) continue
+    if (RETIRED_FETCH_KEYS.has(key)) continue
     const seenKey = `${shape}:${key}`
     if (warnedUnknownFetchKeys.has(seenKey)) continue
     warnedUnknownFetchKeys.add(seenKey)
@@ -406,6 +423,7 @@ export function parseFetchConfig(fetch) {
   if (fetch.query) {
     warnUnknownFetchKeys(fetch, 'query')
     if (fetch.filter !== undefined) warnFilterDeprecated()
+    warnSchemaRetired(fetch, fetch.as || fetch.query)
     return {
       // ⭐ **`query` IS EMITTED, and that is what makes the two producers agree.**
       // The sync lane has always emitted it (`uwx/site.js`) and this one did not,
@@ -470,6 +488,7 @@ export function parseFetchConfig(fetch) {
   if (!path && !url) return null
 
   if (filter !== undefined) warnFilterDeprecated()
+  warnSchemaRetired(fetch, as ?? inferSchemaFromPath(path || url))
 
   return {
     path,
@@ -491,6 +510,46 @@ export function parseFetchConfig(fetch) {
     // Legacy post-processing (deprecated)
     filter,
   }
+}
+
+/**
+ * Report a fetch still authored with the retired `schema:` binding key.
+ *
+ * ⭐ **It names the key the fetch ACTUALLY bound to, and that is the whole
+ * value of this message.** `schema:` is not read (ruling 2026-09-03, `e4fe077`):
+ * the binding key falls back to the query name or to `inferSchemaFromPath`, so
+ * the data still arrives — under a *different* `content.data` key. The component
+ * reads `?.weather`, gets `undefined`, and renders empty with nothing anywhere
+ * saying why. A bare "unrecognized key" would not close that gap; the inferred
+ * name does, because the reader can see at once whether it happens to match.
+ *
+ * ⚠️ Measured 2026-09-03, `templates/dynamic`: five of six sections rendered
+ * empty this way, one of them from a URL whose last segment is empty
+ * (`randomuser.me/api/?results=6` → `as: ''`), which is falsy and drops the
+ * config outright. That template shipped with no warning of any kind, because
+ * `schema` was left on the recognized list when it stopped being read.
+ *
+ * Once per distinct (written → bound) pair: several files each get their own
+ * line, one file repeated across 200 records does not.
+ */
+const warnedRetiredSchema = new Set()
+function warnSchemaRetired(fetch, boundTo) {
+  if (fetch?.schema === undefined) return
+  const wrote = String(fetch.schema)
+  const bound = boundTo === '' || boundTo === undefined ? '(nothing)' : String(boundTo)
+  const seen = `${wrote}→${bound}`
+  if (warnedRetiredSchema.has(seen)) return
+  warnedRetiredSchema.add(seen)
+  console.warn(
+    `[uniweb] fetch: 'schema: ${wrote}' is retired as the binding key and is NOT read. ` +
+      `This fetch binds to content.data.${bound} instead. Write 'as: ${wrote}'. ` +
+      "(On a `queries:` declaration `schema:` is a different, current key — the Model ref.)"
+  )
+}
+
+/** Test seam — reset the retired-`schema:` memo so suites do not leak into each other. */
+export function _resetRetiredSchemaWarnings() {
+  warnedRetiredSchema.clear()
 }
 
 let filterDeprecationWarned = false
