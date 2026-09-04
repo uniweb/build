@@ -369,7 +369,7 @@ describe('resolveSchemaRef — org scope resolution', () => {
   //
   // The requirement they remove is real history: until @uniweb/build@0.29.0 a foundation
   // referencing `@std/person` had to declare `@uniweb/schemas` itself or the build failed.
-  // See kb/framework/build/std-schema-dependency.md.
+  // (The @std schema dependency is documented in the workspace knowledge base.)
 
   it("resolves '@std/<name>' from a foundation that declares NOTHING", async () => {
     // `dir` has a bare package.json and no node_modules. The foundation's own context is

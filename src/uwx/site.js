@@ -730,8 +730,6 @@ export function isSiteRelativeExtensionUrl(decl) {
  * `site.yml collections.<name>.label`; no such field has ever existed, and they have
  * corrected it.
  *
- * ⇒ Full record, including what is established vs merely claimed:
- * `kb/framework/build/collections-decl-open-questions.md`.
  *
  * @param {object} declarations resolved collection declarations, keyed by name
  * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push

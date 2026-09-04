@@ -42,7 +42,7 @@
 // fill it in) is guarded at the CLI with a count and a confirmation; the format
 // stays honest and the CLI does the asking.
 //
-// Model: `kb/framework/plans/records-model.md`.
+// Model: entity · record · query · folder.
 
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'

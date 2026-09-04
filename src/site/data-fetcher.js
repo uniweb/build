@@ -149,10 +149,10 @@ export function applySort(items, sortExpr) {
 /**
  * Apply a where-object predicate to an array of items.
  *
- * The where-object is the new query language (see @uniweb/core's
- * matchWhere). Structured JSON predicate; the runtime evaluator walks
- * the object against each record. Same shape ships to backends that
- * declare `supports: [where]`.
+ * The where-object is the query language (see @uniweb/core's
+ * matchWhere). Structured JSON predicate; the one evaluator walks the
+ * object against each record, here at build time and in the runtime
+ * alike. The same shape crosses to a host's question door unchanged.
  *
  * @param {Array} items - Items to filter
  * @param {object} where - Where-object predicate
@@ -559,8 +559,7 @@ function warnFilterDeprecated() {
  * `merge` decides how a section-level fetch lands in `parsedContent.data` when
  * prerender (or the dev server) executes it — a build-lane feature, documented as
  * such. It rode every shipped payload regardless, and a key on the payload that
- * nothing reads is a key a consumer will one day read (`kb/framework/open-work.md`
- * F8). Stripped at the two emit points framework owns — the link lane's
+ * nothing reads is a key a consumer will one day read. Stripped at the two emit points framework owns — the link lane's
  * `site-content.json` and the bundle lane's embed — AFTER the build has consumed
  * it. ⛔ Not from the sync wire: that carries the author's declaration, which
  * `pull` must round-trip.

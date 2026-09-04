@@ -65,6 +65,37 @@ try {
 const CATCH_ALL_FOLDER = '[...path]'
 
 /**
+ * The site-level `fetcher:` vocabulary the default fetcher used to read —
+ * `baseUrl`, `headers`, `envelope`, `supports`, `request` — was RETIRED on
+ * 2026-09-04 [Diego]: a third-party endpoint is a foundation TRANSPORT, never a
+ * knob on the runtime every site loads. What stays under `fetcher:` is the
+ * site's SELECTION of transports (`transports:`) and the binding config a named
+ * transport reads (`fetcher.<name>:`). A retired key is dropped from the payload
+ * and said out loud, once, because silently ignoring it is the failure class
+ * this seam exists to remove: the author's backend simply stops being reached.
+ */
+const RETIRED_FETCHER_KEYS = ['baseUrl', 'headers', 'envelope', 'supports', 'request']
+let warnedRetiredFetcher = false
+function warnRetiredFetcherKeys(fetcher) {
+  if (!fetcher || typeof fetcher !== 'object' || Array.isArray(fetcher)) return fetcher
+  const retired = RETIRED_FETCHER_KEYS.filter((k) => k in fetcher)
+  if (retired.length === 0) return fetcher
+  if (!warnedRetiredFetcher) {
+    warnedRetiredFetcher = true
+    console.warn(
+      `[uniweb] site.yml fetcher: ${retired.map((k) => `\`${k}\``).join(', ')} ` +
+        `${retired.length === 1 ? 'is' : 'are'} retired and ignored. The default fetcher reads a ` +
+        `site's own files and a host's records lane; a backend of your own is reached through a ` +
+        `foundation transport (docs: development/connecting-a-backend.md). Kept: ` +
+        `\`fetcher.transports\` and a transport's own binding config.`
+    )
+  }
+  const kept = {}
+  for (const [k, v] of Object.entries(fetcher)) if (!RETIRED_FETCHER_KEYS.includes(k)) kept[k] = v
+  return kept
+}
+
+/**
  * Check if a folder name represents a dynamic route (e.g., [slug], [id], [...path])
  * @param {string} folderName - The folder name to check
  * @returns {boolean}
@@ -2076,8 +2107,8 @@ export async function loadFoundationInfo(foundationPath) {
   // rich per-section declaration a visual editor needs to render parameter forms
   // and component pickers — and it is not a source of truth for a site build.
   // The architecture is explicit that the declaration is emitted in two shapes
-  // for two audiences (`kb/framework/architecture/site-foundation-runtime-model.md`
-  // § The two-audience schema): the lean runtime half ships INSIDE `dist/entry.js`
+  // for two audiences (the site / foundation / runtime model, § The two-audience
+  // schema): the lean runtime half ships INSIDE `dist/entry.js`
   // as `capabilities`, and the rich half is for authoring tools only.
   //
   // Reading the editor's copy here was wrong twice over. It made a site build
@@ -2583,6 +2614,7 @@ export async function collectSiteContent(sitePath, options = {}) {
         ? { languages: publishable }
         : {}),
       fetch: parseFetchConfig(siteConfig.fetch),
+      fetcher: warnRetiredFetcherKeys(siteConfig.fetcher),
       // NOTE: `intelligence.yml` was read here and emitted as `config.intelligence`.
       // Removed 2026-08-12 — the assistant surface is `site.yml::assistant`, which
       // needs no line at all on this lane (`config` spreads all of site.yml) and one

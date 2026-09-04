@@ -8,8 +8,7 @@
 // took `site.yml`'s values and sync took `collections.yml`'s, so an author writing
 // `sort: date desc` here got `date asc` baked into the static file.
 //
-// The broken case was the one the public docs recommend. See
-// `kb/framework/plans/one-collections-config.md`.
+// The broken case was the one the public docs recommend.
 //
 // ⭐ A QUERY IS SECOND-ORDER SITE CONTENT — it describes how to REACH content, and
 // is evaluated rather than rendered. `queries.yml` is a BARE MAP of name → query at
@@ -19,7 +18,7 @@
 // ⛔ THE THREE JOBS `collections/<name>/` USED TO FUSE ARE NOW THREE THINGS.
 // `entities/{schema}/` is the pool, `records.yml` is the folder (what makes an
 // entity a record), and a query asks the folder for a set. This file resolves the
-// LAST of those only. Model: `kb/framework/plans/records-model.md`.
+// LAST of those only.
 //
 // ⚠️ `collections.yml` and `site.yml::collections` are GONE, with no alias and no
 // deprecation path — the model's §5 ruling, and there is nothing outside this

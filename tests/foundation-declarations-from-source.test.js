@@ -7,8 +7,7 @@
  * `meta/schema.json` is the EDITOR's artifact: the rich per-section declaration
  * a visual editor needs for parameter forms and component pickers. The
  * architecture emits the declaration in two shapes for two audiences
- * (`kb/framework/architecture/site-foundation-runtime-model.md` § The
- * two-audience schema) — the lean runtime half ships inside `dist/entry.js` as
+ * (the site / foundation / runtime model, § The two-audience schema) — the lean runtime half ships inside `dist/entry.js` as
  * `capabilities`, and the rich half is for authoring tools. A site build is
  * neither audience, and `generate-entry.js` calls the very same two functions
  * this now calls in order to PRODUCE that schema.
