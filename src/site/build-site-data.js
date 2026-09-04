@@ -24,6 +24,7 @@ import { join, resolve, dirname } from 'node:path'
 import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
+import { stripBuildOnlyFetchKeys } from './data-fetcher.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import {
@@ -234,6 +235,10 @@ export async function buildSiteData({
     const { icons: _hostOwnedIcons, ...configWithoutIcons } = finalContent.config
     finalContent = { ...finalContent, config: configWithoutIcons }
   }
+
+  // Build-only fetch keys (`merge`) never reach a shipped payload; this lane runs
+  // no prerender, so nothing here reads them either.
+  finalContent = stripBuildOnlyFetchKeys(finalContent)
 
   // 4. Write `dist/site-content.json` with FULL sections inlined.
   //    Important: do NOT strip sections per the split-content rule here.

@@ -1,6 +1,7 @@
 import {
   parseFetchConfig,
   executeFetch,
+  stripBuildOnlyFetchKeys,
   mergeDataIntoContent,
   executeMultipleFetches,
   applyFilter,
@@ -513,18 +514,21 @@ describe('applySort', () => {
     expect(result.map(i => i.name)).toEqual(['C', 'B', 'A'])
   })
 
-  it('sorts by multiple fields', () => {
+  // ⛔ Multi-key was honoured here and refused by the records door — the
+  // language is single-key by ruling [Diego, 2026-09-04], and an authoring
+  // error on the file lane fails at build time, where it is seen.
+  it('refuses a multi-key sort at build time rather than honouring it on one lane', () => {
     const multiItems = [
       { category: 'B', order: 2 },
       { category: 'A', order: 2 },
       { category: 'A', order: 1 },
     ]
-    const result = applySort(multiItems, 'category asc, order asc')
-    expect(result).toEqual([
-      { category: 'A', order: 1 },
-      { category: 'A', order: 2 },
-      { category: 'B', order: 2 },
-    ])
+    expect(() => applySort(multiItems, 'category asc, order asc')).toThrow(/more than one key/)
+  })
+
+  it("accepts the door's `-field` spelling", () => {
+    const result = applySort(items, '-order')
+    expect(result.map((i) => i.order)).toEqual([3, 2, 1])
   })
 
   it('does not mutate original array', () => {
@@ -727,5 +731,68 @@ describe('parseFetchConfig — the retired inherit: alias is an error', () => {
 
   it('refine: true still parses as a refinement — the control', () => {
     expect(parseFetchConfig({ refine: true, limit: 3 })).toMatchObject({ refine: true, limit: 3 })
+  })
+})
+
+describe('stripBuildOnlyFetchKeys — `merge` never reaches a shipped payload', () => {
+  const content = {
+    config: { name: 'T', fetch: { path: '/data/site.json', as: 'site', merge: true } },
+    pages: [
+      {
+        route: '/blog',
+        fetch: [{ query: 'a', path: '/data/a.json', as: 'a', merge: false }, { query: 'b', path: '/data/b.json', as: 'b', prerender: true, merge: true }],
+        sections: [
+          { id: 's1', fetch: { path: '/data/s.json', as: 's', merge: true }, subsections: [
+            { id: 's1a', fetch: { url: 'https://x/y', as: 'y', merge: true } },
+          ] },
+          { id: 's2' },
+        ],
+      },
+    ],
+    layouts: { default: { header: { sections: [{ id: 'h', fetch: { path: '/data/h.json', as: 'h', merge: true } }] } } },
+    notFound: { route: '/404', sections: [{ id: 'n', fetch: { path: '/data/n.json', as: 'n', merge: false } }] },
+    fetchedData: [{ config: { path: '/data/a.json', as: 'a', merge: false }, data: [] }],
+  }
+
+  const allFetches = (c) => {
+    const out = []
+    const take = (f) => { if (!f) return; for (const one of Array.isArray(f) ? f : [f]) out.push(one) }
+    const walk = (sections) => { for (const s of sections || []) { take(s.fetch); walk(s.subsections) } }
+    take(c.config?.fetch)
+    for (const p of c.pages || []) { take(p.fetch); walk(p.sections) }
+    for (const areas of Object.values(c.layouts || {})) for (const page of Object.values(areas)) walk(page.sections)
+    walk(c.notFound?.sections)
+    for (const e of c.fetchedData || []) take(e.config)
+    return out
+  }
+
+  it('removes `merge` from every fetch declaration the payload carries', () => {
+    const out = stripBuildOnlyFetchKeys(content)
+    const fetches = allFetches(out)
+    expect(fetches.length).toBe(8)
+    expect(fetches.every((f) => !('merge' in f))).toBe(true)
+  })
+
+  it('keeps every other key, and the runtime-read ones in particular', () => {
+    const out = stripBuildOnlyFetchKeys(content)
+    expect(out.pages[0].fetch[1]).toEqual({ query: 'b', path: '/data/b.json', as: 'b', prerender: true })
+    expect(out.config.fetch).toEqual({ path: '/data/site.json', as: 'site' })
+  })
+
+  it('does not mutate the input — the build still reads `merge` from its own copy', () => {
+    const before = JSON.stringify(content)
+    stripBuildOnlyFetchKeys(content)
+    expect(JSON.stringify(content)).toBe(before)
+  })
+
+  it('shares untouched objects rather than cloning the site', () => {
+    const out = stripBuildOnlyFetchKeys(content)
+    expect(out.pages[0].sections[1]).toBe(content.pages[0].sections[1])
+  })
+
+  it('is a no-op shape-wise on a payload with no fetch at all', () => {
+    const plain = { config: { name: 'T' }, pages: [{ route: '/', sections: [] }] }
+    expect(stripBuildOnlyFetchKeys(plain)).toEqual(plain)
+    expect(stripBuildOnlyFetchKeys(null)).toBeNull()
   })
 })

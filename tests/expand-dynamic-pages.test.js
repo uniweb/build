@@ -93,3 +93,44 @@ describe('expandDynamicPages', () => {
     expect(out.find((p) => p.route === '/blog/:slug')?.isDynamic).toBe(true)
   })
 })
+
+describe('records with no value for the route param are COUNTED, not only logged', () => {
+  const noop = () => {}
+  const template = { route: '/blog/:slug', isDynamic: true, paramName: 'slug', parentSchema: 'articles' }
+  const withData = (items) => new Map([['/blog', { schema: 'articles', data: items }]])
+
+  it('says the total once, naming the template, the param and how many records were affected', () => {
+    const lines = []
+    expandDynamicPages(
+      [{ route: '/blog', isDynamic: false }, template],
+      withData([{ slug: 'a' }, { title: 'one' }, { title: 'two' }, { slug: 'b' }, { title: 'three' }]),
+      (l) => lines.push(l)
+    )
+    const summary = lines.filter((l) => l.includes('no page was generated'))
+    expect(summary).toHaveLength(1)
+    expect(summary[0]).toContain('3 of 5')
+    expect(summary[0]).toContain('"slug"')
+    expect(summary[0]).toContain('/blog/:slug')
+    // and no longer one line per record
+    expect(lines.filter((l) => l.includes('Skipping item without'))).toHaveLength(0)
+  })
+
+  it('hands the count back on `stats` so a caller can assert or refuse on it', () => {
+    const stats = {}
+    expandDynamicPages(
+      [{ route: '/blog', isDynamic: false }, template],
+      withData([{ slug: 'a' }, { title: 'unnamed' }]),
+      noop,
+      stats
+    )
+    expect(stats.unrouted).toEqual({ '/blog/:slug': 1 })
+  })
+
+  it('CONTROL — says nothing when every record has the param', () => {
+    const lines = []
+    const stats = {}
+    expandDynamicPages([{ route: '/blog', isDynamic: false }, template], withData([{ slug: 'a' }]), (l) => lines.push(l), stats)
+    expect(lines.some((l) => l.includes('no page was generated'))).toBe(false)
+    expect(stats.unrouted).toEqual({})
+  })
+})

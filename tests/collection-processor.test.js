@@ -290,6 +290,34 @@ Content.
       expect(collections.posts[0].route).toBe('/news/test-post')
     })
 
+    // ⭐ ONE ENCODER for `item.route`. The bake interpolated the slug RAW while
+    // the runtime encoded, and a baked route wins — so a slug with a space
+    // compared unequal to location.pathname and a `/` became a route segment,
+    // on the file lane only (F14, 2026-09-04).
+    it('encodes the slug into the baked route exactly as the runtime would', async () => {
+      const contentDir = join(testDir, 'entities', 'articles')
+      mkdirSync(contentDir, { recursive: true })
+      writeFileSync(join(contentDir, 'b post.md'), `---\ntitle: B\n---\n\nBody\n`)
+
+      const collections = await processQueries(testDir, {
+        articles: { schema: '@/articles', route: '/blog' }
+      })
+      expect(collections.articles[0].route).toBe('/blog/b%20post')
+    })
+
+    it('bakes no route at all for a record with no slug, never /blog/undefined', async () => {
+      const contentDir = join(testDir, 'entities', 'articles')
+      mkdirSync(contentDir, { recursive: true })
+      writeFileSync(join(contentDir, 'refs.json'), JSON.stringify([{ title: 'No slug' }, { slug: 'ok', title: 'Ok' }]))
+
+      const collections = await processQueries(testDir, {
+        articles: { schema: '@/articles', route: '/blog' }
+      })
+      const byTitle = Object.fromEntries(collections.articles.map((i) => [i.title, i.route]))
+      expect(byTitle['No slug']).toBeUndefined()
+      expect(byTitle.Ok).toBe('/blog/ok')
+    })
+
     it('should not add route when route config is absent', async () => {
       const contentDir = join(testDir, 'entities', 'items')
       mkdirSync(contentDir, { recursive: true })

@@ -54,7 +54,7 @@ import { join, basename, extname, dirname, relative, resolve, sep } from 'node:p
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
-import { DATA_DIR } from '@uniweb/core'
+import { DATA_DIR, fillRoutePattern } from '@uniweb/core'
 import { applyWhere, applyFilter, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
@@ -675,13 +675,22 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
 
   warnDuplicateSlugs(items, config.name)
 
-  // Add routes to items if collection has a route configured
+  // `route:` on the query — bake each record's canonical href.
+  //
+  // ⭐ THROUGH THE ONE ENCODER (`fillRoutePattern`, `@uniweb/core/route-match`),
+  // which is what the runtime's `addDetailRoute` also calls. Until 2026-09-04 this
+  // interpolated `${baseRoute}/${item.slug}` RAW while the runtime encoded, and a
+  // record already carrying a baked route keeps it — so the same record got two
+  // different hrefs depending on which lane served it (F14): a slug with a space
+  // compared unequal to `location.pathname`, and a slug with a `/` became an
+  // extra route segment. A record with no slug gets no route rather than
+  // `/blog/undefined`.
   if (config.route) {
-    const baseRoute = config.route.replace(/\/$/, '') // Remove trailing slash
-    items = items.map(item => ({
-      ...item,
-      route: `${baseRoute}/${item.slug}`
-    }))
+    const template = `${config.route.replace(/\/$/, '')}/:slug`
+    items = items.map((item) => {
+      const route = fillRoutePattern(template, item)
+      return route === null ? item : { ...item, route }
+    })
   }
 
   // ⛔ ORDER MATCHES `data-fetcher.js::applyPostProcessing` — where, filter, sort,

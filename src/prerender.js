@@ -12,7 +12,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveDefaultLocale, isDataUrl } from '@uniweb/core'
-import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
+import { executeFetch, mergeDataIntoContent, toFetchList, stripBuildOnlyFetchKeys } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
@@ -190,7 +190,8 @@ export function localizeRedirectTarget(target, { website, locale, isDefault, rou
   return (website.basePath || '') + withSlash
 }
 
-export function expandDynamicPages(pages, pageFetchedData, onProgress) {
+export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}, stats = { unrouted: {} }) {
+  if (!stats.unrouted) stats.unrouted = {}
   const expandedPages = []
 
   // Static pages win over the dynamic `[slug]` catch-all, matching the SPA's
@@ -238,12 +239,19 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress) {
 
     onProgress(`  Expanding ${page.route} → ${items.length} pages from ${schema}`)
 
+    // ⛔ COUNTED, not only logged per record. A record with no value for the
+    // route's param gets no page — correct — but "Skipping item without slug"
+    // once per record is a line nobody reads: an author who files twenty
+    // records and names three gets three pages and no idea why. The total is
+    // said once at the end, and handed back on `stats` for a caller to assert.
+    let unrouted = 0
+
     // Create a concrete page for each item
     for (const item of items) {
       // Get the param value from the item (e.g., item.slug for :slug)
       const paramValue = item[paramName]
       if (!paramValue) {
-        onProgress(`    Skipping item without ${paramName}`)
+        unrouted += 1
         continue
       }
 
@@ -284,6 +292,14 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress) {
       if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
 
       expandedPages.push(concretePage)
+    }
+
+    if (unrouted > 0) {
+      stats.unrouted[page.route] = unrouted
+      onProgress(
+        `  ⚠️ ${unrouted} of ${items.length} ${schema} records have no "${paramName}" — no page was ` +
+          `generated for them under ${page.route}`
+      )
     }
   }
 
@@ -626,7 +642,7 @@ export async function prerenderSite(siteDir, options = {}) {
     onProgress(`\nRendering ${isDefault ? 'default' : locale} locale...`)
 
     // Load locale-specific content
-    const siteContent = JSON.parse(await readFile(localeContentPath, 'utf8'))
+    let siteContent = JSON.parse(await readFile(localeContentPath, 'utf8'))
 
     // Set the active locale in the content
     siteContent.config = siteContent.config || {}
@@ -643,6 +659,11 @@ export async function prerenderSite(siteDir, options = {}) {
 
     // Store fetchedData on siteContent for runtime DataStore pre-population
     siteContent.fetchedData = fetchedData
+
+    // The build has consumed every build-only fetch key by now (`merge`, read
+    // by the section fetches above); what ships in `__SITE_CONTENT__` is the
+    // runtime's payload and carries none of them.
+    siteContent = stripBuildOnlyFetchKeys(siteContent)
 
     // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
     if (siteContent.pages?.some(p => p.isDynamic)) {

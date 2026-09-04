@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { matchWhere, queryDataUrl } from '@uniweb/core'
+import { matchWhere, sortRecords, queryDataUrl } from '@uniweb/core'
 
 /**
  * Infer schema name from path or URL
@@ -128,33 +128,22 @@ export function applyFilter(items, filterExpr) {
 }
 
 /**
- * Apply sort expression to array of items
+ * Apply a `sort:` to an array of items — `@uniweb/core`'s ONE evaluator, the
+ * same the runtime's fallback runs, so a query orders identically on the file
+ * lane and over a fetched array.
+ *
+ * ⛔ SINGLE-KEY, BY RULING [Diego, 2026-09-04]. This was its own implementation
+ * until then, and it honoured `order asc, title asc` — a multi-key sort the
+ * records door refuses and the ruling dropped. A comma now THROWS here, at build
+ * time, which is where an authoring error on the file lane belongs.
  *
  * @param {Array} items - Items to sort
- * @param {string} sortExpr - Sort expression (e.g., "date desc" or "order asc, title asc")
+ * @param {string} sortExpr - Sort expression: `date`, `date desc`, `-date`
  * @returns {Array} Sorted items (new array)
- *
- * @example
- * applySort(items, 'date desc')
- * applySort(items, 'order asc, title asc')
  */
 export function applySort(items, sortExpr) {
   if (!sortExpr || !Array.isArray(items)) return items
-
-  const sorts = sortExpr.split(',').map(s => {
-    const [field, dir = 'asc'] = s.trim().split(/\s+/)
-    return { field, desc: dir.toLowerCase() === 'desc' }
-  })
-
-  return [...items].sort((a, b) => {
-    for (const { field, desc } of sorts) {
-      const aVal = getNestedValue(a, field) ?? ''
-      const bVal = getNestedValue(b, field) ?? ''
-      if (aVal < bVal) return desc ? 1 : -1
-      if (aVal > bVal) return desc ? -1 : 1
-    }
-    return 0
-  })
+  return sortRecords(items, sortExpr)
 }
 
 /**
@@ -562,6 +551,99 @@ function warnFilterDeprecated() {
     "filter: 'tags contains featured'. " +
     'Accepted for one release; will be removed in the next minor.'
   )
+}
+
+/**
+ * Keys a fetch declaration carries for THE BUILD ONLY, which no runtime reads.
+ *
+ * `merge` decides how a section-level fetch lands in `parsedContent.data` when
+ * prerender (or the dev server) executes it — a build-lane feature, documented as
+ * such. It rode every shipped payload regardless, and a key on the payload that
+ * nothing reads is a key a consumer will one day read (`kb/framework/open-work.md`
+ * F8). Stripped at the two emit points framework owns — the link lane's
+ * `site-content.json` and the bundle lane's embed — AFTER the build has consumed
+ * it. ⛔ Not from the sync wire: that carries the author's declaration, which
+ * `pull` must round-trip.
+ */
+const BUILD_ONLY_FETCH_KEYS = ['merge']
+
+function stripFetch(fetch) {
+  if (!fetch || typeof fetch !== 'object') return fetch
+  if (Array.isArray(fetch)) return fetch.map(stripFetch)
+  let changed = false
+  const out = {}
+  for (const [key, value] of Object.entries(fetch)) {
+    if (BUILD_ONLY_FETCH_KEYS.includes(key)) {
+      changed = true
+      continue
+    }
+    out[key] = value
+  }
+  return changed ? out : fetch
+}
+
+function stripSections(sections) {
+  if (!Array.isArray(sections)) return sections
+  return sections.map((section) => {
+    if (!section || typeof section !== 'object') return section
+    const fetch = stripFetch(section.fetch)
+    const subsections = stripSections(section.subsections)
+    if (fetch === section.fetch && subsections === section.subsections) return section
+    const out = { ...section }
+    if (fetch !== section.fetch) out.fetch = fetch
+    if (subsections !== section.subsections) out.subsections = subsections
+    return out
+  })
+}
+
+function stripPageLike(page) {
+  if (!page || typeof page !== 'object') return page
+  const fetch = stripFetch(page.fetch)
+  const sections = stripSections(page.sections)
+  if (fetch === page.fetch && sections === page.sections) return page
+  const out = { ...page }
+  if (fetch !== page.fetch) out.fetch = fetch
+  if (sections !== page.sections) out.sections = sections
+  return out
+}
+
+/**
+ * A copy of a site-content payload with the build-only fetch keys removed from
+ * every fetch declaration it carries: `config.fetch`, each page's, each
+ * section's (and subsection's), each layout area's, and the `config` inside
+ * `fetchedData` entries. Structural sharing — untouched objects are the same
+ * objects, so this is cheap on a large site.
+ *
+ * @param {Object} siteContent
+ * @returns {Object}
+ */
+export function stripBuildOnlyFetchKeys(siteContent) {
+  if (!siteContent || typeof siteContent !== 'object') return siteContent
+  const out = { ...siteContent }
+  if (out.config && typeof out.config === 'object' && out.config.fetch !== undefined) {
+    const fetch = stripFetch(out.config.fetch)
+    if (fetch !== out.config.fetch) out.config = { ...out.config, fetch }
+  }
+  if (Array.isArray(out.pages)) out.pages = out.pages.map(stripPageLike)
+  if (out.layouts && typeof out.layouts === 'object') {
+    const layouts = {}
+    for (const [name, areas] of Object.entries(out.layouts)) {
+      if (!areas || typeof areas !== 'object') { layouts[name] = areas; continue }
+      const next = {}
+      for (const [area, page] of Object.entries(areas)) next[area] = stripPageLike(page)
+      layouts[name] = next
+    }
+    out.layouts = layouts
+  }
+  if (out.notFound) out.notFound = stripPageLike(out.notFound)
+  if (Array.isArray(out.fetchedData)) {
+    out.fetchedData = out.fetchedData.map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry
+      const config = stripFetch(entry.config)
+      return config === entry.config ? entry : { ...entry, config }
+    })
+  }
+  return out
 }
 
 /**

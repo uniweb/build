@@ -69,6 +69,20 @@ A short tagline.
     expect(homePage.sections.length).toBeGreaterThan(0)
   })
 
+  it('ships no build-only fetch key — `merge` is consumed by the build, never read by a runtime', async () => {
+    writeFileSync(join(siteRoot, 'pages', 'home', 'page.yml'), `title: Home\nfetch:\n  path: /data/x.json\n  as: x\n  merge: true\n`)
+    writeFileSync(join(siteRoot, 'pages', 'home', '2-list.md'), `---\ntype: List\nfetch:\n  path: /data/y.json\n  as: y\n  merge: true\n---\n\nList\n`)
+    await buildSiteData({ siteRoot, distDir })
+    const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
+    const home = content.pages.find((p) => p.route === '/')
+    expect(home.fetch.as).toBe('x')
+    expect('merge' in home.fetch).toBe(false)
+    const list = home.sections.find((s) => s.fetch)
+    expect(list.fetch.as).toBe('y')
+    expect('merge' in list.fetch).toBe(false)
+    expect(JSON.stringify(content)).not.toContain('"merge"')
+  })
+
   it('does NOT emit static-host-only artifacts', async () => {
     await buildSiteData({ siteRoot, distDir })
 
