@@ -1507,7 +1507,7 @@ describe('site.yml::tracking across the sync wire', () => {
     // not one: they can only prove what the fixture happens to contain. The
     // consumer's matching test had this exact hole and passed for months —
     // whole-value compare, two-key fixture, blind to the block growing (channel
-    // `framework-backend-a1c8`; they added the nested key, watched it fail,
+    // framework↔backend; they added the nested key, watched it fail,
     // restored). ⚠️ Their fixture pins the key under its ORIGINAL name, `tags`,
     // renamed here to `scripts` afterwards. Harmless — their forward is
     // wholesale, so what it proves is that a nested key survives at all, which

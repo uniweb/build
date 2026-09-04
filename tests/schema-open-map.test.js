@@ -7,7 +7,7 @@
  * map-of-X at all, which is the shape `@std/form` needs: a form's `fields` is
  * keyed by author-chosen field names.
  *
- * Requested by the editor team (channel frontend-framework-066d, 2026-07-31)
+ * Requested by the editor team (channel frontend↔framework, 2026-07-31)
  * after both sides independently found they could not state the shape.
  */
 

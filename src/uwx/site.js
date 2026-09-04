@@ -690,7 +690,7 @@ export function isSiteRelativeExtensionUrl(decl) {
  * declaration could occupy, nothing is ever recorded for one, and every push re-sent
  * this whole section uuid-less. The backend refuses that (an all-blank section over
  * stored items would delete every stored row), which is why `push` worked once and
- * every push after it was refused. Measured 2026-08-29; collab framework-backend-812b.
+ * every push after it was refused. Measured 2026-08-29; collab framework↔backend.
  *
  * ⭐ `name` is the right key and not merely the available one — the backend enforces
  * `unique_field(name, scope: section)` on this section, and it is the join key its

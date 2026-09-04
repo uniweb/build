@@ -6,7 +6,7 @@
 // in our emitter does not merely fail to send an unmodelled field: it DESTROYS
 // whatever was stored under it, on every push, silently.
 //
-// ⚠️ Measured 2026-08-29 (channel framework-backend-2dfa): the Model declares
+// ⚠️ Measured 2026-08-29 (channel framework↔backend): the Model declares
 // ELEVEN decl fields; this emitter knew ten. The eleventh is `label` — which
 // framework has no authoring concept for, since `label` here is a `folders:`
 // BRANCH field (`{segment, label, entries}`), not a property of a collection.
