@@ -91,8 +91,9 @@ function stripSigils(value) {
     // ⛔ A `@uniweb/folder` REF LEAF ENCODES ONE REFERENCE TWO WAYS, and hashing the
     // encoding rather than the reference made the folder's hash unreproducible.
     //
-    // `refLeaf` (uwx/folder.js) emits `$ref: "<collection>/<slug>"` while the record
-    // is brand-new and `entry: { model, entity: <uuid> }` once it has been minted.
+    // `refLeaf` (uwx/folder.js) emits `$ref: <the record's $id>` — the pool position
+    // `<dirs>/<slug>` — while the record is brand-new, and `entry: { model, entity:
+    // <uuid> }` once it has been minted.
     // Both denote the same record. A push hashes the folder BEFORE submitting, then
     // back-fills the minted `$uuid` into every record's source file — so the very
     // next emit builds the OTHER encoding, and the hash the push just banked can
@@ -181,7 +182,7 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * already carries `$uuid` (back-filled from a prior sync) round-trips it.
  *
  * @param {object} params
- * @param {string} params.queryName  - the site.yml collection name
+ * @param {string} params.queryName  - the query's name in site.yml
  * @param {object[]} params.records        - [{ slug, ...fields }]
  * @param {object} params.declaration      - the `@uniweb/data-schema` declaration
  *        (from toDataSchemaDeclaration): `{ name, brief, sections }`
@@ -272,13 +273,19 @@ export function recordsToEntities({
       warnings.push(`${queryName}: a record without a slug was skipped`)
       continue
     }
-    // ⛔ `$id` IS NOT THE SLUG. It is the payload-local handle: the record's path
-    // under collections/ (`<collection>/<slug>`), globally unique within one sync so
+    // ⛔ `$id` IS NOT THE SLUG. It is the payload-local, PATH-QUALIFIED handle, so
     // the @uniweb/folder entity can point a leaf at it via `$ref`. An explicit
     // frontmatter `$id` wins.
     //
+    // ⚠️ The authoritative value is the record's POOL POSITION — `<dirs>/<slug>` —
+    // and it is set upstream, at the pool walk; see the ⭐ comment there, which is
+    // where the reasoning lives. `<query>/<slug>` below is only the fallback for a
+    // record that did not arrive through the pool, and it is explicitly NOT the
+    // shape identity is meant to take: two queries over one Model would mint two
+    // identities for one file.
+    //
     // The qualification is a CONSTRAINT, not a style: the sync response is keyed per
-    // (`$model`, `$id`), so a bare slug would collide whenever two collections on the
+    // (`$model`, `$id`), so a bare slug would collide whenever two queries over the
     // same Model reuse one (see the duplicate check below). ⇒ Do not describe this
     // value as "the slug" — the folder leaf's `path_segment` is the bare segment, and
     // conflating the two has already misdirected a naming decision.
@@ -638,7 +645,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // statically (the "data ball") instead, so the caller can route them there.
   const schemaless = []
   // The sync response is keyed per ($model, $id), so the pair must be unique
-  // within one submission (two collections on the same Model could otherwise
+  // within one submission (two queries over the same Model could otherwise
   // reuse a slug).
   const seen = new Set()
   for (const { name, decl } of mapped) {
