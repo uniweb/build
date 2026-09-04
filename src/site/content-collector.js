@@ -57,20 +57,38 @@ try {
 }
 
 /**
- * Check if a folder name represents a dynamic route (e.g., [slug], [id])
+ * The multi-segment route folder — ONE fixed spelling, ruled 2026-09-04 [Diego].
+ * `[...slug]`, `[...rest]` and a bare `[...]` are NOT the marker: an author does
+ * not name how the URL is parsed. The capture is split by the runtime into the
+ * standard `:path` / `:dir` / `:slug` variables (`@uniweb/core/route-match`).
+ */
+const CATCH_ALL_FOLDER = '[...path]'
+
+/**
+ * Check if a folder name represents a dynamic route (e.g., [slug], [id], [...path])
  * @param {string} folderName - The folder name to check
  * @returns {boolean}
  */
 function isDynamicRoute(folderName) {
-  return /^\[(\w+)\]$/.test(folderName)
+  return folderName === CATCH_ALL_FOLDER || /^\[(\w+)\]$/.test(folderName)
+}
+
+/** Is this the multi-segment route folder? */
+function isCatchAllRoute(folderName) {
+  return folderName === CATCH_ALL_FOLDER
 }
 
 /**
- * Extract the parameter name from a dynamic route folder (e.g., [slug] → slug)
+ * Extract the parameter name from a dynamic route folder (e.g., [slug] → slug).
+ *
+ * `[...path]` yields `slug`: the record is delivered by its handle — the LAST
+ * segment of the capture — exactly as under `[slug]`, so a query written for
+ * one route kind behaves the same under the other.
  * @param {string} folderName - The folder name (e.g., "[slug]")
  * @returns {string|null} The parameter name or null if not a dynamic route
  */
 function extractRouteParam(folderName) {
+  if (isCatchAllRoute(folderName)) return 'slug'
   const match = folderName.match(/^\[(\w+)\]$/)
   return match ? match[1] : null
 }
@@ -1389,8 +1407,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   // First, calculate the folder-based route (what the route would be without index handling)
   let folderRoute
   if (isDynamic) {
-    // Dynamic routes: /blog/[slug] → /blog/:slug (for route matching)
-    folderRoute = parentRoute === '/' ? `/:${paramName}` : `${parentRoute}/:${paramName}`
+    // Dynamic routes: /blog/[slug] → /blog/:slug (for route matching);
+    // /blog/[...path] → /blog/:path* — the one multi-segment token the matcher knows.
+    const token = isCatchAllRoute(pageName) ? ':path*' : `:${paramName}`
+    folderRoute = parentRoute === '/' ? `/${token}` : `${parentRoute}/${token}`
   } else {
     // Normal pages get parent + their name
     folderRoute = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`

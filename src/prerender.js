@@ -11,7 +11,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolveDefaultLocale, resolveFetchConfigs } from '@uniweb/core'
+import { resolveDefaultLocale, resolveFetchConfigs, joinPathCapture, splitPathCapture } from '@uniweb/core'
 import { executeFetch, mergeDataIntoContent, toFetchList, stripBuildOnlyFetchKeys } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -234,8 +234,9 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
     }
 
     // Find the parent's data
-    // The parent route is the route without the :param suffix
-    const parentRoute = page.route.replace(/\/:[\w]+$/, '') || '/'
+    // The parent route is the route without the :param (or :path*) suffix
+    const catchAll = /\/:path\*$/.test(page.route)
+    const parentRoute = page.route.replace(/\/:[\w]+\*?$/, '') || '/'
     const parentData = pageFetchedData.get(parentRoute)
 
     if (!parentData || !Array.isArray(parentData.data)) {
@@ -267,8 +268,14 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
         continue
       }
 
-      // Create concrete route: /blog/:slug → /blog/my-post
-      const concreteRoute = page.route.replace(`:${paramName}`, paramValue)
+      // Create concrete route: /blog/:slug → /blog/my-post. Under `[...path]` the
+      // record's URL is its placement (the folder `records.yml` put it in, carried
+      // as `path`) plus its handle — the split rule in reverse. ⛔ A FILE PATH, so
+      // decoded: the server decodes the request before looking the file up.
+      const capture = catchAll ? joinPathCapture({ dir: item.path, slug: paramValue }) : null
+      const concreteRoute = catchAll
+        ? page.route.replace(/:path\*$/, capture)
+        : page.route.replace(`:${paramName}`, paramValue)
 
       // Static sibling wins: skip a record whose concrete route collides with
       // an existing static page rather than overwriting its HTML at write time.
@@ -297,6 +304,9 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
         paramName,
         paramValue,
         schema,           // Plural: 'articles'
+        // A catch-all page carries its three variables, so a query binding
+        // `:dir` or `:path` resolves the same way it does in the browser.
+        ...(catchAll ? { params: splitPathCapture(capture) } : {}),
       }
 
       // Use item data for page metadata if available

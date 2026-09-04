@@ -134,3 +134,32 @@ describe('records with no value for the route param are COUNTED, not only logged
     expect(stats.unrouted).toEqual({})
   })
 })
+
+describe('a [...path] template expands over placement + handle', () => {
+  const noop = () => {}
+  const template = { route: '/blog/:path*', isDynamic: true, paramName: 'slug', parentSchema: 'posts' }
+  const withData = (items) => new Map([['/blog', { schema: 'posts', data: items }]])
+
+  it('emits one page per record at <placement>/<slug>, with the three variables baked', () => {
+    const out = expandDynamicPages(
+      [{ route: '/blog', isDynamic: false }, template],
+      withData([{ slug: 'my-post', path: 'rust/2025' }, { slug: 'top', path: '' }]),
+      noop
+    )
+    const routes = out.map((p) => p.route)
+    expect(routes).toContain('/blog/rust/2025/my-post')
+    expect(routes).toContain('/blog/top')
+    const deep = out.find((p) => p.route === '/blog/rust/2025/my-post')
+    expect(deep.dynamicContext).toEqual({
+      paramName: 'slug', paramValue: 'my-post', schema: 'posts',
+      params: { path: 'rust/2025/my-post', dir: 'rust/2025', slug: 'my-post' },
+    })
+    expect(out.find((p) => p.route === '/blog/top').dynamicContext.params).toEqual({ path: 'top', dir: '', slug: 'top' })
+  })
+
+  it('a record with no slug is counted as unrouted, as under [slug]', () => {
+    const stats = {}
+    expandDynamicPages([{ route: '/blog', isDynamic: false }, template], withData([{ path: 'a', title: 'x' }]), noop, stats)
+    expect(stats.unrouted).toEqual({ '/blog/:path*': 1 })
+  })
+})

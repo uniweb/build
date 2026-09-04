@@ -513,7 +513,12 @@ function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
 // is already a plain string.
 export function pageDirName(record, sourceLocale) {
   const slug = unwrapLocalized(record.slug, sourceLocale)
-  return record.is_dynamic ? `[${record.param_name || slug}]` : slug
+  if (!record.is_dynamic) return slug
+  // The multi-segment folder rides the wire as slug `...path` with
+  // `param_name: slug` (the handle it delivers by); it comes back as the one
+  // fixed spelling, never as `[slug]`.
+  if (slug === '...path') return '[...path]'
+  return `[${record.param_name || slug}]`
 }
 
 // Pass 1 — write + relocate every page dir, its page.yml/folder.yml, and its

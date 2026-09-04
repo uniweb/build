@@ -334,6 +334,12 @@ async function orderedSubfolders(dirPath, inheritedMode, parentConfig) {
 }
 
 const DYNAMIC_RE = /^\[(.+)\]$/
+// The multi-segment route folder, one fixed spelling (`content-collector.js`).
+// On the wire its page `slug` is the marker itself (`...path`) and its
+// `param_name` is `slug`: the record is delivered by its handle, the last
+// segment, exactly as under `[slug]`. ⚠️ What a consumer's projector emits as
+// the page ROUTE for it is that consumer's; framework expects `/…/:path*`.
+const CATCH_ALL_MARKER = '...path'
 
 // ===========================================================================
 // NESTED ($-document) lane — Phase 0 de-flatten (bidirectional-sync §8).
@@ -545,7 +551,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
       slug,
       mode,
       isDynamic: !!dyn,
-      paramName: dyn ? dyn[1] : undefined,
+      paramName: dyn ? (dyn[1] === CATCH_ALL_MARKER ? 'slug' : dyn[1]) : undefined,
       isRoot,
       siteIndex,
       sourceLocale,
