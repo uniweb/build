@@ -57,7 +57,7 @@ const folderFor = (records) =>
       ...new Map(records.map((r) => [r.collection, r.collection])).keys(),
     ].map((seg) => ({
       kind: 'branch',
-      path_segment: seg,
+      name: seg,
       $children: records
         .filter((r) => r.collection === seg)
         .map((r) => ({ kind: 'ref', $entityId: r.id })),

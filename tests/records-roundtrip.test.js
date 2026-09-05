@@ -83,7 +83,9 @@ describe('push → pull → push is a fixed point', () => {
     // CONTROL — the producer really did carry both shapes, so a fixed point below
     // is about round-tripping them rather than about there being nothing to lose.
     expect(first.folder.document.contents).toHaveLength(2)
-    expect(first.folder.document.contents[1].name).toBe('The Archive')
+    // the branch's handle is `name`; its display text rides as a localized map
+    expect(first.folder.document.contents[1].name).toBe('archive')
+    expect(first.folder.document.contents[1].label).toEqual({ en: 'The Archive' })
     expect(first.col.entities.map((e) => e.id)).toEqual(['article/hello', 'article/older'])
 
     // Project into a FRESH site — no entities/, no records.yml — the way a clone does.
@@ -161,7 +163,7 @@ describe('push → pull → push is a fixed point', () => {
     writeDest('dest/records.yml', '- article/kept.md\n')
     const report = recordsToProject({
       folderDoc: {
-        contents: [{ kind: 'ref', path_segment: 'ghost', entry: { model: '@acme/article', entity: 'U9' } }],
+        contents: [{ kind: 'ref', name: 'ghost', entry: { model: '@acme/article', entity: 'U9' } }],
       },
       recordDocs: [], // the record never arrived
       siteRoot: dest,

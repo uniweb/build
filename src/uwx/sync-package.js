@@ -276,6 +276,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // are complete — new records by `$ref`, already-minted ones by `entry: <uuid>`.
   const folder = buildFolderEntity({
     recordEntities: col.entities,
+    ...(sourceLocale ? { sourceLocale } : {}),
     // ⭐ AUTHORED, from `records.yml`. It used to be derived — one branch per
     // collection — which made the folder a shadow of a directory layout rather
     // than something the author states.

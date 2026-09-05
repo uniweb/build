@@ -23,8 +23,8 @@ function rec(dir, slug, uuid = null) {
 // A resolved `records.yml` branch holding the given entities as leaves.
 const branch = (segment, ids, label) => ({
   kind: 'branch',
-  path_segment: segment,
-  ...(label ? { name: label } : {}),
+  name: segment,
+  ...(label ? { label } : {}),
   $children: ids.map((id) => ({ kind: 'ref', $entityId: id })),
 })
 const leaves = (ids) => ids.map((id) => ({ kind: 'ref', $entityId: id }))
@@ -47,12 +47,12 @@ describe('buildFolderEntity', () => {
     expect(folder.document.$id).toBe('@folder')
     expect(folder.document).not.toHaveProperty('$uuid') // the framework holds no folder uuid
     const branches = folder.document.contents
-    expect(branches.map((b) => b.path_segment)).toEqual(['articles', 'team'])
+    expect(branches.map((b) => b.name)).toEqual(['articles', 'team'])
     const articles = branches[0]
     expect(articles.kind).toBe('branch')
     expect(articles.$children).toEqual([
-      { kind: 'ref', path_segment: 'hello', $ref: 'articles/hello' },
-      { kind: 'ref', path_segment: 'world', $ref: 'articles/world' },
+      { kind: 'ref', name: 'hello', $ref: 'articles/hello' },
+      { kind: 'ref', name: 'world', $ref: 'articles/world' },
     ])
   })
 
@@ -62,8 +62,8 @@ describe('buildFolderEntity', () => {
       folderNodes: [branch('articles', ['articles/hello', 'articles/world'])],
     })
     const leaves = folder.document.contents[0].$children
-    expect(leaves[0]).toEqual({ kind: 'ref', path_segment: 'hello', entry: { model: '@acme/x', entity: 'uuid-1' } })
-    expect(leaves[1]).toEqual({ kind: 'ref', path_segment: 'world', $ref: 'articles/world' })
+    expect(leaves[0]).toEqual({ kind: 'ref', name: 'hello', entry: { model: '@acme/x', entity: 'uuid-1' } })
+    expect(leaves[1]).toEqual({ kind: 'ref', name: 'world', $ref: 'articles/world' })
   })
 
   it('carries no folder $uuid — the backend owns it (keyed by the site-content uuid)', () => {
@@ -83,20 +83,20 @@ describe('buildFolderEntity', () => {
         branch('blog', ['articles/hello'], 'Blog'),
         {
           kind: 'branch',
-          path_segment: 'about',
+          name: 'about',
           $children: [branch('people', ['team/ada'])],
         },
       ],
     })
     const [blog, about] = folder.document.contents
-    expect(blog.path_segment).toBe('blog')
-    expect(blog.name).toBe('Blog')
-    expect(blog.$children).toEqual([{ kind: 'ref', path_segment: 'hello', $ref: 'articles/hello' }])
+    expect(blog.name).toBe('blog')
+    expect(blog.label).toEqual({ en: 'Blog' })
+    expect(blog.$children).toEqual([{ kind: 'ref', name: 'hello', $ref: 'articles/hello' }])
     expect(about.$children[0].kind).toBe('branch')
-    expect(about.$children[0].path_segment).toBe('people')
+    expect(about.$children[0].name).toBe('people')
     expect(about.$children[0].$children[0]).toEqual({
       kind: 'ref',
-      path_segment: 'ada',
+      name: 'ada',
       $ref: 'team/ada',
     })
   })
@@ -140,11 +140,11 @@ describe('folder placement identity', () => {
       contents: [
         {
           kind: 'branch',
-          path_segment: 'members',
+          name: 'members',
           $uuid: 'B1',
           $children: [
-            { kind: 'ref', path_segment: 'alice', $uuid: 'I1' },
-            { kind: 'ref', path_segment: 'bob', $uuid: 'I2' },
+            { kind: 'ref', name: 'alice', $uuid: 'I1' },
+            { kind: 'ref', name: 'bob', $uuid: 'I2' },
           ],
         },
       ],
@@ -214,7 +214,7 @@ describe('folder placement identity', () => {
  *
  * ⚠️ The second and third cases are the point. Excluding the reference could have
  * made the folder blind to real changes; it does not, because a leaf's
- * `path_segment` and its position in the tree still carry which record sits where.
+ * `name` and its position in the tree still carry which record sits where.
  */
 describe('folder hash is identity-independent', () => {
   const hashOf = async (recordEntities) => {

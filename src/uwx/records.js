@@ -104,14 +104,14 @@ function stripSigils(value) {
     //
     // ⭐ Neither encoding is content. What the folder SAYS is "this branch contains
     // this record, here, in this order" — and that is already hashed: a leaf carries
-    // `path_segment` (the record's slug) inside a branch carrying the collection's.
+    // `name` (the record's handle) inside a branch carrying the collection's.
     // A `folders:` branch's entries are COLLECTION names, so every leaf under one
     // comes from a single collection, where a slug is unique. Position plus segment
     // therefore identify the record on their own; `$ref` adds a payload-local handle
     // and `entry` adds identity, and both are exactly what `$uuid` is stripped for.
     //
     // ⚖️ The previous rule kept `$ref` "so a reference change is visible". It still
-    // is: point a leaf at a different record and its `path_segment` moves with it.
+    // is: point a leaf at a different record and its `name` moves with it.
     const isFolderRefLeaf = value.kind === 'ref'
     const out = {}
     for (const [k, v] of Object.entries(value)) {
@@ -287,7 +287,7 @@ export function recordsToEntities({
     // The qualification is a CONSTRAINT, not a style: the sync response is keyed per
     // (`$model`, `$id`), so a bare slug would collide whenever two queries over the
     // same Model reuse one (see the duplicate check below). ⇒ Do not describe this
-    // value as "the slug" — the folder leaf's `path_segment` is the bare segment, and
+    // value as "the slug" — the folder leaf's `name` is the bare segment, and
     // conflating the two has already misdirected a naming decision.
     const id = record.$id || `${queryName}/${slug}`
     const uuid = record.$uuid || null

@@ -143,7 +143,7 @@ export async function readRecordsConfig(siteRoot) {
  *
  * ⛔ ONE PLACEMENT PER ENTITY. Two entries matching one file is a hard error, not
  * a second placement. The wire could carry many-to-many — `folder.js` nests, and
- * placements are keyed by their `path_segment` chain — but `core/src/where.js`'s
+ * placements are keyed by their `name` chain — but `core/src/where.js`'s
  * `matchUnder` is STRING-ONLY, so a record with two paths would match nothing
  * under `where: { path: { under: … } }`, silently. Widening `under` is a
  * predicate the backend also evaluates natively, so it is a cross-lane change to
@@ -184,7 +184,7 @@ export function resolveFolder(entries, pool) {
     const slug = slugForEntity(entity)
     const path = pathSegs.join('/')
     placements.set(key, { entity, path, slug })
-    return { kind: 'ref', path_segment: slug, $entityId: key }
+    return { kind: 'ref', name: slug, $entityId: key }
   }
 
   const resolveEntry = (entry, pathSegs, index, trail) => {
@@ -246,8 +246,13 @@ export function resolveFolder(entries, pool) {
         errors.push(`${RECORDS_YML_RELPATH}: ${where} declares a folder with no name.`)
         return []
       }
-      const branch = { kind: 'branch', path_segment: segment }
-      if (entry.label !== undefined && entry.label !== null) branch.name = String(entry.label)
+      // ⭐ `name` is the handle (the URL segment, sibling-unique); `label` is the
+      // display text. The store renamed the pair on 2026-09-04 — `path_segment` →
+      // `name`, and the old `name` (display) → `label` — so one word means one
+      // thing from records.yml (`folder:` / `label:`) to the wire to the door's
+      // `$name`.
+      const branch = { kind: 'branch', name: segment }
+      if (entry.label !== undefined && entry.label !== null) branch.label = String(entry.label)
       const kids = Array.isArray(entry.records) ? entry.records : []
       if (kids.length === 0) {
         warnings.push(

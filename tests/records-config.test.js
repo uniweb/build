@@ -68,7 +68,7 @@ describe('the common case is three lines', () => {
     const { nodes, placements, errors, warnings } = await folder('- person/*.md\n- project/*.md\n')
     expect(errors).toEqual([])
     expect(warnings).toEqual([])
-    expect(nodes.map((n) => [n.kind, n.path_segment])).toEqual([
+    expect(nodes.map((n) => [n.kind, n.name])).toEqual([
       ['ref', 'ada'],
       ['ref', 'grace'],
       ['ref', 'folding'],
@@ -92,7 +92,7 @@ describe('the common case is three lines', () => {
     w('entities/post/1-first.md')
     const { nodes, errors } = await folder('- post/*.md\n')
     expect(errors).toEqual([])
-    expect(nodes.map((n) => n.path_segment)).toEqual(['1-first', '2-second', '10-tenth'])
+    expect(nodes.map((n) => n.name)).toEqual(['1-first', '2-second', '10-tenth'])
   })
 })
 
@@ -121,7 +121,7 @@ describe('structure is QUERY SCOPE — a folder is an addressable dimension', ()
     expect(byId('publication/2023-c')).toBe('archive/pre-2024')
 
     const archive = nodes.find((n) => n.kind === 'branch')
-    expect(archive.name).toBe('Publication Archive')
+    expect(archive.label).toBe('Publication Archive')
     expect(archive.$children.map((c) => c.kind)).toEqual(['ref', 'branch'])
   })
 
@@ -141,7 +141,7 @@ describe('⛔ error rules — every one of these used to fail silently', () => {
   })
 
   it('a pattern matching ZERO files is an error, not an empty branch', async () => {
-    // Today's measured behaviour was `{path_segment: "artcles", $children: []}` —
+    // Today's measured behaviour was `{name: "artcles", $children: []}` —
     // a real, reachable, empty path, with no warning.
     w('entities/article/a.md')
     const { errors } = await folder('- artcle/*.md\n')
@@ -236,7 +236,7 @@ describe('pattern matching', () => {
     w('entities/publication/2025-11-jmlr-priors.md')
     const { nodes, errors } = await folder('- publication/*.md\n')
     expect(errors).toEqual([])
-    expect(nodes.map((n) => n.path_segment)).toEqual([
+    expect(nodes.map((n) => n.name)).toEqual([
       '2025-11-jmlr-priors',
       '2026-03-nature-folding',
     ])
@@ -255,10 +255,10 @@ describe('a year-named folder', () => {
       '- folder: 2024\n  label: 2024\n  records:\n    - news/*.md\n'
     )
     expect(errors).toEqual([])
-    expect(nodes[0].path_segment).toBe('2024')
     expect(nodes[0].name).toBe('2024')
-    expect(typeof nodes[0].path_segment).toBe('string')
+    expect(nodes[0].label).toBe('2024')
     expect(typeof nodes[0].name).toBe('string')
+    expect(typeof nodes[0].label).toBe('string')
   })
 
   it('still refuses a folder with no name — and `0` is a legal name', async () => {
@@ -267,6 +267,6 @@ describe('a year-named folder', () => {
     expect(empty.errors[0]).toContain('no name')
     const zero = await folder('- folder: 0\n  records:\n    - news/*.md\n')
     expect(zero.errors).toEqual([])
-    expect(zero.nodes[0].path_segment).toBe('0')
+    expect(zero.nodes[0].name).toBe('0')
   })
 })

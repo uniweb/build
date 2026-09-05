@@ -22,16 +22,16 @@ import { buildFolderEntity } from '../src/uwx/folder.js'
 const OLD_PRODUCER_OUTPUT = [
   {
     kind: 'branch',
-    path_segment: 'articles',
+    name: 'articles',
     $children: [
-      { kind: 'ref', path_segment: 'hello', $ref: 'article/hello' },
-      { kind: 'ref', path_segment: 'world', $ref: 'article/world' },
+      { kind: 'ref', name: 'hello', $ref: 'article/hello' },
+      { kind: 'ref', name: 'world', $ref: 'article/world' },
     ],
   },
   {
     kind: 'branch',
-    path_segment: 'team',
-    $children: [{ kind: 'ref', path_segment: 'ada', $ref: 'person/ada' }],
+    name: 'team',
+    $children: [{ kind: 'ref', name: 'ada', $ref: 'person/ada' }],
   },
 ]
 
@@ -93,9 +93,9 @@ describe('records.yml reproduces the grouping the old producer derived', () => {
     const { folder, entity } = await build()
     expect(folder.errors).toEqual([])
     expect(entity.document.contents).toEqual([
-      { kind: 'ref', path_segment: 'hello', $ref: 'article/hello' },
-      { kind: 'ref', path_segment: 'world', $ref: 'article/world' },
-      { kind: 'ref', path_segment: 'ada', $ref: 'person/ada' },
+      { kind: 'ref', name: 'hello', $ref: 'article/hello' },
+      { kind: 'ref', name: 'world', $ref: 'article/world' },
+      { kind: 'ref', name: 'ada', $ref: 'person/ada' },
     ])
     // every record at the root — the path a query slices on is the empty string
     expect([...folder.placements.values()].map((p) => p.path)).toEqual(['', '', ''])
@@ -111,7 +111,7 @@ describe('records.yml reproduces the grouping the old producer derived', () => {
     )
     const { entity } = await build()
     expect(entity.document.contents).toHaveLength(1)
-    expect(entity.document.contents[0].path_segment).toBe('everything')
+    expect(entity.document.contents[0].name).toBe('everything')
     // two schemas, one branch — impossible under the derived rule
     expect(entity.document.contents[0].$children.map((c) => c.$ref)).toEqual([
       'article/hello',

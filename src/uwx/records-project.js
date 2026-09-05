@@ -6,8 +6,8 @@
 //
 // Identity & placement. A record's on-disk home is `(collection, slug)`:
 //   - `slug` and `collection` come from the FOLDER document — each ref leaf is
-//     `{ entry: { model, entity: <uuid> }, path_segment: <slug> }` inside a branch
-//     (its `$children`) whose `path_segment` names the folder it was placed in.
+//     `{ entry: { model, entity: <uuid> }, name: <slug> }` inside a branch
+//     (its `$children`) whose `name` names the folder it was placed in.
 //     The folder is the authoritative organization on a read (the record
 //     document's own `$id` envelope is not guaranteed to be echoed back), with
 //     the record document's `$id` (its pool identity) as a fallback when present.
@@ -40,6 +40,7 @@ import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './proje
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
 import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import { isContentBodyField } from './data-schema.js'
+import { unwrapLocalized } from './backfill.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
@@ -111,9 +112,13 @@ function briefHasContentBody(declaration) {
 
 // Build `uuid → { collection, slug }` from the folder document's ref leaves. The
 // folder is a self-nesting tree under `contents`, nesting via `$children` (the
-// site-content invariant — folder.js). A leaf sits in a branch whose
-// `path_segment` is the collection; the leaf's `path_segment` is the slug and its
-// `entry` is the entity_ref open form `{ model, entity: <uuid> }`. Nested branches
+// site-content invariant — folder.js). A leaf sits in a branch whose `name` is
+// the collection; the leaf's `name` is the slug (the handle) and its `entry` is
+// the entity_ref open form `{ model, entity: <uuid> }`. ⛔ `path_segment` is not
+// read: the store renamed it on 2026-09-04 and a pull emits the new shape only —
+// a reader that kept the old key would index every record as
+// `{ folderPath: null, slug: undefined }` and rewrite records.yml with
+// `folder: undefined` branches (measured on this reader, 2026-09-04). Nested branches
 // are walked; the collection is the NEAREST enclosing branch segment (correct for
 // the default one-branch-per-collection org; a deeply nested virtual org may
 // differ — see the module header).
@@ -122,11 +127,11 @@ function indexFolder(folderDoc) {
   const walk = (nodes, folderPath) => {
     for (const node of nodes || []) {
       if (node?.kind === 'branch') {
-        walk(node.$children, node.path_segment ?? folderPath)
+        walk(node.$children, node.name ?? folderPath)
       } else if (node?.kind === 'ref' && node.entry) {
         // `entry` is `{ model, entity: <uuid> }`; tolerate a bare uuid defensively.
         const uuid = typeof node.entry === 'object' ? node.entry.entity : node.entry
-        if (uuid) byUuid.set(uuid, { folderPath, slug: node.path_segment })
+        if (uuid) byUuid.set(uuid, { folderPath, slug: node.name })
       }
     }
   }
@@ -381,7 +386,7 @@ export function declarationsToQueriesYml({ document, siteRoot }) {
  *        each record landed with.
  * @returns {{ status: 'updated'|'unchanged'|'skipped', entries: Array, warnings: string[] }}
  */
-export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid }) {
+export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale = 'en' }) {
   const warnings = []
 
   const walk = (nodes) => {
@@ -389,10 +394,11 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid }) {
     for (const node of nodes || []) {
       if (!node || typeof node !== 'object') continue
       if (node.kind === 'branch') {
-        const entry = { folder: node.path_segment }
+        const entry = { folder: node.name }
         // Only a BRANCH takes a label. A record carries its own title; the folder
-        // does not caption its rows.
-        if (node.name !== undefined) entry.label = node.name
+        // does not caption its rows. On the wire the label is a localized map;
+        // records.yml carries the source-locale string (a bare string passes).
+        if (node.label !== undefined) entry.label = unwrapLocalized(node.label, sourceLocale)
         entry.records = walk(node.$children)
         out.push(entry)
         continue
@@ -404,7 +410,7 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid }) {
         // means the folder and the pool disagree, and writing the file without it
         // would quietly unpublish that record on the next push.
         warnings.push(
-          `records.yml: a folder leaf ("${node.path_segment ?? '?'}") references a record that ` +
+          `records.yml: a folder leaf ("${node.name ?? '?'}") references a record that ` +
             `was not written locally — the file was left unchanged rather than dropping it.`
         )
         return null
@@ -523,7 +529,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   //
   // The folder ENTITY still carries no `$uuid` we persist: the backend owns the
   // site's folder, keyed by the site-content uuid.
-  const records = folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid })
+  const records = folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
   warnings.push(...records.warnings)
 
   // Flush localized record-field translations to locales/records/{locale}.json,
