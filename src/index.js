@@ -8,7 +8,6 @@
 export {
   loadComponentMeta,
   loadFoundationConfig,
-  loadFoundationMeta, // @deprecated - use loadFoundationConfig
   discoverComponents,
   buildSchema,
   getExposedComponents,

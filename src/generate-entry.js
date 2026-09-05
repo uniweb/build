@@ -5,7 +5,7 @@
  *
  * Exports:
  * - `components` - Object map of component name -> React component
- * - `capabilities` - Custom Layout and props from src/foundation.js (if present)
+ * - `capabilities` - Custom Layout and props from src/main.js (if present)
  * - `meta` - Per-component runtime metadata extracted from meta.js files
  *
  * The `meta` export contains only properties needed at runtime:
@@ -81,11 +81,9 @@ async function detectHostShareableImports(srcDir) {
 /**
  * Detect foundation config file (for props, vars, etc.)
  *
- * Looks for (in priority order): main.js, main.jsx, foundation.js, foundation.jsx
+ * Looks for (in priority order): main.js, main.jsx
  *
- * The canonical name is `main.js` (the foundation package's main authored
- * module). `foundation.js` is the legacy name and remains supported so
- * existing foundations build without a rename.
+ * The foundation's main authored module.
  *
  * The file should export:
  * - props (optional) - Foundation-wide props
@@ -98,8 +96,6 @@ function detectFoundationExports(srcDir) {
   const candidates = [
     { path: 'main.js', ext: 'js' },
     { path: 'main.jsx', ext: 'jsx' },
-    { path: 'foundation.js', ext: 'js' },
-    { path: 'foundation.jsx', ext: 'jsx' },
   ]
 
   for (const { path, ext } of candidates) {
@@ -156,7 +152,7 @@ function generateEntrySource(components, options = {}) {
   }
 
   // Foundation capabilities import (for props, vars, etc.)
-  // Note: Layout/layouts no longer merged from foundation.js — layouts come from src/layouts/ discovery
+  // Note: Layout/layouts no longer merged from main.js — layouts come from src/layouts/ discovery
   if (foundationExports) {
     lines.push(`import * as _foundationModule from '${foundationExports.path}'`)
   }
@@ -409,8 +405,6 @@ export function getStructuralWatchPaths(srcDir, options = {}) {
     'meta.js',
     'main.js',
     'main.jsx',
-    'foundation.js',
-    'foundation.jsx',
     'styles.css',
     'index.css'
   ]
@@ -459,7 +453,7 @@ export function shouldRegenerateForFile(file, srcDir) {
     return 'meta.js changed'
   }
 
-  // main.js / main.jsx / foundation.js / foundation.jsx at root —
+  // main.js / main.jsx at root —
   // the authored declarations file affects the capabilities import.
   if (/^(main|foundation)\.(js|jsx)$/.test(rel)) {
     return 'foundation config changed'

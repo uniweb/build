@@ -209,7 +209,7 @@ async function processDevSectionFetches(sections, fetchOptions) {
     }
   }
 }
-import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '../search/index.js'
+import { generateSearchIndex, isSearchEnabled, getSearchIndexFilename } from '@uniweb/projections'
 import { mergeTranslations } from '../i18n/merge.js'
 import { mountDevApi } from '../dev/api-mount.js'
 

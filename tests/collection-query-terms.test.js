@@ -54,10 +54,6 @@ describe('collection query terms are applied at materialization', () => {
     expect(await items('    where: { tier: gold }\n')).toEqual(['A'])
   })
 
-  it('filter: — the deprecated expression, still narrows', async () => {
-    expect(await items("    filter: 'tier == gold'\n")).toEqual(['A'])
-  })
-
   it('sort: reorders', async () => {
     expect(await items('    sort: title desc\n')).toEqual(['B', 'A'])
   })

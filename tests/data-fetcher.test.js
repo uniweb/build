@@ -4,7 +4,6 @@ import {
   stripBuildOnlyFetchKeys,
   mergeDataIntoContent,
   executeMultipleFetches,
-  applyFilter,
   applySort,
   applyPostProcessing,
   toFetchList,
@@ -223,13 +222,6 @@ describe('parseFetchConfig', () => {
       expect(result.sort).toBe('date desc')
     })
 
-    it('parses collection with filter', () => {
-      const config = { query: 'articles', filter: 'tags contains featured' }
-      const result = parseFetchConfig(config)
-
-      expect(result.filter).toBe('tags contains featured')
-    })
-
     it('allows an `as` override', () => {
       const config = { query: 'articles', as: 'posts' }
       const result = parseFetchConfig(config)
@@ -250,7 +242,6 @@ describe('parseFetchConfig', () => {
         query: 'articles',
         limit: 5,
         sort: 'date desc',
-        filter: 'published != false',
         as: 'posts',
       }
       const result = parseFetchConfig(config)
@@ -259,7 +250,6 @@ describe('parseFetchConfig', () => {
       expect(result.as).toBe('posts')
       expect(result.limit).toBe(5)
       expect(result.sort).toBe('date desc')
-      expect(result.filter).toBe('published != false')
     })
   })
 
@@ -272,16 +262,14 @@ describe('parseFetchConfig', () => {
       expect(result.limit).toBe(10)
     })
 
-    it('parses url with sort and filter', () => {
+    it('parses url with sort', () => {
       const config = {
         url: 'https://api.example.com/items',
         sort: 'order asc',
-        filter: 'active == true',
       }
       const result = parseFetchConfig(config)
 
       expect(result.sort).toBe('order asc')
-      expect(result.filter).toBe('active == true')
     })
   })
 })
@@ -420,63 +408,6 @@ describe('executeMultipleFetches', () => {
   })
 })
 
-describe('applyFilter', () => {
-  const items = [
-    { name: 'A', active: true, tags: ['featured', 'new'], score: 10 },
-    { name: 'B', active: false, tags: ['old'], score: 5 },
-    { name: 'C', active: true, tags: ['featured'], score: 8 },
-  ]
-
-  it('returns original items if no filter', () => {
-    expect(applyFilter(items, null)).toBe(items)
-    expect(applyFilter(items, '')).toBe(items)
-  })
-
-  it('filters by equality (==)', () => {
-    const result = applyFilter(items, 'active == true')
-    expect(result).toHaveLength(2)
-    expect(result.map(i => i.name)).toEqual(['A', 'C'])
-  })
-
-  it('filters by inequality (!=)', () => {
-    const result = applyFilter(items, 'active != true')
-    expect(result).toHaveLength(1)
-    expect(result[0].name).toBe('B')
-  })
-
-  it('filters by greater than (>)', () => {
-    const result = applyFilter(items, 'score > 5')
-    expect(result).toHaveLength(2)
-    expect(result.map(i => i.name)).toEqual(['A', 'C'])
-  })
-
-  it('filters by less than (<)', () => {
-    const result = applyFilter(items, 'score < 10')
-    expect(result).toHaveLength(2)
-    expect(result.map(i => i.name)).toEqual(['B', 'C'])
-  })
-
-  it('filters by contains (array)', () => {
-    const result = applyFilter(items, 'tags contains featured')
-    expect(result).toHaveLength(2)
-    expect(result.map(i => i.name)).toEqual(['A', 'C'])
-  })
-
-  it('filters by contains (string)', () => {
-    const strItems = [
-      { name: 'hello world' },
-      { name: 'foo bar' },
-    ]
-    const result = applyFilter(strItems, 'name contains world')
-    expect(result).toHaveLength(1)
-  })
-
-  it('handles non-array input gracefully', () => {
-    expect(applyFilter(null, 'a == b')).toBeNull()
-    expect(applyFilter('not array', 'a == b')).toBe('not array')
-  })
-})
-
 describe('applySort', () => {
   const items = [
     { name: 'C', order: 3, date: '2025-01-03' },
@@ -554,11 +485,6 @@ describe('applyPostProcessing', () => {
     expect(applyPostProcessing(obj, { limit: 1 })).toBe(obj)
   })
 
-  it('applies filter only', () => {
-    const result = applyPostProcessing(items, { filter: 'active == true' })
-    expect(result).toHaveLength(2)
-  })
-
   it('applies sort only', () => {
     const result = applyPostProcessing(items, { sort: 'order asc' })
     expect(result.map(i => i.name)).toEqual(['B', 'C', 'A'])
@@ -569,15 +495,13 @@ describe('applyPostProcessing', () => {
     expect(result).toHaveLength(2)
   })
 
-  it('applies filter, sort, and limit in order', () => {
+  it('applies where, sort, and limit in order', () => {
     const result = applyPostProcessing(items, {
-      filter: 'active == true',
+      where: { active: true },
       sort: 'order asc',
       limit: 1,
     })
-    // Filter: A, C (active=true)
-    // Sort by order asc: C (order=2), A (order=3)
-    // Limit 1: C
+    // where: A, C (active=true); sort order asc: C(2), A(3); limit 1: C
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('C')
   })
@@ -637,11 +561,12 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
 
-  it('does not confuse a dropped key with a deprecated one', () => {
-    // `filter:` is recognized-but-deprecated; it must warn about deprecation,
-    // never about being unrecognized.
+  it('the retired `filter:` DSL is now an unrecognized key, reported', () => {
+    // `filter:` (the legacy DSL string) was removed 2026-09-05. It is no longer
+    // a recognized fetch key, so it is reported like any other unknown one —
+    // loud, not silently honoured.
     parseFetchConfig({ query: 'articles', filter: 'a == 1' })
-    expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
+    expect(messages().filter((m) => m.includes('unrecognized key')).length).toBeGreaterThan(0)
   })
 })
 

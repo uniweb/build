@@ -23,7 +23,7 @@ import {
   translateRecordData,
   RECORDS_DIR
 } from './records.js'
-import { generateSearchIndex, isSearchEnabled } from '../search/index.js'
+import { generateSearchIndex, isSearchEnabled } from '@uniweb/projections'
 
 // Free-form translation support
 import {

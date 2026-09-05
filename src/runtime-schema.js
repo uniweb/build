@@ -154,7 +154,6 @@ function isFullSchemaFormat(schema) {
  * the same schema feeds both audiences.
  *
  * Normalizations:
- *   - `type: 'string'` → `type: 'text'` (legacy alias; warn in dev)
  *
  * @param {Object} schema - Rich schema as authored
  * @returns {Object} - Normalized rich schema
@@ -170,14 +169,7 @@ function normalizeRichSchemaValue(value) {
   if (!value || typeof value !== 'object') return value
   const out = {}
   for (const [key, v] of Object.entries(value)) {
-    if (key === 'type' && v === 'string') {
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
-        console.warn(
-          "[uniweb] form schema field type 'string' is a legacy alias; use 'text' instead."
-        )
-      }
-      out[key] = 'text'
-    } else if (v && typeof v === 'object') {
+    if (v && typeof v === 'object') {
       out[key] = normalizeRichSchemaValue(v)
     } else {
       out[key] = v

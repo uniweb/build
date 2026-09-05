@@ -118,7 +118,6 @@ describe('getStructuralWatchPaths', () => {
       `${src}/layouts/docs/index.jsx`,
       `${src}/meta.js`,
       `${src}/main.js`,
-      `${src}/foundation.js`,
       `${src}/styles.css`,
       `${src}/index.css`
     ]

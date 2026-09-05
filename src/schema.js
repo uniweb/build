@@ -21,10 +21,8 @@ import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
 
-// Foundation authored-declarations file name. `main.js` is the canonical
-// new name; `foundation.js` is the legacy name kept for backward compat.
-// Whichever exists at the source root is loaded.
-const FOUNDATION_FILE_NAMES = ['main.js', 'foundation.js']
+// Foundation authored-declarations file name.
+const FOUNDATION_FILE_NAMES = ['main.js']
 
 // Default paths to scan for section types (relative to srcDir).
 // Exported so dev-server watchers can derive their watch surface from the same
@@ -392,13 +390,6 @@ function inferFontVarTypes(vars) {
     }
   }
   return out
-}
-
-/**
- * @deprecated Use loadFoundationConfig instead
- */
-export async function loadFoundationMeta(srcDir) {
-  return loadFoundationConfig(srcDir)
 }
 
 /**

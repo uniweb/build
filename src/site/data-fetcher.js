@@ -11,7 +11,7 @@
  * - Local JSON/YAML files
  * - Remote URLs
  * - Transform paths to extract nested data
- * - Post-processing: limit, sort, filter
+ * - Post-processing: limit, sort
  *
  * @module @uniweb/build/site/data-fetcher
  */
@@ -66,68 +66,6 @@ function getNestedValue(obj, path) {
 }
 
 /**
- * Parse a filter value from string
- *
- * @param {string} raw - Raw value string
- * @returns {any} Parsed value
- */
-function parseFilterValue(raw) {
-  if (raw === 'true') return true
-  if (raw === 'false') return false
-  if (raw === 'null') return null
-  if (/^\d+$/.test(raw)) return parseInt(raw, 10)
-  if (/^\d+\.\d+$/.test(raw)) return parseFloat(raw)
-
-  // Remove quotes if present
-  if ((raw.startsWith('"') && raw.endsWith('"')) ||
-      (raw.startsWith("'") && raw.endsWith("'"))) {
-    return raw.slice(1, -1)
-  }
-
-  return raw
-}
-
-/**
- * Apply filter expression to array of items
- *
- * Supported operators: ==, !=, >, <, >=, <=, contains
- *
- * @param {Array} items - Items to filter
- * @param {string} filterExpr - Filter expression (e.g., "published != false")
- * @returns {Array} Filtered items
- *
- * @example
- * applyFilter(items, 'published != false')
- * applyFilter(items, 'tags contains featured')
- */
-export function applyFilter(items, filterExpr) {
-  if (!filterExpr || !Array.isArray(items)) return items
-
-  const match = filterExpr.match(/^(\S+)\s*(==|!=|>=?|<=?|contains)\s*(.+)$/)
-  if (!match) return items
-
-  const [, field, op, rawValue] = match
-  const value = parseFilterValue(rawValue.trim())
-
-  return items.filter(item => {
-    const itemValue = getNestedValue(item, field)
-    switch (op) {
-      case '==': return itemValue === value
-      case '!=': return itemValue !== value
-      case '>': return itemValue > value
-      case '<': return itemValue < value
-      case '>=': return itemValue >= value
-      case '<=': return itemValue <= value
-      case 'contains':
-        return Array.isArray(itemValue)
-          ? itemValue.includes(value)
-          : String(itemValue).includes(value)
-      default: return true
-    }
-  })
-}
-
-/**
  * Apply a `sort:` to an array of items — `@uniweb/core`'s ONE evaluator, the
  * same the runtime's fallback runs, so a query orders identically on the file
  * lane and over a fetched array.
@@ -164,36 +102,26 @@ export function applyWhere(items, where) {
 }
 
 /**
- * Apply post-processing to fetched data (where, filter, sort, limit)
+ * Apply post-processing to fetched data (where, sort, limit)
  *
  * Order of operations:
- *   1. where (where-object predicate, new) — narrows the record set
- *   2. filter (legacy DSL string) — narrows further if both are set; deprecated
- *   3. sort
- *   4. limit
- *
- * `where:` and `filter:` may both appear during the deprecation window
- * but in practice authors should pick one. Using `filter:` emits a dev
- * warning at parse time (see parseFetchConfig).
+ *   1. where (where-object predicate) — narrows the record set
+ *   2. sort
+ *   3. limit
  *
  * @param {any} data - Fetched data
- * @param {object} config - Fetch config with optional where, filter, sort, limit
+ * @param {object} config - Fetch config with optional where, sort, limit
  * @returns {any} Processed data
  */
 export function applyPostProcessing(data, config) {
   if (!data || !Array.isArray(data)) return data
-  if (!config.where && !config.filter && !config.sort && !config.limit) return data
+  if (!config.where && !config.sort && !config.limit) return data
 
   let result = data
 
   // Apply where-object predicate first (new path)
   if (config.where) {
     result = applyWhere(result, config.where)
-  }
-
-  // Apply legacy filter expression (deprecated)
-  if (config.filter) {
-    result = applyFilter(result, config.filter)
   }
 
   // Apply sort
@@ -240,7 +168,7 @@ export function applyPostProcessing(data, config) {
 // not understand, but we can refuse to pretend it was never there. Reported
 // once per key name per process so a 200-record build does not print 200 lines.
 const RECOGNIZED_FETCH_KEYS = {
-  refine: new Set(['refine', 'detail', 'limit', 'sort', 'where', 'filter']),
+  refine: new Set(['refine', 'detail', 'limit', 'sort', 'where']),
   // ⛔ `schema` IS NOT ON EITHER LIST, and its absence is the point. It was the
   // binding key until 2026-09-02 and stopped being READ on 2026-09-03 (`e4fe077`,
   // one name no alias) — but it was left on these lists, which exempted it from
@@ -250,11 +178,11 @@ const RECOGNIZED_FETCH_KEYS = {
   // "unrecognized" understates a key that used to work.
   query: new Set([
     'query', 'as', 'prerender', 'merge', 'transform',
-    'where', 'limit', 'sort', 'detailPage', 'filter',
+    'where', 'limit', 'sort', 'detailPage',
   ]),
   source: new Set([
     'path', 'url', 'as', 'prerender', 'merge', 'transform', 'detail',
-    'detailPage', 'where', 'limit', 'sort', 'filter',
+    'detailPage', 'where', 'limit', 'sort',
   ]),
 }
 
@@ -377,21 +305,19 @@ export function parseFetchConfig(fetch) {
   // No URL — merges with the parent fetch config at runtime; only carries
   // override props.
   //
-  // Note on build-vs-runtime scope: this parser passes `sort` and `filter`
+  // Note on build-vs-runtime scope: this parser passes `sort`
   // through on refine configs, but the runtime EntityStore only applies
-  // `detail`, `limit`, and `order` overrides. `sort` / `filter` on a refine
+  // `detail`, `limit`, and `order` overrides. `sort` on a refine
   // block are currently accepted by the parser but not honored at runtime.
   // Preserved as-is in this rename commit; revisit separately if needed.
   if (fetch.refine === true) {
     warnUnknownFetchKeys(fetch, 'refine')
-    if (fetch.filter !== undefined) warnFilterDeprecated()
     return {
       refine: true,
       ...(fetch.detail !== undefined ? { detail: fetch.detail } : {}),
       ...(fetch.limit !== undefined ? { limit: fetch.limit } : {}),
       ...(fetch.sort !== undefined ? { sort: fetch.sort } : {}),
       ...(fetch.where !== undefined ? { where: fetch.where } : {}),
-      ...(fetch.filter !== undefined ? { filter: fetch.filter } : {}),
     }
   }
 
@@ -411,7 +337,6 @@ export function parseFetchConfig(fetch) {
   // Named-query reference: { query: 'articles', limit: 3 }
   if (fetch.query) {
     warnUnknownFetchKeys(fetch, 'query')
-    if (fetch.filter !== undefined) warnFilterDeprecated()
     warnSchemaRetired(fetch, fetch.as || fetch.query)
     return {
       // ⭐ **`query` IS EMITTED, and that is what makes the two producers agree.**
@@ -450,8 +375,6 @@ export function parseFetchConfig(fetch) {
       // Canonical detail page for a list card's href (page:<stable_id> ref;
       // resolved to a route template + interpolated per record at runtime).
       detailPage: fetch.detailPage,
-      // Legacy post-processing (deprecated, see warning above)
-      filter: fetch.filter,
     }
   }
 
@@ -469,14 +392,11 @@ export function parseFetchConfig(fetch) {
     where,
     limit,
     sort,
-    // Legacy post-processing (deprecated)
-    filter,
   } = fetch
 
   // Must have either path or url
   if (!path && !url) return null
 
-  if (filter !== undefined) warnFilterDeprecated()
   warnSchemaRetired(fetch, as ?? inferSchemaFromPath(path || url))
 
   return {
@@ -496,8 +416,6 @@ export function parseFetchConfig(fetch) {
     where,
     limit,
     sort,
-    // Legacy post-processing (deprecated)
-    filter,
   }
 }
 
@@ -539,18 +457,6 @@ function warnSchemaRetired(fetch, boundTo) {
 /** Test seam — reset the retired-`schema:` memo so suites do not leak into each other. */
 export function _resetRetiredSchemaWarnings() {
   warnedRetiredSchema.clear()
-}
-
-let filterDeprecationWarned = false
-function warnFilterDeprecated() {
-  if (filterDeprecationWarned) return
-  filterDeprecationWarned = true
-  console.warn(
-    "[uniweb] 'fetch: { filter: ... }' (DSL string) is deprecated; use 'where: { ... }' " +
-    'with a where-object. Example: where: { tags: \"featured\" } instead of ' +
-    "filter: 'tags contains featured'. " +
-    'Accepted for one release; will be removed in the next minor.'
-  )
 }
 
 /**
@@ -716,7 +622,7 @@ export async function executeFetch(config, options = {}) {
       data = getNestedValue(data, transform)
     }
 
-    // Apply post-processing (filter, sort, limit)
+    // Apply post-processing (where, sort, limit)
     data = applyPostProcessing(data, config)
 
     // Ensure we return an array or object, defaulting to empty array

@@ -150,7 +150,7 @@ Draft content.
       expect(collections.articles[0].title).toBe('Published Article')
     })
 
-    it('should apply filter expressions', async () => {
+    it('should apply where predicates', async () => {
       const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
@@ -171,7 +171,7 @@ Content.
       const collections = await processQueries(testDir, {
         posts: {
           schema: '@/posts',
-          filter: 'category == tutorial'
+          where: { category: 'tutorial' }
         }
       })
 

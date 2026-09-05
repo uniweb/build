@@ -693,7 +693,7 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
     })
   })
 
-  it('normalizes legacy type:"string" to type:"text" in rich field definitions', () => {
+  it('does NOT convert a form field type of "string" — the legacy text alias was removed 2026-09-05', () => {
     const meta = {
       data: {
         item: {
@@ -702,7 +702,8 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
       },
     }
     const result = extractRuntimeSchema(meta)
-    expect(result.schemas.item.fields[0].type).toBe('text')
+    // The value passes through untouched; `string` is no longer a form type.
+    expect(result.schemas.item.fields[0].type).toBe('string')
   })
 
   it('preserves condition operators on rich fields', () => {

@@ -14,9 +14,7 @@
  * - input: Input field mapping
  * - props: Additional component props (merged with other params)
  * - fetch: Data fetching configuration (path, url, schema, prerender, merge, transform)
- *
- * Note: `component` is supported as an alias for `type` (deprecated)
- *
+  *
  * Uses @uniweb/content-reader for markdown → ProseMirror conversion
  * when available, otherwise uses a simplified parser.
  *
@@ -923,7 +921,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     console.warn(`[content-collector] ${err.message}`)
   }
 
-  const { type, component, preset, input, props, fetch, data, id: frontmatterId, ...params } = frontMatter
+  const { type, preset, input, props, fetch, data, id: frontmatterId, ...params } = frontMatter
 
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
@@ -961,7 +959,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const section = {
     id,
     stableId,
-    type: type || component || null,  // frontmatter: type > component (legacy)
+    type: type || null,
     preset,
     input,
     params: { ...params, ...props },
