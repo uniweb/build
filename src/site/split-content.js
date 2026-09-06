@@ -2,7 +2,8 @@
  * Split Content Helper
  *
  * Shared utility to determine whether a site should use split page content.
- * Used by the site plugin, prerender, and unicloud.
+ * Used by the site plugin, prerender, and any host that assembles the shell
+ * server-side.
  *
  * @module @uniweb/build/site
  */

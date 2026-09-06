@@ -11,7 +11,7 @@
  * Used by:
  * - Site builds (runtime mode + extensions)  — packages/build/src/site/config.js
  * - Runtime shell build                      — packages/runtime/vite.config.app.js
- * - Dynamic-runtime (editor preview)         — packages/uniweb-editor/dynamic-runtime/
+ * - An authoring tool's live preview          — its own runtime build
  *
  * @module @uniweb/build/import-map-plugin
  */
