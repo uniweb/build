@@ -17,6 +17,7 @@ import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inferTitle } from './utils/infer-title.js'
 import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
+import { composeSupports } from './foundation/derive-supports.js'
 
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
@@ -720,6 +721,56 @@ export async function discoverComponents(srcDir, sectionPaths = DEFAULT_SECTION_
 }
 
 /**
+ * Say what the derivation added, at the one moment the developer is looking.
+ *
+ * ⭐ This is the whole answer to *"a developer may not realize they have to
+ * declare the service"*. `uniweb doctor` cannot reach that developer — it is
+ * opt-in, and someone who does not know the key exists has no reason to run it.
+ * A build is on the path they already walk.
+ *
+ * ⛔ It reports; it never edits. Writing the names into `package.json` is
+ * `uniweb doctor --fix`, where it is a thing the developer asked for and can
+ * read in a diff — a build that rewrites source on every run is a surprise, and
+ * the artifact is already correct without it.
+ */
+function reportSupports(srcDir, authored, derived, emitted) {
+  if (!derived) return
+
+  const added = (emitted || []).filter((s) => !(authored || []).includes(s))
+
+  if (added.length > 0) {
+    const list = added.join(', ')
+    if (authored === undefined) {
+      console.log(`Derived uniweb.supports from the bundle: ${list}`)
+      console.log(`  Nothing was declared, so this is what the foundation publishes.`)
+      console.log(`  \`uniweb doctor --fix\` writes it into package.json if you want it in the file.`)
+    } else if (authored.length === 0) {
+      // An explicit `[]` says "this foundation honours no host service", and the
+      // bundle contradicts it. The union wins — evidence beats a stale claim —
+      // but silently overriding what someone typed is how a declaration stops
+      // meaning anything, so say it.
+      console.warn(
+        `Warning: ${srcDir}/package.json declares \`uniweb.supports: []\` (no services), ` +
+          `but the bundle reaches for ${list}. Publishing ${list}.`,
+      )
+    } else {
+      console.log(`Derived uniweb.supports additions: ${list} (declared: ${authored.join(', ')})`)
+    }
+  }
+
+  if (derived.blind && (emitted === undefined || emitted.length === 0)) {
+    // The one case where an empty result is NOT a proven "none": something
+    // named a service in a way the AST could not read, so the set is short by
+    // an unknown amount and absent/UNKNOWN is the honest wire value.
+    console.warn(
+      `Warning: a service is resolved by a computed name, so \`uniweb.supports\` cannot be ` +
+        `derived and is left undeclared. List it in package.json to publish it.`,
+    )
+    for (const at of derived.blindAt || []) console.warn(`  at ${at}`)
+  }
+}
+
+/**
  * Build complete schema for a foundation
  * Returns { _self: { identity + config }, ComponentName: componentMeta, ... }
  *
@@ -729,8 +780,11 @@ export async function discoverComponents(srcDir, sectionPaths = DEFAULT_SECTION_
  *
  * @param {string} srcDir - Source directory
  * @param {string[]} [sectionPaths] - Paths to scan for section types
+ * @param {{services: string[], blind: boolean}} [derivedSupports] - what the
+ *   module graph says this foundation reaches for (`foundation/derive-supports.js`).
+ *   Omitted on a dev rebuild, where nothing reads the result.
  */
-export async function buildSchema(srcDir, sectionPaths) {
+export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) {
   // Load identity from package.json
   const identity = await loadPackageJson(srcDir)
 
@@ -763,10 +817,19 @@ export async function buildSchema(srcDir, sectionPaths) {
   // Build _self, stripping the raw extension boolean in favor of normalized role
   const { extension: _ext, ...configWithoutExtension } = foundationConfig
 
+  // `supports` is the one identity field the graph knows better than the file.
+  // `identity.supports` is already normalized (absent stays absent, `[]` stays
+  // `[]`), and composeSupports keeps that three-state distinction while adding
+  // what the bundle proves — see its table. Spread AFTER `...identity` so it
+  // replaces the authored-only value rather than being overwritten by it.
+  const supports = composeSupports(identity.supports, derivedSupports)
+  reportSupports(srcDir, identity.supports, derivedSupports, supports.supports)
+
   return {
     _self: {
       ...configWithoutExtension,
       ...identity,
+      ...supports,
       // foundation.js overrides package.json for editor-facing identity
       ...(foundationConfig.name && { name: foundationConfig.name }),
       ...(foundationConfig.description && { description: foundationConfig.description }),

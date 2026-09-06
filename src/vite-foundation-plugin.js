@@ -15,12 +15,13 @@ import { generateEntryPoint, shouldRegenerateForFile } from './generate-entry.js
 import { processAllPreviews } from './images.js'
 import { generateFoundationVars } from './theme/index.js'
 import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
+import { deriveSupports } from './foundation/derive-supports.js'
 
 /**
  * Build schema.json with preview image references
  */
-async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPaths) {
-  const schema = await buildSchema(srcDir, sectionPaths)
+async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPaths, derivedSupports) {
+  const schema = await buildSchema(srcDir, sectionPaths, derivedSupports)
 
   // Process preview images
   const { schema: schemaWithImages, totalImages } = await processAllPreviews(
@@ -583,9 +584,22 @@ export function foundationBuildPlugin(options = {}) {
       isDevRebuild = (config.plugins || []).some((p) => p?.name === DEV_REBUILD_MARKER)
     },
 
-    async writeBundle() {
+    async writeBundle(_options, bundle) {
       // Skip if this is a recursive call from buildSSRBundle
       if (_buildingSSRBundle) return
+
+      // What host services this foundation actually reaches for, read off the
+      // post-tree-shake module graph rather than asked for in package.json.
+      //
+      // ⛔ GATED ON `isDevRebuild`, NOT ON `isProduction` — the dev server runs
+      // a real Vite build() of the foundation on every watched change, so
+      // `command`, `mode` and `isProduction` all say "build" and cannot tell a
+      // save from a shipping build (see DEV_REBUILD_MARKER). Same gate, and the
+      // same reason, as the entry-ssr.js sub-build below: nothing in the dev
+      // loop reads this, because `supports` is register-time metadata and dev
+      // never registers. `register`'s build-if-stale check treats a dist left
+      // by a dev session as stale, so this can never ship underived.
+      const derivedSupports = isDevRebuild ? null : deriveSupports(bundle, this)
 
       // After bundle is written, generate schema.json in meta folder
       const outDir = resolve(resolvedOutDir)
@@ -598,7 +612,8 @@ export function foundationBuildPlugin(options = {}) {
         resolvedSrcDir,
         outDir,
         isProduction,
-        sectionPaths
+        sectionPaths,
+        derivedSupports
       )
 
       const schemaPath = join(metaDir, 'schema.json')
@@ -721,8 +736,14 @@ export function foundationPlugin(options = {}) {
       devPlugin.configResolved?.(config)
     },
 
+    // ⛔ `.call(this, …)`, not `buildPlugin.writeBundle(…)`. The inner hook reads
+    // the Rollup plugin context (`this.getModuleInfo`) to derive
+    // `uniweb.supports` from the module graph, and a plain method call would
+    // bind `this` to `buildPlugin` instead. Nothing would throw: the context
+    // probe is optional-chained, so the derivation would silently return an
+    // empty set and every foundation would publish nothing.
     async writeBundle(...args) {
-      await buildPlugin.writeBundle?.(...args)
+      await buildPlugin.writeBundle?.call(this, ...args)
     },
 
     handleHotUpdate(...args) {
