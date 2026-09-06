@@ -1,6 +1,6 @@
 // Using Jest (built-in globals, no imports needed)
 import { buildSiteData } from '../src/site/build-site-data.js'
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 // Derived, never re-spelled — the convention is pinned once, in
@@ -98,6 +98,38 @@ A short tagline.
     // Per-page split files are derived server-side from the full
     // sections we just shipped — link-mode CLI never emits these.
     expect(existsSync(join(distDir, '_pages'))).toBe(false)
+  })
+
+  // ⭐ THE STRUCTURAL FORM OF THE TEST ABOVE, and the reason it is worth having
+  // both: that one is an ENUMERATED list, so it passes for any `_foo/` artifact
+  // nobody thought to add to it. This one cannot — it asserts the SHAPE.
+  //
+  // ⭐ `/_` IS A CROSS-LANE AGREEMENT, not a framework preference. A host that
+  // serves this lane reserves every path beginning with `/_` for the services it
+  // answers — records, search, submissions, the assistant — resolving each
+  // against a table it is handed, and answering 404 for a `/_` path that matches
+  // no entry. So an artifact we emit there is not merely odd, it is
+  // **unreachable**: the host never looks in the site's files for it.
+  //
+  // ⚠️ THIS IS NOT HYPOTHETICAL. Until 2026-08-01 this lane emitted a split
+  // search index at `_search/{locale}/*.json` — and `_search` is now exactly the
+  // kind of name a host answers itself. The collision retired by accident, when
+  // the index moved for unrelated reasons.
+  //
+  // ⚖️ The BUNDLE lane still emits `_importmap/` and `_pages/`, legitimately: it
+  // ships to a plain file host that reserves nothing, and those paths are served
+  // as files. That is why this assertion is on THIS lane only, and why the two
+  // lanes must not be merged on the strength of both producing a `dist/`.
+  it('emits NOTHING under `_` — the reserved prefix belongs to whoever serves the site', async () => {
+    await buildSiteData({ siteRoot, distDir })
+
+    const reserved = readdirSync(distDir).filter((name) => name.startsWith('_'))
+    expect(reserved, `link-mode emitted reserved path(s): ${reserved.join(', ')}`).toEqual([])
+
+    // Positive control — an absence check with nothing known-present beside it
+    // proves only that the directory was read. `site-content.json` is this
+    // lane's whole point.
+    expect(readdirSync(distDir)).toContain('site-content.json')
   })
 
   it('emits dist/data/<collection>.json when collections are declared', async () => {
