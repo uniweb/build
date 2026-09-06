@@ -46,7 +46,6 @@ export { collectSchemalessData, collectSchemalessDataAssets, rewriteSchemalessDa
 export {
   parseFetchConfig,
   executeFetch,
-  applyFilter,
   applySort,
   applyPostProcessing,
   mergeDataIntoContent

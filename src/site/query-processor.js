@@ -55,7 +55,7 @@ import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
 import { DATA_DIR, fillRoutePattern } from '@uniweb/core'
-import { applyWhere, applyFilter, applySort } from './data-fetcher.js'
+import { applyWhere, applySort } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, FOLDER_MISSING } from './records-config.js'
@@ -713,11 +713,6 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // data. Pinned by `tests/collection-query-terms.test.js`.
   if (config.where) {
     items = applyWhere(items, config.where)
-  }
-
-  // Apply the legacy filter expression (deprecated)
-  if (config.filter) {
-    items = applyFilter(items, config.filter)
   }
 
   // Apply sort

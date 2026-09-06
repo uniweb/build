@@ -24,7 +24,6 @@ export {
 export {
   parseFetchConfig,
   executeFetch,
-  applyFilter,
   applySort,
   applyPostProcessing,
   mergeDataIntoContent,
