@@ -110,7 +110,7 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     ? { siteRoot: localeInfo.distDir, publicDir: '.' }
     : fetchOptions
   const optionsFor = (cfg, oneFetch) => (cfg.path !== oneFetch.path ? localizedFetchOptions : fetchOptions)
-  const entry = (cfg, data, scope) => ({ config: cfg, data, meta: { depth: cfg.depth }, _scope: scope })
+  const entry = (cfg, data, scope) => ({ config: cfg, data, meta: { whole: cfg.whole }, _scope: scope })
 
   // 1. Site-level fetch. ⛔ `toFetchList` rather than a property read: a `fetch:`
   // or `data:` LIST parses to an array, and `siteFetch.prerender` on one is

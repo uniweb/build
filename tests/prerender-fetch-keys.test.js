@@ -27,7 +27,7 @@ function site(files) {
 const noop = () => {}
 
 describe('executeAllFetches resolves each declaration the way the runtime does', () => {
-  it('a deferred query is baked at BRIEF depth under the key the SPA will look up', async () => {
+  it('a deferred query is baked as BRIEFS under the key the SPA will look up', async () => {
     const root = site({ 'public/data/articles.json': JSON.stringify([{ slug: 'a', title: 'A' }]) })
     const content = {
       config: { queries: { articles: { name: 'articles', deferred: ['body'] } } },
@@ -35,7 +35,7 @@ describe('executeAllFetches resolves each declaration the way the runtime does',
     }
     const { fetchedData } = await executeAllFetches(content, root, noop, { locale: 'en', defaultLocale: 'en' })
     const entry = fetchedData.find((e) => e.config.as === 'articles')
-    expect(entry.meta).toEqual({ depth: 'brief' })
+    expect(entry.meta).toEqual({ whole: false })
     // the runtime's key for the same declaration
     const runtimeCfg = resolveFetchConfigs([content.pages[0].fetch], { queries: content.config.queries, locale: 'en', defaultLocale: 'en' }).get('articles')
     expect(deriveCacheKey(entry.config)).toBe(deriveCacheKey(runtimeCfg))
@@ -55,7 +55,7 @@ describe('executeAllFetches resolves each declaration the way the runtime does',
     const entry = fetchedData.find((e) => e.config.as === 'articles')
     expect(entry.data).toEqual([{ slug: 'a', title: 'Un' }])
     expect(entry.config.path).toBe('/fr/data/articles.json')
-    expect(entry.meta).toEqual({ depth: 'full' })
+    expect(entry.meta).toEqual({ whole: true })
     const runtimeCfg = resolveFetchConfigs([content.pages[0].fetch], { locale: 'fr', defaultLocale: 'en' }).get('articles')
     expect(deriveCacheKey(entry.config)).toBe(deriveCacheKey(runtimeCfg))
     rmSync(root, { recursive: true, force: true })
