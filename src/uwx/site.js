@@ -246,7 +246,7 @@ function buildPageData(config, ctx) {
     // ⭐ BOTH, deliberately, and they are not redundant.
     //
     //   `query` — the author's named query, unresolved. A consumer that can ask
-    //     a host where records live (`config.records`) resolves it there, which
+    //     a host where records live (`config.services.records`) resolves it there, which
     //     is the only way a live lane is reachable at all: a resolved path names
     //     one place and closes the question.
     //

@@ -12,7 +12,7 @@
 //         or `$ref: "<id>"` while brand-new (resolved within this payload).
 //       - a BRANCH is a sub-folder: `{ kind: 'branch', name, label?, $children }`.
 //
-// ⭐ `name` IS THE HANDLE — the URL segment, sibling-unique, the door's `$name` —
+// ⭐ `name` IS THE HANDLE — the URL segment, sibling-unique, the records service's `$name` —
 // and `label` is the display text, a localized map (`{ en: "Blog" }`). The store
 // renamed the pair on 2026-09-04 (`path_segment` → `name`; the old display `name`
 // → `label`); this emitter writes the new shape only and the pull reader

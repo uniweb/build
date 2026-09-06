@@ -105,10 +105,8 @@ function normalizeQueryDecl(name, decl) {
  * @param {object} [opts]
  * @param {object} [opts.siteYml] - an already-read site.yml (avoids a re-read)
  * @returns {Promise<{
- *   folderSync: boolean,            // vestigial — see below; always true
  *   hasQueriesYml: boolean,
  *   declarations: object,           // { name: decl }  — merged, schema-defaulted
- *   folders: Array|null,            // the folder's virtual org, or null
  * }>}
  */
 export async function resolveQueriesConfig(siteRoot, opts = {}) {
@@ -172,25 +170,20 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
 
   await deriveDeferredFromSchemas(siteRoot, siteYml, declarations)
 
-  // ⛔ BOTH OF THESE ARE VESTIGIAL FOR ONE STEP, and deliberately not deleted here.
+  // ⛔ `folderSync` AND `folders` WERE DELETED HERE, 2026-09-06. Both were
+  // `collections.yml` survivors kept "for one step" while `records.yml` took
+  // over, and both had become literals — `true` and `null` — that no longer
+  // decided anything. `folderSync` was `collections.yml::sync`; its one reader
+  // guarded on `!folderSync`, a branch that had been unreachable since the
+  // literal landed. `folders` was the virtual org, and by the time it was
+  // deleted it had **no reader at all** — the comment naming
+  // `uwx/sync-package.js` was itself stale.
   //
-  //   `folderSync` was `collections.yml::sync`. The model DELETES that mechanism
-  //   rather than porting it: "do not sync" becomes "reference nothing in
-  //   `records.yml`" — the actual round trip. Its one reader is
-  //   `uwx/records.js`, and it goes when `records.yml` supplies the real
-  //   control. Until then it must stay TRUE, or nothing syncs at all.
-  //
-  //   `folders` was `collections.yml::folders`, the virtual org. Its one reader is
-  //   `uwx/sync-package.js`, and `records.yml` replaces it. Null meanwhile is the
-  //   long-standing default (`folder.js::defaultContents` — one branch per query).
-  //
-  // ⚠️ Leaving them as literals rather than ripping out their readers keeps this
-  // step revertible on its own, which is the whole reason the work is ordered.
+  // ⚠️ The lesson is the shape, not the keys: a vestige parked as a literal
+  // stops failing, so nothing brings anyone back to remove it.
   return {
-    folderSync: true,
     hasQueriesYml,
     declarations,
-    folders: null,
   }
 }
 

@@ -558,9 +558,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const recordsState = recordsCfg.state
 
   const colConfig = opts.queriesConfig || (await resolveQueriesConfig(siteRoot))
-  if (!colConfig.folderSync) {
-    return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
-  }
   const mapped = syncableQueries(colConfig.declarations)
   if (mapped.length === 0) return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
 

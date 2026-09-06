@@ -27,8 +27,6 @@ describe('resolveQueriesConfig', () => {
     const cfg = await resolveQueriesConfig(ROOT)
     expect(cfg.hasQueriesYml).toBe(false)
     expect(cfg.declarations).toEqual({})
-    expect(cfg.folders).toBeNull()
-    expect(cfg.folderSync).toBe(true)
   })
 
   it('site.yml::queries resolves; schema defaults to the query name', async () => {
@@ -79,8 +77,6 @@ describe('resolveQueriesConfig', () => {
     w('site.yml', 'name: X\nfoundation: "@a/b@1"\n')
     w('queries.yml', 'sync: false\nfolders:\n  - segment: blog\narticles:\n  schema: "@/article"\n')
     const cfg = await resolveQueriesConfig(ROOT)
-    expect(cfg.folderSync).toBe(true)
-    expect(cfg.folders).toBeNull()
     expect(cfg.declarations.articles.schema).toBe('@/article')
   })
 })

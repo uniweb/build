@@ -249,7 +249,7 @@ export function resolveFolder(entries, pool) {
       // ⭐ `name` is the handle (the URL segment, sibling-unique); `label` is the
       // display text. The store renamed the pair on 2026-09-04 — `path_segment` →
       // `name`, and the old `name` (display) → `label` — so one word means one
-      // thing from records.yml (`folder:` / `label:`) to the wire to the door's
+      // thing from records.yml (`folder:` / `label:`) to the wire to the service's
       // `$name`.
       const branch = { kind: 'branch', name: segment }
       if (entry.label !== undefined && entry.label !== null) branch.label = String(entry.label)

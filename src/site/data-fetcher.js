@@ -72,7 +72,7 @@ function getNestedValue(obj, path) {
  *
  * ⛔ SINGLE-KEY, BY RULING [Diego, 2026-09-04]. This was its own implementation
  * until then, and it honoured `order asc, title asc` — a multi-key sort the
- * records door refuses and the ruling dropped. A comma now THROWS here, at build
+ * records service refuses and the ruling dropped. A comma now THROWS here, at build
  * time, which is where an authoring error on the file lane belongs.
  *
  * @param {Array} items - Items to sort
@@ -90,7 +90,7 @@ export function applySort(items, sortExpr) {
  * The where-object is the query language (see @uniweb/core's
  * matchWhere). Structured JSON predicate; the one evaluator walks the
  * object against each record, here at build time and in the runtime
- * alike. The same shape crosses to a host's question door unchanged.
+ * alike. The same shape crosses to a host's records service unchanged.
  *
  * @param {Array} items - Items to filter
  * @param {object} where - Where-object predicate
@@ -343,7 +343,7 @@ export function parseFetchConfig(fetch) {
       // The sync lane has always emitted it (`uwx/site.js`) and this one did not,
       // for the same declaration — so `resolveQuerySource` fired on a published
       // site and never on a `--link`-deployed one. Measured 2026-09-02 against a
-      // host declaring `config.records`:
+      // host offering the `records` service:
       //
       //   --link   endpoint undefined, path /data/articles.json   ← the STATIC file
       //   publish  endpoint /_api/q/articles                       ← the live lane
