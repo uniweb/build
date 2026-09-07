@@ -420,20 +420,24 @@ async function emitFoundationVarsCss(outDir, schema) {
  * foundation rebuild. "Same set" was a comment three copies made a promise
  * rather than a fact; deriving it makes drift unrepresentable.
  *
- * PLUS the client-only libraries kit code-splits via dynamic import:
+ * PLUS the client-only library kit code-splits via dynamic import:
  *   - shiki / shiki/bundle/full — syntax highlighting (kit Code renderer)
- *   - fuse.js                   — client search index
- * Both hydrate in the browser and never run during renderToString (CLAUDE.md
- * gotcha #12). Keeping them external drops the ~10 MB Shiki language graph from
- * the SSR bundle and leaves them as DORMANT dynamic imports the isolate never
- * awaits — so no extra modules-map entry is needed for them edge-side.
+ * It hydrates in the browser and never runs during renderToString (CLAUDE.md
+ * gotcha #12). Keeping it external drops the ~10 MB Shiki language graph from
+ * the SSR bundle and leaves it a DORMANT dynamic import the isolate never
+ * awaits — so no extra modules-map entry is needed for it edge-side.
+ *
+ * ⛔ `fuse.js` was listed here too, until the local search ranker became
+ * `@uniweb/projections/search` (2026-09-06). Nothing imports fuse now, so the
+ * entry matched no id and was removed rather than left as a claim that it is
+ * still in play. The projections engine needs no entry: it is a leaf of a
+ * package already in the graph, not a third-party dependency.
  */
 const SSR_DEFAULT_EXTERNALS = DEFAULT_EXTERNALS
 
 function isSSRExternal(id) {
   if (SSR_DEFAULT_EXTERNALS.includes(id)) return true
   if (id === 'shiki' || id.startsWith('shiki/')) return true
-  if (id === 'fuse.js' || id.startsWith('fuse.js/')) return true
   return false
 }
 
@@ -443,11 +447,11 @@ function isSSRExternal(id) {
  *
  * The modern browser `entry.js` is a facade that re-exports from
  * `_entry.generated-*.js` and lazily code-splits kit's client-only features
- * (Shiki, Fuse) into hundreds of chunks — a graph the Cloudflare Dynamic Worker
+ * (Shiki) into hundreds of chunks — a graph the Cloudflare Dynamic Worker
  * isolate can't resolve (it loads a single `foundation` module). This builds the
  * SAME source entry into ONE file, inlining the foundation's own graph and
  * externalizing the runtime/React set (→ the isolate's shared worker-runtime)
- * and the client-only Shiki/Fuse libs. Result: a ~foundation-sized ESM module
+ * and the client-only Shiki lib. Result: a ~foundation-sized ESM module
  * (no React, no Shiki) the edge loads as `foundation` for request-time SSR.
  *
  * Built from source (not by re-bundling the built `entry.js`, whose Shiki
@@ -642,7 +646,7 @@ export function foundationBuildPlugin(options = {}) {
       // browser dist/entry.js — for the Cloudflare edge isolate. React + the
       // runtime stay externalized (resolved to the isolate's SHARED
       // worker-runtime, so runtime patches propagate without a rebuild — the
-      // Strategy S win); the client-only Shiki/Fuse libs are externalized so the
+      // Strategy S win); the client-only Shiki lib are externalized so the
       // ~10 MB Shiki graph stays out. The edge loads this as its single
       // `foundation` module for request-time SSR, gated on its presence.
       //
