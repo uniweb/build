@@ -155,6 +155,23 @@ const INFO_TO_SITE_YML = {
   seo: 'seo',
 }
 
+// ── `config` Section → site.yml ───────────────────────────────────────────────
+//
+// The `config` Section (see `site.js::configNested`) carries authored
+// configuration that does not belong on `info`. Each key maps to a
+// top-level `site.yml` key of the same name, verbatim, so the author's file
+// round-trips unchanged.
+//
+// ⛔ THIS MAP IS THE HALF THAT GETS LEFT OUT. The push side tests green entirely
+// on its own, so a missing entry here is invisible until someone pulls and finds
+// their block gone from site.yml. Every key `configNested` emits needs a line.
+//
+// 📌 `theme` will belong here after the stage-2 move off `info` — it is projected
+// to `theme.yml` (not site.yml) and so will need its own handling, not a row.
+const CONFIG_TO_SITE_YML = {
+  placeholders: 'placeholders',
+}
+
 /**
  * Project a site-content document's `info` (+ `extensions`) onto the site's
  * config files: `site.yml`, `theme.yml`, and `head.html`. Idempotent; only the
@@ -191,6 +208,14 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   for (const [infoKey, ymlKey] of Object.entries(INFO_TO_SITE_YML)) {
     if (infoKey === 'foundation' && keepAuthoredFoundation) continue
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
+  }
+
+  // The `config` Section — authored configuration that is not identity, so it is
+  // not on `info`. Same verbatim treatment as the `info` block above; a Section
+  // the document does not carry writes nothing, like every other absent key here.
+  const configSection = document?.config || {}
+  for (const [configKey, ymlKey] of Object.entries(CONFIG_TO_SITE_YML)) {
+    if (configSection[configKey] !== undefined) siteChanges[ymlKey] = configSection[configKey]
   }
 
   // extensions[] → site.yml::extensions. Each entry carries EITHER `ref` (a

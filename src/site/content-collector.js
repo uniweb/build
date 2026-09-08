@@ -2095,11 +2095,19 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 /**
  * Load foundation schema data needed by the content collector.
  *
+ * `hasContentHandler` reports whether the foundation declares `handlers.content`
+ * — the hook that resolves `{…}` in page content. It is NOT used to decide
+ * anything about the build; its only consumer is the `placeholders:` warning at
+ * the call site, which needs to know whether a declared value has any reader.
+ * ⚠️ It cannot tell WHICH engine the handler uses (a handler is a function, and
+ * the build never calls it), so it answers "something could resolve this",
+ * never "Loom will".
+ *
  * @param {string} foundationPath - Path to foundation directory
- * @returns {Promise<{ vars: Object, layoutNames: Set<string> }>}
+ * @returns {Promise<{ vars: Object, layoutNames: Set<string>, hasContentHandler: boolean }>}
  */
 export async function loadFoundationInfo(foundationPath) {
-  if (!foundationPath) return { vars: {}, layoutNames: new Set() }
+  if (!foundationPath) return { vars: {}, layoutNames: new Set(), hasContentHandler: false }
 
   // ⛔ **NOT `dist/meta/schema.json`.** That file is the EDITOR's artifact — the
   // rich per-section declaration a visual editor needs to render parameter forms
@@ -2133,9 +2141,13 @@ export async function loadFoundationInfo(foundationPath) {
   // Two independent reads, so a failure in one does not cost the other. The
   // previous single try/catch lost the layouts when only the config was broken.
   let vars = {}
+  let hasContentHandler = false
   try {
     const config = await loadFoundationConfig(srcDir)
     vars = config?.vars || {}
+    // `loadFoundationConfig` spreads the module's default export, so `handlers`
+    // arrives intact even though it holds functions and never reaches schema.json.
+    hasContentHandler = typeof config?.handlers?.content === 'function'
   } catch (err) {
     console.warn(
       `[content-collector] Could not read the foundation's declared theme vars from ${srcDir}: ${err.message}\n` +
@@ -2154,7 +2166,7 @@ export async function loadFoundationInfo(foundationPath) {
     )
   }
 
-  return { vars, layoutNames }
+  return { vars, layoutNames, hasContentHandler }
 }
 
 /**
@@ -2372,7 +2384,27 @@ export async function collectSiteContent(sitePath, options = {}) {
   const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
 
   // Load foundation info (vars + layout names) and process theme
-  const { vars: foundationVars, layoutNames: layoutNames } = await loadFoundationInfo(foundationPath)
+  const { vars: foundationVars, layoutNames: layoutNames, hasContentHandler } =
+    await loadFoundationInfo(foundationPath)
+
+  // ⭐ `placeholders:` IS DECLARED FOR A READER THAT MAY NOT EXIST, and that is
+  // the one way this feature fails. Resolving `{…}` in page content is a
+  // FOUNDATION capability (`handlers.content`, normally @uniweb/loom), not
+  // something the framework does for every site — so on a foundation that
+  // declares no content handler the block is inert and the page renders the
+  // literal `{vendor.email}`. That reads as an authoring typo, which is why it
+  // is worth a build-time line rather than leaving the author to find it.
+  //
+  // ⚖️ A WARNING, never an error: the site may be mid-migration, or the author
+  // may be about to switch foundations, and a declared-but-unread value harms
+  // nothing. Same rule as the retired-`fetcher:` keys above — warn once, carry on.
+  if (siteConfig.placeholders && !hasContentHandler) {
+    console.warn(
+      `[uniweb] site.yml declares \`placeholders:\` but the foundation has no \`handlers.content\`, ` +
+        `so nothing will resolve them — pages will render the literal \`{name}\` text.\n` +
+        `[uniweb]   A foundation opts in with \`handlers: createLoomHandlers({ vars })\` from @uniweb/loom.`
+    )
+  }
   // `base` reaches the theme because self-hosted font faces are authored
   // root-relative (`/fonts/x.woff2`) and the emitted @font-face lives in an
   // inline <style> — under a subdirectory deployment it must carry the base.

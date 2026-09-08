@@ -955,6 +955,43 @@ function secretsNested(siteYml) {
   )
 }
 
+// ── `config` — the site's authored configuration ──────────────────────────────
+//
+// ⭐ THE LINE IS IDENTITY vs CONFIGURATION. `info` answers *"which site is this?"*
+// — the name/label record, and it is read far more often than it is read in full.
+// `config` answers *"what does this site render with?"*, and it exists because that
+// second question had no home and its answers were accumulating on `info`.
+//
+// A `single` Section: one record, holding each block verbatim under its own key.
+// Verbatim is the point — the authored shape is a nested map and it comes back as
+// one, so nothing has to be flattened on push or rebuilt on pull.
+//
+// ⚠️ AUTHORS NEVER SEE THIS NAME. It is a wire and Model name; `site-project.js`
+// writes `config.placeholders` back out to `site.yml::placeholders`. So it does
+// not have to read well in a YAML file, and it is named flatly for what it holds,
+// like `pages` / `queries` / `records`.
+//
+// ⚠️ AND IT IS A SUBSET OF THE RUNTIME'S `website.config`, not the same thing —
+// that object is all of site.yml spread whole. One word, two scopes: everything
+// in this Section lands in `website.config`, never the reverse. (uwx-format.md →
+// the `config` Section.)
+//
+// 📌 Stage 2, not done here: `info.theme` belongs in this Section by the same
+// argument and is NOT moved, because moving it is a DROP from `info` and a drop
+// refuses (there is no rename detection — uwx-format.md § *A rename refuses*).
+// That is a destructive migration on live data and is priced separately with the
+// lane that pays it. Adding this Section is additive and auto-applies; do not
+// quietly fold `theme` in on the strength of the comment above.
+//
+// ⛔ ABSENT IS NOT EMPTY. Like every replaced Section, `{}` is a request to clear
+// the stored record while a missing key says "I am not telling you about this" —
+// so the Section is emitted only when the file declares something to put in it.
+function configNested(siteYml) {
+  const config = {}
+  setIf(config, 'placeholders', siteYml.placeholders)
+  return Object.keys(config).length > 0 ? config : undefined
+}
+
 /**
  * Map a file site project to the nested `@uniweb/site-content` `$`-document
  * (see the lane header above). PURE — reads the project, never mints, never writes.
@@ -1124,6 +1161,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // The provisioned record rides the `$services` section instead (see servicesNested).
   setIf(info, 'paths', siteYml.paths)
   setIf(info, 'data', siteYml.data ?? siteYml.fetch)
+  // ⛔ `placeholders` IS NOT HERE, DELIBERATELY — it rides the `config` Section
+  // (`configNested` below). `info` carries the site's IDENTITY, and every key on
+  // this allowlist is one WE name and the author merely fills. `placeholders` is
+  // the first where the author invents the key set, and it is unbounded — which
+  // puts it on the Section side of the same line `queries` / `records` / `folders`
+  // already sit on. See `configNested` for the split.
+  //
   // ⛔ `app` IS RETIRED — do not reintroduce it, in either direction. It carried an
   // opaque uuid naming a separate entity a host bound to the site; that entity is
   // gone, a site's services belong to the site itself, and NOTHING replaces the key.
@@ -1177,6 +1221,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   doc.$id = SITE_ENTITY_KEY // one site-content entity per project (stable handle)
   doc.$model = SITE_MODEL_NAME
   doc.info = info
+  // Emitted only when the file declares something — see `configNested`.
+  const config = configNested(siteYml)
+  if (config) doc.config = config
   doc.pages = pages
   doc.layout_sections = layoutSections
   doc.extensions = extensionsNested(siteYml)

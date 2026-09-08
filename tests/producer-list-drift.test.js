@@ -58,6 +58,36 @@ describe('producer-side lists cannot drift silently', () => {
     expect(unaccounted).toEqual([])
   })
 
+  it('every config-Section key the producer emits is mapped back on pull', () => {
+    // The `info` guard above, for the Section that now carries authored config
+    // which does not belong on `info`. Same drift, same silence: a key
+    // `configNested` emits but `CONFIG_TO_SITE_YML` does not map is invisible
+    // locally, so the next push sends the stale local value and reverts an
+    // author's change.
+    //
+    // ⭐ THIS GUARD EXISTS BECAUSE MOVING A KEY OFF `info` LEAVES ITS GUARD BEHIND.
+    // `placeholders` was briefly an `info` field and was covered by the test above;
+    // relocating it to the `config` Section silently took it out of that test's
+    // scope, and everything still passed. A Section without its own guard is the
+    // same wish the header calls out.
+    const projectSrc = read('site-project.js')
+    const siteSrc = read('site.js')
+
+    const body = siteSrc.match(/function configNested\([\s\S]*?\n}/)[0]
+    const emitted = new Set([...body.matchAll(/setIf\(config, '([a-z_]+)'/g)].map((m) => m[1]))
+    const mapped = new Set(
+      projectSrc.match(/const CONFIG_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
+        .match(/^\s*([a-z_]+):/gm).map((s) => s.trim().replace(':', ''))
+    )
+    // Projected somewhere other than site.yml (theme.yml, once `theme` moves here
+    // in stage 2). Named explicitly so a new key cannot land here by default.
+    const specialCased = new Set(['theme'])
+
+    expect(emitted.size).toBeGreaterThan(0) // the regex actually found something
+    const unaccounted = [...emitted].filter((k) => !mapped.has(k) && !specialCased.has(k))
+    expect(unaccounted).toEqual([])
+  })
+
   it('collectSiteUnits covers every file the projector writes', () => {
     // Drift consequence: a file kind the walk misses is ungated by the push
     // precondition and invisible in a conflict report. This ALREADY happened once —
