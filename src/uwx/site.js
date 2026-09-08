@@ -983,9 +983,20 @@ function secretsNested(siteYml) {
 // lane that pays it. Adding this Section is additive and auto-applies; do not
 // quietly fold `theme` in on the strength of the comment above.
 //
-// ⛔ ABSENT IS NOT EMPTY. Like every replaced Section, `{}` is a request to clear
-// the stored record while a missing key says "I am not telling you about this" —
-// so the Section is emitted only when the file declares something to put in it.
+// ⛔ NEVER EMIT `{}` — and NOT for the reason this comment first gave. It said `{}`
+// reads as "clear the stored record", by analogy with `services` above. Backend
+// corrected it (2026-09-08): on a `single` Section the value must be an object, so
+// `{}` parses as ONE RECORD WITH NO FIELDS, not zero records. There is no `[]`
+// analogue — `multi` can say "zero records", `single` cannot.
+//
+// ⚠️ TODAY THE TWO COINCIDE BY ACCIDENT, because `placeholders` is this Section's
+// only field, so "a record with no fields" and "placeholders cleared" are the same
+// state. They diverge the moment `config` gains a second field, and then `{}` means
+// *clear every field on config* — a far wider statement than the one intended.
+//
+// ⇒ The behaviour below is right either way: emit only when the file declares
+// something. If an explicit clear is ever wanted, ask backend for a real form rather
+// than inferring one from an empty object.
 function configNested(siteYml) {
   const config = {}
   setIf(config, 'placeholders', siteYml.placeholders)
