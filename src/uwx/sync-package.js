@@ -305,7 +305,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const siteDoc = includeSite
     ? await siteProjectToDocument(siteRoot, {
         sourceLocale,
-        ...(opts.queryUuids ? { queryUuids: opts.queryUuids } : {})
+        ...(opts.queryUuids ? { queryUuids: opts.queryUuids } : {}),
+        // Withhold the `$services`/`$secrets` Sections when the caller has
+        // determined the file is not asking for anything new by them. Passed
+        // through rather than decided here: the last-agreed state is project
+        // memory the CLI owns. See site.js at `declareServices`.
+        ...(opts.declareServices === false ? { declareServices: false } : {})
       })
     : null
   // Deploy-derived `info` fields (e.g. `data_bundle`, the static-data ball URL) are

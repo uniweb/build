@@ -1191,9 +1191,26 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // Emitted ONLY when the file declares the key — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.
-  const services = servicesNested(siteYml)
+  //
+  // ⭐ AND ONLY WHEN THE CALLER SAYS THE DECLARATION IS A REQUEST.
+  // `opts.declareServices === false` withholds both Sections for THIS push, which
+  // is not the same as the file having no key — the file still declares one; the
+  // caller has determined the owner is not asking for anything new by it.
+  //
+  // ⛔ Why this decision cannot live here: the Sections are REPLACED wholesale by
+  // what we send (`SectionScope::DeclaredOnly`), so re-sending an unchanged block
+  // OVERWRITES whatever the stored request has become since — including a decision
+  // the owner made in the app, where the consent workflow's publish happens. But
+  // "has it changed since we last agreed?" needs the last agreed state, which is
+  // project memory (`deploy.yml`) the CLI owns and this pure mapper must not read.
+  // ⇒ The CLI decides; this honours the decision.
+  //
+  // ⚖️ Default is to declare, so every existing caller is unchanged and the
+  // withholding is opt-in.
+  const declare = opts.declareServices !== false
+  const services = declare ? servicesNested(siteYml) : undefined
   if (services) doc.services = services
-  const secrets = secretsNested(siteYml)
+  const secrets = declare ? secretsNested(siteYml) : undefined
   if (secrets) doc.secrets = secrets
   return doc
 }
