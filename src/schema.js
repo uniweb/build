@@ -758,13 +758,26 @@ function reportSupports(srcDir, authored, derived, emitted) {
     }
   }
 
-  if (derived.blind && (emitted === undefined || emitted.length === 0)) {
-    // The one case where an empty result is NOT a proven "none": something
-    // named a service in a way the AST could not read, so the set is short by
-    // an unknown amount and absent/UNKNOWN is the honest wire value.
+  // ⛔ WARN WHENEVER THE DERIVATION WAS BLIND — not only when it came back empty.
+  //
+  // This used to require an empty result, which left the more likely case
+  // silent: a foundation that reaches `submit` through a literal and `booking`
+  // through a computed name publishes `["submit"]` — short, with no warning, and
+  // the one person who could fix it never hears about it.
+  //
+  // ⭐ That is what makes the lower bound tolerable. How often a foundation
+  // computes a service name is unknowable from here — foundations are
+  // third-party — but it does not need to be known, because the build detects
+  // its own blindness and can say so to the developer at the moment they build.
+  if (derived.blind) {
+    const empty = emitted === undefined || emitted.length === 0
     console.warn(
-      `Warning: a service is resolved by a computed name, so \`uniweb.supports\` cannot be ` +
-        `derived and is left undeclared. List it in package.json to publish it.`,
+      empty
+        ? `Warning: a service is resolved by a computed name, so \`uniweb.supports\` cannot be ` +
+            `derived and is left undeclared. List it in package.json to publish it.`
+        : `Warning: a service is resolved by a computed name, so the derived ` +
+            `\`uniweb.supports\` may be incomplete. Add any service missing from ` +
+            `[${(emitted || []).join(', ')}] to package.json.`,
     )
     for (const at of derived.blindAt || []) console.warn(`  at ${at}`)
   }
