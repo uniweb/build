@@ -40,7 +40,6 @@ import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { authorableFetch } from '../site/fetch-shapes.js'
-import { fetchFromDataShorthand } from '../site/content-collector.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
@@ -152,17 +151,6 @@ const INFO_TO_SITE_YML = {
   // annotated against above. Framework emits neither and must project neither.
 }
 
-// ⚠️ THE `info.*` FALLBACKS BELOW ARE TRANSITIONAL, AND HERE IS THEIR REMOVAL
-// CONDITION. Between backend declaring `settings` and backend dropping these keys
-// from `info`, a site pushed earlier still holds them there — so a pull in that
-// window must read the old home or it silently writes nothing. Each fallback is
-// spelled `settings.X !== undefined ? settings.X : info.X`.
-//
-// ⛔ DELETE THEM once backend confirms their upgrade COPIED the stored values across
-// rather than leaving them on `info`. If it copied, there is no population and these
-// are exactly the fallthroughs-for-nobody this workspace forbids. Ask before assuming
-// either way; the answer is one question and it is theirs.
-//
 // ── `settings` Section → site.yml ─────────────────────────────────────────────
 //
 // The `config` Section (see `site.js::configNested`) carries authored
@@ -249,22 +237,17 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   // pulled, and got a `data:` block back — the value survived and the authored key
   // did not, which the round-trip law forbids (uwx-format.md).
   //
-  // ⚠️ A value pushed BEFORE 2026-09-09 may still be the undesugared shorthand,
-  // since the producer emitted it raw. Normalize it here rather than handing a bare
-  // string to `authorableFetch`, which walks object entries.
-  const wireFetch = settingsSection.fetch !== undefined ? settingsSection.fetch : info.data
+  // ⛔ The producer always desugars, so the wire carries a config or a list of them —
+  // never a bare string. Nothing here accommodates an older shape.
+  const wireFetch = settingsSection.fetch
   if (wireFetch !== undefined) {
-    const shorthand =
-      typeof wireFetch === 'string' ||
-      (Array.isArray(wireFetch) && wireFetch.every((e) => typeof e === 'string'))
-    const resolved = shorthand ? fetchFromDataShorthand(wireFetch) : wireFetch
-    siteChanges.fetch = Array.isArray(resolved)
-      ? resolved.map((f) => authorableFetch(f))
-      : authorableFetch(resolved)
+    siteChanges.fetch = Array.isArray(wireFetch)
+      ? wireFetch.map((f) => authorableFetch(f))
+      : authorableFetch(wireFetch)
   }
 
-  // The `config` Section — authored configuration that is not identity, so it is
-  // not on `info`. Same verbatim treatment as the `info` block above; a Section
+  // The `settings` Section — authored configuration that is not identity, so it is
+  // not on the brief. Same verbatim treatment as the `info` block above; a Section
   // the document does not carry writes nothing, like every other absent key here.
   for (const [settingsKey, ymlKey] of Object.entries(SETTINGS_TO_SITE_YML)) {
     if (settingsSection[settingsKey] !== undefined) siteChanges[ymlKey] = settingsSection[settingsKey]
@@ -319,15 +302,13 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
 
   // theme (whole object) → theme.yml.
-  const wireTheme = settingsSection.theme !== undefined ? settingsSection.theme : info.theme
-  if (wireTheme && typeof wireTheme === 'object') {
-    result.theme = writeThemeFile(siteRoot, wireTheme)
+  if (settingsSection.theme && typeof settingsSection.theme === 'object') {
+    result.theme = writeThemeFile(siteRoot, settingsSection.theme)
   }
 
   // head_html → head.html (a raw file, not YAML).
-  const wireHeadHtml = settingsSection.head_html != null ? settingsSection.head_html : info.head_html
-  if (wireHeadHtml != null) {
-    result.headHtml = writeIfChanged(join(siteRoot, 'head.html'), wireHeadHtml)
+  if (settingsSection.head_html != null) {
+    result.headHtml = writeIfChanged(join(siteRoot, 'head.html'), settingsSection.head_html)
   }
 
   // `info.favicon` rides the verbatim INFO_TO_SITE_YML map above (→ site.yml).

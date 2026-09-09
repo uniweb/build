@@ -116,17 +116,4 @@ describe('3 · the round trip preserves the authored key', () => {
     const second = await siteProjectToDocument(target)
     expect(second.settings.fetch).toEqual(first.settings.fetch)
   })
-
-  it('tolerates a value stored before the producer desugared', async () => {
-    // A site pushed before 2026-09-09 holds the bare shorthand. The projector
-    // must normalize rather than hand a string to `authorableFetch`.
-    const target = await mkdtemp(join(tmpdir(), 'uniweb-sitefetch-legacy-'))
-    DIRS.push(target)
-    siteInfoToConfig({
-      document: { info: { name: 'T', foundation: '@acme/x@1.0.0', data: 'articles' } },
-      siteRoot: target,
-    })
-    const back = yaml.load(readFileSync(join(target, 'site.yml'), 'utf8'))
-    expect(back.fetch).toEqual({ query: 'articles' })
-  })
 })

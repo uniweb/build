@@ -63,9 +63,11 @@ describe('siteInfoToConfig — info → config files', () => {
 
   it('writes theme.yml (whole object) and head.html (raw file)', () => {
     const document = {
-      info: {
-        name: { en: 'S' },
-        foundation: '@acme/base',
+      info: { name: { en: 'S' }, foundation: '@acme/base' },
+      // `theme` and `head_html` are configuration and ride `settings` since
+      // 2026-09-09. Both write to their own file rather than site.yml, so they are
+      // explicit branches in the projector rather than rows in the verbatim map.
+      settings: {
         theme: { vars: { accent: 'red' }, mode: 'dark' },
         head_html: '<meta name="x" content="y">\n',
       },
