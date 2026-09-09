@@ -994,17 +994,6 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   setIf(settings, 'paths', siteYml.paths)
   setIf(settings, 'base', siteYml.base)
 
-  // Locale configuration. ⭐ `default_language` and `languages` moved here on
-  // 2026-09-09 on a MEASUREMENT, not a preference: frontend reported that nothing
-  // reading only the brief touches `default_language`, so the card does not need it
-  // (the reference doc records the argument framework got wrong first).
-  setIf(settings, 'languages', siteYml.languages)
-  setIf(settings, 'default_language', siteYml.defaultLanguage)
-  // Publish intent rides VERBATIM — dangling codes included. Sync carries the full
-  // working set; only *publish* filters. That is what preserves a locale's publish
-  // intent across a remove + re-add in `languages:`.
-  setIf(settings, 'publish_languages', siteYml.publishLanguages)
-
   // SEO. ⛔ `seo` is SIX crawler/sitemap directives and one card field — `image`,
   // `ogTitle`, `ogDescription`, `noindex`, `canonical`, `changefreq`, `priority`
   // (`core/src/seo.js`). Two of those are literally sitemap.xml columns. It only
@@ -1126,6 +1115,30 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // `languages:` (uwx-format.md → "Per-locale publish readiness").
   // `foundation` (required) — the verbatim `site.yml::foundation` string
   // (registry ref / URL / local path), the round-trip source of truth.
+  // ⛔ THE LOCALE KEYS STAY ON `info`, AND MOVING THEM FAILS SILENTLY.
+  //
+  // They were moved to `settings` on 2026-09-09 and moved back the same day, on
+  // backend's measurement: `info` IS the brief Section, and `entity.brief` has
+  // BACKEND readers that neither framework nor frontend can see — the custom-domain
+  // surface and the pool-route reconcile read `default_language`, and publish-locale
+  // narrowing reads all three.
+  //
+  // ⚠️ Nothing refuses. Their default-locale accessor falls back
+  // `default_language` → `languages[0]` → `"en"` and never errors, so moving these
+  // breaks no build, raises no rejection, and quietly resolves EVERY SITE to English
+  // — surfacing as a canonical URL pointing at the wrong domain.
+  //
+  // ⭐ The lesson, which cost two retractions: *"can this key leave `info`?"* is a
+  // grep in BACKEND's repo. Framework measured frontend's reader census and concluded
+  // about backend's storage — an inference about consumers drawn from the wrong side
+  // of a boundary.
+  //
+  // `publish_languages` rides VERBATIM, dangling codes included: sync carries the
+  // full working set and only *publish* filters, which is what preserves a locale's
+  // publish intent across a remove + re-add in `languages:`.
+  setIf(info, 'languages', siteYml.languages)
+  setIf(info, 'default_language', siteYml.defaultLanguage)
+  setIf(info, 'publish_languages', siteYml.publishLanguages)
   info.foundation = siteYml.foundation
   // favicon — a verbatim URL/path string. ⚠️ This comment claimed "the kit
   // resolves it, like other media refs" until 2026-08-17; measured, `favicon`

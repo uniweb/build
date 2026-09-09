@@ -107,6 +107,13 @@ const INFO_TO_SITE_YML = {
   // the pinned ref is exactly what site.yml should say. Only the caller knows which
   // shape it is writing into — and it needs the build's own resolver to know, which is
   // why that check is not made here (it would drag the vite chain into `uwx/`).
+  // ⛔ The locale keys stay on `info` — backend reads them off `entity.brief` and the
+  // failure when they leave is SILENT (every site resolves to `en`). See `site.js`.
+  languages: 'languages',
+  default_language: 'defaultLanguage',
+  // Publish intent — verbatim both ways, dangling codes included (they carry the
+  // preserved publish intent of a temporarily-undeclared language).
+  publish_languages: 'publishLanguages',
   foundation: 'foundation',
   // Publish intent — verbatim both ways, dangling codes included (they carry
   // the preserved publish intent of a temporarily-undeclared language).
@@ -166,11 +173,6 @@ const INFO_TO_SITE_YML = {
 // to `theme.yml` (not site.yml) and so will need its own handling, not a row.
 const SETTINGS_TO_SITE_YML = {
   placeholders: 'placeholders',
-  languages: 'languages',
-  default_language: 'defaultLanguage',
-  // Publish intent — verbatim both ways, dangling codes included (they carry the
-  // preserved publish intent of a temporarily-undeclared language).
-  publish_languages: 'publishLanguages',
   base: 'base',
   fetcher: 'fetcher',
   build: 'build',
