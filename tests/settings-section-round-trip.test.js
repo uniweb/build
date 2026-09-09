@@ -75,11 +75,18 @@ describe('the info / settings split', () => {
       'description', 'favicon', 'foundation', 'name', 'tags', 'template',
     ])
 
-    // ⛔ `url` and `previewUrl` live on `info` too — but they are BACKEND-STAMPED,
+    // ⛔ `url` and `preview_image` live on `info` too — but they are BACKEND-STAMPED,
     // so framework emits neither. A site's live address and its card image URL are
     // assigned by the host, and a serve location is read, never constructed.
-    expect(doc.info).not.toHaveProperty('url')
-    expect(doc.info).not.toHaveProperty('previewUrl')
+    //
+    // ⚠️ THE SPELLING IS LOAD-BEARING HERE. This asserted `previewUrl` until
+    // 2026-09-09 — a name the Model never had (it was `preview_url`, then
+    // `preview_image` at generation 18). The assertion passed the whole time and
+    // would not have caught framework emitting the real field. A guard aimed at a
+    // name that does not exist is not a guard.
+    for (const stamped of ['url', 'preview_image', 'preview_url', 'previewUrl']) {
+      expect(doc.info).not.toHaveProperty(stamped)
+    }
 
     expect(Object.keys(doc.settings).sort()).toEqual([
       'agents', 'assistant', 'base', 'build', 'default_language', 'fetch', 'fetcher',

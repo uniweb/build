@@ -1019,7 +1019,7 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // `ogTitle`, `ogDescription`, `noindex`, `canonical`, `changefreq`, `priority`
   // (`core/src/seo.js`). Two of those are literally sitemap.xml columns. It only
   // ever passed the card test because `image` was inside it; the card's picture is
-  // `info.previewUrl` now.
+  // `info.preview_image` now.
   setIf(settings, 'seo', siteYml.seo)
   // ⭐ `keywords` IS seo by function — it renders into `<meta name="keywords">`
   // (`runtime/src/ssr-renderer.js`). It is top-level in site.yml for authoring
@@ -1267,7 +1267,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // over an already-fetched list and never asks the database, while a DB-filterable
   // facet is separately useful — only the second needs a predicable brief field.
   setIf(info, 'tags', siteYml.tags)
-  // ⛔ `url` and `previewUrl` are BACKEND-STAMPED and framework emits NEITHER.
+  // ⛔ `url` and `preview_image` are BACKEND-STAMPED and framework emits NEITHER.
   // A site's live address is assigned at publish and its card image needs a servable
   // URL; a serve location is a per-response answer the host owns — read, never
   // constructed. `site-project.js` must also never write them into `site.yml`, or a

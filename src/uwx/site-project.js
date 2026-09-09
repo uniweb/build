@@ -144,7 +144,7 @@ const INFO_TO_SITE_YML = {
   // ⭐ `tags` — authored, non-localized tokens; the filter facet for a list of site
   // cards. Round-trips verbatim like any authored list.
   tags: 'tags',
-  // ⛔ `url` and `previewUrl` ARE DELIBERATELY ABSENT and must stay absent. Both are
+  // ⛔ `url` and `preview_image` ARE DELIBERATELY ABSENT and must stay absent. Both are
   // BACKEND-STAMPED — a site's live address and its card image URL are assigned by
   // the host — so writing either into `site.yml` would launder a deploy-derived value
   // into authored config, which is the hazard `submit` / `assistant` / `tracking` are
