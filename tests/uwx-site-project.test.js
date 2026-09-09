@@ -30,6 +30,10 @@ describe('siteInfoToConfig — info → config files', () => {
         name: { en: 'My Site' },
         description: { en: 'A description' },
         foundation: '@acme/base@1.2.3',
+      },
+      // ⭐ Configuration rides the `settings` Section since 2026-09-09; `info` keeps
+      // what a card or a select dropdown renders.
+      settings: {
         languages: ['en', 'fr'],
         default_language: 'en',
         base: '/docs/',
@@ -483,7 +487,7 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
     )
 
     const document = await siteProjectToDocument(src)
-    expect(document.info.submit).toEqual(submit)
+    expect(document.settings.submit).toEqual(submit)
 
     const dest = join(dir, `dest-submit-${_label.replace(/\W/g, '')}`)
     mkdirSync(dest, { recursive: true })
@@ -1169,7 +1173,8 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
 
   it('produce → project → produce recovers the same document', async () => {
     const seed = {
-      info: { name: { en: 'Atlas' }, foundation: '@acme/base@3.0.0', languages: ['en'], base: '/atlas/' },
+      info: { name: { en: 'Atlas' }, foundation: '@acme/base@3.0.0' },
+      settings: { languages: ['en'], base: '/atlas/' },
       queries: [
         { $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/article', sort: '-date' },
       ],
@@ -1223,7 +1228,11 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
 
   it('round-trips a MULTI-LOCALE whole site (scalars + content + nesting + layout)', async () => {
     const seed = {
-      info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@acme/base@3.0.0', languages: ['en', 'es'] },
+      info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@acme/base@3.0.0' },
+      // `languages` is configuration and rides `settings` since 2026-09-09. It has to
+      // be here for the projection to write it into site.yml — without it the
+      // re-produce below finds no locales and the fixed point is vacuous.
+      settings: { languages: ['en', 'es'] },
       pages: [
         {
           $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', is_index: true,
@@ -1535,7 +1544,7 @@ describe('site.yml::tracking across the sync wire', () => {
     )
 
     const document = await siteProjectToDocument(src)
-    expect(document.info.tracking).toEqual(tracking)
+    expect(document.settings.tracking).toEqual(tracking)
 
     const dest = join(dir, `dest-${label.replace(/\W/g, '')}`)
     mkdirSync(dest, { recursive: true })
@@ -1562,7 +1571,7 @@ describe('site.yml::tracking across the sync wire', () => {
     )
 
     const document = await siteProjectToDocument(src)
-    expect(document.info.tracking).toEqual({ endpoint: '/_t' })
+    expect(document.settings.tracking).toEqual({ endpoint: '/_t' })
     expect(JSON.stringify(document)).not.toContain('super-secret')
   })
 
@@ -1631,7 +1640,11 @@ describe('siteInfoToConfig — the authored foundation', () => {
     siteInfoToConfig({
       document: {
         $model: '@uniweb/site-content', $id: 'site-content',
-        info: { foundation: STORED, base: '/docs/', defaultLanguage: undefined, default_language: 'fr' },
+        info: { foundation: STORED },
+        // `base` and the locale keys are configuration — the `settings` Section
+        // since 2026-09-09. The point of the test is unchanged: suppressing
+        // `foundation` must not stop the rest of the projection working.
+        settings: { base: '/docs/', default_language: 'fr' },
       },
       siteRoot: root,
       keepAuthoredFoundation: true,

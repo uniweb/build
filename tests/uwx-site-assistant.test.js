@@ -43,8 +43,8 @@ describe('uwx/site — the assistant block reaches the wire', () => {
       '  system: You are the Acme support assistant.',
       '  model: claude-sonnet-4',
     ])
-    const { info } = await siteProjectToDocument(root)
-    expect(info.assistant).toEqual({
+    const { info, settings } = await siteProjectToDocument(root)
+    expect(settings.assistant).toEqual({
       system: 'You are the Acme support assistant.',
       model: 'claude-sonnet-4',
     })
@@ -52,8 +52,8 @@ describe('uwx/site — the assistant block reaches the wire', () => {
 
   it('carries the string shorthand untouched', async () => {
     const root = siteRoot(['assistant: /_agent/chat'])
-    const { info } = await siteProjectToDocument(root)
-    expect(info.assistant).toBe('/_agent/chat')
+    const { info, settings } = await siteProjectToDocument(root)
+    expect(settings.assistant).toBe('/_agent/chat')
   })
 
   // The claim that adding this line is inert for every existing site rests on
@@ -61,7 +61,7 @@ describe('uwx/site — the assistant block reaches the wire', () => {
   // `assistant:` emits no key rather than an empty one.
   it('emits no key at all when the site declares none', async () => {
     const root = siteRoot([])
-    const { info } = await siteProjectToDocument(root)
+    const { info, settings } = await siteProjectToDocument(root)
     expect(info).not.toHaveProperty('assistant')
   })
 })
@@ -83,9 +83,9 @@ describe('uwx/site — credentials never reach the wire', () => {
       '  key: nor-this-one',
     ])
 
-    const { info } = await siteProjectToDocument(root)
+    const { info, settings } = await siteProjectToDocument(root)
 
-    expect(info.assistant).toEqual({ system: 'Be helpful.' })
+    expect(settings.assistant).toEqual({ system: 'Be helpful.' })
     expect(JSON.stringify(info)).not.toContain('sk-live-must-not-ship')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('apiKey'))
   })
@@ -96,8 +96,8 @@ describe('uwx/site — credentials never reach the wire', () => {
   it('leaves an empty block rather than removing it entirely', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const root = siteRoot(['assistant:', '  apiKey: sk-live-only-key-present'])
-    const { info } = await siteProjectToDocument(root)
-    expect(info.assistant).toEqual({})
+    const { info, settings } = await siteProjectToDocument(root)
+    expect(settings.assistant).toEqual({})
   })
 
   it('does not warn when there is nothing to strip', async () => {

@@ -12,8 +12,8 @@ import { siteProjectToDocument, siteInfoToConfig } from '../src/uwx/index.js'
 // authored config: they ride out on push and must come back on pull.
 //
 // ⭐ WHY BOTH DIRECTIONS ARE TESTED HERE. The two lanes are separate maps —
-// `uwx/site.js::configNested` builds the Section on the way out,
-// `site-project.js::CONFIG_TO_SITE_YML` maps it back on the way in — so the push
+// `uwx/site.js::settingsNested` builds the Section on the way out,
+// `site-project.js::SETTINGS_TO_SITE_YML` maps it back on the way in — so the push
 // half tests green on its own while a pull silently drops the block from
 // site.yml. That asymmetry is the bug this file exists to prevent, not a
 // hypothetical: it is the same shape that let an authored assistant persona
@@ -43,8 +43,8 @@ afterEach(() => {
   while (ROOTS.length) rmSync(ROOTS.pop(), { recursive: true, force: true })
 })
 
-describe('uwx/site — placeholders ride the config Section, not info', () => {
-  it('carries an authored block onto the config Section, verbatim and nested', async () => {
+describe('uwx/site — placeholders ride the settings Section, not info', () => {
+  it('carries an authored block onto the settings Section, verbatim and nested', async () => {
     const root = siteRoot([
       'placeholders:',
       '  product: Uniweb',
@@ -53,7 +53,7 @@ describe('uwx/site — placeholders ride the config Section, not info', () => {
       '    email: billing@acme.example',
     ])
     const doc = await siteProjectToDocument(root)
-    expect(doc.config.placeholders).toEqual({
+    expect(doc.settings.placeholders).toEqual({
       product: 'Uniweb',
       vendor: { organization: 'Acme Studios', email: 'billing@acme.example' },
     })
@@ -66,7 +66,7 @@ describe('uwx/site — placeholders ride the config Section, not info', () => {
     // stored record, so a site that never heard of the key must send nothing.
     const root = siteRoot([])
     const doc = await siteProjectToDocument(root)
-    expect(doc).not.toHaveProperty('config')
+    expect(doc).not.toHaveProperty('settings')
   })
 
   // Not localized, and deliberately so: a placeholder is referenced by name in
@@ -80,18 +80,18 @@ describe('uwx/site — placeholders ride the config Section, not info', () => {
       '  regions: [ca, us]',
     ])
     const doc = await siteProjectToDocument(root)
-    expect(doc.config.placeholders).toEqual({ founded: 2019, beta: true, regions: ['ca', 'us'] })
+    expect(doc.settings.placeholders).toEqual({ founded: 2019, beta: true, regions: ['ca', 'us'] })
   })
 })
 
-describe('uwx/site-project — the config Section comes back on pull', () => {
+describe('uwx/site-project — the settings Section comes back on pull', () => {
   it('projects config.placeholders back onto site.yml', () => {
     const dir = mkdtempSync(join(tmpdir(), 'uwx-placeholders-proj-'))
     ROOTS.push(dir)
 
     const document = {
       info: { name: 'Acme Site', foundation: '@acme/marketing@1.2.3' },
-      config: {
+      settings: {
         placeholders: {
           product: 'Uniweb',
           vendor: { email: 'billing@acme.example' },

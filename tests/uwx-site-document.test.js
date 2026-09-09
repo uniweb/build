@@ -95,6 +95,9 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
       '$id',
       '$model',
       'info',
+      // ⭐ `settings` — the authored configuration that came off the `info` brief on
+      // 2026-09-09, emitted right after it.
+      'settings',
       'pages',
       'layout_sections',
       'extensions',
@@ -103,11 +106,11 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
   })
 
   it('carries info with foundation (the round-trip source of truth)', async () => {
-    const { info } = await siteProjectToDocument(ROOT)
+    const { info, settings } = await siteProjectToDocument(ROOT)
     expect(info.name).toBe('Acme Site') // identity label — plain string, not localized
     expect(info.foundation).toBe('@acme/marketing@1.2.3')
-    expect(info.theme).toEqual({ colors: { primary: '#0099ff' } })
-    expect(info.languages).toEqual(['en', 'fr'])
+    expect(settings.theme).toEqual({ colors: { primary: '#0099ff' } })
+    expect(settings.languages).toEqual(['en', 'fr'])
   })
 
   it('nests page_sections as an INLINE field on the page record (no top-level page_sections, no parent_path)', async () => {

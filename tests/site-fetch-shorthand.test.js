@@ -9,7 +9,7 @@
  *   1. the PAYLOAD lane read `siteConfig.fetch` alone, so `site.yml::data:`
  *      reached a backend on the sync lane and was silently dropped from a static
  *      build — the works-on-one-lane shape;
- *   2. the SYNC producer emitted the shorthand undesugared, so `info.data`
+ *   2. the SYNC producer emitted the shorthand undesugared, so `settings.fetch`
  *      carried a bare string or a full config depending on which key was typed;
  *   3. the PROJECTOR wrote it back verbatim as `site.yml::data`, so an author who
  *      typed `fetch:` pushed, pulled, and got a `data:` block — the value survived
@@ -67,8 +67,8 @@ describe('1 · the payload lane honours `data:` as well as `fetch:`', () => {
 describe('2 · the sync producer emits the DESUGARED form', () => {
   it('`data: articles` reaches the wire as a query declaration, not a bare string', async () => {
     const dir = await makeSite('name: T\nfoundation: "@acme/x@1.0.0"\ndata: articles\n')
-    const { info } = await siteProjectToDocument(dir)
-    expect(info.data).toEqual({ query: 'articles' })
+    const { info, settings } = await siteProjectToDocument(dir)
+    expect(settings.fetch).toEqual({ query: 'articles' })
   })
 
   it('both authored spellings produce the same wire shape', async () => {
@@ -78,18 +78,18 @@ describe('2 · the sync producer emits the DESUGARED form', () => {
     const viaLongForm = await siteProjectToDocument(
       await makeSite('name: T\nfoundation: "@acme/x@1.0.0"\nfetch:\n  query: articles\n')
     )
-    expect(viaShorthand.info.data).toEqual(viaLongForm.info.data)
+    expect(viaShorthand.settings.fetch).toEqual(viaLongForm.settings.fetch)
   })
 })
 
 describe('3 · the round trip preserves the authored key', () => {
   it('projects back as `fetch:`, never `data:`', async () => {
     const dir = await makeSite('name: T\nfoundation: "@acme/x@1.0.0"\nfetch:\n  query: articles\n')
-    const { info } = await siteProjectToDocument(dir)
+    const { info, settings } = await siteProjectToDocument(dir)
 
     const target = await mkdtemp(join(tmpdir(), 'uniweb-sitefetch-rt-'))
     DIRS.push(target)
-    siteInfoToConfig({ document: { info }, siteRoot: target })
+    siteInfoToConfig({ document: { info, settings }, siteRoot: target })
 
     const back = yaml.load(readFileSync(join(target, 'site.yml'), 'utf8'))
     expect(back.fetch).toBeTruthy()
@@ -107,14 +107,14 @@ describe('3 · the round trip preserves the authored key', () => {
     const target = await mkdtemp(join(tmpdir(), 'uniweb-sitefetch-rt2-'))
     DIRS.push(target)
     await mkdir(join(target, 'pages'), { recursive: true })
-    siteInfoToConfig({ document: { info: first.info }, siteRoot: target })
+    siteInfoToConfig({ document: { info: first.info, settings: first.settings }, siteRoot: target })
 
     const afterOne = yaml.load(readFileSync(join(target, 'site.yml'), 'utf8'))
     expect(afterOne.fetch).toEqual({ query: 'articles' })
 
     // Cycle two, from the projected file.
     const second = await siteProjectToDocument(target)
-    expect(second.info.data).toEqual(first.info.data)
+    expect(second.settings.fetch).toEqual(first.settings.fetch)
   })
 
   it('tolerates a value stored before the producer desugared', async () => {

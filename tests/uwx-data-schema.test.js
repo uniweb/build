@@ -238,7 +238,7 @@ describe('toDataSchemaDeclaration — a reference keeps its attributes', () => {
  * no flag. `@std/publication`'s `authors` is the standing authoring case.
  *
  * The producer must therefore keep dropping `required` here — emitting it would
- * fail the publish outright, the way `info.submit` did.
+ * fail the publish outright, the way `settings.submit` did.
  */
 describe('toDataSchemaDeclaration — section prose travels, section `required` does not', () => {
   const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f

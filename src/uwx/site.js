@@ -952,52 +952,103 @@ function secretsNested(siteYml) {
   )
 }
 
-// ── `config` — the site's authored configuration ──────────────────────────────
+// ── `settings` — the site's authored configuration ────────────────────────────
 //
-// ⭐ THE LINE IS IDENTITY vs CONFIGURATION. `info` answers *"which site is this?"*
-// — the name/label record, and it is read far more often than it is read in full.
-// `config` answers *"what does this site render with?"*, and it exists because that
-// second question had no home and its answers were accumulating on `info`.
+// ⭐ THE LINE IS IDENTITY vs CONFIGURATION. `info` answers *"which site is this?"* —
+// the name/label record a card or a select dropdown renders, and the set a listing
+// can filter on. `settings` answers *"what does this site render with?"*.
 //
-// A `single` Section: one record, holding each block verbatim under its own key.
-// Verbatim is the point — the authored shape is a nested map and it comes back as
-// one, so nothing has to be flattened on push or rebuilt on pull.
+// A `single` Section: one record, each block verbatim under its own key. Verbatim is
+// the point — the authored shape is a nested map and it comes back as one, so
+// nothing has to be flattened on push or rebuilt on pull.
 //
 // ⚠️ AUTHORS NEVER SEE THIS NAME. It is a wire and Model name; `site-project.js`
-// writes `config.placeholders` back out to `site.yml::placeholders`. So it does
-// not have to read well in a YAML file, and it is named flatly for what it holds,
-// like `pages` / `queries` / `records`.
+// writes each key back to its authored home (`site.yml`, `theme.yml`, `head.html`).
+// So it is named flatly for what it holds, like `pages` / `queries` / `records`.
 //
-// ⚠️ AND IT IS A SUBSET OF THE RUNTIME'S `website.config`, not the same thing —
-// that object is all of site.yml spread whole. One word, two scopes: everything
-// in this Section lands in `website.config`, never the reverse. (uwx-format.md →
-// the `config` Section.)
-//
-// 📌 Stage 2, not done here: `info.theme` belongs in this Section by the same
-// argument and is NOT moved, because moving it is a DROP from `info` and a drop
-// refuses (there is no rename detection — uwx-format.md § *A rename refuses*).
-// That is a destructive migration on live data and is priced separately with the
-// lane that pays it. Adding this Section is additive and auto-applies; do not
-// quietly fold `theme` in on the strength of the comment above.
-//
-// ⛔ NEVER EMIT `{}` — and NOT for the reason this comment first gave. It said `{}`
-// reads as "clear the stored record", by analogy with `services` above. Backend
-// corrected it (2026-09-08): on a `single` Section the value must be an object, so
-// `{}` parses as ONE RECORD WITH NO FIELDS, not zero records. There is no `[]`
-// analogue — `multi` can say "zero records", `single` cannot.
-//
-// ⚠️ TODAY THE TWO COINCIDE BY ACCIDENT, because `placeholders` is this Section's
-// only field, so "a record with no fields" and "placeholders cleared" are the same
-// state. They diverge the moment `config` gains a second field, and then `{}` means
-// *clear every field on config* — a far wider statement than the one intended.
-//
-// ⇒ The behaviour below is right either way: emit only when the file declares
-// something. If an explicit clear is ever wanted, ask backend for a real form rather
+// ⛔ NEVER EMIT `{}`. On a `single` Section the value must be an object, so `{}` is
+// ONE RECORD WITH NO FIELDS, not zero records — there is no `[]` analogue. With
+// nineteen fields on it, `{}` means *clear all nineteen*. Emit only what the file
+// declares; if an explicit clear is ever wanted, ask backend for a real form rather
 // than inferring one from an empty object.
-function configNested(siteYml) {
-  const config = {}
-  setIf(config, 'placeholders', siteYml.placeholders)
-  return Object.keys(config).length > 0 ? config : undefined
+//
+// ⛔ AND EVERY KEY HERE MUST ROUND-TRIP — an authored value that reaches the server
+// and cannot come back is data loss with a delay on it (uwx-format.md § THE
+// ROUND-TRIP LAW). `site-project.js::SETTINGS_TO_SITE_YML` plus its explicit
+// branches is the other half, and `producer-list-drift.test.js` fails if a key
+// emitted here has neither.
+function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations } = {}) {
+  const settings = {}
+
+  // Site-wide values an author declares once and references from page content as
+  // ordinary Loom variables (`{vendor.email}`). The Section's first field.
+  setIf(settings, 'placeholders', siteYml.placeholders)
+
+  // Verbatim authored blocks. ⭐ `theme` is `theme.yml` VERBATIM — the built theme
+  // is computed (defaults filled, palettes generated), so comparing the two shows a
+  // difference every time and a propagation check has to say which artifact it holds.
+  if (themeYml && Object.keys(themeYml).length > 0) settings.theme = themeYml
+  setIf(settings, 'head_html', headHtml)
+  setIf(settings, 'fetcher', siteYml.fetcher)
+  setIf(settings, 'build', siteYml.build)
+  setIf(settings, 'paths', siteYml.paths)
+  setIf(settings, 'base', siteYml.base)
+
+  // Locale configuration. ⭐ `default_language` and `languages` moved here on
+  // 2026-09-09 on a MEASUREMENT, not a preference: frontend reported that nothing
+  // reading only the brief touches `default_language`, so the card does not need it
+  // (the reference doc records the argument framework got wrong first).
+  setIf(settings, 'languages', siteYml.languages)
+  setIf(settings, 'default_language', siteYml.defaultLanguage)
+  // Publish intent rides VERBATIM — dangling codes included. Sync carries the full
+  // working set; only *publish* filters. That is what preserves a locale's publish
+  // intent across a remove + re-add in `languages:`.
+  setIf(settings, 'publish_languages', siteYml.publishLanguages)
+
+  // SEO. ⛔ `seo` is SIX crawler/sitemap directives and one card field — `image`,
+  // `ogTitle`, `ogDescription`, `noindex`, `canonical`, `changefreq`, `priority`
+  // (`core/src/seo.js`). Two of those are literally sitemap.xml columns. It only
+  // ever passed the card test because `image` was inside it; the card's picture is
+  // `info.previewUrl` now.
+  setIf(settings, 'seo', siteYml.seo)
+  // ⭐ `keywords` IS seo by function — it renders into `<meta name="keywords">`
+  // (`runtime/src/ssr-renderer.js`). It is top-level in site.yml for authoring
+  // convenience, not because it is a different kind of thing. Localized, so it
+  // carries the translation collector with it.
+  setIf(settings, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
+
+  // Authored service declarations. ⛔ These must NOT be filed with the `$services`
+  // Section: authored ones resolve at the SITE tier (`config.<name>`, first choice
+  // in `@uniweb/core`'s `resolveService`) while `$services` is the HOST tier, where
+  // a block's mere PRESENCE declines every service it does not name
+  // (`core/src/services.js`). Moving them there would invert their precedence and
+  // turn a site's own search off with no error and no message.
+  setIf(settings, 'search', siteYml.search)
+  setIf(settings, 'submit', siteYml.submit)
+  // ⛔ Credentials are stripped, not trusted — this block is published world-readable.
+  setIf(settings, 'assistant', stripCredentials(siteYml.assistant, 'assistant'))
+  setIf(settings, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
+
+  // Projections opt-out + route exclusions. Carried because the app is a second
+  // PUBLISHER of projections and derives them from stored content: without this it
+  // cannot see `agents: false` or `agents.exclude`, so an author's opt-out is
+  // silently reversed and an excluded branch becomes both discoverable AND
+  // summarized.
+  setIf(settings, 'agents', siteYml.agents)
+
+  // ⭐ The site-level fetch, DESUGARED and under its real name. `data:` is the
+  // authoring shorthand for `fetch:` and every other tier already calls the wire
+  // field `fetch`; the site tier called it `data` until 2026-09-09.
+  setIf(settings, 'fetch', siteYml.fetch ?? fetchFromDataShorthand(siteYml.data))
+
+  // ⭐ The SITE TIER of framework's own `{name, hide, params}` layout object, which
+  // the page and folder tiers have always had. `hide` is a non-destructive per-area
+  // disable the runtime honours (`core/src/page.js`). Framework read only `.name`
+  // at this tier and emitted nothing at all until 2026-09-09; the app had been
+  // editing the field on the server with framework unable to see or carry it.
+  setIf(settings, 'layout', siteYml.layout)
+
+  return Object.keys(settings).length > 0 ? settings : undefined
 }
 
 /**
@@ -1068,19 +1119,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // title/slug/label/keywords, the body) stay localized. (uwx-format.md → identity-label names.)
   info.name = siteYml.name
   setIf(info, 'description', localizeScalar(siteYml.description, sourceLocale, translations))
-  if (themeYml && Object.keys(themeYml).length > 0) info.theme = themeYml
-  setIf(info, 'languages', siteYml.languages)
-  setIf(info, 'default_language', siteYml.defaultLanguage)
   // Publish intent (site.yml `publishLanguages:`) rides VERBATIM — dangling
   // codes included. Sync carries the full working set; only *publish* filters
   // (backend projection / static-build filter). The verbatim carry is what
   // preserves a locale's publish intent across a remove + re-add in
   // `languages:` (uwx-format.md → "Per-locale publish readiness").
-  setIf(info, 'publish_languages', siteYml.publishLanguages)
   // `foundation` (required) — the verbatim `site.yml::foundation` string
   // (registry ref / URL / local path), the round-trip source of truth.
   info.foundation = siteYml.foundation
-  setIf(info, 'base', siteYml.base)
   // favicon — a verbatim URL/path string. ⚠️ This comment claimed "the kit
   // resolves it, like other media refs" until 2026-08-17; measured, `favicon`
   // appears nowhere in `kit/src` or `runtime/src`. The real consumer is
@@ -1098,26 +1144,18 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // and default keywords exist for any share/SSR/crawler. `seo` rides verbatim
   // as authored config (round-trips like favicon); `keywords` is a localized
   // list (like page keywords).
-  setIf(info, 'seo', siteYml.seo)
-  setIf(info, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
-  setIf(info, 'head_html', headHtml)
-  setIf(info, 'fetcher', siteYml.fetcher)
-  setIf(info, 'build', siteYml.build)
-  setIf(info, 'search', siteYml.search)
   // `submit` — where this site's forms send submissions. Same family as
   // `fetcher`/`search`: the site declares it, the runtime reads it, and it
   // round-trips verbatim. It has to be listed HERE because this lane is an
   // explicit allowlist while the bundle lane spreads all of site.yml — without
   // the line a `submit:` block works on a static host and vanishes silently on
   // the synced lane, which is the worst shape a config bug can take.
-  setIf(info, 'submit', siteYml.submit)
   // `agents` — the projections opt-out + route exclusions. Carried because the
   // app is a second PUBLISHER of projections and derives them from stored
   // content: without this block it cannot see `agents: false` or
   // `agents.exclude`, so an author's opt-out is silently reversed and an
   // excluded branch becomes both discoverable AND summarized by the index.
   // (The CLI lane reads site.yml directly and honors it either way.)
-  setIf(info, 'agents', siteYml.agents)
   // `assistant` — the site's own declaration for an AI assistant: where it
   // lives (`endpoint`, read by kit's `resolveService`) plus authored settings a
   // host reads (`system` persona, model hints). Same family as
@@ -1133,7 +1171,6 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // line.
   //
   // ⛔ Credentials are stripped, not trusted — see `stripCredentials`.
-  setIf(info, 'assistant', stripCredentials(siteYml.assistant, 'assistant'))
   // `tracking` — where this site's usage events go (`endpoint`, read by the
   // runtime through `resolveService`, plus `consent:`). Same family as
   // `search`/`submit`/`assistant` and here for the same reason: the bundle lane
@@ -1147,7 +1184,6 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // (`https://collector/e?key=…`) is invisible here and is disclosed. The host's
   // secret store is the only right home either way.
 
-  setIf(info, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
   // ⛔ `api` IS DELIBERATELY NOT HERE, and this note exists because every comment
   // above it argues the opposite — three services are on this allowlist precisely so
   // an authored block cannot work on a static host and vanish on the synced one.
@@ -1167,7 +1203,6 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // with the RIGHT one.
   //
   // The provisioned record rides the `$services` section instead (see servicesNested).
-  setIf(info, 'paths', siteYml.paths)
   // ⭐ DESUGARED, like every other tier. `data:` is the shorthand for `fetch:`
   // (`data: articles` → `{ query: 'articles' }`), and the page level has always
   // desugared before emitting. The site level shipped the bare string until
@@ -1177,13 +1212,18 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // 📌 The wire NAME is still `data` and becomes `fetch` when the Section moves —
   // renaming it now would be a second destructive wire change for a cosmetic gain;
   // renaming it during the move is free.
-  setIf(info, 'data', siteYml.fetch ?? fetchFromDataShorthand(siteYml.data))
-  // ⛔ `placeholders` IS NOT HERE, DELIBERATELY — it rides the `config` Section
-  // (`configNested` below). `info` carries the site's IDENTITY, and every key on
-  // this allowlist is one WE name and the author merely fills. `placeholders` is
-  // the first where the author invents the key set, and it is unbounded — which
-  // puts it on the Section side of the same line `queries` / `records` / `folders`
-  // already sit on. See `configNested` for the split.
+  // ⛔ THE CONFIGURATION KEYS ARE NOT HERE — they ride the `settings` Section
+  // (`settingsNested` above). `info` is the BRIEF: what a card or a select dropdown
+  // renders, plus what a listing can filter on. Eighteen keys moved off it on
+  // 2026-09-09 because a brief was never meant to carry configuration.
+  //
+  // ⛔ AND THIS ALLOWLIST IS A KNOWN LIABILITY, not a design to copy. `info` is built
+  // from a fixed list of keys framework knows, so any AUTHORED field on the Model that
+  // framework does not model is dropped on pull and — on a Section that replaces
+  // wholesale — destroyed on push, silently. That is what `queriesNested` uses a
+  // DENY-list to avoid ("EMIT WHAT WE DO NOT MODEL"), and it is illegal under the
+  // round-trip law (uwx-format.md). `info.layout` was the live instance and has now
+  // moved to `settings`; the general defect is open.
   //
   // ⛔ `app` IS RETIRED — do not reintroduce it, in either direction. It carried an
   // opaque uuid naming a separate entity a host bound to the site; that entity is
@@ -1200,6 +1240,19 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // backend applies a clonability designation to this site-content entity (it is
   // NOT a registry artifact). Verbatim; absent → a normal (non-template) site.
   setIf(info, 'template', siteYml.template)
+  // ⭐ `tags` — the filter facet for a list of site cards, chiefly the template
+  // picker. An array of NON-LOCALIZED tokens (`[academic, portfolio]`); the site
+  // never renders them and carries no labels for them, because the chip a user
+  // reads belongs to the picker and is translated app-side from a vocabulary it
+  // knows. Two filterings were being discussed as one: the picker filters in JS
+  // over an already-fetched list and never asks the database, while a DB-filterable
+  // facet is separately useful — only the second needs a predicable brief field.
+  setIf(info, 'tags', siteYml.tags)
+  // ⛔ `url` and `previewUrl` are BACKEND-STAMPED and framework emits NEITHER.
+  // A site's live address is assigned at publish and its card image needs a servable
+  // URL; a serve location is a per-response answer the host owns — read, never
+  // constructed. `site-project.js` must also never write them into `site.yml`, or a
+  // pull launders a deploy-derived value into authored config.
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
   const pagesPath = siteYml.paths?.pages
@@ -1238,9 +1291,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   doc.$id = SITE_ENTITY_KEY // one site-content entity per project (stable handle)
   doc.$model = SITE_MODEL_NAME
   doc.info = info
-  // Emitted only when the file declares something — see `configNested`.
-  const config = configNested(siteYml)
-  if (config) doc.config = config
+  // Emitted only when the file declares something — see `settingsNested`.
+  const settings = settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations })
+  if (settings) doc.settings = settings
   doc.pages = pages
   doc.layout_sections = layoutSections
   doc.extensions = extensionsNested(siteYml)

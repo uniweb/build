@@ -58,35 +58,43 @@ describe('producer-side lists cannot drift silently', () => {
     // form. This guard is what caught it when the verbatim row was removed.
     const specialCased = new Set(['description', 'keywords', 'head_html', 'name', 'theme', 'data'])
 
-    expect(emitted.size).toBeGreaterThan(8)
+    // ⚠️ `info` is a BRIEF since 2026-09-09 — 18 keys moved to `settings` — so this
+    // floor is deliberately low. It exists to prove the regex matched something, not
+    // to assert a size.
+    expect(emitted.size).toBeGreaterThan(2)
     const unaccounted = [...emitted].filter((k) => !mapped.has(k) && !specialCased.has(k))
     expect(unaccounted).toEqual([])
   })
 
-  it('every config-Section key the producer emits is mapped back on pull', () => {
+  it('every settings-Section key the producer emits is mapped back on pull', () => {
     // The `info` guard above, for the Section that now carries authored config
     // which does not belong on `info`. Same drift, same silence: a key
-    // `configNested` emits but `CONFIG_TO_SITE_YML` does not map is invisible
+    // `settingsNested` emits but `SETTINGS_TO_SITE_YML` does not map is invisible
     // locally, so the next push sends the stale local value and reverts an
     // author's change.
     //
     // ⭐ THIS GUARD EXISTS BECAUSE MOVING A KEY OFF `info` LEAVES ITS GUARD BEHIND.
     // `placeholders` was briefly an `info` field and was covered by the test above;
-    // relocating it to the `config` Section silently took it out of that test's
+    // relocating it to the `settings` Section silently took it out of that test's
     // scope, and everything still passed. A Section without its own guard is the
     // same wish the header calls out.
     const projectSrc = read('site-project.js')
     const siteSrc = read('site.js')
 
-    const body = siteSrc.match(/function configNested\([\s\S]*?\n}/)[0]
-    const emitted = new Set([...body.matchAll(/setIf\(config, '([a-z_]+)'/g)].map((m) => m[1]))
+    const body = siteSrc.match(/function settingsNested\([\s\S]*?\n}/)[0]
+    const emitted = new Set([...body.matchAll(/setIf\(settings, '([a-z_]+)'/g)].map((m) => m[1]))
     const mapped = new Set(
-      projectSrc.match(/const CONFIG_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
+      projectSrc.match(/const SETTINGS_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
         .match(/^\s*([a-z_]+):/gm).map((s) => s.trim().replace(':', ''))
     )
-    // Projected somewhere other than site.yml (theme.yml, once `theme` moves here
-    // in stage 2). Named explicitly so a new key cannot land here by default.
-    const specialCased = new Set(['theme'])
+    // Handled by an explicit branch rather than the verbatim map — a non-YAML
+    // target, or a localized unwrap. Named so a new key cannot land here by default.
+    const specialCased = new Set([
+      'theme',      // → theme.yml
+      'head_html',  // → head.html
+      'keywords',   // localized list + the translation collector
+      'fetch',      // → site.yml::fetch, via the shorthand-normalizing branch
+    ])
 
     expect(emitted.size).toBeGreaterThan(0) // the regex actually found something
     const unaccounted = [...emitted].filter((k) => !mapped.has(k) && !specialCased.has(k))
@@ -132,6 +140,9 @@ describe('producer-side lists cannot drift silently', () => {
   })
 })
 
+// ⭐ Moved with the 18 on 2026-09-09: `agents` is configuration (a projections
+// opt-out plus route exclusions), so it rides `settings`, not the brief. The test
+// still exists for the same reason — it round-trips, and both halves must be there.
 describe('the agents block round-trips', () => {
   // `agents:` carries the projections opt-out and route exclusions. The app is a
   // second PUBLISHER of projections and derives them from stored content, so a
@@ -141,12 +152,12 @@ describe('the agents block round-trips', () => {
   // because one without the other is the silent case.
   const src = (rel) => readFileSync(new URL(`../src/uwx/${rel}`, import.meta.url), 'utf8')
 
-  it('is emitted onto info by the producer', () => {
-    expect(src('site.js')).toMatch(/setIf\(info, 'agents', siteYml\.agents\)/)
+  it('is emitted onto the settings Section by the producer', () => {
+    expect(src('site.js')).toMatch(/setIf\(settings, 'agents', siteYml\.agents\)/)
   })
 
   it('is mapped back onto site.yml by the projector', () => {
-    const map = src('site-project.js').match(/const INFO_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
+    const map = src('site-project.js').match(/const SETTINGS_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
     expect(map).toMatch(/\bagents:\s*'agents'/)
   })
 })

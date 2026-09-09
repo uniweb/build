@@ -109,22 +109,13 @@ const INFO_TO_SITE_YML = {
   // shape it is writing into — and it needs the build's own resolver to know, which is
   // why that check is not made here (it would drag the vite chain into `uwx/`).
   foundation: 'foundation',
-  languages: 'languages',
-  default_language: 'defaultLanguage',
   // Publish intent — verbatim both ways, dangling codes included (they carry
   // the preserved publish intent of a temporarily-undeclared language).
-  publish_languages: 'publishLanguages',
-  base: 'base',
   favicon: 'favicon',
-  fetcher: 'fetcher',
-  build: 'build',
-  search: 'search',
   // Safe to project back because nothing STAMPS it: `submit` is authored-only,
   // so a pull can never launder a deploy-derived value into authored config the
   // way a key carried by both would. A host-supplied destination is resolved at
   // render time and never enters `info`.
-  submit: 'submit',
-  agents: 'agents',
   // Authored-only, like `submit` above — a host's assistant endpoint is offered
   // through `config.services` and resolved at render time, so it never enters
   // `info` and a pull cannot launder it into authored config.
@@ -145,19 +136,34 @@ const INFO_TO_SITE_YML = {
   // typed, and the push already warned them. The security property is upheld at
   // the push, not by the pull. Measured end-to-end against a live uniwebd —
   // every unit test passed before and after, so only a real push touched it.
-  assistant: 'assistant',
   // Authored-only, like `submit` and `assistant`: a host's tracking endpoint is
   // offered through `config.services.tracking` and resolved at render, so it
   // never enters `info` and a pull cannot launder it into authored config.
-  tracking: 'tracking',
-  paths: 'paths',
   // ⛔ `data` IS NOT VERBATIM — see the explicit branch below. It projects to
   // `site.yml::fetch`, not `site.yml::data`.
   template: 'template',
-  seo: 'seo',
+  // ⭐ `tags` — authored, non-localized tokens; the filter facet for a list of site
+  // cards. Round-trips verbatim like any authored list.
+  tags: 'tags',
+  // ⛔ `url` and `previewUrl` ARE DELIBERATELY ABSENT and must stay absent. Both are
+  // BACKEND-STAMPED — a site's live address and its card image URL are assigned by
+  // the host — so writing either into `site.yml` would launder a deploy-derived value
+  // into authored config, which is the hazard `submit` / `assistant` / `tracking` are
+  // annotated against above. Framework emits neither and must project neither.
 }
 
-// ── `config` Section → site.yml ───────────────────────────────────────────────
+// ⚠️ THE `info.*` FALLBACKS BELOW ARE TRANSITIONAL, AND HERE IS THEIR REMOVAL
+// CONDITION. Between backend declaring `settings` and backend dropping these keys
+// from `info`, a site pushed earlier still holds them there — so a pull in that
+// window must read the old home or it silently writes nothing. Each fallback is
+// spelled `settings.X !== undefined ? settings.X : info.X`.
+//
+// ⛔ DELETE THEM once backend confirms their upgrade COPIED the stored values across
+// rather than leaving them on `info`. If it copied, there is no population and these
+// are exactly the fallthroughs-for-nobody this workspace forbids. Ask before assuming
+// either way; the answer is one question and it is theirs.
+//
+// ── `settings` Section → site.yml ─────────────────────────────────────────────
 //
 // The `config` Section (see `site.js::configNested`) carries authored
 // configuration that does not belong on `info`. Each key maps to a
@@ -170,9 +176,30 @@ const INFO_TO_SITE_YML = {
 //
 // 📌 `theme` will belong here after the stage-2 move off `info` — it is projected
 // to `theme.yml` (not site.yml) and so will need its own handling, not a row.
-const CONFIG_TO_SITE_YML = {
+const SETTINGS_TO_SITE_YML = {
   placeholders: 'placeholders',
+  languages: 'languages',
+  default_language: 'defaultLanguage',
+  // Publish intent — verbatim both ways, dangling codes included (they carry the
+  // preserved publish intent of a temporarily-undeclared language).
+  publish_languages: 'publishLanguages',
+  base: 'base',
+  fetcher: 'fetcher',
+  build: 'build',
+  paths: 'paths',
+  seo: 'seo',
+  layout: 'layout',
+  // Authored-only service declarations: nothing STAMPS them, so a pull cannot
+  // launder a host-supplied endpoint into authored config. A host's own address is
+  // offered through `config.services` and resolved at render, never entering the
+  // stored record.
+  search: 'search',
+  submit: 'submit',
+  assistant: 'assistant',
+  tracking: 'tracking',
+  agents: 'agents',
 }
+
 
 /**
  * Project a site-content document's `info` (+ `extensions`) onto the site's
@@ -189,6 +216,7 @@ const CONFIG_TO_SITE_YML = {
  */
 export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
   const info = document?.info || {}
+  const settingsSection = document?.settings || {}
 
   const siteChanges = {}
   // Localized text fields → unwrapped to the source locale (the target locales are
@@ -202,9 +230,9 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
 
   // `keywords` is a localized list (mirrors page keywords) → unwrap to the
   // source locale; the target locales are captured into the locales/ collector.
-  if (Array.isArray(info.keywords)) info.keywords.forEach((kw) => collector?.add(kw))
-  const keywords = unwrapLocalizedList(info.keywords, sourceLocale)
-  if (keywords !== undefined) siteChanges.keywords = keywords
+  // (`keywords` moved to the `settings` Section on 2026-09-09 — it renders into
+  // `<meta name="keywords">`, so it is seo by function. Handled with the rest of
+  // that Section below.)
 
   // Verbatim fields (includes `seo` — the site-level social/SEO block).
   for (const [infoKey, ymlKey] of Object.entries(INFO_TO_SITE_YML)) {
@@ -212,7 +240,7 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
   }
 
-  // ⭐ `info.data` → `site.yml::fetch`, NOT `::data`.
+  // ⭐ `settings.fetch` → `site.yml::fetch`.
   //
   // `data:` is the authoring SHORTHAND for `fetch:` and the wire carries the
   // desugared form, so `fetch:` is the key that describes what came back. The page
@@ -224,11 +252,12 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   // ⚠️ A value pushed BEFORE 2026-09-09 may still be the undesugared shorthand,
   // since the producer emitted it raw. Normalize it here rather than handing a bare
   // string to `authorableFetch`, which walks object entries.
-  if (info.data !== undefined) {
+  const wireFetch = settingsSection.fetch !== undefined ? settingsSection.fetch : info.data
+  if (wireFetch !== undefined) {
     const shorthand =
-      typeof info.data === 'string' ||
-      (Array.isArray(info.data) && info.data.every((e) => typeof e === 'string'))
-    const resolved = shorthand ? fetchFromDataShorthand(info.data) : info.data
+      typeof wireFetch === 'string' ||
+      (Array.isArray(wireFetch) && wireFetch.every((e) => typeof e === 'string'))
+    const resolved = shorthand ? fetchFromDataShorthand(wireFetch) : wireFetch
     siteChanges.fetch = Array.isArray(resolved)
       ? resolved.map((f) => authorableFetch(f))
       : authorableFetch(resolved)
@@ -237,10 +266,15 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   // The `config` Section — authored configuration that is not identity, so it is
   // not on `info`. Same verbatim treatment as the `info` block above; a Section
   // the document does not carry writes nothing, like every other absent key here.
-  const configSection = document?.config || {}
-  for (const [configKey, ymlKey] of Object.entries(CONFIG_TO_SITE_YML)) {
-    if (configSection[configKey] !== undefined) siteChanges[ymlKey] = configSection[configKey]
+  for (const [settingsKey, ymlKey] of Object.entries(SETTINGS_TO_SITE_YML)) {
+    if (settingsSection[settingsKey] !== undefined) siteChanges[ymlKey] = settingsSection[settingsKey]
   }
+
+  // `settings.keywords` is a LOCALIZED list (it renders into `<meta name="keywords">`)
+  // → unwrap to the source locale; the target locales go to the collector.
+  if (Array.isArray(settingsSection.keywords)) settingsSection.keywords.forEach((kw) => collector?.add(kw))
+  const settingsKeywords = unwrapLocalizedList(settingsSection.keywords, sourceLocale)
+  if (settingsKeywords !== undefined) siteChanges.keywords = settingsKeywords
 
   // extensions[] → site.yml::extensions. Each entry carries EITHER `ref` (a
   // catalog ref or a local name — an extension is a foundation and is declared
@@ -285,13 +319,15 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
 
   // theme (whole object) → theme.yml.
-  if (info.theme && typeof info.theme === 'object') {
-    result.theme = writeThemeFile(siteRoot, info.theme)
+  const wireTheme = settingsSection.theme !== undefined ? settingsSection.theme : info.theme
+  if (wireTheme && typeof wireTheme === 'object') {
+    result.theme = writeThemeFile(siteRoot, wireTheme)
   }
 
   // head_html → head.html (a raw file, not YAML).
-  if (info.head_html != null) {
-    result.headHtml = writeIfChanged(join(siteRoot, 'head.html'), info.head_html)
+  const wireHeadHtml = settingsSection.head_html != null ? settingsSection.head_html : info.head_html
+  if (wireHeadHtml != null) {
+    result.headHtml = writeIfChanged(join(siteRoot, 'head.html'), wireHeadHtml)
   }
 
   // `info.favicon` rides the verbatim INFO_TO_SITE_YML map above (→ site.yml).

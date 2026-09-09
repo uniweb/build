@@ -34,8 +34,8 @@ describe('publish_languages — push carry', () => {
     const document = await siteProjectToDocument(src)
 
     // 'es' is dangling (not declared) — carried anyway; the wire never prunes.
-    expect(document.info.publish_languages).toEqual(['en', 'fr', 'es'])
-    expect(document.info.languages).toEqual(['en', 'fr'])
+    expect(document.settings.publish_languages).toEqual(['en', 'fr', 'es'])
+    expect(document.settings.languages).toEqual(['en', 'fr'])
   })
 
   it('absent publishLanguages stays absent on the wire (= all declared publishable)', async () => {
@@ -66,7 +66,7 @@ describe('publish_languages — push carry', () => {
 })
 
 describe('publish_languages — pull write-back', () => {
-  it('projects info.publish_languages to site.yml publishLanguages', () => {
+  it('projects settings.publish_languages to site.yml publishLanguages', () => {
     const dest = join(dir, 'dest')
     mkdirSync(dest, { recursive: true })
 
@@ -75,6 +75,10 @@ describe('publish_languages — pull write-back', () => {
         info: {
           name: 'T',
           foundation: '@acme/base@1.0.0',
+        },
+        // ⭐ The locale keys ride the `settings` Section since 2026-09-09 — they are
+        // configuration, not the brief a card renders.
+        settings: {
           languages: ['en', 'fr'],
           publish_languages: ['en', 'es'],
         },
@@ -120,7 +124,7 @@ describe('publish_languages — full round-trip', () => {
 
     // and pushing the pulled project reproduces the same wire fields
     const document2 = await siteProjectToDocument(dest)
-    expect(document2.info.publish_languages).toEqual(document.info.publish_languages)
-    expect(document2.info.languages).toEqual(document.info.languages)
+    expect(document2.settings.publish_languages).toEqual(document.settings.publish_languages)
+    expect(document2.settings.languages).toEqual(document.settings.languages)
   })
 })

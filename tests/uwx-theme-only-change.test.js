@@ -9,7 +9,7 @@
  * the producer, would mean this lane silently skipped the entity.
  *
  * It is testable here without a backend because the producer half is self-contained:
- * `entityContentHash` hashes the WHOLE document and `info.theme` is part of it
+ * `entityContentHash` hashes the WHOLE document and `settings.theme` is part of it
  * (`uwx/site.js`), so a theme-only edit must perturb the hash and re-fire the lane.
  *
  * ⭐ The no-op case is a CONTROL, not a bonus. "The lane fired" proves nothing unless
@@ -58,11 +58,11 @@ const siteDocOf = (pkg) =>
   JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
 
 describe('send-only-changed — theme-only edits', () => {
-  it('carries theme.yml into info.theme at all', async () => {
+  it('carries theme.yml into settings.theme at all', async () => {
     const pkg = await emitSyncPackages(SITE)
     const doc = siteDocOf(pkg)
-    expect(doc.info.theme).toBeTruthy()
-    expect(doc.info.theme.colors.accent).toBe('#ff0000')
+    expect(doc.settings.theme).toBeTruthy()
+    expect(doc.settings.theme.colors.accent).toBe('#ff0000')
   })
 
   it('CONTROL: an unchanged site skips the site-content lane', async () => {
@@ -82,7 +82,7 @@ describe('send-only-changed — theme-only edits', () => {
 
     const second = await emitSyncPackages(SITE, { priorHashes: first.hashes })
     expect(second.siteContent).toBeTruthy() // not skipped
-    expect(siteDocOf(second).info.theme.colors.accent).toBe('#00ff00')
+    expect(siteDocOf(second).settings.theme.colors.accent).toBe('#00ff00')
   })
 
   it('the hash itself moves on a theme-only edit', async () => {
