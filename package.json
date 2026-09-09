@@ -20,7 +20,8 @@
     "./hosts": "./src/hosts/index.js",
     "./i18n": "./src/i18n/index.js",
     "./uwx": "./src/uwx/index.js",
-    "./import-map-plugin": "./src/import-map-plugin.js"
+    "./import-map-plugin": "./src/import-map-plugin.js",
+    "./emit-surface": "./src/uwx/emit-surface.json"
   },
   "bin": {},
   "files": [
@@ -48,7 +49,8 @@
     "node": ">=20.19"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "emit-surface": "node scripts/gen-emit-surface.mjs"
   },
   "devDependencies": {
     "vitest": "^4.1.7"

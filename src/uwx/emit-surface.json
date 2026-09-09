@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "model": "@uniweb/site-content",
+  "producer": "@uniweb/build/src/uwx/site.js",
+  "kinds": {
+    "closed": "A fixed key set. Every key is listed; a consumer may assert it.",
+    "passthrough": "Author keys copied verbatim, with no allowlist. ⛔ No closed key set exists — a consumer must NOT assert one.",
+    "records": "Content records with their own field shapes, not site.yml config keys."
+  },
+  "systemKeys": [
+    "$uuid",
+    "$id",
+    "$model"
+  ],
+  "sections": {
+    "info": {
+      "kind": "closed",
+      "keys": {
+        "description": [
+          "site.yml::description"
+        ],
+        "favicon": [
+          "site.yml::favicon"
+        ],
+        "foundation": [
+          "site.yml::foundation"
+        ],
+        "name": [
+          "site.yml::name"
+        ],
+        "tags": [
+          "site.yml::tags"
+        ],
+        "template": [
+          "site.yml::template"
+        ]
+      }
+    },
+    "settings": {
+      "kind": "closed",
+      "keys": {
+        "agents": [
+          "site.yml::agents"
+        ],
+        "assistant": [
+          "site.yml::assistant"
+        ],
+        "base": [
+          "site.yml::base"
+        ],
+        "build": [
+          "site.yml::build"
+        ],
+        "default_language": [
+          "site.yml::defaultLanguage"
+        ],
+        "fetch": [
+          "site.yml::fetch",
+          "site.yml::data"
+        ],
+        "fetcher": [
+          "site.yml::fetcher"
+        ],
+        "head_html": null,
+        "keywords": [
+          "site.yml::keywords"
+        ],
+        "languages": [
+          "site.yml::languages"
+        ],
+        "layout": [
+          "site.yml::layout"
+        ],
+        "paths": [
+          "site.yml::paths"
+        ],
+        "placeholders": [
+          "site.yml::placeholders"
+        ],
+        "publish_languages": [
+          "site.yml::publishLanguages"
+        ],
+        "search": [
+          "site.yml::search"
+        ],
+        "seo": [
+          "site.yml::seo"
+        ],
+        "submit": [
+          "site.yml::submit"
+        ],
+        "theme": null,
+        "tracking": [
+          "site.yml::tracking"
+        ]
+      }
+    },
+    "services": {
+      "kind": "passthrough",
+      "authoredAs": "site.yml::$services"
+    },
+    "secrets": {
+      "kind": "passthrough",
+      "authoredAs": "site.yml::$secrets"
+    },
+    "pages": {
+      "kind": "records"
+    },
+    "layout_sections": {
+      "kind": "records"
+    },
+    "extensions": {
+      "kind": "records"
+    },
+    "queries": {
+      "kind": "records"
+    }
+  }
+}
