@@ -1164,7 +1164,44 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
  * @param {Object} options.versionContext - Version context from parent { version, versionMeta, scope }
  * @returns {Object} Page data with assets manifest
  */
-async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null, versionContext = null, layoutName = null } = {}) {
+/**
+ * Normalize an authored `layout:` into `{ name?, hide?, params? }`.
+ *
+ * ⭐ The authored form is documented in two shapes — the string shorthand
+ * (`layout: DocsLayout`) and the expanded object (`{ name, hide, params }`,
+ * `docs/reference/page-configuration.md`). Both reduce to the same record here so
+ * every tier can be merged with the same rule.
+ *
+ * ⚠️ Only present keys are set. `hide: []` is a real value (hide nothing,
+ * overriding an ancestor) and must survive; an absent `hide` must not shadow one.
+ */
+function normalizeLayoutConfig(raw) {
+  if (typeof raw === 'string') return raw ? { name: raw } : {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out = {}
+  if (typeof raw.name === 'string' && raw.name) out.name = raw.name
+  if (Array.isArray(raw.hide)) out.hide = raw.hide
+  if (raw.params && typeof raw.params === 'object') out.params = raw.params
+  return out
+}
+
+/**
+ * Merge an inherited layout config with a nearer one — site → folder → page.
+ *
+ * ⭐ PER-FIELD, nearest wins, which is the cascade `seo` already documents:
+ * *"the page wins, the site fills the gaps"*. So a page that sets only `hide`
+ * keeps an ancestor's `name`.
+ *
+ * ⛔ NOT a union on `hide`. A page saying `hide: [footer]` under a site saying
+ * `hide: [right]` hides the footer and shows the right rail — it REPLACES the
+ * ancestor's list. Union would make an ancestor's hide impossible to undo from a
+ * page, which is the one thing an override is for.
+ */
+function mergeLayoutConfig(inherited, own) {
+  return { ...(inherited || {}), ...(own || {}) }
+}
+
+async function processPage(pagePath, pageName, siteRoot, { isIndex = false, parentRoute = '/', parentFetch = null, versionContext = null, inheritedLayout = null } = {}) {
   const pageConfig = await readYamlFile(join(pagePath, 'page.yml'))
 
   // Note: We no longer skip hidden pages here - they still exist as valid pages,
@@ -1455,13 +1492,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   // Extract configuration
   const { seo = {}, layout: layoutConfig, ...restConfig } = pageConfig
 
-  // Resolve layout name: page.yml layout (string or object.name) > inherited from parent > null
-  const pageLayoutName = typeof layoutConfig === 'string' ? layoutConfig
-    : layoutConfig?.name || null
-  const resolvedLayoutName = pageLayoutName || layoutName || null
-
-  // Layout panel visibility (from object form of layout config)
-  const layoutObj = typeof layoutConfig === 'object' && layoutConfig !== null ? layoutConfig : {}
+  // Resolve the effective layout by cascading site → folder → page, per field.
+  // ⛔ Until 2026-09-09 only `name` cascaded and `hide` / `params` were read from
+  // the PAGE's own config alone, so the documented expanded form was silently
+  // two-thirds ignored at every tier above the page — including `site.yml`, whose
+  // `layout:` the collector already read for its name.
+  const layoutObj = mergeLayoutConfig(inheritedLayout, normalizeLayoutConfig(layoutConfig))
+  const resolvedLayoutName = layoutObj.name || null
 
   // For dynamic routes, determine the parent's data schema — this tells
   // prerender which data array to iterate over.
@@ -1611,7 +1648,7 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {string} contentMode - 'sections' (default) or 'pages' (md files are child pages)
  * @returns {Promise<Object>} { pages, assetCollection, iconCollection, notFound, versionedScopes }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections', mounts = null, parentLayoutName = null) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, versionContext = null, contentMode = 'sections', mounts = null, parentLayout = null) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -1667,8 +1704,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       ? local.mode
       : mounted?.mode ?? local?.mode ?? contentMode
 
-    const folderLayout = typeof dirConfig.layout === 'string' ? dirConfig.layout
-      : dirConfig.layout?.name || null
+    const folderLayout = normalizeLayoutConfig(dirConfig.layout)
 
     pageFolders.push({
       name,
@@ -1685,7 +1721,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         pages: dirConfig.pages,
         index: dirConfig.index
       },
-      childLayoutName: folderLayout
+      childLayout: folderLayout
     })
   }
 
@@ -1724,7 +1760,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     versionedScopes.set(parentRoute, versionMeta)
 
     for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, childOrderConfig, childLayoutName } = folder
+      const { name: entry, path: entryPath, childOrderConfig, childLayout } = folder
 
       if (isVersionFolder(entry)) {
         const versionInfo = versionMeta.versions.find(v => v.id === entry)
@@ -1738,7 +1774,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         const subResult = await collectPagesRecursive(
           entryPath, versionRoute, siteRoot, childOrderConfig, parentFetch,
           { version: versionInfo, versionMeta, scope: parentRoute },
-          'sections', null, childLayoutName || parentLayoutName
+          'sections', null, mergeLayoutConfig(parentLayout, childLayout)
         )
 
         pages.push(...subResult.pages)
@@ -1750,7 +1786,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       } else {
         const result = await processPage(entryPath, entry, siteRoot, {
           isIndex: false, parentRoute, parentFetch,
-          layoutName: childLayoutName || parentLayoutName
+          inheritedLayout: mergeLayoutConfig(parentLayout, childLayout)
         })
         if (result) {
           pages.push(result.page)
@@ -1818,25 +1854,32 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         page.route = parentRoute
       }
 
-      // Inherit layout name from parent (folder.yml or site.yml cascade)
-      if (parentLayoutName && !page.layout.name) {
-        page.layout.name = parentLayoutName
-      }
+      // Inherit the layout from the folder / site cascade.
+      //
+      // ⭐ THE WHOLE OBJECT, not just the name. `processFileAsPage` (folder-mode
+      // `.md`-as-pages) takes no layout argument, so this post-hoc merge is where
+      // the cascade reaches these pages at all — the threaded path above covers
+      // every other kind. Until 2026-09-09 it patched `name` only, which is why a
+      // folder or site `hide:` never reached a folder-mode page.
+      //
+      // `normalizeLayoutConfig` first so the page's own record has no undefined
+      // keys to shadow an inherited value through the spread.
+      page.layout = mergeLayoutConfig(parentLayout, normalizeLayoutConfig(page.layout))
 
       pages.push(page)
     }
 
     // Process subdirectories
     for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayoutName } = folder
+      const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayout } = folder
       const isIndex = entry === indexName
-      const effectiveLayout = childLayoutName || parentLayoutName
+      const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
 
       if (dirMode === 'sections') {
         // Subdirectory overrides to page mode — process normally
         const result = await processPage(entryPath, entry, siteRoot, {
           isIndex, parentRoute, parentFetch, versionContext,
-          layoutName: effectiveLayout
+          inheritedLayout: effectiveLayout
         })
 
         if (result) {
@@ -1875,7 +1918,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
 
         // Resolve layout for container page
-        const containerLayoutObj = typeof dirConfig.layout === 'object' && dirConfig.layout !== null ? dirConfig.layout : {}
 
         const containerPage = {
           route: containerRoute,
@@ -1895,11 +1937,10 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           hidden: dirConfig.hidden || false,
           hideIn: normalizeHideIn(dirConfig),
           ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
-          layout: {
-            ...(effectiveLayout ? { name: effectiveLayout } : {}),
-            ...(containerLayoutObj.hide ? { hide: containerLayoutObj.hide } : {}),
-            ...(containerLayoutObj.params ? { params: containerLayoutObj.params } : {}),
-          },
+          // `effectiveLayout` is ALREADY this container's resolved layout —
+          // `mergeLayoutConfig(parentLayout, normalizeLayoutConfig(dirConfig.layout))`
+          // — so re-reading `dirConfig.layout` here would drop the inherited half.
+          layout: effectiveLayout,
           seo: {
             noindex: dirConfig.seo?.noindex || false,
             image: dirConfig.seo?.image || null,
@@ -1959,9 +2000,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
-    const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayoutName } = folder
+    const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayout } = folder
     const isIndex = entry === indexPageName
-    const effectiveLayout = childLayoutName || parentLayoutName
+    const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
 
     if (dirMode === 'pages') {
       // Child directory switches to folder mode (has folder.yml) —
@@ -1971,7 +2012,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         : parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`
 
       // Resolve layout for container page
-      const containerLayoutObj = typeof dirConfig.layout === 'object' && dirConfig.layout !== null ? dirConfig.layout : {}
 
       const containerPage = {
         route: containerRoute,
@@ -1991,11 +2031,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         hidden: dirConfig.hidden || false,
         hideIn: normalizeHideIn(dirConfig),
         ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
-        layout: {
-          ...(effectiveLayout ? { name: effectiveLayout } : {}),
-          ...(containerLayoutObj.hide ? { hide: containerLayoutObj.hide } : {}),
-          ...(containerLayoutObj.params ? { params: containerLayoutObj.params } : {}),
-        },
+        // Already resolved — see the note on the sibling container above.
+        layout: effectiveLayout,
         seo: {
           noindex: dirConfig.seo?.noindex || false,
           image: dirConfig.seo?.image || null,
@@ -2026,7 +2063,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       // Sections mode — process directory as a page (existing behavior)
       const result = await processPage(entryPath, entry, siteRoot, {
         isIndex, parentRoute, parentFetch, versionContext,
-        layoutName: effectiveLayout
+        inheritedLayout: effectiveLayout
       })
 
       if (result) {
@@ -2448,13 +2485,13 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Collect layout areas from layout/ directory (including named layout subdirectories)
   const { layouts } = await collectLayouts(layoutPath, sitePath, layoutNames)
 
-  // Site-level layout name (from site.yml layout: field)
-  const siteLayoutName = typeof siteConfig.layout === 'string' ? siteConfig.layout
-    : siteConfig.layout?.name || null
+  // Site-level layout (from `site.yml::layout`) — the ROOT of the cascade, and
+  // the whole object, not just its name.
+  const siteLayout = normalizeLayoutConfig(siteConfig.layout)
 
   // Recursively collect all pages
   let { pages, assetCollection, iconCollection, notFound, versionedScopes } =
-    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts, siteLayoutName)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts, siteLayout)
 
   // Merge top-level config assets (e.g. document.yml's book.covers.front,
   // banner images, logos) into the manifest. The compile pipeline reads
