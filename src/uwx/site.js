@@ -1152,12 +1152,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // `assets` is a build-DERIVED upload manifest, not authored config, so it
   // is never produced from / projected to the site files.
   //
-  // ⚠️ AND FRAMEWORK DOES NOT STAMP IT EITHER — checked 2026-09-09. The only
+  // ⛔ AND `info.assets` IS GONE — deleted from the Model 2026-09-09 with `app`,
+  // `data_bundle` and `foundation_schema`. Framework never stamped it; the only
   // deploy-derived `info` field framework sends is `foundation`, via `injectInfo`
-  // in `publish`. `info.assets` survives here as a comment describing a shape, not
-  // a field this producer writes; whether anything still populates it on the wire is
-  // backend's to say (`info.app` and `info.data_bundle` were both retired after
-  // exactly this discovery).
+  // in `publish`.
+  //
+  // ⚠️ The note stays because `assets.json` — the COMMITTED local map from an
+  // author's asset path to the backend's content-addressed id — is a different
+  // thing with a similar name, and it is very much alive.
   setIf(info, 'favicon', siteYml.favicon)
   // Site-level SEO/social metadata — the same shape as page.yml's `seo:` + the
   // top-level `keywords`, hoisted to the site root so the homepage social card

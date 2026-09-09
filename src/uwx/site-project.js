@@ -314,8 +314,12 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   }
 
   // `info.favicon` rides the verbatim INFO_TO_SITE_YML map above (→ site.yml).
-  // `info.assets` is intentionally NOT projected: it is a build-derived upload
-  // manifest, not authored config, so a pull never writes it back to the site.
+  // ⛔ `info.assets` WAS DELETED FROM THE MODEL (2026-09-09), along with `app`,
+  // `data_bundle` and `foundation_schema`. It had been a build-derived upload
+  // manifest that a pull deliberately never wrote back; framework never populated
+  // it. Nothing to project, and nothing here to remove — the note is kept because
+  // `assets.json` (the committed local path → id map) is a DIFFERENT thing and the
+  // two get confused.
 
   return result
 }
