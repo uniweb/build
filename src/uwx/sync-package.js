@@ -220,8 +220,13 @@ function rewriteEntityAssets(node, map, ids) {
  *        to push unconditionally — that IS the force path.
  * @param {boolean} [opts.includeSite]    - include the site-content lane (default true)
  * @param {object} [opts.injectInfo]      - deploy-derived `info.*` to stamp on the
- *        site-content document (e.g. `{ data_bundle }`, the static-data ball URL);
- *        wire-only — never authored in site.yml, never projected back on pull.
+ *        site-content document. ⭐ TODAY THAT IS `{ foundation }` AND NOTHING ELSE —
+ *        the released ref, stamped by `publish` when it releases a local foundation.
+ *        Deploy-derived means wire-only: never authored in site.yml, never projected
+ *        back on pull, which is the round-trip law's derived exception.
+ *        ⚠️ This example read `{ data_bundle }` until 2026-09-09; that field was
+ *        RETIRED 2026-08-18 (the static-data ball is gone — collection data lands at
+ *        its serving tail), so the example named a key nothing emits.
  * @param {Object<string,string>} [opts.injectExtensions] - authored extension
  *        declaration (`$id`) → the pinned `@scope/name@version` to stamp over it.
  *        `publish` fills this for the site's LOCAL extensions after releasing them;
@@ -313,10 +318,14 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         ...(opts.declareServices === false ? { declareServices: false } : {})
       })
     : null
-  // Deploy-derived `info` fields (e.g. `data_bundle`, the static-data ball URL) are
-  // stamped here — NOT authored in site.yml, so they ride the wire but never project
-  // back on pull (the `info.assets` precedent). They are part of the hashed content,
-  // so a changed bundle URL correctly re-fires the site-content lane.
+  // Deploy-derived `info` fields are stamped here — NOT authored in site.yml, so they
+  // ride the wire but never project back on pull. They are part of the hashed content,
+  // so a changed value correctly re-fires the site-content lane.
+  //
+  // ⭐ TODAY THE SET IS `{ foundation }` AND NOTHING ELSE. ⚠️ This comment named
+  // `data_bundle` (retired 2026-08-18) as the example and `info.assets` as the
+  // precedent; framework stamps neither, so both were pointing a reader at keys this
+  // producer does not write.
   const injectInfo =
     opts.injectInfo && typeof opts.injectInfo === 'object' ? opts.injectInfo : null
   if (siteDoc && injectInfo) {
