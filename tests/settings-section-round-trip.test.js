@@ -8,16 +8,17 @@
  *
  * ⭐ **THE SPLIT** (2026-09-09): `info` is the BRIEF — what a card or a select
  * dropdown renders, plus what a listing can filter on. `settings` is everything the
- * site renders *with*. Fifteen keys moved, because a brief was never meant to carry
+ * site renders *with*. Fourteen keys moved, because a brief was never meant to carry
  * configuration.
  *
- * ⛔ **THE LOCALE KEYS DID NOT MOVE, and the attempt failed silently.** `languages`,
- * `default_language` and `publish_languages` went to `settings` and came back the same
- * day: `info` IS the brief, so `entity.brief` has BACKEND readers — the custom-domain
- * surface, the pool-route reconcile, publish-locale narrowing — that neither framework
- * nor frontend can see. Their default-locale accessor falls back to `"en"` and never
- * errors, so moving them raised no refusal and would have resolved every site to
- * English. ⇒ *"Can this key leave `info`?"* is a grep in BACKEND's repo.
+ * ⚠️ **THE LOCALE KEYS MOVED, REVERTED AND MOVED AGAIN IN ONE DAY.** Backend refused
+ * the move — three call sites read them off `entity.brief`, and their default-locale
+ * accessor falls back to `"en"` without erroring, so the failure would have been
+ * SILENT. Framework reverted. ⭐ The constraint had already been lifted when the
+ * refusal was written: backend had reworked those readers to take the stored Item
+ * through a name-keyed accessor, then made the move, and did not withdraw the refusal.
+ * ⇒ *"Can this key leave `info`?"* is still a grep in BACKEND's repo — and a refusal
+ * has a date on it, like any other measurement.
  *
  * ⛔ These two tests are deliberately whole-document rather than per-key. A per-key
  * test proves a key you remembered to write down; the fixed-point test proves every
@@ -71,8 +72,7 @@ describe('the info / settings split', () => {
     // a title, a subtitle, an icon, a "this is a template" badge, the facets, and
     // the foundation that says what the thing is.
     expect(Object.keys(doc.info).sort()).toEqual([
-      'default_language', 'description', 'favicon', 'foundation', 'languages',
-      'name', 'publish_languages', 'tags', 'template',
+      'description', 'favicon', 'foundation', 'name', 'tags', 'template',
     ])
 
     // ⛔ `url` and `previewUrl` live on `info` too — but they are BACKEND-STAMPED,
@@ -82,9 +82,9 @@ describe('the info / settings split', () => {
     expect(doc.info).not.toHaveProperty('previewUrl')
 
     expect(Object.keys(doc.settings).sort()).toEqual([
-      'agents', 'assistant', 'base', 'build', 'fetch', 'fetcher', 'head_html',
-      'keywords', 'layout', 'paths', 'placeholders', 'search', 'seo', 'submit',
-      'theme', 'tracking',
+      'agents', 'assistant', 'base', 'build', 'default_language', 'fetch', 'fetcher',
+      'head_html', 'keywords', 'languages', 'layout', 'paths', 'placeholders',
+      'publish_languages', 'search', 'seo', 'submit', 'theme', 'tracking',
     ])
   })
 

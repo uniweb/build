@@ -30,12 +30,12 @@ describe('siteInfoToConfig — info → config files', () => {
         name: { en: 'My Site' },
         description: { en: 'A description' },
         foundation: '@acme/base@1.2.3',
-        languages: ['en', 'fr'],
-        default_language: 'en',
       },
       // Configuration rides `settings`; `info` keeps the brief — including the
       // locale keys, which backend reads off it.
       settings: {
+        languages: ['en', 'fr'],
+        default_language: 'en',
         base: '/docs/',
         build: { split: true },
         keywords: ['saas', 'tools'],
@@ -1175,8 +1175,8 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
 
   it('produce → project → produce recovers the same document', async () => {
     const seed = {
-      info: { name: { en: 'Atlas' }, foundation: '@acme/base@3.0.0', languages: ['en'] },
-      settings: { base: '/atlas/' },
+      info: { name: { en: 'Atlas' }, foundation: '@acme/base@3.0.0' },
+      settings: { languages: ['en'], base: '/atlas/' },
       queries: [
         { $id: 'articles', name: 'articles', source: { path: 'collections/articles' }, schema: '@/article', sort: '-date' },
       ],
@@ -1230,11 +1230,11 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
 
   it('round-trips a MULTI-LOCALE whole site (scalars + content + nesting + layout)', async () => {
     const seed = {
-      info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@acme/base@3.0.0', languages: ['en', 'es'] },
-      // `languages` is configuration and rides `settings` since 2026-09-09. It has to
-      // be here for the projection to write it into site.yml — without it the
-      // re-produce below finds no locales and the fixed point is vacuous.
-      // (locale keys stay on `info` — backend reads them off the brief)
+      info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@acme/base@3.0.0' },
+      // `languages` rides `settings`, and it has to be in the seed for the projection
+      // to write it into site.yml — without it the re-produce below finds no locales
+      // and the fixed point is vacuous.
+      settings: { languages: ['en', 'es'] },
       pages: [
         {
           $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', is_index: true,
@@ -1642,11 +1642,10 @@ describe('siteInfoToConfig — the authored foundation', () => {
     siteInfoToConfig({
       document: {
         $model: '@uniweb/site-content', $id: 'site-content',
-        info: { foundation: STORED, default_language: 'fr' },
-        // `base` is configuration; the locale keys stay on the brief. The point of
-        // the test is unchanged: suppressing `foundation` must not stop the rest of
-        // the projection working.
-        settings: { base: '/docs/' },
+        info: { foundation: STORED },
+        // The point of the test is unchanged: suppressing `foundation` must not stop
+        // the rest of the projection working.
+        settings: { base: '/docs/', default_language: 'fr' },
       },
       siteRoot: root,
       keepAuthoredFoundation: true,

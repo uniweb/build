@@ -110,7 +110,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     expect(info.name).toBe('Acme Site') // identity label — plain string, not localized
     expect(info.foundation).toBe('@acme/marketing@1.2.3')
     expect(settings.theme).toEqual({ colors: { primary: '#0099ff' } })
-    expect(info.languages).toEqual(['en', 'fr'])
+    expect(settings.languages).toEqual(['en', 'fr'])
   })
 
   it('nests page_sections as an INLINE field on the page record (no top-level page_sections, no parent_path)', async () => {
