@@ -40,6 +40,7 @@ import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { authorableFetch } from '../site/fetch-shapes.js'
+import { fetchFromDataShorthand } from '../site/content-collector.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
@@ -150,7 +151,8 @@ const INFO_TO_SITE_YML = {
   // never enters `info` and a pull cannot launder it into authored config.
   tracking: 'tracking',
   paths: 'paths',
-  data: 'data',
+  // ⛔ `data` IS NOT VERBATIM — see the explicit branch below. It projects to
+  // `site.yml::fetch`, not `site.yml::data`.
   template: 'template',
   seo: 'seo',
 }
@@ -208,6 +210,28 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   for (const [infoKey, ymlKey] of Object.entries(INFO_TO_SITE_YML)) {
     if (infoKey === 'foundation' && keepAuthoredFoundation) continue
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
+  }
+
+  // ⭐ `info.data` → `site.yml::fetch`, NOT `::data`.
+  //
+  // `data:` is the authoring SHORTHAND for `fetch:` and the wire carries the
+  // desugared form, so `fetch:` is the key that describes what came back. The page
+  // lane has always projected this way (`y.fetch = authorableFetch(record.fetch)`);
+  // the site lane wrote `data:` verbatim, so an author who typed `fetch:` pushed,
+  // pulled, and got a `data:` block back — the value survived and the authored key
+  // did not, which the round-trip law forbids (uwx-format.md).
+  //
+  // ⚠️ A value pushed BEFORE 2026-09-09 may still be the undesugared shorthand,
+  // since the producer emitted it raw. Normalize it here rather than handing a bare
+  // string to `authorableFetch`, which walks object entries.
+  if (info.data !== undefined) {
+    const shorthand =
+      typeof info.data === 'string' ||
+      (Array.isArray(info.data) && info.data.every((e) => typeof e === 'string'))
+    const resolved = shorthand ? fetchFromDataShorthand(info.data) : info.data
+    siteChanges.fetch = Array.isArray(resolved)
+      ? resolved.map((f) => authorableFetch(f))
+      : authorableFetch(resolved)
   }
 
   // The `config` Section — authored configuration that is not identity, so it is

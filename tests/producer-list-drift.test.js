@@ -49,9 +49,14 @@ describe('producer-side lists cannot drift silently', () => {
       projectSrc.match(/const INFO_TO_SITE_YML = \{([\s\S]*?)\n\}/)[1]
         .match(/^\s*([a-z_]+):/gm).map((s) => s.trim().replace(':', ''))
     )
-    // Handled explicitly rather than verbatim — localized unwrap, or a non-YAML
-    // target. Each is named so adding a field cannot quietly land here by default.
-    const specialCased = new Set(['description', 'keywords', 'head_html', 'name', 'theme'])
+    // Handled explicitly rather than verbatim — a localized unwrap, a non-YAML
+    // target, or a different key on the way out. Each is named so adding a field
+    // cannot quietly land here by default.
+    //
+    // ⭐ `data` is the third kind: it projects to `site.yml::fetch`, not `::data`,
+    // because `data:` is the authoring shorthand and the wire carries the desugared
+    // form. This guard is what caught it when the verbatim row was removed.
+    const specialCased = new Set(['description', 'keywords', 'head_html', 'name', 'theme', 'data'])
 
     expect(emitted.size).toBeGreaterThan(8)
     const unaccounted = [...emitted].filter((k) => !mapped.has(k) && !specialCased.has(k))

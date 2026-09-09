@@ -52,6 +52,7 @@ import {
   parseWildcardArray,
   applyWildcardOrder,
   processMarkdownFile,
+  fetchFromDataShorthand,
 } from '../site/content-collector.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
@@ -223,11 +224,7 @@ function buildPageData(config, ctx) {
   // ⭐ A `data:` LIST means "fetch each" — one declaration per entry. Before
   // 2026-09-02 this kept `[0]` and dropped the rest silently, so the wire
   // carried one dataset for a page that asked for several.
-  let fetch =
-    config.fetch ??
-    (config.data
-      ? (Array.isArray(config.data) ? config.data.map((query) => ({ query })) : { query: config.data })
-      : undefined)
+  let fetch = config.fetch ?? fetchFromDataShorthand(config.data)
   // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
   // A shell/backend-hosted site renders client-side with NO prerender, so the
@@ -1171,7 +1168,16 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //
   // The provisioned record rides the `$services` section instead (see servicesNested).
   setIf(info, 'paths', siteYml.paths)
-  setIf(info, 'data', siteYml.data ?? siteYml.fetch)
+  // ⭐ DESUGARED, like every other tier. `data:` is the shorthand for `fetch:`
+  // (`data: articles` → `{ query: 'articles' }`), and the page level has always
+  // desugared before emitting. The site level shipped the bare string until
+  // 2026-09-09, so `info.data` carried two different shapes depending on which
+  // key the author happened to type.
+  //
+  // 📌 The wire NAME is still `data` and becomes `fetch` when the Section moves —
+  // renaming it now would be a second destructive wire change for a cosmetic gain;
+  // renaming it during the move is free.
+  setIf(info, 'data', siteYml.fetch ?? fetchFromDataShorthand(siteYml.data))
   // ⛔ `placeholders` IS NOT HERE, DELIBERATELY — it rides the `config` Section
   // (`configNested` below). `info` carries the site's IDENTITY, and every key on
   // this allowlist is one WE name and the author merely fills. `placeholders` is

@@ -190,7 +190,7 @@ function detectVersions(folderNames) {
  * @param {string|Array<string>|undefined} data
  * @returns {Object|Array<Object>|undefined}
  */
-function fetchFromDataShorthand(data) {
+export function fetchFromDataShorthand(data) {
   if (!data) return undefined
   if (Array.isArray(data)) return data.map((query) => ({ query }))
   return { query: data }
@@ -2680,7 +2680,13 @@ export async function collectSiteContent(sitePath, options = {}) {
       ...(publishFilterActive && Array.isArray(siteConfig.languages)
         ? { languages: publishable }
         : {}),
-      fetch: parseFetchConfig(siteConfig.fetch),
+      // ⛔ `data:` IS THE SHORTHAND FOR `fetch:` AND BOTH LANES MUST READ IT.
+      // This read `siteConfig.fetch` alone until 2026-09-09, so a site-level
+      // `data: articles` reached a backend on the sync lane and was silently
+      // ignored on a static build — the works-on-one-lane shape. The page level
+      // has always used this helper (`pageConfig.fetch || fetchFromDataShorthand(…)`);
+      // the site level simply never did.
+      fetch: parseFetchConfig(siteConfig.fetch || fetchFromDataShorthand(siteConfig.data)),
       fetcher: warnRetiredFetcherKeys(siteConfig.fetcher),
       // NOTE: `intelligence.yml` was read here and emitted as `config.intelligence`.
       // Removed 2026-08-12 — the assistant surface is `site.yml::assistant`, which
