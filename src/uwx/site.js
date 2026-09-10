@@ -852,7 +852,9 @@ function queriesNested(declarations, uuids = null) {
 // config is bound where the service is provisioned, and arrives here by `pull`.
 //
 // ⚖️ WHAT THESE ARE NOT. A site's OWN service declarations — `search:`, `submit:`,
-// `assistant:`, `tracking:` — stay top-level `info.*` keys and are untouched. Those
+// `assistant:`, `tracking:` — ride the `settings` Section and are untouched here.
+// (They were top-level `info.*` keys until 2026-09-09; `settingsNested` below is
+// where they are now written.) Those
 // are authored, they resolve at the SITE tier (`config.<name>`, first choice in
 // `@uniweb/core`'s `resolveService`), and moving them here would flip them to the
 // host tier, where a block's mere presence declines every service it does not name.
