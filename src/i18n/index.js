@@ -24,7 +24,7 @@ import {
   RECORDS_DIR
 } from './records.js'
 import { generateSearchIndex } from '@uniweb/projections'
-import { searchDeclaredOn } from '../site/plugin.js'
+import { searchDeclaredOn } from '../site/search-declared.js'
 
 // Free-form translation support
 import {
