@@ -45,6 +45,7 @@ export {
   writeSiteEntityUuid,
   writeSiteOrg,
   writeSiteBackend,
+  writeSiteUrl,
   extensionDeclaration,
   isExtensionUrl,
   isSiteRelativeExtensionUrl,
@@ -54,7 +55,7 @@ export {
   queriesYmlPath,
   QUERIES_YML_RELPATH,
 } from './queries-config.js'
-export { upsertYamlScalar } from './yaml-upsert.js'
+export { upsertYamlScalar, removeYamlScalar } from './yaml-upsert.js'
 export { buildFolderEntity,
   collectFolderItemUuids,
   stampFolderItemUuids
@@ -83,6 +84,9 @@ export {
   refForAssetId,
   restoreAssetRefs,
   ASSET_MAP_FILE,
+  INFO_ASSET_FIELDS,
+  withAssetIdentity,
+  assetIdentityOf,
 } from './asset-map.js'
 export {
   diffSiteUnits,

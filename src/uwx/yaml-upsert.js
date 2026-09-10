@@ -51,3 +51,29 @@ export function upsertYamlScalar(filePath, key, value) {
   writeFileSync(filePath, next)
   return true
 }
+
+/**
+ * Remove a TOP-LEVEL scalar key from the YAML file at `filePath`, preserving every
+ * other line (comments included) — the inverse of `upsertYamlScalar`, with the same
+ * scope: one `key: value` line at column 0. A key followed by indented lines, or
+ * opening a block scalar (`|` / `>`), is not a one-line scalar and is left alone
+ * rather than half-removed.
+ *
+ * @param {string} filePath
+ * @param {string} key - a top-level scalar key (e.g. `$url`)
+ * @returns {boolean} true if the file changed
+ */
+export function removeYamlScalar(filePath, key) {
+  if (!existsSync(filePath)) return false
+  const lines = readFileSync(filePath, 'utf8').split('\n')
+  const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`^${esc}:(.*)$`)
+  const at = lines.findIndex((l) => re.test(l))
+  if (at === -1) return false
+  const inline = lines[at].replace(re, '$1').trim()
+  const continues = at + 1 < lines.length && /^[ \t]+\S/.test(lines[at + 1])
+  if (continues || /^[|>]/.test(inline)) return false
+  lines.splice(at, 1)
+  writeFileSync(filePath, lines.join('\n'))
+  return true
+}

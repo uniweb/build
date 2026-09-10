@@ -69,6 +69,16 @@ function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
 }
 
+// A YAML scalar the author may have written unquoted: `20260910` loads as a number
+// and `2026-09-10` as a Date. Carry either as the string it stands for; anything
+// else that is not a string is not a value a string field can hold.
+function scalarString(value) {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  if (value instanceof Date) return value.toISOString()
+  return undefined
+}
+
 // Credential-shaped keys, mirroring the set the delivery edge strips on the
 // reading side. Deliberately the SAME list rather than a stricter one, so the
 // two guards are visibly twins and a key added to one is obviously owed to the
@@ -1021,7 +1031,7 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // `ogTitle`, `ogDescription`, `noindex`, `canonical`, `changefreq`, `priority`
   // (`core/src/seo.js`). Two of those are literally sitemap.xml columns. It only
   // ever passed the card test because `image` was inside it; the card's picture is
-  // `info.preview_image` now.
+  // `info.preview` now.
   setIf(settings, 'seo', siteYml.seo)
   // ⭐ `keywords` IS seo by function — it renders into `<meta name="keywords">`
   // (`runtime/src/ssr-renderer.js`). It is top-level in site.yml for authoring
@@ -1271,11 +1281,27 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // over an already-fetched list and never asks the database, while a DB-filterable
   // facet is separately useful — only the second needs a predicable brief field.
   setIf(info, 'tags', siteYml.tags)
-  // ⛔ `url` and `preview_image` are BACKEND-STAMPED and framework emits NEITHER.
-  // A site's live address is assigned at publish and its card image needs a servable
-  // URL; a serve location is a per-response answer the host owns — read, never
-  // constructed. `site-project.js` must also never write them into `site.yml`, or a
-  // pull launders a deploy-derived value into authored config.
+  // ⭐ `preview` — the site card's image. ONE field, TWO writers, and it round-trips
+  // whichever wrote it [Diego, 2026-09-10]:
+  //   · the APP, when it generates a card image — a timestamp, carried verbatim;
+  //   · an AUTHOR, deliberately — typically a template site's custom image: a URL, or
+  //     a site-root path to an image in the project, which push uploads like any
+  //     content image and sends as its serve URL (identity in the fragment — see
+  //     `rewriteInfoAssets` in sync-package.js), and which pull puts back as the path
+  //     the author wrote.
+  // The app leaves an author's value alone.
+  //
+  // ⚠️ This read "`url` and `preview_image` are BACKEND-STAMPED and framework emits
+  // NEITHER" until 2026-09-10. Neither half held: nothing stamped `url`, and leaving
+  // an app-written field off an allowlist destroys it on every push, because `info`
+  // is replaced whole.
+  setIf(info, 'preview', scalarString(siteYml.preview))
+  // ⭐ `url` — where the site is live, so a site card can link to it without opening
+  // the editor. `uniweb publish` records it in `site.yml::$url` from the address the
+  // backend returns, and pull brings it back. The `$` marks it as recorded rather
+  // than authored, like `$uuid` — and keeps it out of the rendered payload, where a
+  // bare `url:` would sit beside `seo.baseUrl`, the authored canonical address.
+  setIf(info, 'url', siteYml.$url)
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
   const pagesPath = siteYml.paths?.pages
@@ -1491,4 +1517,27 @@ export function writeSiteOrg(siteRoot, handle) {
  */
 export function writeSiteBackend(siteRoot, origin) {
   return upsertYamlScalar(join(siteRoot, 'site.yml'), '$backend', origin)
+}
+
+/**
+ * Record where the site is LIVE (`site.yml::$url`) — the address the backend returned
+ * for its last publish, carried on `info.url` so a site card can link to it.
+ *
+ * ⭐ Recorded, never authored — hence the `$`, like `$uuid`/`$org`/`$backend`, which
+ * also keeps it out of the rendered payload (content-collector strips `$` keys). The
+ * caller writes only when the value CHANGED, so a re-publish to the same address
+ * leaves a committed file untouched.
+ *
+ * A plain scalar where that is safe (a URL's `:` is followed by `/`, never a space —
+ * see `writeSiteBackend`), double-quoted otherwise: a full URL can carry more than an
+ * origin does, and whitespace or a leading YAML indicator would change what is read
+ * back.
+ *
+ * @param {string} siteRoot
+ * @param {string} url - the live address, absolute
+ * @returns {boolean} true if site.yml changed
+ */
+export function writeSiteUrl(siteRoot, url) {
+  const plainSafe = !/\s/.test(url) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(url)
+  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$url', plainSafe ? url : JSON.stringify(url))
 }

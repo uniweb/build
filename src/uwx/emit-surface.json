@@ -28,11 +28,17 @@
         "name": [
           "site.yml::name"
         ],
+        "preview": [
+          "site.yml::preview"
+        ],
         "tags": [
           "site.yml::tags"
         ],
         "template": [
           "site.yml::template"
+        ],
+        "url": [
+          "site.yml::$url"
         ]
       }
     },

@@ -26,6 +26,7 @@ import { siteProjectToDocument } from './site.js'
 import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { isLocalAssetPath } from '../site/assets.js'
+import { INFO_ASSET_FIELDS, withAssetIdentity } from './asset-map.js'
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
 const SITE_ENTITY_KEY = 'site-content'
@@ -191,6 +192,22 @@ function rewriteEntityAssets(node, map, ids) {
     }
   }
   return node
+}
+
+// The site's `info` brief holds single-string asset fields (`preview`) on a Section
+// whose fields the host declares. The generic stamp above would write
+// `previewAssetId`/`previewAssetExt` BESIDE a `preview` URL — it is a real
+// ASSET_SLOTS slot — adding two fields the host refuses. So these are rewritten
+// first, identity carried in the fragment (asset-map.js → `withAssetIdentity`);
+// once the value is no longer the local ref, the generic pass neither swaps nor
+// stamps it.
+function rewriteInfoAssets(info, map, ids) {
+  if (!info || typeof info !== 'object') return
+  for (const field of INFO_ASSET_FIELDS) {
+    const ref = info[field]
+    if (typeof ref !== 'string' || !map[ref]) continue
+    info[field] = withAssetIdentity(map[ref], ids?.[ref])
+  }
 }
 
 /**
@@ -387,6 +404,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const assetIds =
     opts.assetIds && typeof opts.assetIds === 'object' ? opts.assetIds : null
   if (assetRewrite) {
+    // `info` FIRST — see rewriteInfoAssets.
+    if (siteDoc) rewriteInfoAssets(siteDoc.info, assetRewrite, assetIds)
     if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds)
     for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite, assetIds)
   }

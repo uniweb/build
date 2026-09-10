@@ -136,6 +136,64 @@ export function refForAssetId(map, id) {
   return null
 }
 
+// ─── Asset fields that are a single string ────────────────────────────────────
+//
+// Everywhere else an asset reference lives on an OBJECT (an image node's attrs, a
+// background's media object), and identity rides BESIDE the URL as flat attrs
+// (`assetId`/`assetExt`, or a slot's prefixed pair — ASSET_SLOTS). A field on the
+// site's `info` brief is a single string, on a Section whose fields the host
+// declares — so there is nowhere beside it to put an attr: the host refuses an
+// undeclared field, and `preview` is a real slot whose `previewAssetId` would be one.
+//
+// ⭐ So the identity rides IN the reference, in the one part of a URL that belongs
+// to the client rather than the host: the fragment. `<serve>#assetId=…&assetExt=…`
+// still loads the served bytes everywhere — a fragment never reaches a server and an
+// `<img>` ignores it — and it lets `pull` put the author's path back from
+// `assets.json` exactly, with no guess about how the host lays out its URLs.
+//
+// ⛔ The fragment is FRAMEWORK'S. Nothing here parses or composes the served part,
+// which is read verbatim from the upload plan, and a URL that already carries a
+// fragment is left alone rather than composed over.
+//
+// Today the one such field is `preview`, the site card's image [Diego, 2026-09-10].
+// `favicon` is the obvious second and is deliberately NOT here: its Model type is a
+// `file`, and what a `file` field accepts is the host's to say.
+
+/** `info` fields that hold one asset reference as a plain string. */
+export const INFO_ASSET_FIELDS = ['preview']
+
+/**
+ * A served URL with the asset's identity carried in its fragment.
+ *
+ * @param {string} url - the host's serve URL, read verbatim
+ * @param {{ id: string, ext?: string }|null|undefined} identity
+ * @returns {string} `url#assetId=…&assetExt=…`, or `url` unchanged when there is no
+ *   identity or the URL already has a fragment
+ */
+export function withAssetIdentity(url, identity) {
+  if (typeof url !== 'string' || !url || !identity?.id || url.includes('#')) return url
+  const params = new URLSearchParams({ assetId: identity.id })
+  if (identity.ext) params.set('assetExt', identity.ext)
+  return `${url}#${params}`
+}
+
+/**
+ * The identity a single-string reference carries in its fragment, or null.
+ *
+ * @param {*} value
+ * @returns {{ id: string, ext: string, url: string }|null} `url` is the served part,
+ *   without the fragment
+ */
+export function assetIdentityOf(value) {
+  if (typeof value !== 'string') return null
+  const hash = value.indexOf('#')
+  if (hash === -1) return null
+  const params = new URLSearchParams(value.slice(hash + 1))
+  const id = params.get('assetId')
+  if (!id) return null
+  return { id, ext: params.get('assetExt') || '', url: value.slice(0, hash) }
+}
+
 /**
  * Restore authored asset paths on a document being projected back to files.
  *
@@ -188,5 +246,20 @@ export function restoreAssetRefs(document, map) {
     for (const v of Object.values(node)) visit(v)
   }
   visit(document)
+
+  // A single-string field carries its identity in the fragment instead (see
+  // `withAssetIdentity`). Same rule as above: an id the map does not know stays as
+  // the URL that works.
+  const info = document?.info
+  if (info && typeof info === 'object') {
+    for (const field of INFO_ASSET_FIELDS) {
+      const identity = assetIdentityOf(info[field])
+      if (!identity) continue
+      const ref = byId.get(identity.id)
+      if (!ref) { stats.unknown++; continue }
+      info[field] = ref
+      stats.restored++
+    }
+  }
   return stats
 }

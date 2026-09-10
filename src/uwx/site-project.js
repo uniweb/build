@@ -144,11 +144,18 @@ const INFO_TO_SITE_YML = {
   // ⭐ `tags` — authored, non-localized tokens; the filter facet for a list of site
   // cards. Round-trips verbatim like any authored list.
   tags: 'tags',
-  // ⛔ `url` and `preview_image` ARE DELIBERATELY ABSENT and must stay absent. Both are
-  // BACKEND-STAMPED — a site's live address and its card image URL are assigned by
-  // the host — so writing either into `site.yml` would launder a deploy-derived value
-  // into authored config, which is the hazard `submit` / `assistant` / `tracking` are
-  // annotated against above. Framework emits neither and must project neither.
+  // ⭐ `preview` — the card image, verbatim: the app's timestamp, an author's URL, or
+  // the path an author wrote for an image in the project, which `restoreAssetRefs`
+  // has already put back from the identity the push carried in the served URL's
+  // fragment (asset-map.js). [Diego, 2026-09-10]
+  preview: 'preview',
+  // ⭐ `url` — where the site is live → `site.yml::$url`. Recorded by `publish` from
+  // the backend's answer rather than authored, so it lands under the `$` like `$uuid`.
+  //
+  // ⚠️ Both were listed here as "DELIBERATELY ABSENT… BACKEND-STAMPED" until
+  // 2026-09-10. Leaving an app-written field out of this map is what lets the next
+  // push destroy it, since `info` is replaced whole.
+  url: '$url',
 }
 
 // ── `settings` Section → site.yml ─────────────────────────────────────────────

@@ -47,6 +47,7 @@ function fullSite() {
     [
       "name: S", "foundation: '@a/b@1.0.0'", 'description: D', 'favicon: /f.svg',
       'template: true', 'tags: [academic, portfolio]',
+      "preview: '2026-09-10T12:34:56Z'", '$url: https://site.example.test/',
       'languages: [en, fr]', 'defaultLanguage: en', 'publishLanguages: [en]',
       'base: /x/', 'seo: { image: /og.png }', 'keywords: [a, b]',
       'fetcher: { transports: {} }', 'build: { prerender: true }',
@@ -72,20 +73,22 @@ describe('the info / settings split', () => {
     // a title, a subtitle, an icon, a "this is a template" badge, the facets, and
     // the foundation that says what the thing is.
     expect(Object.keys(doc.info).sort()).toEqual([
-      'description', 'favicon', 'foundation', 'name', 'tags', 'template',
+      'description', 'favicon', 'foundation', 'name', 'preview', 'tags', 'template', 'url',
     ])
 
-    // ⛔ `url` and `preview_image` live on `info` too — but they are BACKEND-STAMPED,
-    // so framework emits neither. A site's live address and its card image URL are
-    // assigned by the host, and a serve location is read, never constructed.
-    //
-    // ⚠️ THE SPELLING IS LOAD-BEARING HERE. This asserted `previewUrl` until
-    // 2026-09-09 — a name the Model never had (it was `preview_url`, then
-    // `preview_image` at generation 18). The assertion passed the whole time and
-    // would not have caught framework emitting the real field. A guard aimed at a
-    // name that does not exist is not a guard.
-    for (const stamped of ['url', 'preview_image', 'preview_url', 'previewUrl']) {
-      expect(doc.info).not.toHaveProperty(stamped)
+    // ⭐ `preview` (the card image) and `url` (where the site is live) are carried and
+    // round-trip [Diego, 2026-09-10] — `url` from `site.yml::$url`, recorded by
+    // publish. Until then this asserted framework emitted NEITHER, which let every
+    // push destroy an app-written value, because `info` is replaced whole.
+    expect(doc.info.preview).toBe('2026-09-10T12:34:56Z')
+    expect(doc.info.url).toBe('https://site.example.test/')
+
+    // ⚠️ THE SPELLING IS LOAD-BEARING. These are the Model's earlier names for the
+    // card image (`preview_url`, then `preview_image` until generation 19) plus one it
+    // never had (`previewUrl`, asserted here until 2026-09-09 and so guarding nothing).
+    // A guard aimed at a dead name passes forever; emitting any of these is a bug.
+    for (const dead of ['preview_image', 'preview_url', 'previewUrl']) {
+      expect(doc.info).not.toHaveProperty(dead)
     }
 
     expect(Object.keys(doc.settings).sort()).toEqual([
@@ -131,5 +134,24 @@ describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', (
     const first = await siteProjectToDocument(fullSite())
     expect(Object.keys(first.settings).length).toBeGreaterThan(15)
     expect(first.settings.theme).toEqual({ colors: { primary: '#000' } })
+  })
+
+  it('a preview token that YAML would read as a number or a date comes back as the same string', async () => {
+    // The app's value is opaque, and some opaque strings are also YAML numbers or
+    // dates — unquoted, `3e451234` loads as Infinity. The projector must quote them,
+    // or the first pull turns the token into something else.
+    for (const token of ['3e451234', '20260910', '2026-09-10T12:34:56Z']) {
+      const src = fullSite()
+      writeFileSync(join(src, 'site.yml'), `name: S\nfoundation: '@a/b@1.0.0'\npreview: '${token}'\n`)
+      const first = await siteProjectToDocument(src)
+      expect(first.info.preview).toBe(token)
+
+      const dest = mkdtempSync(join(tmpdir(), 'uwx-split-token-'))
+      DIRS.push(dest)
+      mkdirSync(join(dest, 'pages'), { recursive: true })
+      siteContentDocumentToProject({ document: first, siteRoot: dest })
+      const second = await siteProjectToDocument(dest)
+      expect(second.info.preview).toBe(token)
+    }
   })
 })
