@@ -184,7 +184,11 @@ export async function loadPackageJson(srcDir) {
 }
 
 /**
- * Load foundation-level config file (main.js, fallback foundation.js)
+ * Load the foundation's declarations from `src/main.js`.
+ *
+ * ⛔ There is no `foundation.js` fallback — the legacy name was removed
+ * 2026-09-05. A leftover `foundation.js` with no `main.js` beside it is
+ * REFUSED rather than ignored; see `loadFoundationConfig`.
  *
  * Contains foundation-wide configuration:
  * - vars: CSS custom properties sites can override
@@ -340,7 +344,30 @@ export async function loadFoundationConfig(srcDir) {
       break
     }
   }
-  if (!filePath) return {}
+  if (!filePath) {
+    // ⛔ A LEFTOVER `foundation.js` IS NOT "NO CONFIG", AND MUST NOT READ AS ONE.
+    //
+    // The legacy name was removed 2026-09-05 (`FOUNDATION_FILE_NAMES` is
+    // `main.js` alone). This line used to return `{}` here regardless — so a
+    // project that kept the old name built "successfully" with every
+    // declaration silently gone: no `vars`, no `defaultLayout`, no
+    // `defaultSection`, no `props`. That is the exact outcome the guard below
+    // refuses on the import-failure path, reached through a door it did not
+    // cover. Found 2026-09-10 checking two downstream projects before an update;
+    // one would have lost its default layout and its output-format declarations.
+    //
+    // ⇒ Throw, like the guard below, rather than warn: a build log is where a
+    // warning goes to be missed, and the fix is a one-file rename.
+    const legacy = join(srcDir, 'foundation.js')
+    if (existsSync(legacy)) {
+      throw new Error(
+        `${legacy} is no longer read — rename it to main.js.\n` +
+          `  A foundation's declarations (vars, defaultLayout, defaultSection, props, name) live in\n` +
+          `  main.js. Left as foundation.js, the build would continue with none of them.`,
+      )
+    }
+    return {}
+  }
 
   let module
   try {
