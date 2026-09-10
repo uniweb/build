@@ -324,11 +324,15 @@ After building, your foundation will contain:
 
 ```
 dist/
-├── foundation.js      # Bundled components (~6KB typical)
-├── foundation.js.map  # Source map
+├── entry.js           # The foundation — section types, layouts, declarations
+├── entry.js.map       # Source map
+├── entry-ssr.js       # Single-file twin of entry.js, for server-side prerender
+├── runtime-pin.json   # The @uniweb/runtime version it was built against
+├── *.js               # Code-split chunks, when the foundation has any
+├── assets/            # Styles and static assets
 └── meta/              # Editor metadata (not needed at runtime)
     ├── schema.json    # Full component metadata for editors
-    └── previews/      # Preset preview images
+    └── previews/      # Preset preview images, when presets declare them
         └── Hero/
             └── default.webp
 ```
@@ -357,9 +361,9 @@ The `_self` object contains foundation-level metadata:
 | `name` | `package.json` | Foundation package name |
 | `version` | `package.json` | Foundation version |
 | `description` | `package.json` | Foundation description |
-| `vars` | `foundation.js` | CSS custom properties sites can override |
+| `vars` | `main.js` | CSS custom properties sites can override |
 
-Identity fields (`name`, `version`, `description`) come from the foundation's `package.json`. Configuration fields (`vars`, etc.) come from `src/foundation.js`.
+Identity fields (`name`, `version`, `description`) come from the foundation's `package.json`. Configuration fields (`vars`, etc.) come from the foundation's `main.js`.
 
 ## API Reference
 
@@ -370,7 +374,7 @@ Identity fields (`name`, `version`, `description`) come from the foundation's `p
 | `discoverComponents(srcDir)` | Discover all section types (folders with meta.js) |
 | `loadComponentMeta(componentDir)` | Load meta file for a component |
 | `loadPackageJson(srcDir)` | Load identity from package.json |
-| `loadFoundationConfig(srcDir)` | Load foundation.js configuration |
+| `loadFoundationConfig(srcDir)` | Load the foundation's `main.js` declarations. A leftover `foundation.js` with no `main.js` beside it throws |
 | `buildSchema(srcDir)` | Build complete schema object |
 
 ### Entry Generation
@@ -387,7 +391,7 @@ The generated `_entry.generated.js` file exports:
 |--------|-------------|
 | `components` | Object map of component name → React component |
 | Named exports | Each component exported by name (e.g., `Hero`, `Features`) |
-| `capabilities` | Custom Layout and props from `src/foundation.js` (or `null`) |
+| `capabilities` | Custom Layout and props from `main.js` (or `null`) |
 | `meta` | Runtime metadata extracted from component `meta.js` files |
 
 #### Runtime Metadata (`meta` export)
