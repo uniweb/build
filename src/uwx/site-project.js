@@ -149,8 +149,9 @@ const INFO_TO_SITE_YML = {
   // has already put back by recognizing the serve URL the push recorded in
   // `assets.json` (asset-map.js). [Diego, 2026-09-10]
   preview: 'preview',
-  // ⭐ `url` — where the site is live → `site.yml::$url`. Recorded by `publish` from
-  // the backend's answer rather than authored, so it lands under the `$` like `$uuid`.
+  // ⭐ `url` — where the site is live → `site.yml::$url`. The backend records it at
+  // every publish, and pull is its only way onto disk; recorded rather than authored,
+  // so it lands under the `$` like `$uuid`.
   //
   // ⚠️ Both were listed here as "DELIBERATELY ABSENT… BACKEND-STAMPED" until
   // 2026-09-10. Leaving an app-written field out of this map is what lets the next

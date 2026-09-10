@@ -1,7 +1,8 @@
 /**
  * Asset references that are a BARE STRING — `info.preview` (the site card's image
  * [Diego, 2026-09-10]), `info.favicon`, `seo.image` at the site and page tiers, a
- * section param — and the two site.yml writers for values the CLI records.
+ * section param — and `removeYamlScalar`, which the CLI uses to drop a previous
+ * site's values from site.yml.
  *
  * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
  * the author's path by id. A bare string has no object to carry it: the stored value
@@ -29,7 +30,6 @@ import {
   updateAssetMap,
   restoreAssetRefs,
   servedFingerprint,
-  writeSiteUrl,
   removeYamlScalar,
 } from '../src/uwx/index.js'
 
@@ -161,27 +161,12 @@ describe('assets.json — the served fingerprint', () => {
   })
 })
 
-describe('site.yml writers for recorded values', () => {
+describe('removeYamlScalar', () => {
   const siteYml = (body) => {
     const root = tmp('uwx-yml-')
     writeFileSync(join(root, 'site.yml'), body)
     return root
   }
-
-  it('writeSiteUrl records $url, keeps the comments, and is a no-op when unchanged', () => {
-    const root = siteYml('# my site\nname: S\n')
-    expect(writeSiteUrl(root, 'https://acme.example/')).toBe(true)
-    const text = readFileSync(join(root, 'site.yml'), 'utf8')
-    expect(text).toContain('# my site')
-    expect(yaml.load(text).$url).toBe('https://acme.example/')
-    expect(writeSiteUrl(root, 'https://acme.example/')).toBe(false)
-  })
-
-  it('writeSiteUrl quotes a value YAML would otherwise misread', () => {
-    const root = siteYml('name: S\n')
-    writeSiteUrl(root, 'https://acme.example/a b')
-    expect(yaml.load(readFileSync(join(root, 'site.yml'), 'utf8')).$url).toBe('https://acme.example/a b')
-  })
 
   it('removeYamlScalar removes one scalar line and nothing else', () => {
     const root = siteYml("# keep me\n$url: https://old.example/\nname: S\npreview: '123'\n")

@@ -45,7 +45,6 @@ export {
   writeSiteEntityUuid,
   writeSiteOrg,
   writeSiteBackend,
-  writeSiteUrl,
   extensionDeclaration,
   isExtensionUrl,
   isSiteRelativeExtensionUrl,

@@ -1297,10 +1297,11 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // is replaced whole.
   setIf(info, 'preview', scalarString(siteYml.preview))
   // ⭐ `url` — where the site is live, so a site card can link to it without opening
-  // the editor. `uniweb publish` records it in `site.yml::$url` from the address the
-  // backend returns, and pull brings it back. The `$` marks it as recorded rather
-  // than authored, like `$uuid` — and keeps it out of the rendered payload, where a
-  // bare `url:` would sit beside `seo.baseUrl`, the authored canonical address.
+  // the editor. The backend records it at every publish (stated by backend,
+  // 2026-09-10) and pull brings it into `site.yml::$url`; nothing in framework writes
+  // it. The `$` marks it as recorded rather than authored, like `$uuid` — and keeps it
+  // out of the rendered payload, where a bare `url:` would sit beside `seo.baseUrl`,
+  // the authored canonical address.
   setIf(info, 'url', siteYml.$url)
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
@@ -1517,27 +1518,4 @@ export function writeSiteOrg(siteRoot, handle) {
  */
 export function writeSiteBackend(siteRoot, origin) {
   return upsertYamlScalar(join(siteRoot, 'site.yml'), '$backend', origin)
-}
-
-/**
- * Record where the site is LIVE (`site.yml::$url`) — the address the backend returned
- * for its last publish, carried on `info.url` so a site card can link to it.
- *
- * ⭐ Recorded, never authored — hence the `$`, like `$uuid`/`$org`/`$backend`, which
- * also keeps it out of the rendered payload (content-collector strips `$` keys). The
- * caller writes only when the value CHANGED, so a re-publish to the same address
- * leaves a committed file untouched.
- *
- * A plain scalar where that is safe (a URL's `:` is followed by `/`, never a space —
- * see `writeSiteBackend`), double-quoted otherwise: a full URL can carry more than an
- * origin does, and whitespace or a leading YAML indicator would change what is read
- * back.
- *
- * @param {string} siteRoot
- * @param {string} url - the live address, absolute
- * @returns {boolean} true if site.yml changed
- */
-export function writeSiteUrl(siteRoot, url) {
-  const plainSafe = !/\s/.test(url) && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(url)
-  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$url', plainSafe ? url : JSON.stringify(url))
 }
