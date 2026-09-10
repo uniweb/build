@@ -84,9 +84,7 @@ export {
   refForAssetId,
   restoreAssetRefs,
   ASSET_MAP_FILE,
-  INFO_ASSET_FIELDS,
-  withAssetIdentity,
-  assetIdentityOf,
+  servedFingerprint,
 } from './asset-map.js'
 export {
   diffSiteUnits,

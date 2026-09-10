@@ -146,8 +146,8 @@ const INFO_TO_SITE_YML = {
   tags: 'tags',
   // ⭐ `preview` — the card image, verbatim: the app's timestamp, an author's URL, or
   // the path an author wrote for an image in the project, which `restoreAssetRefs`
-  // has already put back from the identity the push carried in the served URL's
-  // fragment (asset-map.js). [Diego, 2026-09-10]
+  // has already put back by recognizing the serve URL the push recorded in
+  // `assets.json` (asset-map.js). [Diego, 2026-09-10]
   preview: 'preview',
   // ⭐ `url` — where the site is live → `site.yml::$url`. Recorded by `publish` from
   // the backend's answer rather than authored, so it lands under the `$` like `$uuid`.

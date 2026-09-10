@@ -1,18 +1,23 @@
 /**
- * Single-string asset fields on the site's `info` brief — today `preview`, the site
- * card's image [Diego, 2026-09-10] — and the two site.yml writers for values the CLI
- * records rather than the author types.
+ * Asset references that are a BARE STRING — `info.preview` (the site card's image
+ * [Diego, 2026-09-10]), `info.favicon`, `seo.image` at the site and page tiers, a
+ * section param — and the two site.yml writers for values the CLI records.
  *
- * Identity for every other asset rides BESIDE its URL as flat attrs. `info` is a
- * Section whose fields the host declares, so for these fields it rides in the served
- * URL's fragment instead. The tests pin the two properties that make that safe:
- *   · the push never puts an undeclared attr on `info` (`preview` is a real
- *     ASSET_SLOTS slot, so the generic stamp WOULD write `previewAssetId`);
- *   · push → pull puts back the exact path the author wrote.
+ * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
+ * the author's path by id. A bare string has no object to carry it: the stored value
+ * is the serve URL alone. The push records a FINGERPRINT of that URL in the
+ * committed `assets.json`, and the pull recognizes it — so the wire carries exactly
+ * the host's URL, and no consumer receives anything it would have to strip.
+ *
+ * The properties pinned here:
+ *   · the wire carries the plain serve URL, and no undeclared attr lands on `info`
+ *     (`preview` is a real ASSET_SLOTS slot, so the generic stamp WOULD);
+ *   · push → pull puts back the exact path the author wrote, at every tier;
+ *   · a URL the map cannot recognize stays as the URL that works.
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
@@ -20,17 +25,29 @@ import {
   emitSyncPackages,
   siteContentDocumentToProject,
   readZip,
+  readAssetMap,
   updateAssetMap,
   restoreAssetRefs,
-  withAssetIdentity,
-  assetIdentityOf,
+  servedFingerprint,
   writeSiteUrl,
   removeYamlScalar,
 } from '../src/uwx/index.js'
 
-const SERVE = '/gateway/asset/dist/9f2c/base.png'
-const IDS = { '/images/card.png': { id: '9f2c', ext: 'png' } }
-const REWRITE = { '/images/card.png': SERVE }
+// What an upload plan hands back for each project image…
+const SERVED = {
+  '/images/card.png': '/gateway/asset/dist/aaaa/base.png',
+  '/f.png': '/gateway/asset/dist/bbbb/base.png',
+  '/og.png': '/gateway/asset/dist/cccc/base.png',
+  '/page-og.png': '/gateway/asset/dist/dddd/base.png',
+  '/param.png': '/gateway/asset/dist/eeee/base.png',
+}
+// …and what the push records from it in assets.json.
+const IDS = Object.fromEntries(
+  Object.entries(SERVED).map(([ref, url]) => [
+    ref,
+    { id: url.split('/')[4], ext: 'png', served: servedFingerprint(url) },
+  ])
+)
 
 const DIRS = []
 afterEach(() => {
@@ -43,13 +60,18 @@ function tmp(prefix) {
   return dir
 }
 
-function siteWithPreview(preview) {
-  const root = tmp('uwx-info-assets-')
+/** A site with a bare-string image reference at every tier the defect reached. */
+function project({ preview = '/images/card.png' } = {}) {
+  const root = tmp('uwx-bare-')
   mkdirSync(join(root, 'pages', 'home'), { recursive: true })
-  writeFileSync(join(root, 'pages', 'home', 'index.md'), '---\ntype: Hero\n---\n\n# H\n')
+  writeFileSync(join(root, 'pages', 'home', 'page.yml'), 'title: Home\nseo:\n  image: /page-og.png\n')
+  writeFileSync(join(root, 'pages', 'home', 'hero.md'), '---\ntype: Hero\nimage: /param.png\n---\n\n# H\n')
   writeFileSync(
     join(root, 'site.yml'),
-    `name: S\nfoundation: '@a/b@1.0.0'\npreview: ${JSON.stringify(preview)}\n`
+    [
+      'name: S', "foundation: '@a/b@1.0.0'", `preview: ${JSON.stringify(preview)}`,
+      'favicon: /f.png', 'seo:', '  image: /og.png', '',
+    ].join('\n')
   )
   return root
 }
@@ -57,73 +79,86 @@ function siteWithPreview(preview) {
 const siteDocOf = (pkg) =>
   JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
 
-describe('the identity fragment', () => {
-  it('carries id and ext, and reads back exactly', () => {
-    const value = withAssetIdentity(SERVE, { id: '9f2c', ext: 'png' })
-    expect(value).toBe(`${SERVE}#assetId=9f2c&assetExt=png`)
-    expect(assetIdentityOf(value)).toEqual({ id: '9f2c', ext: 'png', url: SERVE })
+function sectionFrontmatter(pageDir) {
+  const md = readdirSync(pageDir).find((f) => f.endsWith('.md'))
+  return yaml.load(readFileSync(join(pageDir, md), 'utf8').split('---')[1])
+}
+
+describe('bare-string asset references', () => {
+  it('are surfaced for upload like any content image', async () => {
+    const pkg = await emitSyncPackages(project())
+    expect(pkg.localAssets).toEqual(expect.arrayContaining(Object.keys(SERVED)))
   })
 
-  it('leaves a value alone when there is nothing to carry, or a fragment is already there', () => {
-    expect(withAssetIdentity(SERVE, null)).toBe(SERVE)
-    expect(withAssetIdentity(`${SERVE}#x`, { id: '9f2c' })).toBe(`${SERVE}#x`)
-    // The app's timestamp and a plain URL carry no identity.
-    expect(assetIdentityOf('2026-09-10T12:34:56Z')).toBeNull()
-    expect(assetIdentityOf('https://cdn.example/card.png')).toBeNull()
-  })
-})
-
-describe('info.preview — an image in the project', () => {
-  it('is surfaced for upload like any content image', async () => {
-    const pkg = await emitSyncPackages(siteWithPreview('/images/card.png'))
-    expect(pkg.localAssets).toContain('/images/card.png')
-  })
-
-  it('⛔ goes up as the serve URL with identity in the fragment — and NO attr beside it on info', async () => {
-    const pkg = await emitSyncPackages(siteWithPreview('/images/card.png'), {
-      assetRewrite: REWRITE,
-      assetIds: IDS,
-    })
-    const { info } = siteDocOf(pkg)
-    expect(info.preview).toBe(`${SERVE}#assetId=9f2c&assetExt=png`)
+  it('ride the wire as the plain serve URL — and no identity attr lands on info', async () => {
+    const doc = siteDocOf(await emitSyncPackages(project(), { assetRewrite: SERVED, assetIds: IDS }))
+    expect(doc.info.preview).toBe(SERVED['/images/card.png'])
+    expect(doc.info.favicon).toBe(SERVED['/f.png'])
+    expect(doc.settings.seo.image).toBe(SERVED['/og.png'])
     // `preview` is a real ASSET_SLOTS slot; the generic stamp would write these, and
     // the host refuses a field its `info` does not declare.
-    expect(info).not.toHaveProperty('previewAssetId')
-    expect(info).not.toHaveProperty('previewAssetExt')
+    expect(doc.info).not.toHaveProperty('previewAssetId')
+    expect(doc.info).not.toHaveProperty('previewAssetExt')
   })
 
-  it('⭐ push → pull puts back the path the author wrote', async () => {
-    const pkg = await emitSyncPackages(siteWithPreview('/images/card.png'), {
-      assetRewrite: REWRITE,
-      assetIds: IDS,
-    })
-    const dest = tmp('uwx-info-assets-pull-')
+  it('⭐ push → pull puts back every path the author wrote, at every tier', async () => {
+    const doc = siteDocOf(await emitSyncPackages(project(), { assetRewrite: SERVED, assetIds: IDS }))
+    const dest = tmp('uwx-bare-pull-')
     mkdirSync(join(dest, 'pages'), { recursive: true })
     // The committed map every clone of the project carries.
     updateAssetMap(dest, IDS)
-    siteContentDocumentToProject({ document: siteDocOf(pkg), siteRoot: dest })
-    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).preview).toBe('/images/card.png')
+    siteContentDocumentToProject({ document: doc, siteRoot: dest })
+
+    const site = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+    expect(site.preview).toBe('/images/card.png')
+    expect(site.favicon).toBe('/f.png')
+    expect(site.seo.image).toBe('/og.png')
+    const page = yaml.load(readFileSync(join(dest, 'pages', 'home', 'page.yml'), 'utf8'))
+    expect(page.seo.image).toBe('/page-og.png')
+    expect(sectionFrontmatter(join(dest, 'pages', 'home')).image).toBe('/param.png')
   })
 
-  it('an id the map does not know stays as the URL that works', () => {
-    const doc = { info: { preview: `${SERVE}#assetId=ffff&assetExt=png` } }
+  it('a URL the map has no fingerprint for stays as the URL that works', () => {
+    const doc = { info: { favicon: '/gateway/asset/dist/ffff/base.png' } }
     const stats = restoreAssetRefs(doc, IDS)
-    expect(doc.info.preview).toBe(`${SERVE}#assetId=ffff&assetExt=png`)
-    expect(stats.unknown).toBe(1)
+    expect(doc.info.favicon).toBe('/gateway/asset/dist/ffff/base.png')
+    expect(stats.restored).toBe(0)
   })
 })
 
-describe('info.preview — values that are not a project image', () => {
+describe('info.preview values that are not a project image', () => {
   for (const value of ['2026-09-10T12:34:56Z', 'https://cdn.example/card.png']) {
     it(`${value} rides verbatim and is never uploaded`, async () => {
-      const pkg = await emitSyncPackages(siteWithPreview(value), {
-        assetRewrite: REWRITE,
+      const pkg = await emitSyncPackages(project({ preview: value }), {
+        assetRewrite: SERVED,
         assetIds: IDS,
       })
       expect(siteDocOf(pkg).info.preview).toBe(value)
       expect(pkg.localAssets).not.toContain(value)
     })
   }
+})
+
+describe('assets.json — the served fingerprint', () => {
+  it('is a hash, never the URL, and is stable', () => {
+    const fp = servedFingerprint(SERVED['/f.png'])
+    expect(fp).toMatch(/^sha256:[0-9a-f]{16}$/)
+    expect(fp).not.toContain('gateway')
+    expect(servedFingerprint(SERVED['/f.png'])).toBe(fp)
+  })
+
+  it('is kept; a download cannot erase it, and a new one for the same bytes is a change', () => {
+    const dir = tmp('uwx-map-')
+    updateAssetMap(dir, { '/a.png': { id: 'A', ext: 'png', served: 'sha256:1' } })
+    expect(readAssetMap(dir)['/a.png']).toEqual({ id: 'A', ext: 'png', served: 'sha256:1' })
+    // A download learns identity but not an upload's URL — it must not erase this.
+    expect(updateAssetMap(dir, { '/a.png': { id: 'A', ext: 'png' } }).written).toBe(false)
+    expect(readAssetMap(dir)['/a.png'].served).toBe('sha256:1')
+    // The host now serves the same bytes at another address.
+    expect(
+      updateAssetMap(dir, { '/a.png': { id: 'A', ext: 'png', served: 'sha256:2' } }).changed
+    ).toEqual(['/a.png'])
+  })
 })
 
 describe('site.yml writers for recorded values', () => {

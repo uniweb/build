@@ -26,7 +26,6 @@ import { siteProjectToDocument } from './site.js'
 import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { isLocalAssetPath } from '../site/assets.js'
-import { INFO_ASSET_FIELDS, withAssetIdentity } from './asset-map.js'
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
 const SITE_ENTITY_KEY = 'site-content'
@@ -158,19 +157,22 @@ function walkEntityAssets(node, visitor) {
 // ProseMirror image node's attrs (`{src, alt, …}`) and a section background's
 // media object (`{image: {src}}`) with one rule — the two shapes framework
 // resolves, reached through the same walk.
-function rewriteEntityAssets(node, map, ids) {
+//
+// `noStamp` is the one object that must get NO identity attrs even when a slot
+// matches — the site's `info`, whose fields the host declares (see the call site).
+function rewriteEntityAssets(node, map, ids, noStamp = null) {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
       const v = node[i]
       if (typeof v === 'string') { if (map[v]) node[i] = map[v] }
-      else rewriteEntityAssets(v, map, ids)
+      else rewriteEntityAssets(v, map, ids, noStamp)
     }
     return node
   }
   if (node && typeof node === 'object') {
     // Stamp BEFORE the string swap below, while the reference is still the
     // local ref the ids map is keyed by.
-    if (ids) {
+    if (ids && node !== noStamp) {
       // Every asset slot, not just the primary: a video's `poster` and a
       // document's `preview` are assets like any other, and each has identity
       // attrs naming which reference they belong to (ASSET_SLOTS).
@@ -188,26 +190,10 @@ function rewriteEntityAssets(node, map, ids) {
     for (const key of Object.keys(node)) {
       const v = node[key]
       if (typeof v === 'string') { if (map[v]) node[key] = map[v] }
-      else rewriteEntityAssets(v, map, ids)
+      else rewriteEntityAssets(v, map, ids, noStamp)
     }
   }
   return node
-}
-
-// The site's `info` brief holds single-string asset fields (`preview`) on a Section
-// whose fields the host declares. The generic stamp above would write
-// `previewAssetId`/`previewAssetExt` BESIDE a `preview` URL — it is a real
-// ASSET_SLOTS slot — adding two fields the host refuses. So these are rewritten
-// first, identity carried in the fragment (asset-map.js → `withAssetIdentity`);
-// once the value is no longer the local ref, the generic pass neither swaps nor
-// stamps it.
-function rewriteInfoAssets(info, map, ids) {
-  if (!info || typeof info !== 'object') return
-  for (const field of INFO_ASSET_FIELDS) {
-    const ref = info[field]
-    if (typeof ref !== 'string' || !map[ref]) continue
-    info[field] = withAssetIdentity(map[ref], ids?.[ref])
-  }
 }
 
 /**
@@ -404,9 +390,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const assetIds =
     opts.assetIds && typeof opts.assetIds === 'object' ? opts.assetIds : null
   if (assetRewrite) {
-    // `info` FIRST — see rewriteInfoAssets.
-    if (siteDoc) rewriteInfoAssets(siteDoc.info, assetRewrite, assetIds)
-    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds)
+    // ⛔ No identity attrs on `info`: it is a Section whose fields the host declares,
+    // and `preview` is a real ASSET_SLOTS slot, so stamping would add
+    // `previewAssetId`/`previewAssetExt` — fields the host refuses. Its bare strings
+    // are still swapped for their serve URLs, which `assets.json` recognizes on pull
+    // by fingerprint (asset-map.js → `servedFingerprint`).
+    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds, siteDoc.info)
     for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite, assetIds)
   }
   // Collect the site-root local refs the deploy must upload (`/images/x.png`).

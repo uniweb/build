@@ -36,11 +36,21 @@
  * `config.assets.url` pattern is the whole address, and only the host owns the
  * second half.
  *
+ * ⚖️ **What it holds instead is a FINGERPRINT of the served URL** (`served`), and the
+ * difference is the point: a hash can recognize an address and cannot compose one.
+ * It exists for references that are a BARE STRING — `info.preview`, `info.favicon`,
+ * `seo.image`, a section param — where there is no object to stamp `assetId` beside,
+ * so the stored value is the serve URL alone. `pull` hashes such a string and, when
+ * it matches, puts back the path the author wrote. Should the host ever serve an
+ * asset at a new address, the fingerprint simply stops matching and the pull leaves
+ * the URL — the honest projection — until the next push records the new one.
+ *
  * ⛔ **No mime or size.** The store validates those and they are its to change;
  * a second copy here is a second thing to disagree.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { join } from 'node:path'
 
@@ -70,6 +80,7 @@ export function readAssetMap(siteDir) {
     for (const [ref, v] of Object.entries(assets)) {
       if (v && typeof v.id === 'string' && v.id) {
         out[ref] = { id: v.id, ext: typeof v.ext === 'string' ? v.ext : '' }
+        if (typeof v.served === 'string' && v.served) out[ref].served = v.served
       }
     }
     return out
@@ -98,10 +109,15 @@ export function updateAssetMap(siteDir, entries) {
   for (const [ref, v] of Object.entries(entries || {})) {
     if (!v?.id) continue
     const was = prior[ref]
+    // A new `served` fingerprint is a change too: the host serves these bytes at
+    // another address now, and the old fingerprint would stop recognizing it. An
+    // entry that carries none — a download learns identity, not an upload's URL —
+    // keeps the one already recorded for the same bytes.
+    const served = v.served || (was && was.id === v.id ? was.served : undefined)
     if (!was) added.push(ref)
-    else if (was.id !== v.id) changed.push(ref)
+    else if (was.id !== v.id || (served || '') !== (was.served || '')) changed.push(ref)
     else continue
-    prior[ref] = { id: v.id, ext: v.ext || '' }
+    prior[ref] = { id: v.id, ext: v.ext || '', ...(served ? { served } : {}) }
   }
 
   if (!added.length && !changed.length) return { added, changed, written: false }
@@ -136,62 +152,24 @@ export function refForAssetId(map, id) {
   return null
 }
 
-// ─── Asset fields that are a single string ────────────────────────────────────
-//
-// Everywhere else an asset reference lives on an OBJECT (an image node's attrs, a
-// background's media object), and identity rides BESIDE the URL as flat attrs
-// (`assetId`/`assetExt`, or a slot's prefixed pair — ASSET_SLOTS). A field on the
-// site's `info` brief is a single string, on a Section whose fields the host
-// declares — so there is nowhere beside it to put an attr: the host refuses an
-// undeclared field, and `preview` is a real slot whose `previewAssetId` would be one.
-//
-// ⭐ So the identity rides IN the reference, in the one part of a URL that belongs
-// to the client rather than the host: the fragment. `<serve>#assetId=…&assetExt=…`
-// still loads the served bytes everywhere — a fragment never reaches a server and an
-// `<img>` ignores it — and it lets `pull` put the author's path back from
-// `assets.json` exactly, with no guess about how the host lays out its URLs.
-//
-// ⛔ The fragment is FRAMEWORK'S. Nothing here parses or composes the served part,
-// which is read verbatim from the upload plan, and a URL that already carries a
-// fragment is left alone rather than composed over.
-//
-// Today the one such field is `preview`, the site card's image [Diego, 2026-09-10].
-// `favicon` is the obvious second and is deliberately NOT here: its Model type is a
-// `file`, and what a `file` field accepts is the host's to say.
-
-/** `info` fields that hold one asset reference as a plain string. */
-export const INFO_ASSET_FIELDS = ['preview']
-
 /**
- * A served URL with the asset's identity carried in its fragment.
+ * The fingerprint `assets.json` keeps of the URL a host serves an asset at.
  *
- * @param {string} url - the host's serve URL, read verbatim
- * @param {{ id: string, ext?: string }|null|undefined} identity
- * @returns {string} `url#assetId=…&assetExt=…`, or `url` unchanged when there is no
- *   identity or the URL already has a fragment
- */
-export function withAssetIdentity(url, identity) {
-  if (typeof url !== 'string' || !url || !identity?.id || url.includes('#')) return url
-  const params = new URLSearchParams({ assetId: identity.id })
-  if (identity.ext) params.set('assetExt', identity.ext)
-  return `${url}#${params}`
-}
-
-/**
- * The identity a single-string reference carries in its fragment, or null.
+ * A hash, never the URL: it can recognize an address a pull brings back and it
+ * cannot be used to compose one — see the header. Prefixed so a reader of the
+ * committed file cannot mistake it for something to fetch.
  *
- * @param {*} value
- * @returns {{ id: string, ext: string, url: string }|null} `url` is the served part,
- *   without the fragment
+ * ⛔ Why not carry identity on the wire instead, as content images do? A bare string
+ * has no object to put `assetId` beside, and folding it into the value (a URL
+ * fragment was tried, 2026-09-10) changes what every consumer receives — a
+ * foundation that tells video from image by `src.endsWith('.mp4')` would break on
+ * a hosted site. This way the wire value is exactly the host's URL.
+ *
+ * @param {string} url - the serve URL the upload plan returned, verbatim
+ * @returns {string} `sha256:<16 hex>`
  */
-export function assetIdentityOf(value) {
-  if (typeof value !== 'string') return null
-  const hash = value.indexOf('#')
-  if (hash === -1) return null
-  const params = new URLSearchParams(value.slice(hash + 1))
-  const id = params.get('assetId')
-  if (!id) return null
-  return { id, ext: params.get('assetExt') || '', url: value.slice(0, hash) }
+export function servedFingerprint(url) {
+  return `sha256:${createHash('sha256').update(String(url)).digest('hex').slice(0, 16)}`
 }
 
 /**
@@ -247,19 +225,40 @@ export function restoreAssetRefs(document, map) {
   }
   visit(document)
 
-  // A single-string field carries its identity in the fragment instead (see
-  // `withAssetIdentity`). Same rule as above: an id the map does not know stays as
-  // the URL that works.
-  const info = document?.info
-  if (info && typeof info === 'object') {
-    for (const field of INFO_ASSET_FIELDS) {
-      const identity = assetIdentityOf(info[field])
-      if (!identity) continue
-      const ref = byId.get(identity.id)
-      if (!ref) { stats.unknown++; continue }
-      info[field] = ref
+  // ⭐ BARE STRINGS — a reference with no object to carry identity beside it
+  // (`info.preview`, `info.favicon`, `seo.image`, a section param). The stored value
+  // is the serve URL alone, so it is recognized by the fingerprint the push recorded
+  // for it (`servedFingerprint`). A string the map has no fingerprint for stays as
+  // the URL that works — the same rule as an unknown id above.
+  const byServed = new Map()
+  for (const [ref, v] of Object.entries(map || {})) {
+    if (v?.served && !byServed.has(v.served)) byServed.set(v.served, ref)
+  }
+  if (byServed.size) {
+    const restore = (v) => {
+      if (typeof v !== 'string' || !looksLikeAddress(v)) return v
+      const ref = byServed.get(servedFingerprint(v))
+      if (!ref) return v
       stats.restored++
+      return ref
     }
+    const walk = (node) => {
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i++) {
+          if (typeof node[i] === 'string') node[i] = restore(node[i])
+          else walk(node[i])
+        }
+      } else if (node && typeof node === 'object') {
+        for (const key of Object.keys(node)) {
+          if (typeof node[key] === 'string') node[key] = restore(node[key])
+          else walk(node[key])
+        }
+      }
+    }
+    walk(document)
   }
   return stats
 }
+
+// Only a string that could be a served address is worth hashing.
+const looksLikeAddress = (v) => v.startsWith('/') || /^https?:\/\//i.test(v)

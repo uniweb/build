@@ -1286,9 +1286,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //   · the APP, when it generates a card image — a timestamp, carried verbatim;
   //   · an AUTHOR, deliberately — typically a template site's custom image: a URL, or
   //     a site-root path to an image in the project, which push uploads like any
-  //     content image and sends as its serve URL (identity in the fragment — see
-  //     `rewriteInfoAssets` in sync-package.js), and which pull puts back as the path
-  //     the author wrote.
+  //     content image and sends as its serve URL, and which pull puts back as the
+  //     path the author wrote (`restoreAssetRefs` recognizes the URL by the
+  //     fingerprint `assets.json` recorded for it).
   // The app leaves an author's value alone.
   //
   // ⚠️ This read "`url` and `preview_image` are BACKEND-STAMPED and framework emits
