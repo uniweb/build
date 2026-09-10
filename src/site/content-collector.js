@@ -84,7 +84,7 @@ function warnRetiredFetcherKeys(fetcher) {
       `[uniweb] site.yml fetcher: ${retired.map((k) => `\`${k}\``).join(', ')} ` +
         `${retired.length === 1 ? 'is' : 'are'} retired and ignored. The default fetcher reads a ` +
         `site's own files and a host's records lane; a backend of your own is reached through a ` +
-        `foundation transport (docs: development/connecting-a-backend.md). Kept: ` +
+        `foundation transport (docs: development/data-sources.md). Kept: ` +
         `\`fetcher.transports\` and a transport's own binding config.`
     )
   }
