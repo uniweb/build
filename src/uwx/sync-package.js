@@ -317,6 +317,10 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     ? await siteProjectToDocument(siteRoot, {
         sourceLocale,
         ...(opts.queryUuids ? { queryUuids: opts.queryUuids } : {}),
+        // ⛔ THE SAME ORG `buildRecordEntities` WAS GIVEN ABOVE. A query's `schema`
+        // must name the Model its records are stored under, and both are qualified
+        // from one `@/x` by one rule (`./self-scope.js`) — so they take one org.
+        ...(opts.org ? { org: opts.org } : {}),
         // Withhold the `$services`/`$secrets` Sections when the caller has
         // determined the file is not asking for anything new by them. Passed
         // through rather than decided here: the last-agreed state is project

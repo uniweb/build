@@ -55,6 +55,7 @@ import {
 } from '../site/entity-pool.js'
 import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isContentBodyField } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
+import { resolveSelfScope } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
@@ -631,12 +632,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // `resolveDeclaration` already matches a fully-qualified name against the
   // foundation's `@/`-keyed `dataSchemas`, so a resolved name looks up correctly and
   // `declaration.name` — the value that becomes `$model` — is the resolved one.
-  const selfScopeOrg =
-    typeof opts.org === 'string' ? opts.org.replace(/^@/, '').replace(/\/.*$/, '') : ''
-  const resolveSelfScope = (ref) =>
-    typeof ref === 'string' && ref.startsWith('@/') && selfScopeOrg
-      ? `@${selfScopeOrg}/${ref.slice(2)}`
-      : ref
+  //
+  // ⛔ The rule lives in `./self-scope.js`, shared with the `queries` Section
+  // (`site.js::queriesNested`): a query's `schema` must name exactly the Model
+  // these records are stored under, so both go through one function with one org.
   // Collections that resolved no data schema (the convention-default soft-skip
   // below) — not synced as folder entities. The composite deploy delivers these
   // statically (the "data ball") instead, so the caller can route them there.
@@ -647,7 +646,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const seen = new Set()
   for (const { name, decl } of mapped) {
     const declaredModel = decl.schema || decl.model
-    const modelName = resolveSelfScope(declaredModel)
+    const modelName = resolveSelfScope(declaredModel, opts.org)
     // Unresolvable `@/` — no org is known. Ship it rather than throwing (a `status`
     // probe on a never-pushed site has no org and must still count), but say so:
     // the backend's refusal names a missing Model and cannot name this cause.

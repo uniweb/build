@@ -40,6 +40,7 @@ import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './proje
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
 import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import { isContentBodyField } from './data-schema.js'
+import { unresolveSelfScope } from './self-scope.js'
 import { unwrapLocalized } from './backfill.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
@@ -155,29 +156,10 @@ function recordDirFor(siteRoot, model, selfOrg) {
   return dirs ? join(siteRoot, ENTITIES_DIR, ...dirs) : null
 }
 
-/**
- * Undo the self-scope resolution the producer applies before shipping.
- *
- * ⛔ WITHOUT THIS THE ROUND TRIP IS NOT A FIXED POINT, and the failure is silent
- * on both ends. `@/article` is a FOUNDATION-RELATIVE alias: the producer resolves
- * it to `@acme/article` before it ships, because the backend resolves Models by
- * name and never mints. So a record authored under `entities/article/` comes back
- * as `@acme/article` and, placed literally, lands under `entities/acme/article/` —
- * a different schema folder, which the next build reads as a different schema.
- *
- * ⚠️ It did not show before records were placed by their model: every record went
- * to `collections/<collection>/` regardless, so the resolution had nowhere to leak.
- *
- * ⭐ The site records its own org at create (`site.yml::$org` — "whose this is"),
- * which is exactly the inverse. A model scoped to ANOTHER org is left alone: it
- * genuinely is that org's, and `@/` would be a lie.
- */
-export function unresolveSelfScope(model, selfOrg) {
-  if (typeof model !== 'string' || !selfOrg) return model
-  const org = String(selfOrg).replace(/^@/, '').replace(/\/.*$/, '')
-  if (!org) return model
-  return model.startsWith(`@${org}/`) ? `@/${model.slice(org.length + 2)}` : model
-}
+// ⚠️ Undoing the producer's self-scope resolution (`unresolveSelfScope`) lives in
+// `./self-scope.js`, beside the forward rule it inverts. It did not show before
+// records were placed by their model: every record went to
+// `collections/<collection>/` regardless, so the resolution had nowhere to leak.
 
 // Resolve a record's (collection, slug): the folder index first (authoritative on
 // a read), the record document's `$id` (`<collection>/<slug>`) as a fallback.
@@ -252,7 +234,16 @@ function isDerivedDeferred(d, dataSchemas) {
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(d, dataSchemas = null) {
+function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
+  // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
+  // `schema`. The push qualifies a foundation-relative `@/x` to `@org/x`
+  // (`site.js::queriesNested`), and both checks below are keyed by the author's
+  // `@/x`: against `@org/x` the query-name default would never match — writing an
+  // explicit schema the author never had — and the derived-`deferred` lookup would
+  // miss, persisting a derivation into their file (the 2026-08-29 defect).
+  const d = selfOrg && typeof wire.schema === 'string'
+    ? { ...wire, schema: unresolveSelfScope(wire.schema, selfOrg) }
+    : wire
   const name = d.name || d.$id
   const decl = {}
 
@@ -328,9 +319,12 @@ function declToFileShape(d, dataSchemas = null) {
  * @param {object} params
  * @param {object} params.document - a site-content `$`-document (`{ queries }`)
  * @param {string} params.siteRoot
+ * @param {string} [params.org] - the site's own org, so a `schema` the producer
+ *        qualified from `@/x` is written back as `@/x`. Defaults to `site.yml::$org`,
+ *        the same default `recordsToProject` places records by.
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
-export function declarationsToQueriesYml({ document, siteRoot }) {
+export function declarationsToQueriesYml({ document, siteRoot, org }) {
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
   if (decls.length === 0) return report
@@ -348,10 +342,11 @@ export function declarationsToQueriesYml({ document, siteRoot }) {
     siteYml = null
   }
   const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
+  const selfOrg = org ?? readSiteOrg(siteRoot)
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfOrg)
     if (!name) continue
     queries[name] = decl
   }

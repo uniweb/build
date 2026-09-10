@@ -62,6 +62,7 @@ import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
+import { resolveSelfScope } from './self-scope.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
 
@@ -741,6 +742,9 @@ export function isSiteRelativeExtensionUrl(decl) {
  * @param {object} declarations resolved collection declarations, keyed by name
  * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push
  *        response or a pull. Absent on a first sync, where minting is correct.
+ * @param {string} [org] the publish org. A foundation-relative `schema` (`@/x`)
+ *        is qualified with it (`./self-scope.js`), exactly as the records' `$model`
+ *        is — see the note at the `schema` line below.
  */
 // ⛔ KEYS THAT MUST NOT REACH THE WIRE. Everything else on an authored declaration
 // is emitted, including fields this build does not model — see the note in
@@ -796,13 +800,19 @@ const DECL_NOT_ON_WIRE = new Set([
   'filter'
 ])
 
-function queriesNested(declarations, uuids = null) {
+function queriesNested(declarations, uuids = null, org = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     const data = {}
     const source = d.path ? { path: d.path } : d.url ? { url: d.url } : d.source
     setIf(data, 'source', source)
-    setIf(data, 'schema', d.schema)
+    // ⛔ QUALIFIED, WITH THE SAME RULE AND THE SAME ORG AS THE RECORDS' `$model`
+    // (`records.js::buildRecordEntities`). A consumer answers a query by matching
+    // this name against the Models its records were stored under, so a verbatim
+    // `@/member` beside records stored as `@org/member` names nothing: the query
+    // resolves no Model and the page that binds it renders empty. The pull puts the
+    // author's `@/` back (`records-project.js::declarationsToQueriesYml`).
+    setIf(data, 'schema', resolveSelfScope(d.schema, org))
     setIf(data, 'sort', d.sort)
     // Legacy `filter:` is not synced — it is translated to `where` upstream
     // (the canonical predicate). No legacy fields on the wire.
@@ -1086,6 +1096,9 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  * @param {string} [opts.sourceLocale] - localized-field wrap locale. Defaults to
  *        the site's effective default locale (`defaultLanguage || languages[0] ||
  *        'en'` — the shared `resolveDefaultLocale` rule), NOT a bare 'en'.
+ * @param {string} [opts.org] - the publish org, which qualifies a query's
+ *        foundation-relative `schema` (`@/x` → `@org/x`). Pass the same org the
+ *        records are emitted with; absent, `@/x` ships as written.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, queries }`
  */
@@ -1354,7 +1367,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //
   // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
-  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids)
+  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, opts.org)
   // Emitted ONLY when the file declares the key — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.
