@@ -145,8 +145,8 @@ describe('checkFoundationResolution', () => {
   it('⭐ agrees on a src layout — package root above, entry generated into src/', () => {
     // THE FALSE POSITIVE this used to raise on the most common layout: two
     // directories (`pkg/`, `pkg/src/`) and one file, because `main` points at
-    // exactly what we generated. Measured on a downstream project 2026-09-10:
-    // it fired for 4 of 5 foundations, all healthy.
+    // exactly what we generated. Measured on a ten-site project 2026-09-10:
+    // it fired for six sites, five of them healthy src/ layouts.
     const { src, site } = srcLayout({ main: './src/_entry.generated.js' })
     expect(checkFoundationResolution({ name: 'pkg', generatedInto: src, siteRoot: site })).toEqual({ ok: true })
   })

@@ -92,9 +92,10 @@ export function findPackageDir(name, fromDir) {
  * asked a different one and got it wrong for the most common layout there is: a
  * package rooted at `foundations/<x>/`, its entry generated into
  * `foundations/<x>/src/`, and `main` pointing there. That is two directories and
- * ONE file. Measured 2026-09-10 on a downstream project: the directory check
- * fired for 4 of 5 foundations, every one healthy, and buried the single
- * genuine case — a pnpm `file:` dependency copied into the store — among them.
+ * ONE file. Measured 2026-09-10 against every site of a ten-site project: the
+ * directory check fired for six — five healthy `src/` layouts, and the single
+ * genuine case, a pnpm `file:` dependency copied into the store, buried among
+ * them. The entry comparison leaves exactly that one.
  * A warning that fires on healthy projects is the failure this module's own
  * header warns against.
  *
