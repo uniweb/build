@@ -126,10 +126,13 @@ function walkEntityAssets(node, visitor) {
 //
 //     ⚠️ **This bullet used to justify itself with "no deployment emits
 //     `config.assets.url` yet". FALSIFIED 2026-08-18** by the backend lane:
-//     `serve` publishes the pattern **unconditionally**, falling back to the
-//     direct form, so a deployment with no asset storage emits the honest
-//     `/gateway/asset/dist/{id}/base.{ext}` rather than nothing (measured by
-//     them on a running daemon, not read off a type). ⛔ Scoped to deployments
+//     `serve` publishes the pattern **unconditionally**, falling back to a
+//     direct form, so a deployment with no asset storage emits a pattern rather
+//     than nothing (measured by them on a running daemon, not read off a type).
+//     ⛔ This named that direct form `/gateway/asset/dist/{id}/base.{ext}` until
+//     2026-09-10, and there is no such route [Diego] — the name had spread into
+//     tests and kb as if it were THE serve URL. A serve URL is whatever the host
+//     returns; nothing here depends on its shape. ⛔ Scoped to deployments
 //     running code from 2026-08-17 or later; an older one emits nothing, and
 //     absent stays absent. A present-tense negative about someone else's
 //     deployments is the claim nothing in this repo can ever contradict — it

@@ -33,20 +33,20 @@ import {
   removeYamlScalar,
 } from '../src/uwx/index.js'
 
-// What an upload plan hands back for each project image…
-const SERVED = {
-  '/images/card.png': '/gateway/asset/dist/aaaa/base.png',
-  '/f.png': '/gateway/asset/dist/bbbb/base.png',
-  '/og.png': '/gateway/asset/dist/cccc/base.png',
-  '/page-og.png': '/gateway/asset/dist/dddd/base.png',
-  '/param.png': '/gateway/asset/dist/eeee/base.png',
-}
-// …and what the push records from it in assets.json.
+// Stand-ins for what an upload plan hands back. A real serve URL is whatever the host
+// returns, read verbatim — nothing here depends on its shape, so these are deliberately
+// not shaped like any host's route. Both an absolute and an origin-relative form occur.
+const ASSETS = [
+  ['/images/card.png', 'a1', 'https://assets.example/a1'],
+  ['/f.png', 'b2', 'https://assets.example/b2'],
+  ['/og.png', 'c3', '/served/c3'],
+  ['/page-og.png', 'd4', '/served/d4'],
+  ['/param.png', 'e5', '/served/e5'],
+]
+const SERVED = Object.fromEntries(ASSETS.map(([ref, , url]) => [ref, url]))
+// …and what the push records from them in assets.json.
 const IDS = Object.fromEntries(
-  Object.entries(SERVED).map(([ref, url]) => [
-    ref,
-    { id: url.split('/')[4], ext: 'png', served: servedFingerprint(url) },
-  ])
+  ASSETS.map(([ref, id, url]) => [ref, { id, ext: 'png', served: servedFingerprint(url) }])
 )
 
 const DIRS = []
@@ -119,9 +119,9 @@ describe('bare-string asset references', () => {
   })
 
   it('a URL the map has no fingerprint for stays as the URL that works', () => {
-    const doc = { info: { favicon: '/gateway/asset/dist/ffff/base.png' } }
+    const doc = { info: { favicon: 'https://assets.example/ff' } }
     const stats = restoreAssetRefs(doc, IDS)
-    expect(doc.info.favicon).toBe('/gateway/asset/dist/ffff/base.png')
+    expect(doc.info.favicon).toBe('https://assets.example/ff')
     expect(stats.restored).toBe(0)
   })
 })
@@ -143,7 +143,7 @@ describe('assets.json — the served fingerprint', () => {
   it('is a hash, never the URL, and is stable', () => {
     const fp = servedFingerprint(SERVED['/f.png'])
     expect(fp).toMatch(/^sha256:[0-9a-f]{16}$/)
-    expect(fp).not.toContain('gateway')
+    expect(fp).not.toContain('assets.example')
     expect(servedFingerprint(SERVED['/f.png'])).toBe(fp)
   })
 
