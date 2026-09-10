@@ -244,6 +244,7 @@ export async function defineSiteConfig(options = {}) {
         const agreement = checkFoundationResolution({
           name: foundationInfo.name,
           generatedInto: srcDir,
+          generatedEntry: entryPath,
           siteRoot,
         })
         if (!agreement.ok) console.warn(`\n${agreement.message}\n`)

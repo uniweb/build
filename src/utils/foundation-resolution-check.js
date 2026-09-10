@@ -59,7 +59,7 @@
  * consulted. That is the step whose answer we need.
  */
 
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, parse } from 'node:path'
 
 /**
@@ -86,6 +86,49 @@ export function findPackageDir(name, fromDir) {
 }
 
 /**
+ * Does Vite's resolution of this package land on the very file we generated?
+ *
+ * ⭐ **This is the question the check exists to ask.** Comparing DIRECTORIES
+ * asked a different one and got it wrong for the most common layout there is: a
+ * package rooted at `foundations/<x>/`, its entry generated into
+ * `foundations/<x>/src/`, and `main` pointing there. That is two directories and
+ * ONE file. Measured 2026-09-10 on a downstream project: the directory check
+ * fired for 4 of 5 foundations, every one healthy, and buried the single
+ * genuine case — a pnpm `file:` dependency copied into the store — among them.
+ * A warning that fires on healthy projects is the failure this module's own
+ * header warns against.
+ *
+ * ⛔ **True only when the match is PROVEN** — both files exist and realpath to
+ * one place. Any failure to resolve returns false, so the caller reports the
+ * directory disagreement rather than silencing it: a copy with no entry, or one
+ * carrying a stale entry of its own, is still caught.
+ *
+ * Follows what Vite reads for a bare specifier: `exports['.']` (a string, or its
+ * `import`/`default` condition), else `main`, else `index.js`.
+ */
+function resolvesToSameEntry(generatedEntry, packageDir) {
+  let pkg
+  try {
+    pkg = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'))
+  } catch {
+    return false
+  }
+  const pick = (v) =>
+    typeof v === 'string' ? v : v && typeof v === 'object' ? pick(v.import ?? v.default) : null
+  const exp = pkg.exports
+  let rel = null
+  if (typeof exp === 'string') rel = exp
+  else if (exp && typeof exp === 'object') rel = pick('.' in exp ? exp['.'] : exp)
+  rel ??= typeof pkg.main === 'string' ? pkg.main : null
+  rel ??= 'index.js'
+  try {
+    return realpathSync(generatedEntry) === realpathSync(join(packageDir, rel))
+  } catch {
+    return false
+  }
+}
+
+/**
  * Compare where we generated the foundation entry against where vite will look.
  *
  * ⭐ **Silence is deliberate when the package is not found at all.** Not every
@@ -100,9 +143,11 @@ export function findPackageDir(name, fromDir) {
  * @param {string} args.name - the foundation's declared name (the bare specifier)
  * @param {string} args.generatedInto - the directory we wrote `_entry.generated.js` to
  * @param {string} args.siteRoot - where vite resolves the bare specifier from
+ * @param {string} [args.generatedEntry] - the entry file we wrote; defaults to
+ *   `_entry.generated.js` inside `generatedInto`
  * @returns {{ ok: true } | { ok: false, ours: string, theirs: string, message: string }}
  */
-export function checkFoundationResolution({ name, generatedInto, siteRoot }) {
+export function checkFoundationResolution({ name, generatedInto, siteRoot, generatedEntry }) {
   const theirsRaw = findPackageDir(name, siteRoot)
   if (!theirsRaw) return { ok: true }
 
@@ -117,6 +162,13 @@ export function checkFoundationResolution({ name, generatedInto, siteRoot }) {
   }
 
   if (ours === theirs) return { ok: true }
+
+  // Two directories are not two foundations. When the package Vite reaches
+  // resolves to the entry file we generated, the build reads what we wrote —
+  // the `src/` layout, where the entry sits one level below the package root.
+  if (resolvesToSameEntry(generatedEntry ?? join(generatedInto, '_entry.generated.js'), theirsRaw)) {
+    return { ok: true }
+  }
 
   return {
     ok: false,

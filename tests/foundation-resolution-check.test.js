@@ -125,4 +125,71 @@ describe('checkFoundationResolution', () => {
     expect(message).toContain('vite will import it from')
     expect(message).toContain('SUCCEEDS against the wrong foundation')
   })
+
+  /**
+   * A src-layout foundation: package root `<root>/pkg`, entry generated into
+   * `<root>/pkg/src`. `link: false` leaves node_modules empty for the caller.
+   */
+  function srcLayout(pkgJson, { link = true } = {}) {
+    const pkg = join(root, 'pkg')
+    const src = join(pkg, 'src')
+    const site = join(root, 'site')
+    mkdirSync(src, { recursive: true })
+    mkdirSync(join(site, 'node_modules'), { recursive: true })
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'pkg', ...pkgJson }))
+    writeFileSync(join(src, '_entry.generated.js'), 'export default {}\n')
+    if (link) symlinkSync('../../pkg', join(site, 'node_modules', 'pkg'))
+    return { pkg, src, site }
+  }
+
+  it('⭐ agrees on a src layout — package root above, entry generated into src/', () => {
+    // THE FALSE POSITIVE this used to raise on the most common layout: two
+    // directories (`pkg/`, `pkg/src/`) and one file, because `main` points at
+    // exactly what we generated. Measured on a downstream project 2026-09-10:
+    // it fired for 4 of 5 foundations, all healthy.
+    const { src, site } = srcLayout({ main: './src/_entry.generated.js' })
+    expect(checkFoundationResolution({ name: 'pkg', generatedInto: src, siteRoot: site })).toEqual({ ok: true })
+  })
+
+  it("honours exports['.'] over main, as vite does", () => {
+    const { src, site } = srcLayout({ main: './nope.js', exports: { '.': './src/_entry.generated.js' } })
+    expect(checkFoundationResolution({ name: 'pkg', generatedInto: src, siteRoot: site })).toEqual({ ok: true })
+  })
+
+  it('follows a conditional export to its import/default target', () => {
+    const { src, site } = srcLayout({ exports: { '.': { import: './src/_entry.generated.js' } } })
+    expect(checkFoundationResolution({ name: 'pkg', generatedInto: src, siteRoot: site })).toEqual({ ok: true })
+  })
+
+  it('⛔ still reports a src layout whose main points somewhere ELSE', () => {
+    // At a built dist/, say: vite then imports a file we did not generate, so
+    // edits never reach the site. Same two directories as the passing case —
+    // the entry is what decides.
+    const { pkg, src, site } = srcLayout({ main: './dist/entry.js' })
+    mkdirSync(join(pkg, 'dist'))
+    writeFileSync(join(pkg, 'dist', 'entry.js'), 'export default {}\n')
+    expect(checkFoundationResolution({ name: 'pkg', generatedInto: src, siteRoot: site }).ok).toBe(false)
+  })
+
+  it('⛔ still reports a COPY carrying an entry of its own — the pnpm file: case', () => {
+    // What a `file:` dependency with peers becomes under pnpm: a copy in the
+    // store, holding a perfectly valid — and STALE — _entry.generated.js. Both
+    // files exist and resolve; they are simply different files.
+    const { src, site } = srcLayout({ main: './src/_entry.generated.js' }, { link: false })
+    const copy = join(site, 'node_modules', 'pkg')
+    mkdirSync(join(copy, 'src'), { recursive: true })
+    writeFileSync(join(copy, 'package.json'), JSON.stringify({ name: 'pkg', main: './src/_entry.generated.js' }))
+    writeFileSync(join(copy, 'src', '_entry.generated.js'), 'export default { stale: true }\n')
+    expect(checkFoundationResolution({ name: 'pkg', generatedInto: src, siteRoot: site }).ok).toBe(false)
+  })
+
+  it('uses the generated entry path it is given, not a guessed filename', () => {
+    const { src, site } = srcLayout({ main: './src/custom-entry.js' })
+    writeFileSync(join(src, 'custom-entry.js'), 'export default {}\n')
+    expect(
+      checkFoundationResolution({
+        name: 'pkg', generatedInto: src, siteRoot: site, generatedEntry: join(src, 'custom-entry.js'),
+      })
+    ).toEqual({ ok: true })
+  })
 })
