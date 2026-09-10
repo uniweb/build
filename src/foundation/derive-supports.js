@@ -133,6 +133,30 @@ function isResolveServiceCall(node) {
   return false
 }
 
+/**
+ * A `.isServiceEnabled(name)` call on anything.
+ *
+ * ⛔ **Its name argument is at index 0, not 1.** `resolveService(website, name)`
+ * passes the website first; the method form has already bound it as the
+ * receiver. Reading index 1 here would find `undefined`, fall to the blind
+ * branch, and under-report `uniweb.supports` with a warning nobody is watching
+ * for — which is why `derive-supports.test.js` asserts a foundation calling
+ * `isSubmitEnabled()` derives `submit`.
+ *
+ * ⭐ This is how every `@uniweb/kit` service predicate is seen: they compile to
+ * `website.isServiceEnabled('<name>')`, and kit is bundled into the foundation,
+ * so the literal survives the shake. One matcher covers all of them — the name
+ * is an argument, so the family does not grow a rule per service.
+ */
+function isServiceEnabledCall(node) {
+  return (
+    node.type === 'CallExpression' &&
+    node.callee?.type === 'MemberExpression' &&
+    !node.callee.computed &&
+    node.callee.property?.name === 'isServiceEnabled'
+  )
+}
+
 /** A `.isSearchEnabled()` call on anything. */
 function isSearchEnabledCall(node) {
   return (
@@ -164,6 +188,11 @@ function collectSurvivors(bundle) {
 /**
  * Derive the services this foundation reaches for.
  *
+ * Three call shapes are read, and two of them carry the name as an argument so
+ * they cover the open registry without a rule per service:
+ * `resolveService(website, name)`, `website.isServiceEnabled(name)` (what every
+ * `@uniweb/kit` predicate compiles to), and the two hand-written gates below.
+ *
  * @param {object} bundle - Rollup's bundle, as handed to `writeBundle`
  * @param {object} ctx - the Rollup plugin context (`this` in the hook)
  * @returns {{services: string[], blind: boolean, blindAt: string[]}}
@@ -191,9 +220,12 @@ export function deriveSupports(bundle, ctx) {
         services.add('search')
         return
       }
-      if (!isResolveServiceCall(node)) return
+      const isMethod = isServiceEnabledCall(node)
+      if (!isMethod && !isResolveServiceCall(node)) return
 
-      const arg = node.arguments?.[1]
+      // The name is argument 0 on the method (the website is the receiver) and
+      // argument 1 on the free function. Getting this wrong under-reports.
+      const arg = node.arguments?.[isMethod ? 0 : 1]
       if (typeof arg?.value === 'string') {
         services.add(arg.value)
       } else if (arg?.type === 'Identifier' && consts.has(arg.name)) {

@@ -71,6 +71,19 @@ describe('deriveSupports — over real framework source', () => {
     expect(blind).toBe(false)
   })
 
+  test('a kit predicate derives its service — the method form, name at argument 0', () => {
+    // ⛔ THE OFF-BY-ONE THIS EXISTS FOR. `resolveService(website, name)` carries
+    // the name at argument 1; `website.isServiceEnabled(name)` carries it at 0,
+    // because the website is the receiver. Reading the wrong index does not
+    // throw — it finds `undefined`, falls to the blind branch, and publishes a
+    // `uniweb.supports` short by however many services the foundation uses.
+    const { bundle, ctx } = graphOf([realModule('kit/src/utils/servicePredicates.js')])
+    const { services, blind } = deriveSupports(bundle, ctx)
+
+    expect(services).toEqual(['api', 'assistant', 'search', 'submit', 'tracking'])
+    expect(blind).toBe(false)
+  })
+
   test('the tracking gate is module presence — it routes through no literal', () => {
     const { bundle, ctx } = graphOf([realModule('kit/src/hooks/useTracker.js')])
     expect(deriveSupports(bundle, ctx).services).toContain('tracking')

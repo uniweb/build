@@ -23,7 +23,8 @@ import {
   translateRecordData,
   RECORDS_DIR
 } from './records.js'
-import { generateSearchIndex, isSearchEnabled } from '@uniweb/projections'
+import { generateSearchIndex } from '@uniweb/projections'
+import { searchDeclaredOn } from '../site/plugin.js'
 
 // Free-form translation support
 import {
@@ -400,7 +401,7 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
     outputs[locale] = { content: contentOutputPath }
 
     // Generate search index for this locale if search is enabled
-    if (generateSearchIndexes && isSearchEnabled(translated)) {
+    if (generateSearchIndexes && searchDeclaredOn(translated)) {
       const searchConfig = translated.config?.search || {}
       const searchIndex = generateSearchIndex(translated, {
         locale,
