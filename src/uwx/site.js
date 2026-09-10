@@ -1212,16 +1212,18 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // a bug fix.
   //
   // ⭐ `api` is the one service a site does not AUTHOR. It is a real backend that is
-  // provisioned and paid for, so its address is the host's to supply — it arrives as
+  // provisioned, so its address is the host's to supply — it arrives as
   // `config.services.api` and `@uniweb/api` reads it there (`resolveBase`). An
-  // authored `api:` is the SITE tier, which outranks the host permanently.
+  // authored `api:` is the SITE tier: it yields to a host that offers the service,
+  // and is the answer wherever one does not.
   //
-  // ⇒ Carrying it would turn a local-dev override into a production one the moment
-  // someone pushed: the host would store `info.api` and serve it back as `config.api`,
-  // which wins over the address of the backend the site actually has. The vanish on
-  // this lane is the correct behaviour, not the bug the comments above describe —
-  // there, a dropped block leaves a site with NO endpoint; here it leaves the site
-  // with the RIGHT one.
+  // ⇒ Carrying it would turn a local-dev address into a production one the moment
+  // someone pushed: the host would store `settings.api` and serve it back as
+  // `config.api`, and a site with no `api` service of its own would draw sign-in
+  // against an address nobody answers — where the absence would have drawn
+  // nothing. The vanish on this lane is the correct behaviour, not the bug the
+  // comments above describe — there, a dropped block leaves a site with NO
+  // endpoint; here it leaves the site with the RIGHT answer.
   //
   // The provisioned record rides the `$services` section instead (see servicesNested).
   // ⭐ DESUGARED, like every other tier. `data:` is the shorthand for `fetch:`
