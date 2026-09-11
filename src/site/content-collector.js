@@ -973,27 +973,16 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // Extract @ component references → insets (mutates doc)
   const insets = extractInsets(proseMirrorContent)
 
-  // `data:` shorthand — `data: team` → `fetch: { query: team }`.
+  // `data:` shorthand — `data: team` → `fetch: { query: team }`. A list means
+  // "fetch each": `data: [team, articles]` yields one config per name, each
+  // delivered under its own `content.data` key (the same helper every level uses).
+  // ⚠️ This said a list kept only `[0]` — true until the helper learned lists on
+  // 2026-09-02, and left standing after.
   //
-  // ⛔ **A LIST KEEPS ONLY `[0]`. THE REST ARE INERT.** This comment used to say
-  // *"others via inheritData"*, and that is wrong in a way worth spelling out,
-  // because it read as a mechanism and was copied into a second doc as one.
-  //
-  // `inheritData` is a BOOLEAN OPT-OUT on a section's `meta.js`
-  // (`meta.inheritData === false` → deliver nothing). It never consumed list
-  // elements. What actually happens is that delivery is default-on and
-  // collect-all: `EntityStore._getRequestedSchemas` returns `[]`, so a section
-  // receives EVERY fetch config in the section → page → site cascade whether or
-  // not it named any of them.
-  //
-  // ⇒ So `articles` arrives only if something ELSE already declared a fetch for
-  // it — in which case this section would have received it anyway. **Naming it
-  // here contributes nothing.** Measured 2026-09-02: `data: [team, articles]`
-  // with no other declaration yields exactly one config, `team`, and the array
-  // is not carried forward on the section, so nothing downstream can recover it.
-  //
-  // ⚠️ The list form appears in no `docs/` page, so nothing promises it works.
-  // Whether it should mean "fetch each" or be refused outright is undecided.
+  // Unrelated to a section type's `meta.js` `data:`, which declares the SHAPE of
+  // each `content.data` key (a schema hint) and fetches nothing: delivery is
+  // default-on, so a section receives every fetch in the section → page → site
+  // cascade whether or not it names one there.
   const resolvedFetch = fetch || fetchFromDataShorthand(data)
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null
