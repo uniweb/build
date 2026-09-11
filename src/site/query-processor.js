@@ -54,8 +54,8 @@ import { join, basename, extname, dirname, relative, resolve, sep } from 'node:p
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
-import { DATA_DIR, fillRoutePattern } from '@uniweb/core'
-import { applyWhere, applySort } from './data-fetcher.js'
+import { DATA_DIR, fillRoutePattern, applyScope, withoutRouteVariables } from '@uniweb/core'
+import { applyWhere, applySort, refuseUnder } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, FOLDER_MISSING } from './records-config.js'
@@ -113,6 +113,7 @@ function parseQueryConfig(name, config) {
       schema: config,
       url: null,
       route: null,
+      scope: null,
       sort: null,
       where: null,
       filter: null,
@@ -122,6 +123,7 @@ function parseQueryConfig(name, config) {
     }
   }
 
+  refuseUnder(config.where, `queries.${name}`)
   return {
     name,
     // The query's schema selects its records from the pool — `entities/{schema}/`
@@ -129,6 +131,9 @@ function parseQueryConfig(name, config) {
     schema: config.schema || null,
     url: config.url || null,
     route: config.route || null,
+    // The folder branch the query reads (`records.yml` placement). ⛔ Not read
+    // here until 2026-09-11: a named query's `scope` was ignored on this lane.
+    scope: typeof config.scope === 'string' ? config.scope : null,
     sort: config.sort || null,
     // `where:` is the CANONICAL predicate; `filter:` is the deprecated string DSL
     // it replaced. Both are carried and both are applied below, in the same order
@@ -673,6 +678,19 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // Filter out nulls (unpublished items)
   items = items.filter(Boolean)
 
+  // ⭐ `$name` IS THE RECORD HANDLE ON EVERY SITE (ruled 2026-09-11 [Diego]) — the
+  // field a `[slug]` or `[...path]` page matches, and the one the records service
+  // serves. It is the record's FINAL slug: set here, after every format has been
+  // read and flattened, so a frontmatter `slug:` (which wins over the filename),
+  // a BibTeX cite key and an array-form file's own `slug` all count — exactly what
+  // our sync sends as the entry's name (`uwx/entity-source.js`). `slug` stays:
+  // foundations and templates read it.
+  items = items.map((item) => (
+    item && typeof item === 'object' && item.slug !== undefined && item.slug !== null && item.slug !== ''
+      ? { ...item, $name: String(item.slug) }
+      : item
+  ))
+
   warnDuplicateSlugs(items, config.name)
 
   // `route:` on the query — bake each record's canonical href.
@@ -711,8 +729,17 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // the sync wire, stored — and never applied, while the DEPRECATED one it replaced
   // worked. An author following current guidance got silence and shipped unfiltered
   // data. Pinned by `tests/collection-query-terms.test.js`.
-  if (config.where) {
-    items = applyWhere(items, config.where)
+  // ⭐ ONLY WHAT IS FIXED FOR EVERY PAGE. A clause bound to the route — `scope: :dir`,
+  // `where: { tag: :dir }` — cannot be applied to a file written once for every
+  // page; the runtime binds it per page (`@uniweb/core/fetch-config`,
+  // `resolveQuerySource`). ⛔ Until 2026-09-11 it was applied here to the literal
+  // `':dir'`, and the query compiled to no records (measured).
+  const fixed = withoutRouteVariables({ where: config.where, scope: config.scope })
+  if (fixed.scope) {
+    items = applyScope(items, fixed.scope)
+  }
+  if (fixed.where) {
+    items = applyWhere(items, fixed.where)
   }
 
   // Apply sort

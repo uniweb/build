@@ -11,7 +11,19 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { resolveDefaultLocale, resolveFetchConfigs, joinPathCapture, splitPathCapture } from '@uniweb/core'
+import {
+  resolveDefaultLocale,
+  resolveFetchConfigs,
+  joinPathCapture,
+  routeQuery,
+  sectionFetches,
+  routeParamValue,
+  routeParamName,
+  routeBinding,
+  parentRouteOf,
+  deriveCacheKey,
+} from '@uniweb/core'
+import { routePatternToRegex } from '@uniweb/core/route-match'
 import { executeFetch, mergeDataIntoContent, toFetchList, stripBuildOnlyFetchKeys } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -76,7 +88,9 @@ export function resolveExtensionPath(url, distDir, projectRoot, base) {
  * @param {string} [localeInfo.locale] - Active locale code
  * @param {string} [localeInfo.defaultLocale] - Default locale code
  * @param {string} [localeInfo.distDir] - Path to dist directory (where locale-specific data lives)
- * @returns {Object} { pageFetchedData, fetchedData } - Fetched data for dynamic route expansion and DataStore pre-population
+ * @returns {Object} { fetched, fetchedData, bake } - what each level fetched, by binding key
+ *   (for parametric-page expansion); the entries for DataStore pre-population; and a
+ *   baker for the views a concrete parametric page binds to its route
  */
 export async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
   const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
@@ -111,6 +125,8 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     : fetchOptions
   const optionsFor = (cfg, oneFetch) => (cfg.path !== oneFetch.path ? localizedFetchOptions : fetchOptions)
   const entry = (cfg, data, scope) => ({ config: cfg, data, meta: { whole: cfg.whole }, _scope: scope })
+  // What each level fetched, by binding key — what `expandDynamicPages` iterates.
+  const fetched = { site: new Map(), pages: new Map(), sections: new Map() }
 
   // 1. Site-level fetch. ⛔ `toFetchList` rather than a property read: a `fetch:`
   // or `data:` LIST parses to an array, and `siteFetch.prerender` on one is
@@ -122,11 +138,22 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     const result = await executeFetch(cfg, optionsFor(cfg, oneFetch))
     if (result.data && !result.error) {
       fetchedData.push(entry(cfg, result.data, '__site__'))
+      if (!fetched.site.has(oneFetch.as)) fetched.site.set(oneFetch.as, result.data)
     }
   }
 
-  // 2. Process each page and track fetched data by route
-  const pageFetchedData = new Map()
+  // 2. Process each page and track fetched data by route and binding key. ⭐ EVERY
+  // key, at every level — the static build expands a parametric page over the
+  // data of its ROUTE QUERY, which may be the page's own, its parent's, the site's
+  // or its sections' (`routeQuery`). ⛔ Until 2026-09-11 this kept only the FIRST
+  // prerendered fetch per page, while the collector named the first DECLARED one
+  // as `parentSchema`: a page whose first query was `prerender: false` expanded
+  // over its second and baked that key, and the SPA narrowed the first.
+  const keep = (byRoute, route, as, data) => {
+    const m = byRoute.get(route) ?? new Map()
+    if (!m.has(as)) m.set(as, data)
+    byRoute.set(route, m)
+  }
 
   for (const page of siteContent.pages || []) {
     // Page-level fetch — every declaration on the page.
@@ -137,34 +164,44 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
       const result = await executeFetch(cfg, optionsFor(cfg, oneFetch))
       if (result.data && !result.error) {
         fetchedData.push(entry(cfg, result.data, page.route))
-        // ⚖️ Dynamic-route expansion consumes ONE query — a `[slug]` template
-        // expands over a single record set. With several declared, the first
-        // that prerenders is the route query, matching `parentSchema` in the
-        // collector; `expandDynamicPages` is what reads this back.
-        if (!pageFetchedData.has(page.route)) {
-          pageFetchedData.set(page.route, {
-            schema: oneFetch.as,
-            data: result.data,
-          })
-        }
+        keep(fetched.pages, page.route, oneFetch.as, result.data)
       }
     }
 
     // Process section-level fetches (own fetch → parsedContent.data, not cascaded)
-    await processSectionFetches(page.sections, fetchOptions, onProgress)
+    await processSectionFetches(page.sections, fetchOptions, onProgress, (as, data) => keep(fetched.sections, page.route, as, data))
   }
 
-  return { pageFetchedData, fetchedData }
+  /**
+   * Bake one config the runtime resolved — a view a concrete parametric page binds
+   * to its route — under that page's route, so split-mode pages embed it. Local
+   * files only: a remote `url:` is the browser's, as it is by default.
+   */
+  const bake = async (cfg, route) => {
+    if (cfg.prerender === false || typeof cfg.path !== 'string') return false
+    const options = isNonDefaultLocale && cfg.path.startsWith(`/${localeInfo.locale}/`) ? localizedFetchOptions : fetchOptions
+    const result = await executeFetch(cfg, options)
+    if (!result.data || result.error) return false
+    fetchedData.push(entry(cfg, result.data, route))
+    return true
+  }
+
+  return { fetched, fetchedData, bake }
 }
 
 /**
- * Expand dynamic pages into concrete pages based on fetched data
- * A dynamic page like /blog/:slug with parent data [{ slug: 'post-1' }, { slug: 'post-2' }]
- * becomes /blog/post-1 and /blog/post-2
+ * Expand parametric pages into concrete pages over their route query's records.
+ * A parametric page like /blog/:slug whose route query holds
+ * [{ slug: 'post-1' }, { slug: 'post-2' }] becomes /blog/post-1 and /blog/post-2.
  *
  * @param {Array} pages - Original pages array
- * @param {Map} pageFetchedData - Map of route -> { schema, data }
+ * @param {{ site?: Map, pages?: Map, sections?: Map }} fetched - what each level
+ *   fetched, by binding key (`executeAllFetches`): `site` key → data; `pages` and
+ *   `sections` route → (key → data)
  * @param {function} onProgress - Progress callback
+ * @param {Object} [stats] - receives `unrouted[route]`, the records with no param value
+ * @param {Object} [options]
+ * @param {Object|Array|null} [options.siteFetch] - the site's `fetch`, the last level of a route query
  * @returns {Array} Expanded pages array with dynamic pages replaced by concrete instances
  */
 /**
@@ -202,7 +239,7 @@ export function localizeRedirectTarget(target, { website, locale, isDefault, rou
   return (website.basePath || '') + withSlash
 }
 
-export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}, stats = { unrouted: {} }) {
+export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats = { unrouted: {} }, { siteFetch = null } = {}) {
   if (!stats.unrouted) stats.unrouted = {}
   const expandedPages = []
 
@@ -216,6 +253,13 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
   const staticRoutes = new Set(
     pages.filter((p) => !p.isDynamic).map((p) => p.route)
   )
+  const byRoute = new Map(pages.filter((p) => p?.route).map((p) => [p.route, p]))
+  const has = (route) => byRoute.has(route)
+  const levels = {
+    site: fetched?.site ?? new Map(),
+    pages: fetched?.pages ?? new Map(),
+    sections: fetched?.sections ?? new Map(),
+  }
 
   for (const page of pages) {
     if (!page.isDynamic) {
@@ -224,33 +268,55 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
       continue
     }
 
-    // Dynamic page - expand based on parent's data
-    const { paramName, parentSchema } = page
+    // ⭐ THE ROUTE QUERY, by the rule every lane reads it with (`routeQuery`,
+    // `@uniweb/core/fetch-config`), off the parent every lane finds
+    // (`parentRouteOf`) — the page's own query, its parent's, the site's, or its
+    // sections' shared key. The records it expands over are that query's, at the
+    // level it came from. ⛔ Until 2026-09-11 this read `parentSchema` and always
+    // expanded over the parent route's first prerendered fetch.
+    const parentRoute = parentRouteOf(page.route, { declared: page.parent ?? null, has })
+    const parent = parentRoute ? byRoute.get(parentRoute) : null
+    const route = routeQuery({
+      page: page.fetch,
+      parent: parent?.fetch,
+      site: siteFetch,
+      sections: sectionFetches(page.sections),
+    })
 
-    if (!parentSchema) {
-      onProgress(`  Warning: Dynamic page ${page.route} has no parentSchema, keeping as template for runtime`)
+    if (!route) {
+      onProgress(`  Keeping ${page.route} for runtime — no query for its URL to narrow`)
       expandedPages.push(page)
       continue
     }
 
-    // Find the parent's data
-    // The parent route is the route without the :param (or :path*) suffix
-    const catchAll = /\/:path\*$/.test(page.route)
-    const parentRoute = page.route.replace(/\/:[\w]+\*?$/, '') || '/'
-    const parentData = pageFetchedData.get(parentRoute)
+    const data = route.level === 'page' ? levels.pages.get(page.route)?.get(route.key)
+      : route.level === 'parent' ? levels.pages.get(parentRoute)?.get(route.key)
+        : route.level === 'site' ? levels.site.get(route.key)
+          : levels.sections.get(page.route)?.get(route.key)
 
-    if (!parentData || !Array.isArray(parentData.data)) {
-      // No build-time data available (e.g., prerender: false on parent fetch).
+    if (!Array.isArray(data)) {
+      // No build-time data available (e.g., prerender: false on the route query).
       // Keep the dynamic template so the runtime can match it client-side.
       onProgress(`  Keeping dynamic template ${page.route} for runtime (no build-time data)`)
       expandedPages.push(page)
       continue
     }
 
-    const items = parentData.data
-    const schema = parentData.schema
+    const paramName = routeParamName(page.route, page.paramName)
+    const { paramNames, catchAll } = routePatternToRegex(page.route)
 
-    onProgress(`  Expanding ${page.route} → ${items.length} pages from ${schema}`)
+    // A route with a parameter the records cannot fill — `/orgs/:org/members/:slug`
+    // expanded over one query knows no `org` — is matched in the browser.
+    if (paramNames.length > 1) {
+      onProgress(`  Keeping ${page.route} for runtime — it has more than one route parameter`)
+      expandedPages.push(page)
+      continue
+    }
+
+    const items = data
+    const key = route.key
+
+    onProgress(`  Expanding ${page.route} → ${items.length} pages from ${key}`)
 
     // ⛔ COUNTED, not only logged per record. A record with no value for the
     // route's param gets no page — correct — but "Skipping item without slug"
@@ -261,12 +327,15 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
 
     // Create a concrete page for each item
     for (const item of items) {
-      // Get the param value from the item (e.g., item.slug for :slug)
-      const paramValue = item[paramName]
-      if (!paramValue) {
+      // The value the record carries for the route's param — read through the one
+      // map (`routeParamValue`): `[slug]` its handle, `[uuid]` its identity, any
+      // other name its field. ⛔ This read `item[paramName]` until 2026-09-11.
+      const raw = routeParamValue(item, paramName)
+      if (raw === undefined || raw === null || raw === '') {
         unrouted += 1
         continue
       }
+      const paramValue = String(raw)
 
       // Create concrete route: /blog/:slug → /blog/my-post. Under `[...path]` the
       // record's URL is its placement (the folder `records.yml` put it in, carried
@@ -274,7 +343,7 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
       // decoded: the server decodes the request before looking the file up.
       const capture = catchAll ? joinPathCapture({ dir: item.path, slug: paramValue }) : null
       const concreteRoute = catchAll
-        ? page.route.replace(/:path\*$/, capture)
+        ? page.route.replace(new RegExp(`:${catchAll}\\*$`), capture)
         : page.route.replace(`:${paramName}`, paramValue)
 
       // Static sibling wins: skip a record whose concrete route collides with
@@ -289,24 +358,21 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
       concretePage.route = concreteRoute
       concretePage.isDynamic = false // No longer dynamic
       concretePage.paramName = undefined
-      concretePage.parentSchema = undefined
 
-      // Store the dynamic route context for runtime data resolution. Only the
-      // keys the runtime actually uses — the entity cascade re-finds the record
-      // from the fetched collection by paramName/paramValue/schema. The record
-      // (`currentItem`) and the full sibling list (`allItems`) are deliberately
-      // NOT baked in: nothing reads them (the documented dynamicContext shape is
-      // { paramName, paramValue, schema }; the record is delivered via
-      // content.data and siblings via `fetch: { refine: true, detail: false }`),
+      // The route's binding, as the SPA makes it (`routeBinding`): the three
+      // variables a query binds, the param and its value, and the template's
+      // route. ⛔ No `schema`: the key the URL narrows is worked out where it is
+      // read (deleted 2026-09-11). The record (`currentItem`) and the full sibling
+      // list (`allItems`) are deliberately NOT baked in: the record is delivered
+      // via content.data and siblings via `fetch: { refine: true, detail: false }`,
       // and embedding `allItems` duplicated the whole collection onto every
       // prerendered page in split mode.
+      const binding = routeBinding(page.route, catchAll ? { [catchAll]: capture } : { [paramName]: paramValue }, paramName)
       concretePage.dynamicContext = {
-        paramName,
-        paramValue,
-        schema,           // Plural: 'articles'
-        // A catch-all page carries its three variables, so a query binding
-        // `:dir` or `:path` resolves the same way it does in the browser.
-        ...(catchAll ? { params: splitPathCapture(capture) } : {}),
+        templateRoute: page.route,
+        params: binding.variables,
+        paramName: binding.paramName,
+        paramValue: binding.paramValue,
       }
 
       // Use item data for page metadata if available
@@ -319,7 +385,7 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
     if (unrouted > 0) {
       stats.unrouted[page.route] = unrouted
       onProgress(
-        `  ⚠️ ${unrouted} of ${items.length} ${schema} records have no "${paramName}" — no page was ` +
+        `  ⚠️ ${unrouted} of ${items.length} ${key} records have no "${paramName}" — no page was ` +
           `generated for them under ${page.route}`
       )
     }
@@ -336,7 +402,7 @@ export function expandDynamicPages(pages, pageFetchedData, onProgress = () => {}
  * @param {Object} fetchOptions - Options for executeFetch
  * @param {function} onProgress - Progress callback
  */
-async function processSectionFetches(sections, fetchOptions, onProgress) {
+async function processSectionFetches(sections, fetchOptions, onProgress, record = null) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
@@ -348,6 +414,9 @@ async function processSectionFetches(sections, fetchOptions, onProgress) {
       onProgress(`  Fetching section data: ${sectionFetch.path || sectionFetch.url}`)
       const result = await executeFetch(sectionFetch, fetchOptions)
       if (result.data && !result.error) {
+        // What a section fetched, by key — the route query of a parametric page
+        // whose sections alone declare it (`routeQuery`).
+        if (record) record(sectionFetch.as, result.data)
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           result.data,
@@ -359,7 +428,7 @@ async function processSectionFetches(sections, fetchOptions, onProgress) {
 
     // Process subsections recursively
     if (section.subsections && section.subsections.length > 0) {
-      await processSectionFetches(section.subsections, fetchOptions, onProgress)
+      await processSectionFetches(section.subsections, fetchOptions, onProgress, record)
     }
   }
 }
@@ -607,6 +676,7 @@ export async function prerenderSite(siteDir, options = {}) {
     prefetchIcons,
     createPageRenderer,
     generate404Html,
+    resolvePageFetchConfigs,
   } = await import('@uniweb/runtime/ssr')
 
   // Load default site content
@@ -674,7 +744,7 @@ export async function prerenderSite(siteDir, options = {}) {
     // For non-default locales, collection data is read from dist/{locale}/data/
     onProgress('Executing data fetches...')
     const defaultLocale = resolveDefaultLocale(defaultSiteContent.config)
-    const { pageFetchedData, fetchedData } = await executeAllFetches(
+    const { fetched, fetchedData, bake } = await executeAllFetches(
       siteContent, siteDir, onProgress,
       { locale, defaultLocale, distDir }
     )
@@ -690,7 +760,31 @@ export async function prerenderSite(siteDir, options = {}) {
     // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
     if (siteContent.pages?.some(p => p.isDynamic)) {
       onProgress('Expanding dynamic routes...')
-      siteContent.pages = expandDynamicPages(siteContent.pages, pageFetchedData, onProgress)
+      const templates = { ...siteContent, pages: siteContent.pages }
+      siteContent.pages = expandDynamicPages(siteContent.pages, fetched, onProgress, undefined, {
+        siteFetch: siteContent.config?.fetch ?? null,
+      })
+
+      // ⭐ AN EXPANDED PAGE ASKS FOR WHAT ITS ROUTE BINDS. Its sections read views
+      // no list page asked for — `scope: :dir` bound to its branch, a `deferred:`
+      // query's per-record file — and those are resolved here by the RUNTIME's own
+      // rule for a page (`resolvePageFetchConfigs`, the one a host's prefetch
+      // calls, matched against the parametric page it came from), then read by
+      // this build's executor. So the page renders complete, and the SPA hydrates
+      // the very keys it asks for.
+      const known = new Set(fetchedData.map((e) => deriveCacheKey(e.config)))
+      let baked = 0
+      for (const page of siteContent.pages) {
+        if (!page.dynamicContext) continue
+        for (const cfg of resolvePageFetchConfigs(templates, page.route, { locale })) {
+          const key = deriveCacheKey(cfg)
+          if (known.has(key)) continue
+          known.add(key)
+          if (await bake(cfg, page.route)) baked += 1
+        }
+      }
+      if (baked > 0) onProgress(`  Read ${baked} route-bound view(s) for expanded pages`)
+      siteContent.fetchedData = fetchedData
     }
 
     // Determine whether to split content (after dynamic expansion, after data fetches)

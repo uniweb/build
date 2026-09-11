@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { matchWhere, sortRecords, queryDataUrl } from '@uniweb/core'
+import { matchWhere, sortRecords, queryDataUrl, applyScope } from '@uniweb/core'
 
 /**
  * Infer schema name from path or URL
@@ -115,9 +115,15 @@ export function applyWhere(items, where) {
  */
 export function applyPostProcessing(data, config) {
   if (!data || !Array.isArray(data)) return data
-  if (!config.where && !config.sort && !config.limit) return data
+  if (!config.scope && !config.where && !config.sort && !config.limit) return data
 
   let result = data
+
+  // `scope` first — the folder branch the rest of the query reads, over each
+  // record's placement (`path`), as the runtime's default fetcher applies it.
+  if (typeof config.scope === 'string' && config.scope) {
+    result = applyScope(result, config.scope)
+  }
 
   // Apply where-object predicate first (new path)
   if (config.where) {
@@ -176,14 +182,48 @@ const RECOGNIZED_FETCH_KEYS = {
   // dropped in the one way the author could not see: no warning, and a plausible
   // key inferred from the path in its place. It has its own message below, since
   // "unrecognized" understates a key that used to work.
+  // ⭐ `scope` is recognized since 2026-09-11, when a folder branch became `scope:`
+  // on both lanes and `where: { path: { under } }` was retired in its favour. It
+  // was dropped here as "unrecognized" until then, so a page could not narrow a
+  // query to a branch at all.
   query: new Set([
     'query', 'as', 'prerender', 'merge', 'transform',
-    'where', 'limit', 'sort', 'detailPage',
+    'scope', 'where', 'limit', 'sort', 'detailPage',
   ]),
   source: new Set([
     'path', 'url', 'as', 'prerender', 'merge', 'transform', 'detail',
-    'detailPage', 'where', 'limit', 'sort',
+    'detailPage', 'scope', 'where', 'limit', 'sort',
   ]),
+}
+
+/**
+ * ⛔ `under` IS RETIRED (2026-09-11 [Diego]) — refused, like every retired spelling
+ * here, because an ignored predicate is a silently wrong answer. It existed for
+ * `where: { path: { under: X } }`, a folder branch written before a query had
+ * `scope:`; a branch is `scope: X` now, on both lanes, and the evaluator no longer
+ * knows the operator, so a `where` still carrying it would match nothing.
+ *
+ * @param {Object|undefined} where
+ * @param {string} context - where the declaration sits, for the message
+ */
+export function refuseUnder(where, context) {
+  const walk = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk)
+      return
+    }
+    if (!node || typeof node !== 'object') return
+    for (const [key, value] of Object.entries(node)) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, 'under')) {
+        const instead = key === 'path' && typeof value.under === 'string'
+          ? `Write \`scope: ${JSON.stringify(value.under)}\` — the same folder branch, on every lane.`
+          : 'A folder branch is `scope:`; `under` is no longer an operator.'
+        throw new Error(`[uniweb] ${context}: \`where: { ${key}: { under: … } }\` is retired. ${instead}`)
+      }
+      walk(value)
+    }
+  }
+  walk(where)
 }
 
 // Keys that are neither recognized nor merely unknown: they USED to work, and a
@@ -300,6 +340,7 @@ export function parseFetchConfig(fetch) {
         'per-instance refinement of the ancestor fetch, under its current name.'
     )
   }
+  refuseUnder(fetch.where, 'fetch')
 
   // Refine config: { refine: true, detail: false, limit: 3 }
   // No URL — merges with the parent fetch config at runtime; only carries
@@ -368,7 +409,8 @@ export function parseFetchConfig(fetch) {
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
-      // Query operators
+      // Query operators — a fetch's own override the named query's, per field
+      scope: fetch.scope,
       where: fetch.where,
       limit: fetch.limit,
       sort: fetch.sort,
@@ -389,6 +431,7 @@ export function parseFetchConfig(fetch) {
     detail,
     detailPage,
     // Query operators
+    scope,
     where,
     limit,
     sort,
@@ -413,6 +456,7 @@ export function parseFetchConfig(fetch) {
     // Canonical detail page for a list card's href (page:<stable_id>).
     detailPage,
     // Query operators
+    scope,
     where,
     limit,
     sort,

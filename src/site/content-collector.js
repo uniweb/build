@@ -30,7 +30,7 @@ import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
-import { parseFetchConfig, toFetchList } from './data-fetcher.js'
+import { parseFetchConfig } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
@@ -120,6 +120,51 @@ function extractRouteParam(folderName) {
   if (isCatchAllRoute(folderName)) return 'slug'
   const match = folderName.match(/^\[(\w+)\]$/)
   return match ? match[1] : null
+}
+
+/**
+ * Folders the build refuses on a route, ruled 2026-09-11 [Diego]:
+ *
+ *   - `[dir]` and `[path]` — `:dir` and `:path` are route variables every
+ *     parametric page already has, so a folder by either name would make one
+ *     name mean two values (and `[path]` is most often a mistyped `[...path]`);
+ *   - any folder inside a `[...path]` folder — the catch-all takes the rest of
+ *     the URL, so a page below it has a route (`/docs/:path*\/edit`) that can
+ *     never match. A folder that holds something other than a page is named
+ *     with a leading `_`, which the walk skips.
+ *
+ * @param {string} name - the folder's name
+ * @param {string} parentRoute - the route of the folder it sits in
+ */
+function assertRouteFolder(name, parentRoute) {
+  if (name === '[dir]' || name === '[path]') {
+    const hint = name === '[path]' ? ' Did you mean `[...path]`, which captures a path of any depth?' : ''
+    throw new Error(
+      `[uniweb] pages: a folder cannot be named \`${name}\` — \`:${name.slice(1, -1)}\` is a route ` +
+        `variable every parametric page already has.${hint}`
+    )
+  }
+  if (typeof parentRoute === 'string' && /\/:[A-Za-z0-9_-]+\*(\/|$)/.test(parentRoute)) {
+    throw new Error(
+      `[uniweb] pages: \`${name}\` sits inside a \`[...path]\` folder (${parentRoute}). The catch-all ` +
+        `takes the rest of the URL, so a page below it could never be reached. Move it beside the ` +
+        `\`[...path]\` folder, or name it \`_${name}\` if it holds something other than a page.`
+    )
+  }
+}
+
+/**
+ * The route param a page nested inside a parametric page binds — its nearest
+ * parametric ancestor's, the DEEPEST `:param` of the route it sits under. Null
+ * when no ancestor is parametric.
+ *
+ * @param {string} parentRoute
+ * @returns {string|null}
+ */
+function inheritedRouteParam(parentRoute) {
+  if (typeof parentRoute !== 'string') return null
+  const params = [...parentRoute.matchAll(/:([A-Za-z0-9_-]+)(?=\/|$)/g)].map((m) => m[1])
+  return params.length ? params[params.length - 1] : null
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -866,7 +911,6 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
       lastModified: fileStat.mtime?.toISOString() || null,
       isDynamic: false,
       paramName: null,
-      parentSchema: null,
       version: null,
       versionMeta: null,
       versionScope: null,
@@ -1467,12 +1511,19 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   // Determine route
   // Index pages get the parent route as their canonical route (no dual routes)
   // sourcePath stores the original folder-based path for ancestor checking
-  const isDynamic = isDynamicRoute(pageName)
-  const paramName = isDynamic ? extractRouteParam(pageName) : null
+  // ⭐ A page is PARAMETRIC when its folder is a bracket name or it sits inside
+  // one (ruled 2026-09-11 [Diego]): `pages/members/[slug]/cv/` is `/members/:slug/cv`
+  // and binds its ancestor's `slug`. Every lane — the SPA, the prefetch, the static
+  // build — tells a parametric page by the parameter in its route; this flag says
+  // the same thing to a consumer that reads the flag.
+  const isBracket = isDynamicRoute(pageName)
+  const inheritedParam = isBracket ? null : inheritedRouteParam(parentRoute)
+  const isDynamic = isBracket || inheritedParam !== null
+  const paramName = isBracket ? extractRouteParam(pageName) : inheritedParam
 
   // First, calculate the folder-based route (what the route would be without index handling)
   let folderRoute
-  if (isDynamic) {
+  if (isBracket) {
     // Dynamic routes: /blog/[slug] → /blog/:slug (for route matching);
     // /blog/[...path] → /blog/:path* — the one multi-segment token the matcher knows.
     const token = isCatchAllRoute(pageName) ? ':path*' : `:${paramName}`
@@ -1500,23 +1551,13 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   const layoutObj = mergeLayoutConfig(inheritedLayout, normalizeLayoutConfig(layoutConfig))
   const resolvedLayoutName = layoutObj.name || null
 
-  // For dynamic routes, determine the parent's data schema — this tells
-  // prerender which data array to iterate over.
-  //
-  // ⚖️ **A `[slug]` template expands over exactly ONE record set**, so a plural
-  // parent declaration has to resolve to one query here. The first is taken,
-  // matching what prerender records in `pageFetchedData`; the two must agree or
-  // expansion iterates a set the route was not built from.
-  //
-  // ⛔ This is a genuine cardinality constraint, not a limit worth lifting: a
-  // route pattern names one variable, and "which collection does `:slug` index"
-  // has no second answer. A page that needs another dataset alongside its
-  // dynamic one still declares it — plurality is what makes that sayable.
-  let parentSchema = null
-  if (isDynamic && parentFetch) {
-    const [first] = toFetchList(parentFetch)
-    parentSchema = first ? first.as : null
-  }
+  // ⛔ NO `parentSchema`. Which query a parametric page's URL names one record of
+  // — its ROUTE QUERY — is worked out where it is read, by one function every lane
+  // calls (`routeQuery`, `@uniweb/core/fetch-config`): the page's own query, its
+  // parent's, the site's, or its sections' shared key. This emitted a copy chosen
+  // by another rule (the closest ancestor with a query at ANY depth, never the
+  // page's own or the site's), so the URL narrowed nothing, or a key no section
+  // received — measured 2026-09-10. Removed 2026-09-11 [Diego].
 
   return {
     page: {
@@ -1535,10 +1576,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         : {}),
       lastModified: lastModified?.toISOString(),
 
-      // Dynamic route metadata
+      // Parametric route metadata
       isDynamic,
-      paramName, // e.g., "slug" from [slug]
-      parentSchema, // e.g., "articles" - the data array to iterate over
+      paramName, // e.g., "slug" from [slug]; a nested page's ancestor's
 
       // Version metadata (if within a versioned section)
       version: versionContext?.version || null,
@@ -1872,6 +1912,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     // Process subdirectories
     for (const folder of orderedFolders) {
       const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayout } = folder
+      assertRouteFolder(entry, parentRoute)
       const isIndex = entry === indexName
       const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
 
@@ -1930,7 +1971,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           lastModified: null,
           isDynamic: false,
           paramName: null,
-          parentSchema: null,
           version: versionContext?.version || null,
           versionMeta: versionContext?.versionMeta || null,
           versionScope: versionContext?.scope || null,
@@ -2001,6 +2041,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
     const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayout } = folder
+    assertRouteFolder(entry, parentRoute)
     const isIndex = entry === indexPageName
     const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
 
@@ -2024,7 +2065,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         lastModified: null,
         isDynamic: false,
         paramName: null,
-        parentSchema: null,
         version: versionContext?.version || null,
         versionMeta: versionContext?.versionMeta || null,
         versionScope: versionContext?.scope || null,
@@ -2835,6 +2875,7 @@ function buildRouteTranslations(pages, { defaultLocale = 'en', languages = null 
 }
 
 export {
+  assertRouteFolder,
   buildRouteTranslations,
   extractItemName,
   parseWildcardArray,

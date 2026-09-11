@@ -53,6 +53,7 @@ import {
   applyWildcardOrder,
   processMarkdownFile,
   fetchFromDataShorthand,
+  assertRouteFolder,
 } from '../site/content-collector.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
@@ -548,8 +549,13 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
   const { siteRoot, siteIndex, sourceLocale, translations } = ctx
   const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig)
   const out = []
+  // A folder inside a `[...path]` folder can never be reached, and `[dir]` /
+  // `[path]` would name a route variable — refused here as the collector refuses
+  // them, so a site that cannot build cannot sync either (ruled 2026-09-11).
+  const insideCatchAll = (parentSlugPath || '').split('/').includes(CATCH_ALL_MARKER)
   for (let i = 0; i < folders.length; i++) {
     const f = folders[i]
+    assertRouteFolder(f.dirName, insideCatchAll ? '/:path*' : '/')
     const dyn = f.dirName.match(DYNAMIC_RE)
     const slug = dyn ? dyn[1] : f.name
     const mode = f.source === 'folder.yml' ? 'folder' : 'page'

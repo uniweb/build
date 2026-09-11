@@ -21,7 +21,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { processQueries } from '../src/site/query-processor.js'
-import { applyWhere } from '../src/site/data-fetcher.js'
+import { applyScope } from '@uniweb/core'
 
 let ROOT
 const w = (rel, body) => {
@@ -66,9 +66,10 @@ describe('placement reaches the records a query returns', () => {
     w('records.yml', ['- publication/2026-a.md', '- folder: archive', '  records:', '    - publication/2025-b.md', ''].join('\n'))
 
     const { pubs } = await deliver()
-    expect(applyWhere(pubs, { path: { under: 'archive' } }).map((r) => r.slug)).toEqual(['2025-b'])
-    // CONTROL — the predicate is not simply matching everything
-    expect(applyWhere(pubs, { path: { under: 'nowhere' } })).toEqual([])
+    // a folder branch is `scope:` (ruled 2026-09-11; `where: { path: { under } }` is retired)
+    expect(applyScope(pubs, 'archive').map((r) => r.slug)).toEqual(['2025-b'])
+    // CONTROL — the scope is not simply matching everything
+    expect(applyScope(pubs, 'nowhere')).toEqual([])
   })
 
   it('nests to any depth', async () => {
@@ -77,7 +78,7 @@ describe('placement reaches the records a query returns', () => {
 
     const { pubs } = await deliver()
     expect(pubs[0].path).toBe('archive/2023')
-    expect(applyWhere(pubs, { path: { under: 'archive' } })).toHaveLength(1)
+    expect(applyScope(pubs, 'archive')).toHaveLength(1)
   })
 })
 
