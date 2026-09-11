@@ -1,4 +1,4 @@
-import { scopeFetchedData } from '../src/prerender.js'
+import { scopeFetchedData, readRouteBoundViews } from '../src/prerender.js'
 
 // In split-content mode each prerendered page embeds only the fetched
 // (collection/API) data its own first render reads — the block → page →
@@ -43,5 +43,74 @@ describe('scopeFetchedData', () => {
         expect(e).not.toHaveProperty('_scope')
       }
     }
+  })
+})
+
+describe('a route-bound entry belongs to its own page, in either mode (2026-09-11)', () => {
+  // `readRouteBoundViews` reads one view per expanded parametric page. Carried to
+  // every page, a site of N such pages would embed N views — or N whole records —
+  // in each of them (measured on the first version of the bake).
+  const alice = { config: { path: '/data/members/alice.json', as: 'members' }, data: { slug: 'alice' }, _scope: '/members/alice', _routeBound: true }
+  const bob = { config: { path: '/data/members/bob.json', as: 'members' }, data: { slug: 'bob' }, _scope: '/members/bob', _routeBound: true }
+  const withViews = [...all, alice, bob]
+  const slugs = (out) => out.map((e) => e.data?.slug).filter(Boolean)
+
+  it('non-split: every ordinary entry, and only the current page\'s own route-bound one', () => {
+    const out = scopeFetchedData(withViews, null, '/members/alice')
+    expect(out).toHaveLength(all.length + 1)
+    expect(slugs(out)).toEqual(['alice'])
+  })
+
+  it('split: the cascade\'s entries, and only the current page\'s own — whatever else the cascade names', () => {
+    const out = scopeFetchedData(withViews, new Set(['/members/alice', '/members/bob']), '/members/alice')
+    expect(slugs(out)).toEqual(['alice'])
+    expect(out.map((e) => e._scope)).toEqual([undefined, undefined])
+  })
+
+  it('any other page — or no page — gets none', () => {
+    expect(slugs(scopeFetchedData(withViews, null, '/blog'))).toEqual([])
+    expect(slugs(scopeFetchedData(withViews, null))).toEqual([])
+  })
+
+  it('strips the internal _routeBound tag', () => {
+    for (const e of scopeFetchedData(withViews, null, '/members/alice')) expect(e).not.toHaveProperty('_routeBound')
+  })
+})
+
+describe('readRouteBoundViews', () => {
+  const list = { path: '/data/members.json', as: 'members' }
+  const view = (slug) => ({ path: `/data/members/${slug}.json`, as: 'members' })
+  const pages = [
+    { route: '/members' },
+    { route: '/members/alice', dynamicContext: { paramValue: 'alice' } },
+    { route: '/members/bob', dynamicContext: { paramValue: 'bob' } },
+  ]
+  const read = vi.fn(async (cfg) => ({ config: cfg, data: cfg.path }))
+  beforeEach(() => { read.mockClear() })
+
+  it('reads what each expanded page resolves, filed under that page — skipping what is carried already and pages that are not expanded', async () => {
+    const resolvePageFetchConfigs = vi.fn((_templates, route) => [list, view(route.split('/').pop())])
+    const out = await readRouteBoundViews({ templates: {}, pages, present: [{ config: list, data: [] }], resolvePageFetchConfigs, read })
+    expect(resolvePageFetchConfigs.mock.calls.map((c) => c[1])).toEqual(['/members/alice', '/members/bob'])
+    expect(read.mock.calls.map(([cfg]) => cfg.path)).toEqual(['/data/members/alice.json', '/data/members/bob.json'])
+    expect(out.map((e) => [e.data, e._scope, e._routeBound])).toEqual([
+      ['/data/members/alice.json', '/members/alice', true],
+      ['/data/members/bob.json', '/members/bob', true],
+    ])
+  })
+
+  it('a view two pages bind alike is read ONCE and filed under EACH — the second page is not left without it', async () => {
+    // ⛔ The first version filed it under the first page only (measured: the second
+    // entry in a branch shipped without its branch's view).
+    const branch = { path: '/data/members.json', as: 'members', scope: 'field' }
+    const out = await readRouteBoundViews({ templates: {}, pages, present: [], resolvePageFetchConfigs: () => [branch], read })
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(out.map((e) => e._scope)).toEqual(['/members/alice', '/members/bob'])
+    expect(scopeFetchedData(out, null, '/members/bob').map((e) => e.config.scope)).toEqual(['field'])
+  })
+
+  it('a read with nothing to embed adds nothing', async () => {
+    const out = await readRouteBoundViews({ templates: {}, pages, present: [], resolvePageFetchConfigs: (_t, r) => [view(r)], read: async () => null })
+    expect(out).toEqual([])
   })
 })

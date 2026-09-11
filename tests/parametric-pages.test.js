@@ -8,7 +8,8 @@
  *   - `$name` is the handle of every compiled record — its FINAL slug;
  *   - a branch is `scope:`; `where: { path: { under } }` and `under` are refused;
  *   - a named query's clauses bound to the route are left for the runtime, not compiled
- *     against the literal `':dir'`.
+ *     against the literal `':dir'`, and its `scope` is never baked — the runtime applies
+ *     the scope that wins, as the records service does.
  */
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -104,6 +105,32 @@ describe('the sync walker refuses what the collector refuses', () => {
     w('pages/docs/[...path]/edit/page.yml', 'title: Edit\n')
     await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/sits inside a `\[\.\.\.path\]` folder/)
   })
+
+  const under = '  where:\n    path:\n      under: field\n'
+  it('`under` on a page\'s fetch', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
+    w('pages/members/page.yml', `title: M\nfetch:\n  query: members\n${under}`)
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/Write `scope: "field"`/)
+  })
+
+  it('`under` on the site\'s fetch', async () => {
+    w('site.yml', `name: test-site\nfoundation: "@acme/base@1.0.0"\nfetch:\n  path: /data/members.json\n${under}`)
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/site\.yml fetch: .*Write `scope: "field"`/)
+  })
+
+  it('`under` on a named query', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
+    w('queries.yml', `members:\n  schema: '@/member'\n${under}`)
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/queries\.members: .*Write `scope: "field"`/)
+  })
+
+  it('CONTROL — `scope:` syncs, on a page\'s fetch and on a named query', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
+    w('pages/members/page.yml', 'title: M\nfetch:\n  query: members\n  scope: field\n')
+    w('queries.yml', "members:\n  schema: '@/member'\n  scope: field\n")
+    const doc = await siteProjectToDocument(ROOT)
+    expect(JSON.stringify(doc)).toContain('"scope":"field"')
+  })
 })
 
 describe('$name on compiled records — the record\'s final slug (ruled 2026-09-11)', () => {
@@ -147,8 +174,17 @@ describe('a named query\'s narrowing at build — only what is fixed for every p
     }
   }
 
-  it('a fixed scope compiles only its branch', async () => {
+  it('a fixed scope is never baked — every record compiles, with the placement the runtime scopes by', async () => {
+    // The runtime applies the scope that wins — a page fetch's own, else this
+    // query's (`resolveQuerySource` carries it) — as the records service does.
+    // Baked, a page's own `scope:` could only narrow inside the query's branch on
+    // a static site, and would replace it on a hosted one.
     const { q } = await run({ q: { schema: '@/entry', scope: 'field' } })
+    expect(q.map((r) => [r.slug, r.path]).sort()).toEqual([['a', 'field'], ['b', 'lab']])
+  })
+
+  it('CONTROL — a fixed where is applied at build', async () => {
+    const { q } = await run({ q: { schema: '@/entry', where: { title: 'A' } } })
     expect(q.map((r) => r.slug)).toEqual(['a'])
   })
 

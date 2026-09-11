@@ -54,7 +54,7 @@ import { join, basename, extname, dirname, relative, resolve, sep } from 'node:p
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
-import { DATA_DIR, fillRoutePattern, applyScope, withoutRouteVariables } from '@uniweb/core'
+import { DATA_DIR, fillRoutePattern, withoutRouteVariables } from '@uniweb/core'
 import { applyWhere, applySort, refuseUnder } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
@@ -729,15 +729,17 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // the sync wire, stored — and never applied, while the DEPRECATED one it replaced
   // worked. An author following current guidance got silence and shipped unfiltered
   // data. Pinned by `tests/collection-query-terms.test.js`.
-  // ⭐ ONLY WHAT IS FIXED FOR EVERY PAGE. A clause bound to the route — `scope: :dir`,
+  // ⭐ ONLY THE `where` FIXED FOR EVERY PAGE. A clause bound to the route —
   // `where: { tag: :dir }` — cannot be applied to a file written once for every
   // page; the runtime binds it per page (`@uniweb/core/fetch-config`,
   // `resolveQuerySource`). ⛔ Until 2026-09-11 it was applied here to the literal
   // `':dir'`, and the query compiled to no records (measured).
-  const fixed = withoutRouteVariables({ where: config.where, scope: config.scope })
-  if (fixed.scope) {
-    items = applyScope(items, fixed.scope)
-  }
+  //
+  // ⛔ `scope` is NEVER baked, fixed or routed. The runtime applies the one that
+  // wins — a page fetch's own, else this query's — which is what the records
+  // service does. Baked here, a page's `scope:` could only narrow inside the
+  // query's branch on a static site and would replace it on a hosted one.
+  const fixed = withoutRouteVariables({ where: config.where })
   if (fixed.where) {
     items = applyWhere(items, fixed.where)
   }

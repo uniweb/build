@@ -173,17 +173,17 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
   }
 
   /**
-   * Bake one config the runtime resolved — a view a concrete parametric page binds
-   * to its route — under that page's route, so split-mode pages embed it. Local
-   * files only: a remote `url:` is the browser's, as it is by default.
+   * Read one config the runtime resolved for an expanded parametric page — a view
+   * its route binds — into a plain entry; `readRouteBoundViews` files it under
+   * each page that asks for it. Local files only: a remote `url:` is the
+   * browser's, as it is by default. Null when there is nothing to embed.
    */
-  const bake = async (cfg, route) => {
-    if (cfg.prerender === false || typeof cfg.path !== 'string') return false
+  const bake = async (cfg) => {
+    if (cfg.prerender === false || typeof cfg.path !== 'string') return null
     const options = isNonDefaultLocale && cfg.path.startsWith(`/${localeInfo.locale}/`) ? localizedFetchOptions : fetchOptions
     const result = await executeFetch(cfg, options)
-    if (!result.data || result.error) return false
-    fetchedData.push(entry(cfg, result.data, route))
-    return true
+    if (!result.data || result.error) return null
+    return { config: cfg, data: result.data, meta: { whole: cfg.whole } }
   }
 
   return { fetched, fetchedData, bake }
@@ -494,7 +494,7 @@ async function discoverLocaleContents(distDir, defaultContent) {
  * `{ config, data }` shape the runtime's hydrateDataStore expects.
  */
 function stripFetchScope(entry) {
-  const { _scope, ...clean } = entry
+  const { _scope, _routeBound, ...clean } = entry
   return clean
 }
 
@@ -517,12 +517,64 @@ function stripFetchScope(entry) {
  * @param {Set<string>|null} scopeRoutes - Routes whose entries to keep, or null.
  * @returns {Array<{config: Object, data: any}>}
  */
-export function scopeFetchedData(fetchedData, scopeRoutes) {
+export function scopeFetchedData(fetchedData, scopeRoutes, currentRoute = null) {
   if (!Array.isArray(fetchedData)) return fetchedData
-  if (!scopeRoutes) return fetchedData.map(stripFetchScope)
+  // A route-bound entry (`readRouteBoundViews`) belongs to one expanded page, in
+  // either mode: carried everywhere, a site of N such pages would embed N views —
+  // or N whole records — in every page.
+  const own = (e) => !e._routeBound || e._scope === currentRoute
+  if (!scopeRoutes) return fetchedData.filter(own).map(stripFetchScope)
   return fetchedData
-    .filter((e) => e._scope === '__site__' || scopeRoutes.has(e._scope))
+    .filter((e) => own(e) && (e._scope === '__site__' || scopeRoutes.has(e._scope)))
     .map(stripFetchScope)
+}
+
+/**
+ * The views an expanded parametric page binds to its route — `scope: :dir` bound to
+ * its branch, a `deferred:` query's per-record file — that no list page asked for.
+ * Each is resolved by the RUNTIME's own rule for the page (`resolvePageFetchConfigs`,
+ * the one a host's prefetch calls, matched against the parametric page it came
+ * from) and read by `read`, so the page renders complete and the SPA hydrates the
+ * very keys it asks for.
+ *
+ * ⭐ ONE ENTRY PER PAGE, ONE READ PER VIEW. Each entry is tagged `_routeBound` with
+ * its page's route: `scopeFetchedData` embeds it in that page's HTML and nowhere
+ * else, and the split-mode manifest leaves it out — so N expanded pages do not
+ * carry N views (or N whole records) each. Pages that bind the same view (two
+ * entries in one branch) each get an entry, over a single read. ⛔ Filed under
+ * the first page that asked for it, a shared view reached no other page's HTML
+ * (measured: the second entry in a branch shipped without its branch's view).
+ *
+ * A key already `present` is not read: every page carries those already — the
+ * site's, and, in split mode, its parent's and its template's (the render loop's
+ * `scopeRoutes`).
+ *
+ * @param {Object} options
+ * @param {Object} options.templates - the content as it was before expansion (the parametric pages)
+ * @param {Array<Object>} options.pages - the pages after expansion
+ * @param {Array<Object>} options.present - the entries already baked
+ * @param {Function} options.resolvePageFetchConfigs - `@uniweb/runtime/ssr`'s
+ * @param {(cfg: Object) => Promise<{config: Object, data: any, meta?: Object}|null>} options.read - reads one config
+ * @param {string|null} [options.locale]
+ * @returns {Promise<Array<Object>>} the new entries, each for its own page
+ */
+export async function readRouteBoundViews({ templates, pages, present, resolvePageFetchConfigs, read, locale = null }) {
+  const carried = new Set((present || []).map((e) => deriveCacheKey(e.config)))
+  const reads = new Map()
+  const out = []
+  for (const page of pages || []) {
+    if (!page?.dynamicContext) continue
+    const filed = new Set()
+    for (const cfg of resolvePageFetchConfigs(templates, page.route, { locale })) {
+      const key = deriveCacheKey(cfg)
+      if (carried.has(key) || filed.has(key)) continue
+      filed.add(key)
+      if (!reads.has(key)) reads.set(key, read(cfg))
+      const view = await reads.get(key)
+      if (view) out.push({ ...view, _scope: page.route, _routeBound: true })
+    }
+  }
+  return out
 }
 
 /**
@@ -587,7 +639,7 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
   if (Array.isArray(contentForJson.fetchedData)) {
     contentForJson = {
       ...contentForJson,
-      fetchedData: scopeFetchedData(contentForJson.fetchedData, splitContent ? scopeRoutes : null),
+      fetchedData: scopeFetchedData(contentForJson.fetchedData, splitContent ? scopeRoutes : null, currentRoute),
     }
   }
 
@@ -772,19 +824,21 @@ export async function prerenderSite(siteDir, options = {}) {
       // calls, matched against the parametric page it came from), then read by
       // this build's executor. So the page renders complete, and the SPA hydrates
       // the very keys it asks for.
-      const known = new Set(fetchedData.map((e) => deriveCacheKey(e.config)))
-      let baked = 0
-      for (const page of siteContent.pages) {
-        if (!page.dynamicContext) continue
-        for (const cfg of resolvePageFetchConfigs(templates, page.route, { locale })) {
-          const key = deriveCacheKey(cfg)
-          if (known.has(key)) continue
-          known.add(key)
-          if (await bake(cfg, page.route)) baked += 1
-        }
+      // ⛔ Appended to `siteContent.fetchedData` — the copy `stripBuildOnlyFetchKeys`
+      // made above — never to the raw `fetchedData`, whose configs still carry the
+      // build-only `merge` (it leaked into shipped pages that way, measured).
+      const baked = await readRouteBoundViews({
+        templates,
+        pages: siteContent.pages,
+        present: siteContent.fetchedData,
+        resolvePageFetchConfigs,
+        read: bake,
+        locale,
+      })
+      if (baked.length > 0) {
+        siteContent.fetchedData = [...siteContent.fetchedData, ...baked]
+        onProgress(`  Read ${baked.length} route-bound view(s) for expanded pages`)
       }
-      if (baked > 0) onProgress(`  Read ${baked} route-bound view(s) for expanded pages`)
-      siteContent.fetchedData = fetchedData
     }
 
     // Determine whether to split content (after dynamic expansion, after data fetches)
@@ -846,7 +900,9 @@ export async function prerenderSite(siteDir, options = {}) {
     // hydrateDataStore handles cache-key derivation + value-shape wrapping
     // — same helper used by the browser SPA boot and by the Cloudflare
     // Worker SSR isolate, so all three render paths agree on shape.
-    hydrateDataStore(uniweb.activeWebsite, fetchedData)
+    // ⛔ `siteContent.fetchedData`, not the raw list: only it holds the route-bound
+    // views, and an expanded page rendered without them paints "not found" (measured).
+    hydrateDataStore(uniweb.activeWebsite, siteContent.fetchedData)
 
     // Pre-fetch icons for SSR embedding
     await prefetchIcons(siteContent, uniweb, onProgress)
@@ -940,7 +996,9 @@ export async function prerenderSite(siteDir, options = {}) {
       // Build-specific: theme CSS, __SITE_CONTENT__, icon cache.
       // scopeRoutes mirrors the runtime data cascade (page → page.parent → site)
       // so split-mode pages embed only the collection data their first render reads.
-      const scopeRoutes = new Set([page.route, page.parent?.route].filter(Boolean))
+      // An expanded page's own fetch was read under its TEMPLATE's route — the
+      // route it had when the fetches ran — so that route is in its cascade too.
+      const scopeRoutes = new Set([page.route, page.parent?.route, page.dynamicContext?.templateRoute].filter(Boolean))
       html = injectBuildData(html, siteContent, {
         splitContent,
         currentRoute: page.route,
@@ -986,9 +1044,10 @@ export async function prerenderSite(siteDir, options = {}) {
         })
       }
       // The manifest is a single (non-per-page) file, so it keeps all fetched
-      // data — but the internal `_scope` tag must never leak into it.
+      // data — but the internal `_scope` tag must never leak into it, and a
+      // route-bound entry belongs to its own page's HTML, not to every page.
       if (Array.isArray(manifest.fetchedData)) {
-        manifest.fetchedData = manifest.fetchedData.map(stripFetchScope)
+        manifest.fetchedData = manifest.fetchedData.filter((e) => !e?._routeBound).map(stripFetchScope)
       }
       await writeFile(localeContentPath, JSON.stringify(manifest))
       onProgress('Rewrote site-content.json as lightweight manifest')

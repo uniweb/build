@@ -55,6 +55,7 @@ import {
   fetchFromDataShorthand,
   assertRouteFolder,
 } from '../site/content-collector.js'
+import { refuseUnder } from '../site/data-fetcher.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
@@ -237,6 +238,10 @@ function buildPageData(config, ctx) {
   // 2026-09-02 this kept `[0]` and dropped the rest silently, so the wire
   // carried one dataset for a page that asked for several.
   let fetch = config.fetch ?? fetchFromDataShorthand(config.data)
+  // `where: { path: { under } }` is refused here as the build refuses it
+  // (`parseFetchConfig`): a site that cannot build must not sync either. A
+  // section's fetch is refused where the collector parses it.
+  for (const one of [fetch].flat()) refuseUnder(one?.where, 'fetch')
   // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
   // A shell/backend-hosted site renders client-side with NO prerender, so the
@@ -809,6 +814,7 @@ const DECL_NOT_ON_WIRE = new Set([
 function queriesNested(declarations, uuids = null, org = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
+    refuseUnder(d.where, `queries.${name}`)
     const data = {}
     const source = d.path ? { path: d.path } : d.url ? { url: d.url } : d.source
     setIf(data, 'source', source)
@@ -1077,6 +1083,10 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // ⭐ The site-level fetch, DESUGARED and under its real name. `data:` is the
   // authoring shorthand for `fetch:` and every other tier already calls the wire
   // field `fetch`; the site tier called it `data` until 2026-09-09.
+  // `under` is refused as the build refuses it; the `data:` shorthand carries no
+  // `where`. ⚠️ The source expression stays inside `setIf`: `gen-emit-surface.mjs`
+  // reads the published key's sources off it.
+  for (const one of [siteYml.fetch].flat()) refuseUnder(one?.where, 'site.yml fetch')
   setIf(settings, 'fetch', siteYml.fetch ?? fetchFromDataShorthand(siteYml.data))
 
   // ⭐ The SITE TIER of framework's own `{name, hide, params}` layout object, which
