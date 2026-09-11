@@ -147,7 +147,7 @@ function parseQueryConfig(name, config) {
     },
     // `deferred:` lists fields that are heavy (article body, full nested
     // arrays). Those fields are stripped from the cascade payload that
-    // ships with `data: <name>` declarations, and per-record full files
+    // ships with `query: <name>` declarations, and per-record full files
     // are emitted at public/data/<name>/<slug>.json. Components that
     // need the full record fetch the per-record file on demand, either
     // automatically on dynamic-route pages (entity-store routes the
@@ -913,7 +913,7 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
     if (deferred && deferred.length > 0) {
       // `deferred:` is set — emit two payloads:
       //   1. The cascade JSON at /data/<name>.json with deferred fields stripped.
-      //      This is what `data: <name>` declarations deliver everywhere.
+      //      This is what `query: <name>` declarations deliver everywhere.
       //   2. Per-record full files at /data/<name>/<slug>.json with every field.
       //      Dynamic-route singular fetches and useEntityDetail hooks read these.
       const recordsDir = join(dataDir, name)

@@ -54,7 +54,7 @@ import { processQueries } from './site/query-processor.js'
  * agree on which schema governs what by construction.
  *
  * Inputs are consumed from what the canonical build parsers already compute —
- * `section.fetch` (the binding resolved from `data:` / `fetch:`) and
+ * `section.fetch` (the binding resolved from `query:` / `fetch:`) and
  * `schema.json[type].data` (the key→ref bindings). Re-deriving either would let
  * this command and the build disagree about what feeds what.
  *
@@ -139,7 +139,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
               `but this page delivers ${delivered.map((k) => `\`${k}\``).join(', ')}. ` +
               `The section will render with no data and nothing else will say so. ` +
               `Name the query for the key the section reads, or give the section its own ` +
-              `\`fetch: { query: <name> }\`.`,
+              `\`query: <name>\`.`,
             // One user per declared key, so `uniweb validate` can print
             // `used by /team › Team › data.team` — the key is the thing to rename.
             users: declaredKeys.map((k) => ({ route: page.route, section: type, key: k })),
@@ -479,7 +479,7 @@ async function loadStandardSchemas() {
  */
 function collectInputs(section, pageFetch, siteFetch) {
   const byKey = new Map()
-  // ⭐ Each level may declare SEVERAL — `data: [team, articles]` — so each is
+  // ⭐ Each level may declare SEVERAL — `query: [team, articles]` — so each is
   // flattened rather than read. Order is least- to most-specific and `set`
   // overwrites, which is what makes a section's declaration win the key.
   for (const source of [siteFetch, pageFetch, section.fetch]) {

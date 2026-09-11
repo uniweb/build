@@ -52,7 +52,7 @@ function fullSite() {
       'base: /x/', 'seo: { image: /og.png }', 'keywords: [a, b]',
       'fetcher: { transports: {} }', 'build: { prerender: true }',
       'search: { enabled: true }', 'submit: /s', 'assistant: /a', 'tracking: /t',
-      'agents: false', 'paths: { pages: ./pages }', 'data: articles',
+      'agents: false', 'paths: { pages: ./pages }', 'query: articles',
       'layout: { name: DocsLayout, hide: [right] }',
       'placeholders: { product: Uniweb }',
       '',
@@ -104,7 +104,7 @@ describe('the info / settings split', () => {
     // non-destructive per-area disable the runtime honours. Framework read only
     // `.name` at this tier and emitted nothing at all until 2026-09-09.
     expect(doc.settings.layout).toEqual({ name: 'DocsLayout', hide: ['right'] })
-    // `data:` is the authoring shorthand; the wire carries the desugared form under
+    // `query:` is the authoring shorthand; the wire carries the desugared form under
     // the name every other tier already uses.
     expect(doc.settings.fetch).toEqual({ query: 'articles' })
   })

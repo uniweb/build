@@ -129,7 +129,7 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
   const fetched = { site: new Map(), pages: new Map(), sections: new Map() }
 
   // 1. Site-level fetch. ⛔ `toFetchList` rather than a property read: a `fetch:`
-  // or `data:` LIST parses to an array, and `siteFetch.prerender` on one is
+  // or `query:` LIST parses to an array, and `siteFetch.prerender` on one is
   // `undefined` — which passes the `!== false` test and then fetches nothing.
   for (const oneFetch of toFetchList(siteContent.config?.fetch)) {
     if (oneFetch.prerender === false) continue

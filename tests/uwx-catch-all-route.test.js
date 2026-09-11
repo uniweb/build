@@ -27,7 +27,7 @@ afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 describe('a [...path] template page on the sync wire', () => {
   it('rides as slug `...path` with param_name `slug`', async () => {
     w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
-    w('pages/blog/page.yml', 'title: Blog\ndata: articles\n')
+    w('pages/blog/page.yml', 'title: Blog\nquery: articles\n')
     w('pages/blog/list.md', '---\ntype: List\n---\n\n# Blog\n')
     w('pages/blog/[...path]/page.yml', 'title: Article\n')
     w('pages/blog/[...path]/article.md', '---\ntype: Article\n---\n')
@@ -41,7 +41,7 @@ describe('a [...path] template page on the sync wire', () => {
 
   it('CONTROL — a [slug] page still rides under the folder\'s own label', async () => {
     w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
-    w('pages/blog/page.yml', 'title: Blog\ndata: articles\n')
+    w('pages/blog/page.yml', 'title: Blog\nquery: articles\n')
     w('pages/blog/[postId]/page.yml', 'title: Article\n')
     w('pages/blog/[postId]/article.md', '---\ntype: Article\n---\n')
     const doc = await siteProjectToDocument(ROOT)

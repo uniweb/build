@@ -69,7 +69,7 @@ function site({ metaKey, queryName }) {
 
   const page = join(siteRoot, 'pages', 'home')
   mkdirSync(page, { recursive: true })
-  writeFileSync(join(page, 'page.yml'), `data: ${queryName}\n`)
+  writeFileSync(join(page, 'page.yml'), `query: ${queryName}\n`)
   writeFileSync(join(page, 'index.md'), `---\ntype: Team\n---\n\n# Team\n`)
 
   return { siteRoot, foundationPath: fdn }

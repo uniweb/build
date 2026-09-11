@@ -39,7 +39,7 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, parse } from 'node:path'
+import { join, parse, relative } from 'node:path'
 import {
   readYamlFile,
   readFolderConfig,
@@ -52,7 +52,9 @@ import {
   parseWildcardArray,
   applyWildcardOrder,
   processMarkdownFile,
-  fetchFromDataShorthand,
+  declaredFetch,
+  checkDeclaration,
+  fetchFromQueryShorthand,
   assertRouteFolder,
 } from '../site/content-collector.js'
 import { refuseUnder } from '../site/data-fetcher.js'
@@ -196,7 +198,7 @@ function mapSectionData(section) {
 }
 
 function buildPageData(config, ctx) {
-  const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations } =
+  const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations, where } =
     ctx
   // The page `slug` is the localized route source — a `{lang: slug}` map (the
   // site-content Model declares it localized; greenlit 2026-06-13). A single-locale
@@ -234,10 +236,12 @@ function buildPageData(config, ctx) {
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)
   setIf(data, 'seo', config.seo)
-  // ⭐ A `data:` LIST means "fetch each" — one declaration per entry. Before
+  // ⭐ A `query:` or `fetch:` LIST means "fetch each" — one declaration per entry. Before
   // 2026-09-02 this kept `[0]` and dropped the rest silently, so the wire
   // carried one dataset for a page that asked for several.
-  let fetch = config.fetch ?? fetchFromDataShorthand(config.data)
+  // `fetch:`, or the `query:` shorthand, read and refused exactly as the build
+  // reads them (`declaredFetch`) — a `folder.yml` as much as a `page.yml`.
+  let fetch = declaredFetch(config, where ?? 'page.yml')
   // `where: { path: { under } }` is refused here as the build refuses it
   // (`parseFetchConfig`): a site that cannot build must not sync either. A
   // section's fetch is refused where the collector parses it.
@@ -249,7 +253,7 @@ function buildPageData(config, ctx) {
   // it would never resolve at render (the static build resolves it the same way
   // in site/data-fetcher.js parseFetchConfig). The gateway serves the collection
   // at `<base>/data/<name>.json`.
-  // ⛔ **Mapped, not read.** A `data:`/`fetch:` LIST reaches here as an array, and
+  // ⛔ **Mapped, not read.** A `query:`/`fetch:` LIST reaches here as an array, and
   // `fetch.query` on one is `undefined` — so a property test would skip the
   // resolution below and put bare `{ query }` entries on the wire with no
   // `path`, no `as` and no `schema`. That is the silent-empty class: a payload
@@ -567,6 +571,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     const slugPath = parentSlugPath ? `${parentSlugPath}/${slug}` : slug
 
     const data = buildPageData(f.config, {
+      where: relative(siteRoot, join(f.path, f.source)),
       slug,
       mode,
       isDynamic: !!dyn,
@@ -1080,14 +1085,15 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // summarized.
   setIf(settings, 'agents', siteYml.agents)
 
-  // ⭐ The site-level fetch, DESUGARED and under its real name. `data:` is the
+  // ⭐ The site-level fetch, DESUGARED and under its real name. `query:` is the
   // authoring shorthand for `fetch:` and every other tier already calls the wire
-  // field `fetch`; the site tier called it `data` until 2026-09-09.
-  // `under` is refused as the build refuses it; the `data:` shorthand carries no
-  // `where`. ⚠️ The source expression stays inside `setIf`: `gen-emit-surface.mjs`
-  // reads the published key's sources off it.
+  // field `fetch`; the site tier's wire field was `data` until 2026-09-09.
+  // `query:` / `fetch:` checked as the build checks them, and `under` refused;
+  // the `query:` shorthand carries no `where`. ⚠️ The desugaring stays inline in
+  // `setIf`: `gen-emit-surface.mjs` reads the published key's sources off it.
+  checkDeclaration(siteYml, 'site.yml')
   for (const one of [siteYml.fetch].flat()) refuseUnder(one?.where, 'site.yml fetch')
-  setIf(settings, 'fetch', siteYml.fetch ?? fetchFromDataShorthand(siteYml.data))
+  setIf(settings, 'fetch', siteYml.fetch ?? fetchFromQueryShorthand(siteYml.query))
 
   // ⭐ The SITE TIER of framework's own `{name, hide, params}` layout object, which
   // the page and folder tiers have always had. `hide` is a non-destructive per-area
@@ -1265,15 +1271,6 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // endpoint; here it leaves the site with the RIGHT answer.
   //
   // The provisioned record rides the `$services` section instead (see servicesNested).
-  // ⭐ DESUGARED, like every other tier. `data:` is the shorthand for `fetch:`
-  // (`data: articles` → `{ query: 'articles' }`), and the page level has always
-  // desugared before emitting. The site level shipped the bare string until
-  // 2026-09-09, so `info.data` carried two different shapes depending on which
-  // key the author happened to type.
-  //
-  // 📌 The wire NAME is still `data` and becomes `fetch` when the Section moves —
-  // renaming it now would be a second destructive wire change for a cosmetic gain;
-  // renaming it during the move is free.
   // ⛔ THE CONFIGURATION KEYS ARE NOT HERE — they ride the `settings` Section
   // (`settingsNested` above). `info` is the BRIEF: what a card or a select dropdown
   // renders, plus what a listing can filter on. Eighteen keys moved off it on

@@ -19,15 +19,22 @@ import { parseFrontmatter } from './entity-source.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { recordsYmlPath } from '../site/records-config.js'
+import { DECLARATION_KEYS } from '../site/fetch-shapes.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
 // authoring, not to externally-editable params. On a section write an existing
 // reserved key is preserved and never overwritten by incoming params, so a
 // projection doesn't churn fields it didn't author (the surgical-update bar).
+//
+// ⭐ The declaration keys — `query`, `fetch`, and the retired `data` — are one
+// group: a section that declares its data locally, under any of them, keeps that
+// declaration, and an incoming one under a different key does not land beside it
+// (a file holding two is refused by the build).
 export const DEFAULT_RESERVED_FRONTMATTER = new Set([
   'type',
   'preset',
   'input',
+  'query',
   'fetch',
   'data',
   'nest',
@@ -168,6 +175,7 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
   const { frontmatter, body: existingBody } = parseFrontmatter(existing, filePath)
 
   const nextFrontmatter = { ...frontmatter }
+  const declaresLocally = DECLARATION_KEYS.some((k) => k in frontmatter)
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       // A reserved key is preserved only when it already exists locally (the
@@ -175,6 +183,7 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
       // there is nothing to protect, so the incoming value fills it — that's
       // how a newly-projected section gets its `type`/`nest`/etc.
       if (reserved.has(key) && key in frontmatter) continue
+      if (reserved.has(key) && DECLARATION_KEYS.includes(key) && declaresLocally) continue
       if (value === null || value === undefined) delete nextFrontmatter[key]
       else nextFrontmatter[key] = value
     }
@@ -186,11 +195,12 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
 
 // Shallow-merge `changes` into a YAML config file and write idempotently. A key
 // whose value is null/undefined is deleted; an object value is shallow-merged one
-// level deep (so partial `theme` / `build` updates don't drop sibling keys); any
-// other value replaces. NOTE: this re-dumps the file, so author comments/order are
-// not preserved — acceptable for machine-owned config, but comment-preserving
-// merges for hand-authored config files are a quality bar to revisit.
-function mergeYamlConfig(filePath, changes) {
+// level deep (so partial `theme` / `build` updates don't drop sibling keys) unless
+// the key is in `replace`; any other value replaces. NOTE: this re-dumps the file,
+// so author comments/order are not preserved — acceptable for machine-owned
+// config, but comment-preserving merges for hand-authored config files are a
+// quality bar to revisit.
+function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
   let existing = {}
   try {
     existing = yaml.load(readFileSync(filePath, 'utf8')) || {}
@@ -200,7 +210,7 @@ function mergeYamlConfig(filePath, changes) {
   for (const [key, value] of Object.entries(changes)) {
     if (value === null || value === undefined) {
       delete existing[key]
-    } else if (typeof value === 'object' && !Array.isArray(value)) {
+    } else if (typeof value === 'object' && !Array.isArray(value) && !replace.includes(key)) {
       existing[key] = { ...(existing[key] || {}), ...value }
     } else {
       existing[key] = value
@@ -212,10 +222,15 @@ function mergeYamlConfig(filePath, changes) {
 /**
  * Merge `config` into `site.yml` (shallow). Preserves keys not present in the
  * update (foundation, base, paths, …).
+ *
+ * ⛔ The declaration keys (`query` / `fetch` / `data`) are written WHOLE, never
+ * merged: a declaration is one value, and merging an incoming `fetch:` into the
+ * local one kept whatever key the remote no longer has — a stale `limit` survived
+ * every pull.
  * @returns {'updated'|'unchanged'}
  */
 export function writeSiteConfig(siteRoot, config) {
-  return mergeYamlConfig(join(siteRoot, 'site.yml'), config)
+  return mergeYamlConfig(join(siteRoot, 'site.yml'), config, { replace: DECLARATION_KEYS })
 }
 
 /**

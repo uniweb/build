@@ -39,7 +39,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
-import { authorableFetch } from '../site/fetch-shapes.js'
+import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
@@ -138,8 +138,8 @@ const INFO_TO_SITE_YML = {
   // Authored-only, like `submit` and `assistant`: a host's tracking endpoint is
   // offered through `config.services.tracking` and resolved at render, so it
   // never enters `info` and a pull cannot launder it into authored config.
-  // ⛔ `data` IS NOT VERBATIM — see the explicit branch below. It projects to
-  // `site.yml::fetch`, not `site.yml::data`.
+  // ⛔ The site's declaration is not verbatim — see the explicit `settings.fetch`
+  // branch below: it projects to `site.yml::query` or `site.yml::fetch`.
   template: 'template',
   // ⭐ `tags` — authored, non-localized tokens; the filter facet for a list of site
   // cards. Round-trips verbatim like any authored list.
@@ -199,6 +199,16 @@ const SETTINGS_TO_SITE_YML = {
 }
 
 
+/** An authored YAML config as it stands, or null when there is none to read. */
+function readAuthoredYaml(filePath) {
+  try {
+    const value = yaml.load(readFileSync(filePath, 'utf8'))
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Project a site-content document's `info` (+ `extensions`) onto the site's
  * config files: `site.yml`, `theme.yml`, and `head.html`. Idempotent; only the
@@ -238,22 +248,21 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
   }
 
-  // ⭐ `settings.fetch` → `site.yml::fetch`.
-  //
-  // `data:` is the authoring SHORTHAND for `fetch:` and the wire carries the
-  // desugared form, so `fetch:` is the key that describes what came back. The page
-  // lane has always projected this way (`y.fetch = authorableFetch(record.fetch)`);
-  // the site lane wrote `data:` verbatim, so an author who typed `fetch:` pushed,
-  // pulled, and got a `data:` block back — the value survived and the authored key
-  // did not, which the round-trip law forbids (uwx-format.md).
+  // ⭐ `settings.fetch` → `site.yml::query` or `site.yml::fetch` — the key the file
+  // already uses, else `query:` when the declaration is nothing but query names
+  // (`authorableDeclaration`). The wire carries the desugared form and cannot say
+  // which was typed, and the round-trip law keeps the authored KEY as well as the
+  // value (the sync format's round-trip law): the site lane once wrote the shorthand back verbatim,
+  // so an author who typed `fetch:` pushed, pulled, and got the shorthand back.
+  // The other declaration keys are removed, so the file never holds two (the
+  // build refuses that) — a retired `data:` included.
   //
   // ⛔ The producer always desugars, so the wire carries a config or a list of them —
   // never a bare string. Nothing here accommodates an older shape.
   const wireFetch = settingsSection.fetch
   if (wireFetch !== undefined) {
-    siteChanges.fetch = Array.isArray(wireFetch)
-      ? wireFetch.map((f) => authorableFetch(f))
-      : authorableFetch(wireFetch)
+    const { key, value } = authorableDeclaration(wireFetch, readAuthoredYaml(join(siteRoot, 'site.yml')))
+    for (const k of DECLARATION_KEYS) siteChanges[k] = k === key ? value : null
   }
 
   // The `settings` Section — authored configuration that is not identity, so it is
@@ -409,8 +418,13 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   if (theme_override !== undefined) frontmatter.theme = theme_override
   if (preset !== undefined) frontmatter.preset = preset
   if (input !== undefined) frontmatter.input = input
-  // Invert the build's resolution rather than copy it — see fetch-shapes.js.
-  if (fetch !== undefined) frontmatter.fetch = authorableFetch(fetch)
+  // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
+  // file gets `query:` for a declaration of names alone; a section that declares
+  // its data locally keeps it (`writeSectionFile`, the declaration keys).
+  if (fetch !== undefined) {
+    const { key, value } = authorableDeclaration(fetch)
+    frontmatter[key] = value
+  }
   if (stable_id !== undefined) frontmatter.id = stable_id
 
   const body = insets ? reinlineInsets(sourceContent, insets) : sourceContent
@@ -496,10 +510,13 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
 // page.yml/folder.yml. On a merge write these are replaced wholesale (a managed
 // key the record no longer carries is dropped); any other key is author-authored
 // and preserved. Keep in sync with pageRecordToYml below.
+// ⚠️ `query` and `data` are managed with `fetch`: the declaration is written under
+// ONE key (`authorableDeclaration`), so the other two — a retired `data:`
+// included — are dropped rather than left beside it.
 const PAGE_YML_MANAGED_KEYS = new Set([
   'id', 'title', 'description', 'label', 'keywords', 'index', 'hidden',
   'hideIn', 'knowledge', 'trackSections', 'redirect', 'rewrite', 'layout', 'seo',
-  'fetch', 'sections',
+  'query', 'fetch', 'data', 'sections',
 ])
 
 // Inverse of site.js buildPageData → the `page.yml` / `folder.yml` object.
@@ -507,7 +524,7 @@ const PAGE_YML_MANAGED_KEYS = new Set([
 // directory (name, page.yml vs folder.yml, `[param]/`), not the config body.
 // Identity (the backend uuid) is NOT written here — it lives in the gitignored
 // `.uniweb/` index so authored files stay clean.
-function pageRecordToYml(record, sectionsArray, sourceLocale) {
+function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null) {
   const y = {}
   if (record.stable_id !== undefined) y.id = record.stable_id
   const title = unwrapLocalized(record.title, sourceLocale)
@@ -531,8 +548,12 @@ function pageRecordToYml(record, sectionsArray, sourceLocale) {
   if (record.rewrite !== undefined) y.rewrite = record.rewrite
   if (record.layout !== undefined) y.layout = record.layout
   if (record.seo !== undefined) y.seo = record.seo
-  // Invert the build's resolution rather than copy it — see fetch-shapes.js.
-  if (record.fetch !== undefined) y.fetch = authorableFetch(record.fetch)
+  // Invert the build's resolution rather than copy it — see fetch-shapes.js. Under
+  // the key the file already uses (`existing`), else `query:` for names alone.
+  if (record.fetch !== undefined) {
+    const { key, value } = authorableDeclaration(record.fetch, existing)
+    y[key] = value
+  }
   // `sections:` exists to preserve ORDER and NESTING, which the projected filenames
   // can't carry (they're `<stableId>.md`, with no numeric prefix). It must not also
   // decide MEMBERSHIP — and a bare list does: the collector reads a list without
@@ -635,7 +656,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     const ymlPath = join(pageDir, ymlName)
     // Merge (not full-dump) so author-added keys survive a pull; the projector
     // owns only PAGE_YML_MANAGED_KEYS.
-    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale), PAGE_YML_MANAGED_KEYS)
+    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, readAuthoredYaml(ymlPath)), PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
     writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route)

@@ -274,9 +274,9 @@ export function toFetchList(fetch) {
 }
 
 /**
- * Parse a `fetch:` (or desugared `data:`) declaration.
+ * Parse a `fetch:` (or desugared `query:`) declaration.
  *
- * ⭐ **A LIST MEANS "FETCH EACH".** `data: [team, articles]` declares two needs
+ * ⭐ **A LIST MEANS "FETCH EACH".** `query: [team, articles]` declares two needs
  * and they land under two keys in `content.data` — a component reads
  * `content.data.team` and `content.data.articles` independently, so the
  * declaration is plural by necessity.

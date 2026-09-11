@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { siteProjectToDocument } from '../src/uwx/index.js'
 
-// What the sync wire carries for a page's `data:` / `fetch:` declaration.
+// What the sync wire carries for a page's `query:` / `fetch:` declaration.
 //
 // The author's `query:` shorthand is build-time sugar over a path, and for
 // a long time that is all that crossed: the producer resolved it and sent the
@@ -25,7 +25,7 @@ const w = (rel, body) => {
 
 const buildSite = async () => {
   w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
-  w('pages/blog/page.yml', 'title: Blog\ndata: articles\n')
+  w('pages/blog/page.yml', 'title: Blog\nquery: articles\n')
   w('pages/blog/list.md', '---\ntype: List\n---\n\n# Blog\n')
   const doc = await siteProjectToDocument(ROOT)
   const blog = doc.pages.find((p) => p.title === 'Blog' || p.$id?.includes('blog'))

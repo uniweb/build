@@ -6,7 +6,8 @@ import { validateDataInputs } from '../src/validate-data.js'
 import { resolveFetchConfigs } from '@uniweb/core'
 
 /**
- * `data: [team, articles]` means **fetch each**.
+ * `query: [team, articles]` means **fetch each** (the shorthand was `data:` until
+ * 2026-09-11; `fetch:` takes a list the same way).
  *
  * ## What it did before
  *
@@ -25,7 +26,7 @@ import { resolveFetchConfigs } from '@uniweb/core'
  * |---|---|
  * | `content.data` — what a component reads | **many** (`prepare-props` merges every key) |
  * | `EntityStore` delivery — walks the cascade | **many** (collect-all, `Promise.all`) |
- * | `data:` / `fetch:` — what an author writes | **was one per level** |
+ * | `query:` / `fetch:` — what an author writes | **was one per level** |
  *
  * ⚖️ **Plural DECLARATIONS are not plural REQUESTS.** How many round trips this
  * becomes belongs to the fetcher — the store assembles every config before
@@ -73,7 +74,7 @@ function site(pageData) {
 
   const page = join(siteRoot, 'pages', 'home')
   mkdirSync(page, { recursive: true })
-  writeFileSync(join(page, 'page.yml'), `title: Home\ndata: ${pageData}\n`)
+  writeFileSync(join(page, 'page.yml'), `title: Home\nquery: ${pageData}\n`)
   writeFileSync(join(page, 'index.md'), '---\ntype: Both\n---\n\n# Both\n')
 
   return { siteRoot, foundationPath: fdn }

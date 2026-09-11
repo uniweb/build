@@ -69,3 +69,57 @@ export function authorableFetch(fetch) {
   }
   return out
 }
+
+// ── `query:` or `fetch:` — the key a projection writes back ─────────────────────
+//
+// An author declares a level's data with `fetch:` or with its shorthand, `query:`
+// (`query: team` ≡ `fetch: { query: team }`). The wire carries only the desugared
+// form, so it cannot say which key was typed — and a pull must give back the
+// authored KEY as well as the value (the round-trip law of the sync format). So a
+// projection writes back the key the file already uses, and a file it creates gets
+// `query:` whenever the declaration is nothing but query names — the form the
+// docs teach. The declaration keys are one group: exactly one is written, and a
+// file holding both is refused by the build.
+
+/** The keys that declare a level's data: the long form, its shorthand, and the retired shorthand. */
+export const DECLARATION_KEYS = Object.freeze(['query', 'fetch', 'data'])
+
+/**
+ * The query names a declaration consists of, when that is ALL it says — what
+ * `query:` can express. Keys the build derives or defaults beside a query (`path`,
+ * `url`, `as` equal to the name, `prerender: true`, `merge: false`) say nothing an
+ * author wrote; any other key makes it a `fetch:`.
+ *
+ * @param {object|object[]} fetch - a declaration (or a list) off the wire
+ * @returns {string|string[]|null} the name(s), or null when `query:` cannot say it
+ */
+export function queryNamesOf(fetch) {
+  const nameOf = (one) => {
+    if (!one || typeof one !== 'object' || typeof one.query !== 'string' || one.query === '') return null
+    for (const [key, value] of Object.entries(one)) {
+      if (key === 'query' || key === 'path' || key === 'url') continue
+      if (key === 'as' && value === one.query) continue
+      if (key === 'prerender' && value === true) continue
+      if (key === 'merge' && value === false) continue
+      return null
+    }
+    return one.query
+  }
+  if (!Array.isArray(fetch)) return nameOf(fetch)
+  const names = fetch.map(nameOf)
+  return names.length > 0 && names.every((n) => n !== null) ? names : null
+}
+
+/**
+ * The declaration to write back, and under which key.
+ *
+ * @param {object|object[]} wireFetch - the level's `fetch` off the wire
+ * @param {object|null} [existing] - the authored file's current keys; null for a new file
+ * @returns {{ key: 'query'|'fetch', value: string|string[]|object|object[] }}
+ */
+export function authorableDeclaration(wireFetch, existing = null) {
+  const fetch = Array.isArray(wireFetch) ? wireFetch.map((one) => authorableFetch(one)) : authorableFetch(wireFetch)
+  const names = queryNamesOf(fetch)
+  const typedFetch = !!existing && typeof existing === 'object' && existing.fetch !== undefined
+  return names !== null && !typedFetch ? { key: 'query', value: names } : { key: 'fetch', value: fetch }
+}

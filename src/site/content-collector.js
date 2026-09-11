@@ -24,7 +24,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { resolveQueriesConfig, toConfigQueries } from './queries-config.js'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
-import { join, parse, resolve, sep } from 'node:path'
+import { join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
@@ -220,26 +220,85 @@ function detectVersions(folderNames) {
 }
 
 /**
- * Desugar a `data:` declaration into a `fetch:` one.
+ * `query:` — the shorthand for `fetch: { query }`, at every level that declares
+ * data: a section's frontmatter, `page.yml`, `folder.yml` and `site.yml`, on the
+ * build and on the sync push alike. It names a query, or a list of them — "fetch
+ * each", one `content.data` key per name (see `parseFetchConfig` for why a
+ * declaration is plural and why that says nothing about request count). Anything
+ * richer — a `limit`, a `where`, a source — is `fetch:`.
  *
- * `data: team` → `{ query: 'team' }`; `data: [team, articles]` → one config per
- * entry. ⭐ **A list means "fetch each"** — see `parseFetchConfig` for why the
- * declaration is plural by necessity and why that is not a statement about
- * request count.
+ * ⛔ `data:` WAS THIS KEY until 2026-09-11 [Diego], and it is REFUSED, not
+ * ignored: in frontmatter an unreserved key becomes a section param, so a stale
+ * `data:` would render an empty section and say nothing. The word stays where it
+ * names the data itself — a section type's `meta.js` `data:` (the shape of each
+ * `content.data` key, which fetches nothing) and `content.data`.
  *
- * ⛔ Before 2026-09-02 a list kept `[0]` and dropped the rest **silently**: no
- * warning, no error, and the array was not carried forward on the section, so
- * nothing downstream could recover it. An author writing a list got one dataset
- * and a section rendering empty.
+ * ⛔ `query:` beside `fetch:` is refused too. It was silent — `fetch:` won, and
+ * the other declaration was dropped with nothing saying so.
  *
- * @param {string|Array<string>|undefined} data
+ * @param {Object|null|undefined} config - the level's authored config
+ * @param {string} where - the file it was authored in, for the message
+ * @returns {Object|Array<Object>|undefined} the level's `fetch:` declaration, as authored
+ */
+export function declaredFetch(config, where) {
+  checkDeclaration(config, where)
+  return config?.fetch ?? fetchFromQueryShorthand(config?.query)
+}
+
+/**
+ * The refusals `declaredFetch` makes, alone — for a reader that must keep the
+ * desugaring inline (the sync push's `settings.fetch`, whose sources
+ * `scripts/gen-emit-surface.mjs` reads off the expression).
+ *
+ * @param {Object|null|undefined} config
+ * @param {string} where
+ */
+export function checkDeclaration(config, where) {
+  if (!config || typeof config !== 'object') return
+  if (config.data !== undefined) {
+    const other = config.query !== undefined ? 'query' : config.fetch !== undefined ? 'fetch' : null
+    throw new Error(
+      other
+        ? `[uniweb] ${where}: \`data:\` is retired, and this file already declares \`${other}:\` — delete the \`data:\` line.`
+        : `[uniweb] ${where}: \`data:\` is retired — the shorthand for \`fetch: { query }\` is now \`query:\`. ` +
+            `Write \`query: ${formatQueryNames(config.data)}\`.`
+    )
+  }
+  if (config.query !== undefined && config.fetch !== undefined) {
+    throw new Error(
+      `[uniweb] ${where}: declare \`query:\` or \`fetch:\`, not both — \`query: x\` is the shorthand for \`fetch: { query: x }\`.`
+    )
+  }
+  if (config.query !== undefined && !isQueryNames(config.query)) {
+    const declaring = config.query && typeof config.query === 'object' && !Array.isArray(config.query)
+    throw new Error(
+      `[uniweb] ${where}: \`query:\` takes a query name or a list of names; anything richer is \`fetch:\` — ` +
+        `e.g. \`fetch: { query: articles, limit: 3 }\`.` +
+        (declaring ? ' Declaring queries? That is `queries:` (in site.yml) or queries.yml.' : '')
+    )
+  }
+}
+
+/**
+ * Desugar a `query:` value: `team` → `{ query: 'team' }`, `[team, articles]` →
+ * one config per name. ⛔ Before 2026-09-02 a list kept `[0]` and dropped the rest
+ * silently — an author writing a list got one dataset and a section rendering
+ * empty.
+ *
+ * @param {string|Array<string>|undefined|null} query - already checked (`checkDeclaration`)
  * @returns {Object|Array<Object>|undefined}
  */
-export function fetchFromDataShorthand(data) {
-  if (!data) return undefined
-  if (Array.isArray(data)) return data.map((query) => ({ query }))
-  return { query: data }
+export function fetchFromQueryShorthand(query) {
+  if (query === undefined || query === null) return undefined
+  if (Array.isArray(query)) return query.map((name) => ({ query: name }))
+  return { query }
 }
+
+const isQueryName = (name) => typeof name === 'string' && name.trim() !== ''
+const isQueryNames = (value) =>
+  isQueryName(value) || (Array.isArray(value) && value.length > 0 && value.every(isQueryName))
+const formatQueryNames = (value) =>
+  isQueryNames(value) ? (Array.isArray(value) ? `[${value.join(', ')}]` : value) : '<name>'
 
 /**
  * Build version metadata from detected versions and page.yml config
@@ -280,7 +339,7 @@ function buildVersionMetadata(detectedVersions, pageConfig = {}) {
  * this function reads `site.yml`, `page.yml`, `folder.yml`, `theme.yml` and
  * every section's frontmatter — i.e. every configuration surface an author
  * writes. So a single typo silently discarded that file's entire contribution:
- * page order, nesting, `sections:`, `data:` declarations, theme. **The build
+ * page order, nesting, `sections:`, `query:` declarations, theme. **The build
  * succeeded and shipped a site missing what the author asked for**, with one
  * line on stderr that named no file.
  *
@@ -965,7 +1024,9 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     console.warn(`[content-collector] ${err.message}`)
   }
 
-  const { type, preset, input, props, fetch, data, id: frontmatterId, ...params } = frontMatter
+  // `query`, `fetch` and `data` are never params: `query:` / `fetch:` declare the
+  // section's own data, and a leftover `data:` is refused (`declaredFetch`).
+  const { type, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
 
   // Convert markdown to ProseMirror
   const proseMirrorContent = markdownToProseMirror(markdown)
@@ -973,17 +1034,13 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // Extract @ component references → insets (mutates doc)
   const insets = extractInsets(proseMirrorContent)
 
-  // `data:` shorthand — `data: team` → `fetch: { query: team }`. A list means
-  // "fetch each": `data: [team, articles]` yields one config per name, each
-  // delivered under its own `content.data` key (the same helper every level uses).
-  // ⚠️ This said a list kept only `[0]` — true until the helper learned lists on
-  // 2026-09-02, and left standing after.
-  //
+  // `query: team` → `fetch: { query: team }`; a list, one config per name, each
+  // delivered under its own `content.data` key — the one helper every level uses.
   // Unrelated to a section type's `meta.js` `data:`, which declares the SHAPE of
-  // each `content.data` key (a schema hint) and fetches nothing: delivery is
-  // default-on, so a section receives every fetch in the section → page → site
-  // cascade whether or not it names one there.
-  const resolvedFetch = fetch || fetchFromDataShorthand(data)
+  // each `content.data` key and fetches nothing: delivery is default-on, so a
+  // section receives every fetch in the section → page → site cascade whether or
+  // not it names one here.
+  const resolvedFetch = declaredFetch({ fetch, query, data }, relative(siteRoot, filePath))
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null
   // This ID is stable across reordering (unlike the positional id)
@@ -1608,12 +1665,8 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         priority: seo.priority || null
       },
 
-      // Data fetching
-      // Support 'data:' shorthand at page level
-      // data: team → fetch: { query: team }
-      fetch: parseFetchConfig(
-        pageConfig.fetch || fetchFromDataShorthand(pageConfig.data)
-      ),
+      // Data fetching — `fetch:`, or the `query:` shorthand (`declaredFetch`)
+      fetch: parseFetchConfig(declaredFetch(pageConfig, relative(siteRoot, join(pagePath, 'page.yml')))),
 
       hasContent: hierarchicalSections.length > 0,
       sections: hierarchicalSections
@@ -1976,7 +2029,10 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             changefreq: dirConfig.seo?.changefreq || null,
             priority: dirConfig.seo?.priority || null
           },
-          fetch: parseFetchConfig(dirConfig.fetch) || null,
+          // ⭐ `declaredFetch`, as every other level: this read `dirConfig.fetch`
+          // alone until 2026-09-11, so a container's `folder.yml` shorthand reached
+          // a backend on `push` and was dropped from a static build.
+          fetch: parseFetchConfig(declaredFetch(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
           hasContent: false,
           sections: [],
           order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
@@ -2068,7 +2124,12 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           changefreq: dirConfig.seo?.changefreq || null,
           priority: dirConfig.seo?.priority || null
         },
-        fetch: null,
+        // ⭐ The folder's own declaration, as the folder-mode container above and
+        // every other level read it. ⛔ This was `fetch: null` until 2026-09-11:
+        // a `folder.yml` here lost its `fetch:` (and its shorthand) on a static
+        // build while `push` carried it, so its pages had the folder's data on a
+        // hosted site and none on an exported one.
+        fetch: parseFetchConfig(declaredFetch(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
         hasContent: false,
         sections: [],
         order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
@@ -2080,8 +2141,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         pages.push(containerPage)
       }
 
+      // The container's own fetch config, or the parent's — as the folder-mode
+      // container above passes it.
       const childDirPath = mounts?.get(entry) || entryPath
-      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, parentFetch, versionContext, 'pages', null, effectiveLayout)
+      const containerFetch = containerPage.fetch || parentFetch
+      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, versionContext, 'pages', null, effectiveLayout)
       pages.push(...subResult.pages)
       assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
       iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2645,7 +2709,9 @@ export async function collectSiteContent(sitePath, options = {}) {
   // `publishLanguages` is authoring/publish intent — it has no runtime
   // consumer and never ships in a payload (the visitor runtime is
   // list-unaware; the sync lane reads site.yml directly, not this output).
-  const { publishLanguages: _publishLanguages, ...runtimeSiteConfig } = siteConfig
+  // The `query:` shorthand ships as `config.fetch`, desugared below; carried raw
+  // it would sit beside `config.queries`, the declarations, and read as one.
+  const { publishLanguages: _publishLanguages, query: _query, ...runtimeSiteConfig } = siteConfig
   // ⛔ `$`-prefixed keys are the project's BACKEND-SCOPED state — `$uuid`, `$org`,
   // `$backend`, `$services`, `$secrets` — and this payload is a PUBLISHED artifact
   // that a visitor can fetch. They have no runtime reader (nothing in core, runtime
@@ -2689,7 +2755,7 @@ export async function collectSiteContent(sitePath, options = {}) {
       `${distinctFailures.length} file${distinctFailures.length === 1 ? '' : 's'} could not be parsed as YAML:\n` +
         `${lines.join('\n')}\n\n` +
         `  Each one contributed NOTHING to this build — page order, nesting,\n` +
-        `  sections:, data: and theme settings in these files were dropped.\n` +
+        `  sections:, query: and theme settings in these files were dropped.\n` +
         `  Fix them and rebuild; the dev server reports the same files without failing.`
     )
   }
@@ -2709,13 +2775,12 @@ export async function collectSiteContent(sitePath, options = {}) {
       ...(publishFilterActive && Array.isArray(siteConfig.languages)
         ? { languages: publishable }
         : {}),
-      // ⛔ `data:` IS THE SHORTHAND FOR `fetch:` AND BOTH LANES MUST READ IT.
+      // ⛔ `query:` IS THE SHORTHAND FOR `fetch:` AND BOTH LANES MUST READ IT.
       // This read `siteConfig.fetch` alone until 2026-09-09, so a site-level
-      // `data: articles` reached a backend on the sync lane and was silently
-      // ignored on a static build — the works-on-one-lane shape. The page level
-      // has always used this helper (`pageConfig.fetch || fetchFromDataShorthand(…)`);
-      // the site level simply never did.
-      fetch: parseFetchConfig(siteConfig.fetch || fetchFromDataShorthand(siteConfig.data)),
+      // shorthand reached a backend on the sync lane and was silently ignored on
+      // a static build — the works-on-one-lane shape. Every level reads it
+      // through `declaredFetch` now.
+      fetch: parseFetchConfig(declaredFetch(siteConfig, 'site.yml')),
       fetcher: warnRetiredFetcherKeys(siteConfig.fetcher),
       // NOTE: `intelligence.yml` was read here and emitted as `config.intelligence`.
       // Removed 2026-08-12 — the assistant surface is `site.yml::assistant`, which

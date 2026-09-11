@@ -62,7 +62,7 @@
         ],
         "fetch": [
           "site.yml::fetch",
-          "site.yml::data"
+          "site.yml::query"
         ],
         "fetcher": [
           "site.yml::fetcher"

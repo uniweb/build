@@ -84,11 +84,11 @@ beforeAll(() => {
   // (one pair, two users).
   writeFileSync(
     join(siteRoot, 'pages', 'data', '1-projects.md'),
-    '---\ntype: DataDump\ndata: projects\n---\n\n# Projects\n'
+    '---\ntype: DataDump\nquery: projects\n---\n\n# Projects\n'
   )
   writeFileSync(
     join(siteRoot, 'pages', 'data', '2-projects.md'),
-    '---\ntype: DataDump\ndata: projects\n---\n\n# More Projects\n'
+    '---\ntype: DataDump\nquery: projects\n---\n\n# More Projects\n'
   )
   // A remote source — must be reported as deferred, never silently skipped.
   writeFileSync(
