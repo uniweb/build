@@ -1970,9 +1970,15 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           assetCollection = mergeAssetCollections(assetCollection, pageAssets)
           iconCollection = mergeIconCollections(iconCollection, pageIcons)
 
-          // Modern pattern: blog/index/ (isIndex) inherits the container's fetch config
-          // when it has no fetch of its own. Without this, EntityStore can't find the
-          // fetch config for sections on the index page (page.parent is null for /blog).
+          // A ROOT-PROMOTED folder inherits the container's fetch config when it has
+          // no fetch of its own. Without this, EntityStore cannot find the fetch config
+          // for that page's sections, because promotion leaves it with no parent.
+          //
+          // ⛔ **Root only, and the example this comment used to give was impossible.**
+          // It read "blog/index/ (isIndex)" — a NESTED index folder — but `indexName` is
+          // assigned only under `parentRoute === '/'` (see above), so `entry === indexName`
+          // is false at every deeper level and a nested `index/` folder is an ordinary page.
+          // Measured 2026-09-12: `pages/docs/index/` collects as `/docs/index`, isIndex=false.
           if (isIndex && !page.fetch && parentFetch) {
             page.fetch = parentFetch
           }
