@@ -73,6 +73,31 @@ describe('collectSiteContent — page visibility (hidden vs hideIn)', () => {
     }
   })
 
+  it('a `hidden` 404 is a DRAFT — not published, and the slot is left empty', async () => {
+    // ⛔ The 404 was exempt by ACCIDENT until 2026-09-12: it is lifted into the
+    // `notFound` slot before the prune, and the prune only filters `pages`, so a
+    // page the author marked "not published" shipped anyway — while a
+    // backend-published site dropped it. Ruled [Diego]: the flag is literal.
+    page('404', 'title: Not found\nhidden: true\n')
+
+    const published = await collectSiteContent(siteRoot, { dropUnpublished: true })
+    expect(published.notFound).toBeNull()
+
+    // …and dev keeps it, like every other draft.
+    const dev = await collectSiteContent(siteRoot)
+    expect(dev.notFound).toBeTruthy()
+  })
+
+  it('CONTROL — an ordinary 404 publishes, and needs no flag to stay out of nav', async () => {
+    page('404', 'title: Not found\n')
+
+    const { pages, notFound } = await collectSiteContent(siteRoot, { dropUnpublished: true })
+    expect(notFound).toBeTruthy()
+    // It is never in the page list, which is why an authored 404 needs no
+    // `hideIn`: nothing can list it in a nav area.
+    expect(routesOf(pages)).not.toContain('/404')
+  })
+
   it("hideIn ['*'] page stays routed in the published build (nav-only, not reachability)", async () => {
     const { pages } = await collectSiteContent(siteRoot, { dropUnpublished: true })
     const unlisted = pages.find((p) => p.route === '/unlisted')

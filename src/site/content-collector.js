@@ -2805,7 +2805,19 @@ export async function collectSiteContent(sitePath, options = {}) {
     pages: dropUnpublished ? dropUnpublishedPages(pages) : pages,
     // Layout area sets: { default: { header: page, footer: page, ... }, marketing: { ... } }
     layouts,
-    notFound,
+    // ⭐ THE SAME REACHABILITY AXIS, for the 404 slot. `hidden: true` means DRAFT —
+    // "excluded from the published site" (`docs/reference/page-configuration.md`);
+    // `hideIn: ['*']` is the control for "routed but in no nav".
+    // ⛔ The 404 was exempt BY ACCIDENT until 2026-09-12: it is lifted out of
+    // `pages` before the prune runs, and the prune only filters `pages`, so the
+    // flag never reached it — we published a page its author had marked as not
+    // for publishing, while a backend-published site dropped it. Ruled
+    // [Diego, 2026-09-12]: the flag is literal and framework moves to the lane
+    // that honoured it. The site still gets a `404.html` (the SPA fallback
+    // shell), and `uniweb dev` keeps the page previewable like any other draft.
+    // No cascade to resolve: this slot is root-level only, so its own flag is
+    // the only one that can apply.
+    notFound: dropUnpublished && notFound?.hidden ? null : notFound,
     // Versioned scopes: route → { versions, latestId }
     versionedScopes: versionedScopesObj,
     assets: assetCollection.assets,
