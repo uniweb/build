@@ -17,7 +17,7 @@ import {
   joinPathCapture,
   routeQuery,
   sectionFetches,
-  routeParamValue,
+  routeParamValues,
   routeParamName,
   routeBinding,
   parentRouteOf,
@@ -324,62 +324,81 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
     // records and names three gets three pages and no idea why. The total is
     // said once at the end, and handed back on `stats` for a caller to assert.
     let unrouted = 0
+    // route → the value that claimed it, so a second claim is reported, not silent
+    const claimed = new Map()
 
     // Create a concrete page for each item
     for (const item of items) {
-      // The value the record carries for the route's param — read through the one
-      // map (`routeParamValue`): `[slug]` its handle, `[uuid]` its identity, any
-      // other name its field. ⛔ This read `item[paramName]` until 2026-09-11.
-      const raw = routeParamValue(item, paramName)
-      if (raw === undefined || raw === null || raw === '') {
+      // EVERY value the record answers to — one for a scalar, one per member for a
+      // `multi` field (`routeParamValues`, the map every lane matches through:
+      // `[slug]` its handle, `[uuid]` its identity, any other name its field). A
+      // record holding `['a','b']` gets /tags/a AND /tags/b; a `multi` holding one
+      // value — the case the rule is for — gets exactly one page. Ruled 2026-09-12
+      // [Diego]. ⛔ This read `item[paramName]` until 2026-09-11 and the whole array
+      // until 2026-09-12, which baked `/tags/a%2Cb`, a URL no lane matches.
+      const values = routeParamValues(item, paramName)
+      if (values.length === 0) {
         unrouted += 1
         continue
       }
-      const paramValue = String(raw)
+      for (const paramValue of values) {
 
-      // Create concrete route: /blog/:slug → /blog/my-post. Under `[...path]` the
-      // record's URL is its placement (the folder `records.yml` put it in, carried
-      // as `path`) plus its handle — the split rule in reverse. ⛔ A FILE PATH, so
-      // decoded: the server decodes the request before looking the file up.
-      const capture = catchAll ? joinPathCapture({ dir: item.path, slug: paramValue }) : null
-      const concreteRoute = catchAll
-        ? page.route.replace(new RegExp(`:${catchAll}\\*$`), capture)
-        : page.route.replace(`:${paramName}`, paramValue)
+        // Create concrete route: /blog/:slug → /blog/my-post. Under `[...path]` the
+        // record's URL is its placement (the folder `records.yml` put it in, carried
+        // as `path`) plus its handle — the split rule in reverse. ⛔ A FILE PATH, so
+        // decoded: the server decodes the request before looking the file up.
+        const capture = catchAll ? joinPathCapture({ dir: item.path, slug: paramValue }) : null
+        const concreteRoute = catchAll
+          ? page.route.replace(new RegExp(`:${catchAll}\\*$`), capture)
+          : page.route.replace(`:${paramName}`, paramValue)
 
-      // Static sibling wins: skip a record whose concrete route collides with
-      // an existing static page rather than overwriting its HTML at write time.
-      if (staticRoutes.has(concreteRoute)) {
-        onProgress(`    Skipping ${concreteRoute} — a static page already claims this route (${paramName}:'${paramValue}')`)
-        continue
+        // ⛔ TWO RECORDS, ONE ROUTE — normal the moment the route field is not
+        // unique, which a `multi` member shared by two records makes easy. The first
+        // wins; WHICH is first is this lane's record order, and a hosted site orders
+        // by its own store — so it is said out loud here rather than discovered as a
+        // different record on the same URL.
+        const claimant = claimed.get(concreteRoute)
+        if (claimant !== undefined) {
+          onProgress(`    ⚠️ ${concreteRoute} is claimed by more than one ${key} record (${paramName}: '${claimant}', '${paramValue}') — the first keeps it`)
+          continue
+        }
+        claimed.set(concreteRoute, paramValue)
+
+        // Static sibling wins: skip a record whose concrete route collides with
+        // an existing static page rather than overwriting its HTML at write time.
+        if (staticRoutes.has(concreteRoute)) {
+          onProgress(`    Skipping ${concreteRoute} — a static page already claims this route (${paramName}:'${paramValue}')`)
+          continue
+        }
+
+        // Deep clone the page with modifications
+        const concretePage = JSON.parse(JSON.stringify(page))
+        concretePage.route = concreteRoute
+        concretePage.isDynamic = false // No longer dynamic
+        concretePage.paramName = undefined
+
+        // The route's binding, as the SPA makes it (`routeBinding`): the three
+        // variables a query binds, the param and its value, and the template's
+        // route. ⛔ No `schema`: the key the URL narrows is worked out where it is
+        // read (deleted 2026-09-11). The record (`currentItem`) and the full sibling
+        // list (`allItems`) are deliberately NOT baked in: the record is delivered
+        // via content.data and siblings via `fetch: { refine: true, detail: false }`,
+        // and embedding `allItems` duplicated the whole collection onto every
+        // prerendered page in split mode.
+        const binding = routeBinding(page.route, catchAll ? { [catchAll]: capture } : { [paramName]: paramValue }, paramName)
+        concretePage.dynamicContext = {
+          templateRoute: page.route,
+          params: binding.variables,
+          paramName: binding.paramName,
+          paramValue: binding.paramValue,
+        }
+
+        // Use item data for page metadata if available
+        if (item.title) concretePage.title = item.title
+        if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
+
+        expandedPages.push(concretePage)
       }
-
-      // Deep clone the page with modifications
-      const concretePage = JSON.parse(JSON.stringify(page))
-      concretePage.route = concreteRoute
-      concretePage.isDynamic = false // No longer dynamic
-      concretePage.paramName = undefined
-
-      // The route's binding, as the SPA makes it (`routeBinding`): the three
-      // variables a query binds, the param and its value, and the template's
-      // route. ⛔ No `schema`: the key the URL narrows is worked out where it is
-      // read (deleted 2026-09-11). The record (`currentItem`) and the full sibling
-      // list (`allItems`) are deliberately NOT baked in: the record is delivered
-      // via content.data and siblings via `fetch: { refine: true, detail: false }`,
-      // and embedding `allItems` duplicated the whole collection onto every
-      // prerendered page in split mode.
-      const binding = routeBinding(page.route, catchAll ? { [catchAll]: capture } : { [paramName]: paramValue }, paramName)
-      concretePage.dynamicContext = {
-        templateRoute: page.route,
-        params: binding.variables,
-        paramName: binding.paramName,
-        paramValue: binding.paramValue,
-      }
-
-      // Use item data for page metadata if available
-      if (item.title) concretePage.title = item.title
-      if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
-
-      expandedPages.push(concretePage)
     }
 
     if (unrouted > 0) {

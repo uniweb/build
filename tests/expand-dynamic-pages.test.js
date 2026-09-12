@@ -216,3 +216,58 @@ describe('a [...path] template expands over placement + handle', () => {
     expect(stats.unrouted).toEqual({ '/blog/:path*': 1 })
   })
 })
+
+describe('a `multi` route field expands member-wise (ruled 2026-09-12 [Diego])', () => {
+  // The case the rule is for is not tag pages: it is a Model field TYPED `multi`
+  // that holds ONE value — `department: ['biology']` — which an author routes as
+  // `[department]` and thinks of as a scalar. Expanded whole it baked
+  // `/depts/biology` only by accident of `String(['biology'])`; two values baked
+  // `/tags/a%2Cb`, a URL no lane matches.
+  const list = { route: '/tags', isDynamic: false, fetch: { query: 'items', path: '/data/items.json', as: 'items' } }
+  const template = { route: '/tags/:tag', isDynamic: true, paramName: 'tag' }
+  const data = (items) => parentData(items, 'items', '/tags')
+
+  it('one page per member, and a `multi` holding one value gets exactly one', () => {
+    const out = expandDynamicPages([list, template], data([
+      { slug: 'a', tag: ['x', 'y'] },
+      { slug: 'b', tag: ['z'] },
+      { slug: 'c', tag: 'plain' },
+    ]), noop)
+    const routes = out.map((p) => p.route).filter((r) => r.startsWith('/tags/'))
+    expect(routes.sort()).toEqual(['/tags/plain', '/tags/x', '/tags/y', '/tags/z'])
+  })
+
+  it('each page binds the member it was expanded for', () => {
+    const out = expandDynamicPages([list, template], data([{ slug: 'a', tag: ['x', 'y'] }]), noop)
+    expect(out.find((p) => p.route === '/tags/y').dynamicContext).toMatchObject({
+      templateRoute: '/tags/:tag',
+      paramName: 'tag',
+      paramValue: 'y',
+    })
+  })
+
+  it('⛔ two records claiming one route — the first keeps it, and the build says so', () => {
+    // A non-unique route field makes ties normal. Which record is first is this
+    // lane's order and a hosted site orders by its own store, so it is said out
+    // loud rather than discovered as a different record on the same URL.
+    const said = []
+    const out = expandDynamicPages([list, template], data([
+      { slug: 'a', tag: ['x'] },
+      { slug: 'b', tag: ['x'] },
+    ]), (m) => said.push(m))
+    expect(out.filter((p) => p.route === '/tags/x')).toHaveLength(1)
+    expect(out.find((p) => p.route === '/tags/x').title).toBeUndefined()
+    expect(said.some((m) => /claimed by more than one items record/.test(m))).toBe(true)
+  })
+
+  it('empty and duplicate members drop; a record with none is counted unrouted', () => {
+    const stats = { unrouted: {} }
+    const out = expandDynamicPages([list, template], data([
+      { slug: 'a', tag: ['x', '', 'x', null] },
+      { slug: 'b' },
+      { slug: 'c', tag: [] },
+    ]), noop, stats)
+    expect(out.map((p) => p.route).filter((r) => r.startsWith('/tags/'))).toEqual(['/tags/x'])
+    expect(stats.unrouted['/tags/:tag']).toBe(2)
+  })
+})
