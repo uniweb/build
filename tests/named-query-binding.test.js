@@ -124,7 +124,7 @@ describe('a query NAME and its binding key are separate', () => {
     expect(page.fetch.limit).toBe(5)
   })
 
-  it('⭐ the SYNC WIRE preserves all three — the transport an editor round-trips', async () => {
+  it('⭐ the SYNC WIRE preserves all three — the transport a sync client round-trips', async () => {
     const blog = wirePage(await siteProjectToDocument(ROOT), 'blog')
     expect(blog.fetch).toMatchObject({ query: 'recent-posts', as: 'posts', path: '/data/recent-posts.json' })
   })
