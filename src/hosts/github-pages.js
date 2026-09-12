@@ -13,9 +13,15 @@
  * postBuild: writes `dist/.nojekyll` (empty file).
  *
  * GitHub Pages does not consume `_redirects` (that's a
- * Cloudflare/Netlify thing) — page-level redirects go through the
- * meta-refresh HTML the prerender already emits for `redirect:` /
- * `rewrite:` directives.
+ * Cloudflare/Netlify thing) — a page's `redirect:` goes through the
+ * meta-refresh HTML the prerender emits for it.
+ *
+ * ⛔ **`rewrite:` DOES NOT WORK HERE, and this comment used to say it did.**
+ * A rewrite is a PROXY — the path keeps its URL and is served from an
+ * upstream (`/proxied/* https://upstream/:splat 200` on a host that has a
+ * redirects layer). That needs a server. Prerender deliberately writes
+ * nothing for a `rewrite:` page, so on this host the route is simply
+ * absent. Use `redirect:` if a visible URL change is acceptable.
  *
  * Two ways to publish, both supported:
  *

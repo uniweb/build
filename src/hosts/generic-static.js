@@ -7,9 +7,14 @@
  * indexes natively).
  *
  * Selecting `host: generic-static` explicitly opts out of the Netlify
- * `_redirects` output. Pages with `redirect:` or `rewrite:` directives
- * still emit their meta-refresh HTML (handled inside prerender.js), so
- * those keep working without host help.
+ * `_redirects` output. A page with `redirect:` still emits its
+ * meta-refresh HTML (handled inside prerender.js), so redirects keep
+ * working without host help.
+ *
+ * ⛔ **`rewrite:` does NOT — this comment used to claim it did.** A rewrite
+ * is a proxy: the URL stays and the body comes from an upstream, which no
+ * static host can do. Prerender writes nothing for such a page, so the
+ * route is absent rather than degraded.
  */
 
 const adapter = {
