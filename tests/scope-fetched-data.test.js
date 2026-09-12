@@ -114,3 +114,43 @@ describe('readRouteBoundViews', () => {
     expect(out).toEqual([])
   })
 })
+
+describe('one entry per address — a query several pages declare is embedded once (2026-09-12)', () => {
+  // ⛔ Entries are collected per page, so four pages declaring the same two queries
+  // produced eight entries and unsplit mode put all eight in every page. Measured on
+  // a real build: 46% of the HTML was the duplicates.
+  const articles = (route) => ({ config: { path: '/data/articles.json', as: 'articles' }, data: [1, 2, 3], _scope: route })
+  const people = (route) => ({ config: { path: '/data/people.json', as: 'people' }, data: [4], _scope: route })
+  const four = [articles('/a'), people('/a'), articles('/b'), people('/b'), articles('/c'), people('/c')]
+
+  it('unsplit: the whole site\'s data, each address once', () => {
+    const out = scopeFetchedData(four, null, '/a')
+    expect(out).toHaveLength(2)
+    expect(out.map((e) => e.config.as)).toEqual(['articles', 'people'])
+  })
+
+  it('split: the cascade\'s entries, each address once', () => {
+    const out = scopeFetchedData(four, new Set(['/a', '/b']), '/a')
+    expect(out.map((e) => e.config.as)).toEqual(['articles', 'people'])
+  })
+
+  it('⭐ the deduped entry is the SAME answer — the key is what the SPA looks it up under', () => {
+    // Two entries sharing a cache key answer the same question, so which one
+    // survives cannot change what a page reads.
+    const out = scopeFetchedData(four, null, '/a')
+    expect(out[0].data).toEqual([1, 2, 3])
+  })
+
+  it('a page keeps its OWN route-bound view — a different address, not a duplicate', () => {
+    const view = { config: { path: '/data/articles.json', as: 'articles', scope: 'field' }, data: [9], _scope: '/a/x', _routeBound: true }
+    const out = scopeFetchedData([...four, view], null, '/a/x')
+    expect(out).toHaveLength(3)
+    expect(out.filter((e) => e.config.scope === 'field')).toHaveLength(1)
+  })
+
+  it('entries that differ by view are NOT duplicates — where/sort/limit are part of the address', () => {
+    const filtered = { config: { path: '/data/articles.json', as: 'articles', limit: 3 }, data: [1], _scope: '/b' }
+    const out = scopeFetchedData([articles('/a'), filtered], null, '/a')
+    expect(out).toHaveLength(2)
+  })
+})

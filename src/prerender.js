@@ -542,10 +542,41 @@ export function scopeFetchedData(fetchedData, scopeRoutes, currentRoute = null) 
   // either mode: carried everywhere, a site of N such pages would embed N views —
   // or N whole records — in every page.
   const own = (e) => !e._routeBound || e._scope === currentRoute
-  if (!scopeRoutes) return fetchedData.filter(own).map(stripFetchScope)
-  return fetchedData
-    .filter((e) => own(e) && (e._scope === '__site__' || scopeRoutes.has(e._scope)))
-    .map(stripFetchScope)
+  const kept = scopeRoutes
+    ? fetchedData.filter((e) => own(e) && (e._scope === '__site__' || scopeRoutes.has(e._scope)))
+    : fetchedData.filter(own)
+  return dedupeByAddress(kept).map(stripFetchScope)
+}
+
+/**
+ * One entry per ADDRESS in a page's embedded data — first occurrence wins.
+ *
+ * ⛔ Entries are collected per PAGE (`executeAllFetches` tags each with the route
+ * that asked for it), so a query several pages declare produced one entry per page
+ * and unsplit mode embedded all of them in every page. Measured 2026-09-12 on a
+ * four-page site whose pages share two queries: 8 entries of which 2 were distinct,
+ * and **46% of the HTML was the duplicates**.
+ *
+ * ⭐ Keyed by `deriveCacheKey`, which is what the SPA looks each entry up under
+ * (`hydrateDataStore`) — so two entries with one key are the same answer to the
+ * same question by construction, and dropping the later ones cannot change what any
+ * page reads. A page's own route-bound view has its own address and survives.
+ *
+ * @param {Array<{config: Object}>} entries
+ * @returns {Array<Object>} the same entries, minus repeats of an address
+ */
+function dedupeByAddress(entries) {
+  const seen = new Set()
+  const out = []
+  for (const entry of entries) {
+    const key = entry?.config ? deriveCacheKey(entry.config) : null
+    if (key !== null) {
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+    out.push(entry)
+  }
+  return out
 }
 
 /**
@@ -1066,7 +1097,7 @@ export async function prerenderSite(siteDir, options = {}) {
       // data — but the internal `_scope` tag must never leak into it, and a
       // route-bound entry belongs to its own page's HTML, not to every page.
       if (Array.isArray(manifest.fetchedData)) {
-        manifest.fetchedData = manifest.fetchedData.filter((e) => !e?._routeBound).map(stripFetchScope)
+        manifest.fetchedData = dedupeByAddress(manifest.fetchedData.filter((e) => !e?._routeBound)).map(stripFetchScope)
       }
       await writeFile(localeContentPath, JSON.stringify(manifest))
       onProgress('Rewrote site-content.json as lightweight manifest')
