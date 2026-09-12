@@ -981,9 +981,14 @@ export async function prerenderSite(siteDir, options = {}) {
         continue
       }
 
-      // Rewrite pages: served by an external site, skip rendering entirely
+      // Rewrite pages: served by an external site, skip rendering entirely.
+      // ⛔ NO FILE IS WRITTEN, ON ANY HOST — a rewrite is a PROXY (the URL stays,
+      // the body comes from upstream), so it can only be served by a host with a
+      // redirects layer: `_redirects` spells it `200`, not `302`. Where that layer
+      // does not exist the route is ABSENT, not degraded — so the line says what
+      // did not happen, which is the only signal an author gets here.
       if (page.rewrite) {
-        onProgress(`  Rewrite ${outputRoute} → ${page.rewrite}`)
+        onProgress(`  Rewrite ${outputRoute} → ${page.rewrite} (no page emitted — needs a host that proxies)`)
         continue
       }
 
