@@ -57,7 +57,7 @@ import {
   fetchFromQueryShorthand,
   assertRouteFolder,
 } from '../site/content-collector.js'
-import { refuseUnder } from '../site/data-fetcher.js'
+import { refuseUnder, refuseOutsideLanguage } from '../site/data-fetcher.js'
 import { readLayoutFolder } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
@@ -246,7 +246,10 @@ function buildPageData(config, ctx) {
   // `where: { path: { under } }` is refused here as the build refuses it
   // (`parseFetchConfig`): a site that cannot build must not sync either. A
   // section's fetch is refused where the collector parses it.
-  for (const one of [fetch].flat()) refuseUnder(one?.where, 'fetch')
+  for (const one of [fetch].flat()) {
+    refuseUnder(one?.where, 'fetch')
+    refuseOutsideLanguage(one?.where, 'fetch')
+  }
   // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
   // A shell/backend-hosted site renders client-side with NO prerender, so the
@@ -815,6 +818,7 @@ function queriesNested(declarations, uuids = null, org = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
+    refuseOutsideLanguage(d.where, `queries.${name}`)
     const data = {}
     const source = d.path ? { path: d.path } : d.url ? { url: d.url } : d.source
     setIf(data, 'source', source)
@@ -1087,7 +1091,10 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // the `query:` shorthand carries no `where`. ⚠️ The desugaring stays inline in
   // `setIf`: `gen-emit-surface.mjs` reads the published key's sources off it.
   checkDeclaration(siteYml, 'site.yml')
-  for (const one of [siteYml.fetch].flat()) refuseUnder(one?.where, 'site.yml fetch')
+  for (const one of [siteYml.fetch].flat()) {
+    refuseUnder(one?.where, 'site.yml fetch')
+    refuseOutsideLanguage(one?.where, 'site.yml fetch')
+  }
   setIf(settings, 'fetch', siteYml.fetch ?? fetchFromQueryShorthand(siteYml.query))
 
   // ⭐ The SITE TIER of framework's own `{name, hide, params}` layout object, which

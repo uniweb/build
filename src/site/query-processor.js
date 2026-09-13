@@ -55,7 +55,7 @@ import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
 import { DATA_DIR, fillRoutePattern, withoutRouteVariables } from '@uniweb/core'
-import { applyWhere, applySort, refuseUnder } from './data-fetcher.js'
+import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, FOLDER_MISSING } from './records-config.js'
@@ -124,6 +124,7 @@ function parseQueryConfig(name, config) {
   }
 
   refuseUnder(config.where, `queries.${name}`)
+  refuseOutsideLanguage(config.where, `queries.${name}`)
   return {
     name,
     // The query's schema selects its records from the pool — `entities/{schema}/`

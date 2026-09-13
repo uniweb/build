@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { matchWhere, sortRecords, queryDataUrl, applyScope } from '@uniweb/core'
+import { matchWhere, sortRecords, queryDataUrl, applyScope, whereOutsideLanguage } from '@uniweb/core'
 
 /**
  * Infer schema name from path or URL
@@ -226,6 +226,22 @@ export function refuseUnder(where, context) {
   walk(where)
 }
 
+/**
+ * ⛔ A `where` OUTSIDE THE LANGUAGE STOPS THE BUILD — a retired operator (`like`,
+ * `nin`), an unknown one, an empty `and` / `or`, a text operator with an empty
+ * argument. Every lane answers such a where with no records (`@uniweb/core`'s
+ * `whereOutsideLanguage`), which on a page reads as "nothing matched"; an authoring
+ * error is said where the author wrote it instead. ⛔ `like` and `nin` worked in this
+ * evaluator until 2026-09-13, when it took the language ruled that day.
+ *
+ * @param {Object|undefined} where
+ * @param {string} context - where the declaration sits, for the message
+ */
+export function refuseOutsideLanguage(where, context) {
+  const problem = whereOutsideLanguage(where)
+  if (problem) throw new Error(`[uniweb] ${context}: ${problem}.`)
+}
+
 // Keys that are neither recognized nor merely unknown: they USED to work, and a
 // generic "unrecognized key" line understates that. Each has a dedicated message
 // naming its replacement, so this table only has to keep the generic report from
@@ -341,6 +357,7 @@ export function parseFetchConfig(fetch) {
     )
   }
   refuseUnder(fetch.where, 'fetch')
+  refuseOutsideLanguage(fetch.where, 'fetch')
 
   // Refine config: { refine: true, detail: false, limit: 3 }
   // No URL — merges with the parent fetch config at runtime; only carries
