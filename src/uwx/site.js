@@ -261,6 +261,8 @@ function buildPageData(config, ctx) {
   // `path`, no `as` and no `schema`. That is the silent-empty class: a payload
   // that arrives, parses, and resolves to nothing.
   const resolveWireFetch = (one) => {
+    // ⭐ A string is a query name — the wire carries the object form.
+    if (typeof one === 'string') one = { query: one }
     if (!one || typeof one.query !== 'string') return one
     const { query, ...rest } = one
     // ⭐ BOTH, deliberately, and they are not redundant.
@@ -770,11 +772,10 @@ export function isSiteRelativeExtensionUrl(decl) {
 // that is neither emitted nor listed here.
 // Authored keys the explicit block in `queriesNested` already consumes. Kept
 // separate from the framework-local set below because these DO reach the wire —
-// just under a wire spelling. ⚠️ `detailUrl` is the one that matters: it is emitted
-// as `detail_url`, so a pass-through keyed on "is it already in `data`?" does not
-// see it and the field rides TWICE. Measured 2026-08-29, in the first draft of this
-// very change — and the push test missed it because both its controls (`limit`,
-// `schema`) keep their names.
+// some under a wire spelling. ⚠️ A key emitted under another name is the one that
+// matters: a pass-through keyed on "is it already in `data`?" does not see it and
+// the field rides TWICE (measured 2026-08-29 with `detailUrl` → `detail_url`, which
+// was retired on 2026-09-13 — an external query's `record:` rides in `source`).
 const DECL_EMITTED_ABOVE = new Set([
   'source',
   'schema',
@@ -783,16 +784,19 @@ const DECL_EMITTED_ABOVE = new Set([
   'limit',
   'excerpt',
   'deferred',
-  'detailUrl',
   'queryable'
 ])
 
 const DECL_NOT_ON_WIRE = new Set([
   // Identity — rides as the record's own `name`, not inside `data`.
   'name',
-  // Folded into `source` above.
+  // Folded into `source` above — an external query's whole source.
   'path',
   'url',
+  'method',
+  'body',
+  'transform',
+  'record',
   // Folded into `schema` above (the migration synonym).
   'model',
   // Build state: whether the AUTHOR asked for the schema or the subfolder-name
@@ -812,13 +816,26 @@ const DECL_NOT_ON_WIRE = new Set([
   'filter'
 ])
 
+/** An external query's source, as it rides in the `queries` Section's `source`. */
+function externalSource(d) {
+  const source = { url: d.url }
+  setIf(source, 'method', d.method)
+  setIf(source, 'body', d.body)
+  setIf(source, 'transform', d.transform)
+  setIf(source, 'record', d.record)
+  return source
+}
+
 function queriesNested(declarations, uuids = null, org = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
     refuseOutsideLanguage(d.where, `queries.${name}`)
     const data = {}
-    const source = d.path ? { path: d.path } : d.url ? { url: d.url } : d.source
+    // ⭐ AN EXTERNAL QUERY'S SOURCE, WHOLE — `url`, `method`, `body`, `transform` and
+    // `record` — so a host can put it on the payload's `config.queries[<name>]`, where
+    // the runtime fetches it from (never the records service).
+    const source = d.path ? { path: d.path } : d.url !== undefined ? externalSource(d) : d.source
     setIf(data, 'source', source)
     // ⛔ QUALIFIED, WITH THE SAME RULE AND THE SAME ORG AS THE RECORDS' `$model`
     // (`records.js::buildRecordEntities`). A consumer answers a query by matching
@@ -834,7 +851,6 @@ function queriesNested(declarations, uuids = null, org = null) {
     setIf(data, 'limit', d.limit)
     setIf(data, 'excerpt', d.excerpt)
     setIf(data, 'deferred', d.deferred)
-    setIf(data, 'detail_url', d.detailUrl)
     setIf(data, 'queryable', d.queryable)
     // ⛔ EMIT WHAT WE DO NOT MODEL. The decl's field set is the BACKEND's Model
     // (this document mirrors `@uniweb/site-content` — see the lane header), and

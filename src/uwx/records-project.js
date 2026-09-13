@@ -249,7 +249,12 @@ function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
 
   const source = d.source || {}
   if (typeof source.url === 'string') {
+    // ⭐ An external query's source, whole — the inverse of `site.js::externalSource`.
     decl.url = source.url
+    setIf(decl, 'method', source.method)
+    setIf(decl, 'body', source.body)
+    setIf(decl, 'transform', source.transform)
+    setIf(decl, 'record', source.record)
   } else if (typeof source.path === 'string') {
     // ⛔ A FILE-BASED QUERY HAS NO PATH TO WRITE BACK. `entities/{schema}/` is the
     // pool and `schema:` addresses it, so a `path` arriving on the wire is either
@@ -285,8 +290,8 @@ function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
   if (d.deferred !== undefined && !isDerivedDeferred(d, dataSchemas)) {
     decl.deferred = d.deferred
   }
-  // wire `detail_url` → file-side `detailUrl` (the key the producer reads).
-  if (d.detail_url !== undefined) decl.detailUrl = d.detail_url
+  // ⛔ A stored `detail_url` is not written back: `detailUrl:` is retired (2026-09-13)
+  // and the build refuses it — its case is `record.url` on an external query.
   setIf(decl, 'queryable', d.queryable)
 
   // ⛔ PRESERVE WHAT WE DO NOT MODEL — the pull half of the same rule the emitter

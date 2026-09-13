@@ -150,8 +150,10 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       for (const input of inputs) {
         const key = input.as // the content.data KEY
 
-        if (input.url) {
-          deferred.push({ route: page.route, section: type, key, reason: 'remote url: source', url: input.url })
+        // An external query's records are its address's, fetched where the page renders.
+        const external = typeof input.query === 'string' ? config.queries?.[input.query]?.url : undefined
+        if (input.url || external) {
+          deferred.push({ route: page.route, section: type, key, reason: 'external query', url: input.url ?? external })
           continue
         }
         if (!input.path) continue

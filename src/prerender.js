@@ -167,8 +167,11 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
   // `undefined` — which passes the `!== false` test and then fetches nothing.
   const firstSite = firstOfKey()
   for (const oneFetch of toFetchList(siteContent.config?.fetch)) {
-    if (!firstSite(oneFetch.as) || oneFetch.prerender === false) continue
+    if (!firstSite(oneFetch.as)) continue
+    // ⭐ `prerender` is read off the RESOLVED config: an external query's binding is the
+    // browser's unless it says otherwise, which only the resolver knows.
     const cfg = resolveForBuild(oneFetch)
+    if (cfg.prerender === false) continue
     onProgress(`  Fetching site data: ${cfg.path || cfg.url}`)
     const got = await read(cfg, oneFetch)
     if (got) {
@@ -194,8 +197,9 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     // Page-level fetch — every declaration on the page.
     const firstPage = firstOfKey()
     for (const oneFetch of toFetchList(page.fetch)) {
-      if (!firstPage(oneFetch.as) || oneFetch.prerender === false) continue
+      if (!firstPage(oneFetch.as)) continue
       const cfg = resolveForBuild(oneFetch)
+      if (cfg.prerender === false) continue
       onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
       const got = await read(cfg, oneFetch)
       if (got) {
@@ -227,8 +231,8 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
    * browser's, as it is by default. Null when there is nothing to embed.
    */
   const bake = async (cfg) => {
-    if (cfg.prerender === false || typeof cfg.path !== 'string') return null
-    const options = isNonDefaultLocale && cfg.path.startsWith(`/${localeInfo.locale}/`) ? localizedFetchOptions : fetchOptions
+    if (cfg.prerender === false || (typeof cfg.path !== 'string' && typeof cfg.url !== 'string')) return null
+    const options = isNonDefaultLocale && typeof cfg.path === 'string' && cfg.path.startsWith(`/${localeInfo.locale}/`) ? localizedFetchOptions : fetchOptions
     const result = await executeFetch(cfg, options)
     if (!result.data || result.error) return null
     return { config: cfg, data: result.data, meta: { whole: cfg.whole } }
@@ -500,8 +504,8 @@ async function processSectionFetches(sections, { resolve, read, onProgress, reco
     for (const sectionFetch of toFetchList(section.fetch)) {
       if (seen.has(sectionFetch.as)) continue
       seen.add(sectionFetch.as)
-      if (sectionFetch.prerender === false) continue
       const cfg = resolve(sectionFetch)
+      if (cfg.prerender === false) continue
       onProgress(`  Fetching section data: ${cfg.path || cfg.url}`)
       const got = await read(cfg, sectionFetch)
       if (!got) continue

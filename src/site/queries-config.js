@@ -137,6 +137,8 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
     }
   }
 
+  for (const decl of Object.values(declarations)) refuseQueryDeclaration(decl)
+
   // Schema default (query-name convention) + `model:`→`schema:` synonym.
   // `schemaExplicit` records whether the author asked for this schema: an explicit
   // schema that fails to resolve is a hard error; a convention-defaulted one that
@@ -147,8 +149,8 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
     } else if (decl.model) {
       decl.schema = decl.model // migration synonym
       decl.schemaExplicit = true
-    } else if (!decl.url) {
-      decl.schema = defaultSchema(decl.name) // query-name convention
+    } else if (decl.url === undefined) {
+      decl.schema = defaultSchema(decl.name) // query-name convention; an external query has none
       decl.schemaExplicit = false
     }
   }
@@ -156,10 +158,9 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
   // ⛔ A `path:` ON A FILE-BASED QUERY DOES NOTHING, so say so. It resolved the
   // pool while the pool was `collections/<name>/`; now `schema:` does, and a key
   // that is quietly inert is how an author spends an afternoon on a query that
-  // was reading a different set of files all along. It stays meaningful for a
-  // REMOTE source, whose address nothing local can derive.
+  // was reading a different set of files all along. (Beside `url:` it is refused.)
   for (const decl of Object.values(declarations)) {
-    if (decl.path && !decl.url) {
+    if (decl.path && decl.url === undefined) {
       console.warn(
         `[uniweb] query "${decl.name}": \`path: ${decl.path}\` is ignored. A query names a ` +
           `\`schema:\` and \`entities/{schema}/\` supplies its records — there is no directory ` +
@@ -185,6 +186,80 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
     hasQueriesYml,
     declarations,
   }
+}
+
+/** What a query over the site's records declares, which an external query cannot. */
+const SITE_RECORDS_ONLY = ['schema', 'model', 'scope', 'deferred', 'excerpt', 'route', 'path']
+/** The keys of an external query's `record:` request. */
+const RECORD_KEYS = ['url', 'method', 'body', 'transform']
+
+/**
+ * ⛔ WHAT A QUERY DECLARATION MAY NOT SAY — refused on the build and the sync push
+ * alike, since both resolve queries here.
+ *
+ * ⭐ AN EXTERNAL QUERY is a query with `url:` (ruled 2026-09-13 [Diego]: *"Setting
+ * `url` would classify it as external"*): an address, `method` and `body` for a POST,
+ * `transform` (a dot-path to its records), `where` / `sort` / `limit` evaluated over
+ * them, and `record:` — `{ url, method, body, transform }` — for one record on a
+ * parametric page. What describes the site's records — `schema`, `scope`,
+ * `deferred`, `excerpt`, `route` — is refused beside `url:`. ⛔ `detailUrl:` is
+ * retired everywhere: its one real case is `record.url`.
+ *
+ * @param {Object} decl - one normalized declaration (`{ name, … }`)
+ */
+export function refuseQueryDeclaration(decl) {
+  const where = `query "${decl.name}"`
+  if (decl.detailUrl !== undefined) {
+    throw new Error(
+      `[uniweb] ${where}: \`detailUrl:\` is retired. An API's single-record address is \`record: { url: … }\` ` +
+        `on an external query — one with \`url:\`.`
+    )
+  }
+  const external = decl.url !== undefined
+  if (!external) {
+    for (const key of ['method', 'body', 'transform', 'record']) {
+      if (decl[key] === undefined) continue
+      throw new Error(
+        `[uniweb] ${where}: \`${key}:\` belongs on an external query — one with \`url:\`. A query over the site's ` +
+          `records names a \`schema:\` instead.`
+      )
+    }
+    return
+  }
+  if (typeof decl.url !== 'string' || decl.url.trim() === '') {
+    throw new Error(`[uniweb] ${where}: \`url:\` is the external source's address — a non-empty string.`)
+  }
+  const clash = SITE_RECORDS_ONLY.filter((key) => decl[key] !== undefined)
+  if (clash.length > 0) {
+    throw new Error(
+      `[uniweb] ${where}: ${clash.map((k) => `\`${k}:\``).join(', ')} ${clash.length === 1 ? 'describes' : 'describe'} the ` +
+        `site's records, and this query has \`url:\` — an external source. Declare a separate query for the site's records.`
+    )
+  }
+  refuseMethod(decl.method, where)
+  if (decl.transform !== undefined && typeof decl.transform !== 'string') {
+    throw new Error(`[uniweb] ${where}: \`transform:\` is a dot-path to the records in the response, e.g. \`data.items\`.`)
+  }
+  if (decl.record === undefined) return
+  if (!decl.record || typeof decl.record !== 'object' || Array.isArray(decl.record)) {
+    throw new Error(`[uniweb] ${where}: \`record:\` is the request for one record — \`{ url, method, body, transform }\`.`)
+  }
+  const unknown = Object.keys(decl.record).filter((key) => !RECORD_KEYS.includes(key))
+  if (unknown.length > 0) {
+    throw new Error(
+      `[uniweb] ${where}: \`record:\` takes ${RECORD_KEYS.map((k) => `\`${k}\``).join(', ')} — not ${unknown.map((k) => `\`${k}\``).join(', ')}.`
+    )
+  }
+  refuseMethod(decl.record.method, `${where} record`)
+  if (decl.record.transform !== undefined && typeof decl.record.transform !== 'string') {
+    throw new Error(`[uniweb] ${where} record: \`transform:\` is a dot-path to the record in the response.`)
+  }
+}
+
+function refuseMethod(method, where) {
+  if (method === undefined) return
+  if (typeof method === 'string' && ['GET', 'POST'].includes(method.toUpperCase())) return
+  throw new Error(`[uniweb] ${where}: \`method: ${JSON.stringify(method)}\` — an external query is read with \`GET\` or \`POST\`.`)
 }
 
 /**

@@ -35,7 +35,7 @@ describe('a where outside the language stops the build', () => {
     expect(() => parseFetchConfig({ query: 'members', where: { status: { nin: ['draft'] } } })).toThrow(
       /fetch: `nin` is spelled `not_in`/
     )
-    expect(() => parseFetchConfig({ path: '/data/a.json', where: { title: { like: 'The*' } } })).toThrow(/`like` is retired/)
+    expect(() => parseFetchConfig({ query: 'a', where: { title: { like: 'The*' } } })).toThrow(/`like` is retired/)
   })
 
   it('on a named query', async () => {

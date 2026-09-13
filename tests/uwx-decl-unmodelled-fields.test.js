@@ -61,21 +61,27 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     expect(decl.schema).toBe('@std/person')
   })
 
-  it('⛔ a RENAMED field rides once, under its wire spelling only', async () => {
-    // ⚠️ The control the first draft of this change lacked. `detailUrl` is emitted
-    // as `detail_url`, so a pass-through that skips keys "already in data" does not
-    // recognize it and emits BOTH — a duplicate, on the one field whose name differs
-    // across the seam. The two controls above (`limit`, `schema`) keep their names,
-    // so neither could have caught it. A rename needs a renamed field to test it.
+  it('⛔ a FOLDED field rides once, inside `source` only', async () => {
+    // ⚠️ The control the first draft of this change lacked: a pass-through that
+    // skips keys "already in data" does not recognize a field emitted under another
+    // name, and emits BOTH. An external query's `method`, `body`, `transform` and
+    // `record` ride inside `source` (2026-09-13), so they are that case now — the
+    // renamed `detailUrl` → `detail_url` it was written for is retired.
     const src = makeSite(
-"members:\n  schema: '@std/person'\n  detailUrl: /api/m/{slug}\n"
+"items:\n  url: https://api.test/items\n  method: POST\n  body: { q: all }\n  transform: data.items\n  record: { url: 'https://api.test/items/{slug}' }\n"
     )
 
     const doc = await siteProjectToDocument(src)
-    const decl = doc.queries.find((c) => c.name === 'members')
+    const decl = doc.queries.find((c) => c.name === 'items')
 
-    expect(decl.detail_url).toBe('/api/m/{slug}')
-    expect(decl.detailUrl).toBeUndefined()
+    expect(decl.source).toEqual({
+      url: 'https://api.test/items',
+      method: 'POST',
+      body: { q: 'all' },
+      transform: 'data.items',
+      record: { url: 'https://api.test/items/{slug}' },
+    })
+    for (const key of ['url', 'method', 'body', 'transform', 'record']) expect(decl[key]).toBeUndefined()
   })
 
   it('⛔ withholds framework-local fields the Model has no slot for', async () => {
@@ -145,10 +151,10 @@ describe('pull — an unmodelled decl field returns to the authored file', () =>
     // The subject.
     expect(decl.displayHeading).toBe('Our Team')
 
-    // CONTROL — a modelled field that is RENAMED on the way in. If preservation
-    // were implemented as a blanket copy, `detail_url` would survive under its wire
-    // spelling and the file would carry both keys.
-    expect(decl.detailUrl).toBe('/api/members/{slug}')
+    // CONTROL — a stored field the projection CONSUMES rather than preserves. If
+    // preservation were a blanket copy, a stored `detail_url` would be written back
+    // under some spelling — and `detailUrl:` stops the build since 2026-09-13.
+    expect(decl.detailUrl).toBeUndefined()
     expect(decl.detail_url).toBeUndefined()
   })
 })

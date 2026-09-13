@@ -2,7 +2,13 @@ import { shouldPrefetchInDev } from '../src/site/plugin.js'
 import { parseFetchConfig } from '../src/site/data-fetcher.js'
 // Derived, never re-spelled — the convention is pinned once, in
 // `@uniweb/core`'s tests/data-paths.test.js.
-import { queryDataUrl } from '@uniweb/core'
+import { queryDataUrl, resolveFetchConfigs } from '@uniweb/core'
+
+/** An external query's binding, resolved the way dev resolves it before asking. */
+const external = (binding = {}) =>
+  resolveFetchConfigs([parseFetchConfig({ query: 'things', ...binding })], {
+    queries: { things: { url: 'https://api.example.com/things' } },
+  }).get('things')
 
 // In dev there is no prerender, so we embed a fetch into the boot payload only
 // when the browser cannot fetch it live itself. Local file collections and
@@ -17,20 +23,16 @@ describe('shouldPrefetchInDev', () => {
     expect(shouldPrefetchInDev(cfg)).toBe(false)
   })
 
-  it('does not embed a local path source even with prerender:true', () => {
-    const cfg = parseFetchConfig('/data/team.json')
-    expect(cfg.prerender).toBe(true)
-    expect(shouldPrefetchInDev(cfg)).toBe(false)
+  it('does not embed a local file-based collection even with prerender:true', () => {
+    expect(shouldPrefetchInDev(parseFetchConfig({ query: 'team', prerender: true }))).toBe(false)
   })
 
-  it('embeds a remote url source with default (prerender:true) build-time fetch', () => {
-    const cfg = parseFetchConfig({ url: 'https://api.example.com/things', prerender: true })
-    expect(shouldPrefetchInDev(cfg)).toBe(true)
+  it('embeds an external query whose binding asks for a build-time fetch (prerender:true)', () => {
+    expect(shouldPrefetchInDev(external({ prerender: true }))).toBe(true)
   })
 
-  it('does not embed a remote url source opted into runtime fetch (prerender:false)', () => {
-    // url sources default to prerender:false anyway
-    const cfg = parseFetchConfig({ url: 'https://api.example.com/things' })
+  it('does not embed an external query left to the browser — its default', () => {
+    const cfg = external()
     expect(cfg.prerender).toBe(false)
     expect(shouldPrefetchInDev(cfg)).toBe(false)
   })

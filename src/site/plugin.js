@@ -99,20 +99,22 @@ function resolveFaviconHref(configFavicon, publicDir, basePath) {
  * collection regenerates `/data/*.json` but the runtime keeps reading the stale
  * embed until the dev server is restarted.
  *
- * So in dev we embed only what the browser genuinely cannot fetch itself:
- *   - Local `path:` sources (file-based collections → `/data/*.json`) are served
- *     by Vite and always browser-reachable, so we never embed them — the runtime
- *     fetches them live and picks up edits on reload. This also gives local
- *     collections true parity with a real backend fetcher.
- *   - `prerender: false` opts a source out of build-time fetching by definition.
- *   - Remote `url:` sources with `prerender !== false` may target a
- *     build-time-only endpoint (server-side auth, no CORS), so we keep
- *     pre-fetching and embedding them, mirroring what prod prerender does.
+ * So in dev we embed only what the browser genuinely cannot fetch itself. Asked of
+ * a RESOLVED config (`resolveFetchConfigs`), since only the query says where its
+ * records live:
+ *   - a query over the site's records (`/data/<query>.json`) is served by Vite and
+ *     always browser-reachable, so we never embed it — the runtime fetches it live
+ *     and picks up edits on reload;
+ *   - `prerender: false` opts a source out of build-time fetching by definition —
+ *     and it is an external query's default;
+ *   - an external query whose binding says `prerender: true` may target an
+ *     endpoint only the build can reach (no CORS), so we keep pre-fetching and
+ *     embedding it, mirroring what prod prerender does.
  *
  * Prod is unaffected: prerender still embeds fetched data for flash-free SSG
  * hydration (see build/src/prerender.js executeAllFetches / injectBuildData).
  *
- * @param {Object|null} cfg - A normalized fetch config (parseFetchConfig output)
+ * @param {Object|null} cfg - A resolved fetch config
  * @returns {boolean}
  */
 export function shouldPrefetchInDev(cfg) {
@@ -149,8 +151,8 @@ async function executeDevFetches(siteContent, siteDir) {
 
   // Site-level fetch — every declaration.
   for (const siteFetch of toFetchList(siteContent.config?.fetch)) {
-    if (!shouldPrefetchInDev(siteFetch)) continue
     const cfg = resolveForDev(siteFetch)
+    if (!shouldPrefetchInDev(cfg)) continue
     const result = await executeFetch(cfg, fetchOptions)
     if (result.data && !result.error) {
       fetchedData.push(entry(cfg, result.data))
@@ -161,16 +163,17 @@ async function executeDevFetches(siteContent, siteDir) {
   for (const page of siteContent.pages || []) {
     // Page-level fetch — every declaration.
     for (const pageFetch of toFetchList(page.fetch)) {
-      if (!shouldPrefetchInDev(pageFetch)) continue
       const cfg = resolveForDev(pageFetch)
+      if (!shouldPrefetchInDev(cfg)) continue
       const result = await executeFetch(cfg, fetchOptions)
       if (result.data && !result.error) {
         fetchedData.push(entry(cfg, result.data))
       }
     }
 
-    // Process section-level fetches (own fetch → parsedContent.data)
-    await processDevSectionFetches(page.sections, fetchOptions)
+    // Section-level fetches (own fetch → parsedContent.data) — ⛔ never on a
+    // parametric page, whose sections the runtime fills per URL (as prerender does).
+    if (!page.isDynamic) await processDevSectionFetches(page.sections, fetchOptions, resolveForDev)
   }
 
   // Store on siteContent for runtime DataStore pre-population
@@ -184,14 +187,15 @@ async function executeDevFetches(siteContent, siteDir) {
  * @param {Array} sections - Sections to process
  * @param {Object} fetchOptions - Options for executeFetch
  */
-async function processDevSectionFetches(sections, fetchOptions) {
+async function processDevSectionFetches(sections, fetchOptions, resolve) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
     // Execute every section-level fetch, so dev shows what prerender will.
     for (const sectionFetch of toFetchList(section.fetch)) {
-      if (!shouldPrefetchInDev(sectionFetch)) continue
-      const result = await executeFetch(sectionFetch, fetchOptions)
+      const cfg = resolve(sectionFetch)
+      if (!shouldPrefetchInDev(cfg)) continue
+      const result = await executeFetch(cfg, fetchOptions)
       if (result.data && !result.error) {
         // A section's own fetch goes to content.data, matching prerender.
         section.parsedContent = mergeDataIntoContent(
@@ -205,7 +209,7 @@ async function processDevSectionFetches(sections, fetchOptions) {
 
     // Process subsections recursively
     if (section.subsections && section.subsections.length > 0) {
-      await processDevSectionFetches(section.subsections, fetchOptions)
+      await processDevSectionFetches(section.subsections, fetchOptions, resolve)
     }
   }
 }

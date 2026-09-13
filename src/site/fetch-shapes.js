@@ -1,12 +1,12 @@
 // What shape a `fetch:` declaration is, and what a PROJECTION may write back.
 //
-// ⛔ WHY THIS EXISTS. A `fetch:` declaration has two shapes, and the keys each one
-// accepts differ (`data-fetcher.js` RECOGNIZED_FETCH_KEYS):
+// ⛔ WHY THIS EXISTS. A `fetch:` declaration is a BINDING — it names a query — and
+// accepts `query · as · where · sort · limit · current · …`, NOT `path`/`url`
+// (`data-fetcher.js` RECOGNIZED_FETCH_KEYS). A string is a query name.
 //
-//   query       query · as · where · sort · limit · current · … — and NOT `path`/`url`
-//   source      path · url · as · …
-//
-// (A third, `refine: true`, was retired on 2026-09-13 for `current:`; the build refuses it.)
+// (The source shape — `{ path }`, `{ url }` — and `refine: true` were retired on
+// 2026-09-13; the build refuses both. `source` below classifies what a store may
+// still hold from before, so a pull passes it through rather than guessing.)
 
 //
 // The build RESOLVES a `query:` shorthand into a concrete location, so the
@@ -94,8 +94,10 @@ export const DECLARATION_KEYS = Object.freeze(['query', 'fetch', 'data'])
  */
 export function queryNamesOf(fetch) {
   const nameOf = (one) => {
+    if (typeof one === 'string' && one !== '') return one
     if (!one || typeof one !== 'object' || typeof one.query !== 'string' || one.query === '') return null
     for (const [key, value] of Object.entries(one)) {
+      if (value === undefined) continue
       if (key === 'query' || key === 'path' || key === 'url') continue
       if (key === 'as' && value === one.query) continue
       if (key === 'prerender' && value === true) continue

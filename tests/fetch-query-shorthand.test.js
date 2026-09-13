@@ -37,11 +37,11 @@ describe('⛔ the retired name errors', () => {
   })
 
   // ⛔ THE CASE THAT MAKES THIS A HARD ERROR RATHER THAN A WARNING. Verified, not
-  // assumed: without the throw, the declaration falls to the source shape and
-  // resolves to NULL — no path, no error, no data.
-  it('would otherwise have resolved to nothing at all', () => {
+  // assumed: without it, the declaration names no query — which is refused too
+  // since 2026-09-13, but with a message that does not say what to rename.
+  it('would otherwise have named no query at all', () => {
     const { collection, ...withoutIt } = { collection: 'articles', limit: 3 }
-    expect(parseFetchConfig(withoutIt)).toBeNull()
+    expect(() => parseFetchConfig(withoutIt)).toThrow(/a fetch names a query/)
   })
 
   it('errors even when other keys would have made it look valid', () => {

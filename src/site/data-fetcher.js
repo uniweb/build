@@ -1,17 +1,16 @@
 /**
  * Data Fetcher Utilities
  *
- * Handles parsing fetch configurations and executing data fetches
- * from local files (public/) or remote URLs.
+ * Parses an authored `fetch:` — a BINDING, which names a query — and executes a
+ * resolved config: a compiled `/data/<query>.json` under `public/`, or an external
+ * query's address.
  *
- * Supports:
- * - Simple string paths: "/data/team.json"
- * - Full config objects with schema, prerender, merge, transform options
- * - Named-query references: { query: 'articles', limit: 3 }
- * - Local JSON/YAML files
- * - Remote URLs
- * - Transform paths to extract nested data
- * - Post-processing: limit, sort
+ * ⭐ A binding always names a query (ruled 2026-09-13 [Diego]): `fetch: team` and
+ * `fetch: [team]` mean `fetch: { query: team }` and `fetch: [{ query: team }]`.
+ * The query decides where its records live — the compiled file a static build
+ * generates, a host's live records, or an external API — so one declaration
+ * debugs locally against static data and reads live records once published,
+ * with nothing changed. ⛔ `/data/…` is that generated file, never authored.
  *
  * @module @uniweb/build/site/data-fetcher
  */
@@ -21,28 +20,6 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { matchWhere, sortRecords, queryDataUrl, applyScope, whereOutsideLanguage, CURRENT_MODES } from '@uniweb/core'
-
-/**
- * Infer schema name from path or URL
- * Extracts filename without extension as the schema key
- *
- * @param {string} pathOrUrl - File path or URL
- * @returns {string} Schema name
- *
- * @example
- * inferSchemaFromPath('/data/team-members.json') // 'team-members'
- * inferSchemaFromPath('https://api.com/users')   // 'users'
- */
-function inferSchemaFromPath(pathOrUrl) {
-  if (!pathOrUrl) return 'data'
-
-  // Get the last path segment
-  const segment = pathOrUrl.split('/').pop()
-  // Remove query string
-  const filename = segment.split('?')[0]
-  // Remove extension
-  return filename.replace(/\.(json|yaml|yml)$/i, '')
-}
 
 /**
  * Get a nested value from an object using dot notation
@@ -150,17 +127,13 @@ export function applyPostProcessing(data, config) {
  * @returns {object|null} Normalized config or null if invalid
  *
  * @example
- * // Simple string
- * parseFetchConfig('/data/team.json')
- * // Returns: { path: '/data/team.json', schema: 'team', prerender: true, merge: false }
+ * // A query name
+ * parseFetchConfig('team')
+ * // Returns: { query: 'team', path: '/data/team.json', as: 'team', merge: false }
  *
- * // Full config
- * parseFetchConfig({ path: '/team', schema: 'person', prerender: false })
- * // Returns: { path: '/team', schema: 'person', prerender: false, merge: false }
- *
- * // Collection reference
- * parseFetchConfig({ query: 'articles', limit: 3, sort: 'date desc' })
- * // Returns: { path: '/data/articles.json', schema: 'articles', limit: 3, sort: 'date desc', ... }
+ * // A binding that adapts its query
+ * parseFetchConfig({ query: 'articles', as: 'latest', limit: 3, sort: 'date desc' })
+ * // Returns: { query: 'articles', path: '/data/articles.json', as: 'latest', limit: 3, sort: 'date desc', merge: false }
  */
 // ─── Unrecognized-key reporting ───────────────────────────────────────
 //
@@ -184,13 +157,12 @@ const RECOGNIZED_FETCH_KEYS = {
   // ⛔ `scope` is not a binding key — it is the query's, and refused on a binding
   // (`refuseBindingScope`, ruled 2026-09-13 [Diego]). It was recognized here from
   // 2026-09-11 to 2026-09-13, and replaced the query's scope on the records service.
+  // ⛔ `path`, `url`, `method`, `body`, `transform` and `detail` are not binding keys
+  // either — a binding names a query, which supplies its source (`refuseBinding`).
+  // The source shape that took them (`{ path }`, `{ url }`) was retired on 2026-09-13.
   query: new Set([
-    'query', 'as', 'prerender', 'merge', 'transform',
+    'query', 'as', 'prerender', 'merge',
     'where', 'limit', 'sort', 'current', 'detailPage',
-  ]),
-  source: new Set([
-    'path', 'url', 'as', 'prerender', 'merge', 'transform', 'detail',
-    'detailPage', 'scope', 'where', 'limit', 'sort',
   ]),
 }
 
@@ -310,11 +282,80 @@ function refuseRefineAndMisplacedCurrent(fetch, context, level) {
  * @param {'section'|'page'|'site'|null} [options.level] - the level it sits at, when known
  */
 export function refuseBinding(fetch, context, { level = null } = {}) {
-  if (!fetch || typeof fetch !== 'object' || Array.isArray(fetch)) return
+  if (fetch === null || fetch === undefined) return
+  if (typeof fetch === 'string') {
+    refuseQueryName(fetch, context)
+    return
+  }
+  if (typeof fetch !== 'object' || Array.isArray(fetch)) return
   refuseRefineAndMisplacedCurrent(fetch, context, level)
+  refuseSourceKeys(fetch, context)
+  if (fetch.collection === undefined) refuseQueryName(fetch.query, context, { object: true })
   refuseUnder(fetch.where, context)
   refuseOutsideLanguage(fetch.where, context)
   refuseBindingScope(fetch, context)
+}
+
+/**
+ * A binding's string, or the string it has for `query:` — is it a query name?
+ *
+ * ⛔ A NAME, NOT A PATH — ruled 2026-09-13 [Diego]: *"Referencing "/data" is never
+ * allowed."* `/data/<name>.json` is the file the build generates from a query for a
+ * site with no backend to answer it; naming the query is what lets the same page read
+ * that file locally and a host's live records once published. So a string with a
+ * slash, or a data file's extension, is refused rather than looked up as a name.
+ *
+ * @param {*} name
+ * @param {string} context
+ * @param {{ object?: boolean }} [options] - whether it came from `{ query: … }`
+ */
+function refuseQueryName(name, context, { object = false } = {}) {
+  if (typeof name === 'string' && name.trim() !== '' && !/[\\/]|\.(json|ya?ml)$/i.test(name)) return
+  if (typeof name === 'string' && name.trim() !== '') {
+    const guess = name.replace(/^.*[\\/]/, '').replace(/\.(json|ya?ml)$/i, '')
+    throw new Error(
+      `[uniweb] ${context}: ${object ? `\`query: ${JSON.stringify(name)}\`` : `\`fetch: ${JSON.stringify(name)}\``} — a fetch ` +
+        `names a query, and a query name is not a path. \`/data/…\` is the file the build generates from a query ` +
+        `for a site with no backend; declare the query in queries.yml and name it${guess ? ` — \`query: ${guess}\`` : ''}.`
+    )
+  }
+  throw new Error(
+    `[uniweb] ${context}: a fetch names a query — \`fetch: { query: <name>, … }\`, or the shorthand \`query: <name>\`. ` +
+      `Declare the query in queries.yml.`
+  )
+}
+
+/**
+ * ⛔ A BINDING HAS NO SOURCE OF ITS OWN — ruled 2026-09-13 [Diego]. `path:` is the
+ * generated file (above); `url:`, `method:`, `body:` and `transform:` describe an
+ * external source, which is a named query (*"Making the external source a named query
+ * is smart"*) — so every one a site uses is listed in one file; and `detail:` is
+ * `current:` on a parametric page's section, or `record:` on an external query.
+ *
+ * @param {Object} fetch - one authored binding
+ * @param {string} context
+ */
+function refuseSourceKeys(fetch, context) {
+  if (fetch.path !== undefined) {
+    throw new Error(
+      `[uniweb] ${context}: \`path:\` is not a fetch key — a fetch names a query, and \`/data/…\` is the file the ` +
+        `build generates from one for a site with no backend. ` +
+        (typeof fetch.query === 'string' ? 'Delete the `path:` line.' : 'Declare a query in queries.yml and write `query: <name>`.')
+    )
+  }
+  for (const key of ['url', 'method', 'body', 'transform']) {
+    if (fetch[key] === undefined) continue
+    throw new Error(
+      `[uniweb] ${context}: \`${key}:\` belongs on an external query, not on a fetch. Declare it in queries.yml — ` +
+        `\`<name>: { url: …${key === 'url' ? '' : `, ${key}: …`} }\` — and name it here with \`query: <name>\`.`
+    )
+  }
+  if (fetch.detail !== undefined) {
+    throw new Error(
+      `[uniweb] ${context}: \`detail:\` is retired. On a section of a parametric page, say how it uses the page's ` +
+        `record with \`current:\`; for an API's single-record endpoint, declare \`record: { url: … }\` on its external query.`
+    )
+  }
 }
 
 /**
@@ -443,20 +484,12 @@ export function parseFetchConfig(fetch, context = 'fetch', { level = null } = {}
     return flat.length === 1 ? flat[0] : flat
   }
 
-  // Simple string: "/data/team.json"
+  // ⭐ A STRING IS A QUERY NAME — `fetch: team` ≡ `fetch: { query: team }`.
   if (typeof fetch === 'string') {
-    const inferred = inferSchemaFromPath(fetch)
-    return {
-      path: fetch,
-      url: undefined,
-      as: inferred,
-      prerender: true,
-      merge: false,
-      transform: undefined,
-    }
+    refuseBinding(fetch, context, { level })
+    return parseFetchConfig({ query: fetch }, context, { level })
   }
 
-  // Full config object
   if (typeof fetch !== 'object') return null
 
   // ⛔ RETIRED SPELLINGS ARE ERRORS, NOT WARNINGS — ignored, a declaration falls
@@ -476,93 +509,52 @@ export function parseFetchConfig(fetch, context = 'fetch', { level = null } = {}
     )
   }
 
-  // Named-query reference: { query: 'articles', limit: 3 }
-  if (fetch.query) {
-    warnUnknownFetchKeys(fetch, 'query')
-    warnSchemaRetired(fetch, fetch.as || fetch.query)
-    return {
-      // ⭐ **`query` IS EMITTED, and that is what makes the two producers agree.**
-      // The sync lane has always emitted it (`uwx/site.js`) and this one did not,
-      // for the same declaration — so `resolveQuerySource` fired on a published
-      // site and never on a `--link`-deployed one. Measured 2026-09-02 against a
-      // host offering the `records` service:
-      //
-      //   --link   endpoint undefined, path /data/articles.json   ← the STATIC file
-      //   publish  endpoint /_api/q/articles                       ← the live lane
-      //
-      // Same site, same declaration, two verbs, two data sources. Publishing to a
-      // platform that declares a live lane is supposed to READ from it — the
-      // compiled `/data/*.json` is the escape hatch for entities with no known
-      // data schema, which never sync, not a second way to serve the ones that do.
-      //
-      // ⚠️ Not in the cache key: `deriveCacheKey` hashes {path,url,endpoint,schema,
-      // transform}, so adding this moves no cached entry.
-      query: fetch.query,
-      path: queryDataUrl(fetch.query),
-      url: undefined,
-      // ⭐ **`as` is the BINDING KEY** — the `content.data.<key>` a component
-      // reads — defaulting to the query name. It was called `schema` until
-      // 2026-09-02, which collided with the MODEL REF of the same name on a
-      // `queries` declaration. ⛔ **The old spelling is NOT read here, by
-      // ruling (2026-09-03): one name, no alias.** A fetch authored as
-      // `schema: posts` binds to nothing and is re-authored, not translated.
-      as: fetch.as || fetch.query,
-      prerender: fetch.prerender ?? true,
-      merge: fetch.merge ?? false,
-      transform: fetch.transform,
-      // A binding's adaptations of its query (`@uniweb/core/fetch-config`,
-      // `narrowQuery`): `where` joins the query's, `sort` and `limit` replace its.
-      where: fetch.where,
-      limit: fetch.limit,
-      sort: fetch.sort,
-      // How a section on a parametric page uses the page's record (`currentOf`).
-      current: fetch.current,
-      // Canonical detail page for a list card's href (page:<stable_id> ref;
-      // resolved to a route template + interpolated per record at runtime).
-      detailPage: fetch.detailPage,
-    }
-  }
-
-  warnUnknownFetchKeys(fetch, 'source')
-  const {
-    path,
-    url,
-    as,
-    prerender = url ? false : true,
-    merge = false,
-    transform,
-    detail,
-    detailPage,
-    // Query operators
-    scope,
-    where,
-    limit,
-    sort,
-  } = fetch
-
-  // Must have either path or url
-  if (!path && !url) return null
-
-  warnSchemaRetired(fetch, as ?? inferSchemaFromPath(path || url))
-
+  // A binding: { query: 'articles', limit: 3 }
+  warnUnknownFetchKeys(fetch, 'query')
+  warnSchemaRetired(fetch, fetch.as || fetch.query)
   return {
-    path,
-    url,
-    // ⛔ `schema` is NOT read here — by ruling (2026-09-03), the retired
-    // spelling has no alias anywhere, authored content included. A fetch that
-    // still says `schema:` gets the inferred key and is re-authored to `as:`.
-    as: as ?? inferSchemaFromPath(path || url),
-    prerender,
-    merge,
-    transform,
-    detail,
-    // Canonical detail page for a list card's href (page:<stable_id>).
-    detailPage,
-    // Query operators
-    scope,
-    where,
-    limit,
-    sort,
+    // ⭐ **`query` IS EMITTED, and that is what makes the two producers agree.**
+    // The sync lane has always emitted it (`uwx/site.js`) and this one did not,
+    // for the same declaration — so `resolveQuerySource` fired on a published
+    // site and never on a `--link`-deployed one. Measured 2026-09-02 against a
+    // host offering the `records` service:
+    //
+    //   --link   endpoint undefined, path /data/articles.json   ← the STATIC file
+    //   publish  endpoint /_api/q/articles                       ← the live lane
+    //
+    // Same site, same declaration, two verbs, two data sources. Publishing to a
+    // platform that declares a live lane is supposed to READ from it — the
+    // compiled `/data/*.json` is the escape hatch for entities with no known
+    // data schema, which never sync, not a second way to serve the ones that do.
+    //
+    // ⚠️ Not in the cache key: `deriveCacheKey` hashes {path,url,endpoint,schema,
+    // transform}, so adding this moves no cached entry.
+    query: fetch.query,
+    // The compiled file's address, for a consumer that cannot resolve the query —
+    // derived, never authored (`refuseSourceKeys`).
+    path: queryDataUrl(fetch.query),
+    // ⭐ **`as` is the BINDING KEY** — the `content.data.<key>` a component
+    // reads — defaulting to the query name. It was called `schema` until
+    // 2026-09-02, which collided with the MODEL REF of the same name on a
+    // `queries` declaration. ⛔ **The old spelling is NOT read here, by
+    // ruling (2026-09-03): one name, no alias.** A fetch authored as
+    // `schema: posts` binds to nothing and is re-authored, not translated.
+    as: fetch.as || fetch.query,
+    // ⚠️ Only when authored: its default depends on the query — a query over the
+    // site's records is prerendered, an external query is the browser's
+    // (`@uniweb/core/fetch-config`) — and the parser does not know which this is.
+    prerender: fetch.prerender,
+    merge: fetch.merge ?? false,
+    // A binding's adaptations of its query (`@uniweb/core/fetch-config`,
+    // `narrowQuery`): `where` joins the query's, `sort` and `limit` replace its.
+    where: fetch.where,
+    limit: fetch.limit,
+    sort: fetch.sort,
+    // How a section on a parametric page uses the page's record (`currentOf`).
+    current: fetch.current,
+    // Canonical detail page for a list card's href (page:<stable_id> ref;
+    // resolved to a route template + interpolated per record at runtime).
+    detailPage: fetch.detailPage,
   }
 }
 
@@ -701,7 +693,8 @@ export function stripBuildOnlyFetchKeys(siteContent) {
 /**
  * Execute a fetch operation
  *
- * @param {object} config - Normalized fetch config from parseFetchConfig
+ * @param {object} config - A resolved fetch config (`resolveFetchConfigs`): a compiled
+ *   `path`, or an external query's `url` with its `method`, `body` and `transform`
  * @param {object} options - Execution options
  * @param {string} options.siteRoot - Site root directory
  * @param {string} [options.publicDir='public'] - Public directory name
@@ -756,8 +749,18 @@ export async function executeFetch(config, options = {}) {
         }
       }
     } else if (url) {
-      // Remote URL
-      const response = await globalThis.fetch(url)
+      // An external query's address — a GET, or a POST with a JSON body, as the
+      // runtime's default fetcher sends it.
+      const post = typeof config.method === 'string' && config.method.toUpperCase() === 'POST'
+      const init = post
+        ? {
+            method: 'POST',
+            ...(config.body !== undefined && config.body !== null
+              ? { headers: { 'Content-Type': 'application/json' }, body: typeof config.body === 'string' ? config.body : JSON.stringify(config.body) }
+              : {}),
+          }
+        : undefined
+      const response = await globalThis.fetch(url, init)
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }

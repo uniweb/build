@@ -155,15 +155,6 @@ function parseQueryConfig(name, config) {
     // automatically on dynamic-route pages (entity-store routes the
     // singular detail there) or via the kit's useEntityDetail hook.
     deferred: Array.isArray(config.deferred) ? config.deferred.slice() : null,
-    // `detailUrl:` names the per-record endpoint pattern for API-backed
-    // remote sources (where the build emits no per-record files because
-    // there are no on-disk source files to materialize). Used by the
-    // runtime's auto-detail injection and the useEntityDetail kit hook.
-    // Pattern uses {slug} as the placeholder; substitution at runtime
-    // pulls from the dynamic-route param (entity-store) or the record's
-    // slug field (useEntityDetail). File-backed queries leave
-    // this null and get the static-file default /data/<name>/<slug>.json.
-    detailUrl: typeof config.detailUrl === 'string' ? config.detailUrl : null,
     // `queryable:` declares the queryable surface — which fields a
     // foundation can offer for filtering UI, with their type and
     // type-specific metadata (enum options, range bounds). Foundations
@@ -813,10 +804,14 @@ export async function processQueries(siteDir, queriesConfig, entitiesDir, basePa
   const results = {}
 
   for (const [name, config] of Object.entries(queriesConfig)) {
+    // ⭐ AN EXTERNAL QUERY COMPILES NOTHING — its records are its address's, fetched
+    // where the page renders (`@uniweb/core/fetch-config`). A file written here would
+    // be an empty `/data/<name>.json` standing in for a live source.
+    if (config && typeof config === 'object' && config.url !== undefined) continue
     const parsed = parseQueryConfig(name, config)
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
     parsed.placements = folder?.placements ?? null
-    if (parsed.poolEntities.length === 0 && !parsed.url) {
+    if (parsed.poolEntities.length === 0) {
       console.warn(
         `[query-processor] Query "${name}" matches no records — nothing ` +
           `published declares ${parsed.schema || '(no schema)'}. ` +

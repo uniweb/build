@@ -538,9 +538,8 @@ describe('collection declarations — round-trip against the real producer', () 
     "name: Decls\nfoundation: '@acme/base@1.0.0'\n"
 
   // A source queries.yml exercising: a default-schema file-based query (no schema
-  // key, no path — the pool answers), a REMOTE query whose `url:` is the one source
-  // that survives the round trip, and a full set of query/display fields incl.
-  // detailUrl (camelCase on the file side).
+  // key, no path — the pool answers), an EXTERNAL query whose source is the one that
+  // survives the round trip, and a full set of query/display fields.
   const QUERIES_YML =
     'articles:\n' +
     '  where:\n' +
@@ -548,10 +547,10 @@ describe('collection declarations — round-trip against the real producer', () 
     '  sort: -date\n' +
     '  deferred:\n' +
     '    - body\n' +
-    '  detailUrl: /api/articles/{slug}\n' +
     'products:\n' +
     "  url: https://api.example.com/products\n" +
-    "  schema: '@acme/product'\n" +
+    '  transform: data\n' +
+    "  record: { url: 'https://api.example.com/products/{slug}' }\n" +
     '  limit: 20\n' +
     '  queryable:\n' +
     '    category:\n' +
@@ -580,13 +579,13 @@ describe('collection declarations — round-trip against the real producer', () 
     const projected = yaml.load(readFileSync(join(dest, 'queries.yml'), 'utf8'))
     expect(projected.articles.schema).toBeUndefined()
     expect(projected.articles.path).toBeUndefined()
-    expect(projected.articles.detailUrl).toBe('/api/articles/{slug}')
     // ⭐ A REMOTE source is the one that still round-trips a `source`. A file-based
     // query emits none: `entities/{schema}/` is the pool and `schema:` addresses it,
     // so a path on the wire would be a derivation written back as authored config.
     expect(projected.products).toMatchObject({
       url: 'https://api.example.com/products',
-      schema: '@acme/product',
+      transform: 'data',
+      record: { url: 'https://api.example.com/products/{slug}' },
       limit: 20,
     })
     expect(projected.articles.path).toBeUndefined()

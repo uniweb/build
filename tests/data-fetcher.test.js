@@ -12,140 +12,90 @@ import {
 // `@uniweb/core`'s tests/data-paths.test.js.
 import { queryDataUrl } from '@uniweb/core'
 
-describe('parseFetchConfig', () => {
+describe('parseFetchConfig — a binding names a query (ruled 2026-09-13)', () => {
   it('returns null for falsy input', () => {
     expect(parseFetchConfig(null)).toBeNull()
     expect(parseFetchConfig(undefined)).toBeNull()
     expect(parseFetchConfig('')).toBeNull()
   })
 
-  describe('simple string input', () => {
-    it('parses simple path string', () => {
+  describe('⭐ a string is a query name', () => {
+    it('`fetch: team` is `fetch: { query: team }`', () => {
       // ⛔ `as` only. `schema` was emitted alongside it as a compatibility
       // duplicate until 2026-09-02; the duplicate is gone and one name is the
       // point of the rename.
-      expect(parseFetchConfig('/data/team.json')).toEqual({
-        path: '/data/team.json',
-        url: undefined,
-        as: 'team',
-        prerender: true,
-        merge: false,
-        transform: undefined,
-      })
+      expect(parseFetchConfig('team')).toEqual(parseFetchConfig({ query: 'team' }))
+      expect(parseFetchConfig('team')).toMatchObject({ query: 'team', path: queryDataUrl('team'), as: 'team', merge: false })
     })
 
-    it('infers schema from filename', () => {
-      expect(parseFetchConfig('/data/team-members.json').as).toBe('team-members')
-      expect(parseFetchConfig('/api/events.yaml').as).toBe('events')
-      expect(parseFetchConfig('/public/config.yml').as).toBe('config')
+    it('and in a list, one binding per name', () => {
+      const result = parseFetchConfig(['team', { query: 'articles', limit: 3 }])
+      expect(result.map((c) => [c.query, c.as, c.limit])).toEqual([['team', 'team', undefined], ['articles', 'articles', 3]])
     })
 
-    it('handles paths without extension', () => {
-      expect(parseFetchConfig('/api/users').as).toBe('users')
-    })
-
-    it('handles deep paths', () => {
-      const result = parseFetchConfig('/data/archive/2024/posts.json')
-      expect(result.path).toBe('/data/archive/2024/posts.json')
-      expect(result.as).toBe('posts')
+    it('⛔ a path is not a query name — `/data/…` is the file the build generates, never authored', () => {
+      // A string that was a path until 2026-09-13 — `fetch: /data/team.json` — now
+      // says what to write instead, rather than looking for a query of that name.
+      expect(() => parseFetchConfig('/data/team.json', 'pages/team/page.yml')).toThrow(
+        /pages\/team\/page\.yml: `fetch: "\/data\/team\.json"` — a fetch names a query, and a query name is not a path\. .*`query: team`/
+      )
+      expect(() => parseFetchConfig(['team', 'data/b.yml'])).toThrow(/a query name is not a path/)
     })
   })
 
-  describe('full config object', () => {
-    it('parses config with path', () => {
-      const config = {
-        path: '/data/team.json',
-        as: 'person',
-        prerender: false,
+  describe('an object binding', () => {
+    it('carries its adaptations and the compiled address derived from the query', () => {
+      expect(parseFetchConfig({ query: 'articles', as: 'posts', where: { a: 1 }, sort: 'date desc', limit: 5, merge: true })).toEqual({
+        query: 'articles',
+        path: queryDataUrl('articles'),
+        as: 'posts',
+        prerender: undefined,
         merge: true,
-      }
-      expect(parseFetchConfig(config)).toEqual({
-        path: '/data/team.json',
-        url: undefined,
-        as: 'person',
-        prerender: false,
-        merge: true,
-        transform: undefined,
+        where: { a: 1 },
+        sort: 'date desc',
+        limit: 5,
+        current: undefined,
+        detailPage: undefined,
       })
     })
 
-    it('parses config with url', () => {
-      const config = {
-        url: 'https://api.example.com/team',
-        as: 'team',
+    it('`prerender` only when authored — its default depends on the query, which the resolver knows', () => {
+      expect(parseFetchConfig({ query: 'a' }).prerender).toBeUndefined()
+      expect(parseFetchConfig({ query: 'a', prerender: false }).prerender).toBe(false)
+      expect(parseFetchConfig({ query: 'a', prerender: true }).prerender).toBe(true)
+    })
+
+    it('⛔ a binding with no query stops the build', () => {
+      expect(() => parseFetchConfig({ as: 'x', limit: 3 }, 'x.md')).toThrow(/x\.md: a fetch names a query/)
+      expect(() => parseFetchConfig({}, 'x.md')).toThrow(/a fetch names a query/)
+    })
+
+    it('⛔ `path:` is refused — beside a query it says to delete the line', () => {
+      expect(() => parseFetchConfig({ path: '/data/team.json', as: 'team' }, 'x.md')).toThrow(/`path:` is not a fetch key .*Declare a query/)
+      expect(() => parseFetchConfig({ query: 'team', path: '/data/team.json' }, 'x.md')).toThrow(/`path:` is not a fetch key .*Delete the `path:` line/)
+    })
+
+    it('⛔ `url:`, `method:`, `body:` and `transform:` belong on an external query', () => {
+      expect(() => parseFetchConfig({ url: 'https://api.test/team', as: 'team' }, 'x.md')).toThrow(/`url:` belongs on an external query, not on a fetch/)
+      for (const key of ['method', 'body', 'transform']) {
+        expect(() => parseFetchConfig({ query: 'team', [key]: 'x' }, 'x.md')).toThrow(new RegExp(`\`${key}:\` belongs on an external query`))
       }
-      const result = parseFetchConfig(config)
-      expect(result.url).toBe('https://api.example.com/team')
-      expect(result.as).toBe('team')
-      expect(result.prerender).toBe(false)
-      expect(result.merge).toBe(false)
     })
 
-    it('parses config with transform', () => {
-      const config = {
-        url: 'https://api.example.com/response',
-        as: 'items',
-        transform: 'data.items',
-      }
-      const result = parseFetchConfig(config)
-      expect(result.url).toBe('https://api.example.com/response')
-      expect(result.as).toBe('items')
-      expect(result.prerender).toBe(false)
-      expect(result.merge).toBe(false)
-      expect(result.transform).toBe('data.items')
+    it('⛔ `detail:` is retired, naming `current:` and `record:`', () => {
+      expect(() => parseFetchConfig({ query: 'team', detail: 'rest' }, 'x.md')).toThrow(/`detail:` is retired\. .*current:.*record: \{ url: … \}/)
     })
 
-    it('defaults prerender to true for path configs', () => {
-      const config = { path: '/data/team.json' }
-      expect(parseFetchConfig(config).prerender).toBe(true)
+    it('returns null for non-object, non-string input', () => {
+      expect(parseFetchConfig(123)).toBeNull()
+      expect(parseFetchConfig(true)).toBeNull()
     })
-
-    it('defaults prerender to false for url configs', () => {
-      const config = { url: 'https://api.example.com/team' }
-      expect(parseFetchConfig(config).prerender).toBe(false)
-    })
-
-    it('respects explicit prerender: true for url configs', () => {
-      const config = { url: 'https://api.example.com/team', prerender: true }
-      expect(parseFetchConfig(config).prerender).toBe(true)
-    })
-
-    it('infers schema from path when not provided', () => {
-      const config = { path: '/data/articles.json' }
-      expect(parseFetchConfig(config).as).toBe('articles')
-    })
-
-    it('infers schema from url when not provided', () => {
-      const config = { url: 'https://api.example.com/events' }
-      expect(parseFetchConfig(config).as).toBe('events')
-    })
-
-    it('returns null when neither path nor url provided', () => {
-      expect(parseFetchConfig({ schema: 'test' })).toBeNull()
-      expect(parseFetchConfig({})).toBeNull()
-    })
-
-    it('applies default values', () => {
-      const config = { path: '/data/test.json' }
-      const result = parseFetchConfig(config)
-      expect(result.prerender).toBe(true)
-      expect(result.merge).toBe(false)
-    })
-  })
-
-  it('returns null for non-object, non-string input', () => {
-    expect(parseFetchConfig(123)).toBeNull()
-    expect(parseFetchConfig(true)).toBeNull()
   })
 
   /**
    * ⭐ **A list means "fetch each."** It used to keep `[0]` and drop the rest
    * silently — an author writing `data: [team, articles]` got one dataset and a
    * section rendering empty, with no warning at any stage.
-   *
-   * These pin the two properties that keep that from coming back by another
-   * route: every entry survives, and a list that resolves to ONE fetch is
-   * indistinguishable from having declared it singly.
    */
   describe('a list of declarations', () => {
     it('parses every entry, in order', () => {
@@ -154,36 +104,20 @@ describe('parseFetchConfig', () => {
     })
 
     it('gives each entry its own address', () => {
-      // The failure this guards against is one config overwriting another's
-      // path and both keys resolving to the same file.
       const result = parseFetchConfig([{ query: 'team' }, { query: 'articles' }])
       expect(new Set(result.map((c) => c.path)).size).toBe(2)
     })
 
     it('⛔ collapses a ONE-entry list to an object', () => {
       // The shape reflects the cardinality of the RESULT, not of the syntax, so
-      // no declaration that resolves to a single fetch changes shape. That is
-      // what keeps this from being a silent break for every existing consumer
-      // reading `fetch.path`.
+      // no declaration that resolves to a single fetch changes shape.
       const result = parseFetchConfig([{ query: 'team' }])
       expect(Array.isArray(result)).toBe(false)
       expect(result.as).toBe('team')
     })
 
-    it('drops unparseable entries rather than emitting holes', () => {
-      // A null in the list would reach consumers as `cfg.path` on undefined.
-      const result = parseFetchConfig([{ query: 'team' }, { nothing: true }, { query: 'x' }])
-      expect(result.map((c) => c.as)).toEqual(['team', 'x'])
-    })
-
-    it('returns null when nothing in the list parses', () => {
-      expect(parseFetchConfig([{ nothing: true }])).toBeNull()
+    it('returns null for an empty list', () => {
       expect(parseFetchConfig([])).toBeNull()
-    })
-
-    it('accepts the string form inside a list, as it does alone', () => {
-      const result = parseFetchConfig(['/data/a.json', '/data/b.json'])
-      expect(result.map((c) => c.path)).toEqual(['/data/a.json', '/data/b.json'])
     })
   })
 
@@ -197,80 +131,10 @@ describe('parseFetchConfig', () => {
     })
   })
 
-  describe('collection reference', () => {
-    it('parses collection shorthand', () => {
-      const config = { query: 'articles' }
-      const result = parseFetchConfig(config)
-
-      expect(result.path).toBe(queryDataUrl('articles'))
-      expect(result.as).toBe('articles')
-      expect(result.prerender).toBe(true)
-    })
-
-    it('parses collection with limit', () => {
-      const config = { query: 'articles', limit: 3 }
-      const result = parseFetchConfig(config)
-
-      expect(result.path).toBe(queryDataUrl('articles'))
-      expect(result.limit).toBe(3)
-    })
-
-    it('parses collection with sort', () => {
-      const config = { query: 'articles', sort: 'date desc' }
-      const result = parseFetchConfig(config)
-
-      expect(result.sort).toBe('date desc')
-    })
-
-    it('allows an `as` override', () => {
-      const config = { query: 'articles', as: 'posts' }
-      const result = parseFetchConfig(config)
-
-      expect(result.as).toBe('posts')
-    })
-
-    it('⛔ does NOT read the retired `schema:` spelling — no alias, by ruling (2026-09-03)', () => {
-      // Pinned in the negative: a fetch authored as `schema: posts` binds to the query name, not to
-      // `posts`. Restoring the fallback turns this red, which is the point — one name, no alias,
-      // authored content included; a pre-rename file is re-authored, not translated.
-      expect(parseFetchConfig({ query: 'articles', schema: 'posts' }).as).toBe('articles')
-      expect(parseFetchConfig({ path: '/data/team.json', schema: 'person' }).as).toBe('team')
-    })
-
-    it('parses collection with all options', () => {
-      const config = {
-        query: 'articles',
-        limit: 5,
-        sort: 'date desc',
-        as: 'posts',
-      }
-      const result = parseFetchConfig(config)
-
-      expect(result.path).toBe(queryDataUrl('articles'))
-      expect(result.as).toBe('posts')
-      expect(result.limit).toBe(5)
-      expect(result.sort).toBe('date desc')
-    })
-  })
-
-  describe('post-processing options on path/url', () => {
-    it('parses path with limit', () => {
-      const config = { path: '/data/items.json', limit: 10 }
-      const result = parseFetchConfig(config)
-
-      expect(result.path).toBe('/data/items.json')
-      expect(result.limit).toBe(10)
-    })
-
-    it('parses url with sort', () => {
-      const config = {
-        url: 'https://api.example.com/items',
-        sort: 'order asc',
-      }
-      const result = parseFetchConfig(config)
-
-      expect(result.sort).toBe('order asc')
-    })
+  it('⛔ does NOT read the retired `schema:` spelling — no alias, by ruling (2026-09-03)', () => {
+    // Pinned in the negative: a fetch authored as `schema: posts` binds to the query
+    // name, not to `posts`. One name, no alias; a pre-rename file is re-authored.
+    expect(parseFetchConfig({ query: 'articles', schema: 'posts' }).as).toBe('articles')
   })
 })
 
@@ -523,19 +387,11 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
 
   const messages = () => warn.mock.calls.map((c) => String(c[0]))
 
-  it('names the offending key on a path/url declaration', () => {
-    parseFetchConfig({ path: '/data/x.json', schema: 'x', wehre: { a: 1 } })
+  it('names the offending key', () => {
+    parseFetchConfig({ query: 'x', wehre: { a: 1 } })
     expect(messages().some((m) => m.includes('"wehre"'))).toBe(true)
-  })
-
-  it('names it on a collection declaration too', () => {
     parseFetchConfig({ query: 'articles', recursive: true })
     expect(messages().some((m) => m.includes('"recursive"'))).toBe(true)
-  })
-
-  it('names it on a source declaration too', () => {
-    parseFetchConfig({ path: '/data/x.json', as: 'x', bogus: 1 })
-    expect(messages().some((m) => m.includes('"bogus"'))).toBe(true)
   })
 
   it('lists what IS recognized, so the message is actionable', () => {
@@ -555,8 +411,7 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     // The control. Without it, a warn-on-everything bug would pass every
     // assertion above while making the build unusable.
     parseFetchConfig({ query: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
-    parseFetchConfig({ path: '/data/x.json', as: 'x', transform: 'data.items', merge: true })
-    parseFetchConfig({ url: 'https://example.com/api', as: 'x', prerender: false })
+    parseFetchConfig({ query: 'x', as: 'y', merge: true, prerender: false, detailPage: 'page:abc' })
     parseFetchConfig({ query: 'articles', current: 'exclude', limit: 3 }, 'pages/a/[slug]/related.md', { level: 'section' })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
@@ -590,48 +445,32 @@ describe('parseFetchConfig — the retired `schema:` binding key is REPORTED, no
 
   const messages = () => warn.mock.calls.map((c) => String(c[0]))
 
-  it('warns on a source declaration and names the key it actually bound to', () => {
+  it('warns and names the key the binding actually bound to', () => {
     // The diagnostic value is the SECOND name: the author can see at a glance
-    // that `/data/site-config.json` bound to `site-config`, not to `config`.
-    parseFetchConfig({ path: '/data/site-config.json', schema: 'config' })
-    const m = messages().find((x) => x.includes("'schema: config'"))
-    expect(m).toBeDefined()
-    expect(m).toContain('content.data.site-config')
-    expect(m).toContain("Write 'as: config'")
-  })
-
-  it('warns on a query declaration too', () => {
+    // that the binding landed under the query's name, not under `posts`.
     parseFetchConfig({ query: 'articles', schema: 'posts' })
     const m = messages().find((x) => x.includes("'schema: posts'"))
     expect(m).toBeDefined()
     expect(m).toContain('content.data.articles')
+    expect(m).toContain("Write 'as: posts'")
   })
 
-  it('says "(nothing)" when the inferred key is empty and the config is dropped', () => {
-    // `https://randomuser.me/api/?results=6` → last segment `?results=6` → ''.
-    // A falsy binding key is skipped by resolveFetchConfigs, so the fetch does
-    // not merely land elsewhere — it does not land at all.
-    const parsed = parseFetchConfig({ url: 'https://randomuser.me/api/?results=6', schema: 'donors' })
-    expect(parsed.as).toBe('')
-    expect(messages().some((m) => m.includes('content.data.(nothing)'))).toBe(true)
-  })
-
-  it('warns even when the inferred key happens to match, because the next edit breaks it', () => {
-    parseFetchConfig({ path: '/data/team.json', schema: 'team' })
+  it('warns even when the query name happens to match, because the next edit breaks it', () => {
+    parseFetchConfig({ query: 'team', schema: 'team' })
     expect(messages().some((m) => m.includes("'schema: team'"))).toBe(true)
   })
 
   it('does not ALSO report it as an unrecognized key', () => {
     // It has a specific message; the generic one would understate it and double
     // the noise. This is what RETIRED_FETCH_KEYS buys — the key is still dropped.
-    parseFetchConfig({ path: '/data/x.json', schema: 'x' })
+    parseFetchConfig({ query: 'x', schema: 'y' })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
 
   it('reports once per distinct (written → bound) pair', () => {
-    parseFetchConfig({ path: '/data/a.json', schema: 'x' })
-    parseFetchConfig({ path: '/data/a.json', schema: 'x' })
-    parseFetchConfig({ path: '/data/b.json', schema: 'x' })
+    parseFetchConfig({ query: 'a', schema: 'x' })
+    parseFetchConfig({ query: 'a', schema: 'x' })
+    parseFetchConfig({ query: 'b', schema: 'x' })
     expect(messages().filter((m) => m.includes("'schema: x'"))).toHaveLength(2)
   })
 
@@ -639,7 +478,7 @@ describe('parseFetchConfig — the retired `schema:` binding key is REPORTED, no
     // The control. `schema:` on a `queries:` entry is a different, CURRENT key —
     // the Model ref — and never reaches this parser. Warning on `as:` would make
     // the build unusable while every assertion above still passed.
-    parseFetchConfig({ path: '/data/team.json', as: 'team' })
+    parseFetchConfig({ query: 'team', as: 'team' })
     parseFetchConfig({ query: 'articles', as: 'posts' })
     expect(messages().filter((m) => m.includes('is retired as the binding key'))).toHaveLength(0)
   })

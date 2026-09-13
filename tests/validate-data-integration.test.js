@@ -61,6 +61,8 @@ beforeAll(() => {
       'queries:',
       '  projects:',
       '    schema: "@/project"',
+      '  live:',
+      '    url: https://api.example.org/projects.json',
       '',
     ].join('\n')
   )
@@ -90,10 +92,10 @@ beforeAll(() => {
     join(siteRoot, 'pages', 'data', '2-projects.md'),
     '---\ntype: DataDump\nquery: projects\n---\n\n# More Projects\n'
   )
-  // A remote source — must be reported as deferred, never silently skipped.
+  // An external query — must be reported as deferred, never silently skipped.
   writeFileSync(
     join(siteRoot, 'pages', 'data', '3-live.md'),
-    '---\ntype: DataDump\nfetch:\n  url: https://api.example.org/projects.json\n  schema: projects\n---\n\n# Live\n'
+    '---\ntype: DataDump\nfetch:\n  query: live\n  as: projects\n---\n\n# Live\n'
   )
 })
 
@@ -139,7 +141,7 @@ describe('validateDataInputs — end-to-end join', () => {
       expect.objectContaining({
         section: 'DataDump',
         key: 'projects',
-        reason: 'remote url: source',
+        reason: 'external query',
         url: 'https://api.example.org/projects.json',
       }),
     ])

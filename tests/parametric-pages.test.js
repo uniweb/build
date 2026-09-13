@@ -50,7 +50,7 @@ describe('the collector', () => {
   beforeEach(() => {
     // `about` sorts first, so it is the homepage and `members` keeps its own route
     w('pages/about/about.md', '---\ntype: About\n---\n# About\n')
-    w('pages/members/page.yml', 'title: Members\nfetch:\n  url: https://example.com/members.json\n  as: members\n')
+    w('pages/members/page.yml', 'title: Members\nquery: members\n')
     w('pages/members/list.md', '---\ntype: List\n---\n# Members\n')
     w('pages/members/[slug]/card.md', '---\ntype: Card\n---\n# Card\n')
     w('pages/members/[slug]/cv/cv.md', '---\ntype: Cv\n---\n# CV\n')
@@ -115,7 +115,7 @@ describe('the sync walker refuses what the collector refuses', () => {
   })
 
   it('`under` on the site\'s fetch', async () => {
-    w('site.yml', `name: test-site\nfoundation: "@acme/base@1.0.0"\nfetch:\n  path: /data/members.json\n${under}`)
+    w('site.yml', `name: test-site\nfoundation: "@acme/base@1.0.0"\nfetch:\n  query: members\n${under}`)
     await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/site\.yml fetch: .*Write `scope: "field"`/)
   })
 
@@ -281,9 +281,6 @@ describe('a page\'s fetch — `scope` is the query\'s, `under` is refused', () =
     expect(() => parseFetchConfig([{ query: 'a' }, { query: 'logbook', scope: 'field' }])).toThrow(/`scope` is the query's/)
   })
 
-  it('CONTROL — a source still carries `scope`, until sources go', () => {
-    expect(parseFetchConfig({ path: '/data/logbook.json', scope: 'field' })).toMatchObject({ scope: 'field' })
-  })
 
   it('refuses `under` wherever it sits in a where, with a message naming scope', () => {
     expect(() => parseFetchConfig({ query: 'x', where: { path: { under: 'a' } } })).toThrow(/Write `scope: "a"`/)
