@@ -57,7 +57,7 @@ import {
   fetchFromQueryShorthand,
   assertRouteFolder,
 } from '../site/content-collector.js'
-import { refuseUnder, refuseOutsideLanguage, refuseBindingScope, warnDuplicateBindings } from '../site/data-fetcher.js'
+import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
@@ -243,14 +243,10 @@ function buildPageData(config, ctx) {
   // `fetch:`, or the `query:` shorthand, read and refused exactly as the build
   // reads them (`declaredFetch`) — a `folder.yml` as much as a `page.yml`.
   let fetch = declaredFetch(config, where ?? 'page.yml')
-  // `where: { path: { under } }` is refused here as the build refuses it
-  // (`parseFetchConfig`): a site that cannot build must not sync either. A
-  // section's fetch is refused where the collector parses it.
-  for (const one of [fetch].flat()) {
-    refuseUnder(one?.where, 'fetch')
-    refuseOutsideLanguage(one?.where, 'fetch')
-    refuseBindingScope(one, where ?? 'page.yml')
-  }
+  // Refused here as the build refuses it (`refuseBinding`, the one list): a site
+  // that cannot build must not sync either. A section's fetch is refused where the
+  // collector parses it.
+  for (const one of [fetch].flat()) refuseBinding(one, where ?? 'page.yml', { level: 'page' })
   warnDuplicateBindings([fetch].flat(), where ?? 'page.yml')
   // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
@@ -1093,11 +1089,7 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // the `query:` shorthand carries no `where`. ⚠️ The desugaring stays inline in
   // `setIf`: `gen-emit-surface.mjs` reads the published key's sources off it.
   checkDeclaration(siteYml, 'site.yml')
-  for (const one of [siteYml.fetch].flat()) {
-    refuseUnder(one?.where, 'site.yml fetch')
-    refuseOutsideLanguage(one?.where, 'site.yml fetch')
-    refuseBindingScope(one, 'site.yml fetch')
-  }
+  for (const one of [siteYml.fetch].flat()) refuseBinding(one, 'site.yml fetch', { level: 'site' })
   warnDuplicateBindings([siteYml.fetch ?? fetchFromQueryShorthand(siteYml.query)].flat(), 'site.yml')
   setIf(settings, 'fetch', siteYml.fetch ?? fetchFromQueryShorthand(siteYml.query))
 

@@ -15,9 +15,8 @@ import {
   resolveDefaultLocale,
   resolveFetchConfigs,
   joinPathCapture,
-  routeQuery,
+  pageRouteQuery,
   routeSelection,
-  sectionFetches,
   routeParamValues,
   routeParamName,
   routeBinding,
@@ -305,6 +304,10 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
   )
   const byRoute = new Map(pages.filter((p) => p?.route).map((p) => [p.route, p]))
   const has = (route) => byRoute.has(route)
+  const parentOf = (p) => {
+    const route = parentRouteOf(p.route, { declared: p.parent ?? null, has })
+    return route ? byRoute.get(route) : null
+  }
   const levels = {
     site: fetched?.site ?? new Map(),
     pages: fetched?.pages ?? new Map(),
@@ -318,19 +321,21 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
       continue
     }
 
-    // ⭐ THE ROUTE QUERY, by the rule every lane reads it with (`routeQuery`,
-    // `@uniweb/core/fetch-config`), off the parent every lane finds
-    // (`parentRouteOf`) — the page's own query, its parent's, the site's, or its
-    // sections' shared key. The records it expands over are that query's, at the
-    // level it came from. ⛔ Until 2026-09-11 this read `parentSchema` and always
-    // expanded over the parent route's first prerendered fetch.
-    const parentRoute = parentRouteOf(page.route, { declared: page.parent ?? null, has })
-    const parent = parentRoute ? byRoute.get(parentRoute) : null
-    const route = routeQuery({
-      page: page.fetch,
-      parent: parent?.fetch,
+    // ⭐ THE ROUTE QUERY, by the rule every lane reads it with (`pageRouteQuery`,
+    // `@uniweb/core/fetch-config`), off the parents every lane finds
+    // (`parentRouteOf`) — chosen at the page that captured the URL's variable: its
+    // own query, its parent's, the site's, or its sections' shared key. A page
+    // nested inside a parametric page expands over its capturing page's records.
+    // The records it expands over are that query's, at the level it came from.
+    // ⛔ Until 2026-09-11 this read `parentSchema` and always expanded over the
+    // parent route's first prerendered fetch; until 2026-09-13 a nested page looked
+    // one parent up, and expanded only when the `[slug]` page declared the query.
+    const route = pageRouteQuery(page, {
+      routeOf: (p) => p.route,
+      parentOf,
+      fetchOf: (p) => p.fetch,
+      sectionsOf: (p) => p.sections,
       site: siteFetch,
-      sections: sectionFetches(page.sections),
     })
 
     if (!route) {
@@ -339,10 +344,11 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
       continue
     }
 
-    const data = route.level === 'page' ? levels.pages.get(page.route)?.get(route.key)
-      : route.level === 'parent' ? levels.pages.get(parentRoute)?.get(route.key)
+    const capturing = route.capturing
+    const data = route.level === 'page' ? levels.pages.get(capturing.route)?.get(route.key)
+      : route.level === 'parent' ? levels.pages.get(parentOf(capturing)?.route)?.get(route.key)
         : route.level === 'site' ? levels.site.get(route.key)
-          : levels.sections.get(page.route)?.get(route.key)
+          : levels.sections.get(capturing.route)?.get(route.key)
 
     if (!Array.isArray(data)) {
       // No build-time data available (e.g., prerender: false on the route query).
@@ -432,7 +438,7 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
         // route. ⛔ No `schema`: the key the URL narrows is worked out where it is
         // read (deleted 2026-09-11). The record (`currentItem`) and the full sibling
         // list (`allItems`) are deliberately NOT baked in: the record is delivered
-        // via content.data and siblings via `fetch: { refine: true, detail: false }`,
+        // via content.data and the others via `fetch: { query, current: exclude }`,
         // and embedding `allItems` duplicated the whole collection onto every
         // prerendered page in split mode.
         const binding = routeBinding(page.route, catchAll ? { [catchAll]: capture } : { [paramName]: paramValue }, paramName)

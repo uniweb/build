@@ -147,6 +147,15 @@ describe('the route query decides what a parametric page expands over (ruled 202
     expect(out.map((p) => p.route)).toEqual(expect.arrayContaining(['/blog/post-1', '/blog/post-1/cv']))
   })
 
+  it('a nested page whose route query sits TWO levels up expands with its capturing page (ruled 2026-09-13)', () => {
+    // ⛔ Until then it looked one parent up, found nothing on the `[slug]` page, and stayed for runtime
+    const slugPage = { route: '/blog/:slug', parent: '/blog', isDynamic: true, paramName: 'slug' }
+    const cv = { route: '/blog/:slug/cv', parent: '/blog/:slug', isDynamic: true, paramName: 'slug', fetch: { query: 'cvs', path: '/data/cvs.json', as: 'cvs' } }
+    const out = expandDynamicPages([blog(), slugPage, cv], parentData([{ slug: 'post-1' }, { slug: 'post-2' }]), noop)
+    expect(out.map((p) => p.route)).toEqual(expect.arrayContaining(['/blog/post-1', '/blog/post-1/cv', '/blog/post-2/cv']))
+    expect(out.find((p) => p.route === '/blog/post-2/cv').dynamicContext).toMatchObject({ templateRoute: '/blog/:slug/cv', paramValue: 'post-2' })
+  })
+
   it('a route with a parameter the records cannot fill stays for the runtime', () => {
     const t = { route: '/orgs/:org/members/:slug', isDynamic: true, paramName: 'slug', fetch: { query: 'members', path: '/data/members.json', as: 'members' } }
     const out = expandDynamicPages([t], { pages: new Map([['/orgs/:org/members/:slug', new Map([['members', [{ slug: 'ada' }]]])]]) }, noop)

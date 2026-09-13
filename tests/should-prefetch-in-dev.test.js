@@ -40,8 +40,7 @@ describe('shouldPrefetchInDev', () => {
     expect(shouldPrefetchInDev(cfg)).toBe(false)
   })
 
-  it('does not embed refinements or empty/invalid configs', () => {
-    expect(shouldPrefetchInDev(parseFetchConfig({ refine: true, limit: 3 }))).toBe(false)
+  it('does not embed empty/invalid configs', () => {
     expect(shouldPrefetchInDev(null)).toBe(false)
     expect(shouldPrefetchInDev(undefined)).toBe(false)
     expect(shouldPrefetchInDev({})).toBe(false)

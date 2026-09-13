@@ -168,3 +168,37 @@ describe('a parametric page\'s sections are the runtime\'s to fill', () => {
     rmSync(root, { recursive: true, force: true })
   })
 })
+
+describe('`current:` and nested pages reach a static build (ruled 2026-09-13)', () => {
+  it('a section with `current: exclude` gets the others on every expanded page, `limit` counting them', async () => {
+    const root = site({ 'public/data/posts.json': POSTS })
+    const content = {
+      config: { queries: QUERIES },
+      pages: [
+        { route: '/blog', id: 'blog', fetch: ref(), sections: [section('list')] },
+        { route: '/blog/:slug', id: 'post', parent: '/blog', isDynamic: true, paramName: 'slug', sections: [section('post'), section('related', ref({ current: 'exclude', limit: 2 }))] },
+      ],
+    }
+    const { delivered } = await prerender(content, root)
+    expect(delivered('/blog/a', 1)).toEqual({ status: 'ready', data: { posts: [POSTS[1], POSTS[2]] } })
+    expect(delivered('/blog/b', 1)).toEqual({ status: 'ready', data: { posts: [POSTS[0], POSTS[2]] } })
+    expect(delivered('/blog/b', 0)).toEqual({ status: 'ready', data: { posts: [POSTS[1]] } })
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('a page nested inside `[slug]` expands per record and delivers the record — its route query two levels up', async () => {
+    const root = site({ 'public/data/posts.json': POSTS })
+    const content = {
+      config: { queries: QUERIES },
+      pages: [
+        { route: '/blog', id: 'blog', fetch: ref({ limit: 2 }), sections: [section('list')] },
+        { route: '/blog/:slug', id: 'post', parent: '/blog', isDynamic: true, paramName: 'slug', sections: [section('post')] },
+        { route: '/blog/:slug/cv', id: 'cv', parent: '/blog/:slug', isDynamic: true, paramName: 'slug', sections: [section('cv')] },
+      ],
+    }
+    const { routes, delivered } = await prerender(content, root)
+    expect(routes).toEqual(expect.arrayContaining(['/blog/e', '/blog/e/cv', '/blog/a/cv']))
+    expect(delivered('/blog/e/cv')).toEqual({ status: 'ready', data: { posts: [POSTS[4]] } })
+    rmSync(root, { recursive: true, force: true })
+  })
+})

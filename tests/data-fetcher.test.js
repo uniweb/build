@@ -533,8 +533,8 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     expect(messages().some((m) => m.includes('"recursive"'))).toBe(true)
   })
 
-  it('names it on a refine declaration too', () => {
-    parseFetchConfig({ refine: true, limit: 2, bogus: 1 })
+  it('names it on a source declaration too', () => {
+    parseFetchConfig({ path: '/data/x.json', as: 'x', bogus: 1 })
     expect(messages().some((m) => m.includes('"bogus"'))).toBe(true)
   })
 
@@ -557,7 +557,7 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     parseFetchConfig({ query: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
     parseFetchConfig({ path: '/data/x.json', as: 'x', transform: 'data.items', merge: true })
     parseFetchConfig({ url: 'https://example.com/api', as: 'x', prerender: false })
-    parseFetchConfig({ refine: true, detail: false, limit: 3 })
+    parseFetchConfig({ query: 'articles', current: 'exclude', limit: 3 }, 'pages/a/[slug]/related.md', { level: 'section' })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
 
@@ -645,17 +645,27 @@ describe('parseFetchConfig — the retired `schema:` binding key is REPORTED, no
   })
 })
 
-describe('parseFetchConfig — the retired inherit: alias is an error', () => {
-  // Same treatment as `collection:`, for the same reason: warned-and-ignored,
-  // `{ inherit: true, limit: 3 }` falls through to the source shape, finds no
+describe('parseFetchConfig — `refine` and its alias `inherit` are retired for `current:` (2026-09-13)', () => {
+  // Same treatment as `collection:`, for the same reason: warned-and-ignored, a
+  // `{ refine: true, limit: 3 }` falls through to the source shape, finds no
   // location, and resolves to null — a silently empty block.
-  it('stops the build and names the current spelling', () => {
-    expect(() => parseFetchConfig({ inherit: true, limit: 3 })).toThrow(/inherit: true/)
-    expect(() => parseFetchConfig({ inherit: true, limit: 3 })).toThrow(/refine: true/)
+  it('stops the build and names `current:`', () => {
+    expect(() => parseFetchConfig({ refine: true, detail: false, limit: 3 }, 'pages/a/[slug]/related.md')).toThrow(
+      /pages\/a\/\[slug\]\/related\.md: `refine: true` is retired\. .*current: exclude/
+    )
+    expect(() => parseFetchConfig({ inherit: true, limit: 3 })).toThrow(/`inherit: true` is retired\. .*current:/)
   })
 
-  it('refine: true still parses as a refinement — the control', () => {
-    expect(parseFetchConfig({ refine: true, limit: 3 })).toMatchObject({ refine: true, limit: 3 })
+  it('`current:` takes only, exclude or include', () => {
+    expect(() => parseFetchConfig({ query: 'a', current: 'others' }, 'x.md', { level: 'section' })).toThrow(/write `only`, `exclude` or `include`/)
+    expect(parseFetchConfig({ query: 'a', current: 'include' }, 'x.md', { level: 'section' })).toMatchObject({ query: 'a', current: 'include' })
+  })
+
+  it('`current:` sits on a section\'s binding — a page, folder or site binding stops the build', () => {
+    expect(() => parseFetchConfig({ query: 'a', current: 'exclude' }, 'pages/a/page.yml', { level: 'page' })).toThrow(
+      /pages\/a\/page\.yml: `current:` is read on a section's binding, not on a page's/
+    )
+    expect(() => parseFetchConfig({ query: 'a', current: 'only' }, 'site.yml', { level: 'site' })).toThrow(/not on a site's/)
   })
 })
 

@@ -117,7 +117,7 @@ function resolveFaviconHref(configFavicon, publicDir, basePath) {
  */
 export function shouldPrefetchInDev(cfg) {
   if (!cfg) return false
-  if (!cfg.path && !cfg.url) return false // refinement / nothing to fetch
+  if (!cfg.path && !cfg.url) return false // nothing to fetch
   if (cfg.prerender === false) return false // author opted into runtime fetch
   if (cfg.path && !cfg.url) return false // local file — runtime fetches it live
   return true // remote build-time fetch — keep embedding in dev

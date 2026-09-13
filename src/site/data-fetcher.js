@@ -20,7 +20,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { matchWhere, sortRecords, queryDataUrl, applyScope, whereOutsideLanguage } from '@uniweb/core'
+import { matchWhere, sortRecords, queryDataUrl, applyScope, whereOutsideLanguage, CURRENT_MODES } from '@uniweb/core'
 
 /**
  * Infer schema name from path or URL
@@ -174,7 +174,6 @@ export function applyPostProcessing(data, config) {
 // not understand, but we can refuse to pretend it was never there. Reported
 // once per key name per process so a 200-record build does not print 200 lines.
 const RECOGNIZED_FETCH_KEYS = {
-  refine: new Set(['refine', 'detail', 'limit', 'sort', 'where']),
   // ⛔ `schema` IS NOT ON EITHER LIST, and its absence is the point. It was the
   // binding key until 2026-09-02 and stopped being READ on 2026-09-03 (`e4fe077`,
   // one name no alias) — but it was left on these lists, which exempted it from
@@ -187,7 +186,7 @@ const RECOGNIZED_FETCH_KEYS = {
   // 2026-09-11 to 2026-09-13, and replaced the query's scope on the records service.
   query: new Set([
     'query', 'as', 'prerender', 'merge', 'transform',
-    'where', 'limit', 'sort', 'detailPage',
+    'where', 'limit', 'sort', 'current', 'detailPage',
   ]),
   source: new Set([
     'path', 'url', 'as', 'prerender', 'merge', 'transform', 'detail',
@@ -260,6 +259,62 @@ export function refuseBindingScope(fetch, context) {
       `\`scope: ${JSON.stringify(fetch.scope)}\` on the query \`${fetch.query}\` — or declare ` +
       `another query with that scope — and narrow this binding with \`where\`, \`sort\` and \`limit\`.`
   )
+}
+
+/**
+ * ⛔ `refine: true` IS RETIRED — ruled 2026-09-13 [Diego], for `current:`. It was a flag
+ * three methods consulted separately, and it did one thing: on a parametric page,
+ * `refine: true, detail: false` delivered the route query's records without the
+ * page's own. Its `sort` and `where` changed nothing. `inherit: true`, its earlier
+ * spelling, has been refused since 2026-09-02 and now names the same replacement.
+ *
+ * `current:` is validated here too: one of `only`, `exclude`, `include`, and only on
+ * a section's binding — how a page's record is used is a section's choice.
+ *
+ * @param {Object} fetch - one authored binding
+ * @param {string} context - where the declaration sits, for the message
+ * @param {'section'|'page'|'site'|null} level - the level it sits at, when known
+ */
+function refuseRefineAndMisplacedCurrent(fetch, context, level) {
+  const retired = fetch.refine !== undefined ? 'refine' : fetch.inherit !== undefined ? 'inherit' : null
+  if (retired) {
+    throw new Error(
+      `[uniweb] ${context}: \`${retired}: true\` is retired. Name the query, and say how this section uses ` +
+        `its page's record with \`current:\` — \`fetch: { query: <name>, current: exclude, limit: 3 }\` for ` +
+        `the others, \`current: include\` for all of them, \`current: only\` (the default) for the record.`
+    )
+  }
+  if (fetch.current === undefined) return
+  if (!CURRENT_MODES.includes(fetch.current)) {
+    throw new Error(
+      `[uniweb] ${context}: \`current: ${JSON.stringify(fetch.current)}\` — write \`only\`, \`exclude\` or \`include\`.`
+    )
+  }
+  if (level && level !== 'section') {
+    throw new Error(
+      `[uniweb] ${context}: \`current:\` is read on a section's binding, not on a ${level}'s — ` +
+        `each section of a parametric page says how it uses the page's record.`
+    )
+  }
+}
+
+/**
+ * ⭐ WHAT A BINDING MAY NOT SAY — every refusal, in one place, for the two readers
+ * of an authored binding: the build's parse (`parseFetchConfig`) and the sync push,
+ * which carries a page's declaration without parsing it (`uwx/site.js`). A site
+ * that cannot build must not sync either.
+ *
+ * @param {Object} fetch - one authored binding
+ * @param {string} context - where the declaration sits, for the message
+ * @param {Object} [options]
+ * @param {'section'|'page'|'site'|null} [options.level] - the level it sits at, when known
+ */
+export function refuseBinding(fetch, context, { level = null } = {}) {
+  if (!fetch || typeof fetch !== 'object' || Array.isArray(fetch)) return
+  refuseRefineAndMisplacedCurrent(fetch, context, level)
+  refuseUnder(fetch.where, context)
+  refuseOutsideLanguage(fetch.where, context)
+  refuseBindingScope(fetch, context)
 }
 
 /**
@@ -370,13 +425,15 @@ export function toFetchList(fetch) {
  *
  * @param {string|Object|Array|null} fetch
  * @param {string} [context='fetch'] - where the declaration sits (a file), for messages
+ * @param {Object} [options]
+ * @param {'section'|'page'|'site'|null} [options.level] - the level it sits at, when known
  * @returns {Object|Array<Object>|null}
  */
-export function parseFetchConfig(fetch, context = 'fetch') {
+export function parseFetchConfig(fetch, context = 'fetch', { level = null } = {}) {
   if (!fetch) return null
 
   if (Array.isArray(fetch)) {
-    const parsed = fetch.map((f) => parseFetchConfig(f, context)).filter(Boolean)
+    const parsed = fetch.map((f) => parseFetchConfig(f, context, { level })).filter(Boolean)
     // Flatten: a nested array is not a meaningful authoring shape, and letting
     // one through would put an array inside an array where every consumer
     // expects configs.
@@ -402,41 +459,9 @@ export function parseFetchConfig(fetch, context = 'fetch') {
   // Full config object
   if (typeof fetch !== 'object') return null
 
-  // ⛔ THE RETIRED ALIAS IS AN ERROR, NOT A WARNING — same reasoning as
-  // `collection:` below. `inherit: true` was the earlier spelling of
-  // `refine: true`, accepted with a warning from April 2026 and removed on
-  // 2026-09-02. Ignored, `{ inherit: true, limit: 3 }` would fall through to
-  // the source shape, find neither `path` nor `url`, and resolve to null — a
-  // silently empty block.
-  if (fetch.inherit !== undefined) {
-    throw new Error(
-      '[uniweb] fetch: `inherit: true` is retired. Write `refine: true` — the same ' +
-        'per-instance refinement of the ancestor fetch, under its current name.'
-    )
-  }
-  refuseUnder(fetch.where, context)
-  refuseOutsideLanguage(fetch.where, context)
-  refuseBindingScope(fetch, context)
-
-  // Refine config: { refine: true, detail: false, limit: 3 }
-  // No URL — merges with the parent fetch config at runtime; only carries
-  // override props.
-  //
-  // Note on build-vs-runtime scope: this parser passes `sort`
-  // through on refine configs, but the runtime EntityStore only applies
-  // `detail`, `limit`, and `order` overrides. `sort` on a refine
-  // block are currently accepted by the parser but not honored at runtime.
-  // Preserved as-is in this rename commit; revisit separately if needed.
-  if (fetch.refine === true) {
-    warnUnknownFetchKeys(fetch, 'refine')
-    return {
-      refine: true,
-      ...(fetch.detail !== undefined ? { detail: fetch.detail } : {}),
-      ...(fetch.limit !== undefined ? { limit: fetch.limit } : {}),
-      ...(fetch.sort !== undefined ? { sort: fetch.sort } : {}),
-      ...(fetch.where !== undefined ? { where: fetch.where } : {}),
-    }
-  }
+  // ⛔ RETIRED SPELLINGS ARE ERRORS, NOT WARNINGS — ignored, a declaration falls
+  // through to a shape it is not and resolves to null: a silently empty block.
+  refuseBinding(fetch, context, { level })
 
   // ⛔ THE RETIRED SPELLING IS AN ERROR, NOT A WARNING. An unrecognized key is
   // warned about and IGNORED, so `fetch: { collection: X }` would fall through to
@@ -490,6 +515,8 @@ export function parseFetchConfig(fetch, context = 'fetch') {
       where: fetch.where,
       limit: fetch.limit,
       sort: fetch.sort,
+      // How a section on a parametric page uses the page's record (`currentOf`).
+      current: fetch.current,
       // Canonical detail page for a list card's href (page:<stable_id> ref;
       // resolved to a route template + interpolated per record at runtime).
       detailPage: fetch.detailPage,

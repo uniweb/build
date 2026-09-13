@@ -146,6 +146,59 @@ describe('the sync walker refuses what the collector refuses', () => {
   })
 })
 
+describe('`current:` — refused off a section, warned where nothing reads it (ruled 2026-09-13)', () => {
+  const warnings = async (fn) => {
+    const seen = []
+    const saved = [console.log, console.warn]
+    console.log = () => {}
+    console.warn = (m) => seen.push(String(m))
+    try {
+      await fn()
+    } finally {
+      [console.log, console.warn] = saved
+    }
+    return seen.filter((m) => m.includes('current:'))
+  }
+
+  it('on a section under the route key: accepted, nothing said', async () => {
+    w('queries.yml', "posts:\n  schema: '@/post'\n")
+    w('pages/blog/page.yml', 'title: Blog\nquery: posts\n')
+    w('pages/blog/[slug]/page.yml', 'title: Post\n')
+    w('pages/blog/[slug]/1-body.md', '---\ntype: Post\n---\n')
+    w('pages/blog/[slug]/2-related.md', '---\ntype: Related\nfetch:\n  query: posts\n  current: exclude\n  limit: 3\n---\n')
+    let content
+    expect(await warnings(async () => { content = await collectSiteContent(ROOT, { strict: false }) })).toEqual([])
+    const related = content.pages.find((p) => p.route === '/blog/:slug').sections.find((s) => s.type === 'Related')
+    expect(related.fetch).toMatchObject({ query: 'posts', current: 'exclude', limit: 3 })
+  })
+
+  it('warns on a key the URL does not narrow, and on a page with no parametric route', async () => {
+    w('queries.yml', "posts:\n  schema: '@/post'\ntags:\n  schema: '@/tag'\n")
+    w('pages/blog/page.yml', 'title: Blog\nquery: posts\n')
+    w('pages/blog/[slug]/1-tags.md', '---\ntype: Tags\nfetch:\n  query: tags\n  current: exclude\n---\n')
+    w('pages/about/1-team.md', '---\ntype: Team\nfetch:\n  query: posts\n  current: include\n---\n')
+    const seen = await warnings(() => collectSiteContent(ROOT, { strict: false }))
+    expect(seen.some((m) => /\/blog\/:slug: `current: exclude` on content\.data\.tags is ignored .*\(here `posts`\)/.test(m))).toBe(true)
+    // (the only other page is promoted to the homepage, `/`)
+    expect(seen.some((m) => /`current: include` on content\.data\.posts is ignored .*this page has none/.test(m))).toBe(true)
+  })
+
+  it('stops the build on a page.yml, and the sync push the same way', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
+    w('queries.yml', "posts:\n  schema: '@/post'\n")
+    w('pages/blog/page.yml', 'title: Blog\nfetch:\n  query: posts\n  current: exclude\n')
+    await expect(collect()).rejects.toThrow(/pages\/blog\/page\.yml: `current:` is read on a section's binding/)
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/`current:` is read on a section's binding/)
+  })
+
+  it('`refine: true` stops the build, naming `current:`', async () => {
+    w('queries.yml', "posts:\n  schema: '@/post'\n")
+    w('pages/blog/page.yml', 'title: Blog\nquery: posts\n')
+    w('pages/blog/[slug]/2-related.md', '---\ntype: Related\nfetch:\n  refine: true\n  detail: false\n  limit: 3\n---\n')
+    await expect(collect()).rejects.toThrow(/`refine: true` is retired\. .*current: exclude/)
+  })
+})
+
 describe('$name on compiled records — the record\'s final slug (ruled 2026-09-11)', () => {
   const run = async (queries) => {
     const restore = quiet()
@@ -234,7 +287,7 @@ describe('a page\'s fetch — `scope` is the query\'s, `under` is refused', () =
 
   it('refuses `under` wherever it sits in a where, with a message naming scope', () => {
     expect(() => parseFetchConfig({ query: 'x', where: { path: { under: 'a' } } })).toThrow(/Write `scope: "a"`/)
-    expect(() => parseFetchConfig({ refine: true, where: { or: [{ tag: { under: 'b' } }] } })).toThrow(/`under` is no longer an operator/)
+    expect(() => parseFetchConfig({ query: 'y', where: { or: [{ tag: { under: 'b' } }] } })).toThrow(/`under` is no longer an operator/)
   })
 
   it('applyPostProcessing applies scope before where, sort and limit', () => {

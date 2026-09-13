@@ -1,11 +1,12 @@
 // What shape a `fetch:` declaration is, and what a PROJECTION may write back.
 //
-// ⛔ WHY THIS EXISTS. A `fetch:` declaration has three shapes, and the keys each one
+// ⛔ WHY THIS EXISTS. A `fetch:` declaration has two shapes, and the keys each one
 // accepts differ (`data-fetcher.js` RECOGNIZED_FETCH_KEYS):
 //
-//   refine      refine · detail · limit · sort · where · filter
-//   query       query · schema · … — and NOT `path`/`url`
-//   source      path · url · schema · …
+//   query       query · as · where · sort · limit · current · … — and NOT `path`/`url`
+//   source      path · url · as · …
+//
+// (A third, `refine: true`, was retired on 2026-09-13 for `current:`; the build refuses it.)
 
 //
 // The build RESOLVES a `query:` shorthand into a concrete location, so the
@@ -36,10 +37,9 @@
 // a `query` are recoverable from the query itself; anything else survives and the
 // validator's warning stays the honest signal.
 
-/** Which of the three shapes a declaration is — the same order `data-fetcher` uses. */
+/** Which shape a declaration is — the same order `data-fetcher` uses. */
 export function fetchShapeOf(fetch) {
   if (!fetch || typeof fetch !== 'object') return null
-  if (fetch.refine === true) return 'refine'
   if (fetch.query) return 'query'
   return 'source'
 }
@@ -47,7 +47,6 @@ export function fetchShapeOf(fetch) {
 /** Keys a shape derives rather than the author writing them. */
 const DERIVED_BY_SHAPE = {
   query: ['path', 'url'],
-  refine: [],
   source: []
 }
 

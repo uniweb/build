@@ -32,10 +32,10 @@ import yaml from 'js-yaml'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
-import { parseFetchConfig } from './data-fetcher.js'
+import { parseFetchConfig, toFetchList } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
-import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig } from '@uniweb/core'
+import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig, pageRouteQuery } from '@uniweb/core'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 
 // Try to import content-reader, fall back to simplified parser
@@ -247,8 +247,8 @@ export function declaredFetch(config, where) {
   return config?.fetch ?? fetchFromQueryShorthand(config?.query)
 }
 
-/** `parseFetchConfig`'s arguments for a level: its declaration, and the file it sits in. */
-const fetchIn = (config, where) => [declaredFetch(config, where), where]
+/** `parseFetchConfig`'s arguments for a level: its declaration, the file it sits in, and the level. */
+const fetchIn = (config, where, level) => [declaredFetch(config, where), where, { level }]
 
 /**
  * The refusals `declaredFetch` makes, alone — for a reader that must keep the
@@ -304,6 +304,51 @@ const isQueryNames = (value) =>
   isQueryName(value) || (Array.isArray(value) && value.length > 0 && value.every(isQueryName))
 const formatQueryNames = (value) =>
   isQueryNames(value) ? (Array.isArray(value) ? `[${value.join(', ')}]` : value) : '<name>'
+
+/**
+ * ⚠️ A `current:` NOTHING WILL READ — said once per binding. `current:` applies on a
+ * section's binding under the key its page's URL narrows (the route query,
+ * `pageRouteQuery`); anywhere else the runtime ignores it, and the author would see
+ * the section deliver its list as though the line were not there.
+ *
+ * @param {Array<Object>} pages - collected pages, parents linked
+ * @param {Object} layouts - collected layout areas (never on a parametric route)
+ * @param {Object|Array|null} siteFetch - the parsed site fetch
+ */
+function warnUnreadCurrent(pages, layouts, siteFetch) {
+  const byRoute = new Map(pages.map((p) => [p.route, p]))
+  const access = {
+    routeOf: (p) => p.route,
+    parentOf: (p) => (p.parent ? byRoute.get(p.parent) ?? null : null),
+    fetchOf: (p) => p.fetch,
+    sectionsOf: (p) => p.sections,
+    site: siteFetch,
+  }
+  const check = (sections, where, routeKeyOf) => {
+    for (const section of sections || []) {
+      for (const one of toFetchList(section.fetch)) {
+        if (one?.current === undefined) continue
+        const routeKey = routeKeyOf()
+        if (one.as === routeKey) continue
+        console.warn(
+          `[uniweb] ${where}: \`current: ${one.current}\` on content.data.${one.as} is ignored — it applies on a ` +
+            `section of a parametric page, under the key its URL narrows` +
+            (routeKey ? ` (here \`${routeKey}\`).` : '; this page has none.')
+        )
+      }
+      check(section.subsections, where, routeKeyOf)
+    }
+  }
+  for (const page of pages) {
+    let key
+    check(page.sections, page.route, () => (key === undefined ? (key = pageRouteQuery(page, access)?.key ?? null) : key))
+  }
+  for (const [name, areas] of Object.entries(layouts || {})) {
+    for (const [area, areaPage] of Object.entries(areas || {})) {
+      check(areaPage?.sections, `layout ${name}/${area}`, () => null)
+    }
+  }
+}
 
 /**
  * Build version metadata from detected versions and page.yml config
@@ -1029,7 +1074,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     input,
     params: { ...params, ...props },
     content: proseMirrorContent,
-    fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath)),
+    fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath), { level: 'section' }),
     ...(insets.length > 0 ? { insets } : {}),
     subsections: []
   }
@@ -1641,7 +1686,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       },
 
       // Data fetching — `fetch:`, or the `query:` shorthand (`declaredFetch`)
-      fetch: parseFetchConfig(...fetchIn(pageConfig, relative(siteRoot, join(pagePath, 'page.yml')))),
+      fetch: parseFetchConfig(...fetchIn(pageConfig, relative(siteRoot, join(pagePath, 'page.yml')), 'page')),
 
       hasContent: hierarchicalSections.length > 0,
       sections: hierarchicalSections
@@ -2013,7 +2058,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           // ⭐ `declaredFetch`, as every other level: this read `dirConfig.fetch`
           // alone until 2026-09-11, so a container's `folder.yml` shorthand reached
           // a backend on `push` and was dropped from a static build.
-          fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
+          fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')), 'page')) || null,
           hasContent: false,
           sections: [],
           order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
@@ -2110,7 +2155,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         // a `folder.yml` here lost its `fetch:` (and its shorthand) on a static
         // build while `push` carried it, so its pages had the folder's data on a
         // hosted site and none on an exported one.
-        fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
+        fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')), 'page')) || null,
         hasContent: false,
         sections: [],
         order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
@@ -2533,6 +2578,9 @@ export async function collectSiteContent(sitePath, options = {}) {
     page.parent = parentPage ? parentPage.route : null
   }
 
+  const siteFetch = parseFetchConfig(...fetchIn(siteConfig, 'site.yml', 'site'))
+  warnUnreadCurrent(pages, layouts, siteFetch)
+
   // Page order is determined by per-level sorting during collection:
   // 1. Numeric 'order' property in page.yml (lower first, within each level)
   // 2. pages: array in parent config (wildcard-aware, overrides numeric order)
@@ -2669,7 +2717,7 @@ export async function collectSiteContent(sitePath, options = {}) {
       // shorthand reached a backend on the sync lane and was silently ignored on
       // a static build — the works-on-one-lane shape. Every level reads it
       // through `declaredFetch` now.
-      fetch: parseFetchConfig(...fetchIn(siteConfig, 'site.yml')),
+      fetch: siteFetch,
       fetcher: warnRetiredFetcherKeys(siteConfig.fetcher),
       // NOTE: `intelligence.yml` was read here and emitted as `config.intelligence`.
       // Removed 2026-08-12 — the assistant surface is `site.yml::assistant`, which
