@@ -247,6 +247,9 @@ export function declaredFetch(config, where) {
   return config?.fetch ?? fetchFromQueryShorthand(config?.query)
 }
 
+/** `parseFetchConfig`'s arguments for a level: its declaration, and the file it sits in. */
+const fetchIn = (config, where) => [declaredFetch(config, where), where]
+
 /**
  * The refusals `declaredFetch` makes, alone — for a reader that must keep the
  * desugaring inline (the sync push's `settings.fetch`, whose sources
@@ -1026,7 +1029,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     input,
     params: { ...params, ...props },
     content: proseMirrorContent,
-    fetch: parseFetchConfig(resolvedFetch),
+    fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath)),
     ...(insets.length > 0 ? { insets } : {}),
     subsections: []
   }
@@ -1638,7 +1641,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       },
 
       // Data fetching — `fetch:`, or the `query:` shorthand (`declaredFetch`)
-      fetch: parseFetchConfig(declaredFetch(pageConfig, relative(siteRoot, join(pagePath, 'page.yml')))),
+      fetch: parseFetchConfig(...fetchIn(pageConfig, relative(siteRoot, join(pagePath, 'page.yml')))),
 
       hasContent: hierarchicalSections.length > 0,
       sections: hierarchicalSections
@@ -2010,7 +2013,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           // ⭐ `declaredFetch`, as every other level: this read `dirConfig.fetch`
           // alone until 2026-09-11, so a container's `folder.yml` shorthand reached
           // a backend on `push` and was dropped from a static build.
-          fetch: parseFetchConfig(declaredFetch(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
+          fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
           hasContent: false,
           sections: [],
           order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
@@ -2107,7 +2110,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         // a `folder.yml` here lost its `fetch:` (and its shorthand) on a static
         // build while `push` carried it, so its pages had the folder's data on a
         // hosted site and none on an exported one.
-        fetch: parseFetchConfig(declaredFetch(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
+        fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')))) || null,
         hasContent: false,
         sections: [],
         order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
@@ -2666,7 +2669,7 @@ export async function collectSiteContent(sitePath, options = {}) {
       // shorthand reached a backend on the sync lane and was silently ignored on
       // a static build — the works-on-one-lane shape. Every level reads it
       // through `declaredFetch` now.
-      fetch: parseFetchConfig(declaredFetch(siteConfig, 'site.yml')),
+      fetch: parseFetchConfig(...fetchIn(siteConfig, 'site.yml')),
       fetcher: warnRetiredFetcherKeys(siteConfig.fetcher),
       // NOTE: `intelligence.yml` was read here and emitted as `config.intelligence`.
       // Removed 2026-08-12 — the assistant surface is `site.yml::assistant`, which

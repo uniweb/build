@@ -9,7 +9,8 @@
  *   - a branch is `scope:`; `where: { path: { under } }` and `under` are refused;
  *   - a named query's clauses bound to the route are left for the runtime, not compiled
  *     against the literal `':dir'`, and its `scope` is never baked — the runtime applies
- *     the scope that wins, as the records service does.
+ *     it, as the records service does;
+ *   - `scope` is the query's: a binding carrying one is refused (ruled 2026-09-13).
  */
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -124,9 +125,21 @@ describe('the sync walker refuses what the collector refuses', () => {
     await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/queries\.members: .*Write `scope: "field"`/)
   })
 
-  it('CONTROL — `scope:` syncs, on a page\'s fetch and on a named query', async () => {
+  it('`scope` on a page\'s binding — it is the query\'s (ruled 2026-09-13)', async () => {
     w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
     w('pages/members/page.yml', 'title: M\nfetch:\n  query: members\n  scope: field\n')
+    w('queries.yml', "members:\n  schema: '@/member'\n")
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/pages\/members\/page\.yml: `scope` is the query's, not a binding's/)
+  })
+
+  it('`scope` on the site\'s binding', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\nfetch:\n  query: members\n  scope: field\n')
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/site\.yml fetch: `scope` is the query's/)
+  })
+
+  it('CONTROL — `scope:` syncs on a named query', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
+    w('pages/members/page.yml', 'title: M\nfetch:\n  query: members\n')
     w('queries.yml', "members:\n  schema: '@/member'\n  scope: field\n")
     const doc = await siteProjectToDocument(ROOT)
     expect(JSON.stringify(doc)).toContain('"scope":"field"')
@@ -204,20 +217,19 @@ describe('a named query\'s narrowing at build — only what is fixed for every p
   })
 })
 
-describe('a page\'s fetch — `scope` is recognized, `under` is refused', () => {
+describe('a page\'s fetch — `scope` is the query\'s, `under` is refused', () => {
   beforeEach(() => _resetUnknownFetchKeyWarnings())
 
-  it('keeps `scope` on a query reference and on a source', () => {
-    const warn = console.warn
-    const seen = []
-    console.warn = (m) => seen.push(m)
-    try {
-      expect(parseFetchConfig({ query: 'logbook', scope: ':dir' })).toMatchObject({ query: 'logbook', scope: ':dir' })
-      expect(parseFetchConfig({ path: '/data/logbook.json', scope: 'field' })).toMatchObject({ scope: 'field' })
-    } finally {
-      console.warn = warn
-    }
-    expect(seen.some((m) => m.includes('"scope"'))).toBe(false)
+  it('⛔ refuses `scope` on a binding of a query, naming where it goes (ruled 2026-09-13)', () => {
+    // It was recognized from 2026-09-11 and REPLACED the query's scope on the records
+    // service, while narrowing inside it on a compiled file.
+    expect(() => parseFetchConfig({ query: 'logbook', scope: ':dir' }, 'pages/log/page.yml'))
+      .toThrow(/pages\/log\/page\.yml: `scope` is the query's, not a binding's\. Put `scope: ":dir"` on the query `logbook`/)
+    expect(() => parseFetchConfig([{ query: 'a' }, { query: 'logbook', scope: 'field' }])).toThrow(/`scope` is the query's/)
+  })
+
+  it('CONTROL — a source still carries `scope`, until sources go', () => {
+    expect(parseFetchConfig({ path: '/data/logbook.json', scope: 'field' })).toMatchObject({ scope: 'field' })
   })
 
   it('refuses `under` wherever it sits in a where, with a message naming scope', () => {

@@ -58,16 +58,15 @@ describe('collection query terms are applied at materialization', () => {
     expect(await items('    sort: title desc\n')).toEqual(['B', 'A'])
   })
 
-  it('limit: truncates', async () => {
-    expect(await items('    limit: 1\n')).toEqual(['A'])
+  it('⛔ limit: is NOT applied — every record the query selects compiles (ruled 2026-09-13)', async () => {
+    // A `limit` is how many a list shows, and a binding may pick its own — more than
+    // the query's included — so the runtime cuts each list (`@uniweb/core/fetch-config`).
+    // This truncated until then, and a record past the limit had no detail page.
+    expect(await items('    limit: 1\n')).toEqual(['A', 'B'])
   })
 
-  it('⛔ where + limit compose in the canonical order — narrow, THEN truncate', async () => {
-    // The ordering assertion, and the reason order is not cosmetic. `tier: silver`
-    // matches only B. Narrowing first yields [B]; limiting first would yield [] —
-    // limit takes A, then the predicate rejects it. Two lanes evaluate these same
-    // declarations (this one, and data-fetcher's page-level `fetch:`), so a
-    // difference in order is a difference in RESULT.
-    expect(await items('    where: { tier: silver }\n    limit: 1\n')).toEqual(['B'])
+  it('where still narrows beside a limit — the limit changes nothing here', async () => {
+    expect(await items('    where: { tier: silver }\n    limit: 1\n')).toEqual(await items('    where: { tier: silver }\n'))
+    expect(await items('    where: { tier: silver }\n')).toEqual(['B'])
   })
 })

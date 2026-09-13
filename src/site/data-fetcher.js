@@ -182,13 +182,12 @@ const RECOGNIZED_FETCH_KEYS = {
   // dropped in the one way the author could not see: no warning, and a plausible
   // key inferred from the path in its place. It has its own message below, since
   // "unrecognized" understates a key that used to work.
-  // ⭐ `scope` is recognized since 2026-09-11, when a folder branch became `scope:`
-  // on both lanes and `where: { path: { under } }` was retired in its favour. It
-  // was dropped here as "unrecognized" until then, so a page could not narrow a
-  // query to a branch at all.
+  // ⛔ `scope` is not a binding key — it is the query's, and refused on a binding
+  // (`refuseBindingScope`, ruled 2026-09-13 [Diego]). It was recognized here from
+  // 2026-09-11 to 2026-09-13, and replaced the query's scope on the records service.
   query: new Set([
     'query', 'as', 'prerender', 'merge', 'transform',
-    'scope', 'where', 'limit', 'sort', 'detailPage',
+    'where', 'limit', 'sort', 'detailPage',
   ]),
   source: new Set([
     'path', 'url', 'as', 'prerender', 'merge', 'transform', 'detail',
@@ -240,6 +239,63 @@ export function refuseUnder(where, context) {
 export function refuseOutsideLanguage(where, context) {
   const problem = whereOutsideLanguage(where)
   if (problem) throw new Error(`[uniweb] ${context}: ${problem}.`)
+}
+
+/**
+ * ⛔ `scope` ON A BINDING STOPS THE BUILD — ruled 2026-09-13 [Diego]: *"it belongs to
+ * the query."* Which branch of the folder a query reads decides what the query is;
+ * a binding reuses the query and adapts it with `where`, `sort` and `limit` only.
+ * Refused rather than ignored, because ignored it would read as a branch the page
+ * narrowed to while the query's whole scope arrived. Every lane reads the query's
+ * (`@uniweb/core/fetch-config`).
+ *
+ * @param {Object|undefined} fetch - one authored binding
+ * @param {string} context - where the declaration sits, for the message
+ */
+export function refuseBindingScope(fetch, context) {
+  if (!fetch || typeof fetch !== 'object' || Array.isArray(fetch)) return
+  if (fetch.scope === undefined || typeof fetch.query !== 'string') return
+  throw new Error(
+    `[uniweb] ${context}: \`scope\` is the query's, not a binding's. Put ` +
+      `\`scope: ${JSON.stringify(fetch.scope)}\` on the query \`${fetch.query}\` — or declare ` +
+      `another query with that scope — and narrow this binding with \`where\`, \`sort\` and \`limit\`.`
+  )
+}
+
+/**
+ * ⚠️ TWO BINDINGS UNDER ONE KEY AT ONE LEVEL — ruled 2026-09-13 [Diego]: *"Duplicates
+ * should not exist."* The first is used on every lane (`resolveFetchConfigs` keeps
+ * the first per key, and so does the build's prerender) and the rest are ignored;
+ * this says so once per key per file. Warned, not refused: the first binding still
+ * delivers what it says.
+ *
+ * @param {Array<Object>} list - one level's bindings, parsed or as authored
+ * @param {string} context - where the declaration sits, for the message
+ */
+const warnedDuplicateBindings = new Set()
+export function warnDuplicateBindings(list, context) {
+  if (!Array.isArray(list)) return
+  const seen = new Set()
+  for (const one of list) {
+    const key = one && typeof one === 'object' ? (one.as || one.query) : undefined
+    if (typeof key !== 'string' || !key) continue
+    if (!seen.has(key)) {
+      seen.add(key)
+      continue
+    }
+    const memo = `${context}::${key}`
+    if (warnedDuplicateBindings.has(memo)) continue
+    warnedDuplicateBindings.add(memo)
+    console.warn(
+      `[uniweb] ${context}: more than one binding delivers content.data.${key} — the first is used ` +
+        `and the rest are ignored. Give each binding its own \`as:\`.`
+    )
+  }
+}
+
+/** Test seam — reset the duplicate-binding memo so suites do not leak into each other. */
+export function _resetDuplicateBindingWarnings() {
+  warnedDuplicateBindings.clear()
 }
 
 // Keys that are neither recognized nor merely unknown: they USED to work, and a
@@ -313,18 +369,20 @@ export function toFetchList(fetch) {
  * already broken.)
  *
  * @param {string|Object|Array|null} fetch
+ * @param {string} [context='fetch'] - where the declaration sits (a file), for messages
  * @returns {Object|Array<Object>|null}
  */
-export function parseFetchConfig(fetch) {
+export function parseFetchConfig(fetch, context = 'fetch') {
   if (!fetch) return null
 
   if (Array.isArray(fetch)) {
-    const parsed = fetch.map((f) => parseFetchConfig(f)).filter(Boolean)
+    const parsed = fetch.map((f) => parseFetchConfig(f, context)).filter(Boolean)
     // Flatten: a nested array is not a meaningful authoring shape, and letting
     // one through would put an array inside an array where every consumer
     // expects configs.
     const flat = parsed.flat()
     if (flat.length === 0) return null
+    warnDuplicateBindings(flat, context)
     return flat.length === 1 ? flat[0] : flat
   }
 
@@ -356,8 +414,9 @@ export function parseFetchConfig(fetch) {
         'per-instance refinement of the ancestor fetch, under its current name.'
     )
   }
-  refuseUnder(fetch.where, 'fetch')
-  refuseOutsideLanguage(fetch.where, 'fetch')
+  refuseUnder(fetch.where, context)
+  refuseOutsideLanguage(fetch.where, context)
+  refuseBindingScope(fetch, context)
 
   // Refine config: { refine: true, detail: false, limit: 3 }
   // No URL — merges with the parent fetch config at runtime; only carries
@@ -426,8 +485,8 @@ export function parseFetchConfig(fetch) {
       prerender: fetch.prerender ?? true,
       merge: fetch.merge ?? false,
       transform: fetch.transform,
-      // Query operators — a fetch's own override the named query's, per field
-      scope: fetch.scope,
+      // A binding's adaptations of its query (`@uniweb/core/fetch-config`,
+      // `narrowQuery`): `where` joins the query's, `sort` and `limit` replace its.
       where: fetch.where,
       limit: fetch.limit,
       sort: fetch.sort,

@@ -33,7 +33,8 @@
  *   array, with the cite key as slug). Multiple files in the same folder
  *   merge — the loader flattens one level after collecting them.
  * - Converts markdown body to ProseMirror JSON
- * - Supports filtering, sorting, and limiting
+ * - Applies the query's fixed `where` and orders by its `sort`; its `limit` is
+ *   left to the runtime, so every record the query selects compiles
  * - Auto-generates excerpts and extracts first images (markdown items only)
  *
  * @module @uniweb/build/site/collection-processor
@@ -720,10 +721,10 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
     })
   }
 
-  // ⛔ ORDER MATCHES `data-fetcher.js::applyPostProcessing` — where, filter, sort,
-  // limit. Two lanes evaluate the same declaration (this one materializes a query
-  // to `/data/<name>.json`; that one runs a page-level `fetch:`), so a difference
-  // in order is a difference in RESULT for any query that both narrows and limits.
+  // ⛔ ORDER MATCHES `data-fetcher.js::applyPostProcessing` — where, then sort. Two
+  // lanes evaluate the same declaration (this one materializes a query to
+  // `/data/<name>.json`; that one runs a page-level `fetch:`), so a difference in
+  // order is a difference in RESULT.
   //
   // ⚠️ `where` was missing here entirely until 2026-08-29: `parseQueryConfig`
   // read `filter` and never `where`, so the CANONICAL predicate was parsed, put on
@@ -736,24 +737,25 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
   // `resolveQuerySource`). ⛔ Until 2026-09-11 it was applied here to the literal
   // `':dir'`, and the query compiled to no records (measured).
   //
-  // ⛔ `scope` is NEVER baked, fixed or routed. The runtime applies the one that
-  // wins — a page fetch's own, else this query's — which is what the records
-  // service does. Baked here, a page's `scope:` could only narrow inside the
-  // query's branch on a static site and would replace it on a hosted one.
+  // ⛔ `scope` is NEVER baked, fixed or routed — the runtime applies it, as the
+  // records service does, so a routed `scope: :dir` binds per page.
   const fixed = withoutRouteVariables({ where: config.where })
   if (fixed.where) {
     items = applyWhere(items, fixed.where)
   }
 
-  // Apply sort
+  // The query's `sort` orders the file; the runtime applies whichever sort wins —
+  // a binding's own, else this one — so the order here only spares it the work.
   if (config.sort) {
     items = applySort(items, config.sort)
   }
 
-  // Apply limit
-  if (config.limit > 0) {
-    items = items.slice(0, config.limit)
-  }
+  // ⛔ `limit` IS NEVER BAKED (ruled 2026-09-13 [Diego]): it is how many a list
+  // shows, and a binding may pick its own — more than the query's included — which
+  // a file cut here could not give it. Every record the query selects compiles, and
+  // gets its detail page; the runtime cuts each list (`@uniweb/core/fetch-config`,
+  // `narrowQuery`). Until then this sliced the file, so a query's `limit: 2` made the
+  // static build emit two detail pages while the records service resolved all five.
 
   return items
 }

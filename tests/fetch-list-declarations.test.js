@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { collectSiteContent } from '../src/site/content-collector.js'
 import { validateDataInputs } from '../src/validate-data.js'
 import { resolveFetchConfigs } from '@uniweb/core'
+import { parseFetchConfig, _resetDuplicateBindingWarnings } from '../src/site/data-fetcher.js'
 
 /**
  * `query: [team, articles]` means **fetch each** (the shorthand was `data:` until
@@ -150,5 +151,43 @@ describe('⛔ a single declaration is untouched', () => {
     const content = await collectSiteContent(site('[team]').siteRoot, {})
     expect(Array.isArray(content.pages[0].fetch)).toBe(false)
     expect(content.pages[0].fetch.as).toBe('team')
+  })
+})
+
+describe('⚠️ two bindings under one key at one level — the first is used, and the build says so (ruled 2026-09-13)', () => {
+  const warnings = async (fn) => {
+    const seen = []
+    const saved = console.warn
+    console.warn = (m) => seen.push(String(m))
+    try {
+      await fn()
+    } finally {
+      console.warn = saved
+    }
+    return seen.filter((m) => m.includes('more than one binding'))
+  }
+
+  it('names the file and the key, once', async () => {
+    _resetDuplicateBindingWarnings()
+    const paths = site('team')
+    writeFileSync(
+      join(paths.siteRoot, 'pages', 'home', 'page.yml'),
+      'title: Home\nfetch:\n  - query: team\n  - query: articles\n    as: team\n  - query: team\n'
+    )
+    const seen = await warnings(() => collectSiteContent(paths.siteRoot, {}))
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatch(/pages\/home\/page\.yml: more than one binding delivers content\.data\.team — the first is used/)
+  })
+
+  it('and the first is what resolves', async () => {
+    _resetDuplicateBindingWarnings()
+    const cfg = resolveFetchConfigs([parseFetchConfig([{ query: 'team' }, { query: 'articles', as: 'team' }], 'x')], {}).get('team')
+    expect(cfg.query).toBe('team')
+  })
+
+  it('CONTROL — distinct keys, and one query under two keys, say nothing', async () => {
+    _resetDuplicateBindingWarnings()
+    const seen = await warnings(() => parseFetchConfig([{ query: 'team' }, { query: 'team', as: 'lead' }, { query: 'articles' }], 'x'))
+    expect(seen).toEqual([])
   })
 })

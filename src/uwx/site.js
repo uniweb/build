@@ -57,7 +57,7 @@ import {
   fetchFromQueryShorthand,
   assertRouteFolder,
 } from '../site/content-collector.js'
-import { refuseUnder, refuseOutsideLanguage } from '../site/data-fetcher.js'
+import { refuseUnder, refuseOutsideLanguage, refuseBindingScope, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
@@ -249,7 +249,9 @@ function buildPageData(config, ctx) {
   for (const one of [fetch].flat()) {
     refuseUnder(one?.where, 'fetch')
     refuseOutsideLanguage(one?.where, 'fetch')
+    refuseBindingScope(one, where ?? 'page.yml')
   }
+  warnDuplicateBindings([fetch].flat(), where ?? 'page.yml')
   // Resolve the authored `query:` shorthand to the runtime-fetchable
   // `path: /data/<name>.json` (the static convention the default-fetcher uses).
   // A shell/backend-hosted site renders client-side with NO prerender, so the
@@ -1094,7 +1096,9 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   for (const one of [siteYml.fetch].flat()) {
     refuseUnder(one?.where, 'site.yml fetch')
     refuseOutsideLanguage(one?.where, 'site.yml fetch')
+    refuseBindingScope(one, 'site.yml fetch')
   }
+  warnDuplicateBindings([siteYml.fetch ?? fetchFromQueryShorthand(siteYml.query)].flat(), 'site.yml')
   setIf(settings, 'fetch', siteYml.fetch ?? fetchFromQueryShorthand(siteYml.query))
 
   // ⭐ The SITE TIER of framework's own `{name, hide, params}` layout object, which

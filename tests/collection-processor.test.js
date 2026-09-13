@@ -211,7 +211,7 @@ order: 2
       expect(collections.items.map(i => i.title)).toEqual(['B', 'C', 'A'])
     })
 
-    it('should limit number of items', async () => {
+    it('compiles every record — a query\'s limit is the runtime\'s, and its sort orders the file', async () => {
       const contentDir = join(testDir, 'entities', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
@@ -231,7 +231,8 @@ order: ${i}
         }
       })
 
-      expect(collections.posts).toHaveLength(3)
+      expect(collections.posts).toHaveLength(5)
+      expect(collections.posts.map((p) => p.title)).toEqual(['Post 1', 'Post 2', 'Post 3', 'Post 4', 'Post 5'])
     })
 
     it('should handle missing collection folder gracefully', async () => {

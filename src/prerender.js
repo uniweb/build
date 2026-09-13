@@ -16,6 +16,7 @@ import {
   resolveFetchConfigs,
   joinPathCapture,
   routeQuery,
+  routeSelection,
   sectionFetches,
   routeParamValues,
   routeParamName,
@@ -128,17 +129,52 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
   // What each level fetched, by binding key — what `expandDynamicPages` iterates.
   const fetched = { site: new Map(), pages: new Map(), sections: new Map() }
 
+  /**
+   * Read one resolved config ONCE, as two things: the records it selects, uncut
+   * (`routeSelection`), and the view it delivers — the same records cut by its
+   * `limit`. ⭐ The view is what a page renders and hydrates; the selection is what
+   * a parametric page expands over, because a `limit` is how many a list shows,
+   * never which records have a page (ruled 2026-09-13 [Diego]). ⛔ Until then the
+   * expansion read the cut list, so a query's `limit: 2` made two detail pages of
+   * five. Null when the read failed.
+   */
+  const read = async (cfg, oneFetch) => {
+    const result = await executeFetch(routeSelection(cfg), optionsFor(cfg, oneFetch))
+    if (!result.data || result.error) return null
+    const selection = result.data
+    const view = Array.isArray(selection) && typeof cfg.limit === 'number' && cfg.limit > 0
+      ? selection.slice(0, cfg.limit)
+      : selection
+    return { selection, view }
+  }
+
+  /**
+   * The first binding of a key at one level is the one every lane uses
+   * (`resolveFetchConfigs`); a later one under the same key is ignored — and the
+   * parser has said so (`warnDuplicateBindings`). Counted BEFORE `prerender: false`
+   * is honoured, so a deferred first binding is not replaced by a baked second.
+   */
+  const firstOfKey = () => {
+    const seen = new Set()
+    return (as) => {
+      if (seen.has(as)) return false
+      seen.add(as)
+      return true
+    }
+  }
+
   // 1. Site-level fetch. ⛔ `toFetchList` rather than a property read: a `fetch:`
   // or `query:` LIST parses to an array, and `siteFetch.prerender` on one is
   // `undefined` — which passes the `!== false` test and then fetches nothing.
+  const firstSite = firstOfKey()
   for (const oneFetch of toFetchList(siteContent.config?.fetch)) {
-    if (oneFetch.prerender === false) continue
+    if (!firstSite(oneFetch.as) || oneFetch.prerender === false) continue
     const cfg = resolveForBuild(oneFetch)
     onProgress(`  Fetching site data: ${cfg.path || cfg.url}`)
-    const result = await executeFetch(cfg, optionsFor(cfg, oneFetch))
-    if (result.data && !result.error) {
-      fetchedData.push(entry(cfg, result.data, '__site__'))
-      if (!fetched.site.has(oneFetch.as)) fetched.site.set(oneFetch.as, result.data)
+    const got = await read(cfg, oneFetch)
+    if (got) {
+      fetchedData.push(entry(cfg, got.view, '__site__'))
+      fetched.site.set(oneFetch.as, got.selection)
     }
   }
 
@@ -157,19 +193,32 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
 
   for (const page of siteContent.pages || []) {
     // Page-level fetch — every declaration on the page.
+    const firstPage = firstOfKey()
     for (const oneFetch of toFetchList(page.fetch)) {
-      if (oneFetch.prerender === false) continue
+      if (!firstPage(oneFetch.as) || oneFetch.prerender === false) continue
       const cfg = resolveForBuild(oneFetch)
       onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
-      const result = await executeFetch(cfg, optionsFor(cfg, oneFetch))
-      if (result.data && !result.error) {
-        fetchedData.push(entry(cfg, result.data, page.route))
-        keep(fetched.pages, page.route, oneFetch.as, result.data)
+      const got = await read(cfg, oneFetch)
+      if (got) {
+        fetchedData.push(entry(cfg, got.view, page.route))
+        keep(fetched.pages, page.route, oneFetch.as, got.selection)
       }
     }
 
-    // Process section-level fetches (own fetch → parsedContent.data, not cascaded)
-    await processSectionFetches(page.sections, fetchOptions, onProgress, (as, data) => keep(fetched.sections, page.route, as, data))
+    // Section-level fetches — a section's own, into its `parsedContent.data`.
+    // ⛔ Not on a parametric page: there the sections are the runtime's to fill,
+    // because what one receives depends on the URL — the record under the route
+    // key, a view its route binds under any other. A list baked into the template
+    // was cloned into every expanded page and outranked both (measured 2026-09-13:
+    // `/blog/b` rendered all three records). Its views are read per expanded page
+    // instead (`readRouteBoundViews`).
+    await processSectionFetches(page.sections, {
+      resolve: resolveForBuild,
+      read,
+      onProgress,
+      record: (as, data) => keep(fetched.sections, page.route, as, data),
+      bake: !page.isDynamic,
+    })
   }
 
   /**
@@ -196,8 +245,9 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
  *
  * @param {Array} pages - Original pages array
  * @param {{ site?: Map, pages?: Map, sections?: Map }} fetched - what each level
- *   fetched, by binding key (`executeAllFetches`): `site` key → data; `pages` and
- *   `sections` route → (key → data)
+ *   selected, by binding key (`executeAllFetches`): `site` key → data; `pages` and
+ *   `sections` route → (key → data). Every record a binding selects, uncut by its
+ *   `limit` — a record past a list's count still gets its page
  * @param {function} onProgress - Progress callback
  * @param {Object} [stats] - receives `unrouted[route]`, the records with no param value
  * @param {Object} [options]
@@ -417,28 +467,45 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
  * Process fetch configs for sections (and subsections recursively)
  * Section-level fetches merge data into parsedContent.data (not cascaded).
  *
+ * ⭐ RESOLVED BY THE RUNTIME'S RULE, as page fetches are (`resolve`). ⛔ Until
+ * 2026-09-13 a section's fetch was executed as authored: a non-default locale baked
+ * the default locale's records (measured: a French page's section held the English
+ * file), and a named query's routed clauses and, once its `limit` stopped being
+ * compiled into the file, its `limit` never applied.
+ *
  * @param {Array} sections - Array of section objects
- * @param {Object} fetchOptions - Options for executeFetch
- * @param {function} onProgress - Progress callback
+ * @param {Object} options
+ * @param {(cfg: Object) => Object} options.resolve - resolves one binding
+ * @param {(cfg: Object, authored: Object) => Promise<{selection: any, view: any}|null>} options.read
+ * @param {function} options.onProgress - Progress callback
+ * @param {(as: string, data: any) => void} [options.record] - receives each key's selection
+ * @param {boolean} [options.bake=true] - write the view into `parsedContent.data`
  */
-async function processSectionFetches(sections, fetchOptions, onProgress, record = null) {
+async function processSectionFetches(sections, { resolve, read, onProgress, record = null, bake = true }) {
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
     // Execute every section-level fetch. Each merges under its own key, so
     // several accumulate into one `parsedContent.data` — the same keyed map the
-    // runtime's EntityStore builds.
+    // runtime's EntityStore builds. ⛔ The FIRST binding of a key, as there: each
+    // replaced the last until 2026-09-13, so the build delivered the last binding
+    // and the runtime the first.
+    const seen = new Set()
     for (const sectionFetch of toFetchList(section.fetch)) {
+      if (seen.has(sectionFetch.as)) continue
+      seen.add(sectionFetch.as)
       if (sectionFetch.prerender === false) continue
-      onProgress(`  Fetching section data: ${sectionFetch.path || sectionFetch.url}`)
-      const result = await executeFetch(sectionFetch, fetchOptions)
-      if (result.data && !result.error) {
-        // What a section fetched, by key — the route query of a parametric page
-        // whose sections alone declare it (`routeQuery`).
-        if (record) record(sectionFetch.as, result.data)
+      const cfg = resolve(sectionFetch)
+      onProgress(`  Fetching section data: ${cfg.path || cfg.url}`)
+      const got = await read(cfg, sectionFetch)
+      if (!got) continue
+      // What a section fetched, by key — the route query of a parametric page
+      // whose sections alone declare it (`routeQuery`).
+      if (record) record(sectionFetch.as, got.selection)
+      if (bake) {
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
-          result.data,
+          got.view,
           sectionFetch.as,
           sectionFetch.merge
         )
@@ -447,7 +514,7 @@ async function processSectionFetches(sections, fetchOptions, onProgress, record 
 
     // Process subsections recursively
     if (section.subsections && section.subsections.length > 0) {
-      await processSectionFetches(section.subsections, fetchOptions, onProgress, record)
+      await processSectionFetches(section.subsections, { resolve, read, onProgress, record, bake })
     }
   }
 }
