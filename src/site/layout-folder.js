@@ -35,6 +35,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join, parse, relative } from 'node:path'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
+import { layoutNameKey } from '@uniweb/core/layout-name'
 
 /** The key the default layout's areas are held under, on every lane. */
 export const DEFAULT_LAYOUT = 'default'
@@ -87,10 +88,10 @@ export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning =
   }
 
   const areas = []
-  const byKey = new Map() // `<layout lowercased>/<area>` → source
+  const byKey = new Map() // `<layout name key>/<area>` → source
 
   const add = (entry) => {
-    const key = `${entry.layout.toLowerCase()}/${entry.area}`
+    const key = `${layoutNameKey(entry.layout)}/${entry.area}`
     const other = byKey.get(key)
     if (other) {
       throw new Error(
@@ -183,21 +184,25 @@ export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning =
 
   const layoutFolders = await readAreas(DEFAULT_LAYOUT, layoutDir, { isRoot: true })
 
-  // Each folder directly under layout/ is a named layout; `default` (in any case) is
-  // the default layout written as a folder.
-  const seenNames = new Map() // lowercased → as written
+  // Each folder directly under layout/ is a named layout; `default` (in any case, with
+  // or without a trailing `Layout`) is the default layout written as a folder.
+  // ⭐ Names compare as the runtime compares them (`@uniweb/core/layout-name`): `docs`
+  // is the foundation's `DocsLayout`, so the folder need not repeat the suffix.
+  const seenNames = new Map() // layout name key → as written
   for (const folder of layoutFolders) {
     const lower = folder.toLowerCase()
-    const earlier = seenNames.get(lower)
+    const key = layoutNameKey(folder)
+    const earlier = seenNames.get(key)
     if (earlier) {
       fail(
         join(layoutDir, folder),
-        `\`${earlier}\` and \`${folder}\` name one layout — layout names match regardless of case. Keep one folder.`
+        `\`${earlier}\` and \`${folder}\` name one layout — layout names match regardless of case and of a ` +
+          'trailing `Layout`. Keep one folder.'
       )
     }
-    seenNames.set(lower, folder)
+    seenNames.set(key, folder)
 
-    const layoutName = lower === DEFAULT_LAYOUT ? DEFAULT_LAYOUT : folder
+    const layoutName = key === DEFAULT_LAYOUT ? DEFAULT_LAYOUT : folder
     if (layoutName !== DEFAULT_LAYOUT && CONVENTIONAL_AREAS.has(lower)) {
       const memo = `${layoutDir}/${folder}`
       if (!warned.has(memo)) {

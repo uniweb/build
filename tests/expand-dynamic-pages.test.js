@@ -98,8 +98,20 @@ describe('the route query decides what a parametric page expands over (ruled 202
     expect(out.map((p) => p.route)).toContain('/team/ada')
   })
 
-  it('the site\'s query when the page and its parent declare none', () => {
-    const t = { route: '/team/:slug', isDynamic: true, paramName: 'slug' }
+  it('the site\'s query for a TOP-LEVEL parametric page that declares none', () => {
+    const t = { route: '/:slug', isDynamic: true, paramName: 'slug' }
+    const out = expandDynamicPages(
+      [{ route: '/', isDynamic: false }, t],
+      { site: new Map([['people', [{ slug: 'ada' }]]]) },
+      noop,
+      undefined,
+      { siteFetch: { query: 'people', path: '/data/people.json', as: 'people' } },
+    )
+    expect(out.map((p) => p.route)).toContain('/ada')
+  })
+
+  it('⛔ and not for a deeper one — the site is the virtual root page (ruled 2026-09-13)', () => {
+    const t = { route: '/team/:slug', parent: '/team', isDynamic: true, paramName: 'slug' }
     const out = expandDynamicPages(
       [{ route: '/team', isDynamic: false }, t],
       { site: new Map([['people', [{ slug: 'ada' }]]]) },
@@ -107,7 +119,8 @@ describe('the route query decides what a parametric page expands over (ruled 202
       undefined,
       { siteFetch: { query: 'people', path: '/data/people.json', as: 'people' } },
     )
-    expect(out.map((p) => p.route)).toContain('/team/ada')
+    expect(out).toContain(t)
+    expect(out.map((p) => p.route)).not.toContain('/team/ada')
   })
 
   it('the FIRST declared query — one that is not prerendered keeps the page for runtime, not the second', () => {

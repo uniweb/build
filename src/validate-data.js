@@ -27,7 +27,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
-import { queryNameFromUrl } from '@uniweb/core'
+import { queryNameFromUrl, siteReaches } from '@uniweb/core'
 
 import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema } from './resolve-data-schema.js'
@@ -108,7 +108,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       const type = section.type
       if (!type) return
       const bindings = foundation[type]?.data
-      const inputs = collectInputs(section, page.fetch, config.fetch)
+      // the site's binding reaches a top-level page's sections only (`siteReaches`)
+      const inputs = collectInputs(section, page.fetch, siteReaches(page.parent) ? config.fetch : null)
 
       // ⭐ **THE JOIN, RUN THE OTHER WAY: data arrived, but under no name this
       // section reads.** Everything below asks "for each input, is there a

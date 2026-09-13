@@ -264,3 +264,16 @@ describe('the pull writes the layout folder the reader reads', () => {
     expect([...units.keys()].filter((k) => k.startsWith('layout/'))).toEqual(['layout/footer.md', 'layout/marketing/footer.md'])
   })
 })
+
+describe('a trailing `Layout` is optional in a folder name (ruled 2026-09-13)', () => {
+  it('`layout/docs/` and `layout/DocsLayout/` name one layout — keeping both stops the build', async () => {
+    const root = site({ 'layout/docs/header.md': section('DocsHeader'), 'layout/DocsLayout/footer.md': section('DocsFooter') })
+    await expect(readLayoutFolder(join(root, 'layout'))).rejects.toThrow(/name one layout — layout names match regardless of case and of a trailing `Layout`/)
+  })
+
+  it('`layout/DefaultLayout/` is the default layout written as a folder', async () => {
+    const root = site({ 'layout/DefaultLayout/header.md': section('Header') })
+    const areas = await readLayoutFolder(join(root, 'layout'))
+    expect(areas.map((a) => [a.layout, a.area])).toEqual([['default', 'header']])
+  })
+})
