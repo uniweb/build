@@ -47,7 +47,7 @@
 // reported as unattributed rather than guessed at.
 
 import { entityContentHash } from './records.js'
-import { recordStableId, safeStableIdFilename, pageDirName } from './site-project.js'
+import { recordStableId, safeStableIdFilename, pageDirName, layoutSectionPaths } from './site-project.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
 // A unit's own content, with the nested collections that are their own units
@@ -119,7 +119,12 @@ export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION
   // is the label, since that is where its identity-bearing fields live.
   if (doc?.info && typeof doc.info === 'object') cb('site.yml', doc.info, 'info')
   walkPages(doc?.pages, 'pages')
-  walkSections(doc?.layout_sections, 'layout')
+  // ⭐ A layout section is keyed by the path the pull writes it to (`layoutSectionPaths`),
+  // which names its layout and area. ⛔ It was `layout/<stable id>.md` until 2026-09-13,
+  // so a named layout's `footer` and the default layout's `footer` shared one key.
+  for (const { record, relPath } of layoutSectionPaths(doc?.layout_sections)) {
+    cb(`layout/${relPath}`, record, 'section')
+  }
 }
 
 /** Per-unit content hashes: `{ <path>: <sha256> }`. */

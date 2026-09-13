@@ -58,6 +58,7 @@ import {
   assertRouteFolder,
 } from '../site/content-collector.js'
 import { refuseUnder } from '../site/data-fetcher.js'
+import { readLayoutFolder } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
@@ -599,34 +600,28 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
   return out
 }
 
-// layout_sections: top-level self-nesting, keyed by (layout_name, area) in data.
-// Same per-area walk as collectLayoutSections, emitted as `$`-records.
+// layout_sections: top-level self-nesting, keyed by (layout_name, area) in data —
+// one `$`-record per section, in area order and then section order.
+//
+// ⭐ Read through `readLayoutFolder` (`../site/layout-folder.js`), the ONE reader the
+// build uses too, so the two cannot disagree about what `layout/` holds. ⛔ They did
+// until 2026-09-13: this walk called every folder a named layout and read only the
+// files directly inside it, while the build called a folder an area of the default
+// layout unless the foundation declared a layout by that name.
 async function collectLayoutNested(layoutDir, siteRoot) {
-  if (!existsSync(layoutDir)) return []
+  const areas = await readLayoutFolder(layoutDir, { siteRoot })
   const items = []
   let order = 0
-  async function addArea(filePath, layoutName, area) {
-    const { section } = await processMarkdownFile(filePath, String(order + 1), siteRoot, area)
-    const stable = section.stableId || String(order)
-    items.push(
-      withIdentity(stable, { layout_name: layoutName, area, ...mapSectionData(section) })
-    )
-    order++
-  }
-  const entries = await readdir(layoutDir, { withFileTypes: true })
-  const rootMd = entries
-    .filter((e) => e.isFile() && isMarkdownFile(e.name))
-    .map((e) => e.name)
-    .sort(compareFilenames)
-  for (const file of rootMd) {
-    await addArea(join(layoutDir, file), 'default', parseNumericPrefix(parse(file).name).name)
-  }
-  for (const e of entries) {
-    if (!e.isDirectory() || isIgnoredFolder(e.name)) continue
-    const sub = join(layoutDir, e.name)
-    const md = (await readdir(sub)).filter(isMarkdownFile).sort(compareFilenames)
-    for (const file of md) {
-      await addArea(join(sub, file), e.name, parseNumericPrefix(parse(file).name).name)
+  for (const area of areas) {
+    for (const file of area.files) {
+      // A one-section area's stable id is the area's name, as it always was; a
+      // section of a multi-section area is named the way a page's section is.
+      const { name } = parse(file)
+      const fallback = area.form === 'file' ? area.area : (parseNumericPrefix(name).name || name)
+      const { section } = await processMarkdownFile(join(area.dir, file), String(order + 1), siteRoot, fallback)
+      const stable = section.stableId || String(order)
+      items.push(withIdentity(stable, { layout_name: area.layout, area: area.area, ...mapSectionData(section) }))
+      order++
     }
   }
   return items

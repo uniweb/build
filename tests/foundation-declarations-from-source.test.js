@@ -1,6 +1,7 @@
 /**
- * `loadFoundationInfo` reads what a foundation declares — theme vars and layout
- * names — **from its SOURCE**, and never from `dist/meta/schema.json`.
+ * `loadFoundationInfo` reads what a foundation declares — its theme vars — **from
+ * its SOURCE**, and never from `dist/meta/schema.json`. ⛔ It reads no layout names:
+ * a site's `layout/` folder is read from the site alone (`layout-folder.test.js`).
  *
  * ## Why source, and not the built schema
  *
@@ -15,8 +16,9 @@
  * Until 2026-09-02 the built schema was read first and source was the fallback.
  * That cost three things: a site build depended on the foundation having been
  * built; a STALE schema.json (source edited, foundation not rebuilt) silently
- * won over the source; and dev and build disagreed about layouts — see the
- * asymmetry pinned below, which is the sharpest of the three.
+ * won over the source; and dev and build disagreed about layouts, because the
+ * layout names came from the same place. (Those names are no longer read here at
+ * all — 2026-09-13.)
  *
  * The original regression this file was written for still holds and is stronger
  * now: with no built schema, vars used to come back EMPTY, so theme CSS omitted
@@ -86,7 +88,6 @@ describe('loadFoundationInfo — source-config fallback (no built schema.json)',
     expect(info.vars['section-padding-y']).toEqual({ default: 'clamp(4rem, 6vw, 7rem)' })
     expect(info.vars['section-padding-x']).toEqual({ default: '1.5rem' })
     expect(info.vars['header-height']).toEqual({ default: '4rem' })
-    expect(info.layoutNames).toBeInstanceOf(Set)
   })
 
   it('reads vars from a nested-layout (src/) foundation source when no schema.json exists', async () => {
@@ -113,27 +114,21 @@ describe('loadFoundationInfo — source-config fallback (no built schema.json)',
     })
     writeSchema(dir, {
       _self: { vars: { 'section-padding-y': { default: 'BUILT' } } },
-      _layouts: { OnlyInSchema: {} },
     })
 
     const info = await loadFoundationInfo(dir)
 
     expect(info.vars['section-padding-y']).toEqual({ default: 'SOURCE' })
-    // And the schema's layout list is not consulted either: a layout that
-    // exists only in the editor artifact is not a layout as far as a build is
-    // concerned.
-    expect(info.layoutNames.has('OnlyInSchema')).toBe(false)
   })
 
   it('⛔ answers the SAME whether or not the foundation has been built', async () => {
-    // The asymmetry this change closes, measured on a real fixture before it:
+    // Measured on a real fixture before 2026-09-02, when layout names came from
+    // here too and a built schema was read first:
     //   built   layouts ["default","Wide"], default areas ["footer","header"]
     //   dev     layouts ["default"],        default areas ["Wide","footer","header"]
-    // `collectLayouts` treats a site's `layout/<Name>/` directory as a named
-    // layout only when <Name> is in this set, and as a folder-form area of the
-    // DEFAULT layout otherwise — so an empty set does not omit the content, it
-    // MISFILES it, and the same site rendered two ways depending on whether
-    // `dist/` happened to exist.
+    // ⛔ The layout half is gone from this function (2026-09-13): a foundation's
+    // layouts no longer decide how a site's `layout/` folder is read, so a layout on
+    // disk here must not surface as anything.
     const { dir } = makeFoundation({
       flat: true,
       vars: { 'section-padding-y': { default: '5rem' } },
@@ -144,9 +139,9 @@ describe('loadFoundationInfo — source-config fallback (no built schema.json)',
     writeSchema(dir, { _self: { vars: {} }, _layouts: {} })
     const afterBuild = await loadFoundationInfo(dir)
 
-    expect([...afterBuild.layoutNames].sort()).toEqual([...beforeBuild.layoutNames].sort())
     expect(afterBuild.vars).toEqual(beforeBuild.vars)
-    expect(beforeBuild.layoutNames.has('Wide')).toBe(true)
+    expect(beforeBuild).not.toHaveProperty('layoutNames')
+    expect(afterBuild).not.toHaveProperty('layoutNames')
   })
 
   it('returns empty vars (no throw) when the foundation has neither schema nor readable source', async () => {
@@ -156,12 +151,11 @@ describe('loadFoundationInfo — source-config fallback (no built schema.json)',
     const info = await loadFoundationInfo(dir)
 
     expect(info.vars).toEqual({})
-    expect(info.layoutNames).toBeInstanceOf(Set)
   })
 
   it('returns empty vars when foundationPath is not provided', async () => {
     const info = await loadFoundationInfo(undefined)
     expect(info.vars).toEqual({})
-    expect(info.layoutNames.size).toBe(0)
+    expect(info).not.toHaveProperty('layoutNames')
   })
 })

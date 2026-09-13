@@ -32,9 +32,10 @@
 // we unwrap to the source locale for the file surface (other locales stay in
 // the i18n pipeline). Absent `info` keys are left untouched on disk.
 
-import { join, relative, extname, basename } from 'node:path'
+import { join, relative, extname, basename, dirname } from 'node:path'
 import { readAssetMap, restoreAssetRefs } from './asset-map.js'
-import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
+import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
@@ -695,59 +696,90 @@ function prunePagesTree(pages, pagesDir, sourceLocale, report) {
   if (incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }
 
-// The file a layout section maps to: `layout/<area>.md` (the 'default' layout) or
-// `layout/<layout_name>/<area>.md`. Inverse of site.js collectLayoutNested.
-function layoutFilePath(layoutBaseDir, record) {
-  const area = record.area || recordStableId(record)
-  if (!area) return null
-  const named = record.layout_name && record.layout_name !== 'default' ? record.layout_name : null
-  return named ? join(layoutBaseDir, named, `${area}.md`) : join(layoutBaseDir, `${area}.md`)
+/**
+ * Where each layout section lives, relative to the layout folder — the ONE placement,
+ * shared by the pull (`projectLayout`) and the site diff's unit keys (`site-diff.js`).
+ *
+ * The inverse of `readLayoutFolder` (`../site/layout-folder.js`): an area with one
+ * section is a file — `<area>.md` in the default layout, `<layout>/<area>.md` in a
+ * named one — and an area with several is a folder of prefixed files,
+ * `<layout>/<area>/<n>-<id>.md`, with `default/<area>/` for the default layout.
+ * A layout name is compared regardless of case, as the runtime matches it.
+ *
+ * @param {Array<object>} layoutSections - `layout_sections` records, in order
+ * @returns {Array<{ record: object, relPath: string }>}
+ */
+export function layoutSectionPaths(layoutSections) {
+  const groups = new Map()
+  for (const record of layoutSections || []) {
+    const area = record?.area || recordStableId(record)
+    if (!area) continue
+    const named = typeof record.layout_name === 'string' && record.layout_name && record.layout_name.toLowerCase() !== 'default'
+    const layout = named ? record.layout_name : 'default'
+    const key = `${layout.toLowerCase()}/${area}`
+    if (!groups.has(key)) groups.set(key, { layout, area, records: [] })
+    groups.get(key).records.push(record)
+  }
+  const out = []
+  for (const { layout, area, records } of groups.values()) {
+    if (records.length === 1) {
+      out.push({ record: records[0], relPath: layout === 'default' ? `${area}.md` : `${layout}/${area}.md` })
+      continue
+    }
+    records.forEach((record, i) => {
+      const id = recordStableId(record) || `s${i + 1}`
+      out.push({ record, relPath: `${layout}/${area}/${i + 1}-${safeStableIdFilename(id)}.md` })
+    })
+  }
+  return out
 }
 
-// A layout subdir the producer treats as a named layout (not an `_`-prefixed
-// organizational folder, the only thing collectLayoutNested skips).
-function isNamedLayoutDir(name) {
-  return !name.startsWith('_')
-}
-
-// Delete orphan layout `.md` files (default-layout files in layoutBaseDir and
-// named-layout files in its subdirs) not in `keep`, and remove a named-layout dir
-// left empty. `_`-prefixed organizational folders are never touched.
+// Delete orphan layout section files not in `keep` — at every depth the layout
+// folder reader reads (`<area>.md`, `<layout>/<area>.md`, `<layout>/<area>/*.md`) —
+// and remove an area or layout folder left empty. Only files the reader treats as
+// sections are touched: `_`-prefixed drafts, READMEs and `_`/`.` folders are left alone.
 function pruneOrphanLayout(layoutBaseDir, keep, report) {
   if (!existsSync(layoutBaseDir)) return
-  for (const entry of readdirSync(layoutBaseDir)) {
-    const p = join(layoutBaseDir, entry)
-    const st = statSync(p)
-    if (st.isFile()) {
-      if (extname(entry).toLowerCase() === '.md' && !keep.has(p)) {
-        unlinkSync(p)
-        report.deleted.push(p)
-      }
-    } else if (st.isDirectory() && isNamedLayoutDir(entry)) {
-      for (const f of readdirSync(p)) {
-        const fp = join(p, f)
-        if (statSync(fp).isFile() && extname(f).toLowerCase() === '.md' && !keep.has(fp)) {
-          unlinkSync(fp)
-          report.deleted.push(fp)
-        }
-      }
-      if (readdirSync(p).length === 0) {
-        rmSync(p, { recursive: true, force: true })
-        report.deleted.push(p)
+  const pruneSectionFiles = (dir) => {
+    for (const f of readdirSync(dir)) {
+      const fp = join(dir, f)
+      if (isMarkdownFile(f) && statSync(fp).isFile() && !keep.has(fp)) {
+        unlinkSync(fp)
+        report.deleted.push(fp)
       }
     }
+  }
+  const removeIfEmpty = (dir) => {
+    if (readdirSync(dir).length === 0) {
+      rmSync(dir, { recursive: true, force: true })
+      report.deleted.push(dir)
+    }
+  }
+  pruneSectionFiles(layoutBaseDir)
+  for (const entry of readdirSync(layoutBaseDir)) {
+    const layoutDir = join(layoutBaseDir, entry)
+    if (isIgnoredFolder(entry) || !statSync(layoutDir).isDirectory()) continue
+    pruneSectionFiles(layoutDir)
+    for (const sub of readdirSync(layoutDir)) {
+      const areaDir = join(layoutDir, sub)
+      if (isIgnoredFolder(sub) || !statSync(areaDir).isDirectory()) continue
+      pruneSectionFiles(areaDir)
+      removeIfEmpty(areaDir)
+    }
+    removeIfEmpty(layoutDir)
   }
 }
 
 // Project layout_sections → layout/**. TWO PASSES (like projectPages): pass 1
 // writes + relocates each file (uuid-anchored, so an app-side (layout_name, area)
 // change is a move, not delete + create); pass 2 prunes orphan files + emptied
-// named-layout dirs. Pruning is guarded against an empty incoming set.
+// layout and area folders. Pruning is guarded against an empty incoming set.
 function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
   const written = []
-  for (const record of layoutSections || []) {
-    const filePath = layoutFilePath(layoutBaseDir, record)
-    if (!filePath) continue
+  for (const { record, relPath } of layoutSectionPaths(layoutSections)) {
+    const filePath = join(layoutBaseDir, relPath)
+    // A relocation into a new area folder needs the folder first.
+    mkdirSync(dirname(filePath), { recursive: true })
     placeByUuid(ctx, record.$uuid, filePath)
     sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector })
     report.layout.push(filePath)

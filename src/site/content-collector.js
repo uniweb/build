@@ -24,6 +24,8 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { resolveQueriesConfig, toConfigQueries } from './queries-config.js'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
+import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
+import { readLayoutFolder, DEFAULT_LAYOUT } from './layout-folder.js'
 import { join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
@@ -443,20 +445,6 @@ function extractInsets(doc) {
 }
 
 /**
- * Check if a file is a markdown file that should be processed.
- * Excludes:
- * - Files not ending in .md
- * - Files starting with _ (drafts/private)
- * - README.md (repo documentation, not site content)
- */
-function isMarkdownFile(filename) {
-  if (!filename.endsWith('.md')) return false
-  if (filename.startsWith('_')) return false
-  if (filename.toLowerCase() === 'readme.md') return false
-  return true
-}
-
-/**
  * Check if a filename uses the @ prefix (child section convention).
  * @-prefixed files are excluded from auto-discovered top-level sections —
  * they exist to be nested under a parent via `nest:` in page.yml.
@@ -471,22 +459,6 @@ function isChildSection(filename) {
  */
 function stripAtPrefix(filename) {
   return filename.replace(/^@+/, '')
-}
-
-/**
- * Check if a folder should be ignored.
- *
- * Excludes folders starting with `_` (drafts/private) and with `.` (hidden).
- *
- * Hidden folders matter more than they look. A site's own `pages/` never holds
- * one, but a mount target routinely does: point `paths:` at a directory that is
- * also a git working tree — a sibling clone, which the docs suggest — and `.git`
- * is a directory sitting right next to the content. Walked as content it
- * contributed hundreds of routes. (A submodule hides this: there, `.git` is a
- * file, so only the plain-clone case ever showed it.)
- */
-function isIgnoredFolder(name) {
-  return name.startsWith('_') || name.startsWith('.')
 }
 
 /**
@@ -2223,12 +2195,6 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 }
 
 /**
- * Load foundation variables from schema.json
- *
- * @param {string} foundationPath - Path to foundation directory
- * @returns {Promise<Object>} Foundation variables or empty object
- */
-/**
  * Load foundation schema data needed by the content collector.
  *
  * `hasContentHandler` reports whether the foundation declares `handlers.content`
@@ -2239,11 +2205,16 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
  * the build never calls it), so it answers "something could resolve this",
  * never "Loom will".
  *
+ * ⛔ **No layout names.** This returned the foundation's layouts until 2026-09-13,
+ * for `collectLayouts` to decide whether a folder under `layout/` was a named
+ * layout. A site's meaning does not depend on a foundation the build may not have
+ * — see `./layout-folder.js`, which reads that folder from the site alone.
+ *
  * @param {string} foundationPath - Path to foundation directory
- * @returns {Promise<{ vars: Object, layoutNames: Set<string>, hasContentHandler: boolean }>}
+ * @returns {Promise<{ vars: Object, hasContentHandler: boolean }>}
  */
 export async function loadFoundationInfo(foundationPath) {
-  if (!foundationPath) return { vars: {}, layoutNames: new Set(), hasContentHandler: false }
+  if (!foundationPath) return { vars: {}, hasContentHandler: false }
 
   // ⛔ **NOT `dist/meta/schema.json`.** That file is the EDITOR's artifact — the
   // rich per-section declaration a visual editor needs to render parameter forms
@@ -2256,26 +2227,11 @@ export async function loadFoundationInfo(foundationPath) {
   // Reading the editor's copy here was wrong twice over. It made a site build
   // depend on the foundation having been BUILT, and it read a derived artifact
   // when the source it derives from is right there — `generate-entry.js` calls
-  // these same two functions (`:197` for vars, `:287` for layouts) to produce the
-  // very `schema.json` this used to read back.
-  //
-  // ⭐ **And it made dev and build classify layouts differently.** The old
-  // fallback returned an EMPTY layout set whenever no built schema existed —
-  // "the normal state for `uniweb dev`" — and `collectLayouts` treats a
-  // `layout/<Name>/` directory as a named layout only when `<Name>` is in that
-  // set, otherwise as a folder-form area of the DEFAULT layout. So the same site
-  // rendered `layout/Wide/` as the Wide layout after a build and as a default
-  // area called "Wide" in dev. Measured 2026-09-02 before this change:
-  //   built   layouts ["default","Wide"], default areas ["footer","header"]
-  //   dev     layouts ["default"],        default areas ["Wide","footer","header"]
-  // Reading from source removes the asymmetry: there is one answer, and it does
-  // not depend on whether `dist/` happens to exist.
+  // the same function to produce the very `schema.json` this used to read back.
   const { resolveFoundationSrcPath } = await import('../utils/foundation-source-root.js')
-  const { loadFoundationConfig, discoverLayoutsInPath } = await import('../schema.js')
+  const { loadFoundationConfig } = await import('../schema.js')
   const srcDir = resolveFoundationSrcPath(foundationPath)
 
-  // Two independent reads, so a failure in one does not cost the other. The
-  // previous single try/catch lost the layouts when only the config was broken.
   let vars = {}
   let hasContentHandler = false
   try {
@@ -2292,144 +2248,64 @@ export async function loadFoundationInfo(foundationPath) {
     )
   }
 
-  let layoutNames = new Set()
-  try {
-    layoutNames = new Set(Object.keys(await discoverLayoutsInPath(srcDir)))
-  } catch (err) {
-    console.warn(
-      `[content-collector] Could not discover the foundation's layouts in ${srcDir}: ${err.message}\n` +
-        `[content-collector]   Continuing WITHOUT them — a site \`layout/<Name>/\` directory will be collected as an area of the default layout rather than as that named layout.`
-    )
-  }
-
-  return { vars, layoutNames, hasContentHandler }
+  return { vars, hasContentHandler }
 }
 
 /**
- * Collect areas from a single directory (general named areas, not hardcoded).
+ * Collect the site's layout areas: `{ <layout>: { <area>: { route, title, sections } } }`.
  *
- * Supports two forms per area:
- *   - Folder: dir/header/ (directory with .md files, like a page)
- *   - File shorthand: dir/header.md (single markdown file)
- * Folder takes priority when both exist.
+ * ⭐ Read through `readLayoutFolder` (`./layout-folder.js`) — the ONE reader the
+ * sync producer uses too. Depth decides what a folder under `layout/` is, never the
+ * foundation. ⛔ Until 2026-09-13 a folder was a named layout here only when the
+ * foundation declared a layout by that name, and an area of the default layout
+ * otherwise, while sync called every folder a named layout: `layout/header/` was a
+ * default header on a static build and a layout named `header` once synced
+ * (measured).
  *
- * @param {string} dir - Directory to scan for area files
- * @param {string} siteRoot - Path to site root
- * @param {string} routePrefix - Route prefix for area pages (e.g., '/layout' or '/layout/marketing')
- * @returns {Promise<Object>} Map of areaName -> page data
- */
-async function collectAreasFromDir(dir, siteRoot, routePrefix = '/layout') {
-  const result = {}
-
-  if (!existsSync(dir)) return result
-
-  const entries = await readdir(dir, { withFileTypes: true })
-
-  // Track which area names we've already processed (folder form takes priority)
-  const processed = new Set()
-
-  // First pass: directories (folder form, higher priority)
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
-
-    const areaName = entry.name
-    const entryPath = join(dir, areaName)
-    const pageResult = await processPage(entryPath, areaName, siteRoot, {
-      isIndex: false,
-      parentRoute: routePrefix
-    })
-    if (pageResult) {
-      result[areaName] = pageResult.page
-      processed.add(areaName)
-    }
-  }
-
-  // Second pass: markdown file shorthand (only if not already processed as folder)
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    if (!entry.name.endsWith('.md')) continue
-    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
-
-    const areaName = entry.name.replace('.md', '')
-    if (processed.has(areaName)) continue
-
-    const filePath = join(dir, entry.name)
-    const { section } = await processMarkdownFile(filePath, '1', siteRoot, areaName)
-    result[areaName] = {
-      route: `${routePrefix}/${areaName}`,
-      title: areaName.charAt(0).toUpperCase() + areaName.slice(1),
-      description: '',
-      layout: {},
-      sections: [section]
-    }
-  }
-
-  return result
-}
-
-/**
- * Collect layout areas from the layout/ directory, including named layout subdirectories.
- *
- * Root-level .md files and area directories form the "default" layout's areas.
- * Subdirectories that match a foundation-declared layout name are named layouts,
- * each with its own set of areas. All other subdirectories are folder-form areas
- * for the default layout (multi-section areas).
+ * An area is a container of sections, not a page: no `page.yml` is read, so an area
+ * carries no `fetch`, `seo` or section ordering of its own. ⭐ Its sections' assets
+ * and icons join the site's manifests — ⛔ they were dropped until 2026-09-13, so a
+ * logo referenced from a header section never entered the asset manifest (measured).
  *
  * @param {string} layoutDir - Path to layout directory
  * @param {string} siteRoot - Path to site root
- * @param {Set<string>} layoutNames - Layout names declared in the foundation schema
- * @returns {Promise<Object>} { layouts }
+ * @returns {Promise<{ layouts: Object|null, assetCollection: Object, iconCollection: Object }>}
  */
-async function collectLayouts(layoutDir, siteRoot, layoutNames = new Set()) {
-  if (!existsSync(layoutDir)) {
-    return { layouts: null }
-  }
+async function collectLayouts(layoutDir, siteRoot) {
+  let assetCollection = { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() }
+  let iconCollection = { icons: new Set(), bySource: new Map() }
 
-  const entries = await readdir(layoutDir, { withFileTypes: true })
+  const areas = await readLayoutFolder(layoutDir, { siteRoot })
+  if (areas.length === 0) return { layouts: null, assetCollection, iconCollection }
 
-  // Identify named layout directories: only subdirectories whose name matches
-  // a layout component declared in the foundation. All others are folder-form
-  // areas for the default layout (e.g., layout/header/ with multiple sections).
-  const namedLayoutDirs = []
-
-  for (const entry of entries) {
-    if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue
-
-    if (entry.isDirectory() && layoutNames.has(entry.name)) {
-      namedLayoutDirs.push(entry)
+  const layouts = {}
+  for (const area of areas) {
+    const sections = []
+    for (const file of area.files) {
+      const { name } = parse(file)
+      const { prefix, name: stableName } = parseNumericPrefix(name)
+      // A one-section area keeps the handles it has always had: positional id `1`,
+      // and the area's name as its stable id — what sync sends as its `$id`. A
+      // section of a multi-section area is named the way a page's section is.
+      const id = area.form === 'file' ? '1' : (prefix || name)
+      const stableId = area.form === 'file' ? area.area : (stableName || name)
+      const result = await processMarkdownFile(join(area.dir, file), id, siteRoot, stableId)
+      sections.push(result.section)
+      assetCollection = mergeAssetCollections(assetCollection, result.assetCollection)
+      iconCollection = mergeIconCollections(iconCollection, result.iconCollection)
+    }
+    const route = area.layout === DEFAULT_LAYOUT ? `/layout/${area.area}` : `/layout/${area.layout}/${area.area}`
+    layouts[area.layout] ??= {}
+    layouts[area.layout][area.area] = {
+      route,
+      title: area.area.charAt(0).toUpperCase() + area.area.slice(1),
+      description: '',
+      layout: {},
+      sections,
     }
   }
 
-  // Collect default layout areas
-  const defaultAreas = await collectAreasFromDir(layoutDir, siteRoot, '/layout')
-  // Remove any named layout directories that got collected as areas
-  for (const dir of namedLayoutDirs) {
-    delete defaultAreas[dir.name]
-  }
-
-  // Collect named layout areas
-  const namedLayouts = {}
-  for (const entry of namedLayoutDirs) {
-    const subdir = join(layoutDir, entry.name)
-    namedLayouts[entry.name] = await collectAreasFromDir(subdir, siteRoot, `/layout/${entry.name}`)
-  }
-
-  const hasDefaultAreas = Object.keys(defaultAreas).length > 0
-  const hasNamedLayouts = Object.keys(namedLayouts).length > 0
-
-  if (!hasDefaultAreas && !hasNamedLayouts) {
-    return { layouts: null }
-  }
-
-  // Always use the layouts object format (general areas)
-  const layouts = {}
-  if (hasDefaultAreas) {
-    layouts.default = defaultAreas
-  }
-  Object.assign(layouts, namedLayouts)
-
-  return { layouts }
+  return { layouts, assetCollection, iconCollection }
 }
 
 /**
@@ -2519,9 +2395,8 @@ export async function collectSiteContent(sitePath, options = {}) {
     : join(sitePath, 'layout')
   const rawThemeConfig = await readYamlFile(join(sitePath, 'theme.yml'))
 
-  // Load foundation info (vars + layout names) and process theme
-  const { vars: foundationVars, layoutNames: layoutNames, hasContentHandler } =
-    await loadFoundationInfo(foundationPath)
+  // Load foundation info (vars) and process theme
+  const { vars: foundationVars, hasContentHandler } = await loadFoundationInfo(foundationPath)
 
   // ⭐ `placeholders:` IS DECLARED FOR A READER THAT MAY NOT EXIST, and that is
   // the one way this feature fails. Resolving `{…}` in page content is a
@@ -2581,8 +2456,9 @@ export async function collectSiteContent(sitePath, options = {}) {
   // overrides the profile default per readFolderConfig.
   const { mode: rootContentMode } = await readFolderConfig(pagesPath, profile.defaultMode)
 
-  // Collect layout areas from layout/ directory (including named layout subdirectories)
-  const { layouts } = await collectLayouts(layoutPath, sitePath, layoutNames)
+  // Collect layout areas from the layout/ directory, read from the site alone
+  const { layouts, assetCollection: layoutAssets, iconCollection: layoutIcons } =
+    await collectLayouts(layoutPath, sitePath)
 
   // Site-level layout (from `site.yml::layout`) — the ROOT of the cascade, and
   // the whole object, not just its name.
@@ -2591,6 +2467,10 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Recursively collect all pages
   let { pages, assetCollection, iconCollection, notFound, versionedScopes } =
     await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, null, rootContentMode, mounts, siteLayout)
+
+  // The layout sections' assets and icons, beside the pages'.
+  assetCollection = mergeAssetCollections(assetCollection, layoutAssets)
+  iconCollection = mergeIconCollections(iconCollection, layoutIcons)
 
   // Merge top-level config assets (e.g. document.yml's book.covers.front,
   // banner images, logos) into the manifest. The compile pipeline reads
