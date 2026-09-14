@@ -25,11 +25,11 @@ import { validateDataInputs } from '../src/validate-data.js'
  *
  * ## ⚖️ Why the check is narrow
  *
- * `data:` in `meta.js` is a **hint, not a delivery gate** — a section may declare
- * keys and legitimately receive nothing. So this fires only when the page
- * delivered SOMETHING and the section reads NONE of it: there the author
- * demonstrably intended data to arrive, and only the names failed to meet. The
- * quiet cases below are as much the contract as the loud one.
+ * A section may declare keys and legitimately receive nothing. So this fires only when
+ * the page delivered SOMETHING and none of it fills a key the section reads — not by
+ * name, and not by schema (automatic `as`, 2026-09-14): there the author demonstrably
+ * intended data to arrive, and only the names failed to meet. The quiet cases below are
+ * as much the contract as the loud one.
  */
 
 let root
@@ -44,7 +44,7 @@ afterEach(() => {
  * A site with one page, one section of type `Team`, and one query.
  * `metaKey` is what the section reads; `queryName` is what the page delivers.
  */
-function site({ metaKey, queryName }) {
+function site({ metaKey, queryName, querySchema = null, record = 'name: Ada\n' }) {
   const siteRoot = join(root, 'site')
   const fdn = join(root, 'src')
 
@@ -64,8 +64,9 @@ function site({ metaKey, queryName }) {
   writeFileSync(join(fdn, 'schemas', 'member.yml'), 'fields:\n  name:\n    type: string\n')
 
   mkdirSync(join(siteRoot, 'entities', 'member'), { recursive: true })
-  writeFileSync(join(siteRoot, 'entities', 'member', 'ada.yml'), 'name: Ada\n')
-  writeFileSync(join(siteRoot, 'site.yml'), `name: t\nqueries:\n  ${queryName}: {}\n`)
+  writeFileSync(join(siteRoot, 'entities', 'member', 'ada.yml'), record)
+  const decl = querySchema ? `{ schema: '${querySchema}' }` : '{}'
+  writeFileSync(join(siteRoot, 'site.yml'), `name: t\nqueries:\n  ${queryName}: ${decl}\n`)
 
   const page = join(siteRoot, 'pages', 'home')
   mkdirSync(page, { recursive: true })
@@ -106,10 +107,21 @@ describe('⛔ and it stays quiet where silence is correct', () => {
     expect(unread(report)).toEqual([])
   })
 
+  it('⭐ a query of the key\'s schema fills it under another name — automatic `as` — and nothing is reported (2026-09-14)', async () => {
+    // meta.js reads `team: '@/member'`; the page delivers `members`, a query over `@/member`.
+    const report = await validateDataInputs(site({ metaKey: 'team', queryName: 'members', querySchema: '@/member' }))
+    expect(unread(report)).toEqual([])
+  })
+
+  it('and what fills the key is checked against the key\'s schema', async () => {
+    const report = await validateDataInputs(site({ metaKey: 'team', queryName: 'members', querySchema: '@/member', record: 'name: 42\n' }))
+    expect(report.violations.length).toBeGreaterThan(0)
+    expect(report.violations[0].users).toEqual([{ route: '/', section: 'Team', key: 'team' }])
+  })
+
   it('a page that delivers NO data is not flagged', async () => {
-    // `data:` in meta.js is a hint, not a delivery gate. A section declaring keys
-    // on a page with no fetch at all is ordinary — flagging it would make the
-    // check fire on correct sites, which is how a warning gets ignored.
+    // A section declaring keys on a page with no fetch at all is ordinary — flagging it
+    // would make the check fire on correct sites, which is how a warning gets ignored.
     const { siteRoot, foundationPath } = site({ metaKey: 'team', queryName: 'members' })
     writeFileSync(join(siteRoot, 'pages', 'home', 'page.yml'), 'title: Home\n')
     const report = await validateDataInputs({ siteRoot, foundationPath })

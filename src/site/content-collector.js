@@ -1058,12 +1058,11 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // Extract @ component references → insets (mutates doc)
   const insets = extractInsets(proseMirrorContent)
 
-  // `query: team` → `fetch: { query: team }`; a list, one config per name, each
-  // delivered under its own `content.data` key — the one helper every level uses.
-  // Unrelated to a section type's `meta.js` `data:`, which declares the SHAPE of
-  // each `content.data` key and fetches nothing: delivery is default-on, so a
-  // section receives every fetch in the section → page → site cascade whether or
-  // not it names one here.
+  // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
+  // its own `as` — the one helper every level uses. Unrelated to a section type's
+  // `meta.js` `data:`, which declares the `content.data` keys a component receives and
+  // fetches nothing: which fetch fills each is worked out at render (`fillDeclaredKeys`,
+  // `@uniweb/core`, 2026-09-14).
   const resolvedFetch = declaredFetch({ fetch, query, data }, relative(siteRoot, filePath))
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null

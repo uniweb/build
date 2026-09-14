@@ -3,6 +3,14 @@ import {
   extractAllRuntimeSchemas,
 } from '../src/runtime-schema.js'
 
+// What a lean schema says apart from its declared keys — for the tests of field extraction,
+// which the `data` map of keys (asserted on its own below) does not change.
+const withoutData = (lean) => {
+  if (!lean) return lean
+  const { data, ...rest } = lean
+  return Object.keys(rest).length ? rest : null
+}
+
 describe('extractRuntimeSchema', () => {
   it('returns null for empty/invalid input', () => {
     expect(extractRuntimeSchema(null)).toBeNull()
@@ -22,7 +30,7 @@ describe('extractRuntimeSchema', () => {
   describe('inset extraction', () => {
     it('extracts inset: true', () => {
       const meta = { inset: true }
-      expect(extractRuntimeSchema(meta)).toEqual({ inset: true })
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({ inset: true })
     })
 
     it('ignores inset when falsy', () => {
@@ -40,17 +48,17 @@ describe('extractRuntimeSchema', () => {
   describe('background extraction', () => {
     it('extracts background: true', () => {
       const meta = { background: true }
-      expect(extractRuntimeSchema(meta)).toEqual({ background: true })
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({ background: true })
     })
 
     it('extracts background: "auto"', () => {
       const meta = { background: 'auto' }
-      expect(extractRuntimeSchema(meta)).toEqual({ background: 'auto' })
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({ background: 'auto' })
     })
 
     it('extracts background: "manual"', () => {
       const meta = { background: 'manual' }
-      expect(extractRuntimeSchema(meta)).toEqual({ background: 'manual' })
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({ background: 'manual' })
     })
 
     it('ignores background: false', () => {
@@ -60,11 +68,26 @@ describe('extractRuntimeSchema', () => {
   })
 
   describe('data declaration', () => {
-    it('`data: false` marks explicit opt-out', () => {
-      const meta = { data: false }
-      expect(extractRuntimeSchema(meta)).toEqual({
-        inheritData: false,
-      })
+    it('⭐ every declared key reaches the runtime with its schema ref — null for an inline shape (2026-09-14)', () => {
+      const meta = {
+        data: {
+          post: '@std/article',
+          team: { schema: '@/member' },
+          nav: { label: 'string' },
+          form: { fields: [{ id: 'name', type: 'text' }] },
+          notes: {},
+        },
+      }
+      const result = extractRuntimeSchema(meta, { '@std/article': { name: 'article', fields: { title: { type: 'string' } } } })
+      expect(result.data).toEqual({ post: '@std/article', team: '@/member', nav: null, form: null, notes: null })
+      expect(Object.keys(result.data)).toEqual(['post', 'team', 'nav', 'form', 'notes'])
+      // field defaults only where there are fields
+      expect(Object.keys(result.schemas)).toEqual(['post', 'nav', 'form'])
+    })
+
+    it('`data: false` declares nothing, as no `data:` does — ⛔ it was the opt-out, `inheritData: false`, until 2026-09-14', () => {
+      expect(extractRuntimeSchema({ data: false })).toBeNull()
+      expect(extractRuntimeSchema({ title: 'X' })).toBeNull()
     })
 
     it('returns null for empty data object', () => {
@@ -75,7 +98,7 @@ describe('extractRuntimeSchema', () => {
       const meta = {
         data: { nav: { label: 'string', href: 'string' } },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: { nav: { label: 'string', href: 'string' } },
       })
     })
@@ -88,7 +111,7 @@ describe('extractRuntimeSchema', () => {
           fields: { name: 'string', role: { type: 'string', label: 'Role' } },
         },
       })
-      expect(result).toEqual({
+      expect(withoutData(result)).toEqual({
         schemas: { member: { name: 'string', role: 'string' } },
       })
     })
@@ -120,7 +143,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       })
-      expect(result).toEqual({
+      expect(withoutData(result)).toEqual({
         schemas: {
           articles: {
             title: 'string',
@@ -146,11 +169,11 @@ describe('extractRuntimeSchema', () => {
       expect(result.schemas.x.note).toBeUndefined()
     })
 
-    it('a ref that resolves to neither form yields no schema', () => {
-      // The control: the guard must still return null rather than an empty object,
-      // or a component would receive a schema key it can do nothing with.
+    it('a ref that resolves to neither form yields no field defaults — the key still reaches the runtime', () => {
+      // The control: no `schemas` entry rather than an empty object, which would be a
+      // schema key a component can do nothing with. The key itself is what it receives.
       const meta = { data: { x: '@/empty' } }
-      expect(extractRuntimeSchema(meta, { '@/empty': { name: 'empty' } })).toBeNull()
+      expect(extractRuntimeSchema(meta, { '@/empty': { name: 'empty' } })).toEqual({ data: { x: '@/empty' } })
     })
   })
 
@@ -162,7 +185,7 @@ describe('extractRuntimeSchema', () => {
           layout: { type: 'select', default: 'center' },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         defaults: { theme: 'gradient', layout: 'center' },
       })
     })
@@ -174,7 +197,7 @@ describe('extractRuntimeSchema', () => {
           showBorder: { type: 'boolean', default: false },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         defaults: { showPattern: true, showBorder: false },
       })
     })
@@ -186,7 +209,7 @@ describe('extractRuntimeSchema', () => {
           columns: { type: 'number', default: 0 },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         defaults: { maxItems: 6, columns: 0 },
       })
     })
@@ -198,7 +221,7 @@ describe('extractRuntimeSchema', () => {
           customClass: { type: 'string' }, // no default
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         defaults: { theme: 'gradient' },
       })
     })
@@ -237,7 +260,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           'nav-links': {
             label: 'string',
@@ -263,7 +286,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           'nav-links': {
             label: 'string',
@@ -286,7 +309,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           'nav-links': {
             type: {
@@ -314,7 +337,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           card: {
             meta: {
@@ -337,7 +360,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           card: {
             tags: { type: 'array', items: 'string' },
@@ -364,7 +387,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           social: {
             links: {
@@ -406,7 +429,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           event: {
             location: {
@@ -431,8 +454,8 @@ describe('extractRuntimeSchema', () => {
       })
     })
 
-    it('returns null for empty schema entries', () => {
-      expect(extractRuntimeSchema({ data: { nav: {} } })).toBeNull()
+    it('an empty schema entry carries no field defaults — the key still reaches the runtime', () => {
+      expect(extractRuntimeSchema({ data: { nav: {} } })).toEqual({ data: { nav: null } })
       expect(extractRuntimeSchema({ data: {} })).toBeNull()
     })
 
@@ -449,7 +472,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           'nav-links': { label: 'string', href: 'string' },
           'social': { platform: 'string', url: 'string' },
@@ -472,7 +495,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           team: {
             name: 'string',
@@ -501,7 +524,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           team: {
             name: 'string',
@@ -527,7 +550,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         schemas: {
           config: {
             theme: { type: 'select', options: ['light', 'dark'], default: 'light' },
@@ -551,7 +574,7 @@ describe('extractRuntimeSchema', () => {
           columns: { type: 'number', default: 3 },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         background: true,
         schemas: { events: { title: 'string', date: 'string' } },
         defaults: { layout: 'grid', columns: 3 },
@@ -572,7 +595,7 @@ describe('extractRuntimeSchema', () => {
           },
         },
       }
-      expect(extractRuntimeSchema(meta)).toEqual({
+      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
         background: true,
         defaults: { theme: 'dark' },
         schemas: {
@@ -583,20 +606,20 @@ describe('extractRuntimeSchema', () => {
   })
 })
 
-describe('schema delivery is default-on (data: is a declaration, not a gate)', () => {
-  // EntityStore delivers everything unless the component opts out with
-  // `data: false`. A `data:` schema entry never implies `inheritData`.
-  it('does not emit inheritData when a schema is declared', () => {
+describe('`data:` is the delivery — a section receives the keys its component declares (ruled 2026-09-14)', () => {
+  // ⛔ Until then delivery was default-on and `data:` a hint: `inheritData` is emitted no more.
+  it('a declared schema lists its key, and emits no inheritData', () => {
     const meta = { data: { team: { name: 'string' } } }
     const result = extractRuntimeSchema(meta)
+    expect(result.data).toEqual({ team: null })
     expect(result.schemas.team).toEqual({ name: 'string' })
     expect(result.inheritData).toBeUndefined()
   })
 
-  it('does not emit inheritData when only a nav schema is declared', () => {
+  it('a nav schema likewise', () => {
     const meta = { data: { nav: { label: 'string' } } }
     const result = extractRuntimeSchema(meta)
-    expect(result.schemas.nav).toEqual({ label: 'string' })
+    expect(result.data).toEqual({ nav: null })
     expect(result.inheritData).toBeUndefined()
   })
 
@@ -632,6 +655,7 @@ describe('extractAllRuntimeSchemas', () => {
         defaults: { theme: 'gradient' },
       },
       Features: {
+        data: { features: null },
         schemas: { features: { title: 'string', summary: 'string' } },
       },
       // Text is excluded (no runtime properties)
@@ -670,7 +694,7 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
       },
     }
     const meta = { data: { stats: richSchema } }
-    expect(extractRuntimeSchema(meta)).toEqual({
+    expect(withoutData(extractRuntimeSchema(meta))).toEqual({
       schemas: { stats: richSchema },
     })
   })

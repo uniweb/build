@@ -216,6 +216,8 @@ const DEFAULT_ONLY_CAPABILITIES = [
   'outputs',
   'handlers',
   'extension',
+  // the keys every section receives — what the foundation's handlers read (2026-09-14)
+  'data',
 ]
 
 /**

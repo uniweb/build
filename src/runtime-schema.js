@@ -6,22 +6,19 @@
  * needed at render time:
  *
  * - background: 'self' when component handles its own background
- * - data: { type, limit } for CMS entity binding
+ * - data: { <key>: <schema ref> | null } — every `content.data` key the component
+ *     declares, in order, with its schema ref (null for an inline shape)
+ * - schemas: { <key>: <lean fields> } — field defaults for the declared keys that have any
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
  * - initialState: initial values for mutable block state
- * - inheritData: internal flag for cascaded data delivery
- *     true  → deliver all data available at ancestor levels (default)
- *     false → deliver nothing (component opted out with `data: false`)
  *
- * Data delivery is default-on: a component without any `data:` field
- * receives all data cascaded from its ancestor levels (block → page →
- * parent page → site) via `content.data.{schema}`. A component that
- * genuinely cannot tolerate ambient data declares `data: false`.
- *
- * `data: { entity: 'articles' }` is a **declaration**, not a gate. It
- * tells the editor and prepare-props what shape the component expects,
- * but does not restrict delivery.
+ * ⭐ `data:` IS THE DELIVERY — ruled 2026-09-14 [Diego]: a section's `content.data` holds
+ * the keys its component declares and nothing else, and which fetch fills each is worked
+ * out at render from the keys and their schema refs (`@uniweb/core` `fillDeclaredKeys`).
+ * A component with no `data:`, or `data: false`, receives none of its own. ⛔ Until then
+ * delivery was default-on — every key that reached a section — and `data:` was a hint for
+ * defaults and the editor; `data: false` was the opt-out, emitted as `inheritData: false`.
  *
  * Full metadata (titles, descriptions, hints, etc.) stays in schema.json
  * for the visual editor.
@@ -31,23 +28,15 @@ import { isRichSchema } from '@uniweb/core'
 import { flatRecordFields } from '@uniweb/schemas/conform'
 
 /**
- * Parse data string into structured object
- * 'events' -> { type: 'events', limit: null }
- * 'events:6' -> { type: 'events', limit: 6 }
+ * A `data:` entry's schema ref — a ref string, or `{ schema }` — or null for an inline
+ * shape, which names no schema and is filled only under its own key.
  *
- * @param {string} dataString
- * @returns {{ type: string, limit: number|null }}
+ * @param {string|Object} value
+ * @returns {string|null}
  */
-function parseDataString(dataString) {
-  if (!dataString || typeof dataString !== 'string') {
-    return null
-  }
-
-  const [type, limitStr] = dataString.split(':')
-  return {
-    type: type.trim(),
-    limit: limitStr ? parseInt(limitStr, 10) : null,
-  }
+function dataRef(value) {
+  if (typeof value === 'string') return value || null
+  return value && typeof value === 'object' && typeof value.schema === 'string' && value.schema ? value.schema : null
 }
 
 /**
@@ -284,18 +273,22 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
     runtime.background = fullMeta.background
   }
 
-  // Data schemas. `data:` is the single declaration surface for a section's
-  // structured data: it maps each `content.data` key to its schema. A value
-  // is a named ref (`'@/member'`), an inline field map, or an inline rich-form
-  // (`{ fields: [...] }`, an editor form). Source-agnostic — the data may
-  // arrive by fetch, tagged code block, or editor form; the schema and its
-  // defaults are identical. The schema is a hint (defaults + editor), not a
-  // delivery gate; delivery is default-on. `data: false` opts the section out
-  // of all ambient data.
+  // Data. `data:` is the single declaration surface for a section's structured
+  // data: it maps each `content.data` key to its schema. A value is a named ref
+  // (`'@/member'`), an inline field map, or an inline rich-form (`{ fields: [...] }`,
+  // an editor form). Source-agnostic — the data may arrive by fetch, tagged code
+  // block, or editor form; the schema and its defaults are identical.
+  //
+  // ⭐ Every key reaches the runtime, a key with no fields included — `data` lists them
+  // with their refs, because the keys ARE what the section receives, and a key's ref is
+  // what a fetch of another name fills it by. `schemas` carries field defaults for the
+  // keys that have fields. `data: false` declares nothing, as no `data:` does.
   if (fullMeta.data === false) {
-    runtime.inheritData = false
+    // declares no key
   } else if (fullMeta.data && typeof fullMeta.data === 'object' && !Array.isArray(fullMeta.data)) {
     for (const [key, value] of Object.entries(fullMeta.data)) {
+      runtime.data = runtime.data || {}
+      runtime.data[key] = dataRef(value)
       const lean = leanDataSchema(value, dataSchemaMap)
       if (lean) {
         runtime.schemas = runtime.schemas || {}
@@ -329,11 +322,6 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
 
   // (Top-level `schemas:` is gone — inline field maps and rich-forms are now
   // just `data:` entries with an inline value. See leanDataSchema.)
-
-  // Data delivery is default-on. `runtime.inheritData` stays undefined unless
-  // the component opts out with `data: false`, in which case EntityStore
-  // delivers nothing. A `data:` binding is a hint (schema for defaults +
-  // editor), never a delivery gate.
 
   return Object.keys(runtime).length > 0 ? runtime : null
 }

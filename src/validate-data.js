@@ -27,7 +27,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
-import { queryNameFromUrl, siteReaches } from '@uniweb/core'
+import { queryNameFromUrl, siteReaches, declaredKeys, fillDeclaredKeys } from '@uniweb/core'
 
 import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema } from './resolve-data-schema.js'
@@ -103,54 +103,59 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const work = new Map() // pairKey -> { path, ref, schema, users: [{ route, section, key }] }
   const deferred = []
 
+  const byRoute = new Map((site.pages || []).map((p) => [p.route, p]))
   for (const page of site.pages || []) {
     walkSections(page.sections || [], (section) => {
       const type = section.type
       if (!type) return
       const bindings = foundation[type]?.data
-      // the site's binding reaches a top-level page's sections only (`siteReaches`)
-      const inputs = collectInputs(section, page.fetch, siteReaches(page.parent) ? config.fetch : null)
+      // ⭐ THE RUNTIME'S JOIN (2026-09-14): a section receives the keys its component
+      // declares, and which fetch fills each is automatic `as` — `fillDeclaredKeys`, the
+      // same function the entity store delivers by — so a `post: '@std/article'` key
+      // filled by an `articles` fetch is checked against `@std/article`, and a fetch that
+      // fills no declared key is not checked at all, since no component receives it. The
+      // levels are the section's own fetch, its page's, its parent page's and — for a
+      // top-level page — the site's (`siteReaches`).
+      const declared = declaredKeys(bindings)
+      const levels = [section.fetch, page.fetch, byRoute.get(page.parent)?.fetch, siteReaches(page.parent) ? config.fetch : null]
+      const inputs = collectInputs(levels)
+      const held = nodesOfType(section.content, 'dataBlock').map((node) => node.attrs?.tag).filter(Boolean)
+      const fills = fillDeclaredKeys(declared, levels, { queries: config.queries, held })
 
-      // ⭐ **THE JOIN, RUN THE OTHER WAY: data arrived, but under no name this
-      // section reads.** Everything below asks "for each input, is there a
-      // binding?". This asks "for each binding, was anything delivered?" — and
-      // the answer was silence until 2026-09-02.
+      // ⭐ **THE JOIN, RUN THE OTHER WAY: data arrived, and no key this section reads is
+      // filled by it.** Everything below asks "for each filled key, is its data right?".
+      // This asks "was anything this section reads filled?" — and the answer was silence
+      // until 2026-09-02.
       //
-      // A section reads `content.data.<key>` for the keys its `meta.js` `data:`
-      // declares. When the page delivers a query under a DIFFERENT name, the
-      // section renders its heading and nothing else: no error, no warning, HTTP
-      // 200, a clean console. Reported by `flows`, measured in a real browser —
-      // two records-backed sections carrying 8 and 6 characters of text beside
-      // static ones carrying 182/572/289/529/99.
+      // A section reads `content.data.<key>` for the keys its `meta.js` `data:` declares.
+      // When nothing on the page fills them — no fetch under the key, none of its schema —
+      // the section renders its heading and nothing else: no error, no warning, HTTP 200,
+      // a clean console. Reported by `flows`, measured in a real browser — two
+      // records-backed sections carrying 8 and 6 characters of text beside static ones
+      // carrying 182/572/289/529/99.
       //
-      // ⚖️ **Narrow on purpose: only when SOMETHING was delivered.** `data:` in
-      // `meta.js` is a hint rather than a delivery gate (`docs/reference/
-      // data-fetching.md`), so a section declaring keys on a page with no data at
-      // all is ordinary and silent. What is not ordinary is a page that fetched
-      // something and a section on it that reads none of it — there the author
-      // demonstrably intended data to arrive and the names did not meet.
-      const declaredKeys = bindings ? Object.keys(bindings) : []
-      if (declaredKeys.length > 0 && inputs.length > 0) {
+      // ⚖️ **Narrow on purpose: only when SOMETHING was delivered.** A section declaring
+      // keys on a page with no data at all is ordinary and silent. What is not ordinary is
+      // a page that fetched something and a section on it that receives none of it —
+      // there the author demonstrably intended data to arrive and the names did not meet.
+      const declaredNames = declared.map(([key]) => key)
+      if (declaredNames.length > 0 && inputs.length > 0 && fills.size === 0 && !declaredNames.some((k) => held.includes(k))) {
         const delivered = inputs.map((i) => i.as).filter(Boolean)
-        if (delivered.length > 0 && !declaredKeys.some((k) => delivered.includes(k))) {
-          setupErrors.push({
-            file: `${page.route || '/'} · ${type}`,
-            message:
-              `section reads ${declaredKeys.map((k) => `content.data.${k}`).join(' or ')}, ` +
-              `but this page delivers ${delivered.map((k) => `\`${k}\``).join(', ')}. ` +
-              `The section will render with no data and nothing else will say so. ` +
-              `Name the query for the key the section reads, or give the section its own ` +
-              `\`query: <name>\`.`,
-            // One user per declared key, so `uniweb validate` can print
-            // `used by /team › Team › data.team` — the key is the thing to rename.
-            users: declaredKeys.map((k) => ({ route: page.route, section: type, key: k })),
-          })
-        }
+        setupErrors.push({
+          file: `${page.route || '/'} · ${type}`,
+          message:
+            `section reads ${declaredNames.map((k) => `content.data.${k}`).join(' or ')}, ` +
+            `but this page delivers ${delivered.map((k) => `\`${k}\``).join(', ')}, and none of it fills them — ` +
+            `not by name, and not by schema. The section will render with no data and nothing else will say so. ` +
+            `Name the query for the key the section reads, give the fetch that key with \`as:\`, or give the ` +
+            `section its own \`query: <name>\`.`,
+          // One user per declared key, so `uniweb validate` can print
+          // `used by /team › Team › data.team` — the key is the thing to rename.
+          users: declaredNames.map((k) => ({ route: page.route, section: type, key: k })),
+        })
       }
 
-      for (const input of inputs) {
-        const key = input.as // the content.data KEY
-
+      for (const [key, { fetch: input }] of fills) {
         // An external query's records are its address's, fetched where the page renders.
         const external = typeof input.query === 'string' ? config.queries?.[input.query]?.url : undefined
         if (input.url || external) {
@@ -161,7 +166,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
 
         const binding = bindings?.[key]
         const ref = typeof binding === 'string' ? binding : binding?.schema
-        if (!ref) continue // ungoverned input — no schema bound to this key
+        if (!ref) continue // ungoverned key — no schema declared for it
 
         const schema = dataSchemas[ref]
         if (!schema) continue // build guarantees refs resolve; defensive skip
@@ -475,17 +480,17 @@ async function loadStandardSchemas() {
 }
 
 /**
- * The data inputs available to a section, deduped by key. A section receives
- * its own fetch plus any inherited page-level and site-level fetch (default-on
- * cascade); when two levels share a key, the nearer one wins (section > page >
- * site) — the same precedence the runtime delivers.
+ * The data inputs reaching a section, deduped by key — the fetches of its levels, most
+ * specific first; when two levels share a key, the nearer one wins. What each input fills
+ * is `fillDeclaredKeys`'s to say; this lists what arrived, for the message when nothing
+ * the section reads is filled.
  */
-function collectInputs(section, pageFetch, siteFetch) {
+function collectInputs(levels) {
   const byKey = new Map()
   // ⭐ Each level may declare SEVERAL — `query: [team, articles]` — so each is
   // flattened rather than read. Order is least- to most-specific and `set`
   // overwrites, which is what makes a section's declaration win the key.
-  for (const source of [siteFetch, pageFetch, section.fetch]) {
+  for (const source of [...levels].reverse()) {
     for (const f of toFetchList(source)) {
       // ⛔ Gate on the BINDING KEY. A gate on the wrong name silently yields
       // NOTHING here — no inputs collected, no violations found, a green run —

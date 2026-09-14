@@ -32,6 +32,9 @@ const LINKED = POSTS.map((post) => ({ ...post, $route: `/blog/${post.slug}` }))
 const ref = (extra = {}) => ({ query: 'posts', path: '/data/posts.json', as: 'posts', prerender: true, merge: false, ...extra })
 const QUERIES = { posts: { schema: '@/post' } }
 const noop = () => {}
+// The sections' component: it declares the keys these tests read — a section receives only
+// what its component declares (2026-09-14).
+const META = { data: { posts: null, related: null } }
 
 function site(files) {
   const root = mkdtempSync(join(tmpdir(), 'prerender-bindings-'))
@@ -58,18 +61,19 @@ async function prerender(content, root, localeInfo = { locale: 'en', defaultLoca
   hydrateDataStore(website, content.fetchedData)
   const delivered = (route, index = 0) => {
     const page = website.pages.find((p) => p.route === route)
-    return page ? website.entityStore.resolve(page.bodyBlocks[index], {}) : null
+    return page ? website.entityStore.resolve(page.bodyBlocks[index], META) : null
   }
-  // What the block already holds under each key. It OUTRANKS the store's answer:
-  // `prepareProps` fills only the keys a block does not hold.
+  // What the block already holds under each key. It OUTRANKS the store's answer: a declared
+  // key the block holds is filled from it (`prepareProps`).
   const held = (route, index = 0) => website.pages.find((p) => p.route === route)?.bodyBlocks[index]?.parsedContent?.data ?? {}
-  // What the component receives: the store's answer merged under what the block holds.
-  const rendered = (route, index = 0) => {
+  // What the component receives: its declared keys, from what the block holds, else the store's answer.
+  const prerendered = (route, index = 0, meta = META) => {
     const block = website.pages.find((p) => p.route === route)?.bodyBlocks[index]
-    const answer = website.entityStore.resolve(block, {})
-    return prepareProps(block, {}, answer.status === 'ready' ? answer.data : null).content.data
+    const answer = website.entityStore.resolve(block, meta)
+    return prepareProps(block, meta, answer.status === 'ready' ? answer.data : null).content.data
   }
-  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, fetchedData: content.fetchedData }
+  const rendered = (route, index = 0) => prerendered(route, index)
+  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, prerendered, fetchedData: content.fetchedData }
 }
 
 describe('a count is how many a list shows — never which records have a page', () => {
@@ -180,6 +184,23 @@ describe('a section\'s fetch is resolved by the runtime\'s rule', () => {
     const { held, rendered } = await prerender(content, root)
     expect(held('/blog').posts).toEqual(POSTS.slice(0, 2))
     expect(rendered('/blog').posts).toEqual(LINKED.slice(0, 2))
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('⭐ a component naming the key differently receives the list its section fetched — linked, from what the build baked (2026-09-14)', async () => {
+    // Automatic `as`: the section's own `posts` fetch fills the component's `latest`.
+    const root = site({ 'public/data/posts.json': POSTS })
+    const content = {
+      config: { queries: QUERIES },
+      pages: [
+        { route: '/blog', id: 'blog', sections: [section('list', ref({ limit: 2 }))] },
+        { route: '/blog/:slug', id: 'post', isDynamic: true, paramName: 'slug', fetch: ref(), sections: [section('post')] },
+      ],
+    }
+    const { held, prerendered } = await prerender(content, root)
+    expect(held('/blog').posts).toEqual(POSTS.slice(0, 2))
+    const latest = { data: { latest: '@/post' } }
+    expect(prerendered('/blog', 0, latest)).toEqual({ latest: LINKED.slice(0, 2) })
     rmSync(root, { recursive: true, force: true })
   })
 

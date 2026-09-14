@@ -10,7 +10,8 @@
  *
  * The `meta` export contains only properties needed at runtime:
  * - `background` - 'self' opt-out when component handles its own background
- * - `data` - CMS entity binding ({ type, limit })
+ * - `data` - the `content.data` keys the component declares, with their schema refs
+ * - `schemas` - field defaults for those keys
  * - `defaults` - Param default values
  * - `context` - Static capabilities for cross-block coordination
  * - `initialState` - Initial values for mutable block state
