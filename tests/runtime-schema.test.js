@@ -85,6 +85,14 @@ describe('extractRuntimeSchema', () => {
       expect(Object.keys(result.schemas)).toEqual(['post', 'nav', 'form'])
     })
 
+    it('⛔ a value that is no schema is refused — it would declare a key by accident', () => {
+      expect(() => extractRuntimeSchema({ data: { inherit: ['members', 'queries'] } })).toThrow(/data\.inherit.*`data: \{ inherit: \[\.\.\.\] \}` is retired/)
+      expect(() => extractRuntimeSchema({ data: { posts: true } })).toThrow(/Invalid 'data\.posts'/)
+      expect(() => extractRuntimeSchema({ data: { posts: 3 } })).toThrow(/Invalid 'data\.posts'/)
+      // CONTROL — every schema form, and `{}` / null for none
+      expect(extractRuntimeSchema({ data: { a: '@/x', b: {}, c: null, d: { fields: [] } } }).data).toEqual({ a: '@/x', b: null, c: null, d: null })
+    })
+
     it('`data: false` declares nothing, as no `data:` does — ⛔ it was the opt-out, `inheritData: false`, until 2026-09-14', () => {
       expect(extractRuntimeSchema({ data: false })).toBeNull()
       expect(extractRuntimeSchema({ title: 'X' })).toBeNull()

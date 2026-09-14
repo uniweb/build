@@ -287,6 +287,18 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
     // declares no key
   } else if (fullMeta.data && typeof fullMeta.data === 'object' && !Array.isArray(fullMeta.data)) {
     for (const [key, value] of Object.entries(fullMeta.data)) {
+      // ⛔ A value that is no schema at all declares a key by accident — it would reach the
+      // component as `null`, silently. `data: { inherit: [...] }`, the opt-in of April 2026,
+      // is the shape this refuses: it declared a key named `inherit`.
+      if (typeof value !== 'string' && value !== null && (typeof value !== 'object' || Array.isArray(value))) {
+        throw new Error(
+          `[uniweb] Invalid 'data.${key}' in meta.js: expected a named ref ('@/x'), an inline field map, ` +
+            `a rich-form { fields: [...] }, or {} for a key with no schema — got ${JSON.stringify(value)}.` +
+            (key === 'inherit'
+              ? " `data: { inherit: [...] }` is retired: declare each key the component reads, e.g. `data: { members: {} }`."
+              : '')
+        )
+      }
       runtime.data = runtime.data || {}
       runtime.data[key] = dataRef(value)
       const lean = leanDataSchema(value, dataSchemaMap)
