@@ -161,6 +161,27 @@ Body text.
     expect(Array.isArray(articles) || typeof articles === 'object').toBe(true)
   })
 
+  // ⛔ A RECORD'S CO-LOCATED ASSETS SHIP WITH IT. The query compiler copies them to
+  // `public/records/<path under entities/>` and points the record at `/records/…`; this
+  // lane copied `public/data` into `dist/` and not `public/records`, so a record's image
+  // URL named a file the link lane's `dist/` did not have (until 2026-09-14).
+  it('copies a record\'s co-located assets to dist/records/, where its URLs point', async () => {
+    writeFileSync(join(siteRoot, 'site.yml'), `name: test-site\nfoundation: src\nindex: home\nqueries:\n  articles:\n    schema: '@/article'\n`)
+    const poolDir = join(siteRoot, 'entities', 'article')
+    mkdirSync(join(poolDir, 'img'), { recursive: true })
+    writeFileSync(join(poolDir, 'first.md'), `---\ntitle: First Article\nimage: ./cover.jpg\n---\n\n![diagram](./img/diagram.png)\n`)
+    writeFileSync(join(poolDir, 'cover.jpg'), 'JPG')
+    writeFileSync(join(poolDir, 'img', 'diagram.png'), 'PNG')
+
+    await buildSiteData({ siteRoot, distDir })
+
+    const [article] = JSON.parse(readFileSync(join(distDir, DATA_DIR, 'articles.json'), 'utf8'))
+    expect(article.image).toBe('/records/article/cover.jpg')
+    expect(JSON.stringify(article.content)).toContain('/records/article/img/diagram.png')
+    expect(readFileSync(join(distDir, 'records', 'article', 'cover.jpg'), 'utf8')).toBe('JPG')
+    expect(readFileSync(join(distDir, 'records', 'article', 'img', 'diagram.png'), 'utf8')).toBe('PNG')
+  })
+
   it('skips collections when not declared', async () => {
     await buildSiteData({ siteRoot, distDir })
     // No collections declared → no data dir.

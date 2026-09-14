@@ -1283,18 +1283,26 @@ export function siteContentPlugin(options = {}) {
           }
         }
 
-        // Handle localized collection data (e.g., /fr/data/articles.json)
+        // Handle localized collection data (e.g., /fr/data/articles.json), and a
+        // `deferred:` query's per-record files (/fr/data/articles/<slug>.json) — one
+        // record each, translated the same way.
         const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/${DATA_DIR}\\/(.+\\.json)$`))
         if (localeDataMatch) {
           const locale = localeDataMatch[1]
           const filename = localeDataMatch[2]
-          const queryName = filename.replace('.json', '')
           const sourcePath = join(resolvedSitePath, 'public', DATA_DIR, filename)
 
           if (existsSync(sourcePath)) {
             try {
               const raw = await readFile(sourcePath, 'utf-8')
               const items = JSON.parse(raw)
+              const record = filename.includes('/') && items && typeof items === 'object' && !Array.isArray(items)
+              if (!Array.isArray(items) && !record) {
+                res.setHeader('Content-Type', 'application/json')
+                res.end(raw)
+                return
+              }
+              const queryName = record ? filename.slice(0, filename.lastIndexOf('/')) : filename.replace(/\.json$/, '')
 
               // Load collection translations for this locale
               const translations = await loadRecordTranslations(locale) || {}

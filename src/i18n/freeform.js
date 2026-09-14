@@ -70,30 +70,11 @@ function normalizeRouteForPath(route) {
  * @returns {Promise<Object|null>} Parsed translation { content } or null
  */
 export async function loadFreeformTranslation(section, page, locale, localesDir) {
-  const stableId = section.stableId
-  if (!stableId) return null
-
   const freeformDir = join(localesDir, 'freeform', locale)
   if (!existsSync(freeformDir)) return null
 
-  const candidates = []
-
-  // 1. Try page-ids path (if page has stable id)
-  if (page.id) {
-    candidates.push(join(freeformDir, 'page-ids', page.id, `${stableId}.md`))
-  }
-
-  // 2. Try pages path (by route)
-  const routePath = normalizeRouteForPath(page.route)
-  if (routePath) {
-    candidates.push(join(freeformDir, 'pages', routePath, `${stableId}.md`))
-  } else {
-    // Root page
-    candidates.push(join(freeformDir, 'pages', `${stableId}.md`))
-  }
-
   // Try each candidate in order
-  for (const filePath of candidates) {
+  for (const filePath of freeformPathsFor(section, page).map((rel) => join(freeformDir, rel))) {
     if (!existsSync(filePath)) continue
 
     try {
@@ -285,6 +266,31 @@ export function parseFreeformPath(relativePath) {
   }
 
   return { type: 'unknown', relativePath }
+}
+
+/**
+ * Every path a section's free-form translation is read from, in the order the renderer
+ * tries them (`loadFreeformTranslation`): `page-ids/<page id>/<section>.md` when the page
+ * has an `id`, then `pages/<route>/<section>.md` (`pages/<section>.md` for the root page).
+ *
+ * ⭐ ONE LIST, for the loader and for whatever judges a translation file against the
+ * site. ⛔ Until 2026-09-14 the orphan and stale check derived the first path alone
+ * (`buildFreeformPath`), so on a page with an `id` a route-addressed file the page
+ * rendered was reported orphaned and never checked for staleness.
+ *
+ * @param {Object} section - Section with stableId
+ * @param {Object} page - Page with route and optional id
+ * @returns {string[]} Paths relative to the locale's free-form directory; none when the
+ *   section has no stable id
+ */
+export function freeformPathsFor(section, page) {
+  const stableId = section?.stableId
+  if (!stableId) return []
+  const paths = []
+  if (page?.id) paths.push(`page-ids/${page.id}/${stableId}.md`)
+  const routePath = normalizeRouteForPath(page?.route || '/')
+  paths.push(routePath ? `pages/${routePath}/${stableId}.md` : `pages/${stableId}.md`)
+  return paths
 }
 
 /**

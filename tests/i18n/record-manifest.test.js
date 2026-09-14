@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import {
   extractRecordContent,
   buildLocalizedRecords,
+  translateRecordData,
 } from '../../src/i18n/records.js'
 
 let ROOT
@@ -139,5 +140,100 @@ describe('a translation failure is reported, not only logged', () => {
     site()
     const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(outputs.failures).toBeUndefined()
+  })
+})
+
+// ⭐ THE DEV SERVER'S PATH — `/es/data/<query>.json` is translated on request by
+// `translateRecordData`. ⛔ It threw a `ReferenceError` (`recordDir` was never defined
+// there) whenever `locales/freeform/<locale>/` existed, and the middleware caught it and
+// let the request fall through untranslated. Beneath it, both lanes handed the free-form loader
+// the record's POOL DIRECTORY where it takes a schema ref, so a free-form record file
+// was never found — on the dev server or in a localized build.
+describe('free-form and hash-based record translation agree on the record, in dev and in a build', () => {
+  const freeformSite = async () => {
+    site()
+    w('public/data/recent.json', [{ slug: 'hello', title: 'Hello there' }, { slug: 'world', title: 'World news' }])
+    w('locales/freeform/es/entities/article/hello.md', '---\ntitle: Hola (libre)\n---\n\nCuerpo libre.\n')
+    const manifest = await extractRecordContent(ROOT)
+    const hashOf = (source) => Object.entries(manifest.units).find(([, u]) => u.source === source)[0]
+    // An override keyed by the RECORD (`article/world`), which the default must not win over
+    return { [hashOf('World news')]: { default: 'Noticias', overrides: { 'article/world': 'Noticias del mundo' } } }
+  }
+  const textOf = (doc) => JSON.stringify(doc).match(/"text":"([^"]*)"/)?.[1]
+
+  it('translateRecordData — free-form enabled: the free-form record applies, and the hash-based one keys by the record', async () => {
+    const translations = await freeformSite()
+    const items = JSON.parse(readFileSync(join(ROOT, 'public/data/recent.json'), 'utf8'))
+    const out = await translateRecordData(items, 'recent', ROOT, {
+      locale: 'es', localesDir: join(ROOT, 'locales'), translations, freeformEnabled: true,
+    })
+    expect(out[0].title).toBe('Hola (libre)')
+    expect(textOf(out[0].content)).toBe('Cuerpo libre.')
+    expect(out[1].title).toBe('Noticias del mundo')
+  })
+
+  it('translateRecordData — free-form off: the hash-based record key is the record\'s, not the query\'s', async () => {
+    const translations = await freeformSite()
+    const items = JSON.parse(readFileSync(join(ROOT, 'public/data/recent.json'), 'utf8'))
+    const out = await translateRecordData(items, 'recent', ROOT, { locale: 'es', translations, freeformEnabled: false })
+    expect(out[1].title).toBe('Noticias del mundo')
+    // CONTROL — without free-form, the free-form file is not read
+    expect(out[0].title).toBe('Hello there')
+  })
+
+  it('buildLocalizedRecords reads the same free-form record', async () => {
+    const translations = await freeformSite()
+    w('locales/records/es.json', translations)
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
+    const translated = JSON.parse(readFileSync(outputs.es.recent, 'utf8'))
+    expect(translated[0].title).toBe('Hola (libre)')
+    expect(translated[1].title).toBe('Noticias del mundo')
+  })
+})
+
+// ⛔ A RECORD'S SYSTEM FIELDS ARE NOT PROSE. A compiled record carries `$name` (the handle
+// a parametric page's URL names) and `path` (its placement in records.yml) beside its
+// data, and both were extracted as translatable text — and translated, so a Spanish
+// build could rewrite a handle and the record's page stopped matching its URL.
+describe('system fields are never extracted, nor translated', () => {
+  const units = (manifest) => Object.values(manifest.units).map((u) => u.source)
+
+  it('heuristic: `$`-prefixed keys at any depth, and the top-level `slug` and `path`', async () => {
+    site()
+    w('public/data/recent.json', [
+      { slug: 'hello-post', $name: 'hello-post', path: 'archive', title: 'Hello there', credit: { $id: 'credit-1', label: 'Photo by Ada' } },
+    ])
+    const sources = units(await extractRecordContent(ROOT))
+    expect(sources).not.toContain('hello-post')
+    expect(sources).not.toContain('archive')
+    expect(sources).not.toContain('credit-1')
+    // CONTROL — the record's prose, top-level and nested, is extracted
+    expect(sources).toEqual(expect.arrayContaining(['Hello there', 'Photo by Ada']))
+  })
+
+  it('schema-guided: a schema that declares `slug` a plain string does not make the handle prose', async () => {
+    // `events` resolves `@uniweb/schemas`' flat `event` schema, whose `slug` is `type: string`
+    w('site.yml', 'name: T\n')
+    w('public/data/events.json', [{ slug: 'launch-day', $name: 'launch-day', path: 'archive', title: 'Launch Day' }])
+    const sources = units(await extractRecordContent(ROOT))
+    expect(sources).not.toContain('launch-day')
+    expect(sources).not.toContain('archive')
+    expect(sources).toContain('Launch Day')
+  })
+
+  it('a translation whose source equals a handle rewrites the prose and leaves the handle', async () => {
+    w('site.yml', 'name: T\n')
+    w('queries.yml', "recent:\n  schema: '@/article'\n")
+    w('public/data/recent.json', [{ slug: 'welcome', $name: 'welcome', path: 'welcome', title: 'welcome' }])
+    w('public/data/events.json', [{ slug: 'welcome', $name: 'welcome', title: 'welcome' }])
+    const manifest = await extractRecordContent(ROOT)
+    const [hash] = Object.entries(manifest.units).find(([, u]) => u.source === 'welcome')
+    w('locales/records/es.json', { [hash]: 'bienvenida' })
+
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
+    const [article] = JSON.parse(readFileSync(outputs.es.recent, 'utf8'))
+    expect(article).toMatchObject({ title: 'bienvenida', slug: 'welcome', $name: 'welcome', path: 'welcome' })
+    const [event] = JSON.parse(readFileSync(outputs.es.events, 'utf8'))
+    expect(event).toMatchObject({ title: 'bienvenida', slug: 'welcome', $name: 'welcome' })
   })
 })

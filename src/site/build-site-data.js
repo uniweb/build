@@ -61,6 +61,8 @@ import {
  *     re-derive, so we always ship enough for the ones that do.
  *   - `data/<collection>.json` (+ per-record files for `deferred:`
  *     collections) — same shape `processQueries` produces today.
+ *   - `records/<path under entities/>` — the records' co-located assets, where
+ *     the compiled records point.
  *   - `assets/<media>` — processed images / video posters / PDF
  *     thumbnails. Filtered by the deploy CLI to MEDIA only at upload time.
  *
@@ -151,6 +153,15 @@ export async function buildSiteData({
     const distDataDir = join(resolvedDistDir, DATA_DIR)
     if (existsSync(publicDataDir)) {
       await cp(publicDataDir, distDataDir, { recursive: true })
+    }
+
+    // ⭐ AND THE RECORDS' CO-LOCATED ASSETS — `public/records/<path under entities/>`,
+    // where the compiled records point (`/records/…`), mirrored the way vite mirrors
+    // all of `public/` on the bundle lane. ⛔ Until 2026-09-14 only `public/data` was
+    // copied, so a record's image URL named a file this lane's `dist/` did not have.
+    const publicRecordsDir = join(resolvedSiteRoot, 'public', 'records')
+    if (existsSync(publicRecordsDir)) {
+      await cp(publicRecordsDir, join(resolvedDistDir, 'records'), { recursive: true })
     }
   }
 

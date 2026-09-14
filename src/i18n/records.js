@@ -10,9 +10,9 @@
  * 3. Legacy — flat field list (fallback within heuristic)
  */
 
-import { readFile, writeFile, readdir, mkdir } from 'fs/promises'
+import { readFile, writeFile, readdir, mkdir, rm } from 'fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DATA_DIR } from '@uniweb/core'
 import { computeHash } from './hash.js'
@@ -23,7 +23,7 @@ import { loadFreeformRecord } from './freeform.js'
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
 import { resolveQueriesConfig } from '../site/queries-config.js'
-import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, ENTITIES_DIR } from '../site/entity-pool.js'
 import {
   NON_TRANSLATABLE_TYPES,
   HEURISTIC_SKIP_FIELDS,
@@ -150,6 +150,23 @@ function isFieldTranslatable(fieldDef) {
   return 'no'
 }
 
+/**
+ * ⛔ A RECORD'S SYSTEM FIELDS ARE NEVER PROSE — never extracted, never translated, by
+ * either path. A `$`-prefixed key at any depth is the system's (`$name`, the handle a
+ * parametric page's URL names; `$uuid`), and a record's top-level `slug` and `path`
+ * are its handle and its placement in `records.yml`. Until 2026-09-14 they became
+ * translation units, and a translation whose source happened to equal one rewrote it,
+ * so a record's page stopped matching its URL.
+ *
+ * @param {string|number} key - a field name (an array index is never one)
+ * @param {boolean} topLevel - whether the key sits at the record's own level
+ * @returns {boolean}
+ */
+function isRecordSystemField(key, topLevel) {
+  if (typeof key !== 'string') return false
+  return key.startsWith('$') || (topLevel && (key === 'slug' || key === 'path'))
+}
+
 // ---------------------------------------------------------------------------
 // Schema-guided extraction
 // ---------------------------------------------------------------------------
@@ -181,6 +198,7 @@ function extractFromItemWithSchema(data, fields, pathPrefix, context, units) {
   if (!data || typeof data !== 'object') return
 
   for (const [fieldName, fieldDef] of Object.entries(fields)) {
+    if (isRecordSystemField(fieldName, !pathPrefix)) continue
     const value = data[fieldName]
     if (value === undefined || value === null) continue
 
@@ -253,6 +271,7 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
       : (pathPrefix ? `${pathPrefix}.${key}` : key)
 
     if (value === undefined || value === null) continue
+    if (!Array.isArray(data) && isRecordSystemField(key, depth === 0)) continue
 
     // Skip ProseMirror content (handled separately)
     if (key === 'content' && typeof value === 'object' && value?.type === 'doc') continue
@@ -298,10 +317,11 @@ function translateWithSchema(item, schema, context, translations, includeContent
 /**
  * Recursively translate fields guided by schema.
  */
-function translateItemWithSchema(data, fields, context, translations) {
+function translateItemWithSchema(data, fields, context, translations, topLevel = true) {
   if (!data || typeof data !== 'object') return
 
   for (const [fieldName, fieldDef] of Object.entries(fields)) {
+    if (isRecordSystemField(fieldName, topLevel)) continue
     const value = data[fieldName]
     if (value === undefined || value === null) continue
 
@@ -313,13 +333,13 @@ function translateItemWithSchema(data, fields, context, translations) {
       }
     } else if (translatable === 'recurse') {
       if (fieldDef.type === 'object' && fieldDef.fields && typeof value === 'object' && !Array.isArray(value)) {
-        translateItemWithSchema(value, fieldDef.fields, context, translations)
+        translateItemWithSchema(value, fieldDef.fields, context, translations, false)
       } else if (fieldDef.type === 'array' && Array.isArray(value)) {
         const itemDef = fieldDef.items
         if (itemDef) {
           value.forEach((elem, i) => {
             if (itemDef.type === 'object' && itemDef.fields && typeof elem === 'object') {
-              translateItemWithSchema(elem, itemDef.fields, context, translations)
+              translateItemWithSchema(elem, itemDef.fields, context, translations, false)
             } else if (itemDef.type === 'string') {
               const itemTranslatable = isFieldTranslatable(itemDef)
               if (itemTranslatable === 'yes' && typeof elem === 'string') {
@@ -364,6 +384,7 @@ function translateItemHeuristic(data, context, translations, depth) {
   for (const key of keys) {
     const value = data[key]
     if (value === undefined || value === null) continue
+    if (!Array.isArray(data) && isRecordSystemField(key, depth === 0)) continue
 
     // Skip ProseMirror content (handled separately)
     if (key === 'content' && typeof value === 'object' && value?.type === 'doc') continue
@@ -451,12 +472,26 @@ export async function extractRecordContent(siteRoot, options = {}) {
       // Resolve schema once per collection
       const schema = await resolveSchema(queryName, siteRoot)
       const recordDir = poolDirs.get(queryName) ?? queryName
-
-      for (const item of items) {
+      const extract = (item) => {
         if (schema?.fields) {
           extractWithSchema(item, schema, recordDir, units)
         } else {
           extractHeuristic(item, recordDir, units)
+        }
+      }
+
+      for (const item of items) extract(item)
+
+      // ⭐ AND THE QUERY'S PER-RECORD FILES. A query with `deferred:` fields writes each
+      // record whole beside its lean list, and a deferred field is exactly what the list
+      // does not hold. ⛔ Until 2026-09-14 only the list was read, so a deferred body —
+      // one derived from a schema's brief included — never reached the manifest.
+      for (const name of await recordFileNames(dataDir, queryName)) {
+        try {
+          const item = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
+          if (item && typeof item === 'object' && !Array.isArray(item)) extract(item)
+        } catch (err) {
+          console.warn(`[i18n] Skipping ${queryName}/${name}: ${err.message}`)
         }
       }
     } catch (err) {
@@ -469,6 +504,48 @@ export async function extractRecordContent(siteRoot, options = {}) {
     version: '1.0',
     extracted: new Date().toISOString(),
     units
+  }
+}
+
+/**
+ * The per-record files a query with `deferred:` fields writes beside its list —
+ * `public/data/<query>/<slug>.json`, one record whole in each (`writeQueryFiles`).
+ *
+ * @param {string} dataDir - the directory the query's list is in
+ * @param {string} queryName - the list's file name, without `.json`
+ * @returns {Promise<string[]>} the file names (`<slug>.json`), sorted; none when the
+ *   query writes none
+ */
+async function recordFileNames(dataDir, queryName) {
+  const dir = join(dataDir, queryName)
+  if (!isInside(dir, dataDir) || !existsSync(dir)) return []
+  try {
+    return (await readdir(dir, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map((entry) => entry.name)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+/** Is `path` strictly inside `dir`? A name read off disk must not lead out of it. */
+function isInside(path, dir) {
+  return resolve(path).startsWith(resolve(dir) + sep)
+}
+
+/**
+ * Remove what a locale's record directory holds beyond the query's current record files —
+ * files whose source is gone. Build output only, and never outside `dataDir`.
+ *
+ * @param {string} recordsDir - `<locale>/data/<query>/`
+ * @param {string} dataDir - `<locale>/data/`
+ * @param {Set<string>} keep - the file names the query's source directory holds
+ */
+async function pruneRecordFiles(recordsDir, dataDir, keep) {
+  if (!isInside(recordsDir, dataDir) || !existsSync(recordsDir)) return
+  for (const entry of await readdir(recordsDir)) {
+    if (!keep.has(entry)) await rm(join(recordsDir, entry), { recursive: true, force: true })
   }
 }
 
@@ -671,6 +748,30 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
         const destPath = join(localeDataDir, file)
         await writeFile(destPath, JSON.stringify(translatedItems, null, 2))
         outputs[locale][queryName] = destPath
+
+        // ⭐ AND THE QUERY'S PER-RECORD FILES, beside the translated list and with the
+        // same translations — `/<locale>/data/<query>/<slug>.json`. A query with
+        // `deferred:` fields writes each record whole there, and a parametric page reads
+        // its record from that file. ⛔ Until 2026-09-14 they were not written for any
+        // locale, so a localized site's records showed their deferred fields — an
+        // article's body — in the source language under a translated list.
+        const localeRecordsDir = join(localeDataDir, queryName)
+        const recordNames = await recordFileNames(dataDir, queryName)
+        for (const name of recordNames) {
+          try {
+            const record = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
+            const translatedRecord = record && typeof record === 'object' && !Array.isArray(record)
+              ? await translateItemAsync(record, recordDir, translations, schema, { locale, localesDir, freeformEnabled: hasFreeform })
+              : record
+            await mkdir(localeRecordsDir, { recursive: true })
+            await writeFile(join(localeRecordsDir, name), JSON.stringify(translatedRecord, null, 2))
+          } catch (err) {
+            console.error(`[i18n] Failed to translate ${queryName}/${name} for ${locale}: ${err.message}`)
+            failures.push({ locale, file: `${queryName}/${name}`, message: err.message })
+          }
+        }
+        // A record file the source no longer has is not left behind, translated, in the locale.
+        await pruneRecordFiles(localeRecordsDir, localeDataDir, new Set(recordNames))
       } catch (err) {
         // ⛔ A FAILURE HERE USED TO BE A `console.warn` AND NOTHING ELSE, and it
         // hid a real bug for the length of a session: a `ReferenceError` in this
@@ -708,9 +809,12 @@ async function translateItemAsync(item, recordDir, translations, schema, options
   const slug = item.slug || item.id || item.name || 'unknown'
   const context = { record: `${recordDir}/${slug}` }
 
-  // Check for free-form translation first
+  // Check for free-form translation first. ⛔ The loader takes the record's SCHEMA ref
+  // and derives the pool path from it (`buildFreeformRecordPath`); handed the pool
+  // directory itself (`article`), it derived nothing and found no file — so until
+  // 2026-09-14 no free-form record translation applied on this lane.
   if (freeformEnabled && locale && localesDir) {
-    const freeform = await loadFreeformRecord(item, recordDir, locale, localesDir)
+    const freeform = await loadFreeformRecord(item, schemaForPoolDirs(recordDir.split('/')), locale, localesDir)
 
     if (freeform) {
       // Merge free-form data (supports partial: frontmatter only, body only, or both)
@@ -827,38 +931,50 @@ function lookupTranslation(source, context, translations) {
  * Translate a collection's items array for a given locale.
  * Used by dev server middleware for on-the-fly translation.
  *
- * @param {Array} items - Collection items array
- * @param {string} recordDir - The record's pool directory (e.g. 'article')
+ * ⛔ The record key is derived here exactly as extraction and the localized build
+ * derive it — the query's pool directory (`poolDirsByQuery`), not its name. Until
+ * 2026-09-14 the free-form branch read a `recordDir` that was never defined (a
+ * `ReferenceError`, which the dev middleware caught and logged, leaving the request to
+ * fall through untranslated),
+ * and the other branch keyed by the query's name, so a translation keyed by the record
+ * missed.
+ *
+ * @param {Array|Object} items - Collection items array — or ONE record, the content of a
+ *   `deferred:` query's per-record file (`/data/<query>/<slug>.json`)
+ * @param {string} queryName - The query the items were compiled for (e.g. 'articles')
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Translation options
  * @param {string} options.locale - Target locale code
  * @param {string} options.localesDir - Absolute path to locales directory
  * @param {Object} [options.translations={}] - Hash-based translations
  * @param {boolean} [options.freeformEnabled=false] - Enable free-form translations
- * @returns {Promise<Array>} Translated items
+ * @returns {Promise<Array|Object>} Translated items, or the translated record
  */
 export async function translateRecordData(items, queryName, siteRoot, options = {}) {
   const { locale, localesDir, translations = {}, freeformEnabled = false } = options
 
-  if (!Array.isArray(items)) return items
+  const one = !!items && typeof items === 'object' && !Array.isArray(items)
+  if (!Array.isArray(items) && !one) return items
+  const records = one ? [items] : items
 
   const schema = await resolveSchema(queryName, siteRoot)
+  const recordDir = (await poolDirsByQuery(siteRoot)).get(queryName) ?? queryName
 
-  if (freeformEnabled) {
-    return Promise.all(
-      items.map(item =>
-        translateItemAsync(item, recordDir, translations, schema, {
-          locale,
-          localesDir,
-          freeformEnabled
-        })
+  const translated = freeformEnabled
+    ? await Promise.all(
+        records.map(item =>
+          translateItemAsync(item, recordDir, translations, schema, {
+            locale,
+            localesDir,
+            freeformEnabled
+          })
+        )
       )
-    )
-  }
+    : records.map(item =>
+        translateItemSync(item, recordDir, translations, schema)
+      )
 
-  return items.map(item =>
-    translateItemSync(item, queryName, translations, schema)
-  )
+  return one ? translated[0] : translated
 }
 
 // ---------------------------------------------------------------------------
