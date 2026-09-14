@@ -21,6 +21,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './entity-source.js'
 import { isProseMirrorField, isContentBodyField } from './data-schema.js'
@@ -85,7 +86,7 @@ export function backfillUuid(filePath, uuid) {
   } else if (ext === '.yml' || ext === '.yaml') {
     let obj
     try {
-      obj = yaml.load(text)
+      obj = yaml.load(text, YAML_OPTIONS)
     } catch (err) {
       return { status: 'error', message: `invalid YAML in ${filePath}: ${err.message}` }
     }
@@ -127,7 +128,7 @@ export function backfillArrayFile(filePath, uuidBySlug) {
   }
   let arr
   try {
-    arr = ext === '.json' ? JSON.parse(text) : yaml.load(text)
+    arr = ext === '.json' ? JSON.parse(text) : yaml.load(text, YAML_OPTIONS)
   } catch (err) {
     return { status: 'error', message: `invalid ${ext || '(no extension)'} in ${filePath}: ${err.message}` }
   }

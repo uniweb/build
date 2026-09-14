@@ -41,6 +41,7 @@ import { join, resolve, isAbsolute, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from './utils/yaml-schema.js'
 
 import {
   SCHEMA_EXTENSIONS,
@@ -422,7 +423,7 @@ async function loadSchemaFile(filePath) {
   }
   const text = await readFile(filePath, 'utf8')
   if (filePath.endsWith('.json')) return JSON.parse(text)
-  return yaml.load(text) // .yml / .yaml
+  return yaml.load(text, YAML_OPTIONS) // .yml / .yaml
 }
 
 /**

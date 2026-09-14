@@ -39,6 +39,7 @@
  */
 
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from './yaml-schema.js'
 
 /**
  * Split YAML frontmatter from a markdown body.
@@ -65,7 +66,7 @@ export function parseFrontmatter(raw, filepath) {
   }
 
   try {
-    const frontmatter = yaml.load(parts[1]) || {}
+    const frontmatter = yaml.load(parts[1], YAML_OPTIONS) || {}
     const body = parts.slice(2).join('---\n')
     return { frontmatter, body }
   } catch (err) {

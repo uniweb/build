@@ -27,6 +27,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, siteReaches, declaredKeys, fillDeclaredKeys } from '@uniweb/core'
 
 import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
@@ -541,13 +542,13 @@ async function resolveRecords(path, { byQuery, siteRoot }) {
     try {
       const text = await readFile(filePath, 'utf8')
       if (path.endsWith('.json')) records = JSON.parse(text)
-      else if (path.endsWith('.yml') || path.endsWith('.yaml')) records = yaml.load(text)
+      else if (path.endsWith('.yml') || path.endsWith('.yaml')) records = yaml.load(text, YAML_OPTIONS)
       else {
         // Unknown extension — try JSON, then YAML.
         try {
           records = JSON.parse(text)
         } catch {
-          records = yaml.load(text)
+          records = yaml.load(text, YAML_OPTIONS)
         }
       }
     } catch (err) {
@@ -555,12 +556,12 @@ async function resolveRecords(path, { byQuery, siteRoot }) {
     }
   }
 
-  // Validate the shape that actually SHIPS. `/data/*.json` is JSON, so a YAML
-  // date (parsed to a Date object in memory) serializes to an ISO string, while
-  // booleans / numbers / nesting are unchanged. Checking the JSON-round-tripped
-  // form makes the checker agree with the serialized payload the runtime and
-  // backend receive — and with the prerendered HTML oracle — so a string-typed
-  // date field isn't a false "expected string, got date".
+  // Validate the shape that actually SHIPS. `/data/*.json` is JSON, so anything a
+  // JSON round trip changes is checked as it arrives, while booleans / numbers /
+  // nesting are unchanged. Checking the JSON-round-tripped form makes the checker
+  // agree with the serialized payload the runtime and backend receive — and with the
+  // prerendered HTML oracle. (A YAML date no longer needs it: the build's YAML
+  // resolves no timestamps, `utils/yaml-schema.js`, so it is the string as written.)
   return { records: toShippedShape(records) }
 }
 

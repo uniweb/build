@@ -41,6 +41,7 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { detectFoundationType } from '../site/foundation-ref.js'
 import { join, resolve } from 'node:path'
 
@@ -167,9 +168,11 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
       ? localize(value, sourceLocale)
       : localizeScalar(value, sourceLocale, translations)
   }
-  // A YAML scalar date parses to a Date. The backend validates `date` as
-  // `YYYY-MM-DD` and `datetime` as RFC3339 — emitting full ISO for a `date`
-  // field is rejected before storage, so split by kind.
+  // A Date handed in by a caller. The backend validates `date` as `YYYY-MM-DD` and
+  // `datetime` as RFC3339 — emitting full ISO for a `date` field is rejected before
+  // storage, so split by kind. ⚠️ A record READ from a file never carries one: the
+  // build's YAML resolves no timestamps (`utils/yaml-schema.js`), so an unquoted
+  // `2026-03-01` is the string as written, the same value a quoted one always was.
   if (DATE_KINDS.has(field.type) && value instanceof Date) {
     return field.type === 'date' ? value.toISOString().slice(0, 10) : value.toISOString()
   }
@@ -429,7 +432,7 @@ function syncableQueries(declarations) {
 function resolveFoundationDir(siteRoot, opts) {
   if (opts.foundationDir) return resolve(opts.foundationDir)
   try {
-    const siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8')) || {}
+    const siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
     if (!siteYml.foundation) return null
     const info = detectFoundationType(siteYml.foundation, siteRoot)
     return info?.type === 'local' && info.path ? info.path : null

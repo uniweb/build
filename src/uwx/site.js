@@ -75,13 +75,14 @@ function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
 }
 
-// A YAML scalar the author may have written unquoted: `20260910` loads as a number
-// and `2026-09-10` as a Date. Carry either as the string it stands for; anything
-// else that is not a string is not a value a string field can hold.
+// A YAML scalar the author may have written unquoted: `20260910` loads as a number.
+// Carry it as the string it stands for; anything else that is not a string is not a
+// value a string field can hold. (`2026-09-10` loads as the string it is written as —
+// the build's YAML resolves no timestamps, `utils/yaml-schema.js` — so no Date arrives:
+// it was carried re-rendered by `toISOString()` until 2026-09-14.)
 function scalarString(value) {
   if (typeof value === 'string') return value
   if (typeof value === 'number') return String(value)
-  if (value instanceof Date) return value.toISOString()
   return undefined
 }
 
@@ -289,7 +290,7 @@ function buildPageData(config, ctx) {
     // two data sources. The claim was here the whole time; the mirroring was not.
     // ⭐ `query`, END TO END — no crossing. An earlier version emitted `collection`
     // here on the belief that this field was the backend's to name. MEASURED
-    // otherwise: framework already ships `transform`, `detailPage`, `merge` and
+    // otherwise: framework was already shipping `transform`, `detailPage`, `merge` and
     // `prerender` inside this same `fetch` object, which no backend could be
     // validating — so `fetch` is a blob they carry and framework owns its
     // vocabulary. ⇒ There was nothing to coordinate, and inventing a coordination

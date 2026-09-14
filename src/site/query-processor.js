@@ -52,12 +52,14 @@
  */
 
 import { readFile, readdir, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
-import { join, basename, extname, dirname, relative, resolve, sep } from 'node:path'
+import { join, basename, extname, dirname, relative, resolve, sep, isAbsolute } from 'node:path'
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseBibtex } from '@citestyle/bibtex'
 import { DATA_DIR, withoutRouteVariables } from '@uniweb/core'
-import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute } from './data-fetcher.js'
+import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, FOLDER_MISSING } from './records-config.js'
@@ -126,6 +128,7 @@ function parseQueryConfig(name, config) {
   refuseUnder(config.where, `queries.${name}`)
   refuseOutsideLanguage(config.where, `queries.${name}`)
   refuseQueryRoute(config, `queries.${name}`)
+  refuseLimit(config.limit, `queries.${name}`)
   return {
     name,
     // The query's schema selects its records from the pool — `entities/{schema}/`
@@ -255,28 +258,70 @@ function isExternalUrl(src) {
 }
 
 /**
+ * Where a record's co-located asset is published — its path below `public/records/`.
+ *
+ * ⭐ THE RECORD'S OWN HOME, keyed by where the file sits in the pool. It was
+ * `public/collections/<queryName>/`, which meant the SAME image was copied once per
+ * query that returned the record, under two URLs. Third instance of the same
+ * conflation (after the freeform locale tree and the translation manifest): an asset
+ * belongs to a record, and which query selects it is not a fact about it.
+ *
+ * ⭐ ITS PATH UNDER THE ENTITIES ROOT, whole. ⛔ Until 2026-09-14 it was the record's
+ * schema folder plus the asset's BASENAME, so `./a/pic.png` and `./b/pic.png` under
+ * one schema folder were copied to one file — the last one won — and a record showed
+ * another record's picture. Now a file beside its record keeps the URL it always had
+ * (`article/pic.png`), a file in a subfolder keeps its subfolder (`article/img/pic.png`),
+ * and one elsewhere under the root keeps its own path (`../shared/logo.svg` from
+ * `entities/article/` → `shared/logo.svg`).
+ *
+ * A file OUTSIDE the entities root has no such path, so it is named for where it is:
+ * `_external/<hash>-<name>`, the hash being the first 8 hex digits of the sha-256 of
+ * its path relative to the entities root — the same on every machine with the same
+ * layout, and different for two files that share a name.
+ *
+ * @param {string} resolved - the asset's absolute path
+ * @param {string} entitiesRoot - the site's entities root, absolute
+ * @returns {string} a `/`-separated path below `records/`
+ */
+function recordAssetPath(resolved, entitiesRoot) {
+  const rel = relative(entitiesRoot, resolved)
+  const posix = rel.split(sep).join('/')
+  const inside = rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
+  if (inside) return posix
+  const hash = createHash('sha256').update(posix).digest('hex').slice(0, 8)
+  return `_external/${hash}-${basename(resolved)}`
+}
+
+/**
+ * Copy one of a record's assets to its home under `public/records/` (`recordAssetPath`).
+ *
+ * @returns {Promise<{ url: string, copied: string }>} its URL under `basePath`, and the copy
+ */
+async function publishRecordAsset(resolved, siteRoot, entitiesRoot, basePath) {
+  const path = recordAssetPath(resolved, entitiesRoot)
+  const copied = join(siteRoot, 'public', 'records', ...path.split('/'))
+  await mkdir(dirname(copied), { recursive: true })
+  await copyFile(resolved, copied)
+  return { url: `${basePath}records/${path}`, copied }
+}
+
+/**
  * Process assets in collection content
  * - Resolves relative paths to site-root-relative paths
- * - Copies co-located assets to public/records/<schema>/
+ * - Copies co-located assets to public/records/, by their path under the entities
+ *   root (`recordAssetPath`)
  * - Updates paths in the content in place
  *
  * @param {Object} content - ProseMirror document
  * @param {string} itemPath - Path to the markdown file
  * @param {string} siteRoot - Site root directory
- * @param {string} queryName - Name of the collection (e.g., 'articles')
+ * @param {string} entitiesRoot - The site's entities root, absolute
+ * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
  * @returns {Promise<Object>} Asset manifest for this item
  */
-async function processRecordAssets(content, itemPath, siteRoot, poolDirs, basePath) {
+async function processRecordAssets(content, itemPath, siteRoot, entitiesRoot, basePath) {
   const assets = {}
-  const itemDir = dirname(itemPath)
   const publicDir = join(siteRoot, 'public')
-  // ⭐ THE RECORD'S OWN HOME, keyed by its pool position — `public/records/<schema
-  // dirs>/`. It was `public/collections/<queryName>/`, which meant the SAME image
-  // was copied once per query that returned the record, under two URLs. Third
-  // instance of the same conflation (after the freeform locale tree and the
-  // translation manifest): an asset belongs to a record, and which query selects
-  // it is not a fact about it.
-  const targetDir = join(publicDir, 'records', poolDirs)
 
   // Walk content and collect asset paths
   const assetNodes = []
@@ -298,23 +343,14 @@ async function processRecordAssets(content, itemPath, siteRoot, poolDirs, basePa
     if (src.startsWith('./') || src.startsWith('../')) {
       // Check if file exists at resolved location
       if (existsSync(result.resolved)) {
-        // Copy to public/collections/<collection>/
-        const assetFilename = basename(result.resolved)
-        const targetPath = join(targetDir, assetFilename)
-
-        // Ensure target directory exists
-        await mkdir(targetDir, { recursive: true })
-
-        // Copy the asset
-        await copyFile(result.resolved, targetPath)
-
-        // Update path to site-root-relative
-        finalPath = `${basePath}records/${poolDirs}/${assetFilename}`
+        // Copy to public/records/, and point the content at the copy
+        const { url, copied } = await publishRecordAsset(result.resolved, siteRoot, entitiesRoot, basePath)
+        finalPath = url
 
         assets[src] = {
           original: src,
           resolved: result.resolved,
-          copied: targetPath,
+          copied,
           publicPath: finalPath
         }
       }
@@ -340,22 +376,14 @@ async function processRecordAssets(content, itemPath, siteRoot, poolDirs, basePa
     if (node.attrs.poster && !isExternalUrl(node.attrs.poster)) {
       const posterResult = resolveAssetPath(node.attrs.poster, itemPath, siteRoot)
       if (posterResult.resolved && existsSync(posterResult.resolved)) {
-        const posterFilename = basename(posterResult.resolved)
-        const posterTarget = join(targetDir, posterFilename)
-        await mkdir(targetDir, { recursive: true })
-        await copyFile(posterResult.resolved, posterTarget)
-        node.attrs.poster = `${basePath}records/${poolDirs}/${posterFilename}`
+        node.attrs.poster = (await publishRecordAsset(posterResult.resolved, siteRoot, entitiesRoot, basePath)).url
       }
     }
 
     if (node.attrs.preview && !isExternalUrl(node.attrs.preview)) {
       const previewResult = resolveAssetPath(node.attrs.preview, itemPath, siteRoot)
       if (previewResult.resolved && existsSync(previewResult.resolved)) {
-        const previewFilename = basename(previewResult.resolved)
-        const previewTarget = join(targetDir, previewFilename)
-        await mkdir(targetDir, { recursive: true })
-        await copyFile(previewResult.resolved, previewTarget)
-        node.attrs.preview = `${basePath}records/${poolDirs}/${previewFilename}`
+        node.attrs.preview = (await publishRecordAsset(previewResult.resolved, siteRoot, entitiesRoot, basePath)).url
       }
     }
   }
@@ -364,30 +392,27 @@ async function processRecordAssets(content, itemPath, siteRoot, poolDirs, basePa
 }
 
 /**
- * Process assets in a data item (YAML/JSON)
+ * Process assets in a record's data — a YAML/JSON record, or a markdown record's
+ * frontmatter
  * - Recursively walks the data object looking for local asset paths
- * - Copies co-located assets to public/records/<schema>/
+ * - Copies co-located assets to public/records/, by their path under the entities
+ *   root (`recordAssetPath`)
  * - Rewrites paths to absolute URLs (with base path)
  *
  * @param {Object} data - Parsed data object (mutated in place)
- * @param {string} itemPath - Path to the data file
+ * @param {string} itemPath - Path to the record's file
  * @param {string} siteRoot - Site root directory
- * @param {string} queryName - Name of the collection
+ * @param {string} entitiesRoot - The site's entities root, absolute
  * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
  */
-async function processDataItemAssets(data, itemPath, siteRoot, poolDirs, basePath) {
-  const targetDir = join(siteRoot, 'public', 'records', poolDirs)
-
+async function processDataItemAssets(data, itemPath, siteRoot, entitiesRoot, basePath) {
   async function walk(parent, key) {
     const val = parent[key]
     if (typeof val === 'string' && isLocalAssetPath(val)) {
       if (val.startsWith('./') || val.startsWith('../')) {
         const resolved = resolve(dirname(itemPath), val)
         if (existsSync(resolved)) {
-          const filename = basename(resolved)
-          await mkdir(targetDir, { recursive: true })
-          await copyFile(resolved, join(targetDir, filename))
-          parent[key] = `${basePath}records/${poolDirs}/${filename}`
+          parent[key] = (await publishRecordAsset(resolved, siteRoot, entitiesRoot, basePath)).url
         }
       } else if (val.startsWith('/')) {
         // Absolute site path — just prepend base
@@ -427,16 +452,16 @@ async function processDataItemAssets(data, itemPath, siteRoot, poolDirs, basePat
  * @param {string} filename - YAML filename (.yml or .yaml)
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processDataItem(dir, filename, siteRoot, poolDirs, basePath) {
+async function processDataItem(dir, filename, siteRoot, entitiesRoot, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
-  const data = yaml.load(raw) || {}
+  const data = yaml.load(raw, YAML_OPTIONS) || {}
 
   // Array → multiple items (single-file collection)
   if (Array.isArray(data)) {
     for (const item of data) {
       if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
+        await processDataItemAssets(item, filepath, siteRoot, entitiesRoot, basePath)
       }
     }
     return data
@@ -446,7 +471,7 @@ async function processDataItem(dir, filename, siteRoot, poolDirs, basePath) {
   if (data.published === false) return null
   const slug = basename(filename, extname(filename))
   const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
+  await processDataItemAssets(item, filepath, siteRoot, entitiesRoot, basePath)
   return item
 }
 
@@ -461,7 +486,7 @@ async function processDataItem(dir, filename, siteRoot, poolDirs, basePath) {
  * @param {string} filename - JSON filename
  * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
  */
-async function processJsonItem(dir, filename, siteRoot, poolDirs, basePath) {
+async function processJsonItem(dir, filename, siteRoot, entitiesRoot, basePath) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, '.json')
@@ -471,7 +496,7 @@ async function processJsonItem(dir, filename, siteRoot, poolDirs, basePath) {
   if (Array.isArray(data)) {
     for (const item of data) {
       if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
+        await processDataItemAssets(item, filepath, siteRoot, entitiesRoot, basePath)
       }
     }
     return data
@@ -480,7 +505,7 @@ async function processJsonItem(dir, filename, siteRoot, poolDirs, basePath) {
   // Object → single item
   if (data.published === false) return null
   const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, poolDirs, basePath)
+  await processDataItemAssets(item, filepath, siteRoot, entitiesRoot, basePath)
   return item
 }
 
@@ -514,9 +539,11 @@ async function processBibtexItem(dir, filename) {
  * @param {string} filename - Markdown filename
  * @param {Object} config - Collection configuration
  * @param {string} siteRoot - Site root directory for asset resolution
+ * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
+ * @param {string} entitiesRoot - The site's entities root, absolute
  * @returns {Promise<Object|null>} Processed item or null if unpublished
  */
-async function processContentItem(dir, filename, config, siteRoot, basePath, poolDirs) {
+async function processContentItem(dir, filename, config, siteRoot, basePath, entitiesRoot) {
   const filepath = join(dir, filename)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, extname(filename))
@@ -529,18 +556,25 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, poo
     return null
   }
 
+  // ⭐ THE FRONTMATTER IS THE RECORD'S DATA, so a co-located path in it is published
+  // exactly as a YAML or JSON record's field is. ⛔ Until 2026-09-14 it was neither
+  // copied nor rewritten: `image: ./cover.jpg` reached the compiled record as written,
+  // a path relative to a file no visitor can reach, while the same line in a `.yml`
+  // record was published.
+  await processDataItemAssets(frontmatter, filepath, siteRoot, entitiesRoot, basePath)
+
   // Parse markdown body to ProseMirror
   const content = markdownToProseMirror(body)
 
   // Process assets (resolve paths, copy co-located files)
   // This modifies content in place, updating paths to site-root-relative
-  await processRecordAssets(content, filepath, siteRoot, poolDirs, basePath)
+  await processRecordAssets(content, filepath, siteRoot, entitiesRoot, basePath)
 
   // Extract excerpt
   const excerpt = extractExcerpt(frontmatter, content, config.excerpt)
 
   // Extract first image (frontmatter takes precedence)
-  // Note: paths in content have already been updated by processRecordAssets
+  // Note: paths in the frontmatter and the content have already been rewritten above
   const image = frontmatter.image || extractFirstImage(content)
 
   return {
@@ -624,7 +658,10 @@ async function collectItems(siteDir, config, entitiesDir, basePath, locale = nul
   const pooled = config.poolEntities || []
   if (pooled.length === 0) return []
 
-  const dirOf = (e) => resolve(siteDir, entitiesDir || ENTITIES_DIR, ...e.dirs)
+  // A record's co-located assets are published by their path under this root
+  // (`recordAssetPath`).
+  const entitiesRoot = resolve(siteDir, entitiesDir || ENTITIES_DIR)
+  const dirOf = (e) => resolve(entitiesRoot, ...e.dirs)
 
   // Process all entity files (markdown → content items, YAML/JSON → data items,
   // BibTeX → CSL-JSON bibliography items).
@@ -636,12 +673,12 @@ async function collectItems(siteDir, config, entitiesDir, basePath, locale = nul
         return processBibtexItem(dir, file)
       }
       if (e.ext === '.json') {
-        return processJsonItem(dir, file, siteDir, e.dirs.join('/'), basePath)
+        return processJsonItem(dir, file, siteDir, entitiesRoot, basePath)
       }
       if (e.ext === '.yml' || e.ext === '.yaml') {
-        return processDataItem(dir, file, siteDir, e.dirs.join('/'), basePath)
+        return processDataItem(dir, file, siteDir, entitiesRoot, basePath)
       }
-      return processContentItem(dir, file, config, siteDir, basePath, e.dirs.join('/'))
+      return processContentItem(dir, file, config, siteDir, basePath, entitiesRoot)
     })
   )
 
@@ -769,8 +806,19 @@ export async function processQueries(siteDir, queriesConfig, entitiesDir, basePa
   // with no `records.yml` is simply not managing publication, and its whole pool
   // is delivered. (Making missing mean "publish nothing" would turn every site
   // without the file into a silently empty one.)
+  //
+  // ⛔ AND A MALFORMED FILE IS NOT A MISSING ONE. It read as `missing` here until
+  // 2026-09-14 — invalid YAML, or a mapping where the list goes — so the whole pool was
+  // delivered, drafts included, with one warning, while the sync lane refused the same
+  // file (`uwx/records.js`). An author who wrote `records.yml` is managing publication;
+  // what it says cannot be guessed, so the build stops.
   const recordsCfg = await readRecordsConfig(siteDir)
-  if (recordsCfg.error) console.warn(`[query-processor] ${recordsCfg.error}`)
+  if (recordsCfg.error) {
+    throw new Error(
+      `[uniweb] ${recordsCfg.error}\n` +
+        `  records.yml decides which entities are records, so nothing in entities/ is published until it is fixed.`
+    )
+  }
   const managed = recordsCfg.state !== FOLDER_MISSING
   const folder = managed ? resolveFolder(recordsCfg.entries, pool.entities) : null
   if (folder) {

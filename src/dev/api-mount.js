@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 /**
  * Mount a site's own request handler in the dev server.
@@ -67,7 +68,7 @@ export function mountDevApi(server, { root }) {
   // rule working: if it were readable from `config`, it would also be published.
   let site
   try {
-    site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8')) || {}
+    site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
   } catch {
     return false
   }

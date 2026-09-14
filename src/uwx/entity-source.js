@@ -23,6 +23,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseBibtex } from '@citestyle/bibtex'
 
 const SOURCE_EXTENSIONS = new Set(['.md', '.yml', '.yaml', '.json', '.bib'])
@@ -89,7 +90,7 @@ async function readOneFile(filepath) {
   }
 
   // yaml / json
-  const data = format === 'json' ? JSON.parse(raw) : yaml.load(raw)
+  const data = format === 'json' ? JSON.parse(raw) : yaml.load(raw, YAML_OPTIONS)
   if (Array.isArray(data)) {
     // Many records in one file — each carries its own slug. Write-back deferred.
     return data

@@ -25,6 +25,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 const DEFAULT_TARGET_NAME = 'production'
 const VALID_AUTOSAVE = new Set(['off', 'lastDeploy', 'full'])
@@ -40,7 +41,7 @@ export async function loadDeployYml(siteDir) {
   const path = join(siteDir, 'deploy.yml')
   if (!existsSync(path)) return null
   const text = await readFile(path, 'utf8')
-  const doc = yaml.load(text) ?? {}
+  const doc = yaml.load(text, YAML_OPTIONS) ?? {}
   return validate(doc, path)
 }
 

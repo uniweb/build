@@ -35,6 +35,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
@@ -66,7 +67,7 @@ function readFileUuid(filePath, format) {
   }
   try {
     if (format === 'md') return parseFrontmatter(raw, filePath).frontmatter?.$uuid ?? null
-    const parsed = format === 'json' ? JSON.parse(raw) : yaml.load(raw)
+    const parsed = format === 'json' ? JSON.parse(raw) : yaml.load(raw, YAML_OPTIONS)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     return parsed.$uuid ?? null
   } catch {
@@ -176,7 +177,7 @@ function locate(document, folderIndex) {
 /** `site.yml::$org`, bare (`acme`), or null. Stored bare — see `writeSiteOrg`. */
 function readSiteOrg(siteRoot) {
   try {
-    const y = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8')) || {}
+    const y = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
     return typeof y.$org === 'string' && y.$org ? y.$org : null
   } catch {
     return null
@@ -207,6 +208,10 @@ function setIf(obj, key, value) {
 // resolves as `items` — a round trip that silently relocates a query's pool.
 // Wire keys `declToFileShape` consumes explicitly — mapped, renamed, or folded into
 // the file-side `path`/`url`. `$id`/`$uuid`/`name` are identity, not content.
+// ⛔ `detail_url` and `detail` are consumed and never written back: both are retired on a
+// query and the build refuses them, so a pull that restored a stored one would hand the
+// author a file that does not build. (`detail:` was pushed as an unmodelled field until
+// 2026-09-14, so a store can hold it.)
 const DECL_WIRE_CONSUMED = new Set([
   'name',
   '$id',
@@ -219,6 +224,7 @@ const DECL_WIRE_CONSUMED = new Set([
   'excerpt',
   'deferred',
   'detail_url',
+  'detail',
   'queryable'
 ])
 
@@ -342,7 +348,7 @@ export function declarationsToQueriesYml({ document, siteRoot, org }) {
   // where dropping an AUTHORED one would.
   let siteYml = null
   try {
-    siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8')) || null
+    siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || null
   } catch {
     siteYml = null
   }

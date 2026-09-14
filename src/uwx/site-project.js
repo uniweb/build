@@ -38,6 +38,7 @@ import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, 
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
@@ -203,7 +204,7 @@ const SETTINGS_TO_SITE_YML = {
 /** An authored YAML config as it stands, or null when there is none to read. */
 function readAuthoredYaml(filePath) {
   try {
-    const value = yaml.load(readFileSync(filePath, 'utf8'))
+    const value = yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS)
     return value && typeof value === 'object' && !Array.isArray(value) ? value : null
   } catch {
     return null

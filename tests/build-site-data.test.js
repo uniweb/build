@@ -69,17 +69,20 @@ A short tagline.
     expect(homePage.sections.length).toBeGreaterThan(0)
   })
 
-  it('ships no build-only fetch key — `merge` is consumed by the build, never read by a runtime', async () => {
-    writeFileSync(join(siteRoot, 'pages', 'home', 'page.yml'), `title: Home\nfetch:\n  query: x\n  merge: true\n`)
+  // ⛔ `merge:` is retired (2026-09-14) and refused, so no payload carries it — the
+  // parse no longer emits it as a default either. It used to be stripped here.
+  it('stops on a retired `merge:`, and ships no `merge` on any fetch it builds', async () => {
     writeFileSync(join(siteRoot, 'pages', 'home', '2-list.md'), `---\ntype: List\nfetch:\n  query: y\n  merge: true\n---\n\nList\n`)
+    await expect(buildSiteData({ siteRoot, distDir })).rejects.toThrow(/2-list\.md: `merge:` is retired/)
+
+    writeFileSync(join(siteRoot, 'pages', 'home', 'page.yml'), `title: Home\nfetch:\n  query: x\n`)
+    writeFileSync(join(siteRoot, 'pages', 'home', '2-list.md'), `---\ntype: List\nfetch:\n  query: y\n  limit: 2\n---\n\nList\n`)
     await buildSiteData({ siteRoot, distDir })
     const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
     const home = content.pages.find((p) => p.route === '/')
     expect(home.fetch.as).toBe('x')
-    expect('merge' in home.fetch).toBe(false)
     const list = home.sections.find((s) => s.fetch)
-    expect(list.fetch.as).toBe('y')
-    expect('merge' in list.fetch).toBe(false)
+    expect(list.fetch).toMatchObject({ as: 'y', limit: 2 })
     expect(JSON.stringify(content)).not.toContain('"merge"')
   })
 

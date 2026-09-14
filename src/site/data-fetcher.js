@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { matchWhere, sortRecords, queryDataUrl, evaluateQuery, whereOutsideLanguage, CURRENT_MODES } from '@uniweb/core'
 
 /**
@@ -113,11 +114,11 @@ export function applyPostProcessing(data, config, { locale = null } = {}) {
  * @example
  * // A query name
  * parseFetchConfig('team')
- * // Returns: { query: 'team', path: '/data/team.json', as: 'team', merge: false }
+ * // Returns: { query: 'team', path: '/data/team.json', as: 'team' }
  *
  * // A binding that adapts its query
  * parseFetchConfig({ query: 'articles', as: 'latest', limit: 3, sort: 'date desc' })
- * // Returns: { query: 'articles', path: '/data/articles.json', as: 'latest', limit: 3, sort: 'date desc', merge: false }
+ * // Returns: { query: 'articles', path: '/data/articles.json', as: 'latest', limit: 3, sort: 'date desc' }
  */
 // ─── Unrecognized-key reporting ───────────────────────────────────────
 //
@@ -144,8 +145,9 @@ const RECOGNIZED_FETCH_KEYS = {
   // ⛔ `path`, `url`, `method`, `body`, `transform` and `detail` are not binding keys
   // either — a binding names a query, which supplies its source (`refuseBinding`).
   // The source shape that took them (`{ path }`, `{ url }`) was retired on 2026-09-13.
+  // ⛔ Nor `merge`, retired 2026-09-14 and refused (`refuseMerge`).
   query: new Set([
-    'query', 'as', 'prerender', 'merge',
+    'query', 'as', 'prerender',
     'where', 'limit', 'sort', 'current', 'detailPage',
   ]),
 }
@@ -276,6 +278,49 @@ function refuseRefineAndMisplacedCurrent(fetch, context, level) {
 }
 
 /**
+ * ⛔ `limit:` IS A WHOLE NUMBER OF RECORDS, 0 OR MORE — on a query and on a fetch. Every
+ * lane cuts a set only by a number above 0 (`@uniweb/core`), so until 2026-09-14
+ * `limit: "5"` and `limit: -1` meant no limit and `limit: 2.5` cut to a count nobody
+ * wrote, with nothing said. `0` means no limit, and so does a `limit:` with no value
+ * (null), as though it were not written.
+ *
+ * @param {*} limit - the authored `limit`
+ * @param {string} context - where the declaration sits, for the message
+ */
+export function refuseLimit(limit, context) {
+  if (limit === undefined || limit === null) return
+  if (Number.isInteger(limit) && limit >= 0) return
+  const instead =
+    typeof limit === 'string' && /^\s*\d+\s*$/.test(limit)
+      ? `Write \`limit: ${Number(limit)}\`, unquoted.`
+      : Number.isInteger(limit)
+        ? 'For no limit, write `limit: 0` or leave it out.'
+        : 'Write a count, e.g. `limit: 5`, or leave it out for no limit.'
+  throw new Error(
+    `[uniweb] ${context}: \`limit: ${JSON.stringify(limit)}\` — \`limit:\` is a whole number of records, 0 or more, ` +
+      `and \`0\` means no limit. ${instead}`
+  )
+}
+
+/**
+ * ⛔ `merge:` IS RETIRED (2026-09-14) — refused whatever its value, `false` included.
+ * It never combined anything reliably: the build holds no parsed tagged data block for
+ * a fetch to merge with, and the prerender asks each key once. What a key receives is
+ * settled without it — a fetch fills the key it names, and a tagged data block under a
+ * key the component declares fills that key first.
+ *
+ * @param {Object} fetch - one authored binding
+ * @param {string} context - where the declaration sits, for the message
+ */
+function refuseMerge(fetch, context) {
+  if (fetch.merge === undefined) return
+  throw new Error(
+    `[uniweb] ${context}: \`merge:\` is retired — a fetch fills the key it names, and a tagged data block under a key ` +
+      `the component declares fills it first. Delete the \`merge:\` line.`
+  )
+}
+
+/**
  * ⭐ WHAT A BINDING MAY NOT SAY — every refusal, in one place, for the two readers
  * of an authored binding: the build's parse (`parseFetchConfig`) and the sync push,
  * which carries a page's declaration without parsing it (`uwx/site.js`). A site
@@ -294,11 +339,13 @@ export function refuseBinding(fetch, context, { level = null } = {}) {
   }
   if (typeof fetch !== 'object' || Array.isArray(fetch)) return
   refuseRefineAndMisplacedCurrent(fetch, context, level)
+  refuseMerge(fetch, context)
   refuseSourceKeys(fetch, context)
   if (fetch.collection === undefined) refuseQueryName(fetch.query, context, { object: true })
   refuseUnder(fetch.where, context)
   refuseOutsideLanguage(fetch.where, context)
   refuseBindingScope(fetch, context)
+  refuseLimit(fetch.limit, context)
 }
 
 /**
@@ -549,7 +596,6 @@ export function parseFetchConfig(fetch, context = 'fetch', { level = null } = {}
     // site's records is prerendered, an external query is the browser's
     // (`@uniweb/core/fetch-config`) — and the parser does not know which this is.
     prerender: fetch.prerender,
-    merge: fetch.merge ?? false,
     // A binding's adaptations of its query, kept as authored: the resolver makes them
     // the fetch's `narrow` of the query's set (`@uniweb/core/fetch-config`,
     // `setAndNarrow`) — its `where` filters the set, its `sort` re-orders it, its
@@ -605,97 +651,10 @@ export function _resetRetiredSchemaWarnings() {
   warnedRetiredSchema.clear()
 }
 
-/**
- * Keys a fetch declaration carries for THE BUILD ONLY, which no runtime reads.
- *
- * `merge` decides how a section-level fetch lands in `parsedContent.data` when
- * prerender (or the dev server) executes it — a build-lane feature, documented as
- * such. It rode every shipped payload regardless, and a key on the payload that
- * nothing reads is a key a consumer will one day read. Stripped at the two emit points framework owns — the link lane's
- * `site-content.json` and the bundle lane's embed — AFTER the build has consumed
- * it. ⛔ Not from the sync wire: that carries the author's declaration, which
- * `pull` must round-trip.
- */
-const BUILD_ONLY_FETCH_KEYS = ['merge']
-
-function stripFetch(fetch) {
-  if (!fetch || typeof fetch !== 'object') return fetch
-  if (Array.isArray(fetch)) return fetch.map(stripFetch)
-  let changed = false
-  const out = {}
-  for (const [key, value] of Object.entries(fetch)) {
-    if (BUILD_ONLY_FETCH_KEYS.includes(key)) {
-      changed = true
-      continue
-    }
-    out[key] = value
-  }
-  return changed ? out : fetch
-}
-
-function stripSections(sections) {
-  if (!Array.isArray(sections)) return sections
-  return sections.map((section) => {
-    if (!section || typeof section !== 'object') return section
-    const fetch = stripFetch(section.fetch)
-    const subsections = stripSections(section.subsections)
-    if (fetch === section.fetch && subsections === section.subsections) return section
-    const out = { ...section }
-    if (fetch !== section.fetch) out.fetch = fetch
-    if (subsections !== section.subsections) out.subsections = subsections
-    return out
-  })
-}
-
-function stripPageLike(page) {
-  if (!page || typeof page !== 'object') return page
-  const fetch = stripFetch(page.fetch)
-  const sections = stripSections(page.sections)
-  if (fetch === page.fetch && sections === page.sections) return page
-  const out = { ...page }
-  if (fetch !== page.fetch) out.fetch = fetch
-  if (sections !== page.sections) out.sections = sections
-  return out
-}
-
-/**
- * A copy of a site-content payload with the build-only fetch keys removed from
- * every fetch declaration it carries: `config.fetch`, each page's, each
- * section's (and subsection's), each layout area's, and the `config` inside
- * `fetchedData` entries. Structural sharing — untouched objects are the same
- * objects, so this is cheap on a large site.
- *
- * @param {Object} siteContent
- * @returns {Object}
- */
-export function stripBuildOnlyFetchKeys(siteContent) {
-  if (!siteContent || typeof siteContent !== 'object') return siteContent
-  const out = { ...siteContent }
-  if (out.config && typeof out.config === 'object' && out.config.fetch !== undefined) {
-    const fetch = stripFetch(out.config.fetch)
-    if (fetch !== out.config.fetch) out.config = { ...out.config, fetch }
-  }
-  if (Array.isArray(out.pages)) out.pages = out.pages.map(stripPageLike)
-  if (out.layouts && typeof out.layouts === 'object') {
-    const layouts = {}
-    for (const [name, areas] of Object.entries(out.layouts)) {
-      if (!areas || typeof areas !== 'object') { layouts[name] = areas; continue }
-      const next = {}
-      for (const [area, page] of Object.entries(areas)) next[area] = stripPageLike(page)
-      layouts[name] = next
-    }
-    out.layouts = layouts
-  }
-  if (out.notFound) out.notFound = stripPageLike(out.notFound)
-  if (Array.isArray(out.fetchedData)) {
-    out.fetchedData = out.fetchedData.map((entry) => {
-      if (!entry || typeof entry !== 'object') return entry
-      const config = stripFetch(entry.config)
-      return config === entry.config ? entry : { ...entry, config }
-    })
-  }
-  return out
-}
+// ⛔ NO BUILD-ONLY FETCH KEYS, AND NO STRIP. `stripBuildOnlyFetchKeys` removed `merge`
+// from every shipped payload after the build had read it; `merge` was its only key, and
+// with it retired (2026-09-14, `refuseMerge`) the parse emits nothing a runtime does not
+// read, so there is nothing left to strip.
 
 /**
  * Execute a fetch operation
@@ -747,13 +706,13 @@ export async function executeFetch(config, options = {}) {
       if (path.endsWith('.json')) {
         data = JSON.parse(content)
       } else if (path.endsWith('.yaml') || path.endsWith('.yml')) {
-        data = yaml.load(content)
+        data = yaml.load(content, YAML_OPTIONS)
       } else {
         // Try JSON first, then YAML
         try {
           data = JSON.parse(content)
         } catch {
-          data = yaml.load(content)
+          data = yaml.load(content, YAML_OPTIONS)
         }
       }
     } else if (url) {
@@ -792,64 +751,29 @@ export async function executeFetch(config, options = {}) {
 }
 
 /**
- * Merge fetched data into existing content
+ * Put fetched data into a content object, under the key its fetch names.
+ *
+ * It REPLACES what the key held. ⛔ A fourth `merge` argument concatenated arrays and
+ * spread objects into what was there until 2026-09-14, for the retired `merge:` fetch
+ * key (`refuseMerge`); it is no longer read.
  *
  * @param {object} content - Existing content object with data property
  * @param {any} fetchedData - Data from fetch
- * @param {string} schema - Schema key to store under
- * @param {boolean} [merge=false] - If true, merge with existing data; if false, replace
- * @returns {object} Updated content object
+ * @param {string} schema - the key to store under — the fetch's `as`
+ * @returns {object} Updated content object (a copy; the input is not mutated)
  *
  * @example
- * const content = { data: { team: [{ name: 'Local' }] } }
- * const fetched = [{ name: 'Remote' }]
- *
- * // Replace (default)
- * mergeDataIntoContent(content, fetched, 'team', false)
- * // content.data.team = [{ name: 'Remote' }]
- *
- * // Merge
- * mergeDataIntoContent(content, fetched, 'team', true)
- * // content.data.team = [{ name: 'Local' }, { name: 'Remote' }]
+ * mergeDataIntoContent({ data: { team: [{ name: 'Local' }] } }, [{ name: 'Remote' }], 'team')
+ * // → { data: { team: [{ name: 'Remote' }] } }
  */
-export function mergeDataIntoContent(content, fetchedData, schema, merge = false) {
+export function mergeDataIntoContent(content, fetchedData, schema) {
   if (fetchedData === null || fetchedData === undefined || !schema) {
     return content
   }
-
-  // Create a new content object with updated data
-  const result = {
+  return {
     ...content,
-    data: { ...(content.data || {}) },
+    data: { ...(content.data || {}), [schema]: fetchedData },
   }
-
-  if (merge && result.data[schema] !== undefined) {
-    // Merge mode: combine with existing data
-    const existing = result.data[schema]
-
-    if (Array.isArray(existing) && Array.isArray(fetchedData)) {
-      // Arrays: concatenate
-      result.data[schema] = [...existing, ...fetchedData]
-    } else if (
-      typeof existing === 'object' &&
-      existing !== null &&
-      typeof fetchedData === 'object' &&
-      fetchedData !== null &&
-      !Array.isArray(existing) &&
-      !Array.isArray(fetchedData)
-    ) {
-      // Objects: shallow merge
-      result.data[schema] = { ...existing, ...fetchedData }
-    } else {
-      // Different types: fetched data wins
-      result.data[schema] = fetchedData
-    }
-  } else {
-    // Replace mode (default): fetched data overwrites
-    result.data[schema] = fetchedData
-  }
-
-  return result
 }
 
 /**

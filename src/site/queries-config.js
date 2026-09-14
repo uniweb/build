@@ -32,9 +32,10 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { briefFields, flatRecordFields } from '@uniweb/schemas/conform'
 import { detectFoundationType } from './foundation-ref.js'
-import { refuseQueryRoute } from './data-fetcher.js'
+import { refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 // Read its own YAML rather than importing the site build's helper. That import
 // pointed the wrong way — a config resolver reaching into the collector that
@@ -44,7 +45,7 @@ import yaml from 'js-yaml'
 async function readYamlFile(filePath) {
   if (!existsSync(filePath)) return {}
   try {
-    return yaml.load(await readFile(filePath, 'utf8')) || {}
+    return yaml.load(await readFile(filePath, 'utf8'), YAML_OPTIONS) || {}
   } catch {
     return {}
   }
@@ -203,8 +204,9 @@ const RECORD_KEYS = ['url', 'method', 'body', 'transform']
  * `transform` (a dot-path to its records), `where` / `sort` / `limit` evaluated over
  * them, and `record:` — `{ url, method, body, transform }` — for one record on a
  * parametric page. What describes the site's records — `schema`, `scope`,
- * `deferred`, `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` is
- * retired everywhere: its one real case is `record.url`.
+ * `deferred`, `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` and `detail:` are
+ * retired everywhere: their one real case is `record.url`. ⛔ And `limit:` is a whole
+ * number, 0 or more (`refuseLimit`).
  *
  * ⛔ `route:` is retired everywhere too (2026-09-14 [Diego]): a record links to the page
  * whose route query is its query, as `$route`, which the runtime fills at render time
@@ -222,7 +224,16 @@ export function refuseQueryDeclaration(decl) {
         `on an external query — one with \`url:\`.`
     )
   }
+  // ⛔ `detail:` too — retired on a fetch 2026-09-13, and accepted here in silence until
+  // 2026-09-14, carried into `config.queries` where nothing read it.
+  if (decl.detail !== undefined) {
+    throw new Error(
+      `[uniweb] ${where}: \`detail:\` is retired. An API's single-record request is \`record: { url: … }\` ` +
+        `on an external query — one with \`url:\`.`
+    )
+  }
   refuseQueryRoute(decl, where)
+  refuseLimit(decl.limit, where)
   const external = decl.url !== undefined
   if (!external) {
     for (const key of ['method', 'body', 'transform', 'record']) {

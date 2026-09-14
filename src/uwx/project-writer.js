@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, renameSync, readdirSync, existsSync, mkdir
 import { join, resolve, dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-writer'
 import { parseFrontmatter } from './entity-source.js'
 import { renderEntityDocument } from './backfill.js'
@@ -203,7 +204,7 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
 function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
   let existing = {}
   try {
-    existing = yaml.load(readFileSync(filePath, 'utf8')) || {}
+    existing = yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) || {}
   } catch {
     // missing / invalid → start fresh
   }
@@ -263,7 +264,7 @@ export function writeYamlFile(filePath, obj) {
 export function writeMergedYaml(filePath, projected, managedKeys) {
   let existing = {}
   try {
-    existing = yaml.load(readFileSync(filePath, 'utf8')) || {}
+    existing = yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) || {}
   } catch {
     // missing / invalid → start fresh
   }

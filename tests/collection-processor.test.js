@@ -112,9 +112,9 @@ This is a test article.
       const article = collections.articles[0]
       expect(article.slug).toBe('test-article')
       expect(article.title).toBe('Test Article')
-      // js-yaml parses dates into Date objects, so check for either format
-      const expectedDate = new Date('2025-01-15T00:00:00.000Z')
-      expect(new Date(article.date).getTime()).toBe(expectedDate.getTime())
+      // The date as written — the build's YAML resolves no timestamps (it was a Date
+      // until 2026-09-14, and `2025-01-15T00:00:00.000Z` once compiled)
+      expect(article.date).toBe('2025-01-15')
       expect(article.author).toBe('Test Author')
       expect(article.tags).toEqual(['test', 'example'])
       expect(article.content).toBeDefined()

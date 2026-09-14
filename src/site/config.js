@@ -23,6 +23,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import {
   generateEntryPoint,
   shouldRegenerateForFile,
@@ -81,7 +82,7 @@ export function readSiteConfig(siteRoot) {
   }
 
   try {
-    return yaml.load(readFileSync(configPath, 'utf8')) || {}
+    return yaml.load(readFileSync(configPath, 'utf8'), YAML_OPTIONS) || {}
   } catch (err) {
     console.warn('[site-config] Failed to read site.yml:', err.message)
     return {}

@@ -126,6 +126,39 @@ export function shouldPrefetchInDev(cfg) {
 }
 
 /**
+ * What a change to a file at the site root asks the dev server to redo — or null
+ * for a file it does not read.
+ *
+ *   - `'queries'` — re-collect the site, re-materialize every query file from the
+ *     query list just collected, reload. `queries.yml` declares queries, and so does
+ *     `site.yml` (`queries:`), beside the rest of the site's configuration.
+ *   - `'records'` — re-materialize the query files, reload: `records.yml` decides
+ *     which entities are records, as an entity change decides what one says.
+ *   - `'content'` — re-collect the site, reload.
+ *
+ * ⛔ Until 2026-09-14 nothing watched `records.yml` or `queries.yml`, a `site.yml`
+ * edit re-collected the pages alone, and the query list was the one read at startup
+ * — so an edit to what DEFINES a query file changed nothing until a restart.
+ *
+ * @param {string|null} filename - the changed entry's name, as `fs.watch` reports it
+ * @returns {'queries'|'records'|'content'|null}
+ */
+export function siteRootChange(filename) {
+  switch (filename) {
+    case 'site.yml':
+    case 'queries.yml':
+      return 'queries'
+    case 'records.yml':
+      return 'records'
+    case 'theme.yml':
+    case 'head.html':
+      return 'content'
+    default:
+      return null
+  }
+}
+
+/**
  * Execute the dev fetches that should be embedded (see shouldPrefetchInDev) and
  * collect them as `fetchedData` for DataStore pre-population. Local file-based
  * collections and `prerender: false` sources are intentionally skipped so the
@@ -184,7 +217,7 @@ async function executeDevFetches(siteContent, siteDir) {
 
 /**
  * Process fetches for sections recursively
- * Section-level fetches merge data into parsedContent.data (not cascaded).
+ * Section-level fetches fill parsedContent.data, each under its own key (not cascaded).
  *
  * @param {Array} sections - Sections to process
  * @param {Object} fetchOptions - Options for executeFetch
@@ -203,8 +236,7 @@ async function processDevSectionFetches(sections, fetchOptions, resolve) {
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           result.data,
-          sectionFetch.as,
-          sectionFetch.merge
+          sectionFetch.as
         )
       }
     }
@@ -643,6 +675,22 @@ export function siteContentPlugin(options = {}) {
   }
 
   /**
+   * Materialize every query the site declares into `public/data/` — at dev startup,
+   * and again whenever what a query file is made from changes (`siteRootChange`, and
+   * an entity change).
+   *
+   * @param {Object|undefined} queries - the collected `config.queries`
+   * @param {Object|undefined} config - the collected `config`, for the default locale a `sort` collates in
+   */
+  async function materializeQueries(queries, config) {
+    if (!queries) return
+    const byQuery = await processQueries(resolvedSitePath, queries, resolvedEntitiesDir, basePath, {
+      locale: resolveDefaultLocale(config ?? {}) ?? null,
+    })
+    await writeQueryFiles(resolvedSitePath, byQuery, queries)
+  }
+
+  /**
    * Read head.html from site root (if it exists)
    */
   async function loadHeadHtml() {
@@ -827,10 +875,7 @@ export function siteContentPlugin(options = {}) {
 
           if (queriesConfig) {
             console.log('[site-content] Materializing queries...')
-            const byQuery = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath, {
-              locale: resolveDefaultLocale(earlyContent.config) ?? null,
-            })
-            await writeQueryFiles(resolvedSitePath, byQuery, queriesConfig)
+            await materializeQueries(queriesConfig, earlyContent.config)
           }
         } catch (err) {
           console.warn('[site-content] Early query materialization failed:', err.message)
@@ -914,18 +959,26 @@ export function siteContentPlugin(options = {}) {
 
       // Watch for content changes in dev mode
       if (shouldWatch) {
-        const siteYmlPath = resolve(resolvedSitePath, 'site.yml')
-        const themeYmlPath = resolve(resolvedSitePath, 'theme.yml')
-
-        // Debounce rebuilds
+        // Debounce rebuilds. One that `queries.yml` or `site.yml` asked for also
+        // re-materializes the query files, from the query list the rebuild has just
+        // collected — and a content change debounced after it, in the same window,
+        // does not cancel that.
         let rebuildTimeout = null
-        const scheduleRebuild = () => {
+        let rebuildQueries = false
+        const scheduleRebuild = (withQueries = false) => {
+          rebuildQueries = rebuildQueries || withQueries
           if (rebuildTimeout) clearTimeout(rebuildTimeout)
           rebuildTimeout = setTimeout(async () => {
+            const materialize = rebuildQueries
+            rebuildQueries = false
             console.log('[site-content] Content changed, rebuilding...')
             try {
               siteContent = await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })
               headHtml = await loadHeadHtml()
+              if (materialize) {
+                queriesConfig = siteContent.config?.queries
+                await materializeQueries(queriesConfig, siteContent.config)
+              }
               // Execute fetches for the updated content
               await executeDevFetches(siteContent, resolvedSitePath)
               console.log(`[site-content] Rebuilt ${siteContent.pages?.length || 0} pages`)
@@ -945,12 +998,9 @@ export function siteContentPlugin(options = {}) {
           recordRebuildTimeout = setTimeout(async () => {
             console.log('[site-content] Records changed, regenerating JSON...')
             try {
-              // Use queriesConfig (cached from configResolved) or siteContent
-              const byQuery = queriesConfig || siteContent?.config?.queries
-              if (byQuery) {
-                const processed = await processQueries(resolvedSitePath, byQuery, resolvedEntitiesDir, basePath)
-                await writeQueryFiles(resolvedSitePath, processed, byQuery)
-              }
+              // The query list the last collect read — at startup, or by a rebuild
+              // that `queries.yml` or `site.yml` asked for
+              await materializeQueries(queriesConfig || siteContent?.config?.queries, siteContent?.config)
               // Send full reload to client
               server.ws.send({ type: 'full-reload' })
             } catch (err) {
@@ -959,13 +1009,16 @@ export function siteContentPlugin(options = {}) {
           }, 100)
         }
 
+        // A watcher passes `(eventType, filename)`; a content change never asks for the queries.
+        const onContentChange = () => scheduleRebuild(false)
+
         // Track all watchers for cleanup
         const watchers = []
 
         // Watch pages directory (resolved from site.yml pagesDir or default)
         if (existsSync(resolvedPagesPath)) {
           try {
-            watchers.push(watch(resolvedPagesPath, { recursive: true }, scheduleRebuild))
+            watchers.push(watch(resolvedPagesPath, { recursive: true }, onContentChange))
             console.log(`[site-content] Watching ${resolvedPagesPath}`)
           } catch (err) {
             console.warn('[site-content] Could not watch pages directory:', err.message)
@@ -982,7 +1035,7 @@ export function siteContentPlugin(options = {}) {
         for (const mountPath of resolvedMountPaths) {
           if (!existsSync(mountPath)) continue
           try {
-            watchers.push(watch(mountPath, { recursive: true }, scheduleRebuild))
+            watchers.push(watch(mountPath, { recursive: true }, onContentChange))
             console.log(`[site-content] Watching ${mountPath} (mounted)`)
           } catch (err) {
             console.warn(`[site-content] Could not watch mounted directory ${mountPath}:`, err.message)
@@ -992,33 +1045,28 @@ export function siteContentPlugin(options = {}) {
         // Watch layout directory (resolved from site.yml layoutDir or default)
         if (existsSync(resolvedLayoutPath)) {
           try {
-            watchers.push(watch(resolvedLayoutPath, { recursive: true }, scheduleRebuild))
+            watchers.push(watch(resolvedLayoutPath, { recursive: true }, onContentChange))
             console.log(`[site-content] Watching ${resolvedLayoutPath}`)
           } catch (err) {
             console.warn('[site-content] Could not watch layout directory:', err.message)
           }
         }
 
-        // Watch site.yml
+        // Watch the site root — `site.yml`, `queries.yml`, `records.yml`, `theme.yml`,
+        // `head.html` — as ONE directory rather than a watch per file: a file watch
+        // cannot be set on a file created after the server started (a first
+        // `records.yml`), and an editor that saves by replacing a file ends its watch.
+        // Not recursive, so what the build writes below the root (`public/data/`) is
+        // not seen here. What each change redoes is `siteRootChange`.
         try {
-          watchers.push(watch(siteYmlPath, scheduleRebuild))
+          watchers.push(watch(resolvedSitePath, (eventType, filename) => {
+            const change = siteRootChange(filename)
+            if (change === 'queries') scheduleRebuild(true)
+            else if (change === 'records') scheduleRecordRebuild()
+            else if (change === 'content') scheduleRebuild(false)
+          }))
         } catch (err) {
-          // site.yml may not exist, that's ok
-        }
-
-        // Watch theme.yml
-        try {
-          watchers.push(watch(themeYmlPath, scheduleRebuild))
-        } catch (err) {
-          // theme.yml may not exist, that's ok
-        }
-
-        // Watch head.html
-        const headHtmlPath = resolve(resolvedSitePath, 'head.html')
-        try {
-          watchers.push(watch(headHtmlPath, scheduleRebuild))
-        } catch {
-          // head.html may not exist, that's ok
+          console.warn('[site-content] Could not watch the site root:', err.message)
         }
 
         // ⭐ WATCH THE POOL, NOT A DIRECTORY PER QUERY. This used to resolve

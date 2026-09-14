@@ -29,7 +29,7 @@ const POSTS = ['a', 'b', 'c', 'd', 'e'].map((slug) => ({ slug, $name: slug, titl
 // A delivered record carries `$route` — the page that shows it, filled at render time on
 // every lane, the prerender's included (2026-09-14); the build bakes none into the file.
 const LINKED = POSTS.map((post) => ({ ...post, $route: `/blog/${post.slug}` }))
-const ref = (extra = {}) => ({ query: 'posts', path: '/data/posts.json', as: 'posts', prerender: true, merge: false, ...extra })
+const ref = (extra = {}) => ({ query: 'posts', path: '/data/posts.json', as: 'posts', prerender: true, ...extra })
 const QUERIES = { posts: { schema: '@/post' } }
 const noop = () => {}
 // The sections' component: it declares the keys these tests read — a section receives only

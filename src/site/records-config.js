@@ -48,6 +48,7 @@ import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { compareByNumericPrefix } from '../utils/numeric-prefix.js'
 
 export const RECORDS_YML_RELPATH = 'records.yml'
@@ -114,7 +115,7 @@ export async function readRecordsConfig(siteRoot) {
 
   let doc
   try {
-    doc = yaml.load(await readFile(file, 'utf8'))
+    doc = yaml.load(await readFile(file, 'utf8'), YAML_OPTIONS)
   } catch (err) {
     return { state: FOLDER_MISSING, entries: [], error: `${RECORDS_YML_RELPATH}: ${err.message}` }
   }
@@ -127,7 +128,7 @@ export async function readRecordsConfig(siteRoot) {
       state: FOLDER_MISSING,
       entries: [],
       error:
-        `${RECORDS_YML_RELPATH} must be a LIST of what is in the folder, not a mapping. ` +
+        `${RECORDS_YML_RELPATH} must be a LIST of what is in the folder, not ${typeof doc === 'object' ? 'a mapping' : 'a single value'}. ` +
         `The common case is three lines:\n  - person/*.md\n  - publication/*.md`,
     }
   }

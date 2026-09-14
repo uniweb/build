@@ -27,6 +27,9 @@
 //   declaration: detailPage, filter, limit, merge, prerender, query, schema,
 //   sort, transform, where.
 //
+// (That list is the one recognized on that date. `filter`, `schema`, `transform`
+// and `merge` have been retired since.)
+//
 // ⭐ The round trip has to invert the resolution, not copy it. `/data/<name>.json`
 // is a materialization of a query, never its definition — so it is precisely the
 // thing an authored file should not contain.
@@ -36,6 +39,11 @@
 // would make the round trip lossy in a way nothing reports. `path` and `url` beside
 // a `query` are recoverable from the query itself; anything else survives and the
 // validator's warning stays the honest signal.
+//
+// ⛔ THE ONE EXCEPTION IS A RETIRED KEY THE BUILD REFUSES. `merge` (retired
+// 2026-09-14) rode every section's fetch on the wire as `merge: false` — the parse
+// emitted it as a default — so a site synced before then holds it in store. Written
+// back, it would stop the next build; so it is dropped, whatever its value.
 
 /** Which shape a declaration is — the same order `data-fetcher` uses. */
 export function fetchShapeOf(fetch) {
@@ -50,20 +58,23 @@ const DERIVED_BY_SHAPE = {
   source: []
 }
 
+/** Retired keys a store may still hold, which the build refuses — dropped from every shape. */
+const RETIRED_KEYS = ['merge']
+
 /**
  * The declaration as an author would have written it — the wire's resolved form
- * minus what the build derived.
+ * minus what the build derived, and minus a retired key the build would refuse.
  *
  * @param {object} fetch a `fetch:` declaration off the sync wire
  * @returns {object} the same declaration, safe to write into authored config
  */
 export function authorableFetch(fetch) {
   const shape = fetchShapeOf(fetch)
-  const derived = DERIVED_BY_SHAPE[shape]
-  if (!derived || derived.length === 0) return fetch
+  if (!shape) return fetch
+  const drop = [...DERIVED_BY_SHAPE[shape], ...RETIRED_KEYS]
   const out = {}
   for (const [k, v] of Object.entries(fetch)) {
-    if (derived.includes(k)) continue
+    if (drop.includes(k)) continue
     out[k] = v
   }
   return out
@@ -86,8 +97,9 @@ export const DECLARATION_KEYS = Object.freeze(['query', 'fetch', 'data'])
 /**
  * The query names a declaration consists of, when that is ALL it says — what
  * `query:` can express. Keys the build derives or defaults beside a query (`path`,
- * `url`, `as` equal to the name, `prerender: true`, `merge: false`) say nothing an
- * author wrote; any other key makes it a `fetch:`.
+ * `url`, `as` equal to the name, `prerender: true`) say nothing an author wrote, and
+ * a retired `merge` of any value is not written back at all; any other key makes it a
+ * `fetch:`.
  *
  * @param {object|object[]} fetch - a declaration (or a list) off the wire
  * @returns {string|string[]|null} the name(s), or null when `query:` cannot say it
@@ -101,7 +113,7 @@ export function queryNamesOf(fetch) {
       if (key === 'query' || key === 'path' || key === 'url') continue
       if (key === 'as' && value === one.query) continue
       if (key === 'prerender' && value === true) continue
-      if (key === 'merge' && value === false) continue
+      if (RETIRED_KEYS.includes(key)) continue
       return null
     }
     return one.query

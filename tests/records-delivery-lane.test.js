@@ -17,10 +17,11 @@
 // placements — from `resolveFolder`, which was correct all along. Nothing
 // crossed from there into what the build actually delivers. A unit that is right
 // proves nothing about a consumer that never calls it.
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { processQueries } from '../src/site/query-processor.js'
+import { buildRecordEntities } from '../src/uwx/records.js'
 import { applyScope } from '@uniweb/core'
 
 let ROOT
@@ -117,6 +118,39 @@ describe('⛔ records.yml decides what is PUBLISHED here, not only what syncs', 
     const { pubs } = await deliver()
     expect(pubs).toEqual([])
   })
+
+  // ⛔ A MALFORMED records.yml PUBLISHED EVERYTHING. It read as `missing` — "not managing
+  // publication" — so every entity in the pool shipped, drafts included, with one
+  // warning on stderr, while the sync lane refused the same file. It stops the build now.
+  describe('a malformed records.yml stops the build, as it stops a sync', () => {
+    beforeEach(() => {
+      w('entities/publication/published.md', entity('Published'))
+      w('entities/publication/secret-draft.md', entity('Draft'))
+    })
+
+    it('invalid YAML — naming the file and the problem', async () => {
+      w('records.yml', '- publication/published.md\n  bad: [unclosed\n')
+      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml: .*\n[\s\S]*nothing in entities\/ is published until it is fixed/)
+      await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\.yml/)
+    })
+
+    it('a mapping instead of a list', async () => {
+      w('records.yml', 'publication:\n  - published.md\n')
+      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml must be a LIST of what is in the folder, not a mapping/)
+      await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\.yml must be a LIST/)
+    })
+
+    it('a single value instead of a list, said as such', async () => {
+      w('records.yml', 'publication/published.md\n')
+      await expect(deliver()).rejects.toThrow(/records\.yml must be a LIST of what is in the folder, not a single value/)
+    })
+
+    it('CONTROL — the same entry as a list publishes it, and only it', async () => {
+      w('records.yml', '- publication/published.md\n')
+      const { pubs } = await deliver()
+      expect(pubs.map((r) => r.slug)).toEqual(['published'])
+    })
+  })
 })
 
 // ⚠️ The tersest thing an author can write in `queries.yml` is a bare key —
@@ -162,5 +196,95 @@ describe('record assets are keyed by the record, not the query', () => {
     expect(existsSync(join(ROOT, 'public/records/article/pic.png'))).toBe(true)
     expect(existsSync(join(ROOT, 'public/collections/recent'))).toBe(false)
     expect(existsSync(join(ROOT, 'public/collections/all'))).toBe(false)
+  })
+})
+
+// ⭐ A MARKDOWN RECORD'S FRONTMATTER IS DATA, like a YAML or JSON record's fields —
+// so a co-located path in it is copied and rewritten the same way. It was neither:
+// `image: ./cover.jpg` reached the compiled record as `./cover.jpg`, a path relative to
+// a file no visitor can see, while the same line in a `.yml` record was published.
+describe('a markdown record\'s frontmatter paths are treated as a YAML record\'s fields', () => {
+  it('copies and rewrites a co-located frontmatter path, nested ones included', async () => {
+    w('entities/article/hello.md', '---\ntitle: Hello\nimage: ./cover.jpg\ngallery:\n  - ./img/one.png\n---\n\nBody.\n')
+    writeFileSync(join(ROOT, 'entities/article/cover.jpg'), 'JPG')
+    w('entities/article/img/one.png', 'PNG')
+
+    const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/docs/')
+    expect(articles[0].image).toBe('/docs/records/article/cover.jpg')
+    expect(articles[0].gallery).toEqual(['/docs/records/article/img/one.png'])
+    expect(existsSync(join(ROOT, 'public/records/article/cover.jpg'))).toBe(true)
+    expect(existsSync(join(ROOT, 'public/records/article/img/one.png'))).toBe(true)
+  })
+
+  it('CONTROL — a `.yml` record\'s field gets the same URL for the same layout', async () => {
+    w('entities/article/hello.yml', 'title: Hello\nimage: ./cover.jpg\n')
+    writeFileSync(join(ROOT, 'entities/article/cover.jpg'), 'JPG')
+    const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/docs/')
+    expect(articles[0].image).toBe('/docs/records/article/cover.jpg')
+  })
+
+  it('the body\'s first image still stands in when the frontmatter names none', async () => {
+    w('entities/article/hello.md', '---\ntitle: Hello\n---\n\n![pic](./pic.png)\n')
+    writeFileSync(join(ROOT, 'entities/article/pic.png'), 'PNG')
+    const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
+    expect(articles[0].image).toBe('/records/article/pic.png')
+  })
+})
+
+// ⛔ TWO ASSETS WITH ONE FILENAME OVERWROTE EACH OTHER. A co-located asset was copied to
+// `public/records/<schema dirs>/<basename>`, keyed by its basename alone, so `./a/pic.png`
+// and `./b/pic.png` under one schema folder became one file — the last one copied — at
+// one URL, and a record showed another record's picture.
+describe('a record asset keeps its path under the entities root', () => {
+  const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
+
+  it('two files named alike, in two folders, stay two files at two URLs', async () => {
+    w('entities/article/a.md', '---\ntitle: A\n---\n\n![a](./a/pic.png)\n')
+    w('entities/article/b.md', '---\ntitle: B\n---\n\n![b](./b/pic.png)\n')
+    w('entities/article/a/pic.png', 'PIC-A')
+    w('entities/article/b/pic.png', 'PIC-B')
+
+    const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
+    const bySlug = Object.fromEntries(articles.map((r) => [r.slug, r.image]))
+    expect(bySlug).toEqual({ a: '/records/article/a/pic.png', b: '/records/article/b/pic.png' })
+    expect(read('public/records/article/a/pic.png')).toBe('PIC-A')
+    expect(read('public/records/article/b/pic.png')).toBe('PIC-B')
+  })
+
+  it('a file beside its record keeps today\'s URL; one outside the schema folder, inside entities/, keeps its path', async () => {
+    w('entities/article/a.md', '---\ntitle: A\nlogo: ../shared/logo.svg\n---\n\n![pic](./pic.png)\n')
+    w('entities/article/pic.png', 'PIC')
+    w('entities/shared/logo.svg', '<svg/>')
+
+    const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
+    expect(articles[0].image).toBe('/records/article/pic.png')
+    expect(articles[0].logo).toBe('/records/shared/logo.svg')
+    expect(read('public/records/shared/logo.svg')).toBe('<svg/>')
+  })
+
+  it('in a YAML record\'s fields, by the same rule', async () => {
+    w('entities/person/team.yml', '- slug: ada\n  photo: ./img/ada.png\n- slug: lin\n  photo: ./other/ada.png\n')
+    w('entities/person/img/ada.png', 'ADA')
+    w('entities/person/other/ada.png', 'LIN')
+    const { people } = await processQueries(ROOT, { people: { name: 'people', schema: '@/person' } }, undefined, '/')
+    expect(people.map((p) => p.photo)).toEqual(['/records/person/img/ada.png', '/records/person/other/ada.png'])
+    expect(read('public/records/person/other/ada.png')).toBe('LIN')
+  })
+
+  it('a file outside the entities root gets a stable name of its own, distinct per file', async () => {
+    w('entities/article/a.md', '---\ntitle: A\nlogo: ../../assets/logo.svg\nother: ../../brand/logo.svg\n---\n')
+    w('assets/logo.svg', 'ASSETS')
+    w('brand/logo.svg', 'BRAND')
+    const compile = () => processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
+
+    const [first] = (await compile()).articles
+    expect(first.logo).toMatch(/^\/records\/_external\/[0-9a-f]{8}-logo\.svg$/)
+    expect(first.other).toMatch(/^\/records\/_external\/[0-9a-f]{8}-logo\.svg$/)
+    expect(first.logo).not.toBe(first.other)
+    expect(read(`public${first.logo}`)).toBe('ASSETS')
+    expect(read(`public${first.other}`)).toBe('BRAND')
+    // deterministic — the same file gets the same URL on the next build
+    const [second] = (await compile()).articles
+    expect(second.logo).toBe(first.logo)
   })
 })

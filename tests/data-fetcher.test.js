@@ -1,7 +1,6 @@
 import {
   parseFetchConfig,
   executeFetch,
-  stripBuildOnlyFetchKeys,
   mergeDataIntoContent,
   executeMultipleFetches,
   applySort,
@@ -25,7 +24,7 @@ describe('parseFetchConfig — a binding names a query (ruled 2026-09-13)', () =
       // duplicate until 2026-09-02; the duplicate is gone and one name is the
       // point of the rename.
       expect(parseFetchConfig('team')).toEqual(parseFetchConfig({ query: 'team' }))
-      expect(parseFetchConfig('team')).toMatchObject({ query: 'team', path: queryDataUrl('team'), as: 'team', merge: false })
+      expect(parseFetchConfig('team')).toMatchObject({ query: 'team', path: queryDataUrl('team'), as: 'team' })
     })
 
     it('and in a list, one binding per name', () => {
@@ -45,12 +44,11 @@ describe('parseFetchConfig — a binding names a query (ruled 2026-09-13)', () =
 
   describe('an object binding', () => {
     it('carries its adaptations and the compiled address derived from the query', () => {
-      expect(parseFetchConfig({ query: 'articles', as: 'posts', where: { a: 1 }, sort: 'date desc', limit: 5, merge: true })).toEqual({
+      expect(parseFetchConfig({ query: 'articles', as: 'posts', where: { a: 1 }, sort: 'date desc', limit: 5 })).toEqual({
         query: 'articles',
         path: queryDataUrl('articles'),
         as: 'posts',
         prerender: undefined,
-        merge: true,
         where: { a: 1 },
         sort: 'date desc',
         limit: 5,
@@ -84,6 +82,12 @@ describe('parseFetchConfig — a binding names a query (ruled 2026-09-13)', () =
 
     it('⛔ `detail:` is retired, naming `current:` and `record:`', () => {
       expect(() => parseFetchConfig({ query: 'team', detail: 'rest' }, 'x.md')).toThrow(/`detail:` is retired\. .*current:.*record: \{ url: … \}/)
+    })
+
+    it('⛔ `merge:` is retired, whatever its value (2026-09-14)', () => {
+      for (const merge of [true, false]) {
+        expect(() => parseFetchConfig({ query: 'team', merge }, 'x.md')).toThrow(/x\.md: `merge:` is retired — a fetch fills the key it names/)
+      }
     })
 
     it('returns null for non-object, non-string input', () => {
@@ -151,30 +155,30 @@ describe('mergeDataIntoContent', () => {
     expect(mergeDataIntoContent(content, [3, 4], null)).toBe(content)
   })
 
-  describe('replace mode (default)', () => {
-    it('replaces data under schema key', () => {
+  describe('it replaces what the key held', () => {
+    it('replaces data under the key', () => {
       const content = { data: { team: [{ name: 'Local' }] } }
       const fetched = [{ name: 'Remote' }]
 
-      const result = mergeDataIntoContent(content, fetched, 'team', false)
+      const result = mergeDataIntoContent(content, fetched, 'team')
 
       expect(result.data.team).toEqual([{ name: 'Remote' }])
     })
 
-    it('creates new schema key if not exists', () => {
+    it('creates the key if it does not exist', () => {
       const content = { data: {} }
       const fetched = [{ name: 'New' }]
 
-      const result = mergeDataIntoContent(content, fetched, 'team', false)
+      const result = mergeDataIntoContent(content, fetched, 'team')
 
       expect(result.data.team).toEqual([{ name: 'New' }])
     })
 
-    it('creates data object if not exists', () => {
+    it('creates the data object if it does not exist', () => {
       const content = {}
       const fetched = [{ name: 'New' }]
 
-      const result = mergeDataIntoContent(content, fetched, 'team', false)
+      const result = mergeDataIntoContent(content, fetched, 'team')
 
       expect(result.data.team).toEqual([{ name: 'New' }])
     })
@@ -183,7 +187,7 @@ describe('mergeDataIntoContent', () => {
       const content = { data: { team: [1], config: { a: 1 } } }
       const fetched = [2]
 
-      const result = mergeDataIntoContent(content, fetched, 'team', false)
+      const result = mergeDataIntoContent(content, fetched, 'team')
 
       expect(result.data.team).toEqual([2])
       expect(result.data.config).toEqual({ a: 1 })
@@ -193,51 +197,19 @@ describe('mergeDataIntoContent', () => {
       const content = { data: { team: [1] } }
       const fetched = [2]
 
-      const result = mergeDataIntoContent(content, fetched, 'team', false)
+      const result = mergeDataIntoContent(content, fetched, 'team')
 
       expect(content.data.team).toEqual([1])
       expect(result.data.team).toEqual([2])
     })
-  })
 
-  describe('merge mode', () => {
-    it('concatenates arrays', () => {
-      const content = { data: { team: [{ name: 'Local' }] } }
-      const fetched = [{ name: 'Remote' }]
-
-      const result = mergeDataIntoContent(content, fetched, 'team', true)
-
-      expect(result.data.team).toEqual([
-        { name: 'Local' },
-        { name: 'Remote' },
-      ])
-    })
-
-    it('shallow merges objects', () => {
-      const content = { data: { config: { a: 1, b: 2 } } }
-      const fetched = { b: 3, c: 4 }
-
-      const result = mergeDataIntoContent(content, fetched, 'config', true)
-
-      expect(result.data.config).toEqual({ a: 1, b: 3, c: 4 })
-    })
-
-    it('uses fetched when types differ (array vs object)', () => {
-      const content = { data: { team: [1, 2] } }
-      const fetched = { name: 'object' }
-
-      const result = mergeDataIntoContent(content, fetched, 'team', true)
-
-      expect(result.data.team).toEqual({ name: 'object' })
-    })
-
-    it('handles merge when existing data is missing', () => {
-      const content = { data: {} }
-      const fetched = [{ name: 'New' }]
-
-      const result = mergeDataIntoContent(content, fetched, 'team', true)
-
-      expect(result.data.team).toEqual([{ name: 'New' }])
+    // ⛔ The retired `merge:` fetch key reached here as a fourth argument, which
+    // concatenated arrays and spread objects. A caller still passing it gets a replace.
+    it('⛔ a leftover fourth `merge` argument is not read — arrays and objects are replaced, never combined', () => {
+      expect(mergeDataIntoContent({ data: { team: [{ name: 'Local' }] } }, [{ name: 'Remote' }], 'team', true).data.team)
+        .toEqual([{ name: 'Remote' }])
+      expect(mergeDataIntoContent({ data: { config: { a: 1, b: 2 } } }, { b: 3, c: 4 }, 'config', true).data.config)
+        .toEqual({ b: 3, c: 4 })
     })
   })
 })
@@ -411,7 +383,7 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     // The control. Without it, a warn-on-everything bug would pass every
     // assertion above while making the build unusable.
     parseFetchConfig({ query: 'articles', where: { a: 1 }, sort: 'date desc', limit: 3 })
-    parseFetchConfig({ query: 'x', as: 'y', merge: true, prerender: false, detailPage: 'page:abc' })
+    parseFetchConfig({ query: 'x', as: 'y', prerender: false, detailPage: 'page:abc' })
     parseFetchConfig({ query: 'articles', current: 'exclude', limit: 3 }, 'pages/a/[slug]/related.md', { level: 'section' })
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
@@ -505,68 +477,5 @@ describe('parseFetchConfig — `refine` and its alias `inherit` are retired for 
       /pages\/a\/page\.yml: `current:` is read on a section's binding, not on a page's/
     )
     expect(() => parseFetchConfig({ query: 'a', current: 'only' }, 'site.yml', { level: 'site' })).toThrow(/not on a site's/)
-  })
-})
-
-describe('stripBuildOnlyFetchKeys — `merge` never reaches a shipped payload', () => {
-  const content = {
-    config: { name: 'T', fetch: { path: '/data/site.json', as: 'site', merge: true } },
-    pages: [
-      {
-        route: '/blog',
-        fetch: [{ query: 'a', path: '/data/a.json', as: 'a', merge: false }, { query: 'b', path: '/data/b.json', as: 'b', prerender: true, merge: true }],
-        sections: [
-          { id: 's1', fetch: { path: '/data/s.json', as: 's', merge: true }, subsections: [
-            { id: 's1a', fetch: { url: 'https://x/y', as: 'y', merge: true } },
-          ] },
-          { id: 's2' },
-        ],
-      },
-    ],
-    layouts: { default: { header: { sections: [{ id: 'h', fetch: { path: '/data/h.json', as: 'h', merge: true } }] } } },
-    notFound: { route: '/404', sections: [{ id: 'n', fetch: { path: '/data/n.json', as: 'n', merge: false } }] },
-    fetchedData: [{ config: { path: '/data/a.json', as: 'a', merge: false }, data: [] }],
-  }
-
-  const allFetches = (c) => {
-    const out = []
-    const take = (f) => { if (!f) return; for (const one of Array.isArray(f) ? f : [f]) out.push(one) }
-    const walk = (sections) => { for (const s of sections || []) { take(s.fetch); walk(s.subsections) } }
-    take(c.config?.fetch)
-    for (const p of c.pages || []) { take(p.fetch); walk(p.sections) }
-    for (const areas of Object.values(c.layouts || {})) for (const page of Object.values(areas)) walk(page.sections)
-    walk(c.notFound?.sections)
-    for (const e of c.fetchedData || []) take(e.config)
-    return out
-  }
-
-  it('removes `merge` from every fetch declaration the payload carries', () => {
-    const out = stripBuildOnlyFetchKeys(content)
-    const fetches = allFetches(out)
-    expect(fetches.length).toBe(8)
-    expect(fetches.every((f) => !('merge' in f))).toBe(true)
-  })
-
-  it('keeps every other key, and the runtime-read ones in particular', () => {
-    const out = stripBuildOnlyFetchKeys(content)
-    expect(out.pages[0].fetch[1]).toEqual({ query: 'b', path: '/data/b.json', as: 'b', prerender: true })
-    expect(out.config.fetch).toEqual({ path: '/data/site.json', as: 'site' })
-  })
-
-  it('does not mutate the input — the build still reads `merge` from its own copy', () => {
-    const before = JSON.stringify(content)
-    stripBuildOnlyFetchKeys(content)
-    expect(JSON.stringify(content)).toBe(before)
-  })
-
-  it('shares untouched objects rather than cloning the site', () => {
-    const out = stripBuildOnlyFetchKeys(content)
-    expect(out.pages[0].sections[1]).toBe(content.pages[0].sections[1])
-  })
-
-  it('is a no-op shape-wise on a payload with no fetch at all', () => {
-    const plain = { config: { name: 'T' }, pages: [{ route: '/', sections: [] }] }
-    expect(stripBuildOnlyFetchKeys(plain)).toEqual(plain)
-    expect(stripBuildOnlyFetchKeys(null)).toBeNull()
   })
 })

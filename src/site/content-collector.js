@@ -13,8 +13,9 @@
  * - preset: Preset configuration name
  * - input: Input field mapping
  * - props: Additional component props (merged with other params)
- * - fetch: Data fetching configuration (path, url, schema, prerender, merge, transform)
-  *
+ * - fetch: The section's binding — names a query (query, as, where, sort, limit, current,
+ *   prerender, detailPage); `query:` is its shorthand
+ *
  * Uses @uniweb/content-reader for markdown → ProseMirror conversion
  * when available, otherwise uses a simplified parser.
  *
@@ -29,6 +30,7 @@ import { readLayoutFolder, DEFAULT_LAYOUT } from './layout-folder.js'
 import { join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
@@ -135,6 +137,11 @@ function extractRouteParam(folderName) {
  *     never match. A folder that holds something other than a page is named
  *     with a leading `_`, which the walk skips.
  *
+ * ⛔ And a bracketed name that is no parametric marker (2026-09-14) — `[...slug]`,
+ * `[...rest]`, `[...]`, `[my-id]`. It matched neither `[...path]` nor `[name]`, so it
+ * built a STATIC page whose route kept the brackets (`/docs/[...slug]`), and the sync
+ * push carried it as a parametric page named `...slug` — two answers, neither meant.
+ *
  * @param {string} name - the folder's name
  * @param {string} parentRoute - the route of the folder it sits in
  */
@@ -144,6 +151,13 @@ function assertRouteFolder(name, parentRoute) {
     throw new Error(
       `[uniweb] pages: a folder cannot be named \`${name}\` — \`:${name.slice(1, -1)}\` is a route ` +
         `variable every parametric page already has.${hint}`
+    )
+  }
+  if (name.startsWith('[') && name.endsWith(']') && !isDynamicRoute(name)) {
+    throw new Error(
+      name.startsWith('[...')
+        ? `[uniweb] pages: a folder cannot be named \`${name}\` — capturing the rest of the URL is spelled \`[...path]\`.`
+        : `[uniweb] pages: a folder cannot be named \`${name}\` — a parametric folder's name is letters, digits and \`_\`, e.g. \`[slug]\`.`
     )
   }
   if (typeof parentRoute === 'string' && /\/:[A-Za-z0-9_-]+\*(\/|$)/.test(parentRoute)) {
@@ -421,7 +435,7 @@ let yamlFailures = []
  */
 function parseYaml(yamlString, source = '<unknown>') {
   try {
-    return yaml.load(yamlString) || {}
+    return yaml.load(yamlString, YAML_OPTIONS) || {}
   } catch (err) {
     yamlFailures.push({ source, message: err.message })
     console.warn(`[content-collector] YAML parse error in ${source}: ${err.message}`)

@@ -25,7 +25,7 @@ import {
   evaluateQuery,
 } from '@uniweb/core'
 import { routePatternToRegex } from '@uniweb/core/route-match'
-import { executeFetch, mergeDataIntoContent, toFetchList, stripBuildOnlyFetchKeys } from './site/data-fetcher.js'
+import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
@@ -480,7 +480,7 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
 
 /**
  * Process fetch configs for sections (and subsections recursively)
- * Section-level fetches merge data into parsedContent.data (not cascaded).
+ * Section-level fetches fill parsedContent.data, each under its own key (not cascaded).
  *
  * ⭐ RESOLVED BY THE RUNTIME'S RULE, as page fetches are (`resolve`). ⛔ Until
  * 2026-09-13 a section's fetch was executed as authored: a non-default locale baked
@@ -500,7 +500,7 @@ async function processSectionFetches(sections, { resolve, read, onProgress, reco
   if (!sections || !Array.isArray(sections)) return
 
   for (const section of sections) {
-    // Execute every section-level fetch. Each merges under its own key, so
+    // Execute every section-level fetch. Each lands under its own key, so
     // several accumulate into one `parsedContent.data` — the same keyed map the
     // runtime's EntityStore builds. ⛔ The FIRST binding of a key, as there: each
     // replaced the last until 2026-09-13, so the build delivered the last binding
@@ -521,8 +521,7 @@ async function processSectionFetches(sections, { resolve, read, onProgress, reco
         section.parsedContent = mergeDataIntoContent(
           section.parsedContent || {},
           got.view,
-          sectionFetch.as,
-          sectionFetch.merge
+          sectionFetch.as
         )
       }
     }
@@ -936,11 +935,6 @@ export async function prerenderSite(siteDir, options = {}) {
     // Store fetchedData on siteContent for runtime DataStore pre-population
     siteContent.fetchedData = fetchedData
 
-    // The build has consumed every build-only fetch key by now (`merge`, read
-    // by the section fetches above); what ships in `__SITE_CONTENT__` is the
-    // runtime's payload and carries none of them.
-    siteContent = stripBuildOnlyFetchKeys(siteContent)
-
     // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
     if (siteContent.pages?.some(p => p.isDynamic)) {
       onProgress('Expanding dynamic routes...')
@@ -956,9 +950,6 @@ export async function prerenderSite(siteDir, options = {}) {
       // calls, matched against the parametric page it came from), then read by
       // this build's executor. So the page renders complete, and the SPA hydrates
       // the very keys it asks for.
-      // ⛔ Appended to `siteContent.fetchedData` — the copy `stripBuildOnlyFetchKeys`
-      // made above — never to the raw `fetchedData`, whose configs still carry the
-      // build-only `merge` (it leaked into shipped pages that way, measured).
       const baked = await readRouteBoundViews({
         templates,
         pages: siteContent.pages,

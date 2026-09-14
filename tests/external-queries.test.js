@@ -9,14 +9,16 @@
  * `transform`.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
 import { resolveFetchConfigs } from '@uniweb/core'
 import { resolveQueriesConfig, refuseQueryDeclaration } from '../src/site/queries-config.js'
 import { processQueries, writeQueryFiles } from '../src/site/query-processor.js'
 import { executeFetch, parseFetchConfig } from '../src/site/data-fetcher.js'
-import { siteProjectToDocument } from '../src/uwx/index.js'
+import { collectSiteContent } from '../src/site/content-collector.js'
+import { siteProjectToDocument, declarationsToQueriesYml } from '../src/uwx/index.js'
 
 const refuse = (decl) => () => refuseQueryDeclaration({ name: 'items', ...decl })
 
@@ -48,6 +50,12 @@ describe('what an external query may declare', () => {
     expect(refuse({ url: 'https://api.test/items', detailUrl: '/api/{slug}' })).toThrow(/`detailUrl:` is retired/)
   })
 
+  it('⛔ `detail:` is retired on a query too — an API\'s single-record request is `record:`', () => {
+    // It was accepted in silence and carried into `config.queries`, where nothing read it.
+    expect(refuse({ schema: '@/item', detail: '/data/items/{slug}.json' })).toThrow(/query "items": `detail:` is retired\. .*`record: \{ url: … \}` on an external query — one with `url:`/)
+    expect(refuse({ url: 'https://api.test/items', detail: 'rest' })).toThrow(/`detail:` is retired/)
+  })
+
   it('⛔ an external source\'s keys on a query with no `url:`', () => {
     for (const key of ['method', 'body', 'transform', 'record']) {
       expect(refuse({ schema: '@/item', [key]: 'x' })).toThrow(new RegExp(`\`${key}:\` belongs on an external query — one with \`url:\``))
@@ -59,6 +67,24 @@ describe('what an external query may declare', () => {
     expect(refuse({ url: 'https://api.test/items', record: 'https://api.test/items/{slug}' })).toThrow(/`record:` is the request for one record/)
     expect(refuse({ url: 'https://api.test/items', method: 'PUT' })).toThrow(/`method: "PUT"` — an external query is read with `GET` or `POST`/)
     expect(refuse({ url: '' })).toThrow(/`url:` is the external source's address/)
+  })
+
+  it('`detail:` in queries.yml stops the build and the sync push — so `config.queries` never carries it — and a pull does not write a stored one back', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'external-queries-detail-'))
+    try {
+      writeFileSync(join(root, 'site.yml'), 'name: T\nfoundation: "@acme/base@1.0.0"\n')
+      writeFileSync(join(root, 'queries.yml'), "items:\n  schema: '@/item'\n  detail: rest\n")
+      await expect(resolveQueriesConfig(root)).rejects.toThrow(/query "items": `detail:` is retired/)
+      await expect(collectSiteContent(root, { strict: true })).rejects.toThrow(/`detail:` is retired/)
+      await expect(siteProjectToDocument(root)).rejects.toThrow(/`detail:` is retired/)
+
+      rmSync(join(root, 'queries.yml'))
+      declarationsToQueriesYml({ document: { queries: [{ name: 'items', schema: '@/other', detail: 'rest', limit: 3 }] }, siteRoot: root })
+      const written = yaml.load(readFileSync(join(root, 'queries.yml'), 'utf8'))
+      expect(written.items).toEqual({ schema: '@/other', limit: 3 })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('the build and the sync push both refuse, through the one resolution', async () => {

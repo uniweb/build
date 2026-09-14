@@ -86,6 +86,34 @@ describe('the collector', () => {
     await expect(collect()).rejects.toThrow(/sits inside a `\[\.\.\.path\]` folder/)
   })
 
+  // ⛔ A bracket name that is no marker built a STATIC page whose route held the brackets
+  // (`/docs/[...slug]`), which no URL an author means would reach.
+  it('refuses a `[...name]` folder other than `[...path]`, naming `[...path]`', async () => {
+    for (const name of ['[...slug]', '[...rest]', '[...]']) {
+      rmSync(join(ROOT, 'pages/docs'), { recursive: true, force: true })
+      w(`pages/docs/${name}/doc.md`, '---\ntype: Doc\n---\n')
+      await expect(collect()).rejects.toThrow(
+        new RegExp(`a folder cannot be named \`${name.replace(/[.[\]]/g, '\\$&')}\` — capturing the rest of the URL is spelled \`\\[\\.\\.\\.path\\]\`\\.`)
+      )
+    }
+  })
+
+  it('refuses any other bracket name that is no parameter — letters, digits and `_`', async () => {
+    for (const name of ['[my-id]', '[]', '[a b]']) {
+      rmSync(join(ROOT, 'pages/things'), { recursive: true, force: true })
+      w(`pages/things/${name}/thing.md`, '---\ntype: Thing\n---\n')
+      await expect(collect()).rejects.toThrow(/a parametric folder's name is letters, digits and `_`, e\.g\. `\[slug\]`\./)
+    }
+  })
+
+  it('CONTROL — `[my_id]` and `[...path]` are parametric pages', async () => {
+    w('pages/things/[my_id]/thing.md', '---\ntype: Thing\n---\n')
+    w('pages/docs/[...path]/doc.md', '---\ntype: Doc\n---\n')
+    const content = await collect()
+    expect(content.pages.find((p) => p.route === '/things/:my_id')).toMatchObject({ isDynamic: true, paramName: 'my_id' })
+    expect(content.pages.find((p) => p.route === '/docs/:path*')).toMatchObject({ isDynamic: true })
+  })
+
   it('CONTROL — a `_`-named folder inside [...path] is not a page, and is not refused', async () => {
     w('pages/docs/[...path]/doc.md', '---\ntype: Doc\n---\n')
     w('pages/docs/[...path]/_images/readme.md', 'not a page\n')
@@ -98,6 +126,15 @@ describe('the sync walker refuses what the collector refuses', () => {
     w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
     w('pages/members/[dir]/page.yml', 'title: X\n')
     await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/cannot be named `\[dir\]`/)
+  })
+
+  it('a `[...name]` folder other than `[...path]`, and a bracket name that is no parameter', async () => {
+    w('site.yml', 'name: test-site\nfoundation: "@acme/base@1.0.0"\n')
+    w('pages/docs/[...slug]/page.yml', 'title: Doc\n')
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/cannot be named `\[\.\.\.slug\]` — capturing the rest of the URL is spelled `\[\.\.\.path\]`/)
+    rmSync(join(ROOT, 'pages/docs'), { recursive: true, force: true })
+    w('pages/members/[my-id]/page.yml', 'title: X\n')
+    await expect(siteProjectToDocument(ROOT)).rejects.toThrow(/cannot be named `\[my-id\]` — a parametric folder's name is letters, digits and `_`/)
   })
 
   it('a folder inside [...path]', async () => {
