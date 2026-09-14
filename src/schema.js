@@ -12,6 +12,7 @@
 
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -40,11 +41,20 @@ const SECTIONS_PATH = 'sections'
 export const LAYOUTS_PATH = 'layouts'
 
 /**
- * Load a meta.js file via dynamic import
+ * Load a meta.js file via dynamic import — as it is on disk now.
+ *
+ * ⛔ Node caches an ES module by its URL for the life of the process, so a dev server
+ * that regenerates the foundation entry after a `meta.js` edit re-imported the file it
+ * had started with, and the entry kept the old meta. The entry inlines that meta, and a
+ * section receives only the `data:` keys it declares (2026-09-14), so a key added in dev
+ * reached no component until the server restarted. Measured in a dev server before this
+ * fix. The URL now carries the file's content hash: an unchanged file is the cached
+ * module, an edited one is read again. A module the meta.js itself imports is still
+ * cached until restart.
  */
 async function loadMetaFile(filePath) {
-  const fileUrl = pathToFileURL(filePath).href
-  const module = await import(fileUrl)
+  const version = createHash('sha1').update(await readFile(filePath)).digest('hex').slice(0, 16)
+  const module = await import(`${pathToFileURL(filePath).href}?content=${version}`)
   return module.default
 }
 
