@@ -1,7 +1,8 @@
 /**
- * What the static build's prerender does with a binding — ruled 2026-09-13 [Diego]:
- * a binding narrows its query and picks its own count, and a count is how many a
- * list shows, never which records have a page.
+ * What the static build's prerender does with a binding — ruled 2026-09-13 and
+ * 2026-09-14 [Diego]: a query defines its set, its `limit` included, and a binding
+ * narrows that set — its count is how many a list shows, never which records have a
+ * page; the query's count is part of which records exist.
  *
  * Measured before these held, each through `executeAllFetches` → `expandDynamicPages`
  * → the runtime's own render-time store:
@@ -93,14 +94,27 @@ describe('a count is how many a list shows — never which records have a page',
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('a query\'s own limit reaches the list through the resolved binding — the compiled file is not cut', async () => {
+  it('⛔ a query\'s own limit defines its set — its list shows three, and only those three have pages (ruled 2026-09-14)', async () => {
+    // Until then no `limit` decided which records had pages, the query's included:
+    // this made six routes of a query that selects three.
     const root = site({ 'public/data/posts.json': POSTS })
     const c = content()
     c.config.queries = { posts: { schema: '@/post', limit: 3 } }
     c.pages[0].fetch = ref()
     const { routes, delivered } = await prerender(c, root)
-    expect(routes).toHaveLength(6)
+    expect(routes).toEqual(['/blog', '/blog/a', '/blog/b', '/blog/c'])
     expect(delivered('/blog').data.posts).toEqual(POSTS.slice(0, 3))
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('a list that narrows a query\'s set to fewer still leaves every record of the set its page', async () => {
+    const root = site({ 'public/data/posts.json': POSTS })
+    const c = content()
+    c.config.queries = { posts: { schema: '@/post', limit: 3 } }
+    const { routes, delivered } = await prerender(c, root)
+    expect(routes).toEqual(['/blog', '/blog/a', '/blog/b', '/blog/c'])
+    expect(delivered('/blog').data.posts).toEqual(POSTS.slice(0, 2))
+    expect(delivered('/blog/c')).toEqual({ status: 'ready', data: { posts: [POSTS[2]] } })
     rmSync(root, { recursive: true, force: true })
   })
 })
@@ -117,14 +131,17 @@ describe('a section\'s fetch is resolved by the runtime\'s rule', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('the query\'s limit and the binding\'s where both apply', async () => {
+  it('the binding\'s where narrows the query\'s set — never reaching past its limit (ruled 2026-09-14)', async () => {
+    // The set is the query's first two, a and b; the binding keeps what it holds of b, c, d.
+    // ⛔ Until then the two were merged — the where applied first, the limit after — and
+    // this baked b and c, a record the query does not select.
     const root = site({ 'public/data/posts.json': POSTS })
     const content = {
       config: { queries: { posts: { schema: '@/post', limit: 2 } } },
       pages: [{ route: '/blog', sections: [section('s', ref({ where: { slug: { in: ['b', 'c', 'd'] } } }))] }],
     }
     await executeAllFetches(content, root, noop, { locale: 'en', defaultLocale: 'en' })
-    expect(content.pages[0].sections[0].parsedContent.data.posts.map((p) => p.slug)).toEqual(['b', 'c'])
+    expect(content.pages[0].sections[0].parsedContent.data.posts.map((p) => p.slug)).toEqual(['b'])
     rmSync(root, { recursive: true, force: true })
   })
 

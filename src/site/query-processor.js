@@ -34,7 +34,8 @@
  *   merge — the loader flattens one level after collecting them.
  * - Converts markdown body to ProseMirror JSON
  * - Applies the query's fixed `where` and orders by its `sort`; its `limit` is
- *   left to the runtime, so every record the query selects compiles
+ *   left to the runtime, which makes each page's set, so every record the query's
+ *   fixed `where` selects compiles
  * - Auto-generates excerpts and extracts first images (markdown items only)
  *
  * @module @uniweb/build/site/collection-processor
@@ -742,12 +743,15 @@ async function collectItems(siteDir, config, entitiesDir, basePath, locale = nul
     items = applySort(items, config.sort, { locale })
   }
 
-  // ⛔ `limit` IS NEVER BAKED (ruled 2026-09-13 [Diego]): it is how many a list
-  // shows, and a binding may pick its own — more than the query's included — which
-  // a file cut here could not give it. Every record the query selects compiles, and
-  // gets its detail page; the runtime cuts each list (`@uniweb/core/fetch-config`,
-  // `narrowQuery`). Until then this sliced the file, so a query's `limit: 2` made the
-  // static build emit two detail pages while the records service resolved all five.
+  // ⛔ `limit` IS NEVER BAKED. A query's `limit` is part of its set (ruled 2026-09-14
+  // [Diego]), but the set is made per page: `scope` and the route-bound clauses the
+  // runtime applies first differ from page to page, and the `limit` cuts what they
+  // leave — so a file cut here would cut before them. Every record the query's fixed
+  // `where` selects compiles, in its `sort`; the runtime makes each page's set and then
+  // applies the fetch's `narrow` (`@uniweb/core`'s `evaluateQuery`), and a parametric
+  // page is expanded over the set (`prerender.js`). ⛔ Until 2026-09-13 this sliced the
+  // file — before a page's `scope` or routed clauses, which the runtime has applied
+  // since 2026-09-11, could select anything from it.
 
   return items
 }

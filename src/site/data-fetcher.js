@@ -19,7 +19,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
-import { matchWhere, sortRecords, queryDataUrl, applyScope, whereOutsideLanguage, CURRENT_MODES } from '@uniweb/core'
+import { matchWhere, sortRecords, queryDataUrl, evaluateQuery, whereOutsideLanguage, CURRENT_MODES } from '@uniweb/core'
 
 /**
  * Get a nested value from an object using dot notation
@@ -83,47 +83,25 @@ export function applyWhere(items, where) {
 }
 
 /**
- * Apply post-processing to fetched data (where, sort, limit)
+ * Apply post-processing to fetched data — a resolved config's two levels, by
+ * `@uniweb/core`'s `evaluateQuery`, the one order of work the runtime's default
+ * fetcher uses too:
  *
- * Order of operations:
- *   1. where (where-object predicate) — narrows the record set
- *   2. sort
- *   3. limit
+ *   1. the query's set — `scope` over each record's placement (`path`), `where`,
+ *      `sort`, `limit`;
+ *   2. the fetch's `narrow` of it — `where` (and `match`), `sort`, `limit`.
+ *
+ * A bad `sort:` throws here: an authoring error stops the build.
  *
  * @param {any} data - Fetched data
- * @param {object} config - Fetch config with optional where, sort, limit
+ * @param {object} config - A resolved fetch config
  * @param {object} [options]
  * @param {string|null} [options.locale] - the page's locale, which texts sort in
  * @returns {any} Processed data
  */
 export function applyPostProcessing(data, config, { locale = null } = {}) {
-  if (!data || !Array.isArray(data)) return data
-  if (!config.scope && !config.where && !config.sort && !config.limit) return data
-
-  let result = data
-
-  // `scope` first — the folder branch the rest of the query reads, over each
-  // record's placement (`path`), as the runtime's default fetcher applies it.
-  if (typeof config.scope === 'string' && config.scope) {
-    result = applyScope(result, config.scope)
-  }
-
-  // Apply where-object predicate first (new path)
-  if (config.where) {
-    result = applyWhere(result, config.where)
-  }
-
-  // Apply sort
-  if (config.sort) {
-    result = applySort(result, config.sort, { locale })
-  }
-
-  // Apply limit last
-  if (config.limit && config.limit > 0) {
-    result = result.slice(0, config.limit)
-  }
-
-  return result
+  if (!data || !Array.isArray(data) || !config) return data
+  return evaluateQuery(data, config, { locale })
 }
 
 /**
@@ -551,8 +529,10 @@ export function parseFetchConfig(fetch, context = 'fetch', { level = null } = {}
     // (`@uniweb/core/fetch-config`) — and the parser does not know which this is.
     prerender: fetch.prerender,
     merge: fetch.merge ?? false,
-    // A binding's adaptations of its query (`@uniweb/core/fetch-config`,
-    // `narrowQuery`): `where` joins the query's, `sort` and `limit` replace its.
+    // A binding's adaptations of its query, kept as authored: the resolver makes them
+    // the fetch's `narrow` of the query's set (`@uniweb/core/fetch-config`,
+    // `setAndNarrow`) — its `where` filters the set, its `sort` re-orders it, its
+    // `limit` cuts it and never reaches past it.
     where: fetch.where,
     limit: fetch.limit,
     sort: fetch.sort,

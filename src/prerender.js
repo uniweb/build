@@ -22,6 +22,7 @@ import {
   routeBinding,
   parentRouteOf,
   deriveCacheKey,
+  evaluateQuery,
 } from '@uniweb/core'
 import { routePatternToRegex } from '@uniweb/core/route-match'
 import { executeFetch, mergeDataIntoContent, toFetchList, stripBuildOnlyFetchKeys } from './site/data-fetcher.js'
@@ -131,21 +132,22 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
   const fetched = { site: new Map(), pages: new Map(), sections: new Map() }
 
   /**
-   * Read one resolved config ONCE, as two things: the records it selects, uncut
-   * (`routeSelection`), and the view it delivers — the same records cut by its
-   * `limit`. ⭐ The view is what a page renders and hydrates; the selection is what
-   * a parametric page expands over, because a `limit` is how many a list shows,
-   * never which records have a page (ruled 2026-09-13 [Diego]). ⛔ Until then the
-   * expansion read the cut list, so a query's `limit: 2` made two detail pages of
-   * five. Null when the read failed.
+   * Read one resolved config ONCE, as two things: its query's SET (`routeSelection` —
+   * the query as saved, its `limit` included), and the view it delivers — that set
+   * with the fetch's `narrow` applied (`evaluateQuery`). ⭐ The view is what a page
+   * renders and hydrates; the set is what a parametric page expands over, because a
+   * parametric page has a URL for each record of its route query's set and no other —
+   * a fetch's narrowing never decides which pages exist (ruled 2026-09-14 [Diego]).
+   *
+   * ⛔ Until 2026-09-13 the expansion read the list a `limit` cut, so a list's
+   * `limit: 2` made two detail pages of five; from then until 2026-09-14 it read the
+   * records with no `limit` at all, the query's included. Null when the read failed.
    */
   const read = async (cfg, oneFetch) => {
     const result = await executeFetch(routeSelection(cfg), optionsFor(cfg, oneFetch))
     if (!result.data || result.error) return null
     const selection = result.data
-    const view = Array.isArray(selection) && typeof cfg.limit === 'number' && cfg.limit > 0
-      ? selection.slice(0, cfg.limit)
-      : selection
+    const view = cfg.narrow ? evaluateQuery(selection, { narrow: cfg.narrow }, { locale }) : selection
     return { selection, view }
   }
 
@@ -251,8 +253,9 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
  * @param {Array} pages - Original pages array
  * @param {{ site?: Map, pages?: Map, sections?: Map }} fetched - what each level
  *   selected, by binding key (`executeAllFetches`): `site` key → data; `pages` and
- *   `sections` route → (key → data). Every record a binding selects, uncut by its
- *   `limit` — a record past a list's count still gets its page
+ *   `sections` route → (key → data). Each binding's query SET — the query as saved,
+ *   its `limit` included, without the fetch's narrowing: a record past a list's count
+ *   still gets its page, and one past the query's gets none
  * @param {function} onProgress - Progress callback
  * @param {Object} [stats] - receives `unrouted[route]`, the records with no param value
  * @param {Object} [options]
