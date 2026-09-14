@@ -136,7 +136,9 @@ export function shouldPrefetchInDev(cfg) {
  * @param {string} siteDir - Path to site directory
  */
 async function executeDevFetches(siteContent, siteDir) {
-  const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
+  // The page's locale, which a `sort` collates texts in.
+  const locale = siteContent.config?.activeLocale ?? resolveDefaultLocale(siteContent.config) ?? null
+  const fetchOptions = { siteRoot: siteDir, publicDir: 'public', locale }
   const fetchedData = []
   // Resolved the way the runtime resolves it (see prerender.js::executeAllFetches
   // for why): the SPA hydrates by the cache key of ITS resolved config.
@@ -825,7 +827,9 @@ export function siteContentPlugin(options = {}) {
 
           if (queriesConfig) {
             console.log('[site-content] Materializing queries...')
-            const byQuery = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath)
+            const byQuery = await processQueries(resolvedSitePath, queriesConfig, resolvedEntitiesDir, basePath, {
+              locale: resolveDefaultLocale(earlyContent.config) ?? null,
+            })
             await writeQueryFiles(resolvedSitePath, byQuery, queriesConfig)
           }
         } catch (err) {

@@ -93,7 +93,9 @@ export function resolveExtensionPath(url, distDir, projectRoot, base) {
  *   baker for the views a concrete parametric page binds to its route
  */
 export async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
-  const fetchOptions = { siteRoot: siteDir, publicDir: 'public' }
+  // The locale this pass renders, which a `sort` collates texts in.
+  const locale = localeInfo?.locale ?? localeInfo?.defaultLocale ?? resolveDefaultLocale(siteContent.config) ?? null
+  const fetchOptions = { siteRoot: siteDir, publicDir: 'public', locale }
   const fetchedData = [] // Collected for DataStore pre-population
 
   // For non-default locales, translated collection data lives in dist/{locale}/data/
@@ -121,7 +123,7 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
 
   // Fetch options pointing to dist/ for localized data
   const localizedFetchOptions = isNonDefaultLocale
-    ? { siteRoot: localeInfo.distDir, publicDir: '.' }
+    ? { siteRoot: localeInfo.distDir, publicDir: '.', locale }
     : fetchOptions
   const optionsFor = (cfg, oneFetch) => (cfg.path !== oneFetch.path ? localizedFetchOptions : fetchOptions)
   const entry = (cfg, data, scope) => ({ config: cfg, data, meta: { whole: cfg.whole }, _scope: scope })

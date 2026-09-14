@@ -143,7 +143,8 @@ export async function buildSiteData({
       resolvedSiteRoot,
       siteContent.config.queries,
       siteContent.config?.paths?.entities,
-      basePath
+      basePath,
+      { locale: resolveDefaultLocale(siteContent.config) ?? null }
     )
     await writeQueryFiles(resolvedSiteRoot, byQuery, siteContent.config.queries)
 

@@ -52,13 +52,17 @@ function getNestedValue(obj, path) {
  * records service refuses and the ruling dropped. A comma now THROWS here, at build
  * time, which is where an authoring error on the file lane belongs.
  *
+ * Texts are collated in `locale` — the page's (ruled 2026-09-14 [Diego]).
+ *
  * @param {Array} items - Items to sort
  * @param {string} sortExpr - Sort expression: `date`, `date desc`, `-date`
+ * @param {Object} [options]
+ * @param {string|null} [options.locale] - the page's locale
  * @returns {Array} Sorted items (new array)
  */
-export function applySort(items, sortExpr) {
+export function applySort(items, sortExpr, { locale = null } = {}) {
   if (!sortExpr || !Array.isArray(items)) return items
-  return sortRecords(items, sortExpr)
+  return sortRecords(items, sortExpr, { locale })
 }
 
 /**
@@ -88,9 +92,11 @@ export function applyWhere(items, where) {
  *
  * @param {any} data - Fetched data
  * @param {object} config - Fetch config with optional where, sort, limit
+ * @param {object} [options]
+ * @param {string|null} [options.locale] - the page's locale, which texts sort in
  * @returns {any} Processed data
  */
-export function applyPostProcessing(data, config) {
+export function applyPostProcessing(data, config, { locale = null } = {}) {
   if (!data || !Array.isArray(data)) return data
   if (!config.scope && !config.where && !config.sort && !config.limit) return data
 
@@ -109,7 +115,7 @@ export function applyPostProcessing(data, config) {
 
   // Apply sort
   if (config.sort) {
-    result = applySort(result, config.sort)
+    result = applySort(result, config.sort, { locale })
   }
 
   // Apply limit last
@@ -698,6 +704,7 @@ export function stripBuildOnlyFetchKeys(siteContent) {
  * @param {object} options - Execution options
  * @param {string} options.siteRoot - Site root directory
  * @param {string} [options.publicDir='public'] - Public directory name
+ * @param {string|null} [options.locale] - the page's locale, which a `sort` collates texts in
  * @returns {Promise<{ data: any, error?: string }>} Fetched data or error
  *
  * @example
@@ -773,7 +780,7 @@ export async function executeFetch(config, options = {}) {
     }
 
     // Apply post-processing (where, sort, limit)
-    data = applyPostProcessing(data, config)
+    data = applyPostProcessing(data, config, { locale: options.locale ?? null })
 
     // Ensure we return an array or object, defaulting to empty array
     return { data: data ?? [] }

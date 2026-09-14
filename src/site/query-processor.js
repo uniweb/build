@@ -617,7 +617,7 @@ function warnDuplicateSlugs(items, queryName) {
  * @param {Object} config - Parsed collection config
  * @returns {Promise<Array>} Array of processed items
  */
-async function collectItems(siteDir, config, entitiesDir, basePath) {
+async function collectItems(siteDir, config, entitiesDir, basePath, locale = null) {
   // ⭐ THE QUERY NAMES A SCHEMA AND THE POOL FOLLOWS — the same resolution the
   // sync lane makes, from the same reader, so the two lanes cannot disagree
   // about which files are a query's records. They used to: this one recursed
@@ -737,8 +737,9 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
 
   // The query's `sort` orders the file; the runtime applies whichever sort wins —
   // a binding's own, else this one — so the order here only spares it the work.
+  // Texts collate in the site's default language; each page re-sorts in its own.
   if (config.sort) {
-    items = applySort(items, config.sort)
+    items = applySort(items, config.sort, { locale })
   }
 
   // ⛔ `limit` IS NEVER BAKED (ruled 2026-09-13 [Diego]): it is how many a list
@@ -757,6 +758,10 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
  * @param {string} siteDir - Site root directory
  * @param {Object} queriesConfig - the resolved QUERY declarations
  * @param {string} [entitiesDir] - pool directory override (`site.yml::paths.entities`)
+ * @param {string} [basePath='/']
+ * @param {Object} [options]
+ * @param {string|null} [options.locale] - the site's default language, which a query's `sort`
+ *   collates texts in when it orders the compiled file
  * @returns {Promise<Object>} Map of collection name to items array
  *
  * @example
@@ -766,7 +771,7 @@ async function collectItems(siteDir, config, entitiesDir, basePath) {
  * })
  * // { articles: [...], products: [...] }
  */
-export async function processQueries(siteDir, queriesConfig, entitiesDir, basePath = '/') {
+export async function processQueries(siteDir, queriesConfig, entitiesDir, basePath = '/', { locale = null } = {}) {
   if (!queriesConfig || typeof queriesConfig !== 'object') {
     return {}
   }
@@ -818,7 +823,7 @@ export async function processQueries(siteDir, queriesConfig, entitiesDir, basePa
           (managed ? 'Check records.yml lists them.' : 'Check entities/.')
       )
     }
-    const items = await collectItems(siteDir, parsed, entitiesDir, basePath)
+    const items = await collectItems(siteDir, parsed, entitiesDir, basePath, locale)
     results[name] = items
     console.log(`[query-processor] Processed ${name}: ${items.length} items`)
   }
