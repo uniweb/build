@@ -22,10 +22,13 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { initPrerender, hydrateDataStore, resolvePageFetchConfigs } from '@uniweb/runtime/ssr'
+import { initPrerender, hydrateDataStore, resolvePageFetchConfigs, prepareProps } from '@uniweb/runtime/ssr'
 import { executeAllFetches, expandDynamicPages, readRouteBoundViews } from '../src/prerender.js'
 
 const POSTS = ['a', 'b', 'c', 'd', 'e'].map((slug) => ({ slug, $name: slug, title: slug.toUpperCase() }))
+// A delivered record carries `$route` — the page that shows it, filled at render time on
+// every lane, the prerender's included (2026-09-14); the build bakes none into the file.
+const LINKED = POSTS.map((post) => ({ ...post, $route: `/blog/${post.slug}` }))
 const ref = (extra = {}) => ({ query: 'posts', path: '/data/posts.json', as: 'posts', prerender: true, merge: false, ...extra })
 const QUERIES = { posts: { schema: '@/post' } }
 const noop = () => {}
@@ -60,7 +63,13 @@ async function prerender(content, root, localeInfo = { locale: 'en', defaultLoca
   // What the block already holds under each key. It OUTRANKS the store's answer:
   // `prepareProps` fills only the keys a block does not hold.
   const held = (route, index = 0) => website.pages.find((p) => p.route === route)?.bodyBlocks[index]?.parsedContent?.data ?? {}
-  return { routes: content.pages.map((p) => p.route), delivered, held, fetchedData: content.fetchedData }
+  // What the component receives: the store's answer merged under what the block holds.
+  const rendered = (route, index = 0) => {
+    const block = website.pages.find((p) => p.route === route)?.bodyBlocks[index]
+    const answer = website.entityStore.resolve(block, {})
+    return prepareProps(block, {}, answer.status === 'ready' ? answer.data : null).content.data
+  }
+  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, fetchedData: content.fetchedData }
 }
 
 describe('a count is how many a list shows — never which records have a page', () => {
@@ -82,7 +91,7 @@ describe('a count is how many a list shows — never which records have a page',
   it('a page past the count delivers its own record, from what the build hydrated', async () => {
     const root = site({ 'public/data/posts.json': POSTS })
     const { delivered } = await prerender(content(), root)
-    expect(delivered('/blog/e')).toEqual({ status: 'ready', data: { posts: [POSTS[4]] } })
+    expect(delivered('/blog/e')).toEqual({ status: 'ready', data: { posts: [LINKED[4]] } })
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -90,7 +99,7 @@ describe('a count is how many a list shows — never which records have a page',
     const root = site({ 'public/data/posts.json': POSTS })
     const { delivered, fetchedData } = await prerender(content(), root)
     expect(fetchedData.find((e) => e._scope === '/blog').data).toEqual(POSTS.slice(0, 2))
-    expect(delivered('/blog')).toEqual({ status: 'ready', data: { posts: POSTS.slice(0, 2) } })
+    expect(delivered('/blog')).toEqual({ status: 'ready', data: { posts: LINKED.slice(0, 2) } })
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -103,7 +112,7 @@ describe('a count is how many a list shows — never which records have a page',
     c.pages[0].fetch = ref()
     const { routes, delivered } = await prerender(c, root)
     expect(routes).toEqual(['/blog', '/blog/a', '/blog/b', '/blog/c'])
-    expect(delivered('/blog').data.posts).toEqual(POSTS.slice(0, 3))
+    expect(delivered('/blog').data.posts).toEqual(LINKED.slice(0, 3))
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -113,8 +122,8 @@ describe('a count is how many a list shows — never which records have a page',
     c.config.queries = { posts: { schema: '@/post', limit: 3 } }
     const { routes, delivered } = await prerender(c, root)
     expect(routes).toEqual(['/blog', '/blog/a', '/blog/b', '/blog/c'])
-    expect(delivered('/blog').data.posts).toEqual(POSTS.slice(0, 2))
-    expect(delivered('/blog/c')).toEqual({ status: 'ready', data: { posts: [POSTS[2]] } })
+    expect(delivered('/blog').data.posts).toEqual(LINKED.slice(0, 2))
+    expect(delivered('/blog/c')).toEqual({ status: 'ready', data: { posts: [LINKED[2]] } })
     rmSync(root, { recursive: true, force: true })
   })
 })
@@ -155,6 +164,38 @@ describe('a section\'s fetch is resolved by the runtime\'s rule', () => {
     expect(content.pages[0].sections[0].parsedContent.data.posts).toEqual(POSTS)
     rmSync(root, { recursive: true, force: true })
   })
+
+  it('⛔ a list a section fetches for itself reaches its component linked (2026-09-14)', async () => {
+    // The build bakes the section's list into its content, and what a block holds outranks
+    // the store's answer — the one that carries `$route`. Until this held the component got
+    // the baked records bare, so a list on a prerendered page linked nowhere.
+    const root = site({ 'public/data/posts.json': POSTS })
+    const content = {
+      config: { queries: QUERIES },
+      pages: [
+        { route: '/blog', id: 'blog', sections: [section('list', ref({ limit: 2 }))] },
+        { route: '/blog/:slug', id: 'post', isDynamic: true, paramName: 'slug', fetch: ref(), sections: [section('post')] },
+      ],
+    }
+    const { held, rendered } = await prerender(content, root)
+    expect(held('/blog').posts).toEqual(POSTS.slice(0, 2))
+    expect(rendered('/blog').posts).toEqual(LINKED.slice(0, 2))
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('CONTROL — a key the section holds from no fetch of its own is left as it is', async () => {
+    const root = site({ 'public/data/posts.json': POSTS })
+    const content = {
+      config: { queries: QUERIES },
+      pages: [
+        { route: '/blog', id: 'blog', sections: [{ ...section('list'), parsedContent: { data: { posts: POSTS.slice(0, 1) } } }] },
+        { route: '/blog/:slug', id: 'post', isDynamic: true, paramName: 'slug', fetch: ref(), sections: [section('post')] },
+      ],
+    }
+    const { rendered } = await prerender(content, root)
+    expect(rendered('/blog').posts).toEqual(POSTS.slice(0, 1))
+    rmSync(root, { recursive: true, force: true })
+  })
 })
 
 describe('a parametric page\'s sections are the runtime\'s to fill', () => {
@@ -178,8 +219,8 @@ describe('a parametric page\'s sections are the runtime\'s to fill', () => {
     const root = site({ 'public/data/posts.json': POSTS })
     const { routes, delivered, held } = await prerender(content(), root)
     expect(routes).toEqual(['/blog', '/blog/a', '/blog/b', '/blog/c', '/blog/d', '/blog/e'])
-    expect(delivered('/blog/b')).toEqual({ status: 'ready', data: { posts: [POSTS[1]] } })
-    expect(delivered('/blog/e')).toEqual({ status: 'ready', data: { posts: [POSTS[4]] } })
+    expect(delivered('/blog/b')).toEqual({ status: 'ready', data: { posts: [LINKED[1]] } })
+    expect(delivered('/blog/e')).toEqual({ status: 'ready', data: { posts: [LINKED[4]] } })
     // and nothing the block holds outranks it — the whole list did, cloned from the template
     expect(held('/blog/b').posts).toBeUndefined()
     rmSync(root, { recursive: true, force: true })
@@ -197,9 +238,9 @@ describe('`current:` and nested pages reach a static build (ruled 2026-09-13)', 
       ],
     }
     const { delivered } = await prerender(content, root)
-    expect(delivered('/blog/a', 1)).toEqual({ status: 'ready', data: { posts: [POSTS[1], POSTS[2]] } })
-    expect(delivered('/blog/b', 1)).toEqual({ status: 'ready', data: { posts: [POSTS[0], POSTS[2]] } })
-    expect(delivered('/blog/b', 0)).toEqual({ status: 'ready', data: { posts: [POSTS[1]] } })
+    expect(delivered('/blog/a', 1)).toEqual({ status: 'ready', data: { posts: [LINKED[1], LINKED[2]] } })
+    expect(delivered('/blog/b', 1)).toEqual({ status: 'ready', data: { posts: [LINKED[0], LINKED[2]] } })
+    expect(delivered('/blog/b', 0)).toEqual({ status: 'ready', data: { posts: [LINKED[1]] } })
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -215,7 +256,7 @@ describe('`current:` and nested pages reach a static build (ruled 2026-09-13)', 
     }
     const { routes, delivered } = await prerender(content, root)
     expect(routes).toEqual(expect.arrayContaining(['/blog/e', '/blog/e/cv', '/blog/a/cv']))
-    expect(delivered('/blog/e/cv')).toEqual({ status: 'ready', data: { posts: [POSTS[4]] } })
+    expect(delivered('/blog/e/cv')).toEqual({ status: 'ready', data: { posts: [LINKED[4]] } })
     rmSync(root, { recursive: true, force: true })
   })
 })

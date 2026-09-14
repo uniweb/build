@@ -71,13 +71,12 @@ describe('Collection Processor', () => {
       writeRecord(root, 'b.md', 'B')
       const out = await processQueries(
         testDir,
-        { flat: { name: 'flat', schema: '@/flat', route: '/f' } },
+        { flat: { name: 'flat', schema: '@/flat' } },
         undefined,
         '/'
       )
       expect(out.flat.map((i) => i.slug).sort()).toEqual(['a', 'b'])
       expect(out.flat.every((i) => i.path === '')).toBe(true)
-      expect(out.flat.map((i) => i.route).sort()).toEqual(['/f/a', '/f/b'])
     })
   })
 
@@ -248,90 +247,25 @@ order: ${i}
       expect(collections).toEqual({})
     })
 
-    it('should add route to items when collection has route config', async () => {
-      const contentDir = join(testDir, 'entities', 'articles')
-      mkdirSync(contentDir, { recursive: true })
-
-      writeFileSync(join(contentDir, 'my-article.md'), `---
-title: My Article
----
-
-Content here.
-`)
-
-      const collections = await processQueries(testDir, {
-        articles: {
-          schema: '@/articles',
-          route: '/blog'
-        }
-      })
-
-      expect(collections.articles).toHaveLength(1)
-      expect(collections.articles[0].route).toBe('/blog/my-article')
+    // ⛔ `route:` ON A QUERY IS RETIRED (2026-09-14): a record links to its query's page as
+    // `$route`, filled at render time on every lane. The build baked `route:` into each
+    // compiled record as `route` — overwriting an entity's own field of that name.
+    it('⛔ refuses `route:` on a query, naming `$route` and `detailPage:`', async () => {
+      await expect(processQueries(testDir, { articles: { schema: '@/articles', route: '/blog' } }))
+        .rejects.toThrow(/queries\.articles: `route:` is retired\..*\$route.*detailPage/s)
     })
 
-    it('should handle trailing slash in route config', async () => {
-      const contentDir = join(testDir, 'entities', 'posts')
-      mkdirSync(contentDir, { recursive: true })
-
-      writeFileSync(join(contentDir, 'test-post.md'), `---
-title: Test Post
----
-
-Content.
-`)
-
-      const collections = await processQueries(testDir, {
-        posts: {
-          schema: '@/posts',
-          route: '/news/'
-        }
-      })
-
-      expect(collections.posts[0].route).toBe('/news/test-post')
-    })
-
-    // ⭐ ONE ENCODER for `item.route`. The bake interpolated the slug RAW while
-    // the runtime encoded, and a baked route wins — so a slug with a space
-    // compared unequal to location.pathname and a `/` became a route segment,
-    // on the file lane only (F14, 2026-09-04).
-    it('encodes the slug into the baked route exactly as the runtime would', async () => {
+    it('bakes no link into a compiled record, and leaves an entity\'s own `route` field as the author wrote it', async () => {
       const contentDir = join(testDir, 'entities', 'articles')
       mkdirSync(contentDir, { recursive: true })
-      writeFileSync(join(contentDir, 'b post.md'), `---\ntitle: B\n---\n\nBody\n`)
+      writeFileSync(join(contentDir, 'my-article.md'), `---\ntitle: My Article\nroute: north-trail\n---\n\nContent here.\n`)
+      writeFileSync(join(contentDir, 'plain.md'), `---\ntitle: Plain\n---\n\nContent.\n`)
 
-      const collections = await processQueries(testDir, {
-        articles: { schema: '@/articles', route: '/blog' }
-      })
-      expect(collections.articles[0].route).toBe('/blog/b%20post')
-    })
-
-    it('bakes no route at all for a record with no slug, never /blog/undefined', async () => {
-      const contentDir = join(testDir, 'entities', 'articles')
-      mkdirSync(contentDir, { recursive: true })
-      writeFileSync(join(contentDir, 'refs.json'), JSON.stringify([{ title: 'No slug' }, { slug: 'ok', title: 'Ok' }]))
-
-      const collections = await processQueries(testDir, {
-        articles: { schema: '@/articles', route: '/blog' }
-      })
-      const byTitle = Object.fromEntries(collections.articles.map((i) => [i.title, i.route]))
-      expect(byTitle['No slug']).toBeUndefined()
-      expect(byTitle.Ok).toBe('/blog/ok')
-    })
-
-    it('a route naming a [...path] page bakes the record\'s placement into its href', async () => {
-      const contentDir = join(testDir, 'entities', 'articles')
-      mkdirSync(contentDir, { recursive: true })
-      writeFileSync(join(contentDir, 'deep.md'), `---\ntitle: Deep\n---\n\nBody\n`)
-      writeFileSync(join(contentDir, 'top.md'), `---\ntitle: Top\n---\n\nBody\n`)
-      writeFileSync(join(testDir, 'records.yml'), ['- articles/top.md', '- folder: field/2026', '  records:', '    - articles/deep.md', ''].join('\n'))
-
-      const collections = await processQueries(testDir, {
-        articles: { schema: '@/articles', route: '/logbook/[...path]' }
-      })
-      const byTitle = Object.fromEntries(collections.articles.map((i) => [i.title, i.route]))
-      expect(byTitle.Deep).toBe('/logbook/field/2026/deep')
-      expect(byTitle.Top).toBe('/logbook/top')
+      const collections = await processQueries(testDir, { articles: { schema: '@/articles' } })
+      const byTitle = Object.fromEntries(collections.articles.map((i) => [i.title, i]))
+      expect(byTitle['My Article'].route).toBe('north-trail')
+      expect(byTitle.Plain).not.toHaveProperty('route')
+      expect(collections.articles.some((i) => '$route' in i)).toBe(false)
     })
 
     it('should not add route when route config is absent', async () => {

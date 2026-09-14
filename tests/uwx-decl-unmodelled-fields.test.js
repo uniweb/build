@@ -84,22 +84,20 @@ describe('push — an unmodelled decl field reaches the wire', () => {
     for (const key of ['url', 'method', 'body', 'transform', 'record']) expect(decl[key]).toBeUndefined()
   })
 
-  it('⛔ withholds framework-local fields the Model has no slot for', async () => {
-    // `route:` is a REAL authored field — `parseQueryConfig` reads it and
-    // `collectItems` composes each item link as `<route>/<slug>` — but it is
-    // framework's, not the Model's. Sending it would push build-time config into a
-    // store that validates writes against a declared schema.
+  it('⛔ a query declaring the retired framework-local `route:` does not push at all', async () => {
+    // `route:` was framework's, not the Model's — `collectItems` baked each item's link
+    // from it — and it was withheld from the wire. It is refused since 2026-09-14: a
+    // record links to its query's page as `$route`, filled at render time.
     const src = makeSite(
 "members:\n  schema: '@std/person'\n  route: /team\n"
     )
+    await expect(siteProjectToDocument(src)).rejects.toThrow(/`route:` is retired/)
 
-    const doc = await siteProjectToDocument(src)
+    // CONTROL — the same query without it pushes, carrying its modelled fields
+    const doc = await siteProjectToDocument(makeSite("members:\n  schema: '@std/person'\n"))
     const decl = doc.queries.find((c) => c.name === 'members')
-
-    expect(decl.route).toBeUndefined()
-    // CONTROL — the record exists and carries its modelled fields, so the assertion
-    // above is about withholding and not about an empty result.
     expect(decl.schema).toBe('@std/person')
+    expect(decl.route).toBeUndefined()
   })
 
   it('⛔ still withholds framework-local keys — pass-through is not a raw dump', async () => {

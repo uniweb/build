@@ -803,13 +803,13 @@ const DECL_NOT_ON_WIRE = new Set([
   // convention supplied it. Decides hard-error vs soft-skip during sync;
   // `collections-config.js::toConfigQueries` strips it downstream too.
   'schemaExplicit',
-  // ⭐ FRAMEWORK-LOCAL, and the one that proves the rule. `route:` is a real
-  // authored field — `parseQueryConfig` reads it, and `collectItems` composes
-  // each item's link as `<route>/<slug>` — but the backend's Model has no slot for
-  // it, so emitting it would be sending build-time config to a store that validates
-  // against a declared schema. Measured 2026-08-29: a first version of this change
-  // passed unknown keys through blindly and would have started sending `route` from
-  // every site that declares one.
+  // ⛔ RETIRED 2026-09-14, and kept here so a stale declaration never carries it.
+  // `route:` was framework-local — `collectItems` baked each item's link as
+  // `<route>/<slug>` — and the backend's Model has no slot for it. It is refused now
+  // (`data-fetcher.js::refuseQueryRoute`): a record links to its query's page as
+  // `$route`, filled at render time. Measured 2026-08-29: a first version of this list
+  // passed unknown keys through blindly and would have sent `route` from every site
+  // that declared one.
   'route',
   // Legacy predicate, translated to the canonical `where` upstream. No legacy
   // fields on the wire.

@@ -32,6 +32,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { briefFields, flatRecordFields } from '@uniweb/schemas/conform'
 import { detectFoundationType } from './foundation-ref.js'
+import { refuseQueryRoute } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
 
@@ -189,7 +190,7 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
 }
 
 /** What a query over the site's records declares, which an external query cannot. */
-const SITE_RECORDS_ONLY = ['schema', 'model', 'scope', 'deferred', 'excerpt', 'route', 'path']
+const SITE_RECORDS_ONLY = ['schema', 'model', 'scope', 'deferred', 'excerpt', 'path']
 /** The keys of an external query's `record:` request. */
 const RECORD_KEYS = ['url', 'method', 'body', 'transform']
 
@@ -202,8 +203,14 @@ const RECORD_KEYS = ['url', 'method', 'body', 'transform']
  * `transform` (a dot-path to its records), `where` / `sort` / `limit` evaluated over
  * them, and `record:` — `{ url, method, body, transform }` — for one record on a
  * parametric page. What describes the site's records — `schema`, `scope`,
- * `deferred`, `excerpt`, `route` — is refused beside `url:`. ⛔ `detailUrl:` is
+ * `deferred`, `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` is
  * retired everywhere: its one real case is `record.url`.
+ *
+ * ⛔ `route:` is retired everywhere too (2026-09-14 [Diego]): a record links to the page
+ * whose route query is its query, as `$route`, which the runtime fills at render time
+ * on every lane — and a fetch that wants another page names it with `detailPage:`. The
+ * build baked `route:` into each compiled record as `route`, a field in the author's
+ * namespace that it overwrote.
  *
  * @param {Object} decl - one normalized declaration (`{ name, … }`)
  */
@@ -215,6 +222,7 @@ export function refuseQueryDeclaration(decl) {
         `on an external query — one with \`url:\`.`
     )
   }
+  refuseQueryRoute(decl, where)
   const external = decl.url !== undefined
   if (!external) {
     for (const key of ['method', 'body', 'transform', 'record']) {

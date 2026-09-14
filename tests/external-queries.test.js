@@ -33,9 +33,14 @@ describe('what an external query may declare', () => {
   it('⛔ refuses what describes the site\'s records beside `url:`', () => {
     expect(refuse({ url: 'https://api.test/items', schema: '@/item' })).toThrow(/query "items": `schema:` describes the site's records, and this query has `url:`/)
     expect(refuse({ url: 'https://api.test/items', scope: 'a', deferred: ['body'] })).toThrow(/`scope:`, `deferred:` describe the site's records/)
-    for (const key of ['excerpt', 'route', 'path']) {
+    for (const key of ['excerpt', 'path']) {
       expect(refuse({ url: 'https://api.test/items', [key]: 'x' })).toThrow(/describes the site's records/)
     }
+  })
+
+  it('⛔ `route:` is retired on every query — a record links to its query\'s page as `$route`', () => {
+    expect(refuse({ schema: '@/item', route: '/items' })).toThrow(/`route:` is retired\..*\$route.*detailPage/s)
+    expect(refuse({ url: 'https://api.test/items', route: '/items' })).toThrow(/`route:` is retired/)
   })
 
   it('⛔ `detailUrl:` is retired everywhere — its case is `record.url`', () => {

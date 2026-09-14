@@ -151,6 +151,27 @@ const RECOGNIZED_FETCH_KEYS = {
 }
 
 /**
+ * ⛔ `route:` ON A QUERY IS RETIRED (2026-09-14 [Diego]) — refused, because a query
+ * that still declares it would build and its cards would lose their links silently. A
+ * record links to the page whose route query is its query, as `$route`, which the
+ * runtime fills at render time on every lane; a fetch picks another page with
+ * `detailPage:`. The build baked `route:` into each compiled record as `route`, a field
+ * in the author's namespace that it overwrote.
+ *
+ * @param {Object} decl - a query declaration
+ * @param {string} context - where the declaration sits, for the message
+ */
+export function refuseQueryRoute(decl, context) {
+  if (!decl || typeof decl !== 'object' || decl.route === undefined) return
+  throw new Error(
+    `[uniweb] ${context}: \`route:\` is retired. Each record links to the page that shows one record of this ` +
+      `query — the \`[slug]\` page whose URL names one of its records — as \`$route\`, with nothing to declare: ` +
+      `delete the line, and read \`record.$route\` in a component. To link to another page, add ` +
+      `\`detailPage: page:<id>\` to the fetch.`
+  )
+}
+
+/**
  * ⛔ `under` IS RETIRED (2026-09-11 [Diego]) — refused, like every retired spelling
  * here, because an ignored predicate is a silently wrong answer. It existed for
  * `where: { path: { under: X } }`, a folder branch written before a query had

@@ -56,8 +56,8 @@ import { join, basename, extname, dirname, relative, resolve, sep } from 'node:p
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { parseBibtex } from '@citestyle/bibtex'
-import { DATA_DIR, fillRoutePattern, withoutRouteVariables } from '@uniweb/core'
-import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage } from './data-fetcher.js'
+import { DATA_DIR, withoutRouteVariables } from '@uniweb/core'
+import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, ENTITIES_DIR } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, FOLDER_MISSING } from './records-config.js'
@@ -94,8 +94,7 @@ try {
  *
  * // Extended form
  * parseQueryConfig('articles', {
- *   path: 'collections/articles',
- *   route: '/blog',
+ *   schema: '@/article',
  *   sort: 'date desc',
  *   filter: 'published != false',
  *   limit: 100
@@ -114,7 +113,6 @@ function parseQueryConfig(name, config) {
       name,
       schema: config,
       url: null,
-      route: null,
       scope: null,
       sort: null,
       where: null,
@@ -127,13 +125,13 @@ function parseQueryConfig(name, config) {
 
   refuseUnder(config.where, `queries.${name}`)
   refuseOutsideLanguage(config.where, `queries.${name}`)
+  refuseQueryRoute(config, `queries.${name}`)
   return {
     name,
     // The query's schema selects its records from the pool — `entities/{schema}/`
     // declares the model, so the entities of a schema ARE the query's records.
     schema: config.schema || null,
     url: config.url || null,
-    route: config.route || null,
     // The folder branch the query reads (`records.yml` placement). ⛔ Not read
     // here until 2026-09-11: a named query's `scope` was ignored on this lane.
     scope: typeof config.scope === 'string' ? config.scope : null,
@@ -686,32 +684,6 @@ async function collectItems(siteDir, config, entitiesDir, basePath, locale = nul
   ))
 
   warnDuplicateSlugs(items, config.name)
-
-  // `route:` on the query — bake each record's canonical href.
-  //
-  // ⭐ THROUGH THE ONE ENCODER (`fillRoutePattern`, `@uniweb/core/route-match`),
-  // which is what the runtime's `addDetailRoute` also calls. Until 2026-09-04 this
-  // interpolated `${baseRoute}/${item.slug}` RAW while the runtime encoded, and a
-  // record already carrying a baked route keeps it — so the same record got two
-  // different hrefs depending on which lane served it (F14): a slug with a space
-  // compared unequal to `location.pathname`, and a slug with a `/` became an
-  // extra route segment. A record with no slug gets no route rather than
-  // `/blog/undefined`.
-  //
-  // `route: /blog` names the base of a `[slug]` page, so the template is
-  // `/blog/:slug`. `route: /blog/[...path]` names a `[...path]` page: the
-  // template is `/blog/:path*` and the record's placement (`path`, the folder
-  // `records.yml` put it in) becomes part of its href — `/blog/field/my-post`.
-  if (config.route) {
-    const base = config.route.replace(/\/$/, '')
-    const template = base.endsWith('/[...path]')
-      ? `${base.slice(0, -'/[...path]'.length)}/:path*`
-      : `${base}/:slug`
-    items = items.map((item) => {
-      const route = fillRoutePattern(template, item)
-      return route === null ? item : { ...item, route }
-    })
-  }
 
   // ⛔ ORDER MATCHES `data-fetcher.js::applyPostProcessing` — where, then sort. Two
   // lanes evaluate the same declaration (this one materializes a query to
