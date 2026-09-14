@@ -30,7 +30,15 @@ import {
   LAYOUTS_PATH
 } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
-import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
+import { collectSchemaRefs, buildDataSchemaMap, SCHEMA_EXTENSIONS } from './resolve-data-schema.js'
+
+/**
+ * The files a foundation's data schemas are read from, relative to its source root:
+ * `@/name` is `schemas/name.<ext>` (`resolve-data-schema.js::findSelfSchemaFile`), and
+ * `schemas.config.js` says where a scope's schemas live (`loadSchemaAliases`).
+ */
+const SCHEMAS_PATH = 'schemas'
+const SCHEMA_ALIASES_FILE = 'schemas.config.js'
 
 /**
  * Packages that may be bundled inside a foundation but require single-instance
@@ -407,12 +415,14 @@ export function getStructuralWatchPaths(srcDir, options = {}) {
     'main.js',
     'main.jsx',
     'styles.css',
-    'index.css'
+    'index.css',
+    SCHEMA_ALIASES_FILE
   ]
 
   return [
     ...sectionPaths.map(path => join(srcDir, path)),
     join(srcDir, LAYOUTS_PATH),
+    join(srcDir, SCHEMAS_PATH),
     ...rootFiles.map(file => join(srcDir, file))
   ]
 }
@@ -501,6 +511,23 @@ export function shouldRegenerateForFile(file, srcDir) {
         return `layout entry: ${inner}`
       }
     }
+  }
+
+  // ⭐ The foundation's data schemas — `schemas/<name>.<ext>` and `schemas.config.js`.
+  // The entry's `meta` carries each declared `data:` key with its schema's field
+  // defaults, and a `@/name` ref whose file is missing stops entry generation. A
+  // section receives only the keys its entry declares (2026-09-14), so an entry that
+  // falls behind withholds data: a `data:` key declaring `@/member` before
+  // `schemas/member.yml` exists fails the regeneration, and until 2026-09-14 writing
+  // the file triggered no other — the dev server kept the entry without the key.
+  if (rel.startsWith(`${SCHEMAS_PATH}/`)) {
+    const inner = rel.slice(SCHEMAS_PATH.length + 1)
+    if (!inner.includes('/') && SCHEMA_EXTENSIONS.some(ext => inner.endsWith(ext))) {
+      return `data schema: ${inner}`
+    }
+  }
+  if (rel === SCHEMA_ALIASES_FILE) {
+    return 'schema aliases changed'
   }
 
   return null

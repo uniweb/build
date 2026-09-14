@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { shouldRegenerateForFile, getStructuralWatchPaths } from '../src/generate-entry.js'
+import { SCHEMA_EXTENSIONS } from '../src/resolve-data-schema.js'
 
 /**
  * `shouldRegenerateForFile` decides whether a watcher event re-runs
@@ -39,6 +40,22 @@ describe('shouldRegenerateForFile', () => {
     it('ignores non-structural files', () => {
       expect(shouldRegenerateForFile(`${src}/components/Card.jsx`, src)).toBeNull()
       expect(shouldRegenerateForFile(`${src}/sections/Hero/styles.css`, src)).toBeNull()
+    })
+
+    // The entry's `meta` carries each declared `data:` key with its schema's defaults, and
+    // a section receives only the keys its entry declares — so a schema edit, or the file a
+    // `@/name` ref was waiting for, has to regenerate it (2026-09-14)
+    it('matches a data schema file, in every extension a `@/name` ref resolves to', () => {
+      for (const ext of SCHEMA_EXTENSIONS) {
+        expect(shouldRegenerateForFile(`${src}/schemas/member${ext}`, src)).toBe(`data schema: member${ext}`)
+      }
+      expect(shouldRegenerateForFile(`${src}/schemas.config.js`, src)).toBe('schema aliases changed')
+    })
+
+    it('CONTROL — ignores what schema resolution never reads', () => {
+      expect(shouldRegenerateForFile(`${src}/schemas/README.md`, src)).toBeNull()
+      expect(shouldRegenerateForFile(`${src}/schemas/drafts/member.yml`, src)).toBeNull()
+      expect(shouldRegenerateForFile(`${src}/sections/Team/schemas.config.js`, src)).toBeNull()
     })
 
     it('ignores files outside the source root', () => {
@@ -81,6 +98,11 @@ describe('shouldRegenerateForFile', () => {
       expect(shouldRegenerateForFile(`${src}\\components\\Card.jsx`, src)).toBeNull()
     })
 
+    it('matches a data schema file', () => {
+      expect(shouldRegenerateForFile(`${src}\\schemas\\member.yml`, src)).toBe('data schema: member.yml')
+      expect(shouldRegenerateForFile(`${src}\\schemas.config.js`, src)).toBe('schema aliases changed')
+    })
+
     it('ignores files outside the source root', () => {
       expect(
         shouldRegenerateForFile('C:\\Users\\dev\\elsewhere\\sections\\Hero.jsx', src)
@@ -119,7 +141,9 @@ describe('getStructuralWatchPaths', () => {
       `${src}/meta.js`,
       `${src}/main.js`,
       `${src}/styles.css`,
-      `${src}/index.css`
+      `${src}/index.css`,
+      `${src}/schemas/member.yml`,
+      `${src}/schemas.config.js`
     ]
 
     for (const file of structural) {

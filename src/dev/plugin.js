@@ -27,6 +27,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { build } from 'vite'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { DEV_REBUILD_MARKER } from '../vite-foundation-plugin.js'
+import { shouldRegenerateForFile } from '../generate-entry.js'
 
 /** Directories that never hold foundation source and must never be walked. */
 const UNWATCHABLE_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage'])
@@ -237,19 +238,22 @@ export function foundationDevPlugin(options = {}) {
           }, 200)
         }
 
-        const onChange = (eventType, filename) => {
+        // `filename` is relative to the watched target, so each target gets its own handler
+        const onChange = (target) => (eventType, filename) => {
           // Ignore generated files (build output triggers entry regeneration)
-          if (filename && filename.includes('_entry.generated')) return
+          if (!filename || filename.includes('_entry.generated')) return
 
-          // Only rebuild for source file changes
+          // Rebuild for source file changes, and for any file the entry is generated
+          // from — a data schema under `schemas/` is `.yml` or `.json` as often as `.js`
+          // (`shouldRegenerateForFile`)
           if (
-            filename &&
-            (filename.endsWith('.js') ||
-              filename.endsWith('.jsx') ||
-              filename.endsWith('.ts') ||
-              filename.endsWith('.tsx') ||
-              filename.endsWith('.css') ||
-              filename.endsWith('.svg'))
+            filename.endsWith('.js') ||
+            filename.endsWith('.jsx') ||
+            filename.endsWith('.ts') ||
+            filename.endsWith('.tsx') ||
+            filename.endsWith('.css') ||
+            filename.endsWith('.svg') ||
+            shouldRegenerateForFile(join(target.path, filename), srcPath)
           ) {
             console.log(`[foundation] ${filename} changed`)
             scheduleRebuild()
@@ -259,7 +263,7 @@ export function foundationDevPlugin(options = {}) {
         const watchers = []
         for (const target of resolveWatchTargets(srcPath)) {
           try {
-            watchers.push(watch(target.path, { recursive: target.recursive }, onChange))
+            watchers.push(watch(target.path, { recursive: target.recursive }, onChange(target)))
           } catch (err) {
             console.warn(`[foundation] Could not watch ${target.path}:`, err.message)
           }
