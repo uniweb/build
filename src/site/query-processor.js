@@ -152,7 +152,7 @@ function parseQueryConfig(name, config) {
     // are emitted at public/data/<name>/<slug>.json. Components that
     // need the full record fetch the per-record file on demand, either
     // automatically on dynamic-route pages (entity-store routes the
-    // singular detail there) or via the kit's useEntityDetail hook.
+    // singular detail there) or via kit's useWholeRecord hook.
     deferred: Array.isArray(config.deferred) ? config.deferred.slice() : null,
     // `queryable:` declares the queryable surface — which fields a
     // foundation can offer for filtering UI, with their type and
@@ -894,7 +894,7 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
       //   1. The cascade JSON at /data/<name>.json with deferred fields stripped.
       //      This is what `query: <name>` declarations deliver everywhere.
       //   2. Per-record full files at /data/<name>/<slug>.json with every field.
-      //      Dynamic-route singular fetches and useEntityDetail hooks read these.
+      //      Dynamic-route singular fetches and kit's useWholeRecord read these.
       const recordsDir = join(dataDir, name)
       await mkdir(recordsDir, { recursive: true })
 

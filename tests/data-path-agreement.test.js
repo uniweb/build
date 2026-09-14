@@ -2,8 +2,8 @@
  * Emit ↔ request agreement for compiled collection data.
  *
  * The defect this closes: the build wrote per-record files to
- * `public/data/<collection>/<slug>.json` while kit's `useEntityDetail`
- * requested `/_data/<collection>/<slug>.json`. Both sides had passing tests —
+ * `public/data/<collection>/<slug>.json` while kit's `useEntityDetail` (now
+ * `useWholeRecord`) requested `/_data/<collection>/<slug>.json`. Both sides had passing tests —
  * each pinned its own literal, so neither could see the other. A public,
  * documented hook fetched a URL nothing anywhere emitted, on every lane, and
  * nothing failed.
@@ -15,7 +15,7 @@
  * the agreement between any producer and any consumer and it fails.
  *
  * The kit half cannot be reached from here (`@uniweb/build` does not depend on
- * `@uniweb/kit`); it is covered by `kit/tests/entity-detail-path.test.js`,
+ * `@uniweb/kit`); it is covered by `kit/tests/whole-record-request.test.js`,
  * which asserts the hook resolves through the same shared helper.
  */
 
