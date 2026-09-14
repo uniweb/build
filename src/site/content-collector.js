@@ -35,7 +35,7 @@ import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
 import { parseFetchConfig, toFetchList } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
-import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig, pageRouteQuery } from '@uniweb/core'
+import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig, pageRouteQuery, currentFor } from '@uniweb/core'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 
 // Try to import content-reader, fall back to simplified parser
@@ -306,10 +306,14 @@ const formatQueryNames = (value) =>
   isQueryNames(value) ? (Array.isArray(value) ? `[${value.join(', ')}]` : value) : '<name>'
 
 /**
- * ⚠️ A `current:` NOTHING WILL READ — said once per binding. `current:` applies on a
- * section's binding under the key its page's URL narrows (the route query,
- * `pageRouteQuery`); anywhere else the runtime ignores it, and the author would see
- * the section deliver its list as though the line were not there.
+ * ⚠️ A `current:` NOTHING WILL READ — said once per binding. `current:` follows the query a
+ * section's fetch names (`currentFor`, `@uniweb/core`, ruled 2026-09-14): on a page with a
+ * route query (`pageRouteQuery`) it is read on a fetch of that query or of any other, so it
+ * goes unread on a page with none — a static page, a parametric page whose sections name
+ * different queries with nothing above them, a layout area. There the runtime ignores it,
+ * and the author would see the section deliver its list as though the line were not there.
+ * ⛔ Until 2026-09-14 this warned by key, as the runtime then read it: on any key but the
+ * route query's.
  *
  * @param {Array<Object>} pages - collected pages, parents linked
  * @param {Object} layouts - collected layout areas (never on a parametric route)
@@ -324,24 +328,24 @@ function warnUnreadCurrent(pages, layouts, siteFetch) {
     sectionsOf: (p) => p.sections,
     site: siteFetch,
   }
-  const check = (sections, where, routeKeyOf) => {
+  const check = (sections, where, routeOf) => {
     for (const section of sections || []) {
       for (const one of toFetchList(section.fetch)) {
         if (one?.current === undefined) continue
-        const routeKey = routeKeyOf()
-        if (one.as === routeKey) continue
+        const route = routeOf()
+        if (currentFor(one, route) !== null) continue
         console.warn(
           `[uniweb] ${where}: \`current: ${one.current}\` on content.data.${one.as} is ignored — it applies on a ` +
-            `section of a parametric page, under the key its URL narrows` +
-            (routeKey ? ` (here \`${routeKey}\`).` : '; this page has none.')
+            `section of a parametric page, to a fetch that names a query` +
+            (route ? ` (this page's URL names one of \`${route.key}\`).` : '; this page has none.')
         )
       }
-      check(section.subsections, where, routeKeyOf)
+      check(section.subsections, where, routeOf)
     }
   }
   for (const page of pages) {
-    let key
-    check(page.sections, page.route, () => (key === undefined ? (key = pageRouteQuery(page, access)?.key ?? null) : key))
+    let route
+    check(page.sections, page.route, () => (route === undefined ? (route = pageRouteQuery(page, access) ?? null) : route))
   }
   for (const [name, areas] of Object.entries(layouts || {})) {
     for (const [area, areaPage] of Object.entries(areas || {})) {

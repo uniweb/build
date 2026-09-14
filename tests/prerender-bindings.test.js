@@ -244,6 +244,21 @@ describe('`current:` and nested pages reach a static build (ruled 2026-09-13)', 
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('⭐ `current:` follows the query — a fetch of the route query under a key of its own gets the others (2026-09-14)', async () => {
+    // Until then `current:` was read under the route key alone: `related` got the list.
+    const root = site({ 'public/data/posts.json': POSTS })
+    const content = {
+      config: { queries: QUERIES },
+      pages: [
+        { route: '/blog', id: 'blog', fetch: ref(), sections: [section('list')] },
+        { route: '/blog/:slug', id: 'post', parent: '/blog', isDynamic: true, paramName: 'slug', sections: [section('post'), section('related', ref({ as: 'related', current: 'exclude', limit: 2 }))] },
+      ],
+    }
+    const { delivered } = await prerender(content, root)
+    expect(delivered('/blog/b', 1)).toEqual({ status: 'ready', data: { related: [LINKED[0], LINKED[2]], posts: [LINKED[1]] } })
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('a page nested inside `[slug]` expands per record and delivers the record — its route query two levels up', async () => {
     const root = site({ 'public/data/posts.json': POSTS })
     const content = {

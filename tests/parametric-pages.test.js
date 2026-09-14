@@ -172,15 +172,26 @@ describe('`current:` — refused off a section, warned where nothing reads it (r
     expect(related.fetch).toMatchObject({ query: 'posts', current: 'exclude', limit: 3 })
   })
 
-  it('warns on a key the URL does not narrow, and on a page with no parametric route', async () => {
-    w('queries.yml', "posts:\n  schema: '@/post'\ntags:\n  schema: '@/tag'\n")
+  it('⭐ follows the query, not the key: accepted on another key, and on another query (2026-09-14)', async () => {
+    // Until then both warned — `current:` was read only under the route key.
+    w('queries.yml', "posts:\n  schema: '@/post'\nfeatured:\n  schema: '@/post'\n")
     w('pages/blog/page.yml', 'title: Blog\nquery: posts\n')
-    w('pages/blog/[slug]/1-tags.md', '---\ntype: Tags\nfetch:\n  query: tags\n  current: exclude\n---\n')
+    w('pages/blog/[slug]/1-related.md', '---\ntype: Related\nfetch:\n  query: posts\n  as: related\n  current: exclude\n---\n')
+    w('pages/blog/[slug]/2-featured.md', '---\ntype: Featured\nfetch:\n  query: featured\n  current: exclude\n---\n')
+    expect(await warnings(() => collectSiteContent(ROOT, { strict: false }))).toEqual([])
+  })
+
+  it('warns on a page with no parametric route, and on a parametric page with no route query', async () => {
+    w('queries.yml', "posts:\n  schema: '@/post'\ntags:\n  schema: '@/tag'\n")
     w('pages/about/1-team.md', '---\ntype: Team\nfetch:\n  query: posts\n  current: include\n---\n')
+    // two sections declaring different queries, and nothing above them: no route query
+    w('pages/blog/page.yml', 'title: Blog\n')
+    w('pages/blog/[slug]/1-posts.md', '---\ntype: Posts\nfetch:\n  query: posts\n  current: exclude\n---\n')
+    w('pages/blog/[slug]/2-tags.md', '---\ntype: Tags\nquery: tags\n---\n')
     const seen = await warnings(() => collectSiteContent(ROOT, { strict: false }))
-    expect(seen.some((m) => /\/blog\/:slug: `current: exclude` on content\.data\.tags is ignored .*\(here `posts`\)/.test(m))).toBe(true)
-    // (the only other page is promoted to the homepage, `/`)
+    // (the only static page is promoted to the homepage, `/`)
     expect(seen.some((m) => /`current: include` on content\.data\.posts is ignored .*this page has none/.test(m))).toBe(true)
+    expect(seen.some((m) => /\/blog\/:slug: `current: exclude` on content\.data\.posts is ignored .*this page has none/.test(m))).toBe(true)
   })
 
   it('stops the build on a page.yml, and the sync push the same way', async () => {
