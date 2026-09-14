@@ -35,9 +35,9 @@ import {
   parseFreeformPath,
   buildFreeformPath,
   freeformPathsFor,
+  freeformSourceIndex,
   buildFreeformRecordPath
 } from './freeform.js'
-import { ENTITIES_DIR } from '../site/entity-pool.js'
 import {
   computeSourceHash,
   loadManifest as loadFreeformManifest,
@@ -88,6 +88,7 @@ export {
   parseFreeformPath,
   buildFreeformPath,
   freeformPathsFor,
+  freeformSourceIndex,
   buildFreeformRecordPath,
 
   // Free-form manifest functions
@@ -422,40 +423,6 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
 }
 
 /**
- * Every section whose free-form translation the renderer looks up, with the page it
- * looks it up for — the traversal `merge.js::mergeTranslationsAsync` makes: each page's
- * sections, the 404 page's, and each layout area's (whose route it defaults to
- * `/layout/[<name>/]<area>`), subsections included.
- *
- * ⛔ The orphan and stale check walked top-level page sections only until 2026-09-14, so a
- * translation the renderer used for a subsection, the 404 page or a layout area was
- * reported orphaned. Keep the two traversals the same.
- *
- * @param {Object} siteContent
- * @returns {Array<{ section: Object, page: Object }>}
- */
-function freeformSections(siteContent) {
-  const out = []
-  const visit = (sections, page) => {
-    for (const section of sections || []) {
-      out.push({ section, page })
-      visit(section.subsections, page)
-    }
-  }
-  for (const page of siteContent.pages || []) visit(page.sections, page)
-  if (siteContent.notFound) visit(siteContent.notFound.sections, siteContent.notFound)
-  for (const [layoutName, areas] of Object.entries(siteContent.layouts || {})) {
-    if (!areas || typeof areas !== 'object') continue
-    for (const [areaKey, layoutPage] of Object.entries(areas)) {
-      if (!layoutPage?.sections) continue
-      const route = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
-      visit(layoutPage.sections, { ...layoutPage, route })
-    }
-  }
-  return out
-}
-
-/**
  * Check for stale/orphaned free-form translations and emit warnings
  * @param {string} locale - Locale code
  * @param {string} freeformDir - Path to locale's freeform directory
@@ -463,20 +430,10 @@ function freeformSections(siteContent) {
  */
 async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
   try {
-    // Build map of valid source hashes — every path the renderer reads a section's
-    // translation from, for every section it translates (`freeformSections`).
-    const sourceHashes = {}
-    const validPaths = new Set()
-
-    for (const { section, page } of freeformSections(siteContent)) {
-      for (const path of freeformPathsFor(section, page)) {
-        validPaths.add(path)
-        // Compute source hash for staleness check
-        if (section.content) {
-          sourceHashes[path] = computeSourceHash(section.content)
-        }
-      }
-    }
+    // Every path the renderer reads a section's translation from, for every section it
+    // translates, with the hash of each source — the index the CLI's free-form commands
+    // judge by too (`freeformSourceIndex`).
+    const { validPaths, sourceHashes, canJudge } = freeformSourceIndex(siteContent)
 
     // Check for stale translations
     const stale = await getStaleTranslations(freeformDir, sourceHashes)
@@ -484,12 +441,11 @@ async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
       console.warn(`[i18n] Free-form translation stale: ${locale}/${item.path} (source changed ${item.recordedDate})`)
     }
 
-    // Check for orphaned translations. ⛔ Not a record's: `entities/…` is read by the
-    // record lane (`loadFreeformRecord`), from records this site content does not hold,
-    // so a page's check cannot know it is orphaned — and until 2026-09-14 said it was.
+    // Check for orphaned translations — only those this content can judge: never a
+    // record's (`entities/…`), which is read from records the site content does not hold.
     const orphaned = await getOrphanedTranslations(freeformDir, validPaths)
     for (const item of orphaned) {
-      if (item.path.startsWith(`${ENTITIES_DIR}/`)) continue
+      if (!canJudge(item.path)) continue
       console.warn(`[i18n] Free-form translation orphaned: ${locale}/${item.path}`)
     }
 

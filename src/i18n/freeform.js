@@ -10,7 +10,7 @@
  *   locales/freeform/{locale}/
  *     pages/{pageRoute}/{stableId}.md      - By route
  *     page-ids/{pageId}/{stableId}.md      - By page ID (stable)
- *     collections/{queryName}/{slug}.md - Collection items
+ *     entities/{schema dirs}/{slug}.md     - Records
  *
  * Resolution order for sections:
  *   1. page-ids/{pageId}/{stableId}.md (if page has id:)
@@ -20,10 +20,11 @@
 
 import { readFile, readdir, stat } from 'fs/promises'
 import { existsSync } from 'node:fs'
-import { join, relative, dirname } from 'node:path'
+import { join, relative, dirname, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
+import { computeSourceHash } from './freeform-manifest.js'
 
 // Try to import content-reader for markdown → ProseMirror conversion
 let markdownToProseMirror
@@ -170,7 +171,7 @@ async function discoverMarkdownFiles(dir, baseDir) {
       const subFiles = await discoverMarkdownFiles(fullPath, baseDir)
       files.push(...subFiles)
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      files.push(relative(baseDir, fullPath))
+      files.push(relative(baseDir, fullPath).split(sep).join('/'))
     }
   }
 
@@ -180,11 +181,18 @@ async function discoverMarkdownFiles(dir, baseDir) {
 /**
  * Discover all free-form translation files for a locale
  *
- * Used by status commands to show what translations exist.
+ * Used by status commands to show what translations exist, and by the build to
+ * register a translation that has no manifest entry yet.
+ *
+ * ⭐ Each path is relative to the locale's free-form directory — `pages/about/story.md`,
+ * `page-ids/<id>/intro.md`, `entities/article/hello.md` — the form the manifest keys a
+ * translation by and `freeformPathsFor` derives. ⛔ Until 2026-09-14 each was relative
+ * to its own subdirectory (`about/story.md`), so none matched a manifest key: the build
+ * registered no new file, and a status counted every stale or orphaned file as up to date.
  *
  * @param {string} locale - Locale code
  * @param {string} localesDir - Path to locales directory
- * @returns {Promise<Object>} { pages: string[], pageIds: string[], collections: string[] }
+ * @returns {Promise<{ pages: string[], pageIds: string[], records: string[] }>}
  */
 export async function discoverFreeformTranslations(locale, localesDir) {
   const freeformDir = join(localesDir, 'freeform', locale)
@@ -200,19 +208,19 @@ export async function discoverFreeformTranslations(locale, localesDir) {
   // Discover pages translations
   const pagesDir = join(freeformDir, 'pages')
   if (existsSync(pagesDir)) {
-    result.pages = await discoverMarkdownFiles(pagesDir, pagesDir)
+    result.pages = (await discoverMarkdownFiles(pagesDir, freeformDir)).sort()
   }
 
   // Discover page-ids translations
   const pageIdsDir = join(freeformDir, 'page-ids')
   if (existsSync(pageIdsDir)) {
-    result.pageIds = await discoverMarkdownFiles(pageIdsDir, pageIdsDir)
+    result.pageIds = (await discoverMarkdownFiles(pageIdsDir, freeformDir)).sort()
   }
 
   // Discover entity translations
   const entitiesDir = join(freeformDir, ENTITIES_DIR)
   if (existsSync(entitiesDir)) {
-    result.records = await discoverMarkdownFiles(entitiesDir, entitiesDir)
+    result.records = (await discoverMarkdownFiles(entitiesDir, freeformDir)).sort()
   }
 
   return result
@@ -291,6 +299,80 @@ export function freeformPathsFor(section, page) {
   const routePath = normalizeRouteForPath(page?.route || '/')
   paths.push(routePath ? `pages/${routePath}/${stableId}.md` : `pages/${stableId}.md`)
   return paths
+}
+
+/**
+ * Every section whose free-form translation the renderer looks up, with the page it
+ * looks it up for — the traversal `merge.js::mergeTranslationsAsync` makes: each page's
+ * sections, the 404 page's, and each layout area's (whose route it defaults to
+ * `/layout/[<name>/]<area>`), subsections included. Keep the two the same.
+ *
+ * @param {Object} siteContent
+ * @returns {Array<{ section: Object, page: Object }>}
+ */
+function freeformSections(siteContent) {
+  const out = []
+  const visit = (sections, page) => {
+    for (const section of sections || []) {
+      out.push({ section, page })
+      visit(section.subsections, page)
+    }
+  }
+  for (const page of siteContent?.pages || []) visit(page.sections, page)
+  if (siteContent?.notFound) visit(siteContent.notFound.sections, siteContent.notFound)
+  for (const [layoutName, areas] of Object.entries(siteContent?.layouts || {})) {
+    if (!areas || typeof areas !== 'object') continue
+    for (const [areaKey, layoutPage] of Object.entries(areas)) {
+      if (!layoutPage?.sections) continue
+      const route = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
+      visit(layoutPage.sections, { ...layoutPage, route })
+    }
+  }
+  return out
+}
+
+/**
+ * What a site's content says about its free-form translations — the ONE index for the
+ * build's stale and orphan check and for the CLI's `status --freeform`, `update-hash` and
+ * `prune --freeform`, so no two of them can judge a file differently.
+ *
+ *   - `validPaths` — every path the renderer reads a section's translation from
+ *     (`freeformPathsFor`), for every section it translates;
+ *   - `sourceHashes` — the hash of the source a translation at each of those paths
+ *     translates, which a recorded hash is compared with;
+ *   - `canJudge(path)` — whether this content can say a translation at `path` is
+ *     orphaned. ⛔ Only a page section's (`pages/…`, `page-ids/…`), and not one for a page
+ *     whose sections the content does not carry — a prerendered site with split content
+ *     rewrites `site-content.json` without them. A record's (`entities/…`) is read from
+ *     records this content does not hold. A check that cannot see the source must never
+ *     call its translation orphaned: `prune --freeform` deletes what it is told is.
+ *
+ * @param {Object} siteContent - collected site content, as `dist/site-content.json` holds it
+ * @returns {{ validPaths: Set<string>, sourceHashes: Object<string, string>, canJudge: (path: string) => boolean }}
+ */
+export function freeformSourceIndex(siteContent) {
+  const validPaths = new Set()
+  const sourceHashes = {}
+  for (const { section, page } of freeformSections(siteContent)) {
+    for (const path of freeformPathsFor(section, page)) {
+      validPaths.add(path)
+      if (section.content) sourceHashes[path] = computeSourceHash(section.content)
+    }
+  }
+
+  // The directories a translation for a page with no `sections` would sit in.
+  const unseen = new Set()
+  for (const page of siteContent?.pages || []) {
+    if (Array.isArray(page?.sections)) continue
+    for (const path of freeformPathsFor({ stableId: '_' }, page)) unseen.add(dirname(path))
+  }
+
+  const canJudge = (path) =>
+    typeof path === 'string' &&
+    (path.startsWith('pages/') || path.startsWith('page-ids/')) &&
+    !unseen.has(dirname(path))
+
+  return { validPaths, sourceHashes, canJudge }
 }
 
 /**
