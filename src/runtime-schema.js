@@ -288,8 +288,9 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
   } else if (fullMeta.data && typeof fullMeta.data === 'object' && !Array.isArray(fullMeta.data)) {
     for (const [key, value] of Object.entries(fullMeta.data)) {
       // ⛔ A value that is no schema at all declares a key by accident — it would reach the
-      // component as `null`, silently. `data: { inherit: [...] }`, the opt-in of April 2026,
-      // is the shape this refuses: it declared a key named `inherit`.
+      // component as `null`, silently. `data: { inherit: [...] }` — the opt-in to cascaded
+      // data from 2026-01-31 until declared keys replaced it — is the shape this refuses: it
+      // declared a key named `inherit`.
       if (typeof value !== 'string' && value !== null && (typeof value !== 'object' || Array.isArray(value))) {
         throw new Error(
           `[uniweb] Invalid 'data.${key}' in meta.js: expected a named ref ('@/x'), an inline field map, ` +
