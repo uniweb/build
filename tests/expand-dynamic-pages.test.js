@@ -85,6 +85,21 @@ describe('expandDynamicPages', () => {
     expect(out).toContain(template)
     expect(lines.some((l) => l.includes('no query for its URL to narrow'))).toBe(true)
   })
+
+  it('titles each page by the record, by the one rule the SPA reads — `recordTitle` (2026-09-14)', () => {
+    // ⛔ Until then only a `title` field named the page, so a person — a `name`, no
+    // `title` — kept the template's own title, which a bracket folder fills with its name.
+    const titled = { ...template, title: '[slug]' }
+    const out = expandDynamicPages([blog(), titled], parentData([
+      { slug: 'ada', name: 'Ada Lovelace' },
+      { slug: 'bare' },
+      { slug: 'post', title: 'A Post', name: 'Not this' },
+    ]), noop)
+    const title = (route) => out.find((p) => p.route === route).title
+    expect(title('/blog/ada')).toBe('Ada Lovelace')
+    expect(title('/blog/bare')).toBe('bare')
+    expect(title('/blog/post')).toBe('A Post')
+  })
 })
 
 describe('the route query decides what a parametric page expands over (ruled 2026-09-11)', () => {
@@ -278,7 +293,8 @@ describe('a `multi` route field expands member-wise (ruled 2026-09-12 [Diego])',
       { slug: 'b', tag: ['x'] },
     ]), (m) => said.push(m))
     expect(out.filter((p) => p.route === '/tags/x')).toHaveLength(1)
-    expect(out.find((p) => p.route === '/tags/x').title).toBeUndefined()
+    // the FIRST record titles it — by its handle, having no `title` or `name` (`recordTitle`)
+    expect(out.find((p) => p.route === '/tags/x').title).toBe('a')
     expect(said.some((m) => /claimed by more than one items record/.test(m))).toBe(true)
   })
 

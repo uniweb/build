@@ -24,7 +24,7 @@ import {
   deriveCacheKey,
   evaluateQuery,
 } from '@uniweb/core'
-import { routePatternToRegex } from '@uniweb/core/route-match'
+import { recordTitle, routePatternToRegex } from '@uniweb/core/route-match'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
@@ -458,8 +458,11 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
           paramValue: binding.paramValue,
         }
 
-        // Use item data for page metadata if available
-        if (item.title) concretePage.title = item.title
+        // The record names the page by the rule the SPA and the search index read
+        // (`recordTitle`: `title`, `name`, then its handle). ⛔ Until 2026-09-14 this read
+        // `title` alone, so a person record's page kept the template's own title.
+        const title = recordTitle(item)
+        if (title) concretePage.title = title
         if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
 
         expandedPages.push(concretePage)
