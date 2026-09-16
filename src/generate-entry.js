@@ -322,6 +322,18 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   // Resolve the data schemas referenced by section bindings, then extract
   // per-component runtime metadata (which lean-extracts field defaults from
   // the resolved schemas into meta.schemas[<key>]).
+  // ⛔ Components only, unlike `schema.js`, which also passes the foundation's
+  // `main.js` `data:`. Not an oversight: this map feeds `extractAllRuntimeSchemas`,
+  // and `extractRuntimeSchema` reads `fullMeta.data` — per component. A
+  // foundation-tier key reaches every section (`declaredKeys`) but has nowhere to
+  // put its lean schema in a PER-COMPONENT runtime meta, so resolving its ref here
+  // would produce an entry nothing reads.
+  //
+  // ⚠️ The consequence is real and still open: a foundation-tier `data:` entry
+  // naming a schema gets no field defaults from `applySchemas` at runtime. Latent
+  // today — every foundation-tier declaration in the templates is ref-less — and
+  // fixing it means deciding where a foundation-wide schema lives in the runtime
+  // meta, which is a design question, not a missing argument.
   const dataSchemaMap = await buildDataSchemaMap(collectSchemaRefs(components), { srcDir })
   const meta = extractAllRuntimeSchemas(components, dataSchemaMap)
 

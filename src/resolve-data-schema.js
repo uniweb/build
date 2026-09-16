@@ -80,19 +80,30 @@ const packageForScope = (scope) => SCOPE_PACKAGE[scope] ?? `@${scope}/schemas`
  * Reads `data: { key: '<ref>' }` (short) and `data: { key: { schema: '<ref>' } }`
  * (full). Non-string / schemaless entries are ignored.
  *
+ * ⛔ **The foundation's own `data:` counts too, and did not until 2026-09-16.**
+ * `main.js` may declare `data:` and those keys reach EVERY section
+ * (`declaredKeys`, `@uniweb/core/data-keys`) — but only components were scanned
+ * here, so a ref at that tier was neither resolved into `dataSchemas` nor
+ * rejected when dangling, while the key was still delivered at runtime. The
+ * symptom would have been no schema for the editor and no field defaults from
+ * `applySchemas`, with no build error. It bit nobody only because every
+ * foundation-tier declaration in the templates is ref-less.
+ *
  * @param {Object} components - Map of componentName → full meta (with `data`)
+ * @param {Object|false|null} [foundationData] - the foundation's `main.js` `data:`
  * @returns {Set<string>}
  */
-export function collectSchemaRefs(components) {
+export function collectSchemaRefs(components, foundationData = null) {
   const refs = new Set()
-  for (const meta of Object.values(components || {})) {
-    const data = meta?.data
-    if (!data || typeof data !== 'object' || data === false) continue
+  const readData = (data) => {
+    if (!data || typeof data !== 'object' || data === false) return
     for (const binding of Object.values(data)) {
       const ref = typeof binding === 'string' ? binding : binding?.schema
       if (typeof ref === 'string') refs.add(ref)
     }
   }
+  for (const meta of Object.values(components || {})) readData(meta?.data)
+  readData(foundationData)
   return refs
 }
 
