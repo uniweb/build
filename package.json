@@ -78,7 +78,8 @@
     "@uniweb/core": "workspace:^",
     "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-react": "^4.0.0 || ^5.0.0",
-    "vite-plugin-svgr": "^4.0.0"
+    "vite-plugin-svgr": "^4.0.0",
+    "@uniweb/runtime": "workspace:^"
   },
   "peerDependenciesMeta": {
     "vite": {
@@ -100,6 +101,9 @@
       "optional": true
     },
     "vite-plugin-svgr": {
+      "optional": true
+    },
+    "@uniweb/runtime": {
       "optional": true
     }
   }

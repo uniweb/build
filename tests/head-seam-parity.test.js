@@ -23,7 +23,10 @@
  * **If this test fails, the default assumption is that a new head injection
  * went into the wrong function.** Move it into injectPageContent(). Only widen
  * BUILD_ONLY if the thing genuinely cannot exist without a build — and say why
- * in the entry, because the next reader's alternative is to widen it again.
+ * in the entry, because the next reader's alternative is to widen it again. *
+ * ⚠️ Reaches `@uniweb/runtime/ssr`, a BUILT artifact — rebuild it (`pnpm -C
+ * framework/runtime build:ssr`) after changing the runtime, or this reads stale code.
+ * The root `pnpm test` / `test:contracts` do it for you; a package-local run cannot.
  */
 
 import { injectBuildData } from '../src/prerender.js'

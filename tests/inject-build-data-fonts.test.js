@@ -14,7 +14,10 @@
  * of generated CSS twice is pure payload.
  *
  * That strip is also why "no css on the graph" cannot be used to mean "no css on
- * the page" — see the DOM guard in the runtime's `setup.js`.
+ * the page" — see the DOM guard in the runtime's `setup.js`. *
+ * ⚠️ Reaches `@uniweb/runtime/ssr`, a BUILT artifact — rebuild it (`pnpm -C
+ * framework/runtime build:ssr`) after changing the runtime, or this reads stale code.
+ * The root `pnpm test` / `test:contracts` do it for you; a package-local run cannot.
  */
 
 import { injectBuildData } from '../src/prerender.js'
