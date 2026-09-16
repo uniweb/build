@@ -44,7 +44,7 @@
  * `submit`, because the framework has no list of permitted names
  * (`core/src/services.js`).
  *
- * ## ⛔ THE `tracking` ENTRY IS SLATED FOR REMOVAL — DO NOT EXTEND IT (decided 2026-09-15)
+ * ## ⛔ `tracking` IS NEVER EMITTED — AND THAT IS NOT A DETECTION GAP
  *
  * ⭐ **Tracking renders nothing.** This field exists because a service with no
  * surface to draw is invisible from outside — a search endpoint with no search
@@ -54,22 +54,24 @@
  * emitting it conditionally **asserts something false about every foundation that
  * does not call these** — not a missing niche capability.
  *
- * ⛔ **So the gap is not a gap, and the obvious fixes are wrong:** `block.track()`
- * (a `Website`-adjacent method in externalized core, invisible here) and
- * `kit/src/hooks/useReadingDepth.js` (a second hook the module rule below never
- * named) both emit custom events and derive nothing. **A matcher for either was
- * considered and rejected.** The rule below and the name `tracking` both go; until
- * they do, this paragraph is why nobody should widen them.
+ * ⛔ **So do not "fix" the obvious misses.** `block.track()` (a method in
+ * externalized core, invisible here) and `kit/src/hooks/useReadingDepth.js` both
+ * emit custom events and derive nothing. **A matcher for either was considered
+ * and rejected**, along with a separate `own-events` name. There is nothing here
+ * to detect. `NEVER_EMITTED` below is what enforces it, because the generic
+ * `isServiceEnabled` matcher would otherwise pick the name back up from any
+ * `isTrackingEnabled()` call.
  *
- * Two gates need help, and only two:
+ * One gate needs help, and only one:
  *
- *   - **`useTracker`** resolves nothing itself — it calls through to
- *     `getUniweb()?.tracking`, and the `'tracking'` literal lives in
- *     `runtime/src/wire-foundation.js`, which is never bundled into a
- *     foundation. Its module presence is the signal.
  *   - **`isSearchEnabled()`** is a `Website` method, and its literal is in
  *     `core/src/website.js` — external, so never a survivor. The call is the
  *     signal.
+ *
+ * ⚠️ **`records` is not derived here at all** — its resolver is in externalized
+ * core too, so nothing naming it survives the shake. It comes from the component
+ * schema instead (`declaredKeys`, applied in `build/src/schema.js`), which is a
+ * second derivation over a different artifact.
  *
  * ⚠️ `@uniweb/api` deliberately needs no entry: it calls
  * `resolveService(website, SERVICE_NAME)` against a module-level `const`, which
@@ -89,8 +91,38 @@
  * @module @uniweb/build/foundation/derive-supports
  */
 
-/** Kit's `useTracker`, in a workspace clone or a published install alike. */
-const TRACKER_MODULE = /(^|[/\\])kit[/\\]src[/\\]hooks[/\\]useTracker\.js$/
+import { declaredKeys } from '@uniweb/core/data-keys'
+
+/**
+ * Service names this never emits, however a foundation reaches for them.
+ *
+ * ⛔ **Excluding a name is not the same as failing to detect one**, which is why
+ * this is a list and not an omission. `tracking` arrives through the generic
+ * `isServiceEnabled` matcher from any `isTrackingEnabled()` call, so deleting
+ * the old module rule was not enough on its own — a foundation that guards a
+ * consent banner would have put the name back.
+ *
+ * See the header: a service with no rendered surface cannot be claimed or
+ * withheld by a foundation, and naming it conditionally asserts a falsehood
+ * about every foundation that does not call these.
+ */
+const NEVER_EMITTED = new Set(['tracking'])
+
+/** The names in `names` that this field may carry. */
+function nameable(names) {
+  return names.filter((s) => !NEVER_EMITTED.has(s))
+}
+
+/**
+ * The names in `names` that it may not — for the caller's warning.
+ *
+ * Exported because an AUTHORED name is dropped too (`composeSupports`), and a
+ * developer who typed one deserves to be told rather than to find it missing
+ * from the registry.
+ */
+export function unnameableIn(names) {
+  return (names || []).filter((s) => NEVER_EMITTED.has(s))
+}
 
 /**
  * Walk an ESTree tree, visiting every node.
@@ -208,7 +240,8 @@ function collectSurvivors(bundle) {
  * Three call shapes are read, and two of them carry the name as an argument so
  * they cover the open registry without a rule per service:
  * `resolveService(website, name)`, `website.isServiceEnabled(name)` (what every
- * `@uniweb/kit` predicate compiles to), and the two hand-written gates below.
+ * `@uniweb/kit` predicate compiles to), and the one hand-written gate,
+ * `isSearchEnabled()`. Names in `NEVER_EMITTED` are dropped from the result.
  *
  * @param {object} bundle - Rollup's bundle, as handed to `writeBundle`
  * @param {object} ctx - the Rollup plugin context (`this` in the hook)
@@ -224,8 +257,6 @@ export function deriveSupports(bundle, ctx) {
   const blindAt = new Set()
 
   for (const id of collectSurvivors(bundle)) {
-    if (TRACKER_MODULE.test(id)) services.add('tracking')
-
     const info = ctx?.getModuleInfo?.(id)
     const ast = info?.ast
     if (!ast) continue
@@ -257,10 +288,45 @@ export function deriveSupports(bundle, ctx) {
   }
 
   return {
-    services: [...services].sort(),
+    services: nameable([...services]).sort(),
     blind: blindAt.size > 0,
     blindAt: [...blindAt].sort(),
   }
+}
+
+/**
+ * Does this foundation support `records`?
+ *
+ * ⭐ **The second derivation, over a different artifact.** `records` has no
+ * module-graph signature — `resolveRecordsService` is in externalized core, so
+ * nothing naming it survives a foundation's tree-shake. The evidence is the
+ * component schema instead.
+ *
+ * Since the 2026-09-14 ruling a section receives only the `data:` keys it
+ * declares (`assembleData`, `runtime/src/prepare-props.js`), so a foundation
+ * declaring none at either tier can never deliver a record to anything.
+ *
+ * ⛔ **Key presence, not ref presence.** A `data:` entry may name a schema, but
+ * that is a shape hint; the Model ref deciding whether records are live or
+ * static is on the site's QUERY, defaulted to the query's own name, and is
+ * chosen after this foundation is registered. Counting only ref-bearing entries
+ * measured backwards across the templates: it named the forms template and
+ * missed the one built to demonstrate query-driven pages.
+ *
+ * What it claims: *given query results, this foundation will render them* — not
+ * that any site supplies them. A declared key may equally be filled by a data
+ * block authored inline in the markdown (`block.heldData`).
+ *
+ * @param {Object} components - componentName → meta, each with its `data:`
+ * @param {Object|false|null|undefined} foundationData - `main.js` `data:`
+ * @returns {boolean}
+ */
+export function deriveRecordsSupport(components, foundationData) {
+  // The foundation tier reaches every section, so one key there is enough — and
+  // it is checked separately because a foundation declaring one still supports
+  // records when it has no components of its own.
+  if (declaredKeys(undefined, foundationData).length > 0) return true
+  return Object.values(components || {}).some((meta) => declaredKeys(meta?.data).length > 0)
 }
 
 /**
@@ -293,16 +359,23 @@ export function deriveSupports(bundle, ctx) {
  * @returns {{supports?: string[]}} spread into `_self`; `{}` keeps the key absent
  */
 export function composeSupports(authored, derived) {
+  // An authored name this field may not carry is dropped HERE rather than at
+  // its source: `package.json` is the developer's file, and rewriting it is
+  // `doctor --fix`'s job. `reportSupports` says what was dropped and why.
+  // ⛔ Absence must survive the filter — `undefined` is UNKNOWN, `[]` is a
+  // declaration, and mapping one to the other loses a state.
+  const declared = authored === undefined ? undefined : nameable(authored)
+
   // No derivation ran (dev rebuild): the authored value is the whole answer,
   // and an absent one stays absent.
-  if (!derived) return authored === undefined ? {} : { supports: authored }
+  if (!derived) return declared === undefined ? {} : { supports: declared }
 
   const { services, blind } = derived
 
-  if (authored === undefined && services.length === 0) {
+  if (declared === undefined && services.length === 0) {
     return blind ? {} : { supports: [] }
   }
 
-  const union = [...new Set([...(authored || []), ...services])].sort()
+  const union = [...new Set([...(declared || []), ...services])].sort()
   return { supports: union }
 }

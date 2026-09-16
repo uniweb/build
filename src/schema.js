@@ -18,7 +18,11 @@ import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inferTitle } from './utils/infer-title.js'
 import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
-import { composeSupports } from './foundation/derive-supports.js'
+import {
+  composeSupports,
+  deriveRecordsSupport,
+  unnameableIn,
+} from './foundation/derive-supports.js'
 
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
@@ -790,6 +794,19 @@ export async function discoverComponents(srcDir, sectionPaths = DEFAULT_SECTION_
  * the artifact is already correct without it.
  */
 function reportSupports(srcDir, authored, derived, emitted) {
+  // ⛔ BEFORE the dev-rebuild bail: a name this field may not carry is dropped
+  // from what ships, and a developer who typed one has to hear it. Left below
+  // the bail it would be silent in dev, which is where they are working.
+  const dropped = unnameableIn(authored)
+  if (dropped.length > 0) {
+    console.warn(
+      `Warning: ${srcDir}/package.json declares \`uniweb.supports: ${dropped.join(', ')}\`, ` +
+        `which this field does not carry. A foundation renders no surface for it — the runtime ` +
+        `handles it for every foundation alike — so naming it would tell a consumer that any ` +
+        `foundation NOT naming it lacks the capability, which is false. Dropped.`,
+    )
+  }
+
   if (!derived) return
 
   const added = (emitted || []).filter((s) => !(authored || []).includes(s))
@@ -865,7 +882,10 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Resolve the data schemas referenced by section bindings (carried in
   // schema.json for the editor/platform — see named-data-schemas.md).
-  const dataSchemas = await buildDataSchemaMap(collectSchemaRefs(components), { srcDir })
+  const dataSchemas = await buildDataSchemaMap(
+    collectSchemaRefs(components, foundationConfig.data),
+    { srcDir },
+  )
 
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
@@ -886,13 +906,31 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
   // Build _self, stripping the raw extension boolean in favor of normalized role
   const { extension: _ext, ...configWithoutExtension } = foundationConfig
 
-  // `supports` is the one identity field the graph knows better than the file.
+  // `supports` is the one identity field the build knows better than the file.
   // `identity.supports` is already normalized (absent stays absent, `[]` stays
   // `[]`), and composeSupports keeps that three-state distinction while adding
-  // what the bundle proves — see its table. Spread AFTER `...identity` so it
+  // what the build proves — see its table. Spread AFTER `...identity` so it
   // replaces the authored-only value rather than being overwritten by it.
-  const supports = composeSupports(identity.supports, derivedSupports)
-  reportSupports(srcDir, identity.supports, derivedSupports, supports.supports)
+  //
+  // ⭐ TWO DERIVATIONS, TWO ARTIFACTS. `derivedSupports` is read off the bundle's
+  // post-tree-shake module graph; `records` cannot be, because its resolver is in
+  // externalized core. It comes from the component schema, which is right here.
+  //
+  // ⛔ GATED WITH THE GRAPH DERIVATION, DELIBERATELY. This one is free to compute
+  // and would work on a dev rebuild, where `derivedSupports` is null. It is
+  // skipped there anyway: dev never registers, and a dev-built schema.json whose
+  // `supports` differs from the one a real build produces is a trap rather than a
+  // convenience — the artifact would disagree with itself depending on which
+  // command wrote it. One rule: the derivation runs on a real build.
+  const derived = derivedSupports && {
+    ...derivedSupports,
+    services: deriveRecordsSupport(components, foundationConfig.data)
+      ? [...new Set([...derivedSupports.services, 'records'])].sort()
+      : derivedSupports.services,
+  }
+
+  const supports = composeSupports(identity.supports, derived)
+  reportSupports(srcDir, identity.supports, derived, supports.supports)
 
   return {
     _self: {

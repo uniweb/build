@@ -21,7 +21,12 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseAst } from 'vite'
-import { deriveSupports, composeSupports } from '../src/foundation/derive-supports.js'
+import {
+  deriveSupports,
+  composeSupports,
+  deriveRecordsSupport,
+  unnameableIn,
+} from '../src/foundation/derive-supports.js'
 
 const FRAMEWORK = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -44,6 +49,9 @@ function graphOf(modules, { renderedLength = 100 } = {}) {
   const ctx = { getModuleInfo: (id) => byId.get(id) ?? null }
   return { bundle, ctx }
 }
+
+/** A derivation result, as `deriveSupports` returns one. */
+const derived = (services, blind = false) => ({ services, blind, blindAt: [] })
 
 describe('deriveSupports — over real framework source', () => {
   test('reads the submit gate through kit, where the literal actually lives', () => {
@@ -80,13 +88,30 @@ describe('deriveSupports — over real framework source', () => {
     const { bundle, ctx } = graphOf([realModule('kit/src/utils/servicePredicates.js')])
     const { services, blind } = deriveSupports(bundle, ctx)
 
-    expect(services).toEqual(['api', 'assistant', 'search', 'submit', 'tracking'])
+    // `tracking` is absent although `isTrackingEnabled()` is right there in the
+    // same file, and that is the point of NEVER_EMITTED — see the next test.
+    expect(services).toEqual(['api', 'assistant', 'search', 'submit'])
     expect(blind).toBe(false)
   })
 
-  test('the tracking gate is module presence — it routes through no literal', () => {
-    const { bundle, ctx } = graphOf([realModule('kit/src/hooks/useTracker.js')])
-    expect(deriveSupports(bundle, ctx).services).toContain('tracking')
+  test('⛔ `tracking` is never emitted, even from a direct isTrackingEnabled() call', () => {
+    // Inverted 2026-09-16. This asserted that `useTracker`'s module presence
+    // DERIVED `tracking`; the name is now excluded outright, because a foundation
+    // neither supplies nor withholds it — the runtime emits page_view /
+    // outbound_click / section_view for every foundation alike. Under the
+    // three-state rule a list means "these and only these", so naming it
+    // conditionally tells a consumer that every foundation NOT naming it lacks
+    // the capability, which is false of all of them.
+    //
+    // Deleting the module rule alone was not enough: the generic
+    // `isServiceEnabled` matcher picks the name straight out of
+    // `isTrackingEnabled()`, which is why the exclusion is a list and not an
+    // omission. This asserts the path that would otherwise put it back.
+    const predicates = graphOf([realModule('kit/src/utils/servicePredicates.js')])
+    expect(deriveSupports(predicates.bundle, predicates.ctx).services).not.toContain('tracking')
+
+    const tracker = graphOf([realModule('kit/src/hooks/useTracker.js')])
+    expect(deriveSupports(tracker.bundle, tracker.ctx).services).not.toContain('tracking')
   })
 
   test('core\'s own module declares resolveService without calling it, and is not blind', () => {
@@ -176,7 +201,6 @@ describe('deriveSupports — blindness', () => {
 })
 
 describe('composeSupports — the three states must not collapse', () => {
-  const derived = (services, blind = false) => ({ services, blind, blindAt: [] })
 
   test('nothing authored, something derived → the derived set', () => {
     expect(composeSupports(undefined, derived(['submit']))).toEqual({ supports: ['submit'] })
@@ -218,5 +242,73 @@ describe('composeSupports — the three states must not collapse', () => {
     expect(composeSupports(undefined, null)).toEqual({})
     expect(composeSupports([], null)).toEqual({ supports: [] })
     expect(composeSupports(['search'], null)).toEqual({ supports: ['search'] })
+  })
+})
+
+describe('composeSupports — an authored name the field may not carry', () => {
+  test('a hand-written `tracking` is dropped from what ships', () => {
+    // The exclusion is not only about what the graph finds. A developer who
+    // types the name into package.json makes the same false claim, so the union
+    // drops it too — and `reportSupports` warns, because a value that vanishes
+    // with no explanation is how a declaration stops meaning anything.
+    expect(composeSupports(['tracking'], derived(['search']))).toEqual({ supports: ['search'] })
+    expect(composeSupports(['search', 'tracking'], derived([]))).toEqual({ supports: ['search'] })
+  })
+
+  test('⛔ dropping the only authored name yields [], not absence', () => {
+    // `[]` is "this foundation honours no host service"; absent is "nobody said".
+    // The developer DID say — everything they said was unnameable — so the
+    // declaration survives as an explicit none. Mapping it to absence would lose
+    // a state and read as an older CLI.
+    expect(composeSupports(['tracking'], derived([]))).toEqual({ supports: [] })
+    expect(composeSupports(['tracking'], null)).toEqual({ supports: [] })
+  })
+
+  test('absence still survives the filter', () => {
+    expect(composeSupports(undefined, derived([]))).toEqual({ supports: [] })
+    expect(composeSupports(undefined, null)).toEqual({})
+  })
+
+  test('unnameableIn names what was dropped, for the warning', () => {
+    expect(unnameableIn(['search', 'tracking'])).toEqual(['tracking'])
+    expect(unnameableIn(['search'])).toEqual([])
+    expect(unnameableIn(undefined)).toEqual([])
+  })
+})
+
+describe('deriveRecordsSupport — the second derivation, over the component schema', () => {
+  test('a component declaring a data key supports records', () => {
+    expect(deriveRecordsSupport({ Hero: { data: { articles: {} } } }, undefined)).toBe(true)
+  })
+
+  test('⛔ key presence, not ref presence — an inline shape counts', () => {
+    // The Model ref that decides whether records arrive live or static is on the
+    // site's QUERY, defaulted to the query's own name, and is chosen after this
+    // foundation is registered. Counting only ref-bearing entries measured
+    // backwards across the templates: it named the forms template (`@std/form`)
+    // and missed the one built to demonstrate query-driven pages, whose sections
+    // all declare `{ key: {} }`.
+    expect(deriveRecordsSupport({ A: { data: { donors: {} } } }, undefined)).toBe(true)
+    expect(deriveRecordsSupport({ A: { data: { team: '@/member' } } }, undefined)).toBe(true)
+  })
+
+  test('no data key anywhere means no records', () => {
+    expect(deriveRecordsSupport({ Hero: { params: {} }, Nav: {} }, undefined)).toBe(false)
+    expect(deriveRecordsSupport({}, undefined)).toBe(false)
+    expect(deriveRecordsSupport(undefined, undefined)).toBe(false)
+  })
+
+  test('`data: false` and a non-map declare nothing', () => {
+    expect(deriveRecordsSupport({ A: { data: false } }, undefined)).toBe(false)
+    expect(deriveRecordsSupport({ A: { data: [] } }, undefined)).toBe(false)
+    expect(deriveRecordsSupport({ A: { data: {} } }, undefined)).toBe(false)
+  })
+
+  test('the foundation tier counts on its own — its keys reach every section', () => {
+    // Checked separately from the component loop, because a foundation declaring
+    // one still supports records when it has no components of its own.
+    expect(deriveRecordsSupport({ A: { params: {} } }, { profile: {} })).toBe(true)
+    expect(deriveRecordsSupport({}, { profile: {} })).toBe(true)
+    expect(deriveRecordsSupport({}, false)).toBe(false)
   })
 })
