@@ -350,3 +350,42 @@ describe('font-var type inference (loadFoundationConfig)', () => {
     expect(vars['font-display'].type).toBe('number')
   })
 })
+
+describe('titleInferred', () => {
+  afterEach(cleanup)
+
+  // ⭐ The build fills `title` from the component name whenever meta.js declares
+  // none, so `title` is ALWAYS present and a consumer cannot tell an authored
+  // name from a generated one. That difference decides whether the string can be
+  // translated: an authored title is the foundation's own words and is shown
+  // verbatim in every UI language; an inferred one is a placeholder a consumer
+  // may replace with a localized label. Without the flag, a foundation that
+  // never named its Hero ships the English "Hero" to every author in the world.
+  it('marks a title the build invented from the component name', async () => {
+    fresh()
+    touch('sections/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
+    writeMeta('sections/TeamRoster/meta.js', { description: 'People' })
+
+    const result = await discoverComponents(tmpRoot, ['sections'])
+    expect(result.TeamRoster.title).toBe('Team Roster')
+    expect(result.TeamRoster.titleInferred).toBe(true)
+  })
+
+  it('marks it for a section discovered with no meta.js at all', async () => {
+    fresh()
+    touch('sections/Hero/Hero.jsx', 'export default function Hero() {}')
+
+    const result = await discoverComponents(tmpRoot, ['sections'])
+    expect(result.Hero.titleInferred).toBe(true)
+  })
+
+  it('leaves an authored title unmarked', async () => {
+    fresh()
+    touch('sections/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
+    writeMeta('sections/TeamRoster/meta.js', { title: 'Who We Are' })
+
+    const result = await discoverComponents(tmpRoot, ['sections'])
+    expect(result.TeamRoster.title).toBe('Who We Are')
+    expect(result.TeamRoster.titleInferred).toBeUndefined()
+  })
+})

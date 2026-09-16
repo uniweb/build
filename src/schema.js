@@ -464,11 +464,27 @@ function hasEntryFile(dirPath, dirName) {
  * Create an implicit empty meta for a section type discovered without meta.js
  */
 function createImplicitMeta(name) {
-  return { title: inferTitle(name) }
+  return { title: inferTitle(name), titleInferred: true }
 }
 
 /**
- * Build a component entry with title inference applied
+ * Build a component entry with title inference applied.
+ *
+ * ⭐ `titleInferred` SAYS THE TITLE IS OURS, NOT THE AUTHOR'S, and without it a
+ * consumer cannot tell. We fill `title` from the component name whenever
+ * `meta.js` declares none, so `title` is ALWAYS present — which means an editor
+ * showing section names has no way to know that `"Hero"` is a string the build
+ * invented rather than one a developer chose.
+ *
+ * ⛔ THAT DIFFERENCE DECIDES WHETHER THE NAME CAN BE TRANSLATED. An authored
+ * title is the foundation's own words and must be shown verbatim in every UI
+ * language. An inferred one is a placeholder, and a consumer that knows the
+ * section's `family` has a better string available — one it can localize. A
+ * foundation that never named its Hero would otherwise ship the English
+ * `"Hero"` to every author in the world.
+ *
+ * ⚖️ The build itself reads neither field. This is a statement ABOUT the title,
+ * for whoever renders it.
  */
 function buildComponentEntry(name, relativePath, meta) {
   const entry = {
@@ -479,6 +495,7 @@ function buildComponentEntry(name, relativePath, meta) {
   // Apply title inference if meta has no explicit title
   if (!entry.title) {
     entry.title = inferTitle(name)
+    entry.titleInferred = true
   }
   return entry
 }
