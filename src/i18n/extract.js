@@ -327,7 +327,8 @@ function visitTranslatableBlocks(nodes, visit) {
  * Determine field name for heading based on level and index
  */
 function getHeadingField(level, index) {
-  // First H1 is title, first H2 is subtitle, H3 before H1 could be pretitle
+  // First H1 is title, first H2 is subtitle. A pretitle is a `#>` label line
+  // (or, in older content, a smaller heading above the title).
   // This is simplified - semantic-parser does this more intelligently
   if (level === 1) return index.h1 === 0 ? 'title' : `heading.${index.h1}`
   if (level === 2) return index.h2 === 0 ? 'subtitle' : `heading.h2.${index.h2}`
