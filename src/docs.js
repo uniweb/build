@@ -31,6 +31,13 @@ function generateComponentDocs(name, meta) {
     lines.push('')
   }
 
+  // The standard section type this component claims. `family` replaced the
+  // retired `category:` / `purpose:` pair, which this generator never emitted.
+  if (meta.family) {
+    lines.push(`*Family:* \`${meta.family}\``)
+    lines.push('')
+  }
+
   // Parameters (shown first - most important for content authors)
   if (meta.params && Object.keys(meta.params).length > 0) {
     lines.push('### Parameters')
@@ -66,33 +73,48 @@ function generateComponentDocs(name, meta) {
     }
   }
 
-  // Presets
-  if (meta.presets && meta.presets.length > 0) {
+  // Presets — named param combinations. `meta.presets` is a KEYED OBJECT
+  // ({ name: { label, params } }), not an array: this read `meta.presets.length`
+  // until 2026-09-16, which is `undefined > 0` on an object, so every preset in
+  // every foundation was dropped from COMPONENTS.md with nothing reporting it.
+  const presets = Object.entries(meta.presets || {})
+  if (presets.length > 0) {
     lines.push('### Presets')
     lines.push('')
 
-    for (const preset of meta.presets) {
-      const settings = preset.settings
-        ? Object.entries(preset.settings)
+    for (const [name, preset] of presets) {
+      const settings = preset?.params
+        ? Object.entries(preset.params)
             .map(([k, v]) => `${k}: ${v}`)
             .join(', ')
         : ''
-      lines.push(`- **${preset.name}**${settings ? ` — ${settings}` : ''}`)
+      const label = preset?.label || name
+      lines.push(`- **${name}**${label !== name ? ` — ${label}` : ''}${settings ? ` (${settings})` : ''}`)
     }
     lines.push('')
   }
 
-  // Content Elements (condensed - less important)
-  if (meta.elements && Object.keys(meta.elements).length > 0) {
-    const elements = Object.entries(meta.elements)
-    const elementList = elements.map(([key, el]) => {
-      return el.required ? `${key} (required)` : key
-    }).join(', ')
-
+  // Content expectations — what an author writes in the markdown. The key is
+  // `content`; this read `meta.content` as `meta.elements` until 2026-09-16 —
+  // the pre-rename name, which nothing has produced since. A dead branch reads
+  // exactly like a component that declares nothing, so the whole section was
+  // missing from every generated catalog.
+  //
+  // A value is either a label string ('Description [1-2]') or { label, hint }.
+  // The LABEL is the point: `paragraphs` alone tells an author nothing, and the
+  // count hint is the part that says how much to write.
+  const elements = Object.entries(meta.content || {})
+  if (elements.length > 0) {
     lines.push('### Content')
     lines.push('')
-    lines.push(elementList)
-    lines.push('')
+
+    for (const [key, el] of elements) {
+      const label = typeof el === 'string' ? el : el?.label || ''
+      lines.push(`**${key}**${label ? ` — ${label}` : ''}`)
+      const hint = typeof el === 'object' && el?.hint ? el.hint : ''
+      if (hint) lines.push(`  ${hint}`)
+      lines.push('')
+    }
   }
 
   return lines.join('\n')
