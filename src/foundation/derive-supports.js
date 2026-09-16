@@ -44,6 +44,23 @@
  * `submit`, because the framework has no list of permitted names
  * (`core/src/services.js`).
  *
+ * ## ⛔ THE `tracking` ENTRY IS SLATED FOR REMOVAL — DO NOT EXTEND IT (decided 2026-09-15)
+ *
+ * ⭐ **Tracking renders nothing.** This field exists because a service with no
+ * surface to draw is invisible from outside — a search endpoint with no search
+ * box. But the runtime emits `page_view` / `outbound_click` / `section_view` for
+ * every foundation alike (`wireTracker`), so a foundation neither supplies nor
+ * withholds tracking, and under the three-state rule (*these and only these*)
+ * emitting it conditionally **asserts something false about every foundation that
+ * does not call these** — not a missing niche capability.
+ *
+ * ⛔ **So the gap is not a gap, and the obvious fixes are wrong:** `block.track()`
+ * (a `Website`-adjacent method in externalized core, invisible here) and
+ * `kit/src/hooks/useReadingDepth.js` (a second hook the module rule below never
+ * named) both emit custom events and derive nothing. **A matcher for either was
+ * considered and rejected.** The rule below and the name `tracking` both go; until
+ * they do, this paragraph is why nobody should widen them.
+ *
  * Two gates need help, and only two:
  *
  *   - **`useTracker`** resolves nothing itself — it calls through to
