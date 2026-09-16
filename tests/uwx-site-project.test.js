@@ -15,6 +15,7 @@ import {
   siteProjectToDocument,
   declarationsToQueriesYml,
 } from '../src/uwx/index.js'
+import { collectUnitUuids, stampUnitUuids } from '../src/uwx/site-diff.js'
 import { computeHash } from '../src/i18n/hash.js'
 
 let dir
@@ -435,6 +436,68 @@ describe('pages lane fixed point — project → re-produce', () => {
     const reproduced = await siteProjectToDocument(site)
     const home = reproduced.pages.find((p) => p.$id === 'home')
     expect(treeOf(home.page_sections)).toEqual(['hero', { features: ['card-a'] }])
+  })
+})
+
+describe('an app-created section (a $uuid, no stable id) survives pull → edit → push', () => {
+  // ⛔ The editor creates sections with a `$uuid` and no `stable_id`. The projector,
+  // the prune keep-set and the push/pull unit walk all skipped such a section, so a
+  // pull left its file out and a push after any local edit sent the page without it —
+  // which the backend deletes. Measured 2026-09-16 on a local stack: 8 stored Home
+  // sections, 5 pulled.
+  const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const APP_UUID = '01a0aa95-def2-72a1-86b4-ce5795993360'
+  const remote = () => ({
+    info: { name: { en: 'Site' }, foundation: '@a/base' },
+    pages: [
+      {
+        $uuid: 'u-home',
+        $id: 'home',
+        slug: 'home',
+        mode: 'page',
+        stable_id: 'home',
+        is_index: true,
+        page_sections: [
+          { $uuid: 'u-hero', stable_id: 'hero', type: 'Hero', content: docOf('CLI hero') },
+          { $uuid: APP_UUID, type: 'SplitContent', content: docOf('Added in the app') },
+        ],
+      },
+    ],
+  })
+
+  it('is written under a name derived from its $uuid, listed in sections:, and kept on a pruning re-pull', () => {
+    const site = join(dir, 'site')
+    mkdirSync(site, { recursive: true })
+    siteContentDocumentToProject({ document: remote(), siteRoot: site })
+
+    const file = join(site, 'pages', 'home', 'split-content-95993360.md')
+    expect(existsSync(file)).toBe(true)
+    expect(readFileSync(file, 'utf8')).toContain('Added in the app')
+    const pageYml = yaml.load(readFileSync(join(site, 'pages', 'home', 'page.yml'), 'utf8'))
+    expect(pageYml.sections).toEqual(['hero', 'split-content-95993360', '...'])
+
+    // A second pull with prune must not treat the file as an orphan.
+    siteContentDocumentToProject({ document: remote(), siteRoot: site, prune: true })
+    expect(existsSync(file)).toBe(true)
+  })
+
+  it('goes back out with its original $uuid, so the backend matches it instead of deleting it', async () => {
+    const site = join(dir, 'site')
+    mkdirSync(site, { recursive: true })
+    const pulled = remote()
+    siteContentDocumentToProject({ document: pulled, siteRoot: site })
+
+    const local = await siteProjectToDocument(site)
+    const r = stampUnitUuids(local, collectUnitUuids(pulled))
+    expect(r.collisions).toEqual([])
+
+    const home = local.pages.find((p) => p.$id === 'home')
+    expect(home.page_sections.map((s) => [s.type, s.$uuid])).toEqual([
+      ['Hero', 'u-hero'],
+      ['SplitContent', APP_UUID],
+    ])
+    // The path the pull harvested under is the path the push stamps from.
+    expect(Object.keys(collectUnitUuids(local))).toEqual(Object.keys(collectUnitUuids(pulled)))
   })
 })
 

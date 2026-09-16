@@ -23,7 +23,7 @@
 // Units are DISJOINT: a page's hash excludes its sections, a section's excludes its
 // children, so a change lands in exactly one unit and is never double-reported.
 // Naming comes from the projector's own helpers (`pageDirName`,
-// `safeStableIdFilename`) rather than a local copy, so a label always names a file
+// `sectionFileBase`) rather than a local copy, so a label always names a file
 // that really exists.
 //
 // It needs TWO bases, and that is the non-obvious part.
@@ -47,7 +47,7 @@
 // reported as unattributed rather than guessed at.
 
 import { entityContentHash } from './records.js'
-import { recordStableId, safeStableIdFilename, pageDirName, layoutSectionPaths } from './site-project.js'
+import { sectionFileBase, pageDirName, layoutSectionPaths } from './site-project.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 
 // A unit's own content, with the nested collections that are their own units
@@ -95,10 +95,10 @@ export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.
 export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
   const walkSections = (sections, dir) => {
     for (const record of sections || []) {
-      const id = recordStableId(record)
-      // Anonymous and id-less: the projector cannot place it either, so there is
-      // no file to name and nothing to attribute.
-      if (id) cb(`${dir}/${safeStableIdFilename(id)}.md`, record, 'section')
+      // The projector's own file rule, so a unit's path here is the file it is
+      // written to — including an app-created section named from its `$uuid`.
+      const base = sectionFileBase(record)
+      if (base) cb(`${dir}/${base}.md`, record, 'section')
       walkSections(record.$children, dir)
     }
   }

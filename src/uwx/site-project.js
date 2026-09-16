@@ -465,6 +465,42 @@ export function safeStableIdFilename(stableId) {
 }
 
 /**
+ * The `.md` file base a page section is written to — the ONE rule the projector,
+ * the prune keep-set and the push/pull unit walk (`site-diff.js::walkSiteUnits`)
+ * all use, so the path a pull harvests a `$uuid` under is the path the next push
+ * stamps it back onto.
+ *
+ * `stable_id || $id` when the record has one (unchanged). ⛔ A section with
+ * neither — what the app's editor creates: a `$uuid` and no stable id — used to be
+ * SKIPPED, silently, by all three. A pull then left its file out, and a push after
+ * any local edit sent the page without it, which the backend deletes (a
+ * package's absence of a stored `page_sections` item under a page it sends is a
+ * delete). So such a section is named from its identity instead:
+ * `<type-kebab>-<last 8 hex of $uuid>`, e.g. `hero-95993360`.
+ *
+ * The derived base is already filesystem-safe and starts with a letter, so the
+ * build reads it back verbatim as the section's stable id (no numeric prefix to
+ * strip) and `safeStableIdFilename` returns it unchanged — the push path equals
+ * the pull path. The first push after such a pull therefore gives the item that
+ * stable id; the `$uuid` is re-stamped by path, so the item keeps its identity.
+ *
+ * @returns {string|null} null only for a record with no stable id and no `$uuid`
+ */
+export function sectionFileBase(record) {
+  const id = recordStableId(record)
+  if (id) return safeStableIdFilename(id)
+  const hex = typeof record?.$uuid === 'string' ? record.$uuid.replace(/-/g, '').toLowerCase() : ''
+  if (!/^[0-9a-f]{8,}$/.test(hex)) return null
+  const kebab = String(record?.type || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  const stem = /^[a-z]/.test(kebab) ? kebab : 'section'
+  return `${stem}-${hex.slice(-8)}`
+}
+
+/**
  * Write a page's `page_sections` tree to clean `<stableId>.md` files in `pageDir`
  * and return the `page.yml::sections:` array that captures order + nesting — the
  * verified nested form (`processExplicitSections`): a string per leaf section, a
@@ -483,12 +519,13 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
   const buildEntries = (records) => {
     const entries = []
     for (const record of records || []) {
-      const stableId = recordStableId(record)
-      if (!stableId) continue // anonymous and id-less → cannot place; skip
-      // Filesystem-safe filename (= stableId when already safe); the true stableId
-      // rides in frontmatter `id:`. The sections: leaf uses the same base so the
-      // producer's filename-based resolution matches.
-      const fileBase = safeStableIdFilename(stableId)
+      // Filesystem-safe filename (= stableId when already safe; derived from `$uuid`
+      // for an app-created section with no stable id); the true stableId rides in
+      // frontmatter `id:`. The sections: leaf uses the same base so the producer's
+      // filename-based resolution matches.
+      const fileBase = sectionFileBase(record)
+      if (!fileBase) continue // no stable id AND no `$uuid` → nothing to name it by
+      const stableId = recordStableId(record) || fileBase
       const filePath = join(pageDir, `${fileBase}.md`)
       // If this uuid's section moved (an app-side stableId rename), relocate its
       // `.md` in place before writing; then record its current path in the index.
@@ -672,8 +709,8 @@ function collectSectionFileBases(pageSections) {
   const bases = new Set()
   const walk = (records) => {
     for (const record of records || []) {
-      const id = recordStableId(record)
-      if (id) bases.add(safeStableIdFilename(id))
+      const base = sectionFileBase(record)
+      if (base) bases.add(base)
       if (Array.isArray(record.$children)) walk(record.$children)
     }
   }
