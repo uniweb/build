@@ -494,6 +494,51 @@ function escapeHtml(str) {
 }
 
 /**
+ * The effective `seo` block for a collected site.
+ *
+ * ⛔ **`site.yml::seo` IS THE SOURCE. The plugin option is an OVERRIDE.**
+ * This plugin read `options.seo` alone until 2026-09-17, and nothing ever put
+ * `site.yml`'s block there: `defineSiteConfig` passes its own `seo` option
+ * straight through and defaults it to `{}`, while the scaffolded
+ * `vite.config.js` calls `defineSiteConfig()` with no arguments. So on the
+ * bundle lane `seo.baseUrl` and `seo.robots` were authored, documented
+ * (`cli/partials/agents.md`), read by `uniweb doctor` — and dead. The symptom,
+ * reported from a real site: `seo.baseUrl` set, doctor's
+ * `agents-index-relative-links` warning cleared, and `uniweb build` / `uniweb
+ * export` emitting neither `sitemap.xml` nor `robots.txt` while `llms.txt`
+ * links stayed root-relative.
+ *
+ * ⭐ **The data-only path was never wrong** — `build-site-data.js::writeProjections`
+ * reads `siteContent.config.seo.baseUrl`. Reading the same place here is what
+ * makes the two lanes unable to disagree, which is the whole reason
+ * `projectionOptions` exists.
+ *
+ * ⚠️ The generators were unit-tested throughout (`tests/robots-content-signals.test.js`
+ * calls `generateRobotsTxt` directly), which is why a green suite proved
+ * nothing: the tests supplied the input the wiring never delivered. That is why
+ * this is an exported function rather than a closure — the RESOLUTION is the
+ * part that was missing, so it is the part that gets asserted.
+ *
+ * A site's `vite.config.js` is CLI scaffolding — strip it and the site is
+ * unchanged — so a site's SEO must not depend on what it passes. An explicit
+ * override still wins, key by key, the way `base` does.
+ *
+ * @param {Object} [content] - Collected site content (reads `content.config.seo`)
+ * @param {Object} [overrides] - Caller overrides, merged OVER the site's block
+ * @returns {{ baseUrl: string, defaultImage: ?string, twitterHandle: ?string, locales: Array, robots: Object }}
+ */
+export function resolveEffectiveSeo(content, overrides = {}) {
+  const merged = { ...(content?.config?.seo || {}), ...overrides }
+  return {
+    baseUrl: merged.baseUrl?.replace(/\/$/, '') || '', // Remove trailing slash
+    defaultImage: merged.defaultImage || null,
+    twitterHandle: merged.twitterHandle || null,
+    locales: merged.locales || [],
+    robots: merged.robots || {}
+  }
+}
+
+/**
  * Create the site content plugin
  *
  * @param {Object} options
@@ -503,7 +548,10 @@ function escapeHtml(str) {
  * @param {boolean} [options.inject=true] - Inject content into HTML
  * @param {string} [options.filename='site-content.json'] - Output filename
  * @param {boolean} [options.watch=true] - Watch for changes in dev mode
- * @param {Object} [options.seo] - SEO configuration
+ * @param {Object} [options.seo] - SEO OVERRIDES, merged OVER `site.yml::seo`
+ *   key by key. The site's own block is the source; this is for a caller that
+ *   must override it (a preview build pointing at a staging origin, say).
+ *   ⛔ Do not reach for this to make `site.yml::seo` work — it already does.
  * @param {string} [options.seo.baseUrl] - Base URL for sitemap and canonical URLs
  * @param {string} [options.seo.defaultImage] - Default OG image path
  * @param {string} [options.seo.twitterHandle] - Twitter handle for cards
@@ -548,15 +596,8 @@ export function siteContentPlugin(options = {}) {
     pdfThumbnails: assetsConfig.pdfThumbnails !== false // Default true
   }
 
-  // Extract SEO options with defaults
-  const seoEnabled = !!seo.baseUrl
-  const seoOptions = {
-    baseUrl: seo.baseUrl?.replace(/\/$/, '') || '', // Remove trailing slash
-    defaultImage: seo.defaultImage || null,
-    twitterHandle: seo.twitterHandle || null,
-    locales: seo.locales || [],
-    robots: seo.robots || {}
-  }
+  /** This plugin's SEO resolution — `site.yml::seo`, with `options.seo` over it. */
+  const resolveSeo = content => resolveEffectiveSeo(content, seo)
 
   // Warn once per build, not once per collection — the dev server re-collects
   // on every content change and would otherwise repeat this on every keystroke.
@@ -756,7 +797,7 @@ export function siteContentPlugin(options = {}) {
   function projectionOptions(content) {
     const defaultLocale = resolveDefaultLocale(content.config)
     return {
-      baseUrl: seoOptions.baseUrl,
+      baseUrl: resolveSeo(content).baseUrl,
       basePath,
       locale: content.config?.activeLocale || defaultLocale,
       defaultLocale
@@ -1185,17 +1226,22 @@ export function siteContentPlugin(options = {}) {
           // If no translations, fall through to serve default content
         }
 
+        // Dev serves the same two SEO artifacts the build emits, off the same
+        // resolution — so `uniweb dev` and `uniweb build` cannot disagree about
+        // whether a site has them.
+        const devSeo = resolveSeo(siteContent)
+
         // Serve sitemap.xml in dev mode
-        if (req.url === '/sitemap.xml' && seoEnabled && siteContent?.pages) {
+        if (req.url === '/sitemap.xml' && devSeo.baseUrl && siteContent?.pages) {
           res.setHeader('Content-Type', 'application/xml')
-          res.end(generateSitemap(siteContent.pages, seoOptions.baseUrl, filterSeoLocales(seoOptions.locales, siteContent.config), siteContent.config?.i18n?.routeTranslations))
+          res.end(generateSitemap(siteContent.pages, devSeo.baseUrl, filterSeoLocales(devSeo.locales, siteContent.config), siteContent.config?.i18n?.routeTranslations))
           return
         }
 
         // Serve robots.txt in dev mode
-        if (req.url === '/robots.txt' && seoEnabled) {
+        if (req.url === '/robots.txt' && devSeo.baseUrl) {
           res.setHeader('Content-Type', 'text/plain')
-          res.end(generateRobotsTxt(seoOptions.baseUrl, seoOptions.robots))
+          res.end(generateRobotsTxt(devSeo.baseUrl, devSeo.robots))
           return
         }
 
@@ -1398,8 +1444,9 @@ export function siteContentPlugin(options = {}) {
       }
 
       // Inject SEO meta tags
-      if (seoEnabled) {
-        const metaTags = generateMetaTags(contentToInject, seoOptions)
+      const injectSeo = resolveSeo(contentToInject)
+      if (injectSeo.baseUrl) {
+        const metaTags = generateMetaTags(contentToInject, injectSeo)
         if (metaTags) {
           headInjection += `    ${metaTags}\n`
         }
@@ -1555,9 +1602,10 @@ export function siteContentPlugin(options = {}) {
       })
 
       // Generate SEO files if enabled
-      if (seoEnabled && finalContent?.pages) {
+      const buildSeo = resolveSeo(finalContent)
+      if (buildSeo.baseUrl && finalContent?.pages) {
         // Generate sitemap.xml
-        const sitemap = generateSitemap(finalContent.pages, seoOptions.baseUrl, filterSeoLocales(seoOptions.locales, finalContent.config), finalContent.config?.i18n?.routeTranslations)
+        const sitemap = generateSitemap(finalContent.pages, buildSeo.baseUrl, filterSeoLocales(buildSeo.locales, finalContent.config), finalContent.config?.i18n?.routeTranslations)
         this.emitFile({
           type: 'asset',
           fileName: 'sitemap.xml',
@@ -1566,7 +1614,7 @@ export function siteContentPlugin(options = {}) {
         console.log('[site-content] Generated sitemap.xml')
 
         // Generate robots.txt
-        const robotsTxt = generateRobotsTxt(seoOptions.baseUrl, seoOptions.robots)
+        const robotsTxt = generateRobotsTxt(buildSeo.baseUrl, buildSeo.robots)
         this.emitFile({
           type: 'asset',
           fileName: 'robots.txt',

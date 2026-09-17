@@ -97,7 +97,10 @@ export function readSiteConfig(siteRoot) {
  * @param {Array} [options.plugins] - Additional Vite plugins
  * @param {Object} [options.build] - Vite build options
  * @param {Object} [options.resolve] - Vite resolve options
- * @param {Object} [options.seo] - SEO configuration for siteContentPlugin
+ * @param {Object} [options.seo] - SEO OVERRIDES for siteContentPlugin, merged
+ *   OVER the site's own `site.yml::seo` block. Omit it and `site.yml` decides —
+ *   a site's `vite.config.js` is scaffolding, so nothing a site GETS may depend
+ *   on what it passes here.
  * @param {Object} [options.assets] - Asset processing configuration
  * @param {Object} [options.search] - Search index configuration
  * @param {boolean} [options.tailwind] - Include Tailwind CSS v4 Vite plugin (default: true)
