@@ -578,9 +578,21 @@ async function warnFolderModePagesSkipped(dirPath, siteRoot) {
       files.map((f) => `  - ${where}/${f}`).join('\n') +
       `\n  To publish them, make each one a page-mode directory ` +
       `(\`<name>/page.yml\` + its section files). To ship them as they are, ` +
-      `use \`uniweb export\` or \`uniweb deploy --host <adapter>\`.`
+      `use \`uniweb export\` or \`uniweb deploy --host <adapter>\`.` +
+      REPUBLISH_CLAUSE
   )
 }
+
+// A push sends the page tree as ONE entity (see site-diff.js), so a republish does
+// not merge: the shorter document becomes the whole tree. Measured by the backend
+// lane 2026-09-18 against a current `uniwebd` — 49 stored pages replaced by 2, the
+// publish reporting success. Both skip warnings carry this, because "will not be
+// pushed" reads as "you publish short" when the real cost on an already-published
+// site is that live pages are REMOVED.
+const REPUBLISH_CLAUSE =
+  `\n  ⚠ If this site has been published before, a push REPLACES its whole page ` +
+  `tree — pages already live that are missing here are REMOVED, and the publish ` +
+  `still reports success.`
 
 // Recursively build the `pages` tree: each record carries its fields, its inline
 // `page_sections` (page mode only), and its child pages under `$children`.
@@ -1400,7 +1412,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
         `\`${segment}\` will be pushed as an empty container and none of the mounted ` +
         `pages will reach the backend. A build mounts it normally. Inline the ` +
         `directory under \`pages/${segment}/\` to push it, or ship the site with ` +
-        `\`uniweb export\` / \`uniweb deploy --host <adapter>\`.`
+        `\`uniweb export\` / \`uniweb deploy --host <adapter>\`.` +
+        REPUBLISH_CLAUSE
     )
   }
   const pagesPath = siteYml.paths?.pages

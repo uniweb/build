@@ -126,6 +126,33 @@ describe('a `pages/<segment>` sub-mount is not read here, and now says so', () =
     expect(warn).toContain('empty container')
   })
 
+  // A push sends the page tree as ONE entity, so on an already-published site the
+  // cost is not "you publish short" — it is that live pages are REMOVED, with the
+  // publish still reporting success. Measured by the backend lane 2026-09-18
+  // against a current `uniwebd`: 49 stored pages replaced by 2. Both warnings must
+  // say so, and asserting it on BOTH is the point — one shared constant, two
+  // callers, and nothing else relates them.
+  it('BOTH warnings say a republish REMOVES live pages, not merely that it publishes short', async () => {
+    w('site.yml', `${site}paths:\n    pages/docs: ./external\n`)
+    w('pages/docs/folder.yml', 'title: Docs\n')
+    w('pages/guide/folder.yml', 'title: Guide\n')
+    w('pages/guide/intro.md', '# Intro\n')
+    w('external/thing/page.yml', 'title: Thing\n')
+
+    await siteProjectToDocument(ROOT)
+
+    const mount = warnings.find((m) => m.includes('NOT read on the sync lane'))
+    const folderMode = warnings.find((m) => m.includes('folder-mode folder'))
+    expect(mount).toBeDefined()
+    expect(folderMode).toBeDefined()
+    for (const warn of [mount, folderMode]) {
+      expect(warn).toContain('REPLACES its whole page tree')
+      expect(warn).toContain('REMOVED')
+      // The success report is half of why this was invisible — say it.
+      expect(warn).toContain('reports success')
+    }
+  })
+
   it('CONTROL — the whole-directory form `paths: { pages: … }` IS read, and is silent', async () => {
     w('site.yml', `${site}paths:\n    pages: ./altpages\n`)
     w('altpages/solo/page.yml', 'title: Solo\n')
@@ -135,5 +162,6 @@ describe('a `pages/<segment>` sub-mount is not read here, and now says so', () =
 
     expect(doc.pages.map((p) => p.$id)).toEqual(['solo'])
     expect(warnings.filter((m) => m.includes('sync lane'))).toHaveLength(0)
+    expect(warnings.filter((m) => m.includes('REMOVED'))).toHaveLength(0)
   })
 })
