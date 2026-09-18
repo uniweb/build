@@ -56,6 +56,7 @@ import {
   checkDeclaration,
   fetchFromQueryShorthand,
   assertRouteFolder,
+  mountEntriesOf,
 } from '../site/content-collector.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder } from '../site/layout-folder.js'
@@ -557,6 +558,30 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   return sections.map((s, i) => sectionToRecord(s, i))
 }
 
+// A folder-mode folder's `.md` files are pages to the build and nothing to this
+// lane. Name every one of them, so the shortfall is visible at push time rather
+// than by reading the backend's store or opening the published site.
+async function warnFolderModePagesSkipped(dirPath, siteRoot) {
+  let files
+  try {
+    files = (await readdir(dirPath)).filter(isMarkdownFile)
+  } catch {
+    return
+  }
+  if (files.length === 0) return
+  const where = relative(siteRoot, dirPath)
+  console.warn(
+    `uwx/site: ${files.length} page(s) in \`${where}\` will NOT be pushed — ` +
+      `it is a folder-mode folder (\`folder.yml\`), and pushing \`.md\`-as-pages ` +
+      `is not implemented on the sync lane. A build renders them; the backend ` +
+      `will not have them.\n` +
+      files.map((f) => `  - ${where}/${f}`).join('\n') +
+      `\n  To publish them, make each one a page-mode directory ` +
+      `(\`<name>/page.yml\` + its section files). To ship them as they are, ` +
+      `use \`uniweb export\` or \`uniweb deploy --host <adapter>\`.`
+  )
+}
+
 // Recursively build the `pages` tree: each record carries its fields, its inline
 // `page_sections` (page mode only), and its child pages under `$children`.
 async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot) {
@@ -594,6 +619,20 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     if (mode === 'page') {
       const sections = await collectPageSectionsNested(f.path, siteRoot, f.config)
       if (sections.length > 0) record.page_sections = sections
+    } else {
+      // ⛔ FOLDER MODE: the build makes each `.md` file here a PAGE; this lane
+      // makes it nothing. It is a v0 mapper gap (bidirectional-sync.md §"Other
+      // v0 mapper gaps"), and until it closes the ONLY thing standing between an
+      // author and a site that publishes a fraction of itself is this warning.
+      //
+      // ⭐ It has to be here, not in `status` or `push`. Those compare the built
+      // document against what was last sent, so with the pages already absent
+      // from the document both correctly report "Synced" / "Nothing to push".
+      // The loss happens upstream of every diff, which is why it was invisible:
+      // measured 2026-09-18, a 49-page documentation site published 2 pages with
+      // every CLI instrument reporting success [measured:backend, channel with
+      // backend, and reproduced here against the same site].
+      await warnFolderModePagesSkipped(f.path, siteRoot)
     }
 
     const children = await walkPagesNested(ctx, f.path, slugPath, f.internalMode, f.config, false)
@@ -1346,6 +1385,24 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // (uwx-format.md → info.url.)
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
+  // ⛔ ONE `paths:` CONVENTION, TWO READERS, AND THIS ONE IS A STRICT SUBSET.
+  // The build honours sub-mounts — `paths: { pages/<segment>: <dir> }`, through
+  // `resolveMounts`/`mountEntriesOf` in `site/content-collector.js` — and this
+  // lane reads `paths.pages` alone. A sub-mounted folder therefore syncs as an
+  // EMPTY container: its directory on disk holds only the `folder.yml`, so it
+  // emits with no children and nothing anywhere says so. Measured 2026-09-18 on
+  // a site whose entire corpus was one sub-mount: 49 pages built, 2 pushed.
+  // Deferred by design for now (bidirectional-sync.md); warned about here so it
+  // is not also silent.
+  for (const [segment] of mountEntriesOf(siteYml.paths)) {
+    console.warn(
+      `uwx/site: \`paths: { pages/${segment}: … }\` is NOT read on the sync lane — ` +
+        `\`${segment}\` will be pushed as an empty container and none of the mounted ` +
+        `pages will reach the backend. A build mounts it normally. Inline the ` +
+        `directory under \`pages/${segment}/\` to push it, or ship the site with ` +
+        `\`uniweb export\` / \`uniweb deploy --host <adapter>\`.`
+    )
+  }
   const pagesPath = siteYml.paths?.pages
     ? join(siteRoot, siteYml.paths.pages)
     : join(siteRoot, 'pages')
