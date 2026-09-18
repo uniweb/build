@@ -1332,18 +1332,18 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //     fingerprint `assets.json` recorded for it).
   // The app leaves an author's value alone.
   //
-  // ⚠️ This read "`url` and `preview_image` are BACKEND-STAMPED and framework emits
-  // NEITHER" until 2026-09-10. Neither half held: nothing stamped `url`, and leaving
-  // an app-written field off an allowlist destroys it on every push, because `info`
-  // is replaced whole.
+  // ⚠️ Until 2026-09-10 framework emitted no preview, on the premise that the host
+  // stamps it. Nothing did, and leaving an app-written field off an allowlist
+  // destroys it on every push, because `info` is replaced whole.
   setIf(info, 'preview', scalarString(siteYml.preview))
-  // ⭐ `url` — where the site is live, so a site card can link to it without opening
-  // the editor. The backend records it at every publish (stated by backend,
-  // 2026-09-10) and pull brings it into `site.yml::$url`; nothing in framework writes
-  // it. The `$` marks it as recorded rather than authored, like `$uuid` — and keeps it
-  // out of the rendered payload, where a bare `url:` would sit beside `seo.baseUrl`,
-  // the authored canonical address.
-  setIf(info, 'url', siteYml.$url)
+  // ⛔ `url` IS RETIRED (2026-09-17) — do not reintroduce it, in either direction.
+  // It carried where the site went live, read from `site.yml::$url` (which pull
+  // wrote), so a site card could link to it. That is a fact about a DEPLOY, not
+  // about the site: `publish` prints it and records it in `deploy.yml`, and a
+  // derived value must not round-trip (the round-trip law, uwx-format.md). The host
+  // no longer declares the field and refuses a push that carries it. A `$url` line
+  // left in an old site.yml is inert — nothing reads it, so nothing sends it.
+  // (uwx-format.md → info.url.)
 
   const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
   const pagesPath = siteYml.paths?.pages

@@ -47,7 +47,7 @@ function fullSite() {
     [
       "name: S", "foundation: '@a/b@1.0.0'", 'description: D', 'favicon: /f.svg',
       'template: true', 'tags: [academic, portfolio]',
-      "preview: '2026-09-10T12:34:56Z'", '$url: https://site.example.test/',
+      "preview: '2026-09-10T12:34:56Z'",
       'languages: [en, fr]', 'defaultLanguage: en', 'publishLanguages: [en]',
       'base: /x/', 'seo: { image: /og.png }', 'keywords: [a, b]',
       'fetcher: { transports: {} }', 'build: { prerender: true }',
@@ -73,15 +73,14 @@ describe('the info / settings split', () => {
     // a title, a subtitle, an icon, a "this is a template" badge, the facets, and
     // the foundation that says what the thing is.
     expect(Object.keys(doc.info).sort()).toEqual([
-      'description', 'favicon', 'foundation', 'name', 'preview', 'tags', 'template', 'url',
+      'description', 'favicon', 'foundation', 'name', 'preview', 'tags', 'template',
     ])
 
-    // ⭐ `preview` (the card image) and `url` (where the site is live) are carried and
-    // round-trip [Diego, 2026-09-10] — `url` from `site.yml::$url`, recorded by
-    // publish. Until then this asserted framework emitted NEITHER, which let every
-    // push destroy an app-written value, because `info` is replaced whole.
+    // ⭐ `preview` (the card image) is carried and round-trips [Diego, 2026-09-10].
+    // Until then this asserted framework did NOT emit it, which let every push
+    // destroy an app-written value, because `info` is replaced whole. (`url` rode
+    // beside it until 2026-09-17 and is retired — uwx-site-project.test.js.)
     expect(doc.info.preview).toBe('2026-09-10T12:34:56Z')
-    expect(doc.info.url).toBe('https://site.example.test/')
 
     // ⚠️ THE SPELLING IS LOAD-BEARING. These are the Model's earlier names for the
     // card image (`preview_url`, then `preview_image` until generation 19) plus one it

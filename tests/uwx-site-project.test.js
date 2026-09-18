@@ -1103,6 +1103,40 @@ describe('info.app — retired, and must not come back', () => {
   })
 })
 
+describe('info.url — retired, and must not come back', () => {
+  // Where a site went live is a deploy fact (`publish` records it in deploy.yml), not
+  // site config. The host no longer declares `info.url` and refuses a push carrying
+  // it, so emitting it again fails every push from a project that has the key.
+  it('does not emit info.url even when site.yml still carries a $url: key', async () => {
+    const src = join(dir, 'src')
+    mkdirSync(src, { recursive: true })
+    // An old project, pulled while the key still round-tripped (2026-09-10 → 09-17).
+    // The key on disk is not an instruction to send it.
+    writeFileSync(
+      join(src, 'site.yml'),
+      "name: S\nfoundation: '@a/base'\n$url: https://site.example.test/\n"
+    )
+    const document = await siteProjectToDocument(src)
+    expect('url' in document.info).toBe(false)
+  })
+
+  it('does not write $url into site.yml when a document still carries info.url', () => {
+    // A backend that has not yet dropped the field may still return it.
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    siteInfoToConfig({
+      document: {
+        info: { name: 'S', foundation: '@a/base', url: 'https://site.example.test/' }
+      },
+      siteRoot: dest
+    })
+    const written = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+    expect(written.name).toBe('S')
+    expect('$url' in written).toBe(false)
+    expect('url' in written).toBe(false)
+  })
+})
+
 describe('siteContentDocumentToProject — unsafe stable_id filename safety (A8)', () => {
   const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
   const info = { name: { en: 'S' }, foundation: '@a/base' }

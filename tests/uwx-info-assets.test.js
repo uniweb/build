@@ -2,7 +2,7 @@
  * Asset references that are a BARE STRING — `info.preview` (the site card's image
  * [Diego, 2026-09-10]), `info.favicon`, `seo.image` at the site and page tiers, a
  * section param — and `removeYamlScalar`, which the CLI uses to drop a previous
- * site's values from site.yml.
+ * site's generated `preview` from site.yml.
  *
  * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
  * the author's path by id. A bare string has no object to carry it: the stored value
@@ -169,11 +169,14 @@ describe('removeYamlScalar', () => {
   }
 
   it('removeYamlScalar removes one scalar line and nothing else', () => {
-    const root = siteYml("# keep me\n$url: https://old.example/\nname: S\npreview: '123'\n")
+    const root = siteYml("# keep me\npreview: '123'\nname: S\n$uuid: abc\n")
     const file = join(root, 'site.yml')
-    expect(removeYamlScalar(file, '$url')).toBe(true)
-    expect(readFileSync(file, 'utf8')).toBe("# keep me\nname: S\npreview: '123'\n")
-    expect(removeYamlScalar(file, '$url')).toBe(false)
+    expect(removeYamlScalar(file, 'preview')).toBe(true)
+    expect(readFileSync(file, 'utf8')).toBe('# keep me\nname: S\n$uuid: abc\n')
+    expect(removeYamlScalar(file, 'preview')).toBe(false)
+    // A `$`-prefixed key is matched literally, not read as a regex anchor.
+    expect(removeYamlScalar(file, '$uuid')).toBe(true)
+    expect(readFileSync(file, 'utf8')).toBe('# keep me\nname: S\n')
   })
 
   it('removeYamlScalar leaves a block value alone rather than half-removing it', () => {

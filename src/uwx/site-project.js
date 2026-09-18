@@ -150,15 +150,15 @@ const INFO_TO_SITE_YML = {
   // the path an author wrote for an image in the project, which `restoreAssetRefs`
   // has already put back by recognizing the serve URL the push recorded in
   // `assets.json` (asset-map.js). [Diego, 2026-09-10]
-  preview: 'preview',
-  // ⭐ `url` — where the site is live → `site.yml::$url`. The backend records it at
-  // every publish, and pull is its only way onto disk; recorded rather than authored,
-  // so it lands under the `$` like `$uuid`.
   //
-  // ⚠️ Both were listed here as "DELIBERATELY ABSENT… BACKEND-STAMPED" until
+  // ⚠️ It was listed here as "DELIBERATELY ABSENT… BACKEND-STAMPED" until
   // 2026-09-10. Leaving an app-written field out of this map is what lets the next
   // push destroy it, since `info` is replaced whole.
-  url: '$url',
+  preview: 'preview',
+  // ⛔ `url` is RETIRED (2026-09-17) and must not come back: where a site went live
+  // is a deploy fact, which `publish` records in `deploy.yml`, not site config. A
+  // document that still carries `info.url` writes nothing — an unlisted key is
+  // ignored — and a `$url` already on disk is left alone and never read.
 }
 
 // ── `settings` Section → site.yml ─────────────────────────────────────────────

@@ -60,7 +60,7 @@ export function upsertYamlScalar(filePath, key, value) {
  * rather than half-removed.
  *
  * @param {string} filePath
- * @param {string} key - a top-level scalar key (e.g. `$url`)
+ * @param {string} key - a top-level scalar key (e.g. `preview`)
  * @returns {boolean} true if the file changed
  */
 export function removeYamlScalar(filePath, key) {
