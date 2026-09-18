@@ -23,6 +23,7 @@ import {
   translateRecordData,
   RECORDS_DIR
 } from './records.js'
+import { resolveDefaultLocale } from '@uniweb/core'
 import { generateSearchIndex } from '@uniweb/projections'
 import { searchDeclaredOn } from '../site/search-declared.js'
 
@@ -330,6 +331,48 @@ export async function getTranslationStatus(siteRoot, options = {}) {
 }
 
 /**
+ * ⭐ THE LOCALE SET A PAYLOAD DECLARES — resolved here, because this is the only
+ * place that knows it.
+ *
+ * ⛔ THE BUILD AND THE RUNTIME USED TO DISAGREE ABOUT WHERE LOCALES COME FROM, and
+ * nothing failed when they did. The build derives them from the FILESYSTEM —
+ * every `locales/*.json`, which is also what `languages: '*'` means — while
+ * `Website.buildLocalesList` reads `config.languages` and nothing else. So a site
+ * with locale files and no `languages:` in `site.yml` built a complete
+ * `dist/<locale>/` tree whose Website reported `hasMultipleLocales() === false`.
+ *
+ * Everything gated on that answer then silently switched off, in the rendered
+ * output, with no warning anywhere:
+ *   - no link was locale-prefixed (`applyLocale`, @uniweb/kit/utils/href) — every
+ *     internal link on a French page pointed into the English tree;
+ *   - no route translation was applied, although the build had emitted the
+ *     translated routes as directories (`/fr/a-propos/` existed; nothing linked
+ *     to it);
+ *   - any foundation UI gated on `hasMultipleLocales()` — the language switcher —
+ *     vanished from the very pages that needed it.
+ *
+ * Measured 2026-09-18 on our own `international` template, which was in exactly
+ * this state. ⇒ **The producer stamps what it resolved; the consumer reads it.**
+ * Guessing the set twice, from two different sources, is what this replaces.
+ *
+ * Declared entries are kept as authored — a `{ code, label }` object carries a
+ * label the filesystem cannot know — and resolved codes are appended.
+ */
+function declaredLanguages(config, defaultLocale, locales) {
+  const authored = Array.isArray(config?.languages) ? config.languages : []
+  const codeOf = (e) => (typeof e === 'string' ? e : e?.code)
+  const seen = new Set(authored.map(codeOf).filter(Boolean))
+  const out = authored.filter((e) => codeOf(e) && codeOf(e) !== '*')
+  for (const code of [defaultLocale, ...locales]) {
+    if (code && !seen.has(code)) {
+      seen.add(code)
+      out.push(code)
+    }
+  }
+  return out
+}
+
+/**
  * Build translated site content for all locales
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Options
@@ -353,8 +396,19 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
   const siteContentPath = join(outputDir, 'site-content.json')
   const siteContentRaw = await readFile(siteContentPath, 'utf-8')
   const siteContent = JSON.parse(siteContentRaw)
+  const defaultLocale = resolveDefaultLocale(siteContent.config)
 
   const outputs = {}
+
+  // ⭐ The DEFAULT locale's payload needs the same stamp. It is not written in
+  // this loop — it is the source this function reads — but a visitor landing on
+  // `/` gets a Website built from it, and without the set that page loses its
+  // language switcher while every translated page has one.
+  const stampedLanguages = declaredLanguages(siteContent.config, defaultLocale, locales)
+  if (JSON.stringify(siteContent.config?.languages) !== JSON.stringify(stampedLanguages)) {
+    siteContent.config = { ...siteContent.config, languages: stampedLanguages }
+    await writeFile(siteContentPath, JSON.stringify(siteContent, null, 2))
+  }
 
   for (const locale of locales) {
     const localePath = join(localesPath, `${locale}.json`)
@@ -390,8 +444,14 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
       })
     }
 
-    // Mark the active locale in the translated content
-    translated.config = { ...translated.config, activeLocale: locale }
+    // Mark the active locale in the translated content, and stamp the resolved
+    // locale set so the runtime does not have to re-derive it — see
+    // `declaredLanguages`.
+    translated.config = {
+      ...translated.config,
+      activeLocale: locale,
+      languages: declaredLanguages(siteContent.config, defaultLocale, locales)
+    }
 
     // Write to locale subdirectory
     const localeOutputDir = join(outputDir, locale)

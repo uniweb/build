@@ -174,47 +174,92 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
 }
 
 /**
+ * ⭐ A TRANSLATION VALUE IS INLINE MARKDOWN, AND A PLAIN-TEXT SLOT RENDERS ITS TEXT.
+ *
+ * Units are deduplicated by normalized plain text, so ONE id carries every role
+ * that text plays on the site — and on a documentation site the two roles
+ * collide by design, because the house style is to link to a page by its title:
+ * "See [Roles and permissions](page:…)" makes that page's own title and the link
+ * to it the same string, hence the same unit.
+ *
+ * ⛔ That collision used to be unresolvable for the translator. A body occurrence
+ * needs the markdown (or the link is lost); a title occurrence was assigned the
+ * value RAW, so the same markdown landed verbatim in `<title>` — brackets,
+ * `page:` protocol and all — in the tab, the nav and every search result.
+ * Measured 2026-09-18: 32 of one site's 41 link texts were also page titles, so
+ * neither "markdown everywhere" nor "markdown nowhere" was shippable.
+ *
+ * ⭐ The resolution is on the CONSUMER, not the key. A body element parses the
+ * value into a fragment; a title takes its TEXT. One value serves both, and a
+ * page's title stays in lockstep with the links pointing at it — which is the
+ * property a cross-linked site wants and a role-keyed hash would destroy (the
+ * same word translated once per role, free to drift).
+ *
+ * ⛔ Do not add the field or the role to the hash. Genuine wording divergence by
+ * context is what `overrides` is for (`lookupTranslation`); representation
+ * divergence is this function's job.
+ */
+function toPlainText(value) {
+  if (typeof value !== 'string' || !value.includes('[') && !value.includes('*') && !value.includes('`') && !value.includes('_')) {
+    return value
+  }
+  try {
+    const doc = markdownToProseMirror(value)
+    const collect = (nodes) =>
+      (nodes || [])
+        .map((n) => (n.type === 'text' ? n.text || '' : n.type === 'hardBreak' ? ' ' : collect(n.content)))
+        .join('')
+    const text = collect(doc?.content).trim()
+    return text || value
+  } catch {
+    return value
+  }
+}
+
+/**
  * Translate page metadata (title, description, keywords, etc.)
+ *
+ * Every field here is a PLAIN-TEXT slot — `<title>`, a nav label, a meta
+ * description — so each value is flattened. See `toPlainText`.
  */
 function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
   const context = { page: pageRoute, section: '_meta' }
+  const translate = (value) =>
+    toPlainText(lookupTranslation(value, context, translations, fallbackToSource))
 
   // Translate title
   if (page.title && typeof page.title === 'string') {
-    page.title = lookupTranslation(page.title, context, translations, fallbackToSource)
+    page.title = translate(page.title)
   }
 
   // Translate label (short navigation label)
   if (page.label && typeof page.label === 'string') {
-    page.label = lookupTranslation(page.label, context, translations, fallbackToSource)
+    page.label = translate(page.label)
   }
 
   // Translate description
   if (page.description && typeof page.description === 'string') {
-    page.description = lookupTranslation(page.description, context, translations, fallbackToSource)
+    page.description = translate(page.description)
   }
 
   // Translate SEO fields
   if (page.seo) {
     if (page.seo.ogTitle && typeof page.seo.ogTitle === 'string') {
-      page.seo.ogTitle = lookupTranslation(page.seo.ogTitle, context, translations, fallbackToSource)
+      page.seo.ogTitle = translate(page.seo.ogTitle)
     }
     if (page.seo.ogDescription && typeof page.seo.ogDescription === 'string') {
-      page.seo.ogDescription = lookupTranslation(page.seo.ogDescription, context, translations, fallbackToSource)
+      page.seo.ogDescription = translate(page.seo.ogDescription)
     }
   }
 
   // Translate keywords
   if (page.keywords) {
     if (Array.isArray(page.keywords)) {
-      page.keywords = page.keywords.map(keyword => {
-        if (keyword && typeof keyword === 'string') {
-          return lookupTranslation(keyword, context, translations, fallbackToSource)
-        }
-        return keyword
-      })
+      page.keywords = page.keywords.map(keyword =>
+        keyword && typeof keyword === 'string' ? translate(keyword) : keyword
+      )
     } else if (typeof page.keywords === 'string') {
-      page.keywords = lookupTranslation(page.keywords, context, translations, fallbackToSource)
+      page.keywords = translate(page.keywords)
     }
   }
 }

@@ -131,3 +131,62 @@ describe('elementMarkup', () => {
     expect(elementMarkup(node)).toBe('A **bold** heading')
   })
 })
+
+describe('one value, two roles — a page title and a body link', () => {
+  // On a cross-linked site the link text IS the target page's title, so the two
+  // share a unit by construction. The value must therefore serve both: the body
+  // parses it, the title takes its text. See merge.js::toPlainText.
+  const TITLE = 'Roles and permissions'
+  const VALUE = '[Rôles et permissions](page:docs/collaboration/roles-and-permissions)'
+
+  const site = () => ({
+    config: { defaultLanguage: 'en' },
+    pages: [
+      {
+        route: '/docs/collaboration/roles-and-permissions',
+        title: TITLE,
+        label: TITLE,
+        description: 'See **Roles and permissions**.',
+        sections: [
+          { id: 'sec1', content: markdownToProseMirror(`Body: see [${TITLE}](page:docs/collaboration/roles-and-permissions).`) }
+        ]
+      }
+    ]
+  })
+
+  it('renders the title as plain text, not raw markdown', () => {
+    const out = mergeTranslations(site(), { [computeHash(TITLE)]: VALUE })
+    expect(out.pages[0].title).toBe('Rôles et permissions')
+    expect(out.pages[0].title).not.toContain('page:')
+    expect(out.pages[0].title).not.toContain('[')
+  })
+
+  it('flattens the nav label the same way', () => {
+    const out = mergeTranslations(site(), { [computeHash(TITLE)]: VALUE })
+    expect(out.pages[0].label).toBe('Rôles et permissions')
+  })
+
+  it('keeps the link in the body from that same value', () => {
+    const bodyKey = `Body: see ${TITLE}.`
+    const out = mergeTranslations(site(), {
+      [computeHash(TITLE)]: VALUE,
+      [computeHash(bodyKey)]: `Corps : voir ${VALUE}.`
+    })
+    const json = JSON.stringify(out.pages[0].sections[0].content)
+    expect(json).toContain('"type":"link"')
+    expect(json).toContain('page:docs/collaboration/roles-and-permissions')
+  })
+
+  it('leaves a plain translation untouched', () => {
+    const out = mergeTranslations(site(), { [computeHash(TITLE)]: 'Rôles et permissions' })
+    expect(out.pages[0].title).toBe('Rôles et permissions')
+  })
+
+  it('flattens emphasis in a description without dropping its words', () => {
+    const src = 'See **Roles and permissions**.'
+    const out = mergeTranslations(site(), {
+      [computeHash(src)]: 'Voir **Rôles et permissions**.'
+    })
+    expect(out.pages[0].description).toBe('Voir Rôles et permissions.')
+  })
+})
