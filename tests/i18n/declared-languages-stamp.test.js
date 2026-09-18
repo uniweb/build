@@ -19,6 +19,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdir, writeFile, readFile, rm } from 'fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildLocalizedContent } from '../../src/i18n/index.js'
 
@@ -101,6 +102,37 @@ describe('an authored languages list', () => {
     await setup({ defaultLanguage: 'en', languages: ['*'] })
     await buildLocalizedContent(ROOT, {
       locales: ['fr'],
+      outputDir: DIST,
+      generateSearchIndexes: false,
+      freeformEnabled: false
+    })
+    expect(await languagesOf(join(DIST, 'fr', 'site-content.json'))).toEqual(['en', 'fr'])
+  })
+})
+
+describe('the default locale is the root tree', () => {
+  it('writes no dist/<default>/ even when languages declares it', async () => {
+    // The trap: an explicit `languages: [en, fr]` resolves verbatim, default
+    // included, so the DECLARED form minted a byte-identical duplicate of every
+    // page while the wildcard form did not. Measured 2026-09-18: 47 pages.
+    await setup({ defaultLanguage: 'en', languages: ['en', 'fr'] })
+    const outputs = await buildLocalizedContent(ROOT, {
+      locales: ['en', 'fr'],
+      outputDir: DIST,
+      generateSearchIndexes: false,
+      freeformEnabled: false
+    })
+    expect(Object.keys(outputs)).toEqual(['fr'])
+    expect(existsSync(join(DIST, 'en'))).toBe(false)
+    expect(existsSync(join(DIST, 'fr', 'site-content.json'))).toBe(true)
+  })
+
+  it('still declares the default in the stamped locale set', async () => {
+    // Skipping its OUTPUT tree must not drop it from the DECLARED set — the
+    // language switcher needs it as a choice.
+    await setup({ defaultLanguage: 'en', languages: ['en', 'fr'] })
+    await buildLocalizedContent(ROOT, {
+      locales: ['en', 'fr'],
       outputDir: DIST,
       generateSearchIndexes: false,
       freeformEnabled: false

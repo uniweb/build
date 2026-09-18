@@ -411,6 +411,21 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
   }
 
   for (const locale of locales) {
+    // ⛔ THE DEFAULT LOCALE IS THE ROOT TREE, NEVER A SUBDIRECTORY. Emitting
+    // `dist/<default>/` mints a byte-identical duplicate of every page at a second
+    // URL — duplicate content on any real domain, and the `hreflang` block already
+    // points that locale at `/` (`locale.default`, site/plugin.js) so nothing links
+    // to the copy.
+    //
+    // ⚠️ It was reachable only through the DECLARED form, which is the form the
+    // contract tells authors to use: `resolveLocales` returns an explicit
+    // `languages: [en, fr]` verbatim, default included, while the wildcard and
+    // filesystem forms exclude it by accident (there is no `locales/en.json`). So
+    // the documented spelling was the broken one. `uniweb i18n generate` has always
+    // skipped the default explicitly; this is the same rule, one stage later.
+    // Measured 2026-09-18: 47 pages duplicated under /en/.
+    if (locale === defaultLocale) continue
+
     const localePath = join(localesPath, `${locale}.json`)
 
     // Load translations (or empty object if not exists)
