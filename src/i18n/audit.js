@@ -11,6 +11,17 @@ import { readFile, writeFile } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+// Inline markdown → ProseMirror, so the markup check asks the merge's own question
+// ("would this value produce marks?") instead of pattern-matching markdown syntax.
+// Same lazy-import-with-fallback pattern as merge.js / extract.js.
+let markdownToProseMirror
+try {
+  const contentReader = await import('@uniweb/content-reader')
+  markdownToProseMirror = contentReader.markdownToProseMirror
+} catch {
+  markdownToProseMirror = null
+}
+
 /**
  * Audit a locale file against the manifest
  * @param {string} localesPath - Path to locales directory
@@ -46,18 +57,27 @@ export async function auditLocale(localesPath, locale) {
   const valid = []
   const missing = []
   const stale = []
-  const needsTags = []
+  const losesMarkup = []
 
   // Check manifest entries
   for (const hash of manifestHashes) {
     if (translationHashes.has(hash)) {
-      const source = manifest.units[hash].source
+      const unit = manifest.units[hash]
+      const source = unit.source
       const translation = getTranslationText(translations[hash])
       valid.push({ hash, source, translation })
 
-      // Flag entries where source has inline tags but translation doesn't
-      if (/<\d+>/.test(source) && !/<\d+>/.test(translation) && translation.length > 0) {
-        needsTags.push({ hash, source, translation })
+      // ⭐ The source element carries inline markdown; the translation does not.
+      // `merge` builds the translated element from the VALUE alone — it never
+      // re-applies marks from the source — so this entry will render as flat prose
+      // and its links will be gone. It still counts as translated, which is why
+      // coverage cannot see it: the whole class scores 100%.
+      // ⛔ REPLACES a `<N>`-tag check that could no longer fire. Those tags were the
+      // pre-2026-06-24 keying scheme (`d12d594`); extraction has not emitted one
+      // since, so the check was dead while looking like a live guard — and it was
+      // the only thing in the pipeline that even gestured at mark fidelity.
+      if (unit.markup && translation.length > 0 && !carriesInlineMarkup(translation)) {
+        losesMarkup.push({ hash, source, markup: unit.markup, translation })
       }
     } else {
       missing.push({
@@ -86,7 +106,29 @@ export async function auditLocale(localesPath, locale) {
     valid,
     missing,
     stale,
-    needsTags
+    losesMarkup
+  }
+}
+
+/**
+ * Does this translation value produce any inline marks when the merge parses it?
+ *
+ * Asks the parser rather than a regex: the merge resolves a value through
+ * `markdownToProseMirror`, so the only honest test of "will this keep its link"
+ * is to run the same conversion. With no converter available the check declines
+ * to fire — a missing dependency must not invent findings.
+ */
+function carriesInlineMarkup(value) {
+  if (!markdownToProseMirror) return true
+  try {
+    const doc = markdownToProseMirror(value)
+    const walk = (nodes) =>
+      (nodes || []).some(
+        (n) => (n?.marks && n.marks.length > 0) || (n?.type && n.type !== 'text' && n.type !== 'paragraph') || walk(n?.content)
+      )
+    return walk(doc?.content)
+  } catch {
+    return true
   }
 }
 
@@ -161,8 +203,8 @@ export function formatAuditReport(results, options = {}) {
     lines.push(`  Valid:   ${result.valid.length} (${coverage}%)`)
     lines.push(`  Missing: ${result.missing.length}`)
     lines.push(`  Stale:   ${result.stale.length}`)
-    if (result.needsTags?.length > 0) {
-      lines.push(`  Needs tags: ${result.needsTags.length}`)
+    if (result.losesMarkup?.length > 0) {
+      lines.push(`  Loses markup: ${result.losesMarkup.length}  (links/bold in the source, plain in the translation)`)
     }
 
     if (verbose && result.stale.length > 0) {
@@ -176,14 +218,16 @@ export function formatAuditReport(results, options = {}) {
       }
     }
 
-    if (verbose && result.needsTags?.length > 0) {
-      lines.push(`\n  Translations missing inline tags:`)
-      for (const entry of result.needsTags.slice(0, 10)) {
-        const src = truncate(entry.source, 50)
-        lines.push(`    - ${entry.hash}: "${src}"`)
+    if (verbose && result.losesMarkup?.length > 0) {
+      lines.push(`\n  Translations that drop the source's inline markup:`)
+      lines.push(`  (a translation value is inline markdown — copy the links and marks across)`)
+      for (const entry of result.losesMarkup.slice(0, 10)) {
+        lines.push(`    - ${entry.hash}`)
+        lines.push(`        source: "${truncate(entry.markup, 60)}"`)
+        lines.push(`        yours:  "${truncate(entry.translation, 60)}"`)
       }
-      if (result.needsTags.length > 10) {
-        lines.push(`    ... and ${result.needsTags.length - 10} more`)
+      if (result.losesMarkup.length > 10) {
+        lines.push(`    ... and ${result.losesMarkup.length - 10} more`)
       }
     }
   }

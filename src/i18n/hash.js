@@ -31,44 +31,25 @@ export function normalizeText(text) {
 
 /**
  * Strip inline mark tags for hashing: "<1>text</1>" → "text"
- * Used to keep hash keys stable regardless of mark tagging.
+ *
+ * VESTIGIAL BUT LIVE. `<N>` tags were the pre-2026-06-24 mark-preservation scheme:
+ * a unit's source carried numbered tags and the merge re-applied the source's marks
+ * to the matching spans positionally. Whole-element keying replaced it (`d12d594`) —
+ * a translation VALUE is now inline markdown and the merge re-parses it, so nothing
+ * emits a `<N>` tag any more.
+ *
+ * ⛔ This stays anyway, because it runs on the HASH path: a manifest written before
+ * that change still holds tagged sources, and stripping keeps their keys matching
+ * what extraction produces today. Removing it would silently orphan those
+ * translations. The tag PARSER that went with it (`parseInlineTags`) had no callers
+ * and was deleted 2026-09-18; it was the only thing in the codebase that still looked
+ * like a live mark-preservation convention, which cost a peer lane a day of hunting
+ * for the placeholder syntax it implied.
+ *
  * @param {string} text
  * @returns {string}
  */
 export function stripInlineTags(text) {
   if (typeof text !== 'string') return ''
   return text.replace(/<\/?(\d+)>/g, '')
-}
-
-/**
- * Parse tagged translation string into segments.
- * "plain <1>marked</1> more" →
- *   { segments: [{ text: "plain " }, { text: "marked", markIndex: 0 }, { text: " more" }], hasMarks: true }
- *
- * Tag numbers are 1-based in the string, markIndex is 0-based in the result.
- * @param {string} text
- * @returns {{ segments: Array<{ text: string, markIndex?: number }>, hasMarks: boolean }}
- */
-export function parseInlineTags(text) {
-  const regex = /<(\d+)>([\s\S]*?)<\/\1>/g
-  const segments = []
-  let lastIndex = 0
-  let hasMarks = false
-  let match
-
-  while ((match = regex.exec(text)) !== null) {
-    hasMarks = true
-    if (match.index > lastIndex) {
-      segments.push({ text: text.slice(lastIndex, match.index) })
-    }
-    segments.push({ text: match[2], markIndex: parseInt(match[1], 10) - 1 })
-    lastIndex = regex.lastIndex
-  }
-
-  if (lastIndex < text.length) {
-    segments.push({ text: text.slice(lastIndex) })
-  }
-
-  if (!hasMarks) return { segments: [{ text }], hasMarks: false }
-  return { segments, hasMarks }
 }

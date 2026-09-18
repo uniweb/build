@@ -15,6 +15,7 @@ export function syncManifests(previous, current) {
   const report = {
     unchanged: [],
     moved: [],
+    remarked: [],
     changed: [],
     added: [],
     removed: []
@@ -41,6 +42,23 @@ export function syncManifests(previous, current) {
           source: currentUnit.source,
           previousContexts: prevUnit.contexts,
           currentContexts: currentUnit.contexts
+        })
+      } else if (prevUnit.markup !== currentUnit.markup) {
+        // ⭐ Same words, different inline markup — an author added a link, bolded a
+        // phrase or re-targeted an href without touching the text.
+        //
+        // ⛔ THE HASH CANNOT SEE THIS, BY DESIGN. It is computed over the flattened
+        // plain text precisely so that marking up a sentence does not orphan its
+        // existing translation. The cost is that nothing told a translator to go
+        // back and add the link, and the existing translation stays "valid" and
+        // fully counted while silently losing the markup the source gained.
+        // Measured 2026-09-18; before this bucket the report was simply silent.
+        report.remarked.push({
+          hash,
+          source: currentUnit.source,
+          previousMarkup: prevUnit.markup || null,
+          currentMarkup: currentUnit.markup || null,
+          contexts: currentUnit.contexts
         })
       } else {
         report.unchanged.push({ hash, source: currentUnit.source })
@@ -152,6 +170,21 @@ export function formatSyncReport(report) {
     }
     if (report.moved.length > 5) {
       lines.push(`    ... and ${report.moved.length - 5} more`)
+    }
+  }
+
+  if (report.remarked?.length > 0) {
+    lines.push(
+      `  ✎ ${report.remarked.length} strings kept their words but changed inline markup (links/bold)`
+    )
+    lines.push(
+      `    Existing translations still count as valid — update them or the markup is lost.`
+    )
+    for (const item of report.remarked.slice(0, 5)) {
+      lines.push(`    - "${truncate(item.currentMarkup || item.source, 60)}"`)
+    }
+    if (report.remarked.length > 5) {
+      lines.push(`    ... and ${report.remarked.length - 5} more`)
     }
   }
 

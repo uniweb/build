@@ -9,6 +9,19 @@ import { resolveDefaultLocale } from '@uniweb/core'
 import { computeHash, stripInlineTags } from './hash.js'
 import { visitDataStrings } from './data-strings.js'
 
+// ProseMirror inline fragment → inline markdown, for the TRANSLATOR-FACING half of
+// a unit. Same lazy-import-with-fallback pattern as merge.js, so the synchronous
+// extraction path has the serializer ready at call time. The fallback is the plain
+// text we already had, so a resolution failure degrades to the old behaviour rather
+// than breaking extraction.
+let serializeInlineContent
+try {
+  const contentWriter = await import('@uniweb/content-writer')
+  serializeInlineContent = contentWriter.serializeInlineContent
+} catch {
+  serializeInlineContent = null
+}
+
 /**
  * Extract all translatable units from site content
  * @param {Object} siteContent - Parsed site-content.json
@@ -231,7 +244,7 @@ function extractFromProseMirrorDoc(doc, context, units) {
       const field = getHeadingField(level, headingIndex)
       headingIndex[`h${level}`]++
 
-      addUnit(units, text, field, context)
+      addUnit(units, text, field, context, elementMarkup(node))
       return
     }
 
@@ -242,12 +255,12 @@ function extractFromProseMirrorDoc(doc, context, units) {
     if (!text) return
 
     if (listIndex !== null) {
-      addUnit(units, text, `list.${listIndex}`, context)
+      addUnit(units, text, `list.${listIndex}`, context, elementMarkup(node))
       return
     }
 
     const field = paragraphIndex === 0 ? 'paragraph' : `paragraph.${paragraphIndex}`
-    addUnit(units, text, field, context)
+    addUnit(units, text, field, context, elementMarkup(node))
     paragraphIndex++
   })
 }
@@ -348,6 +361,37 @@ export function elementText(node) {
   return collectInlineText(node).trim()
 }
 
+/**
+ * A block element's INLINE MARKDOWN — the translator-facing half of a unit.
+ *
+ * ⛔ NOT a second key. `elementText` above stays the key and the hash input,
+ * deliberately: bolding a word or re-targeting a link must not move a hash and
+ * orphan an existing translation.
+ *
+ * WHY THIS EXISTS. `merge.js` parses a translation VALUE as inline markdown, so
+ * the value channel carries links, marks and inline atoms losslessly. The SOURCE
+ * channel did not: a unit stored only the flattened text, `uniweb i18n generate`
+ * seeded locale files from it, and a translator was therefore shown a paragraph
+ * with its links already gone. They cannot restore what they were never shown —
+ * so a fully translated, 100%-covered site rendered with zero inline links, and
+ * no instrument reported anything (coverage counts keys, not fidelity).
+ * Measured 2026-09-18 on a documentation site with 266 internal links.
+ *
+ * Returns null when the serializer is unavailable or adds nothing over the plain
+ * text, so `markup` appears on a unit only when it actually carries more.
+ */
+export function elementMarkup(node) {
+  if (!serializeInlineContent || !node?.content) return null
+  try {
+    const markup = serializeInlineContent(node.content)
+    if (typeof markup !== 'string') return null
+    const trimmed = markup.trim()
+    return trimmed && trimmed !== elementText(node) ? trimmed : null
+  } catch {
+    return null
+  }
+}
+
 function collectInlineText(node) {
   if (!node || !node.content) return ''
   let out = ''
@@ -385,14 +429,18 @@ export function blockElements(doc) {
 /**
  * Add a translation unit to the accumulator
  */
-function addUnit(units, source, field, context) {
+function addUnit(units, source, field, context, markup = null) {
   if (!source || source.length === 0) return
 
   // Hash on plain text (strip inline tags) so keys stay stable
   const hash = computeHash(stripInlineTags(source))
 
   if (units[hash]) {
-    // Unit exists - add context if not already present
+    // Unit exists - add context if not already present.
+    // Two elements can share a key and differ in markup ("Learn more" plain in one
+    // place, linked in another). The first occurrence wins the field and the order,
+    // but a later one may be the only carrier of markup, so fill it rather than drop it.
+    if (markup && !units[hash].markup) units[hash].markup = markup
     const existingContexts = units[hash].contexts
     const contextKey = `${context.page}:${context.section}`
     const exists = existingContexts.some(
@@ -402,9 +450,11 @@ function addUnit(units, source, field, context) {
       existingContexts.push({ ...context })
     }
   } else {
-    // New unit
+    // New unit. `markup` is omitted unless the element carries inline markdown —
+    // most units are plain prose and gain nothing from a duplicate string.
     units[hash] = {
       source,
+      ...(markup ? { markup } : {}),
       field,
       contexts: [{ ...context }]
     }
