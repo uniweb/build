@@ -607,24 +607,35 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null) {
   return y
 }
 
-// Delete `<name>.md` files in `pageDir` whose stableId isn't in `keep`.
+// ⛔ A PRUNE MAY ONLY DELETE WHAT A PUSH COULD HAVE SENT. An orphan is a file the
+// incoming document no longer has — but a push reads the tree with the build's own
+// rules (`isMarkdownFile`, `isIgnoredFolder`), so a `_draft.md`, a `README.md`, a
+// `_partials/` folder or a `.git/` directory never reaches the backend and can never
+// come back in a pulled document. Judged by "not in the incoming set" alone, every
+// one of them was an orphan and a default pull DELETED it — the `.git/` of a pages
+// directory that is its own clone included. The same two rules decide both sides
+// now, which is also what the layout prune below already did.
+
+// Delete the section files in `pageDir` whose stableId isn't in `keep`.
 function pruneOrphanSectionFiles(pageDir, keep, report) {
   if (!existsSync(pageDir)) return
   for (const entry of readdirSync(pageDir)) {
-    if (extname(entry).toLowerCase() !== '.md') continue
+    if (!isMarkdownFile(entry)) continue
     if (keep.has(basename(entry, extname(entry)))) continue
     const p = join(pageDir, entry)
+    if (!statSync(p).isFile()) continue
     unlinkSync(p)
     report.deleted.push(p)
   }
 }
 
-// Delete subdirectories of `pagesDir` whose name isn't an incoming page dir.
+// Delete the page directories in `pagesDir` whose name isn't an incoming page dir.
 function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
   if (!existsSync(pagesDir)) return
   for (const entry of readdirSync(pagesDir)) {
+    if (isIgnoredFolder(entry) || keepDirs.has(entry)) continue
     const p = join(pagesDir, entry)
-    if (!statSync(p).isDirectory() || keepDirs.has(entry)) continue
+    if (!statSync(p).isDirectory()) continue
     rmSync(p, { recursive: true, force: true })
     report.deleted.push(p)
   }

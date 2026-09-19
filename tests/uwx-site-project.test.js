@@ -322,6 +322,53 @@ describe('siteContentDocumentToProject — reconcile (prune)', () => {
     siteContentDocumentToProject({ document: { info, pages: [] }, siteRoot: dir, prune: true })
     expect(existsSync(join(dir, 'pages/home'))).toBe(true) // guard: not nuked
   })
+
+  // ⛔ A push reads the tree with the build's rules, so these never reach the
+  // backend — and a prune judging "not in the incoming set" alone deleted every one.
+  it('never deletes what a push never sends — `_`/`.` folders, `_` drafts, READMEs', () => {
+    const v1 = { info, pages: [page('home', [section('hero', 'Hi')]), page('about', [section('intro', 'X')])] }
+    siteContentDocumentToProject({ document: v1, siteRoot: dir })
+    const keep = [
+      'pages/_drafts/page.yml',
+      'pages/.git/HEAD',
+      'pages/home/_notes.md',
+      'pages/home/README.md',
+    ]
+    for (const rel of keep) {
+      mkdirSync(join(dir, rel, '..'), { recursive: true })
+      writeFileSync(join(dir, rel), 'x\n')
+    }
+
+    const v2 = { info, pages: [page('home', [section('hero', 'Hi')])] }
+    const report = siteContentDocumentToProject({ document: v2, siteRoot: dir, prune: true })
+
+    for (const rel of keep) expect(existsSync(join(dir, rel)), rel).toBe(true)
+    // CONTROL — a real orphan still goes, so the guard did not simply switch pruning off.
+    expect(existsSync(join(dir, 'pages/about'))).toBe(false)
+    expect(report.deleted).toEqual([join(dir, 'pages/about')])
+  })
+
+  it('a pruning pull of exactly what was pushed deletes nothing', async () => {
+    const files = {
+      'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\n",
+      'pages/home/page.yml': 'title: Home\n',
+      'pages/home/hero.md': '# Hi\n',
+      'pages/home/_notes.md': 'private\n',
+      'pages/home/README.md': '# how this page works\n',
+      'pages/_shared/snippet.md': '# shared\n',
+      'pages/.github/workflows/ci.yml': 'on: push\n',
+    }
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(join(dir, rel, '..'), { recursive: true })
+      writeFileSync(join(dir, rel), body)
+    }
+
+    const doc = await siteProjectToDocument(dir)
+    const report = siteContentDocumentToProject({ document: doc, siteRoot: dir, prune: true })
+
+    expect(report.deleted).toEqual([])
+    for (const rel of Object.keys(files)) expect(existsSync(join(dir, rel)), rel).toBe(true)
+  })
 })
 
 describe('siteContentDocumentToProject — uuid-anchored rename detection', () => {
