@@ -349,7 +349,10 @@ describe('siteContentDocumentToProject — reconcile (prune)', () => {
     expect(report.deleted).toEqual([join(dir, 'pages/about')])
   })
 
-  it('a pruning pull of exactly what was pushed deletes nothing', async () => {
+  // ⚠️ Not "deletes nothing" in general: a pull canonicalizes (`1-hero.md` → `hero.md`,
+  // `@card.md` → `card.md`), which removes the old name. What it must never remove is a
+  // file the push skipped — this fixture holds only those, so any deletion is a bug.
+  it('a pruning pull of what was pushed deletes none of the files a push skips', async () => {
     const files = {
       'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\n",
       'pages/home/page.yml': 'title: Home\n',
@@ -369,6 +372,31 @@ describe('siteContentDocumentToProject — reconcile (prune)', () => {
 
     expect(report.deleted).toEqual([])
     for (const rel of Object.keys(files)) expect(existsSync(join(dir, rel)), rel).toBe(true)
+  })
+
+  // ⛔ The build renders an `@` file no `nest:` claims (appended, "to avoid silent data
+  // loss"); the push omitted it, so a pull of the result deleted the author's file.
+  it('an orphaned `@` section survives a pull of what was pushed — renamed, never lost', async () => {
+    const files = {
+      'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\nindex: home\n",
+      'pages/home/page.yml': 'title: Home\n',
+      'pages/home/hero.md': '# Hero\n',
+      'pages/home/@card.md': '# Card\n',
+    }
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(join(dir, rel, '..'), { recursive: true })
+      writeFileSync(join(dir, rel), body)
+    }
+    const rendered = async () =>
+      (await collectSiteContent(dir, {})).pages.find((p) => p.route === '/').sections.map((s) => s.stableId)
+    expect(await rendered()).toEqual(['hero', 'card'])
+
+    const doc = await siteProjectToDocument(dir)
+    expect(doc.pages[0].page_sections.map((s) => s.$id)).toEqual(['hero', 'card'])
+    siteContentDocumentToProject({ document: doc, siteRoot: dir, prune: true })
+
+    expect(await rendered()).toEqual(['hero', 'card'])
+    expect(readFileSync(join(dir, 'pages/home/card.md'), 'utf8')).toContain('# Card')
   })
 })
 

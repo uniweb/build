@@ -546,14 +546,28 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   }
 
   // Top-level sections: every NON-`@` markdown file, in order. `@`-prefixed files
-  // are children, pulled in via their parent's `nest:` above (an orphaned `@`
-  // file with no parent is simply omitted — it stays out of the document).
+  // are children, pulled in via their parent's `nest:` above.
   const seen = new Set()
   const sections = []
   for (const file of mdFiles) {
     if (isChildSection(file) || seen.has(file)) continue
     seen.add(file)
     sections.push(await buildSection(file, seen))
+  }
+
+  // An `@` file no `nest:` claimed is an ORPHAN, and the build keeps it — appended
+  // as a top-level section, with a warning, "to avoid silent data loss" (`processPage`,
+  // `site/content-collector.js`). Mirrored exactly: at the end, in file order, with no
+  // children of its own. ⛔ This lane omitted it until 2026-09-19, and a pull of the
+  // result then DELETED the file — on disk and absent from the document, it read as
+  // something removed upstream.
+  for (const file of mdFiles) {
+    if (!isChildSection(file) || seen.has(file)) continue
+    seen.add(file)
+    const stableDefault = parseNumericPrefix(stripAtPrefix(parse(file).name)).name
+    const { section } = await processMarkdownFile(join(pageDir, file), String(seen.size), siteRoot, stableDefault)
+    section.subsections = []
+    sections.push(section)
   }
 
   return sections.map((s, i) => sectionToRecord(s, i))
