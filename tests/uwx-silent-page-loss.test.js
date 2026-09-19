@@ -212,6 +212,19 @@ describe('a `pages/<segment>` sub-mount is not read here, and now says so', () =
     expect(warn).toContain('empty container')
   })
 
+  it('with no local stub, says the route is not pushed at all — there is no container to send', async () => {
+    w('site.yml', `${site}paths:\n    pages/docs: ./external\n`)
+    w('external/guide/page.yml', 'title: Guide\n')
+    w('external/guide/hero.md', '---\ntype: Hero\n---\n\n# Guide\n')
+
+    const doc = await siteProjectToDocument(ROOT)
+
+    expect(doc.pages.find((p) => p.$id === 'docs')).toBeUndefined()
+    const warn = warnings.find((m) => m.includes('pages/docs'))
+    expect(warn).toContain('will not be pushed at all')
+    expect(warn).not.toContain('empty container')
+  })
+
   // A push sends the page tree as ONE entity, so on an already-published site the
   // cost is not "you publish short" — it is that live pages are REMOVED, with the
   // publish still reporting success. Measured by the backend lane 2026-09-18

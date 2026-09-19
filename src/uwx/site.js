@@ -1424,18 +1424,26 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // a site whose entire corpus was one sub-mount: 49 pages built, 2 pushed.
   // Deferred by design for now (bidirectional-sync.md); warned about here so it
   // is not also silent.
+  //
+  // The same two directories the pull writes back to — see `siteContentDirs`.
+  const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
   for (const [segment] of mountEntriesOf(siteYml.paths)) {
+    // Only a LOCAL stub (`pages/<segment>/`, the folder that gives a mounted route its
+    // layout) is walked, so the route arrives as an empty container; with no stub,
+    // nothing here stands for the route and it is not sent at all. ⚠️ The message
+    // said "empty container" in both cases until 2026-09-19.
+    const fate = existsSync(join(pagesPath, segment))
+      ? 'will be pushed as an empty container'
+      : 'will not be pushed at all'
     console.warn(
       `uwx/site: \`paths: { pages/${segment}: … }\` is NOT read on the sync lane — ` +
-        `\`${segment}\` will be pushed as an empty container and none of the mounted ` +
+        `\`${segment}\` ${fate} and none of the mounted ` +
         `pages will reach the backend. A build mounts it normally. Inline the ` +
         `directory under \`pages/${segment}/\` to push it, or ship the site with ` +
         `\`uniweb export\` / \`uniweb deploy --host <adapter>\`.` +
         REPUBLISH_CLAUSE
     )
   }
-  // The same two directories the pull writes back to — see `siteContentDirs`.
-  const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
   let pages = []
   if (existsSync(pagesPath)) {
     // The root has a mode too, read as the build reads it (`rootContentMode`):
