@@ -1714,14 +1714,18 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 }
 
 /**
- * Determine the index page name from ordering config
+ * The homepage ONE config declares: the first named `pages:` entry, else `index:`.
+ * `undefined` when it declares none; `null` when its first `pages:` entry names
+ * nothing usable, which has always meant "no homepage" rather than "fall through".
  *
- * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent
- * @param {Array} availableFolders - Array of { name, order } for folders at this level
- * @returns {string|null} The folder name that should be the index, or null
+ * The within-file rule, in one place — a level's config and each of the root's two
+ * configs (`rootOrderConfig`) are read by it alike.
+ *
+ * @param {Object} [config] - `{ pages, index }` as authored
+ * @returns {string|null|undefined}
  */
-function determineIndexPage(orderConfig, availableFolders) {
-  const { pages: pagesArray, index: indexName } = orderConfig || {}
+function declaredHomepage(config) {
+  const { pages: pagesArray, index: indexName } = config || {}
 
   // 1. Explicit pages array - first non-'...' item is index
   if (Array.isArray(pagesArray) && pagesArray.length > 0) {
@@ -1733,9 +1737,69 @@ function determineIndexPage(orderConfig, availableFolders) {
   }
 
   // 2. Explicit index property
-  if (indexName) {
-    return indexName
+  return indexName || undefined
+}
+
+/**
+ * The homepage a level's order config names. The root's was already decided across
+ * its two configs, and arrives as `homepage` (`rootOrderConfig`); any other level
+ * that promotes one — a folder promoted to `/`, the latest version of a scope at the
+ * root — names it in its own config.
+ */
+function homepageOf(orderConfig) {
+  return orderConfig && 'homepage' in orderConfig ? orderConfig.homepage : declaredHomepage(orderConfig)
+}
+
+/**
+ * The site's TOP LEVEL — its order and its homepage — from the two configs that can
+ * declare it: the site config (`site.yml`, or a document profile's own file) and the
+ * pages directory's own config (`pages/folder.yml`, or `pages/page.yml`).
+ *
+ * ⭐ The pages directory's config is read as a MOUNTED directory's is: the content's
+ * own declaration, under the site's. Every other directory's config orders its
+ * children, and a mounted one's does too — but the root's was read for its mode
+ * alone until 2026-09-19, so a content repository that orders itself kept its order
+ * mounted below the root and lost it as the whole pages directory: alphabetical,
+ * and in folder mode with no homepage at all.
+ *
+ * ⛔ THE HOMEPAGE IS DECIDED PER CONFIG, NOT PER KEY. Within one file the first
+ * `pages:` entry beats `index:`, as it always has; across the two, whichever form the
+ * site config uses beats the pages directory's. Merged key by key, a `pages:` list
+ * from the pages directory would override a `site.yml` `index:`. The order is the
+ * site config's `pages:`, else the pages directory's.
+ *
+ * ⚖️ `pages:` and `index:` ONLY. The root has no container page, so the keys that
+ * describe one (`title`, `seo`, …) mean nothing here — a repository carries them for
+ * when it is mounted below the root. And `layout:` stays the site config's alone: a
+ * site's layout travels on the sync lane as that file's own value, verbatim, so a
+ * second source would render on a static build and nowhere else.
+ *
+ * @param {{ pages?: Array, index?: string }} [site] - the site config's own order keys
+ * @param {Object} [root] - the pages directory's config, as `readFolderConfig` read it
+ * @returns {{ pages: Array|undefined, index: string|undefined, homepage: string|null|undefined }}
+ */
+export function rootOrderConfig(site = {}, root = {}) {
+  const listed = (value) => Array.isArray(value) && value.length > 0
+  const fromSite = declaredHomepage(site)
+  const homepage = fromSite !== undefined ? fromSite : declaredHomepage(root)
+  return {
+    pages: listed(site?.pages) ? site.pages : listed(root?.pages) ? root.pages : undefined,
+    index: homepage || undefined,
+    homepage,
   }
+}
+
+/**
+ * Determine the index page name from ordering config
+ *
+ * @param {Object} orderConfig - { pages: [...], index: 'name' } from parent
+ * @param {Array} availableFolders - Array of { name, order } for folders at this level
+ * @returns {string|null} The folder name that should be the index, or null
+ */
+function determineIndexPage(orderConfig, availableFolders) {
+  // 1–2. The first named `pages:` entry, else `index:` (`declaredHomepage`).
+  const declared = homepageOf(orderConfig)
+  if (declared !== undefined) return declared
 
   // 3. Fallback: lowest order value, or first alphabetically
   // IMPORTANT: Dynamic route folders (e.g., [slug]) can never be index pages
@@ -1953,11 +2017,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     // pages: controls order only and every folder keeps its natural route.
     let indexName = null
     if (parentRoute === '/') {
-      if (pagesParsedFM && pagesParsedFM.before.length > 0) {
-        indexName = extractItemName(pagesParsedFM.before[0])
-      } else {
-        indexName = orderConfig?.index || null
-      }
+      indexName = homepageOf(orderConfig) ?? null
     }
 
     // Add md-file-pages
@@ -2505,21 +2565,22 @@ export async function collectSiteContent(sitePath, options = {}) {
     }
   }
 
+  // Root content mode default comes from the profile (folder mode for
+  // documents, page mode for sites). A folder.yml/page.yml in the pages root
+  // overrides the profile default per readFolderConfig.
+  const { mode: rootContentMode, config: rootFolderConfig } = await readFolderConfig(pagesPath, profile.defaultMode)
+
   // Extract page ordering config from the top-level config.
   // Document profile reads the `content:` field (with `pages:` as a back-compat
   // alias); site profile reads `pages:`. Either way the internal field name is
   // `pages` so collectPagesRecursive doesn't need to care about profile.
-  const siteOrderConfig = {
+  // ⭐ Layered over the pages directory's own `pages:` / `index:` — see `rootOrderConfig`.
+  const siteOrderConfig = rootOrderConfig({
     pages: profile.orderField === 'pages'
       ? siteConfig.pages
       : (siteConfig[profile.orderField] ?? siteConfig.pages),
     index: siteConfig.index
-  }
-
-  // Root content mode default comes from the profile (folder mode for
-  // documents, page mode for sites). A folder.yml/page.yml in the pages root
-  // overrides the profile default per readFolderConfig.
-  const { mode: rootContentMode } = await readFolderConfig(pagesPath, profile.defaultMode)
+  }, rootFolderConfig)
 
   // Collect layout areas from the layout/ directory, read from the site alone
   const { layouts, assetCollection: layoutAssets, iconCollection: layoutIcons } =

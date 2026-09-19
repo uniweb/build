@@ -57,6 +57,7 @@ import {
   fetchFromQueryShorthand,
   assertRouteFolder,
   mountEntriesOf,
+  rootOrderConfig,
 } from '../site/content-collector.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder } from '../site/layout-folder.js'
@@ -1428,7 +1429,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // left in an old site.yml is inert — nothing reads it, so nothing sends it.
   // (uwx-format.md → info.url.)
 
-  const ctx = { siteRoot, siteIndex: siteYml.index, sourceLocale, translations }
+  // `siteIndex` — the homepage — joins below, once the pages directory's own config is read.
+  const ctx = { siteRoot, sourceLocale, translations }
   // ⛔ ONE `paths:` CONVENTION, TWO READERS, AND THIS ONE IS A STRICT SUBSET.
   // The build honours sub-mounts — `paths: { pages/<segment>: <dir> }`, through
   // `resolveMounts`/`mountEntriesOf` in `site/content-collector.js` — and this
@@ -1465,9 +1467,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     // config of its own inherits it. ⛔ This walk started in page mode unconditionally
     // until 2026-09-19, so such a site's top-level `.md` pages were dropped without a
     // word and its top-level folders were pushed as pages of sections.
-    const { mode: rootMode, source: rootSource } = await readFolderConfig(pagesPath, 'sections')
+    const { mode: rootMode, source: rootSource, config: rootConfig } = await readFolderConfig(pagesPath, 'sections')
     if (rootMode === 'pages') await warnFolderModePagesSkipped(pagesPath, siteRoot, rootSource)
-    pages = await walkPagesNested(ctx, pagesPath, '', rootMode, siteYml, true)
+    // The top level's order and homepage, decided by the build's own function: the
+    // site's `pages:` / `index:` over the pages directory's own. ⛔ The homepage read
+    // `index:` alone until 2026-09-19, so a site naming it by its first `pages:` entry
+    // — as the build does — pushed no homepage at all.
+    const top = rootOrderConfig({ pages: siteYml.pages, index: siteYml.index }, rootConfig)
+    pages = await walkPagesNested({ ...ctx, siteIndex: top.homepage }, pagesPath, '', rootMode, { pages: top.pages }, true)
   }
 
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
