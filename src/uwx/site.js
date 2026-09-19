@@ -562,7 +562,12 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
 // A folder-mode folder's `.md` files are pages to the build and nothing to this
 // lane. Name every one of them, so the shortfall is visible at push time rather
 // than by reading the backend's store or opening the published site.
-async function warnFolderModePagesSkipped(dirPath, siteRoot) {
+//
+// `source` is `readFolderConfig`'s: a folder with no config of its own is in folder
+// mode because a `folder.yml` above it put it there, and the message says so —
+// "it is a folder-mode folder (`folder.yml`)" over a folder that has none would send
+// the author looking for a file that does not exist.
+async function warnFolderModePagesSkipped(dirPath, siteRoot, source = 'folder.yml') {
   let files
   try {
     files = (await readdir(dirPath)).filter(isMarkdownFile)
@@ -571,9 +576,12 @@ async function warnFolderModePagesSkipped(dirPath, siteRoot) {
   }
   if (files.length === 0) return
   const where = relative(siteRoot, dirPath)
+  const why = source === 'inherited'
+    ? 'it is a folder-mode folder (it has no `folder.yml` or `page.yml` of its own, so it inherits folder mode from the `folder.yml` above it)'
+    : 'it is a folder-mode folder (`folder.yml`)'
   console.warn(
     `uwx/site: ${files.length} page(s) in \`${where}\` will NOT be pushed — ` +
-      `it is a folder-mode folder (\`folder.yml\`), and pushing \`.md\`-as-pages ` +
+      `${why}, and pushing \`.md\`-as-pages ` +
       `is not implemented on the sync lane. A build renders them; the backend ` +
       `will not have them.\n` +
       files.map((f) => `  - ${where}/${f}`).join('\n') +
@@ -610,7 +618,16 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     assertRouteFolder(f.dirName, insideCatchAll ? '/:path*' : '/')
     const dyn = f.dirName.match(DYNAMIC_RE)
     const slug = dyn ? dyn[1] : f.name
-    const mode = f.source === 'folder.yml' ? 'folder' : 'page'
+    // ⭐ THE BUILD'S ANSWER, NOT A SECOND ONE. `readFolderConfig` has already resolved
+    // this folder's mode — a `folder.yml` here, a `page.yml` here, or neither and
+    // INHERITED from its parent — and that resolved mode is exactly what the build
+    // reads (`site/content-collector.js`). ⛔ This line tested the config file's NAME
+    // until 2026-09-19, so a folder with no config under a folder-mode parent — the
+    // documented cascade, one `folder.yml` at the top of a docs tree — was pushed as
+    // ONE page whose sections were its `.md` files while the build rendered each as a
+    // page of its own. Nothing warned, and a pull then wrote a `page.yml` into the
+    // folder, converting the author's own site to the wrong shape.
+    const mode = f.internalMode === 'pages' ? 'folder' : 'page'
     const slugPath = parentSlugPath ? `${parentSlugPath}/${slug}` : slug
 
     const data = buildPageData(f.config, {
@@ -645,7 +662,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
       // measured 2026-09-18, a 49-page documentation site published 2 pages with
       // every CLI instrument reporting success [measured:backend, channel with
       // backend, and reproduced here against the same site].
-      await warnFolderModePagesSkipped(f.path, siteRoot)
+      await warnFolderModePagesSkipped(f.path, siteRoot, f.source)
     }
 
     const children = await walkPagesNested(ctx, f.path, slugPath, f.internalMode, f.config, false)
@@ -1419,9 +1436,17 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   }
   // The same two directories the pull writes back to — see `siteContentDirs`.
   const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
-  const pages = existsSync(pagesPath)
-    ? await walkPagesNested(ctx, pagesPath, '', 'sections', siteYml, true)
-    : []
+  let pages = []
+  if (existsSync(pagesPath)) {
+    // The root has a mode too, read as the build reads it (`rootContentMode`):
+    // `pages/folder.yml` puts the whole site in folder mode, and every folder with no
+    // config of its own inherits it. ⛔ This walk started in page mode unconditionally
+    // until 2026-09-19, so such a site's top-level `.md` pages were dropped without a
+    // word and its top-level folders were pushed as pages of sections.
+    const { mode: rootMode, source: rootSource } = await readFolderConfig(pagesPath, 'sections')
+    if (rootMode === 'pages') await warnFolderModePagesSkipped(pagesPath, siteRoot, rootSource)
+    pages = await walkPagesNested(ctx, pagesPath, '', rootMode, siteYml, true)
+  }
 
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
 

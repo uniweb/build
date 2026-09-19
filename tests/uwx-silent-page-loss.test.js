@@ -21,10 +21,11 @@
  * goes and so does its test — but until then, removing the warning silently
  * restores a defect that took a live edge deployment and 49 HTTPS probes to find.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { siteProjectToDocument } from '../src/uwx/index.js'
+import { siteProjectToDocument, siteContentDocumentToProject } from '../src/uwx/index.js'
+import { collectSiteContent } from '../src/site/content-collector.js'
 
 let ROOT
 let warnings
@@ -104,6 +105,91 @@ describe('folder-mode `.md`-as-pages are skipped, and now say so', () => {
       expect(node).toBeDefined()
     }
     expect(warnings.filter((m) => m.includes('will NOT be pushed'))).toHaveLength(0)
+  })
+})
+
+// ⛔ FOLDER MODE CASCADES, and this lane used to ask only whether a folder HAS a
+// `folder.yml`. The documented shape of a docs tree — one `folder.yml` at the top,
+// plain folders of `.md` files below it — was pushed as pages of sections: every
+// `.md` page merged into its folder's one page, with no warning, and a pull then
+// wrote a `page.yml` into the folder so the author's own build merged them too.
+describe('folder mode is read the way the build reads it — inherited, and at the root', () => {
+  const routes = async () => (await collectSiteContent(ROOT, {})).pages.map((p) => p.route)
+  // An explicit homepage, so the build does not promote `docs` to `/` and strip its prefix.
+  const withHome = () => {
+    w('site.yml', `${site}index: home\n`)
+    w('pages/home/page.yml', 'title: Home\n')
+    w('pages/home/hero.md', '# Hi\n')
+  }
+  const find = (pages, ...ids) => ids.reduce((node, id) => (node?.$children ?? node)?.find?.((p) => p.$id === id), pages)
+
+  it('a folder with no config under a folder-mode parent is folder mode, and names its pages', async () => {
+    withHome()
+    w('pages/docs/folder.yml', 'title: Docs\n')
+    w('pages/docs/start/install.md', '# Install\n')
+    w('pages/docs/start/quick.md', '# Quick\n')
+
+    // The build: two pages, not one.
+    expect(await routes()).toEqual(expect.arrayContaining(['/docs/start/install', '/docs/start/quick']))
+
+    const doc = await siteProjectToDocument(ROOT)
+    const start = find(doc.pages, 'docs', 'start')
+    expect(start.mode).toBe('folder')
+    expect(start.page_sections).toBeUndefined()
+
+    const warn = warnings.find((m) => m.includes('pages/docs/start'))
+    expect(warn).toContain('2 page(s)')
+    expect(warn).toContain('install.md')
+    expect(warn).toContain('quick.md')
+    // It must not send the author looking for a `folder.yml` the folder does not have.
+    expect(warn).toContain('inherits folder mode')
+  })
+
+  it('CONTROL — a `page.yml` under a folder-mode parent is still a page of sections', async () => {
+    withHome()
+    w('pages/docs/folder.yml', 'title: Docs\n')
+    w('pages/docs/guide/page.yml', 'title: Guide\n')
+    w('pages/docs/guide/hero.md', '# Guide\n')
+
+    const doc = await siteProjectToDocument(ROOT)
+    const guide = find(doc.pages, 'docs', 'guide')
+    expect(guide.mode).toBe('page')
+    expect(guide.page_sections).toHaveLength(1)
+    expect(warnings.filter((m) => m.includes('will NOT be pushed'))).toHaveLength(0)
+  })
+
+  it('`pages/folder.yml` puts the whole site in folder mode — top-level pages are named, not dropped silently', async () => {
+    w('site.yml', site)
+    w('pages/folder.yml', 'title: Site\n')
+    w('pages/intro.md', '# Intro\n')
+    w('pages/about/about.md', '# About\n')
+    w('pages/contact/page.yml', 'title: Contact\n')
+    w('pages/contact/form.md', '# Form\n')
+
+    const doc = await siteProjectToDocument(ROOT)
+
+    expect(warnings.find((m) => m.includes('in `pages` will NOT be pushed'))).toContain('intro.md')
+    expect(find(doc.pages, 'about').mode).toBe('folder')
+    expect(warnings.find((m) => m.includes('pages/about'))).toContain('about.md')
+    // CONTROL — a `page.yml` opts back into page mode, at the root as anywhere.
+    expect(find(doc.pages, 'contact').mode).toBe('page')
+    expect(find(doc.pages, 'contact').page_sections).toHaveLength(1)
+  })
+
+  it('a pull of what was pushed leaves the author\'s folder-mode tree as it was', async () => {
+    withHome()
+    w('pages/docs/folder.yml', 'title: Docs\n')
+    w('pages/docs/start/install.md', '# Install\n\nRun it.\n')
+    w('pages/docs/start/quick.md', '# Quick\n')
+    const before = await routes()
+
+    const doc = await siteProjectToDocument(ROOT)
+    siteContentDocumentToProject({ document: doc, siteRoot: ROOT, prune: true })
+
+    // No `page.yml` turned the folder into one page; the files are untouched.
+    expect(existsSync(join(ROOT, 'pages/docs/start/page.yml'))).toBe(false)
+    expect(readFileSync(join(ROOT, 'pages/docs/start/install.md'), 'utf8')).toBe('# Install\n\nRun it.\n')
+    expect(await routes()).toEqual(before)
   })
 })
 
