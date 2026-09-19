@@ -1095,9 +1095,10 @@ export async function prerenderSite(siteDir, options = {}) {
       // ⭐ `renderer.render` IS the sequence this loop used to spell out —
       // renderPage → classify → injectPageContent. It was moved into
       // `@uniweb/runtime/ssr` because an SSR isolate assembles the same three steps
-      // per request, and two hand-written copies of one sequence is how the two
-      // lanes drift. This lane passes the Page it already holds; the isolate passes
-      // a route. See `runtime/src/page-renderer.js` for what it leaves to the host.
+      // for the page a visit starts on, and two hand-written copies of one sequence
+      // is how the two lanes drift. This lane passes the Page it already holds; the
+      // isolate passes a route. See `runtime/src/page-renderer.js` for what it leaves
+      // to the host.
       const result = renderer.render(page)
 
       if (result.outcome === 'failed') {
