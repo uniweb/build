@@ -69,6 +69,7 @@ import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { resolveSelfScope } from './self-scope.js'
+import { siteContentDirs } from './site-dirs.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
 
@@ -1416,16 +1417,12 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
         REPUBLISH_CLAUSE
     )
   }
-  const pagesPath = siteYml.paths?.pages
-    ? join(siteRoot, siteYml.paths.pages)
-    : join(siteRoot, 'pages')
+  // The same two directories the pull writes back to — see `siteContentDirs`.
+  const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
   const pages = existsSync(pagesPath)
     ? await walkPagesNested(ctx, pagesPath, '', 'sections', siteYml, true)
     : []
 
-  const layoutDir = siteYml.paths?.layout
-    ? join(siteRoot, siteYml.paths.layout)
-    : join(siteRoot, 'layout')
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
 
   // Wrap each section's content into its per-locale form (source doc + target

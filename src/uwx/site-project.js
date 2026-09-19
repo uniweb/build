@@ -46,6 +46,7 @@ import { createTranslationCollector, writeLocaleTranslations, writeFreeformTrans
 import { buildFreeformPath } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+import { siteContentDirs } from './site-dirs.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
 // map under `.uniweb/`, the home for the backend's per-item identity so that
@@ -881,11 +882,11 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   // localized scalars during the page walk.
   const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale }
 
-  const paths = document?.info?.paths || {}
-  const pagesDir = paths.pages ? join(siteRoot, paths.pages) : join(siteRoot, 'pages')
+  // Where the tree goes is what `site.yml` says NOW — `siteInfoToConfig` above has
+  // written the document's `settings.paths` into it — because that is the file the
+  // next push and the build read. See `siteContentDirs`.
+  const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, readAuthoredYaml(join(siteRoot, 'site.yml')))
   projectPages(document?.pages, pagesDir, sourceLocale, report, prune, ctx)
-
-  const layoutBaseDir = paths.layout ? join(siteRoot, paths.layout) : join(siteRoot, 'layout')
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)

@@ -64,8 +64,9 @@ const ownContent = (record, ...childKeys) => {
  * the projector would write it to.
  *
  * Paths use the conventional `pages/` and `layout/` roots. A site that relocates
- * them via `info.paths` still gets stable, unique keys — only the displayed prefix
- * would differ from disk, which is a labelling nicety, not a correctness issue.
+ * them via `site.yml::paths` (`settings.paths` on the wire) still gets stable, unique
+ * keys — only the displayed prefix would differ from disk, which is a labelling
+ * nicety, not a correctness issue.
  *
  * @returns {Map<string, object>} path → the unit's own record
  */

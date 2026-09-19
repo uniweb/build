@@ -17,6 +17,7 @@ import {
 } from '../src/uwx/index.js'
 import { collectUnitUuids, stampUnitUuids } from '../src/uwx/site-diff.js'
 import { computeHash } from '../src/i18n/hash.js'
+import { collectSiteContent } from '../src/site/content-collector.js'
 
 let dir
 beforeEach(() => {
@@ -1424,6 +1425,65 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
     expect(JSON.stringify(hero.content.es)).toContain('Bienvenido')
     expect(doc1.layout_sections[0].content.es.type).toBe('doc')
     expect(JSON.stringify(doc1.layout_sections[0].content.es)).toContain('Navegacion')
+  })
+})
+
+describe('pages and layout land where site.yml::paths puts them', () => {
+  // ⛔ The pull read these directories from `info.paths`, which stopped existing when
+  // `paths` moved to the `settings` Section (2026-09-09). Every pull then wrote to
+  // `pages/` and `layout/`, while the build and the next push read the declared ones.
+  const put = (root, files) => {
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(join(root, rel, '..'), { recursive: true })
+      writeFileSync(join(root, rel), body)
+    }
+  }
+  const relocated = {
+    'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\npaths:\n  pages: content\n  layout: chrome\n",
+    'content/home/page.yml': 'title: Home\n',
+    'content/home/hero.md': '# Hi\n',
+    'content/about/page.yml': 'title: About\n',
+    'content/about/intro.md': '# About\n',
+    'chrome/header.md': '# Nav\n',
+  }
+
+  it('a clone of a relocated site writes into the declared directories, builds, and pushes back unchanged', async () => {
+    const src = join(dir, 'src')
+    put(src, relocated)
+    const doc = await siteProjectToDocument(src)
+    expect(doc.settings.paths).toEqual({ pages: 'content', layout: 'chrome' })
+
+    // What `clone` does: scaffold a bare site.yml, then run the pull projection.
+    const dest = join(dir, 'dest')
+    put(dest, { 'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\n" })
+    siteContentDocumentToProject({ document: doc, siteRoot: dest, prune: true })
+
+    expect(existsSync(join(dest, 'content/home/hero.md'))).toBe(true)
+    expect(existsSync(join(dest, 'content/about/intro.md'))).toBe(true)
+    expect(existsSync(join(dest, 'chrome/header.md'))).toBe(true)
+    // CONTROL — nothing under the default names, which is where the stale read wrote.
+    expect(existsSync(join(dest, 'pages'))).toBe(false)
+    expect(existsSync(join(dest, 'layout'))).toBe(false)
+
+    // The build reads the same place: before the fix this clone built ZERO pages.
+    const built = await collectSiteContent(dest, {})
+    expect(built.pages.filter((p) => p.hasContent)).toHaveLength(2)
+    // And a push from the clone is the push that made it.
+    expect(await siteProjectToDocument(dest)).toEqual(doc)
+  })
+
+  it('a pull into a relocated project writes there even when the document carries no paths', () => {
+    put(dir, { 'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\npaths:\n  pages: content\n" })
+    const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+    const document = {
+      info: { name: { en: 'S' }, foundation: '@a/base@1.0.0' },
+      pages: [{ $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') }] }],
+    }
+
+    siteContentDocumentToProject({ document, siteRoot: dir, prune: true })
+
+    expect(existsSync(join(dir, 'content/home/hero.md'))).toBe(true)
+    expect(existsSync(join(dir, 'pages'))).toBe(false)
   })
 })
 
