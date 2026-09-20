@@ -154,7 +154,7 @@ describe('⛔ a single declaration is untouched', () => {
   })
 })
 
-describe('⚠️ two bindings under one key at one level — the first is used, and the build says so (ruled 2026-09-13)', () => {
+describe('⚠️ two bindings under one key at one level — what happens to the second depends on the component, and the build says both (ruled 2026-09-13, refined 2026-09-20)', () => {
   const warnings = async (fn) => {
     const seen = []
     const saved = console.warn
@@ -176,7 +176,14 @@ describe('⚠️ two bindings under one key at one level — the first is used, 
     )
     const seen = await warnings(() => collectSiteContent(paths.siteRoot, {}))
     expect(seen).toHaveLength(1)
-    expect(seen[0]).toMatch(/pages\/home\/page\.yml: more than one binding delivers content\.data\.team — the first is used/)
+    expect(seen[0]).toMatch(/pages\/home\/page\.yml: more than one binding is named team/)
+    // ⭐ It says BOTH outcomes, because which one applies depends on whether a component
+    // declares the key — which this parser cannot see (ruled 2026-09-20 [Diego]: several
+    // fetches of one schema pair positionally with that schema's declared keys when no `as`
+    // pairs them). ⛔ It claimed "the rest are ignored" until then, and that is false for the
+    // second case.
+    expect(seen[0]).toMatch(/receives the first, and the rest fill nothing/)
+    expect(seen[0]).toMatch(/pair in order with the declared keys of their schema/)
   })
 
   it('and the first is what resolves', async () => {

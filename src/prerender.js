@@ -171,7 +171,15 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
   // `undefined` — which passes the `!== false` test and then fetches nothing.
   const firstSite = firstOfKey()
   for (const oneFetch of toFetchList(siteContent.config?.fetch)) {
-    if (!firstSite(oneFetch.as)) continue
+    // ⭐ EVERY binding is FETCHED; only the first per key is KEPT as the key's set.
+    // Ruled 2026-09-20 [Diego]: where several fetches of one schema meet several declared
+    // keys of it and no `as` pairs them, they pair POSITIONALLY — so a second binding under
+    // one key fills another key and its data is needed. ⛔ Skipping it baked nothing for that
+    // key and the section rendered empty. What stays first-per-key is the SET a parametric
+    // page expands over, which is the route query's — and it is counted before
+    // `prerender: false` is honoured, so a deferred first binding is not replaced by a baked
+    // second.
+    const isFirst = firstSite(oneFetch.as)
     // ⭐ `prerender` is read off the RESOLVED config: an external query's binding is the
     // browser's unless it says otherwise, which only the resolver knows.
     const cfg = resolveForBuild(oneFetch)
@@ -180,7 +188,7 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     const got = await read(cfg, oneFetch)
     if (got) {
       fetchedData.push(entry(cfg, got.view, '__site__'))
-      fetched.site.set(oneFetch.as, got.selection)
+      if (isFirst) fetched.site.set(oneFetch.as, got.selection)
     }
   }
 
@@ -201,14 +209,15 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     // Page-level fetch — every declaration on the page.
     const firstPage = firstOfKey()
     for (const oneFetch of toFetchList(page.fetch)) {
-      if (!firstPage(oneFetch.as)) continue
+      // Every binding fetched, the first per key kept as the key's set — see the site level.
+      const isFirst = firstPage(oneFetch.as)
       const cfg = resolveForBuild(oneFetch)
       if (cfg.prerender === false) continue
       onProgress(`  Fetching page data for ${page.route}: ${cfg.path || cfg.url}`)
       const got = await read(cfg, oneFetch)
       if (got) {
         fetchedData.push(entry(cfg, got.view, page.route))
-        keep(fetched.pages, page.route, oneFetch.as, got.selection)
+        if (isFirst) keep(fetched.pages, page.route, oneFetch.as, got.selection)
       }
     }
 

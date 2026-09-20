@@ -296,3 +296,38 @@ describe('`current:` and nested pages reach a static build (ruled 2026-09-13)', 
     rmSync(root, { recursive: true, force: true })
   })
 })
+
+describe('⭐ several fetches of one schema pair POSITIONALLY with its declared keys (ruled 2026-09-20)', () => {
+  // **[Diego, 2026-09-20]** — *"if there are x fetches of schema Y, and x+ keys for schema Y, and
+  // there is no `as` key that tells us how to pair (default `as` is query name), then we can
+  // auto-pair positionally."* The runtime has paired this way since `fillDeclaredKeys` (2026-09-14);
+  // ⛔ the BUILD skipped every binding after the first of a key, so the second query was never
+  // read and the key it fills rendered empty on a prerendered page — the two lanes disagreeing
+  // about the same declaration, which is what this file exists to catch.
+  const NEWS = [{ slug: 'n1', $name: 'n1', title: 'N1' }]
+  // both under one key, because neither names one the component declares
+  const content = () => ({
+    config: { queries: { posts: { schema: '@/post' }, news: { schema: '@/post' } } },
+    pages: [{
+      route: '/blog',
+      id: 'blog',
+      fetch: [ref(), ref({ query: 'news', path: '/data/news.json' })],
+      sections: [section('list')],
+    }],
+  })
+  const PAIRED = { data: { featured: '@/post', recent: '@/post' } }
+
+  it('the build reads both, and the component receives one under each key', async () => {
+    const root = site({ 'public/data/posts.json': POSTS, 'public/data/news.json': NEWS })
+    const { prerendered } = await prerender(content(), root)
+    expect(prerendered('/blog', 0, PAIRED)).toEqual({ featured: POSTS, recent: NEWS })
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('CONTROL — a component that DECLARES the key gets the first, and the second fills nothing', async () => {
+    const root = site({ 'public/data/posts.json': POSTS, 'public/data/news.json': NEWS })
+    const { prerendered } = await prerender(content(), root)
+    expect(prerendered('/blog', 0, { data: { posts: '@/post' } })).toEqual({ posts: POSTS })
+    rmSync(root, { recursive: true, force: true })
+  })
+})

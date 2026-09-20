@@ -412,10 +412,19 @@ function refuseSourceKeys(fetch, context) {
 
 /**
  * ⚠️ TWO BINDINGS UNDER ONE KEY AT ONE LEVEL — ruled 2026-09-13 [Diego]: *"Duplicates
- * should not exist."* The first is used on every lane (`resolveFetchConfigs` keeps
- * the first per key, and so does the build's prerender) and the rest are ignored;
- * this says so once per key per file. Warned, not refused: the first binding still
- * delivers what it says.
+ * should not exist."* Warned, not refused, once per key per file.
+ *
+ * ⛔ **What happens to the second one depends on something this parser cannot see** — whether
+ * a component declares that key — so the message says both, and this comment no longer claims
+ * one. Ruled 2026-09-20 [Diego]: *"if there are x fetches of schema Y, and x+ keys for schema
+ * Y, and there is no `as` key that tells us how to pair, then we can auto-pair positionally."*
+ *   - **a component declares the key** → the first fills it and the rest fill nothing;
+ *   - **none declares it** → they pair POSITIONALLY with that schema's still-empty declared
+ *     keys, in order, so the second is used (`fillDeclaredKeys`, measured 2026-09-20).
+ *
+ * ⚠️ This comment and the message said *"the rest are ignored"* until 2026-09-20, which is
+ * false in the second case — and the build's own executor believed it, so a second binding's
+ * data was never fetched and the key it fills rendered empty.
  *
  * @param {Array<Object>} list - one level's bindings, parsed or as authored
  * @param {string} context - where the declaration sits, for the message
@@ -435,8 +444,10 @@ export function warnDuplicateBindings(list, context) {
     if (warnedDuplicateBindings.has(memo)) continue
     warnedDuplicateBindings.add(memo)
     console.warn(
-      `[uniweb] ${context}: more than one binding delivers content.data.${key} — the first is used ` +
-        `and the rest are ignored. Give each binding its own \`as:\`.`
+      `[uniweb] ${context}: more than one binding is named ${key}. A component that declares ` +
+        `content.data.${key} receives the first, and the rest fill nothing; if none declares it, ` +
+        `they pair in order with the declared keys of their schema. Give each binding its own ` +
+        `\`as:\` to say which is which.`
     )
   }
 }
