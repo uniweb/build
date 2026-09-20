@@ -22,8 +22,10 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { initPrerender, hydrateDataStore, resolvePageFetchConfigs, prepareProps } from '@uniweb/runtime/ssr'
-import { executeAllFetches, expandDynamicPages, readRouteBoundViews } from '../src/prerender.js'
+import DataStore from '@uniweb/core/datastore'
+import { initPrerender, hydrateDataStore, loadPageData, prepareProps } from '@uniweb/runtime/ssr'
+import { executeAllFetches, expandDynamicPages } from '../src/prerender.js'
+import { createFileTransport } from '../src/site/file-transport.js'
 
 const POSTS = ['a', 'b', 'c', 'd', 'e'].map((slug) => ({ slug, $name: slug, title: slug.toUpperCase() }))
 // A delivered record carries `$route` — the page that shows it, filled at render time on
@@ -49,16 +51,27 @@ const section = (id, fetch = null) => ({ id, type: 'X', content: { type: 'doc', 
 
 /** The build's prerender steps, in its order, then the runtime's store for one page. */
 async function prerender(content, root, localeInfo = { locale: 'en', defaultLocale: 'en' }) {
-  const { fetched, fetchedData, bake } = await executeAllFetches(content, root, noop, localeInfo)
+  const { fetched, fetchedData } = await executeAllFetches(content, root, noop, localeInfo)
   content.fetchedData = fetchedData
-  const templates = { ...content, pages: content.pages }
   content.pages = expandDynamicPages(content.pages, fetched, noop, undefined, { siteFetch: content.config?.fetch ?? null })
-  const baked = await readRouteBoundViews({
-    templates, pages: content.pages, present: content.fetchedData, resolvePageFetchConfigs, read: bake, locale: localeInfo.locale,
-  })
-  content.fetchedData = [...content.fetchedData, ...baked]
-  const website = initPrerender(content, { default: {} }, []).activeWebsite
+  // ⭐ The foundation DECLARES what these sections read. A section receives the keys its component
+  // declares (2026-09-14) and the build's data step honours that, so a fixture with no metas is a
+  // site whose components declare nothing — where asking for nothing is the right answer.
+  const website = initPrerender(content, { default: { meta: { X: META } } }, []).activeWebsite
   hydrateDataStore(website, content.fetchedData)
+  // ⭐ Then the render loop's own step, page by page: the build asks what each page's render will
+  // read, by the rule the render uses, and answers it from its own files (2026-09-20). What a page
+  // asked for is filed under it, as a route-bound view always was.
+  const fetch = createFileTransport({ siteRoot: root, base: content.config?.base || '' })
+  const cache = new DataStore()
+  for (const page of website.pages) {
+    if (page.route.includes(':')) continue
+    const asked = await loadPageData({ website, route: page, fetch, prerender: 'author', cache })
+    hydrateDataStore(website, asked)
+    for (const entry of asked) {
+      if (entry.outcome === 'fetched') content.fetchedData.push({ ...entry, _scope: page.route, _routeBound: true })
+    }
+  }
   const delivered = (route, index = 0) => {
     const page = website.pages.find((p) => p.route === route)
     return page ? website.entityStore.resolve(page.bodyBlocks[index], META) : null
@@ -73,7 +86,7 @@ async function prerender(content, root, localeInfo = { locale: 'en', defaultLoca
     return prepareProps(block, meta, answer.status === 'ready' ? answer.data : null).content.data
   }
   const rendered = (route, index = 0) => prerendered(route, index)
-  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, prerendered, fetchedData: content.fetchedData }
+  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, prerendered, website, fetchedData: content.fetchedData }
 }
 
 describe('a count is how many a list shows — never which records have a page', () => {
@@ -328,6 +341,37 @@ describe('⭐ several fetches of one schema pair POSITIONALLY with its declared 
     const root = site({ 'public/data/posts.json': POSTS, 'public/data/news.json': NEWS })
     const { prerendered } = await prerender(content(), root)
     expect(prerendered('/blog', 0, { data: { posts: '@/post' } })).toEqual({ posts: POSTS })
+    rmSync(root, { recursive: true, force: true })
+  })
+})
+
+describe('⭐ a LAYOUT section\'s data is fetched too (2026-09-20)', () => {
+  // ⛔ Nothing fetched it before. The build's executor walks the site, each page and each page's
+  // sections; layout areas sit beside the pages, so a header or footer with a `fetch:` rendered
+  // empty in EVERY prerendered page and filled in once the SPA booted — visible only to whoever
+  // reads the HTML. The render loop now asks by the rule the render uses, and that walks the
+  // layout areas a page draws.
+  const content = () => ({
+    config: { queries: QUERIES },
+    layouts: { default: { header: { route: '/layout/header', sections: [section('nav', ref())] } } },
+    pages: [{ route: '/about', id: 'about', sections: [section('body')] }],
+  })
+
+  it('a page that asks for nothing itself still has its header\'s data', async () => {
+    const root = site({ 'public/data/posts.json': POSTS })
+    const { website, fetchedData } = await prerender(content(), root)
+    const header = website.pages.find((p) => p.route === '/about').getLayoutAreas().header[0]
+    expect(website.entityStore.resolve(header, META)).toEqual({ status: 'ready', data: { posts: POSTS } })
+    // and it rides in that page's payload, so the browser does not ask again
+    expect(fetchedData.some((e) => e.config.path === '/data/posts.json')).toBe(true)
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('CONTROL — nothing reaches the page\'s own body block, which declares the same key', async () => {
+    const root = site({ 'public/data/posts.json': POSTS })
+    const { website } = await prerender(content(), root)
+    const body = website.pages.find((p) => p.route === '/about').bodyBlocks[0]
+    expect(website.entityStore.resolve(body, META).status).toBe('none')
     rmSync(root, { recursive: true, force: true })
   })
 })

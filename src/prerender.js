@@ -25,7 +25,9 @@ import {
   evaluateQuery,
 } from '@uniweb/core'
 import { recordTitle, routePatternToRegex } from '@uniweb/core/route-match'
+import DataStore from '@uniweb/core/datastore'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
+import { createFileTransport } from './site/file-transport.js'
 import { shouldSplitContent } from './site/split-content.js'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
@@ -89,9 +91,10 @@ export function resolveExtensionPath(url, distDir, projectRoot, base) {
  * @param {string} [localeInfo.locale] - Active locale code
  * @param {string} [localeInfo.defaultLocale] - Default locale code
  * @param {string} [localeInfo.distDir] - Path to dist directory (where locale-specific data lives)
- * @returns {Object} { fetched, fetchedData, bake } - what each level fetched, by binding key
- *   (for parametric-page expansion); the entries for DataStore pre-population; and a
- *   baker for the views a concrete parametric page binds to its route
+ * @returns {Object} { fetched, fetchedData } - what each level fetched, by binding key (for
+ *   parametric-page expansion), and the entries for DataStore pre-population. ⛔ It no longer
+ *   bakes the views an expanded page binds to its route: the render loop asks for those by the
+ *   rule the render uses, per page (`loadPageData`, 2026-09-20).
  */
 export async function executeAllFetches(siteContent, siteDir, onProgress, localeInfo) {
   // The locale this pass renders, which a `sort` collates texts in.
@@ -227,7 +230,7 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     // key, a view its route binds under any other. A list baked into the template
     // was cloned into every expanded page and outranked both (measured 2026-09-13:
     // `/blog/b` rendered all three records). Its views are read per expanded page
-    // instead (`readRouteBoundViews`).
+    // instead — by the render loop's data step, per page (`loadPageData`).
     await processSectionFetches(page.sections, {
       resolve: resolveForBuild,
       read,
@@ -237,21 +240,7 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
     })
   }
 
-  /**
-   * Read one config the runtime resolved for an expanded parametric page — a view
-   * its route binds — into a plain entry; `readRouteBoundViews` files it under
-   * each page that asks for it. Local files only: a remote `url:` is the
-   * browser's, as it is by default. Null when there is nothing to embed.
-   */
-  const bake = async (cfg) => {
-    if (cfg.prerender === false || (typeof cfg.path !== 'string' && typeof cfg.url !== 'string')) return null
-    const options = isNonDefaultLocale && typeof cfg.path === 'string' && cfg.path.startsWith(`/${localeInfo.locale}/`) ? localizedFetchOptions : fetchOptions
-    const result = await executeFetch(cfg, options)
-    if (!result.data || result.error) return null
-    return { config: cfg, data: result.data, meta: { whole: cfg.whole } }
-  }
-
-  return { fetched, fetchedData, bake }
+  return { fetched, fetchedData }
 }
 
 /**
@@ -631,7 +620,7 @@ function stripFetchScope(entry) {
  */
 export function scopeFetchedData(fetchedData, scopeRoutes, currentRoute = null) {
   if (!Array.isArray(fetchedData)) return fetchedData
-  // A route-bound entry (`readRouteBoundViews`) belongs to one expanded page, in
+  // A route-bound entry — what a page's own data step asked for — belongs to that page, in
   // either mode: carried everywhere, a site of N such pages would embed N views —
   // or N whole records — in every page.
   const own = (e) => !e._routeBound || e._scope === currentRoute
@@ -668,54 +657,6 @@ function dedupeByAddress(entries) {
       seen.add(key)
     }
     out.push(entry)
-  }
-  return out
-}
-
-/**
- * The views an expanded parametric page binds to its route — `scope: :dir` bound to
- * its branch, a `deferred:` query's per-record file — that no list page asked for.
- * Each is resolved by the RUNTIME's own rule for the page (`resolvePageFetchConfigs`,
- * the one a host's prefetch calls, matched against the parametric page it came
- * from) and read by `read`, so the page renders complete and the SPA hydrates the
- * very keys it asks for.
- *
- * ⭐ ONE ENTRY PER PAGE, ONE READ PER VIEW. Each entry is tagged `_routeBound` with
- * its page's route: `scopeFetchedData` embeds it in that page's HTML and nowhere
- * else, and the split-mode manifest leaves it out — so N expanded pages do not
- * carry N views (or N whole records) each. Pages that bind the same view (two
- * entries in one branch) each get an entry, over a single read. ⛔ Filed under
- * the first page that asked for it, a shared view reached no other page's HTML
- * (measured: the second entry in a branch shipped without its branch's view).
- *
- * A key already `present` is not read: every page carries those already — the
- * site's, and, in split mode, its parent's and its template's (the render loop's
- * `scopeRoutes`).
- *
- * @param {Object} options
- * @param {Object} options.templates - the content as it was before expansion (the parametric pages)
- * @param {Array<Object>} options.pages - the pages after expansion
- * @param {Array<Object>} options.present - the entries already baked
- * @param {Function} options.resolvePageFetchConfigs - `@uniweb/runtime/ssr`'s
- * @param {(cfg: Object) => Promise<{config: Object, data: any, meta?: Object}|null>} options.read - reads one config
- * @param {string|null} [options.locale]
- * @returns {Promise<Array<Object>>} the new entries, each for its own page
- */
-export async function readRouteBoundViews({ templates, pages, present, resolvePageFetchConfigs, read, locale = null }) {
-  const carried = new Set((present || []).map((e) => deriveCacheKey(e.config)))
-  const reads = new Map()
-  const out = []
-  for (const page of pages || []) {
-    if (!page?.dynamicContext) continue
-    const filed = new Set()
-    for (const cfg of resolvePageFetchConfigs(templates, page.route, { locale })) {
-      const key = deriveCacheKey(cfg)
-      if (carried.has(key) || filed.has(key)) continue
-      filed.add(key)
-      if (!reads.has(key)) reads.set(key, read(cfg))
-      const view = await reads.get(key)
-      if (view) out.push({ ...view, _scope: page.route, _routeBound: true })
-    }
   }
   return out
 }
@@ -871,7 +812,7 @@ export async function prerenderSite(siteDir, options = {}) {
     prefetchIcons,
     createPageRenderer,
     generate404Html,
-    resolvePageFetchConfigs,
+    loadPageData,
   } = await import('@uniweb/runtime/ssr')
 
   // Load default site content
@@ -950,30 +891,15 @@ export async function prerenderSite(siteDir, options = {}) {
     // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
     if (siteContent.pages?.some(p => p.isDynamic)) {
       onProgress('Expanding dynamic routes...')
-      const templates = { ...siteContent, pages: siteContent.pages }
       siteContent.pages = expandDynamicPages(siteContent.pages, fetched, onProgress, undefined, {
         siteFetch: siteContent.config?.fetch ?? null,
       })
 
-      // ⭐ AN EXPANDED PAGE ASKS FOR WHAT ITS ROUTE BINDS. Its sections read views
-      // no list page asked for — `scope: :dir` bound to its branch, a `deferred:`
-      // query's per-record file — and those are resolved here by the RUNTIME's own
-      // rule for a page (`resolvePageFetchConfigs`, the one a host's prefetch
-      // calls, matched against the parametric page it came from), then read by
-      // this build's executor. So the page renders complete, and the SPA hydrates
-      // the very keys it asks for.
-      const baked = await readRouteBoundViews({
-        templates,
-        pages: siteContent.pages,
-        present: siteContent.fetchedData,
-        resolvePageFetchConfigs,
-        read: bake,
-        locale,
-      })
-      if (baked.length > 0) {
-        siteContent.fetchedData = [...siteContent.fetchedData, ...baked]
-        onProgress(`  Read ${baked.length} route-bound view(s) for expanded pages`)
-      }
+      // ⭐ AN EXPANDED PAGE ASKS FOR WHAT ITS ROUTE BINDS — its branch's view, a `deferred:`
+      // query's per-record file — and that is now asked for in the render loop below, by the
+      // rule the render uses, per page (`loadPageData`). ⛔ It was worked out here from the
+      // payload alone until 2026-09-20, which cannot build a record's own address from the
+      // record: an `[id]` route over a `deferred:` query asked for `{slug}` unfilled.
     }
 
     // Determine whether to split content (after dynamic expansion, after data fetches)
@@ -1030,6 +956,16 @@ export async function prerenderSite(siteDir, options = {}) {
     // One renderer for this run: the Website is already built and the shell is
     // fixed, so it is created once and asked per page.
     const renderer = createPageRenderer({ website: uniweb.activeWebsite, shell: htmlShell })
+
+    // ⭐ The data step's two halves for this lane: a transport over the files this build has
+    // already produced, and one cache for the whole run so an address every page asks for is read
+    // once rather than once per page.
+    const fileTransport = createFileTransport({
+      siteRoot: siteDir,
+      distDir,
+      base: siteContent.config?.base || '',
+    })
+    const buildDataCache = new DataStore()
 
     // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender.
     // hydrateDataStore handles cache-key derivation + value-shape wrapping
@@ -1097,6 +1033,34 @@ export async function prerenderSite(siteDir, options = {}) {
           renderedFiles.push(outputPath)
           continue
         }
+      }
+
+      // ⭐ WHAT THIS PAGE'S RENDER WILL READ — asked by the rule the render itself uses
+      // (`loadPageData`, `@uniweb/runtime/ssr`) and answered from this build's own files. It walks
+      // the page's blocks: its body, the layout areas it draws, child blocks and insets.
+      //
+      // ⛔ Until 2026-09-20 this lane worked the answer out its own way, and got two things wrong
+      // that nothing else could see: a LAYOUT section's data was never fetched at all — the
+      // executor walks the site, each page and each page's sections, and layout areas sit beside
+      // the pages — and an expanded page's views came from the payload walk, which cannot build a
+      // record's own address from the record. Both render empty in the HTML and fill in once the
+      // SPA boots, so only a crawler ever saw them.
+      //
+      // One cache for the whole run, so an address every page asks for is read once; the author's
+      // `prerender: false` is honoured, which is what `'author'` means and what a baking lane owes.
+      const asked = await loadPageData({
+        website,
+        route: page,
+        fetch: fileTransport,
+        prerender: 'author',
+        cache: buildDataCache,
+      })
+      hydrateDataStore(website, asked)
+      // Filed under this page, the way a route-bound view always has been: `scopeFetchedData`
+      // embeds it in this page's HTML and nowhere else, and one address embedded twice collapses.
+      for (const entry of asked) {
+        if (entry.outcome !== 'fetched') continue
+        siteContent.fetchedData.push({ ...entry, _scope: page.route, _routeBound: true })
       }
 
       onProgress(`Rendering ${outputRoute}...`)
