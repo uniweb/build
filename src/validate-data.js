@@ -28,7 +28,8 @@ import { existsSync } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from './utils/yaml-schema.js'
-import { queryNameFromUrl, siteReaches, declaredKeys, fillDeclaredKeys } from '@uniweb/core'
+import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
+import { parentRouteOf } from '@uniweb/core/route-match'
 
 import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema } from './resolve-data-schema.js'
@@ -105,7 +106,26 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const deferred = []
 
   const byRoute = new Map((site.pages || []).map((p) => [p.route, p]))
+  // ⭐ The parent by the ONE parent rule, not the declared field alone: a payload may omit
+  // `parent`, and reading it raw gives a page no parent here while every other lane infers one —
+  // so the site's fetch reached pages it does not reach, and a parent's reached none.
+  const parentOf = (page) => {
+    if (!page?.route) return null
+    const route = parentRouteOf(page.route, { declared: page.parent ?? null, has: (r) => byRoute.has(r) })
+    return route ? byRoute.get(route) ?? null : null
+  }
+  const access = {
+    routeOf: (p) => p?.route,
+    parentOf,
+    fetchOf: (p) => p?.fetch ?? null,
+    sectionsOf: (p) => p?.sections,
+    site: config.fetch,
+  }
   for (const page of site.pages || []) {
+    const parent = parentOf(page)
+    // Its route query, when it is on a parametric route — a page nested inside one included,
+    // which is a level this check did not have.
+    const route = pageRouteQuery(page, access)
     walkSections(page.sections || [], (section) => {
       const type = section.type
       if (!type) return
@@ -115,10 +135,11 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       // same function the entity store delivers by — so a `post: '@std/article'` key
       // filled by an `articles` fetch is checked against `@std/article`, and a fetch that
       // fills no declared key is not checked at all, since no component receives it. The
-      // levels are the section's own fetch, its page's, its parent page's and — for a
-      // top-level page — the site's (`siteReaches`).
+      // levels are the rule's, so this check sees what the render sees (`fetchLevels`,
+      // `@uniweb/core/page-data`) — ⛔ it wrote its own list until 2026-09-19, which read only
+      // the declared parent and had no route binding for a nested page.
       const declared = declaredKeys(bindings)
-      const levels = [section.fetch, page.fetch, byRoute.get(page.parent)?.fetch, siteReaches(page.parent) ? config.fetch : null]
+      const levels = fetchLevels({ own: section.fetch, page: page.fetch, parent, route, site: config.fetch })
       const inputs = collectInputs(levels)
       const held = nodesOfType(section.content, 'dataBlock').map((node) => node.attrs?.tag).filter(Boolean)
       const fills = fillDeclaredKeys(declared, levels, { queries: config.queries, held })
