@@ -26,7 +26,7 @@
 //
 // When a query declares no schema, the query-name convention fills it
 // (`articles` → `@/articles`). Absent the file entirely, a site simply has no
-// queries — and therefore delivers no collection data.
+// queries — and therefore delivers no fetched data.
 
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
