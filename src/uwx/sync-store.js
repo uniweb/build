@@ -237,6 +237,23 @@ export function updateBackendMap(siteDir, origin, section, entries, merge) {
 }
 
 /**
+ * The merge rule for the `assets` section — pass it to `updateBackendMap`.
+ *
+ * ⭐ **One definition, because three callers need it.** A push learns an id; only an
+ * UPLOAD learns the address the host serves it at. So a push that re-records the same
+ * bytes must not erase the `served` fingerprint an earlier one recorded, and a push
+ * whose bytes changed must drop it — the old address no longer describes them.
+ * Hand-rolled at each call site this is three chances to forget the second half.
+ *
+ * @param {{id: string, ext?: string, served?: string}} next
+ * @param {{id: string, ext?: string, served?: string}} prior
+ */
+export function carryServed(next, prior) {
+  if (next?.served || !prior || prior.id !== next?.id) return next
+  return prior.served ? { ...next, served: prior.served } : next
+}
+
+/**
  * Forget one backend entirely. Every other backend is untouched — which is the
  * point of the keying, and the reason this is safe in a way clearing the old
  * single-valued identity never was.

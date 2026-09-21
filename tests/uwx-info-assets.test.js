@@ -22,12 +22,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
+
+const ORIGIN = 'https://backend.test'
 import {
   emitSyncPackages,
   siteContentDocumentToProject,
   readZip,
-  readAssetMap,
-  updateAssetMap,
+  readBackendState,
+  updateBackendMap,
+  carryServed,
   restoreAssetRefs,
   servedFingerprint,
   removeYamlScalar,
@@ -106,8 +109,8 @@ describe('bare-string asset references', () => {
     const dest = tmp('uwx-bare-pull-')
     mkdirSync(join(dest, 'pages'), { recursive: true })
     // The committed map every clone of the project carries.
-    updateAssetMap(dest, IDS)
-    siteContentDocumentToProject({ document: doc, siteRoot: dest })
+    updateBackendMap(dest, ORIGIN, 'assets', IDS)
+    siteContentDocumentToProject({ document: doc, siteRoot: dest, backend: ORIGIN })
 
     const site = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
     expect(site.preview).toBe('/images/card.png')
@@ -149,15 +152,16 @@ describe('assets.json — the served fingerprint', () => {
 
   it('is kept; a download cannot erase it, and a new one for the same bytes is a change', () => {
     const dir = tmp('uwx-map-')
-    updateAssetMap(dir, { '/a.png': { id: 'A', ext: 'png', served: 'sha256:1' } })
-    expect(readAssetMap(dir)['/a.png']).toEqual({ id: 'A', ext: 'png', served: 'sha256:1' })
+    const put = (e) => updateBackendMap(dir, ORIGIN, 'assets', { '/a.png': e }, carryServed)
+    const got = () => readBackendState(dir, ORIGIN).assets['/a.png']
+
+    put({ id: 'A', ext: 'png', served: 'sha256:1' })
+    expect(got()).toEqual({ id: 'A', ext: 'png', served: 'sha256:1' })
     // A download learns identity but not an upload's URL — it must not erase this.
-    expect(updateAssetMap(dir, { '/a.png': { id: 'A', ext: 'png' } }).written).toBe(false)
-    expect(readAssetMap(dir)['/a.png'].served).toBe('sha256:1')
+    expect(put({ id: 'A', ext: 'png' }).written).toBe(false)
+    expect(got().served).toBe('sha256:1')
     // The host now serves the same bytes at another address.
-    expect(
-      updateAssetMap(dir, { '/a.png': { id: 'A', ext: 'png', served: 'sha256:2' } }).changed
-    ).toEqual(['/a.png'])
+    expect(put({ id: 'A', ext: 'png', served: 'sha256:2' }).changed).toEqual(['/a.png'])
   })
 })
 

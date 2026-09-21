@@ -33,7 +33,8 @@
 // the i18n pipeline). Absent `info` keys are left untouched on disk.
 
 import { join, relative, extname, basename, dirname } from 'node:path'
-import { readAssetMap, restoreAssetRefs } from './asset-map.js'
+import { restoreAssetRefs } from './asset-map.js'
+import { readBackendState } from './sync-store.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -859,7 +860,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  *        empty set.
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false }) {
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
@@ -871,7 +872,15 @@ export function siteContentDocumentToProject({ document, siteRoot, sourceLocale 
   // the author wrote. Without this a push/pull cycle rewrites every image in a
   // developer's source to a backend route — a mangling of files they own, by a
   // round trip that changed nothing.
-  report.assets = restoreAssetRefs(document, readAssetMap(siteRoot))
+  // ⛔ `backend` is required to restore anything, and its absence is HONEST rather
+  // than a default: asset ids are minted per backend (`sync.json`), so a projection
+  // not tied to one has no known assets and restores nothing. Every caller that
+  // pulls has an origin; the ones that do not are projecting a document in the
+  // abstract.
+  report.assets = restoreAssetRefs(
+    document,
+    backend ? readBackendState(siteRoot, backend).assets || {} : {}
+  )
 
   report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector, keepAuthoredFoundation })
   report.queries = declarationsToQueriesYml({ document, siteRoot })

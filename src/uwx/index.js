@@ -77,14 +77,10 @@ export {
   localeFilePath,
 } from './locale-sync.js'
 export { emitSyncPackages } from './sync-package.js'
-export {
-  readAssetMap,
-  updateAssetMap,
-  refForAssetId,
-  restoreAssetRefs,
-  ASSET_MAP_FILE,
-  servedFingerprint,
-} from './asset-map.js'
+// ⚠️ The asset MAP is `sync.json::backends.<origin>.assets` (sync-store.js, below).
+// `readAssetMap` / `updateAssetMap` / `refForAssetId` / `ASSET_MAP_FILE` were removed
+// on 2026-09-20: a single flat file cannot hold ids minted by more than one backend.
+export { restoreAssetRefs, servedFingerprint } from './asset-map.js'
 // `sync.json` — what each backend minted, keyed by origin. Absorbs `assets.json`
 // above, `site.yml`'s identity keys and three maps out of the sync cache.
 // Spec: kb/framework/reference/sync-json.md
@@ -95,8 +91,9 @@ export {
   listSyncedBackends,
   updateBackendState,
   updateBackendMap,
+  carryServed,
   clearBackend,
-  refForAssetId as refForAssetIdInStore,
+  refForAssetId,
   normalizeOrigin as normalizeBackendOrigin,
 } from './sync-store.js'
 export {

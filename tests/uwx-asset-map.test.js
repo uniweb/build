@@ -1,114 +1,19 @@
 /**
- * `assets.json` — the committed local-ref → asset-id map, and the path
- * restoration it exists for.
+ * Asset reference restoration — the half of the old `assets.json` module that is
+ * pure, and stayed.
  *
- * The properties under test are the ones that make a COMMITTED file safe to
- * keep: it merges rather than replaces (a push carries only the refs its
- * content touched), it sorts (an unstable file diffs on every push and trains
- * people to stop reading it), and it does not rewrite an identical file (a push
- * that moved no assets must leave `git status` clean).
+ * ⚠️ **The map's own tests moved to `uwx-sync-store.test.js`** on 2026-09-20, with
+ * the map itself: reading, merging, sorting, no-op writes and `refForAssetId` are
+ * now properties of `sync.json`, which holds one map PER BACKEND because an asset id
+ * is minted by one and means nothing to another.
  *
- * Plus the half the whole thing is for: a push/pull cycle must be a fixed point
- * on the paths a developer wrote.
+ * What is left here is what the map exists FOR: a push/pull cycle must be a fixed
+ * point on the paths a developer wrote.
  */
 
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import {
-  readAssetMap,
-  updateAssetMap,
-  refForAssetId,
-  restoreAssetRefs,
-  ASSET_MAP_FILE
-} from '../src/uwx/asset-map.js'
+import { restoreAssetRefs } from '../src/uwx/asset-map.js'
 
-let DIR
-beforeEach(() => { DIR = mkdtempSync(join(tmpdir(), 'uw-assetmap-')) })
-afterEach(() => { if (DIR) rmSync(DIR, { recursive: true, force: true }) })
-
-const raw = () => readFileSync(join(DIR, ASSET_MAP_FILE), 'utf8')
-
-describe('reading', () => {
-  it('a missing map reads as empty rather than throwing', () => {
-    expect(readAssetMap(DIR)).toEqual({})
-  })
-
-  it('a corrupt map reads as empty — it must never be why a push fails', () => {
-    writeFileSync(join(DIR, ASSET_MAP_FILE), '{ this is not json')
-    expect(readAssetMap(DIR)).toEqual({})
-    // …and the next write repairs it rather than compounding the damage.
-    updateAssetMap(DIR, { '/images/a.png': { id: 'A', ext: 'png' } })
-    expect(readAssetMap(DIR)).toEqual({ '/images/a.png': { id: 'A', ext: 'png' } })
-  })
-})
-
-describe('writing — the properties a committed file needs', () => {
-  it('writes sorted keys and a trailing newline', () => {
-    updateAssetMap(DIR, {
-      '/images/z.png': { id: 'Z', ext: 'png' },
-      '/images/a.png': { id: 'A', ext: 'png' },
-      '/images/m.png': { id: 'M', ext: 'png' }
-    })
-    const text = raw()
-    const order = [...text.matchAll(/"(\/images\/[^"]+)"/g)].map((m) => m[1])
-    expect(order).toEqual(['/images/a.png', '/images/m.png', '/images/z.png'])
-    expect(text.endsWith('\n')).toBe(true)
-  })
-
-  it('MERGES rather than replaces — a partial push must not drop untouched refs', () => {
-    updateAssetMap(DIR, { '/images/a.png': { id: 'A', ext: 'png' } })
-    updateAssetMap(DIR, { '/images/b.png': { id: 'B', ext: 'png' } })
-    expect(readAssetMap(DIR)).toEqual({
-      '/images/a.png': { id: 'A', ext: 'png' },
-      '/images/b.png': { id: 'B', ext: 'png' }
-    })
-  })
-
-  it('⭐ an unchanged push does not rewrite the file — git status stays clean', () => {
-    const entries = { '/images/a.png': { id: 'A', ext: 'png' } }
-    const first = updateAssetMap(DIR, entries)
-    expect(first.written).toBe(true)
-    expect(first.added).toEqual(['/images/a.png'])
-
-    const before = raw()
-    const second = updateAssetMap(DIR, entries)
-    expect(second.written).toBe(false)
-    expect(second.added).toEqual([])
-    expect(second.changed).toEqual([])
-    expect(raw()).toBe(before)
-  })
-
-  it('re-pointing a ref is reported as changed, not added', () => {
-    updateAssetMap(DIR, { '/images/a.png': { id: 'A', ext: 'png' } })
-    const r = updateAssetMap(DIR, { '/images/a.png': { id: 'A2', ext: 'png' } })
-    expect(r.changed).toEqual(['/images/a.png'])
-    expect(r.added).toEqual([])
-    expect(readAssetMap(DIR)['/images/a.png'].id).toBe('A2')
-  })
-
-  it('entries with no id are ignored rather than written as junk', () => {
-    const r = updateAssetMap(DIR, { '/images/a.png': { ext: 'png' } })
-    expect(r.written).toBe(false)
-    expect(existsSync(join(DIR, ASSET_MAP_FILE))).toBe(false)
-  })
-})
-
-describe('refForAssetId', () => {
-  const map = {
-    '/images/hero.png': { id: '9f2c', ext: 'png' },
-    '/images/other.png': { id: 'abcd', ext: 'png' }
-  }
-  it('is the direction pull needs — id back to the AUTHORED path', () => {
-    expect(refForAssetId(map, '9f2c')).toBe('/images/hero.png')
-  })
-  it('returns null for an unknown or empty id', () => {
-    expect(refForAssetId(map, 'nope')).toBe(null)
-    expect(refForAssetId(map, '')).toBe(null)
-  })
-})
-
-describe('restoreAssetRefs — the reason the map is committed', () => {
+describe('restoreAssetRefs — the reason the map is committed at all', () => {
   const MAP = { '/images/hero.png': { id: '9f2c', ext: 'png' } }
   const SERVE = '/gateway/asset/dist/9f2c/base.png'
 
