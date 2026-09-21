@@ -266,6 +266,33 @@ describe('⛔ error rules — every one of these used to fail silently', () => {
     expect(errors[0]).toContain('no recognized kind')
   })
 
+  // ⛔ A query's `scope:` names a folder by its path, so two sibling folders with one
+  // name would be one scope — and a backend refuses a folder holding the pair.
+  it('⛔ two folders with one name at one level are an error, naming BOTH entries', async () => {
+    w('records/publication/2026-a.md')
+    w('records/publication/2025-b.md')
+    const { errors } = await folder(
+      '- folder: archive\n  records:\n    - publication/2026-a.md\n' +
+        '- folder: archive\n  records:\n    - publication/2025-b.md\n'
+    )
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('folder "archive" is declared twice at one level')
+    expect(errors[0]).toContain('[0]')
+    expect(errors[0]).toContain('[1]')
+  })
+
+  // CONTROL — one name at two LEVELS is two paths, and records may share a name.
+  it('CONTROL — one folder name at two levels is fine, and so are same-named records', async () => {
+    w('records/publication/2026-a.md')
+    w('records/publication/2025-b.md')
+    w('records/note/2025-b.md')
+    const { errors } = await folder(
+      '- folder: archive\n  records:\n    - publication/2026-a.md\n' +
+        '    - folder: archive\n      records:\n        - publication/2025-b.md\n'
+    )
+    expect(errors).toEqual([])
+  })
+
   // ⛔ CONTROL. Every case above asserts a REFUSAL; without this one, a resolver
   // that placed nothing at all would pass all of them.
   it('CONTROL — a well-formed file places its records and reports nothing', async () => {

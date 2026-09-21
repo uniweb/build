@@ -176,6 +176,8 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
   const placements = new Map()
   // Which entry claimed a file, so the second one can name the first.
   const claimedBy = new Map()
+  // Which entry declared a folder, by its path, for the same reason.
+  const folderAt = new Map()
 
   const byRelPath = new Map()
   for (const e of pool || []) {
@@ -280,6 +282,20 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       // is the curator's organization and maps to no route unless a query binds
       // `scope: :dir` [Diego]. *("the URL segment, sibling-unique" stood here until
       // 2026-09-21.)*
+      // ⛔ TWO FOLDERS AT ONE LEVEL CANNOT SHARE A NAME. A query's `scope:` names a
+      // folder by its path, so a second `archive` beside the first would make one scope
+      // of both, and a backend refuses a folder holding the pair. Records at one level
+      // may share a name; folders may not.
+      const at = [...pathSegs, segment].join('/')
+      const prior = folderAt.get(at)
+      if (prior) {
+        errors.push(
+          `${file}: folder "${segment}" is declared twice at one level — by ${prior} and by ${where}. ` +
+            `A query's \`scope:\` names a folder by its path, so merge them into one entry.`
+        )
+        return []
+      }
+      folderAt.set(at, where)
       const branch = { kind: 'branch', name: segment }
       if (entry.label !== undefined && entry.label !== null) branch.label = String(entry.label)
       const kids = Array.isArray(entry.records) ? entry.records : []
