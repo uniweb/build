@@ -27,31 +27,32 @@ afterEach(() => {
   dirs = []
 })
 
-function project(siteYmlExtra = '') {
+const ORIGIN = 'http://backend.test'
+
+/** A project, optionally PROVISIONED on ORIGIN with services/secrets. */
+function project(provisioned = null) {
   const dir = mkdtempSync(join(tmpdir(), 'uw-declare-'))
   dirs.push(dir)
   mkdirSync(join(dir, 'pages'), { recursive: true })
   writeFileSync(join(dir, 'pages', 'home.md'), '# Home\n')
-  writeFileSync(
-    join(dir, 'site.yml'),
-    `name: demo\nfoundation: "@acme/marketing@1.0.0"\n${siteYmlExtra}`
-  )
+  writeFileSync(join(dir, 'site.yml'), 'name: demo\nfoundation: "@acme/marketing@1.0.0"\n')
+  if (provisioned) {
+    writeFileSync(
+      join(dir, 'sync.json'),
+      JSON.stringify({ version: 1, backends: { [ORIGIN]: provisioned } })
+    )
+  }
   return dir
 }
 
-const WITH_SERVICES = `$services:
-  - name: api
-    enabled: true
-    config:
-      grade: pro
-$secrets:
-  - name: token
-    service: api
-`
+const WITH_SERVICES = {
+  services: [{ name: 'api', enabled: true, config: { grade: 'pro' } }],
+  secrets: [{ name: 'token', service: 'api' }]
+}
 
 describe('declareServices', () => {
   it('declares both Sections by default — every existing caller is unchanged', async () => {
-    const doc = await siteProjectToDocument(project(WITH_SERVICES))
+    const doc = await siteProjectToDocument(project(WITH_SERVICES), { backend: ORIGIN })
     expect(doc.services).toEqual([
       expect.objectContaining({ name: 'api', enabled: true, config: { grade: 'pro' } })
     ])
@@ -60,6 +61,7 @@ describe('declareServices', () => {
 
   it('withholds both when the caller says the file is not asking', async () => {
     const doc = await siteProjectToDocument(project(WITH_SERVICES), {
+      backend: ORIGIN,
       declareServices: false
     })
     // ⭐ ABSENT, not empty. `[]` is an explicit clear and would drop every stored
@@ -70,15 +72,15 @@ describe('declareServices', () => {
 
   it('only `false` withholds — an absent or true option declares', async () => {
     for (const opts of [{}, { declareServices: true }, { declareServices: undefined }]) {
-      const doc = await siteProjectToDocument(project(WITH_SERVICES), opts)
+      const doc = await siteProjectToDocument(project(WITH_SERVICES), { backend: ORIGIN, ...opts })
       expect(doc.services, JSON.stringify(opts)).toBeDefined()
     }
   })
 
   it('withholding changes nothing else about the document', async () => {
     const dir = project(WITH_SERVICES)
-    const declared = await siteProjectToDocument(dir)
-    const withheld = await siteProjectToDocument(dir, { declareServices: false })
+    const declared = await siteProjectToDocument(dir, { backend: ORIGIN })
+    const withheld = await siteProjectToDocument(dir, { backend: ORIGIN, declareServices: false })
     const strip = (d) => {
       const { services: _s, secrets: _x, ...rest } = d
       return rest
@@ -89,9 +91,9 @@ describe('declareServices', () => {
   it('an explicit clear is withheld too — it is a request like any other', async () => {
     // `$services: []` says "drop every stored row". Once sent, re-sending it is
     // still a re-send, so the gate must be able to withhold it.
-    const dir = project('$services: []\n')
-    expect((await siteProjectToDocument(dir)).services).toEqual([])
-    const doc = await siteProjectToDocument(dir, { declareServices: false })
+    const dir = project({ services: [] })
+    expect((await siteProjectToDocument(dir, { backend: ORIGIN })).services).toEqual([])
+    const doc = await siteProjectToDocument(dir, { backend: ORIGIN, declareServices: false })
     expect('services' in doc).toBe(false)
   })
 })

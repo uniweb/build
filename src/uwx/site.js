@@ -975,8 +975,14 @@ function queriesNested(declarations, uuids = null, org = null) {
 
 // ── `services` + `secrets` — a site's own service records ─────────────────────
 //
-// ⭐ THE FILE KEYS ARE `$services` / `$secrets`, NOT `services` / `secrets`, and the
-// `$` is load-bearing rather than decorative. `site.yml::services` is ALREADY TAKEN,
+// ⚠️ THESE WERE `site.yml::$services` / `$secrets` UNTIL 2026-09-20. They now live in
+// `sync.json::backends.<origin>.{services,secrets}`, because what a site is PROVISIONED
+// with is a fact about one backend — a service is bought on the backend that sold it.
+// The `$` prefix existed to keep them off `site.yml::services`, which means something
+// else on the bundle lane (the HOST tier); out of `site.yml` entirely, that collision
+// is gone too.
+//
+// The original note, kept because it explains why the names could not simply be reused: `site.yml::services` is ALREADY TAKEN,
 // on the other lane: the bundle lane spreads site.yml whole into the payload, so a
 // `services:` block there lands at `config.services` — the HOST tier — which is the
 // documented way to simulate a host locally (`kit/src/utils/submitTarget.js`).
@@ -1057,9 +1063,9 @@ function serviceRecords(declared, identify, label) {
 }
 
 /** One service per `name` — the same keyspace `config.services` uses at runtime. */
-function servicesNested(siteYml) {
+function servicesNested(provisioned) {
   return serviceRecords(
-    siteYml.$services,
+    provisioned?.services,
     (e) => (typeof e.name === 'string' && e.name ? e.name : null),
     '$services'
   )
@@ -1077,9 +1083,9 @@ function servicesNested(siteYml) {
  * judgement belongs; framework does not strip it, because silently dropping a value
  * an author typed would leave them believing a secret was set.
  */
-function secretsNested(siteYml) {
+function secretsNested(provisioned) {
   return serviceRecords(
-    siteYml.$secrets,
+    provisioned?.secrets,
     (e) => {
       if (typeof e.name !== 'string' || !e.name) return null
       return typeof e.service === 'string' && e.service
@@ -1544,9 +1550,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // ⚖️ Default is to declare, so every existing caller is unchanged and the
   // withholding is opt-in.
   const declare = opts.declareServices !== false
-  const services = declare ? servicesNested(siteYml) : undefined
+  // ⭐ Provisioned per backend — a service is bought on the backend that sold it,
+  // so which rows exist is a question about ONE backend. They were `site.yml::$services`
+  // / `$secrets`, a single copy that could only ever describe one.
+  const provisioned = opts.backend ? readBackendState(siteRoot, opts.backend) : null
+  const services = declare ? servicesNested(provisioned) : undefined
   if (services) doc.services = services
-  const secrets = declare ? secretsNested(siteYml) : undefined
+  const secrets = declare ? secretsNested(provisioned) : undefined
   if (secrets) doc.secrets = secrets
   return doc
 }

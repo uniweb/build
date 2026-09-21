@@ -34,7 +34,7 @@
 
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
-import { readBackendState } from './sync-store.js'
+import { readBackendState, updateBackendState } from './sync-store.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -226,7 +226,7 @@ function readAuthoredYaml(filePath) {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -296,7 +296,7 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
     : []
   if (extensions.length > 0) siteChanges.extensions = extensions
 
-  // services[] → site.yml::$services · secrets[] → site.yml::$secrets.
+  // services[] / secrets[] → sync.json::backends.<origin>.{services,secrets}.
   //
   // ⭐ The `$` prefix, and not the bare name, for the reason spelled out in
   // `uwx/site.js`: `site.yml::services` already means "pretend a host offers these"
@@ -316,10 +316,20 @@ export function siteInfoToConfig({ document, siteRoot, sourceLocale = LOCALIZED_
   // state — "this site has no service rows" — and it is the state a `pull` must be
   // able to deliver after the last one was removed. Skipping would leave a stale
   // `$services` on disk that the next push would resurrect.
-  for (const [section, ymlKey] of [['services', '$services'], ['secrets', '$secrets']]) {
-    const records = document?.[section]
-    if (!Array.isArray(records)) continue
-    siteChanges[ymlKey] = records.map(({ $id: _id, ...fields }) => fields)
+  // ⭐ To `sync.json`, under the backend that provisioned them — not `site.yml`.
+  // A service is bought on one backend, so its rows describe that backend alone.
+  // ⛔ Needs a backend: with none there is nowhere coherent to file them, and
+  // writing them to a shared place is exactly the single-copy bug this removed.
+  if (backend) {
+    const provisioned = {}
+    for (const section of ['services', 'secrets']) {
+      const records = document?.[section]
+      if (!Array.isArray(records)) continue
+      provisioned[section] = records.map(({ $id: _id, ...fields }) => fields)
+    }
+    if (Object.keys(provisioned).length) {
+      updateBackendState(siteRoot, backend, provisioned)
+    }
   }
 
   const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
@@ -882,7 +892,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
     backend ? readBackendState(siteRoot, backend).assets || {} : {}
   )
 
-  report.config = siteInfoToConfig({ document, siteRoot, sourceLocale, collector, keepAuthoredFoundation })
+  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
   report.queries = declarationsToQueriesYml({ document, siteRoot })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor

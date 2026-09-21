@@ -1014,15 +1014,32 @@ describe('info.favicon / info.assets (A5)', () => {
 //   - projecting it again is SILENT — a stray key reappears in the author's
 //     site.yml, and the next push is the loud half.
 describe('$services / $secrets — the service records a site is provisioned with', () => {
+  // ⭐ Provisioned rows live in `sync.json` under the backend that sold them
+  // (2026-09-20), not in site.yml. The fixtures stay readable YAML: this routes the
+  // `$services` / `$secrets` keys to the store and leaves the author's keys behind,
+  // so each case below still reads as the file a person would picture.
+  const ORIGIN = 'http://backend.test'
   const write = (yml) => {
     const src = join(dir, 'src')
     mkdirSync(src, { recursive: true })
-    writeFileSync(join(src, 'site.yml'), yml)
+    const all = yaml.load(yml) || {}
+    const { $services, $secrets, ...authored } = all
+    writeFileSync(join(src, 'site.yml'), yaml.dump(authored))
+    const provisioned = {
+      ...($services !== undefined ? { services: $services } : {}),
+      ...($secrets !== undefined ? { secrets: $secrets } : {})
+    }
+    if (Object.keys(provisioned).length) {
+      writeFileSync(
+        join(src, 'sync.json'),
+        JSON.stringify({ version: 1, backends: { [ORIGIN]: provisioned } })
+      )
+    }
     return src
   }
 
   it('omits both sections entirely when the file declares neither', async () => {
-    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n"))
+    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n"), { backend: ORIGIN })
     // ⛔ Not `[]`. The section is REPLACED by what we send, so an empty list asks the
     // backend to drop every stored config row — which is what an ordinary push from a
     // project that has never pulled would then do to a service configured in the app.
@@ -1031,15 +1048,12 @@ describe('$services / $secrets — the service records a site is provisioned wit
   })
 
   it('an explicit empty list IS sent — clearing is available, just never implicit', async () => {
-    const document = await siteProjectToDocument(
-      write("name: S\nfoundation: '@a/base'\n$services: []\n")
-    )
+    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n$services: []\n"), { backend: ORIGIN })
     expect(document.services).toEqual([])
   })
 
   it('forwards a service verbatim, treating `config` as opaque', async () => {
-    const document = await siteProjectToDocument(
-      write(
+    const document = await siteProjectToDocument(write(
         "name: S\nfoundation: '@a/base'\n" +
           '$services:\n' +
           '  - name: api\n' +
@@ -1050,8 +1064,7 @@ describe('$services / $secrets — the service records a site is provisioned wit
           '      billing:\n' +
           '        currency: CAD\n' +
           '      somethingAddedLater: 7\n'
-      )
-    )
+      ), { backend: ORIGIN })
     expect(document.services).toEqual([
       {
         $id: 'api',
@@ -1069,8 +1082,7 @@ describe('$services / $secrets — the service records a site is provisioned wit
   })
 
   it('keys a secret by (service, name), and by the bare name when site-level', async () => {
-    const document = await siteProjectToDocument(
-      write(
+    const document = await siteProjectToDocument(write(
         "name: S\nfoundation: '@a/base'\n" +
           '$secrets:\n' +
           '  - service: api\n' +
@@ -1078,8 +1090,7 @@ describe('$services / $secrets — the service records a site is provisioned wit
           "    value: '#ref'\n" +
           '    consumer: leaseholder\n' +
           '  - name: site_wide\n'
-      )
-    )
+      ), { backend: ORIGIN })
     expect(document.secrets).toEqual([
       {
         $id: 'api:stripe_key',
@@ -1095,9 +1106,7 @@ describe('$services / $secrets — the service records a site is provisioned wit
 
   it('skips an entry with no name rather than sending an unkeyed record', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const document = await siteProjectToDocument(
-      write("name: S\nfoundation: '@a/base'\n$services:\n  - config: { grade: small }\n")
-    )
+    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n$services:\n  - config: { grade: small }\n"), { backend: ORIGIN })
     expect(document.services).toEqual([])
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
@@ -1106,14 +1115,12 @@ describe('$services / $secrets — the service records a site is provisioned wit
   it('leaves site.yml::services alone — it is the other lane, and the other tier', async () => {
     // `services:` (no `$`) simulates a HOST offer on the bundle lane, where config is
     // site.yml spread whole. It must not be mistaken for the site's own records.
-    const document = await siteProjectToDocument(
-      write("name: S\nfoundation: '@a/base'\nservices:\n  submit:\n    endpoint: /forms\n")
-    )
+    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\nservices:\n  submit:\n    endpoint: /forms\n"), { backend: ORIGIN })
     expect('services' in document).toBe(false)
     expect(document.info.services).toBeUndefined()
   })
 
-  it('projects both sections back under the $ keys, dropping the derived $id', () => {
+  it('projects both sections into sync.json for that backend, dropping the derived $id', () => {
     const dest = join(dir, 'dest')
     mkdirSync(dest, { recursive: true })
     siteInfoToConfig({
@@ -1122,11 +1129,17 @@ describe('$services / $secrets — the service records a site is provisioned wit
         services: [{ $id: 'api', name: 'api', config: { grade: 'small' } }],
         secrets: [{ $id: 'api:k', service: 'api', name: 'k', value: '#ref' }]
       },
-      siteRoot: dest
+      siteRoot: dest,
+      backend: ORIGIN
     })
+    // ⭐ In the store, under the backend that provisioned them.
+    const stored = JSON.parse(readFileSync(join(dest, 'sync.json'), 'utf8')).backends[ORIGIN]
+    expect(stored.services).toEqual([{ name: 'api', config: { grade: 'small' } }])
+    expect(stored.secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
+    // ⛔ And NOT in site.yml, which now holds only what an author wrote.
     const yml = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
-    expect(yml.$services).toEqual([{ name: 'api', config: { grade: 'small' } }])
-    expect(yml.$secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
+    expect(yml.$services).toBeUndefined()
+    expect(yml.$secrets).toBeUndefined()
   })
 
   it('round-trips produce → project → produce unchanged', async () => {
@@ -1135,11 +1148,11 @@ describe('$services / $secrets — the service records a site is provisioned wit
         '$services:\n  - name: api\n    config: { grade: small }\n' +
         "$secrets:\n  - service: api\n    name: k\n    value: '#ref'\n"
     )
-    const first = await siteProjectToDocument(src)
+    const first = await siteProjectToDocument(src, { backend: ORIGIN })
     const dest = join(dir, 'dest2')
     mkdirSync(dest, { recursive: true })
-    siteInfoToConfig({ document: first, siteRoot: dest })
-    const second = await siteProjectToDocument(dest)
+    siteInfoToConfig({ document: first, siteRoot: dest, backend: ORIGIN })
+    const second = await siteProjectToDocument(dest, { backend: ORIGIN })
     expect(second.services).toEqual(first.services)
     expect(second.secrets).toEqual(first.secrets)
   })
