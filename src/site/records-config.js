@@ -130,7 +130,7 @@ export async function readRecordsConfig(siteRoot) {
  *
  * ⛔ ONE PLACEMENT PER RECORD. Two entries matching one file is a hard error, not
  * a second placement. The wire could carry many-to-many — `folder.js` nests, and
- * placements are keyed by their `name` chain — but a record's `path` is one string:
+ * a placement is banked by the record it references — but a record's `path` is one string:
  * `@uniweb/core`'s `withinScope` matches nothing that is not a string, so a record
  * with two paths would fall outside every `scope:`, silently. The records service
  * evaluates `scope` natively, so widening it is a cross-lane change to agree first,
@@ -249,11 +249,12 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
         errors.push(`${RECORDS_YML_RELPATH}: ${where} declares a folder with no name.`)
         return []
       }
-      // ⭐ `name` is the handle (the URL segment, sibling-unique); `label` is the
+      // ⭐ A folder's `name` is the segment a query's `scope:` names; `label` is its
       // display text. The store renamed the pair on 2026-09-04 — `path_segment` →
-      // `name`, and the old `name` (display) → `label` — so one word means one
-      // thing from records.yml (`folder:` / `label:`) to the wire to the service's
-      // `$name`.
+      // `name`, and the old `name` (display) → `label`. ⛔ Not a URL segment: a folder
+      // is the curator's organization and maps to no route unless a query binds
+      // `scope: :dir` [Diego]. *("the URL segment, sibling-unique" stood here until
+      // 2026-09-21.)*
       const branch = { kind: 'branch', name: segment }
       if (entry.label !== undefined && entry.label !== null) branch.label = String(entry.label)
       const kids = Array.isArray(entry.records) ? entry.records : []

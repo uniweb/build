@@ -11,7 +11,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { emitSyncPackages, readZip } from '../src/uwx/index.js'
+import { emitSyncPackages, readZip, collectFolderItemUuids, stampFolderItemUuids } from '../src/uwx/index.js'
 
 const ARTICLE = {
   name: 'article',
@@ -148,25 +148,63 @@ describe('every record is pushed — nothing lists them', () => {
   })
 })
 
-// ⛔ A FOLDER'S NAMES ARE SIBLING-UNIQUE, and every record sits at the top unless
-// `records.yml` places it — so two schema folders holding one slug meet there.
+// ⭐ TWO RECORDS OF DIFFERENT SCHEMAS MAY SHARE A NAME IN ONE FOLDER. A folder is the
+// curator's organization, not a URL map; a slug is resolved by a query over one schema
+// [Diego, 2026-09-21]. ⛔ A push refused this until the same day, on the premise that
+// folder names were unique among siblings — the premise was wrong.
 describe('two records with one name in one folder', () => {
-  it('is refused, naming both files', async () => {
+  it('is an ordinary folder — both are pushed and placed', async () => {
     const root = site()
-    w('site/records/note/hello.md', '---\ntitle: A note\n---\n')
-    await expect(emitSyncPackages(root)).rejects.toThrow(
-      /"hello" at the top of the folder: records\/article\/hello\.md and records\/note\/hello\.md/
-    )
-  })
-
-  it('CONTROL — placing one of them in a sub-folder resolves it', async () => {
-    const root = site({ recordsYml: '- folder: notes\n  records:\n    - note/hello.md\n' })
     w('site/records/note/hello.md', '---\ntitle: A note\n---\n')
     const pkg = await emitSyncPackages(root)
     expect(sentIds(pkg)).toEqual(expect.arrayContaining(['article/hello', 'note/hello']))
+    const names = folderDoc(pkg).contents.map((c) => c.name)
+    expect(names.filter((n) => n === 'hello')).toHaveLength(2)
+  })
+
+  // ⛔ WHAT THE REFUSAL WAS STANDING IN FOR. Placement identity was banked by the `name`
+  // chain alone, so both `hello` leaves would have been stamped with ONE uuid on the
+  // next push. Each is banked by the record it references now.
+  it('each keeps its own placement identity across a push', () => {
+    const stored = {
+      contents: [
+        { kind: 'ref', name: 'hello', entry: { model: '@acme/article', entity: 'R-A' }, $uuid: 'P-A' },
+        { kind: 'ref', name: 'hello', entry: { model: '@acme/note', entity: 'R-N' }, $uuid: 'P-N' },
+        { kind: 'ref', name: 'world', entry: { model: '@acme/article', entity: 'R-W' }, $uuid: 'P-W' },
+      ],
+    }
+    const banked = collectFolderItemUuids(stored)
+    // an ambiguous `hello` chain key is not banked — it would name either leaf
+    expect(banked).not.toHaveProperty('hello')
+    expect(banked).toMatchObject({ '@R-A': 'P-A', '@R-N': 'P-N', '@R-W': 'P-W', world: 'P-W' })
+
+    // the next push's folder, in whatever order it is built
+    const next = { contents: stored.contents.map(({ $uuid, ...leaf }) => leaf).reverse() }
+    stampFolderItemUuids(next, banked)
+    const byRecord = Object.fromEntries(next.contents.map((c) => [c.entry.entity, c.$uuid]))
+    expect(byRecord).toEqual({ 'R-A': 'P-A', 'R-N': 'P-N', 'R-W': 'P-W' })
+  })
+
+  // ⛔ CONTROL — a map banked before record keys existed holds `name` chains only, and
+  // a leaf whose name is unique still finds its uuid there.
+  it('CONTROL — a name-chain map from before still stamps a uniquely named leaf', () => {
+    const next = { contents: [{ kind: 'ref', name: 'world', entry: { model: '@acme/article', entity: 'R-W' } }] }
+    stampFolderItemUuids(next, { world: 'P-W' })
+    expect(next.contents[0].$uuid).toBe('P-W')
+  })
+
+  it('no uuid is ever stamped on two items', () => {
+    // a stale chain key could otherwise hand one row to two leaves
+    const next = {
+      contents: [
+        { kind: 'ref', name: 'x', entry: { model: '@acme/a', entity: 'R-1' } },
+        { kind: 'ref', name: 'y', entry: { model: '@acme/a', entity: 'R-2' } },
+      ],
+    }
+    stampFolderItemUuids(next, { '@R-1': 'P-1', y: 'P-1' })
+    expect(next.contents.map((c) => c.$uuid)).toEqual(['P-1', undefined])
   })
 })
-
 // ⭐ A FILE IS NOT ALWAYS ONE RECORD, and a record's id is not always its file's
 // stem — the folder places the records a file PRODUCED.
 describe('the folder references the records files produce', () => {

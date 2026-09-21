@@ -88,10 +88,10 @@ describe('⭐ the sync lane reads the same function', () => {
     // block included. This asserts the shape is gone, not merely that something
     // throws: a future "tolerant" refactor that restored `body: raw` would pass
     // a plain toThrow test if it also warned.
-    expect(() => fromEntitySource(BAD, 'entities/post/a.md')).toThrow()
+    expect(() => fromEntitySource(BAD, 'records/post/a.md')).toThrow()
     let leaked = null
     try {
-      fromEntitySource(BAD, 'entities/post/a.md')
+      fromEntitySource(BAD, 'records/post/a.md')
     } catch {
       leaked = null // nothing is returned at all — that is the point
     }

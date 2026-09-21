@@ -12,8 +12,17 @@
 //         or `$ref: "<id>"` while brand-new (resolved within this payload).
 //       - a BRANCH is a sub-folder: `{ kind: 'branch', name, label?, $children }`.
 //
-// ⭐ `name` IS THE HANDLE — the URL segment, sibling-unique, the records service's `$name` —
-// and `label` is the display text, a localized map (`{ en: "Blog" }`). The store
+// ⭐ A LEAF'S `name` IS ITS RECORD'S HANDLE — the slug, the records service's `$name` —
+// and a branch's `name` is the segment a query's `scope:` names. `label` is a branch's
+// display text, a localized map (`{ en: "Blog" }`).
+//
+// ⛔ A FOLDER IS NOT A URL MAP, AND ITS NAMES ARE NOT UNIQUE ACROSS SCHEMAS. It is a
+// content pool organized for the curator's convenience [Diego, 2026-09-21]; a slug is
+// resolved by a (parametric) query over one schema, never by where a record sits, and
+// mapping a URL to a folder path takes an explicit `scope: :dir` on a query. So
+// `article/intro` and `person/intro` side by side in one folder is ordinary. *(This
+// note called `name` "the URL segment, sibling-unique" until 2026-09-21, and that
+// wording led straight to a push refusing two such records.)* The store
 // renamed the pair on 2026-09-04 (`path_segment` → `name`; the old display `name`
 // → `label`); this emitter writes the new shape only and the pull reader
 // (`records-project.js`) reads the new shape only. No alias on either side: the
@@ -93,9 +102,19 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
   return out
 }
 
+// The uuid of the record a leaf references — once minted, `entry: { model, entity }`
+// (a bare uuid is tolerated). A brand-new record's leaf carries `$ref` instead.
+function recordOf(item) {
+  if (item?.kind !== 'ref') return null
+  const e = item.entry
+  const uuid = e && typeof e === 'object' ? e.entity : e
+  return typeof uuid === 'string' && uuid ? uuid : null
+}
+
 /**
- * Walk a folder document's `contents` tree, visiting every item with the
- * slash-joined `name` chain that addresses it.
+ * Walk a folder document's `contents` tree, visiting every item with the keys that
+ * address it: its slash-joined `name` chain, whether that chain is UNIQUE among its
+ * siblings, and — for a leaf — the uuid of the record it references.
  *
  * ⛔ IT MUST RECURSE INTO `$children`. `contents` is SELF-NESTING: a walk of the
  * top level sees the branches and misses every record under them — which is 6 of
@@ -103,11 +122,15 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
  * before it could be got wrong.)*
  */
 function walkFolderItems(contents, cb, prefix = '') {
-  for (const item of contents || []) {
-    if (!item || typeof item !== 'object') continue
+  const items = (contents || []).filter((item) => item && typeof item === 'object')
+  const count = new Map()
+  for (const item of items) {
+    if (typeof item.name === 'string') count.set(item.name, (count.get(item.name) || 0) + 1)
+  }
+  for (const item of items) {
     const seg = typeof item.name === 'string' ? item.name : null
     const path = seg ? (prefix ? `${prefix}/${seg}` : seg) : prefix
-    if (seg) cb(path, item)
+    if (seg) cb({ path, unique: count.get(seg) === 1, record: recordOf(item) }, item)
     walkFolderItems(item.$children, cb, path)
   }
 }
@@ -115,18 +138,24 @@ function walkFolderItems(contents, cb, prefix = '') {
 /**
  * Harvest per-item identity from the folder document the backend returns.
  *
- * ⭐ THE KEY IS THE `name` CHAIN, and it is the right one because the backend's
- * own model declares `name` SIBLING-UNIQUE — so the chain is
- * unique within the folder, stable across pushes, and derivable identically on
- * both sides without either lane holding the other's ids.
+ * ⭐ A PLACEMENT IS KEYED BY THE RECORD IT REFERENCES — `@<record uuid>` — because a
+ * record has one placement, so that key is unique in the folder whatever the names
+ * are. A branch, and a leaf whose name no sibling shares, is ALSO keyed by its `name`
+ * chain, which is what every placement map banked before 2026-09-21 holds.
+ *
+ * ⛔ The chain alone assumed no two siblings share a name. Two records of different
+ * schemas can (`article/intro`, `person/intro`), and keyed by `intro` both would
+ * have been stamped with one uuid on the next push.
  *
  * @param {object} doc - a stored `@uniweb/folder` document (`{ contents: [...] }`)
- * @returns {Record<string,string>} path → `$uuid`
+ * @returns {Record<string,string>} key → `$uuid` — `@<record uuid>`, or a `name` chain
  */
 export function collectFolderItemUuids(doc) {
   const out = {}
-  walkFolderItems(doc?.contents, (path, item) => {
-    if (typeof item.$uuid === 'string' && item.$uuid) out[path] = item.$uuid
+  walkFolderItems(doc?.contents, ({ path, unique, record }, item) => {
+    if (typeof item.$uuid !== 'string' || !item.$uuid) return
+    if (record) out[`@${record}`] = item.$uuid
+    if (unique) out[path] = item.$uuid
   })
   return out
 }
@@ -145,15 +174,23 @@ export function collectFolderItemUuids(doc) {
  * from the site-content uuid. This is about its ITEMS, and the two were conflated
  * by a comment in this file that was true of the entity and false of its contents.
  *
+ * ⭐ A leaf takes the uuid banked under its record (`@<record uuid>`) first, and its
+ * `name` chain only when no sibling shares the name — the one key an older map has.
+ * ⛔ No uuid is stamped twice: two items claiming one row is the failure the record
+ * key exists to prevent, so a second claimant goes out without one, as a new row.
+ *
  * @returns {{ stamped: number, unknown: number }}
  */
 export function stampFolderItemUuids(doc, pathToUuid = {}) {
   let stamped = 0
   let unknown = 0
-  walkFolderItems(doc?.contents, (path, item) => {
-    const uuid = pathToUuid[path]
-    if (uuid) {
+  const claimed = new Set()
+  walkFolderItems(doc?.contents, ({ path, unique, record }, item) => {
+    let uuid = record ? pathToUuid[`@${record}`] : undefined
+    if (!uuid && unique) uuid = pathToUuid[path]
+    if (uuid && !claimed.has(uuid)) {
       item.$uuid = uuid
+      claimed.add(uuid)
       stamped++
     } else {
       unknown++

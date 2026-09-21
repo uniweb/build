@@ -110,11 +110,12 @@ function stripSigils(value) {
     //
     // ⭐ Neither encoding is content. What the folder SAYS is "this branch contains
     // this record, here, in this order" — and that is already hashed: a leaf carries
-    // `name` (the record's handle) inside the branch that holds it, and names are
-    // unique among siblings — the push refuses two that are not
-    // (`siblingNameClashes`, below). Position plus segment therefore identify the
-    // record on their own; `$ref` adds a payload-local handle and `entry` adds
-    // identity, and both are exactly what `$uuid` is stripped for.
+    // `name` (the record's handle) at its position inside the branch that holds it.
+    // Two siblings may share a name — records of different schemas can — and position
+    // still tells them apart; a leaf that comes to reference another record arrives
+    // with that record changed, which re-sends the folder anyway. `$ref` adds a
+    // payload-local handle and `entry` adds identity, and both are exactly what
+    // `$uuid` is stripped for.
     //
     // ⚖️ The previous rule kept `$ref` "so a reference change is visible". It still
     // is: point a leaf at a different record and its `name` moves with it.
@@ -716,8 +717,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const index = []
   // pool id (the FILE) → the records it produced, so the folder places records.
   const producedBy = new Map()
-  // record id → the file it came from, for messages that must name a file.
-  const sourceOf = new Map()
   // `draft: true` records found on the way — the push is refused if there are any.
   const drafts = []
   // Schemas (as written) whose Model resolved to nothing — soft-skipped.
@@ -768,7 +767,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         flat.push(rec)
         sourceBySlug.set(r.slug, r)
         produced.push({ id: rec.$id, slug: r.slug })
-        sourceOf.set(rec.$id, pooled.relPath)
       }
       producedBy.set(pooled.id, produced)
     }
@@ -894,14 +892,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   }
 
   const nodes = placeProducedRecords(folder.nodes, producedBy)
-  const clashes = siblingNameClashes(nodes, sourceOf)
-  if (clashes.length) {
-    throw new Error(
-      `uwx/records: two things in one folder share a name —\n  ${clashes.join('\n  ')}\n` +
-        '  Names within a folder are unique. Put one of them in a `folder:` in records.yml, ' +
-        'or give it another slug.'
-    )
-  }
 
   return {
     entities,
@@ -931,26 +921,6 @@ function sendsFolder(pool, entities) {
   return pool.entities.length === 0 && pool.errors.length === 0
 }
 
-// ⛔ A FOLDER'S NAMES ARE SIBLING-UNIQUE — the backend's model declares `name` so
-// (`folder.js`), and placement identity is keyed by the `name` chain
-// (`collectFolderItemUuids`), so two siblings with one name would share a uuid.
-// Every record sits at the top of the folder unless `records.yml` places it, so two
-// schema folders holding the same slug — `article/intro.md`, `person/intro.md` —
-// meet there. That was possible while `records.yml` listed records at the top too;
-// placing every file made it the ordinary case, so it is refused here, naming files.
-function siblingNameClashes(nodes, sourceOf, where = 'the top of the folder') {
-  const out = []
-  const byName = new Map()
-  for (const node of nodes || []) {
-    const name = node?.name
-    if (typeof name !== 'string') continue
-    const what = node.kind === 'branch' ? `the folder "${name}"` : sourceOf.get(node.$entityId) || node.$entityId
-    if (byName.has(name)) out.push(`"${name}" at ${where}: ${byName.get(name)} and ${what}`)
-    else byName.set(name, what)
-    if (node.kind === 'branch') out.push(...siblingNameClashes(node.$children, sourceOf, `folder "${name}"`))
-  }
-  return out
-}
 
 /**
  * "Send only changed" filter, shared by the collection and combined sync paths.

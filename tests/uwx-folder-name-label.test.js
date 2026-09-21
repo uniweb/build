@@ -49,8 +49,8 @@ describe('the pull reader reads { name, label }', () => {
   let root
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'uwx-folder-'))
-    mkdirSync(join(root, 'entities', 'article'), { recursive: true })
-    writeFileSync(join(root, 'entities', 'article', 'hello.md'), '---\ntitle: Hello\n---\n\nHi\n')
+    mkdirSync(join(root, 'records', 'article'), { recursive: true })
+    writeFileSync(join(root, 'records', 'article', 'hello.md'), '---\ntitle: Hello\n---\n\nHi\n')
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
