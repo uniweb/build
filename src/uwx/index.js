@@ -85,6 +85,20 @@ export {
   ASSET_MAP_FILE,
   servedFingerprint,
 } from './asset-map.js'
+// `sync.json` — what each backend minted, keyed by origin. Absorbs `assets.json`
+// above, `site.yml`'s identity keys and three maps out of the sync cache.
+// Spec: kb/framework/reference/sync-json.md
+export {
+  SYNC_STORE_FILE,
+  readSyncStore,
+  readBackendState,
+  listSyncedBackends,
+  updateBackendState,
+  updateBackendMap,
+  clearBackend,
+  refForAssetId as refForAssetIdInStore,
+  normalizeOrigin as normalizeBackendOrigin,
+} from './sync-store.js'
 export {
   diffSiteUnits,
   describeSiteDiff,
