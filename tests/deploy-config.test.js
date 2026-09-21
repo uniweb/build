@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { loadDeployYml, resolveTarget } from '../src/site/deploy-config.js'
+import { loadDeployYml, resolveTarget, resolvePublishTarget } from '../src/site/deploy-config.js'
 import {
   recordLastDeploy,
   recordTarget,
@@ -672,6 +672,113 @@ describe('forgetDeployYml — a copy becoming a new project', () => {
       await writeFile(join(dir, 'deploy.yml'), 'targets: [unclosed\n', 'utf8')
       expect(await forgetDeployYml(dir)).toEqual([])
       expect(existsSync(join(dir, 'deploy.yml'))).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('resolvePublishTarget — the target follows the backend', () => {
+  const U = 'https://uniweb.app'
+  const L = 'http://localhost:8080'
+  const file = (targets, extra = {}) => ({ default: 'production', targets, saveDeploys: true, ...extra })
+
+  test('no deploy.yml: the scaffold, naming the backend', () => {
+    expect(resolvePublishTarget(null, `${L}/dev/x`)).toEqual({
+      targetName: 'production', host: 'uniweb', config: { backend: L }, saveDeploys: true, fromFile: false,
+    })
+  })
+
+  test('⭐ a publish to another backend never lands on the default target', () => {
+    const yml = file({ production: { host: 'uniweb', backend: U }, staging: { host: 'uniweb', backend: L } })
+    expect(resolvePublishTarget(yml, L).targetName).toBe('staging')
+    expect(resolvePublishTarget(yml, U).targetName).toBe('production')
+  })
+
+  test('the default target wins a tie; otherwise the first by name', () => {
+    const both = { a: { host: 'uniweb', backend: L }, b: { host: 'uniweb', backend: L } }
+    expect(resolvePublishTarget(file(both, { default: 'b' }), L).targetName).toBe('b')
+    expect(resolvePublishTarget(file(both, { default: 'pages' }), L).targetName).toBe('a')
+  })
+
+  test('a uniweb target with no backend names the default backend', () => {
+    const yml = file({ production: { host: 'uniweb' } })
+    expect(resolvePublishTarget(yml, U, { defaultBackend: U }).targetName).toBe('production')
+    expect(resolvePublishTarget(yml, L, { defaultBackend: U }).fromFile).toBe(false)
+  })
+
+  test('none names it: a new target named after the backend, never a taken name', () => {
+    const yml = file({ production: { host: 'uniweb', backend: U }, 'localhost:8080': { host: 'netlify' } })
+    expect(resolvePublishTarget(yml, L)).toEqual({
+      targetName: 'localhost:8080-2', host: 'uniweb', config: { backend: L }, saveDeploys: true, fromFile: false,
+    })
+  })
+
+  test('another host never answers for a backend, and saveDeploys is carried', () => {
+    const yml = file({ pages: { host: 'cloudflare-pages', backend: L } }, { saveDeploys: false })
+    const got = resolvePublishTarget(yml, L)
+    expect(got.fromFile).toBe(false)
+    expect(got.saveDeploys).toBe(false)
+  })
+})
+
+describe('recordLastDeploy — a target the file does not have yet', () => {
+  test('⭐ is added beside the others; default, comments and existing targets untouched', async () => {
+    const dir = await makeSiteDir()
+    try {
+      const original = [
+        '# kept',
+        'default: production',
+        'targets:',
+        '  production:',
+        '    host: uniweb',
+        '    backend: https://uniweb.app',
+        'saveDeploys: true',
+        '',
+      ].join('\n')
+      await writeFile(join(dir, 'deploy.yml'), original, 'utf8')
+      await recordLastDeploy(dir, {
+        targetName: 'localhost:8080',
+        targetConfig: { host: 'uniweb', backend: 'http://localhost:8080' },
+        lastDeploy: { at: '2026-09-21T00:00:00Z', backend: 'http://localhost:8080' },
+        saveDeploys: true,
+      })
+      const after = await loadDeployYml(dir)
+      expect(after.default).toBe('production')
+      expect(after.targets.production).toEqual({ host: 'uniweb', backend: 'https://uniweb.app' })
+      expect(after.targets['localhost:8080']).toEqual({ host: 'uniweb', backend: 'http://localhost:8080' })
+      expect(after.deploys['localhost:8080'].backend).toBe('http://localhost:8080')
+      expect(await readFile(join(dir, 'deploy.yml'), 'utf8')).toMatch(/# kept/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('an existing target is never modified by a targetConfig', async () => {
+    const dir = await makeSiteDir()
+    try {
+      await writeFile(join(dir, 'deploy.yml'), 'default: p\ntargets:\n  p:\n    host: uniweb\n    backend: https://a.test\n', 'utf8')
+      await recordLastDeploy(dir, {
+        targetName: 'p',
+        targetConfig: { host: 'uniweb', backend: 'https://b.test' },
+        lastDeploy: { at: 'x' },
+        saveDeploys: true,
+      })
+      expect((await loadDeployYml(dir)).targets.p.backend).toBe('https://a.test')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a file that does not parse is refused, never rewritten', async () => {
+    const dir = await makeSiteDir()
+    try {
+      const broken = 'targets: [unclosed\n'
+      await writeFile(join(dir, 'deploy.yml'), broken, 'utf8')
+      await expect(
+        recordLastDeploy(dir, { targetName: 'p', lastDeploy: { at: 'x' }, saveDeploys: true })
+      ).rejects.toThrow(/did not parse/)
+      expect(await readFile(join(dir, 'deploy.yml'), 'utf8')).toBe(broken)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

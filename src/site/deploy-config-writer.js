@@ -11,7 +11,8 @@
  * loader (deploy-config.js) stays on js-yaml for read-only ingestion.
  *
  * `saveDeploys: false` (or `--no-save`) makes this a no-op; otherwise it
- * touches ONLY deploys.<targetName>. ⚠️ It was `autoSave: off|lastDeploy|full`
+ * touches ONLY deploys.<targetName> — plus targets.<targetName> when the file has no
+ * such target yet (a publish to a backend no target names). ⚠️ It was `autoSave: off|lastDeploy|full`
  * until 2026-09-20, and `full` was reserved and behaved as `lastDeploy` — a
  * boolean wearing a tri-state.
  *
@@ -68,8 +69,9 @@ const SCAFFOLD_HEADER = [
  * @param {string} siteDir
  * @param {object} opts
  * @param {string} opts.targetName       e.g. 'production'
- * @param {object} [opts.targetConfig]   { host, ...host-specific }; only
- *                                       used on first-deploy scaffold.
+ * @param {object} [opts.targetConfig]   { host, ...host-specific }; the
+ *                                       first-deploy scaffold's target, and a
+ *                                       target to ADD when the file lacks it
  * @param {object} opts.lastDeploy       { at, url, foundation, runtime,
  *                                          artifactSha, ... }
  * @param {boolean} opts.saveDeploys - false makes this a no-op
@@ -98,8 +100,24 @@ export async function recordLastDeploy(siteDir, opts) {
 
   const text = await readFile(path, 'utf8')
   const doc = parseDocument(text)
+  // Never rewrite a file we could not read — the caller reports it instead.
+  if (doc.errors.length) {
+    throw new Error(`deploy.yml did not parse: ${doc.errors[0].message.split('\n')[0]}`)
+  }
 
-  // Touch ONLY deploys.<targetName>. Never reach into targets/default/saveDeploys.
+  // A target the file does not have yet — a publish to a backend no target names
+  // (resolvePublishTarget) — is added beside the others. An existing target is never
+  // modified, and `default` / `saveDeploys` are never touched.
+  if (targetConfig?.host) {
+    const targetsNode = doc.get('targets', true)
+    if (!isMap(targetsNode)) {
+      if (targetsNode === undefined) doc.set('targets', { [targetName]: targetConfig })
+    } else if (!targetsNode.has(targetName)) {
+      targetsNode.set(targetName, targetConfig)
+    }
+  }
+
+  // Otherwise touch ONLY deploys.<targetName>.
   let deploysNode = doc.get('deploys', true)
   if (!isMap(deploysNode)) {
     doc.set('deploys', { [targetName]: lastDeploy })

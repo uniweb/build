@@ -33,6 +33,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
+import { normalizeOrigin } from '../uwx/sync-store.js'
 
 const DEFAULT_TARGET_NAME = 'production'
 
@@ -108,6 +109,68 @@ export function resolveTarget(deployYml, requestedTarget) {
     saveDeploys: deployYml.saveDeploys !== false,
     fromFile: true,
   }
+}
+
+/**
+ * The target a publish to `origin` records its deploy under.
+ *
+ * ⭐ **The target follows the backend, never the reverse.** A publish goes to ONE backend,
+ * decided before this runs — `--backend`, or the backend the user is logged in to
+ * *[Diego, 2026-09-21: "publish should publish to the backend the user logged in to"]*.
+ * The default target is only a tie-break, winning when it names that backend too.
+ *
+ *   1. no deploy.yml → the scaffold: `production`, naming `origin`
+ *   2. `host: uniweb` targets naming `origin` → the default one if it is among them,
+ *      else the first by name. A target with no `backend:` names `defaultBackend` —
+ *      its documented meaning
+ *   3. none → a NEW target, named after the backend's host (`uniweb.app`,
+ *      `localhost:8080`), `-2`, `-3`… if taken. The caller adds it when it persists.
+ *
+ * ⛔ Until 2026-09-21 publish always resolved the DEFAULT target, whatever backend it
+ * published to: a publish to a second backend recorded over the default target's deploy,
+ * and compared its service request against that target's fingerprint.
+ *
+ * @param {object|null} deployYml - from loadDeployYml
+ * @param {string} origin - the backend being published to
+ * @param {{ defaultBackend?: string }} [opts]
+ * @returns {{ targetName: string, host: 'uniweb', config: object, saveDeploys: boolean,
+ *   fromFile: boolean }} `fromFile: false` means the file has no such target yet
+ */
+export function resolvePublishTarget(deployYml, origin, { defaultBackend } = {}) {
+  const key = normalizeOrigin(origin)
+  if (!deployYml) {
+    return {
+      targetName: DEFAULT_TARGET_NAME,
+      host: 'uniweb',
+      config: { backend: key },
+      saveDeploys: true,
+      fromFile: false,
+    }
+  }
+  const saveDeploys = deployYml.saveDeploys !== false
+  const targets = deployYml.targets || {}
+  const naming = Object.keys(targets)
+    .filter((name) => {
+      const t = targets[name]
+      return t && t.host === 'uniweb' && normalizeOrigin(t.backend || defaultBackend) === key
+    })
+    .sort()
+  if (naming.length) {
+    const targetName = naming.includes(deployYml.default) ? deployYml.default : naming[0]
+    const { host, ...config } = targets[targetName]
+    return { targetName, host, config, saveDeploys, fromFile: true }
+  }
+  let base = 'uniweb'
+  try {
+    base = new URL(key).host || base
+  } catch {
+    /* keep the fallback */
+  }
+  let targetName = base
+  for (let i = 2; Object.prototype.hasOwnProperty.call(targets, targetName); i++) {
+    targetName = `${base}-${i}`
+  }
+  return { targetName, host: 'uniweb', config: { backend: key }, saveDeploys, fromFile: false }
 }
 
 function validate(doc, path) {
