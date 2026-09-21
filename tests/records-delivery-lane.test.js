@@ -1,20 +1,19 @@
-// ⛔ `records.yml` GOVERNS THE DELIVERY LANE TOO — it did not, and both suites
-// were green while it did not.
+// ⛔ `records.yml`'s PLACEMENT REACHES THE DELIVERY LANE — it did not, and both
+// suites were green while it did not.
 //
-// The sync lane honoured it from the start: only referenced entities are pushed,
-// and placement builds the folder. The DELIVERY lane — `/data/<name>.json`, which
-// is what every static host and every query materialization actually reads —
-// ignored it entirely. Two consequences, both silent:
+// The DELIVERY lane — `/data/<name>.json`, which is what every static host and every
+// query materialization actually reads — ignored `records.yml` entirely at first:
+// every record shipped with `path: ''`, so a folder slice matched NOTHING. Folders
+// exist only to be queried, so the feature was inert on the lane that serves it.
 //
-//   1. every record shipped with `path: ''`, so a folder slice
-//      (`where: { path: { under: 'archive' } }`) matched NOTHING. Folders exist
-//      only to be queried, so the feature was inert on the lane that serves it.
-//   2. an entity `records.yml` did not list still shipped. An author removes a
-//      record to unpublish it and it stays public on a static site.
+// ⭐ AND EVERY RECORD IS DELIVERED (ruled 2026-09-21 [Diego]). Placing a file in
+// `records/` is what makes it a record; `records.yml` only sorts records into
+// folders. ⛔ Until 2026-09-21 `records.yml` listed the records, and a file it did
+// not list was left out of the compiled file here.
 //
-// ⚠️ NEITHER WAS CAUGHT BY THE EXISTING TESTS, and the reason is worth keeping:
-// `records-config.test.js` and `folder-grouping-parity.test.js` both assert
-// placements — from `resolveFolder`, which was correct all along. Nothing
+// ⚠️ THE PLACEMENT DEFECT WAS NOT CAUGHT BY THE EXISTING TESTS, and the reason is
+// worth keeping: `records-config.test.js` and `folder-grouping-parity.test.js` both
+// assert placements — from `resolveFolder`, which was correct all along. Nothing
 // crossed from there into what the build actually delivers. A unit that is right
 // proves nothing about a consumer that never calls it.
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
@@ -34,24 +33,28 @@ const entity = (title) => `---\ntitle: ${title}\n---\n\nBody.\n`
 const deliver = () =>
   processQueries(ROOT, { pubs: { name: 'pubs', schema: '@/publication' } }, undefined, '/')
 
-let warn, log
+let warn, log, err
 beforeEach(() => {
   ROOT = mkdtempSync(join(tmpdir(), 'delivery-lane-'))
   w('site.yml', 'name: T\n')
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   log = vi.spyOn(console, 'log').mockImplementation(() => {})
+  err = vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
   warn.mockRestore()
   log.mockRestore()
+  err.mockRestore()
   rmSync(ROOT, { recursive: true, force: true })
 })
 
 describe('placement reaches the records a query returns', () => {
-  it('stamps each record with the folder records.yml put it in', async () => {
-    w('entities/publication/2026-a.md', entity('Current'))
-    w('entities/publication/2025-b.md', entity('Older'))
-    w('records.yml', ['- publication/2026-a.md', '- folder: archive', '  records:', '    - publication/2025-b.md', ''].join('\n'))
+  const ARCHIVE = ['- folder: archive', '  records:', '    - publication/2025-b.md', ''].join('\n')
+
+  it('stamps each record with the folder records.yml put it in — the top for the rest', async () => {
+    w('records/publication/2026-a.md', entity('Current'))
+    w('records/publication/2025-b.md', entity('Older'))
+    w('records.yml', ARCHIVE)
 
     const { pubs } = await deliver()
     const byslug = Object.fromEntries(pubs.map((r) => [r.slug, r.path]))
@@ -62,9 +65,9 @@ describe('placement reaches the records a query returns', () => {
   // ⭐ THE ASSERTION THAT WOULD HAVE CAUGHT IT. The one above is about a field;
   // this is about the capability the field exists for.
   it('a folder slice actually selects — the point of folders', async () => {
-    w('entities/publication/2026-a.md', entity('Current'))
-    w('entities/publication/2025-b.md', entity('Older'))
-    w('records.yml', ['- publication/2026-a.md', '- folder: archive', '  records:', '    - publication/2025-b.md', ''].join('\n'))
+    w('records/publication/2026-a.md', entity('Current'))
+    w('records/publication/2025-b.md', entity('Older'))
+    w('records.yml', ARCHIVE)
 
     const { pubs } = await deliver()
     // a folder branch is `scope:` (ruled 2026-09-11; `where: { path: { under } }` is retired)
@@ -74,7 +77,7 @@ describe('placement reaches the records a query returns', () => {
   })
 
   it('nests to any depth', async () => {
-    w('entities/publication/deep.md', entity('Deep'))
+    w('records/publication/deep.md', entity('Deep'))
     w('records.yml', ['- folder: archive', '  records:', '    - folder: 2023', '      records:', '        - publication/deep.md', ''].join('\n'))
 
     const { pubs } = await deliver()
@@ -83,72 +86,74 @@ describe('placement reaches the records a query returns', () => {
   })
 })
 
-describe('⛔ records.yml decides what is PUBLISHED here, not only what syncs', () => {
-  it('an unreferenced entity is not delivered', async () => {
-    w('entities/publication/published.md', entity('Published'))
-    w('entities/publication/secret-draft.md', entity('Draft'))
-    w('records.yml', '- publication/published.md\n')
-
-    const { pubs } = await deliver()
-    // the subject
-    expect(pubs.map((r) => r.slug)).not.toContain('secret-draft')
-    // ⛔ CONTROL — its referenced sibling IS delivered, so the absence above is
-    // the rule working rather than the lane delivering nothing.
-    expect(pubs.map((r) => r.slug)).toEqual(['published'])
-  })
-
-  // ⚖️ MISSING MEANS SOMETHING DIFFERENT HERE THAN IT DOES TO SYNC, deliberately.
-  // On sync, missing is inert — leave the server's folder alone. There is no
-  // server state on this lane, so a site with no `records.yml` is simply not
-  // managing publication and its whole pool is delivered. Making missing mean
-  // "publish nothing" would turn every site without the file silently empty.
-  it('no records.yml delivers the whole pool', async () => {
-    w('entities/publication/a.md', entity('A'))
-    w('entities/publication/b.md', entity('B'))
+describe('⭐ every record in the directory is delivered — records.yml only organizes', () => {
+  it('no records.yml delivers every record, at the top', async () => {
+    w('records/publication/a.md', entity('A'))
+    w('records/publication/b.md', entity('B'))
 
     const { pubs } = await deliver()
     expect(pubs.map((r) => r.slug).sort()).toEqual(['a', 'b'])
     expect(pubs.every((r) => r.path === '')).toBe(true)
   })
 
-  it('an EMPTY records.yml delivers nothing — it says the folder holds nothing', async () => {
-    w('entities/publication/a.md', entity('A'))
+  it('an EMPTY records.yml delivers every record too — it removes nothing', async () => {
+    // ⛔ Until 2026-09-21 it delivered NOTHING: it said the folder held nothing.
+    w('records/publication/a.md', entity('A'))
     w('records.yml', '')
 
     const { pubs } = await deliver()
-    expect(pubs).toEqual([])
+    expect(pubs.map((r) => r.slug)).toEqual(['a'])
   })
 
-  // ⛔ A MALFORMED records.yml PUBLISHED EVERYTHING. It read as `missing` — "not managing
-  // publication" — so every entity in the pool shipped, drafts included, with one
-  // warning on stderr, while the sync lane refused the same file. It stops the build now.
+  it('a file whose name starts with `_` is not a record, so it is not delivered', async () => {
+    w('records/publication/published.md', entity('Published'))
+    w('records/publication/_secret-draft.md', entity('Draft'))
+
+    const { pubs } = await deliver()
+    // the subject, and ⛔ CONTROL — its sibling IS delivered, so the absence is the
+    // rule working rather than the lane delivering nothing.
+    expect(pubs.map((r) => r.slug)).toEqual(['published'])
+  })
+
+  it('⛔ a path at the top of records.yml is refused loudly — and every record is still delivered', async () => {
+    w('records/publication/a.md', entity('A'))
+    w('records/publication/b.md', entity('B'))
+    w('records.yml', '- publication/a.md\n')
+
+    const { pubs } = await deliver()
+    expect(pubs.map((r) => r.slug).sort()).toEqual(['a', 'b'])
+    expect(err.mock.calls.map((c) => String(c[0])).some((m) => m.includes('lists records at the top level'))).toBe(true)
+  })
+
+  // ⛔ A MALFORMED records.yml ONCE PUBLISHED EVERYTHING WITH ONE WARNING while the sync
+  // lane refused the same file. It stops the build: what it meant to organize cannot be
+  // guessed, and a query's `scope:` reads the organization.
   describe('a malformed records.yml stops the build, as it stops a sync', () => {
     beforeEach(() => {
-      w('entities/publication/published.md', entity('Published'))
-      w('entities/publication/secret-draft.md', entity('Draft'))
+      w('records/publication/published.md', entity('Published'))
     })
 
     it('invalid YAML — naming the file and the problem', async () => {
-      w('records.yml', '- publication/published.md\n  bad: [unclosed\n')
-      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml: .*\n[\s\S]*nothing in entities\/ is published until it is fixed/)
+      w('records.yml', '- folder: a\n  bad: [unclosed\n')
+      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml: .*\n[\s\S]*fix it to build/)
       await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\.yml/)
     })
 
     it('a mapping instead of a list', async () => {
-      w('records.yml', 'publication:\n  - published.md\n')
-      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml must be a LIST of what is in the folder, not a mapping/)
+      w('records.yml', 'archive:\n  - publication/published.md\n')
+      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml must be a LIST of folders, not a mapping/)
       await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\.yml must be a LIST/)
     })
 
     it('a single value instead of a list, said as such', async () => {
       w('records.yml', 'publication/published.md\n')
-      await expect(deliver()).rejects.toThrow(/records\.yml must be a LIST of what is in the folder, not a single value/)
+      await expect(deliver()).rejects.toThrow(/records\.yml must be a LIST of folders, not a single value/)
     })
 
-    it('CONTROL — the same entry as a list publishes it, and only it', async () => {
-      w('records.yml', '- publication/published.md\n')
+    it('CONTROL — the same record placed through a list builds, in its folder', async () => {
+      w('records.yml', '- folder: archive\n  records:\n    - publication/published.md\n')
       const { pubs } = await deliver()
-      expect(pubs.map((r) => r.slug)).toEqual(['published'])
+      expect(pubs.map((r) => [r.slug, r.path])).toEqual([['published', 'archive']])
     })
   })
 })
@@ -159,7 +164,7 @@ describe('⛔ records.yml decides what is PUBLISHED here, not only what syncs', 
 // `processQueries`'s own docstring shows) crashed on it.
 describe('a bare query key', () => {
   it('does not crash the processor, and says it matched nothing', async () => {
-    w('entities/publication/a.md', entity('A'))
+    w('records/publication/a.md', entity('A'))
     // ⚖️ Empty is CORRECT for a RAW null: the name→schema default lives in the
     // resolver, and a second copy here is exactly the drift this codebase keeps
     // paying for. Through the real path the resolver has already filled
@@ -178,9 +183,8 @@ describe('a bare query key', () => {
 // translation manifest — and the only one that duplicated bytes.
 describe('record assets are keyed by the record, not the query', () => {
   it('two queries over one schema copy an image ONCE, to one URL', async () => {
-    w('entities/article/hello.md', '---\ntitle: Hello\n---\n\n![pic](./pic.png)\n')
-    writeFileSync(join(ROOT, 'entities/article/pic.png'), 'PNGDATA')
-    w('records.yml', '- article/*.md\n')
+    w('records/article/hello.md', '---\ntitle: Hello\n---\n\n![pic](./pic.png)\n')
+    writeFileSync(join(ROOT, 'records/article/pic.png'), 'PNGDATA')
 
     const out = await processQueries(
       ROOT,
@@ -205,9 +209,9 @@ describe('record assets are keyed by the record, not the query', () => {
 // a file no visitor can see, while the same line in a `.yml` record was published.
 describe('a markdown record\'s frontmatter paths are treated as a YAML record\'s fields', () => {
   it('copies and rewrites a co-located frontmatter path, nested ones included', async () => {
-    w('entities/article/hello.md', '---\ntitle: Hello\nimage: ./cover.jpg\ngallery:\n  - ./img/one.png\n---\n\nBody.\n')
-    writeFileSync(join(ROOT, 'entities/article/cover.jpg'), 'JPG')
-    w('entities/article/img/one.png', 'PNG')
+    w('records/article/hello.md', '---\ntitle: Hello\nimage: ./cover.jpg\ngallery:\n  - ./img/one.png\n---\n\nBody.\n')
+    writeFileSync(join(ROOT, 'records/article/cover.jpg'), 'JPG')
+    w('records/article/img/one.png', 'PNG')
 
     const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/docs/')
     expect(articles[0].image).toBe('/docs/records/article/cover.jpg')
@@ -217,15 +221,15 @@ describe('a markdown record\'s frontmatter paths are treated as a YAML record\'s
   })
 
   it('CONTROL — a `.yml` record\'s field gets the same URL for the same layout', async () => {
-    w('entities/article/hello.yml', 'title: Hello\nimage: ./cover.jpg\n')
-    writeFileSync(join(ROOT, 'entities/article/cover.jpg'), 'JPG')
+    w('records/article/hello.yml', 'title: Hello\nimage: ./cover.jpg\n')
+    writeFileSync(join(ROOT, 'records/article/cover.jpg'), 'JPG')
     const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/docs/')
     expect(articles[0].image).toBe('/docs/records/article/cover.jpg')
   })
 
   it('the body\'s first image still stands in when the frontmatter names none', async () => {
-    w('entities/article/hello.md', '---\ntitle: Hello\n---\n\n![pic](./pic.png)\n')
-    writeFileSync(join(ROOT, 'entities/article/pic.png'), 'PNG')
+    w('records/article/hello.md', '---\ntitle: Hello\n---\n\n![pic](./pic.png)\n')
+    writeFileSync(join(ROOT, 'records/article/pic.png'), 'PNG')
     const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
     expect(articles[0].image).toBe('/records/article/pic.png')
   })
@@ -235,14 +239,14 @@ describe('a markdown record\'s frontmatter paths are treated as a YAML record\'s
 // `public/records/<schema dirs>/<basename>`, keyed by its basename alone, so `./a/pic.png`
 // and `./b/pic.png` under one schema folder became one file — the last one copied — at
 // one URL, and a record showed another record's picture.
-describe('a record asset keeps its path under the entities root', () => {
+describe('a record asset keeps its path under the records directory', () => {
   const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
 
   it('two files named alike, in two folders, stay two files at two URLs', async () => {
-    w('entities/article/a.md', '---\ntitle: A\n---\n\n![a](./a/pic.png)\n')
-    w('entities/article/b.md', '---\ntitle: B\n---\n\n![b](./b/pic.png)\n')
-    w('entities/article/a/pic.png', 'PIC-A')
-    w('entities/article/b/pic.png', 'PIC-B')
+    w('records/article/a.md', '---\ntitle: A\n---\n\n![a](./a/pic.png)\n')
+    w('records/article/b.md', '---\ntitle: B\n---\n\n![b](./b/pic.png)\n')
+    w('records/article/a/pic.png', 'PIC-A')
+    w('records/article/b/pic.png', 'PIC-B')
 
     const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
     const bySlug = Object.fromEntries(articles.map((r) => [r.slug, r.image]))
@@ -251,10 +255,10 @@ describe('a record asset keeps its path under the entities root', () => {
     expect(read('public/records/article/b/pic.png')).toBe('PIC-B')
   })
 
-  it('a file beside its record keeps today\'s URL; one outside the schema folder, inside entities/, keeps its path', async () => {
-    w('entities/article/a.md', '---\ntitle: A\nlogo: ../shared/logo.svg\n---\n\n![pic](./pic.png)\n')
-    w('entities/article/pic.png', 'PIC')
-    w('entities/shared/logo.svg', '<svg/>')
+  it('a file beside its record keeps today\'s URL; one outside the schema folder, inside records/, keeps its path', async () => {
+    w('records/article/a.md', '---\ntitle: A\nlogo: ../shared/logo.svg\n---\n\n![pic](./pic.png)\n')
+    w('records/article/pic.png', 'PIC')
+    w('records/shared/logo.svg', '<svg/>')
 
     const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
     expect(articles[0].image).toBe('/records/article/pic.png')
@@ -263,16 +267,16 @@ describe('a record asset keeps its path under the entities root', () => {
   })
 
   it('in a YAML record\'s fields, by the same rule', async () => {
-    w('entities/person/team.yml', '- slug: ada\n  photo: ./img/ada.png\n- slug: lin\n  photo: ./other/ada.png\n')
-    w('entities/person/img/ada.png', 'ADA')
-    w('entities/person/other/ada.png', 'LIN')
+    w('records/person/team.yml', '- slug: ada\n  photo: ./img/ada.png\n- slug: lin\n  photo: ./other/ada.png\n')
+    w('records/person/img/ada.png', 'ADA')
+    w('records/person/other/ada.png', 'LIN')
     const { people } = await processQueries(ROOT, { people: { name: 'people', schema: '@/person' } }, undefined, '/')
     expect(people.map((p) => p.photo)).toEqual(['/records/person/img/ada.png', '/records/person/other/ada.png'])
     expect(read('public/records/person/other/ada.png')).toBe('LIN')
   })
 
-  it('a file outside the entities root gets a stable name of its own, distinct per file', async () => {
-    w('entities/article/a.md', '---\ntitle: A\nlogo: ../../assets/logo.svg\nother: ../../brand/logo.svg\n---\n')
+  it('a file outside the records directory gets a stable name of its own, distinct per file', async () => {
+    w('records/article/a.md', '---\ntitle: A\nlogo: ../../assets/logo.svg\nother: ../../brand/logo.svg\n---\n')
     w('assets/logo.svg', 'ASSETS')
     w('brand/logo.svg', 'BRAND')
     const compile = () => processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')

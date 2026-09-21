@@ -1,49 +1,130 @@
-// A site's ENTITY POOL — every stored thing on disk, and the model each one has.
+// A site's RECORDS on disk — every file in `records/`, and the model each one has.
 //
-// ⛔ THE PATH DECLARES THE MODEL, AND NOTHING ELSE. That is the whole point of
-// this directory, and it is the de-conflation the records model is built on:
-// `collections/<name>/` used to mean three things at once — these files are
-// entities, their schema is `@/<name>`, and they are grouped as `<name>` for
-// placement. `entities/{schema}/` declares only the first two. Grouping moved to
-// `records.yml`, which is what makes an entity a RECORD.
+// ⭐ PLACING A FILE IN `records/` IS WHAT MAKES IT A RECORD (ruled 2026-09-21
+// [Diego]). The directory is the file side of the site's records folder: the
+// backend's folder holds references to entities, and putting a ref in it is what
+// makes one a record — putting a file in this directory is the same act. Nothing
+// else is needed, and nothing lists it. (`records.yml` only organizes records into
+// sub-folders; see `records-config.js`.) A file whose name starts with `_` or `.`
+// is not read, so it is not a record.
 //
-// ⇒ So nothing here reads a query, a folder, or any config. A pool is a fact
-// about the filesystem.
+// ⛔ A RECORD IS NOT "PUBLISHED" BY BEING HERE. `push` sends the site's records to a
+// backend, and they are served once the SITE is published — publishing the site
+// publishes its folder and what is in it. Nothing about a single record decides that.
+//
+// ⛔ THE PATH DECLARES THE MODEL, AND NOTHING ELSE. `collections/<name>/` used to
+// mean three things at once — these files are entities, their schema is
+// `@/<name>`, and they are grouped as `<name>` for placement. A schema folder here
+// declares only the model; grouping is `records.yml`'s.
+//
+// ⇒ So nothing here reads a query or a folder. A site's records are a fact about
+// the filesystem — plus `site.yml::paths.records`, which says where they live.
 //
 // ⭐ DEPTH NAMES THE SCOPE — the schema-ref grammar, spelled as directories:
 //
-//     entities/person/ada.md         → @/person        (the foundation's own)
-//     entities/std/person/ada.md     → @std/person      (the shared standard set)
-//     entities/acme/project/x.md     → @acme/project    (an org's)
+//     records/person/ada.md         → @/person        (the foundation's own)
+//     records/std/person/ada.md     → @std/person      (the shared standard set)
+//     records/acme/project/x.md     → @acme/project    (an org's)
 //
 // matching `build/src/resolve-data-schema.js`, which is the only grammar there
 // is: a bare directory name can mean `@/<name>` and nothing else.
 //
-// ⛔ BARE, NOT `entities/@std/`. Measured: `@` is a reserved indicator in YAML
+// ⛔ BARE, NOT `records/@std/`. Measured: `@` is a reserved indicator in YAML
 // 1.2, so a bare `@std/person/*.md` scalar throws in js-yaml — and the message is
 // `bad indentation of a sequence entry`, which names neither the cause nor the
-// fix. The `@` form would force quotes on the most common line in `records.yml`
-// and put two spellings in one list.
+// fix. The `@` form would force quotes on every pattern in `records.yml` that
+// names a scoped schema.
 //
 // ⛔ AND NO NESTING BELOW THE SCHEMA DIR, which is what makes the depth rule
 // total: it is the FILE's depth that decides, so one path answers the question
-// with nothing to classify and no ambiguous case to resolve.
+// with nothing to classify and no ambiguous case to resolve. Organization is a
+// `folder:` in `records.yml`, never a directory.
 //
-// ⭐ That costs nothing — it CLOSES a divergence that was live and silent.
-// `uwx/collection-source.js::reportNestedRecords` warns today that records below
-// a collection's top level "build and render locally but are absent from the
-// synced set": the delivery lane recursed and the sync lane was one level deep.
-// `records.yml` replaces on-disk nesting outright, so the two lanes stop
-// disagreeing rather than being taught to agree.
+// ⛔ THE DIRECTORY WAS `entities/` UNTIL 2026-09-21, and `site.yml::paths.entities`
+// the key that moved it. Both are refused by name rather than read (no alias —
+// there is no population to carry): a leftover `entities/` beside `records/` would
+// otherwise hold records nothing reads, silently.
 
 import { readdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { join, extname, basename } from 'node:path'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join, extname, basename, resolve } from 'node:path'
+import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
-/** Where a site's entities live, relative to its root. */
-export const ENTITIES_DIR = 'entities'
+/** Where a site's records live, relative to its root, unless `site.yml::paths.records` moves them. */
+export const RECORDS_DIR = 'records'
 
-/** Source extensions an entity file may have. Mirrors the sync-lane reader. */
+/** The directory's name until 2026-09-21. Read only to refuse it. */
+const RETIRED_DIR = 'entities'
+
+function isDirectory(path) {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function readSitePaths(siteRoot) {
+  const file = join(siteRoot, 'site.yml')
+  if (!existsSync(file)) return {}
+  try {
+    const doc = yaml.load(readFileSync(file, 'utf8'), YAML_OPTIONS)
+    return doc && typeof doc.paths === 'object' && doc.paths !== null ? doc.paths : {}
+  } catch {
+    // An unreadable site.yml is reported by whoever reads the site; this only
+    // needs the one key, and the default is the right answer without it.
+    return {}
+  }
+}
+
+/**
+ * Refuse the retired `entities/` directory when it is not the one the site reads.
+ *
+ * ⛔ A RENAMED DIRECTORY FAILS SILENTLY — its files are simply not read, and a site
+ * with no records looks exactly like a site whose records moved. So its presence
+ * stops the build, the push and every other reader, naming the new place.
+ */
+export function refuseRetiredRecordsDir(siteRoot, rel) {
+  const retired = resolve(siteRoot, RETIRED_DIR)
+  if (resolve(siteRoot, rel) === retired) return
+  if (!isDirectory(retired)) return
+  throw new Error(
+    `[uniweb] ${RETIRED_DIR}/ is not read — a site's records live in \`${rel}/\` now. ` +
+      `Rename the directory (\`git mv ${RETIRED_DIR} ${rel}\`) and every file in it is a record, ` +
+      `as before; records.yml no longer lists them.`
+  )
+}
+
+/**
+ * Where a site's records live — `site.yml::paths.records`, else `records/`.
+ *
+ * ⭐ THE ONE RESOLVER, and every lane asks it: the build, the push, the pull and
+ * the CLI. ⛔ Until 2026-09-21 only the build honoured the key — then called
+ * `paths.entities` — while push read the default, so a site that moved its records
+ * built fine and then failed to push, with an error naming a directory it did not
+ * use (measured).
+ *
+ * @param {string} siteRoot
+ * @param {object} [paths] - `site.yml::paths`, when the caller has already read it;
+ *   otherwise `site.yml` is read here.
+ * @returns {{ rel: string, abs: string }} `rel` as written (for messages), `abs`
+ *   resolved against the site root — an absolute `paths.records` is honoured.
+ */
+export function resolveRecordsDir(siteRoot, paths) {
+  const p = paths === undefined ? readSitePaths(siteRoot) : paths || {}
+  if (p.entities !== undefined) {
+    throw new Error(
+      `[uniweb] site.yml: \`paths.entities\` is now \`paths.records\` — the directory a site's ` +
+        `records live in. Rename the key.`
+    )
+  }
+  const rel = typeof p.records === 'string' && p.records.trim() ? p.records.trim().replace(/\/+$/, '') : RECORDS_DIR
+  refuseRetiredRecordsDir(siteRoot, rel)
+  return { rel, abs: resolve(siteRoot, rel) }
+}
+
+/** Source extensions a record file may have. Mirrors the sync-lane reader. */
 export const ENTITY_EXTENSIONS = new Set(['.md', '.yml', '.yaml', '.json', '.bib'])
 
 const isHidden = (name) => name.startsWith('_') || name.startsWith('.')
@@ -51,7 +132,7 @@ const isHidden = (name) => name.startsWith('_') || name.startsWith('.')
 /**
  * The schema ref a pool path names.
  *
- * @param {string[]} dirs - the directory segments below `entities/`
+ * @param {string[]} dirs - the directory segments below `records/`
  * @returns {string|null} the ref, or null when the depth names no schema
  */
 export function schemaForPoolDirs(dirs) {
@@ -61,7 +142,7 @@ export function schemaForPoolDirs(dirs) {
 }
 
 /**
- * Where a schema's entities live — the inverse of `schemaForPoolDirs`.
+ * Where a schema's records live — the inverse of `schemaForPoolDirs`.
  *
  * ⛔ ONE IMPLEMENTATION AND ITS INVERSE, IN ONE PLACE, for the reason this file
  * exists at all: the reader derives a model from a path and the pull side derives
@@ -70,7 +151,7 @@ export function schemaForPoolDirs(dirs) {
  * `deferredFromSchema` — a deriver and its recognizer must not be two copies.
  *
  * @param {string} schema - a ref: `@/name` or `@org/name`
- * @returns {string[]|null} the directory segments below `entities/`, or null for
+ * @returns {string[]|null} the directory segments below `records/`, or null for
  *   a ref this layout cannot express
  */
 export function poolDirsForSchema(schema) {
@@ -85,7 +166,7 @@ export function poolDirsForSchema(schema) {
 /**
  * Both readings of a 2-segment pool path, for an error that has to name them.
  *
- * ⚠️ A reader who mistakes `entities/person/2024/ada.md` for "the `person`
+ * ⚠️ A reader who mistakes `records/person/2024/ada.md` for "the `person`
  * schema, organised by year" needs to be told what the build actually did with
  * it, not merely that something did not resolve. The wrong reading is the
  * plausible one, so the message carries both.
@@ -98,33 +179,46 @@ export function poolPathReadings(dirs) {
 }
 
 /**
- * Read a site's entity pool.
+ * Read a site's records.
  *
- * Returns entities in a stable, path-sorted order — the wire's package digest
+ * Returns them in a stable, path-sorted order — the wire's package digest
  * depends on it — each carrying the model its path declares.
  *
  * ⚠️ NOTHING HERE RESOLVES A SCHEMA. Whether `@std/person` is a schema this site
  * can actually see is a question for whoever holds the foundation's built schema
  * map, and only that caller can raise the error §4 of the model asks for. This
- * reports the pool's SHAPE — a file with no schema above it, a file nested too
- * deep — because those are answerable from the filesystem alone.
+ * reports the directory's SHAPE — a file with no schema above it, a file nested
+ * too deep — because those are answerable from the filesystem alone.
  *
  * @param {string} siteRoot
  * @param {object} [opts]
- * @param {string} [opts.dir] - override the pool directory (site-root-relative)
+ * @param {string} [opts.dir] - the records directory, site-root-relative or
+ *   absolute, when the caller already resolved it; otherwise `resolveRecordsDir`
+ *   reads `site.yml::paths.records`.
  * @returns {Promise<{
  *   entities: Array<{ id, schema, slug, dirs, relPath, absPath, ext }>,
  *   errors: string[],
  *   exists: boolean,
+ *   dir: string,
  * }>}
- *   `id` is the entity's path under `entities/` without its extension — unique
+ *   `id` is the record's path under `records/` without its extension — unique
  *   by construction, stable across pushes, and derivable identically on both
- *   sides without either lane holding the other's ids.
+ *   sides without either lane holding the other's ids. `exists` is whether the
+ *   directory is there at all, which is not the same as holding nothing: a push
+ *   leaves the backend's folder alone for a site with no records directory.
  */
 export async function readEntityPool(siteRoot, opts = {}) {
-  const rel = opts.dir || ENTITIES_DIR
-  const base = join(siteRoot, rel)
-  if (!existsSync(base)) return { entities: [], errors: [], exists: false }
+  let rel
+  if (opts.dir) {
+    rel = String(opts.dir).replace(/\/+$/, '')
+    refuseRetiredRecordsDir(siteRoot, rel)
+  } else {
+    rel = resolveRecordsDir(siteRoot).rel
+  }
+  // ⛔ `resolve`, not `join`: an absolute `paths.records` is supported, and
+  // `join(siteRoot, '/abs')` is a path under the site root that does not exist.
+  const base = resolve(siteRoot, rel)
+  if (!isDirectory(base)) return { entities: [], errors: [], exists: false, dir: rel }
 
   const entities = []
   const errors = []
@@ -188,7 +282,7 @@ export async function readEntityPool(siteRoot, opts = {}) {
   }
 
   await walk(base, [])
-  return { entities, errors, exists: true }
+  return { entities, errors, exists: true, dir: rel }
 }
 
 /**

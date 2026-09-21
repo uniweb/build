@@ -290,16 +290,20 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     ...(sourceLocale ? { sourceLocale } : {}),
-    // ⭐ AUTHORED, from `records.yml`. It used to be derived — one branch per
-    // collection — which made the folder a shadow of a directory layout rather
-    // than something the author states.
-    folderNodes: col.folder?.nodes ?? [],
-    // ⛔ Whether `records.yml` EXISTS — not whether it holds anything. Missing is
-    // inert; empty is a folder that REMOVES. Compared against the affirmative
-    // value, never `!== 'missing'`: an absent state would read as declared, and
-    // that is precisely how a site with no records.yml once emitted a folder that
-    // would have emptied the live one.
-    declared: col.recordsState === 'empty' || col.recordsState === 'declared',
+    // ⭐ Every record in the directory, at the top of the folder or in the
+    // sub-folder `records.yml` places it in — and NOTHING when there is no folder to
+    // state. ⛔ Gated here as well as by `declared`, because the builder sends any
+    // non-empty tree: a `records.yml` whose folders hold only records that resolved
+    // no schema is a tree of empty branches, and sending it would replace the
+    // backend's folder with them (measured on the `dynamic` template, 2026-09-21).
+    folderNodes: col.sendFolder === true ? (col.folder?.nodes ?? []) : [],
+    // ⛔ Whether the file side HAS a folder to state (`records.js::sendsFolder`) —
+    // not whether it holds anything. A site with no records directory sends none
+    // and leaves the backend's alone; an empty directory sends an empty folder,
+    // which REMOVES (the CLI asks first). Compared as `=== true`: an absent value
+    // must read as "nothing to state", which is how a site with no records.yml once
+    // emitted a folder that would have emptied the backend's.
+    declared: col.sendFolder === true,
     // Placement identity from the folder document a previous push returned.
     // Absent on a first push — every item is genuinely new then. Its ABSENCE on a
     // later push is what made `publish` after `push` fail: send-only-changed skips
@@ -308,9 +312,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     ...(opts.folderItemUuids ? { itemUuids: opts.folderItemUuids } : {}),
   })
   // ⚠️ A placement that produced no entity is dropped by the builder rather than
-  // sent pointing at nothing — but it must still be SAID. It means an entity was
-  // placed in records.yml and then skipped upstream (a schema that did not
-  // resolve, most often), and the record is simply absent from the site.
+  // sent pointing at nothing — but it must still be SAID. `buildRecordEntities`
+  // places only records it produced, so this is a guard on the pairing rather than
+  // an expected path.
   if (folder?.warnings?.length) warnings.push(...folder.warnings)
 
   // `queryUuids` — identity for the `queries` section, keyed by query

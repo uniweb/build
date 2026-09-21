@@ -10,7 +10,7 @@
  *   locales/freeform/{locale}/
  *     pages/{pageRoute}/{stableId}.md      - By route
  *     page-ids/{pageId}/{stableId}.md      - By page ID (stable)
- *     entities/{schema dirs}/{slug}.md     - Records
+ *     records/{schema dirs}/{slug}.md      - Records
  *
  * Resolution order for sections:
  *   1. page-ids/{pageId}/{stableId}.md (if page has id:)
@@ -22,7 +22,7 @@ import { readFile, readdir, stat } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative, dirname, sep } from 'node:path'
 import yaml from 'js-yaml'
-import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, RECORDS_DIR } from '../site/entity-pool.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { computeSourceHash } from './freeform-manifest.js'
 
@@ -101,13 +101,13 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
 }
 
 /**
- * Load a free-form translation for one ENTITY.
+ * Load a free-form translation for one RECORD.
  *
- * Path: entities/{schema dirs}/{slug}.md — mirroring the pool exactly.
+ * Path: records/{schema dirs}/{slug}.md — mirroring the records directory exactly.
  *
- * ⛔ KEYED BY THE ENTITY, NOT BY A QUERY. It used to be
+ * ⛔ KEYED BY THE RECORD, NOT BY A QUERY. It used to be
  * `collections/{queryName}/{slug}.md`, which was fine only while a
- * collection was also a directory of files. With `entities/{schema}/` as the pool,
+ * collection was also a directory of files. With `records/{schema}/` holding records,
  * TWO queries can cover one schema — so a query-keyed path would make an author
  * write the same translation once per query, and finding neither from the other.
  * ⚠️ And a query is renameable where a record's model is not: keying on the query
@@ -185,7 +185,7 @@ async function discoverMarkdownFiles(dir, baseDir) {
  * register a translation that has no manifest entry yet.
  *
  * ⭐ Each path is relative to the locale's free-form directory — `pages/about/story.md`,
- * `page-ids/<id>/intro.md`, `entities/article/hello.md` — the form the manifest keys a
+ * `page-ids/<id>/intro.md`, `records/article/hello.md` — the form the manifest keys a
  * translation by and `freeformPathsFor` derives. ⛔ Until 2026-09-14 each was relative
  * to its own subdirectory (`about/story.md`), so none matched a manifest key: the build
  * registered no new file, and a status counted every stale or orphaned file as up to date.
@@ -217,10 +217,10 @@ export async function discoverFreeformTranslations(locale, localesDir) {
     result.pageIds = (await discoverMarkdownFiles(pageIdsDir, freeformDir)).sort()
   }
 
-  // Discover entity translations
-  const entitiesDir = join(freeformDir, ENTITIES_DIR)
-  if (existsSync(entitiesDir)) {
-    result.records = (await discoverMarkdownFiles(entitiesDir, freeformDir)).sort()
+  // Discover record translations
+  const recordsDir = join(freeformDir, RECORDS_DIR)
+  if (existsSync(recordsDir)) {
+    result.records = (await discoverMarkdownFiles(recordsDir, freeformDir)).sort()
   }
 
   return result
@@ -246,7 +246,7 @@ export async function getFreeformFileMeta(filePath) {
  * Parse a free-form translation file path to extract metadata
  *
  * @param {string} relativePath - Path relative to locale's freeform dir
- * @returns {Object} { type, pageRoute?, pageId?, queryName?, stableId, slug? }
+ * @returns {Object} { type, pageRoute?, pageId?, schema?, stableId, slug? }
  */
 export function parseFreeformPath(relativePath) {
   const parts = relativePath.split('/')
@@ -266,11 +266,12 @@ export function parseFreeformPath(relativePath) {
     return { type: 'pageId', pageId, stableId }
   }
 
-  if (parts[0] === ENTITIES_DIR) {
-    // collections/articles/getting-started.md → { type: 'collection', queryName: 'articles', slug: 'getting-started' }
+  if (parts[0] === RECORDS_DIR) {
+    // records/std/person/ada.md → { type: 'record', schema: '@std/person', slug: 'ada' }
+    // ⛔ This returned `queryName: parts[1]` until 2026-09-21 — the first schema
+    // segment (`std` above), and never a query's name. Nothing read it.
     const slug = parts[parts.length - 1].replace('.md', '')
-    const queryName = parts[1]
-    return { type: 'record', queryName, slug }
+    return { type: 'record', schema: schemaForPoolDirs(parts.slice(1, -1)), slug }
   }
 
   return { type: 'unknown', relativePath }
@@ -343,7 +344,7 @@ function freeformSections(siteContent) {
  *   - `canJudge(path)` — whether this content can say a translation at `path` is
  *     orphaned. ⛔ Only a page section's (`pages/…`, `page-ids/…`), and not one for a page
  *     whose sections the content does not carry — a prerendered site with split content
- *     rewrites `site-content.json` without them. A record's (`entities/…`) is read from
+ *     rewrites `site-content.json` without them. A record's (`records/…`) is read from
  *     records this content does not hold. A check that cannot see the source must never
  *     call its translation orphaned: `prune --freeform` deletes what it is told is.
  *
@@ -413,10 +414,10 @@ export function buildFreeformPath(section, page, preferPageId = true) {
  *
  * @param {string} schema - the entity's model ref (`@/name` or `@org/name`)
  * @param {string} slug - the entity's slug
- * @returns {string|null} e.g. `entities/article/getting-started.md`, or null for a
+ * @returns {string|null} e.g. `records/article/getting-started.md`, or null for a
  *   ref this layout cannot express
  */
 export function buildFreeformRecordPath(schema, slug) {
   const dirs = poolDirsForSchema(schema)
-  return dirs ? `${ENTITIES_DIR}/${dirs.join('/')}/${slug}.md` : null
+  return dirs ? `${RECORDS_DIR}/${dirs.join('/')}/${slug}.md` : null
 }

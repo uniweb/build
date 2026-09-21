@@ -100,8 +100,8 @@ describe('what an external query may declare', () => {
 describe('an external query compiles nothing', () => {
   it('no `/data/<name>.json` stands in for a live source', async () => {
     const root = mkdtempSync(join(tmpdir(), 'external-compile-'))
-    mkdirSync(join(root, 'entities', 'post'), { recursive: true })
-    writeFileSync(join(root, 'entities', 'post', 'a.md'), '---\ntitle: A\n---\n\nA\n')
+    mkdirSync(join(root, 'records', 'post'), { recursive: true })
+    writeFileSync(join(root, 'records', 'post', 'a.md'), '---\ntitle: A\n---\n\nA\n')
     const queries = { items: { url: 'https://api.test/items' }, posts: { schema: '@/post' } }
     const saved = console.log
     console.log = () => {}

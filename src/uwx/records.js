@@ -107,11 +107,11 @@ function stripSigils(value) {
     //
     // ⭐ Neither encoding is content. What the folder SAYS is "this branch contains
     // this record, here, in this order" — and that is already hashed: a leaf carries
-    // `name` (the record's handle) inside a branch carrying the collection's.
-    // A `folders:` branch's entries are COLLECTION names, so every leaf under one
-    // comes from a single collection, where a slug is unique. Position plus segment
-    // therefore identify the record on their own; `$ref` adds a payload-local handle
-    // and `entry` adds identity, and both are exactly what `$uuid` is stripped for.
+    // `name` (the record's handle) inside the branch that holds it, and names are
+    // unique among siblings — the push refuses two that are not
+    // (`siblingNameClashes`, below). Position plus segment therefore identify the
+    // record on their own; `$ref` adds a payload-local handle and `entry` adds
+    // identity, and both are exactly what `$uuid` is stripped for.
     //
     // ⚖️ The previous rule kept `$ref` "so a reference change is visible". It still
     // is: point a leaf at a different record and its `name` moves with it.
@@ -181,13 +181,15 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
 }
 
 /**
- * Map one file-based collection's records to entity-content `$`-documents of
+ * Map records of one schema to entity-content `$`-documents of
  * `declaration`'s Model. PURE — records + declaration in, entity descriptors out;
  * no I/O, no minting. The backend mints `$uuid` on first sync; a record that
  * already carries `$uuid` (back-filled from a prior sync) round-trips it.
  *
  * @param {object} params
- * @param {string} params.queryName  - the query's name in site.yml
+ * @param {string} params.label  - what the records are, for messages and the path
+ *        inside the package — the schema folder they came from (`article`,
+ *        `std/person`)
  * @param {object[]} params.records        - [{ slug, ...fields }]
  * @param {object} params.declaration      - the `@uniweb/data-schema` declaration
  *        (from toDataSchemaDeclaration): `{ name, brief, sections }`
@@ -198,7 +200,7 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  *   `{ id, uuid, model, file, document }` — `document` is the section-keyed body.
  */
 export function recordsToEntities({
-  queryName,
+  label,
   records,
   declaration,
   sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale,
@@ -267,7 +269,7 @@ export function recordsToEntities({
   const warnings = []
   if (contentMatches.length > 1) {
     warnings.push(
-      `${queryName}: ${declaration.name} has more than one content ` +
+      `${label}: ${declaration.name} has more than one content ` +
         `(markdown / html / prosemirror) field — the markdown body maps to ` +
         `"${bodyTarget.secName}.${bodyTarget.key}"`
     )
@@ -275,7 +277,7 @@ export function recordsToEntities({
   for (const record of records || []) {
     const slug = record.slug
     if (!slug) {
-      warnings.push(`${queryName}: a record without a slug was skipped`)
+      warnings.push(`${label}: a record without a slug was skipped`)
       continue
     }
     // ⛔ `$id` IS NOT THE SLUG. It is the payload-local, PATH-QUALIFIED handle, so
@@ -283,18 +285,16 @@ export function recordsToEntities({
     // frontmatter `$id` wins.
     //
     // ⚠️ The authoritative value is the record's POOL POSITION — `<dirs>/<slug>` —
-    // and it is set upstream, at the pool walk; see the ⭐ comment there, which is
-    // where the reasoning lives. `<query>/<slug>` below is only the fallback for a
-    // record that did not arrive through the pool, and it is explicitly NOT the
-    // shape identity is meant to take: two queries over one Model would mint two
-    // identities for one file.
+    // and it is set upstream, where the records directory is walked; see the ⭐
+    // comment there, which is where the reasoning lives. `<label>/<slug>` below is
+    // only the fallback for a record that did not arrive that way.
     //
     // The qualification is a CONSTRAINT, not a style: the sync response is keyed per
-    // (`$model`, `$id`), so a bare slug would collide whenever two queries over the
-    // same Model reuse one (see the duplicate check below). ⇒ Do not describe this
+    // (`$model`, `$id`), so a bare slug would collide whenever two schema folders
+    // resolving to one Model reuse one (see the duplicate check). ⇒ Do not describe this
     // value as "the slug" — the folder leaf's `name` is the bare segment, and
     // conflating the two has already misdirected a naming decision.
-    const id = record.$id || `${queryName}/${slug}`
+    const id = record.$id || `${label}/${slug}`
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
@@ -323,13 +323,13 @@ export function recordsToEntities({
     for (const key of Object.keys(record)) {
       if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
       warnings.push(
-        `${queryName}/${slug}: field "${key}" is not on ` +
+        `${label}/${slug}: field "${key}" is not on ` +
           `${declaration.name} — not synced`
       )
     }
     if (hasBody && !bodyTarget) {
       warnings.push(
-        `${queryName}/${slug}: markdown body present but ` +
+        `${label}/${slug}: markdown body present but ` +
           `${declaration.name} has no content body field — body not synced`
       )
     }
@@ -351,7 +351,10 @@ export function recordsToEntities({
       uuid,
       slug,
       model: declaration.name, // reference the Model BY NAME — importer resolves it
-      file: `entities/${queryName}/${slug}.json`,
+      // The file's place inside the package — opaque to the reader, which follows
+      // `entries[].file` (`entity-document.js`). Label + slug, not `$id`: a slug is
+      // unique within its schema folder, and an authored `$id` need not be.
+      file: `entities/${label}/${slug}.json`,
       document,
     })
   }
@@ -359,14 +362,13 @@ export function recordsToEntities({
 }
 
 // Post-pass: override a collection record's localized CONTENT body with a per-locale
-// FREE-FORM body when `locales/freeform/{locale}/entities/<schema>/<slug>.md` exists
+// FREE-FORM body when `locales/freeform/{locale}/records/<schema>/<slug>.md` exists
 // — the override wins over the structural map, exactly like site-content sections
 // (site.js localizeContentTree). Only a `format: prosemirror` localized field can
 // take it (it is a PM doc on the wire; a markup `text` body stays a raw string).
 // Mutates the entity documents in place. Async — the free-form read hits the disk.
 async function applyFreeformRecordOverrides({
   entities,
-  queryName,
   declaration,
   sourceLocale,
   targetLocales,
@@ -399,15 +401,44 @@ async function applyFreeformRecordOverrides({
 
 // --- orchestration (file I/O) ------------------------------------------------
 
-// The collections in site.yml that opt into export (an object decl with `model:`).
-// The declared collections that opt into sync: a resolvable data schema present
-// (explicit or convention-defaulted) and not opted out (`sync: false`). Takes the
-// merged declarations from resolveQueriesConfig (collections.yml over
-// site.yml::collections), so collections.yml is honored without re-reading.
-function syncableQueries(declarations) {
+// The queries over the SITE'S records — every declaration with a schema, which is
+// every one without `url:` (an external query's records are its address's).
+//
+// ⛔ They do not decide what is pushed: the records directory does. A query matters
+// here for two things only — whether its schema was ASKED FOR (an explicit schema
+// that resolves to nothing is an error, a defaulted one is not), and which queries
+// ship as static files because their schema resolved to nothing.
+function siteQueries(declarations) {
   const out = []
   for (const decl of Object.values(declarations)) {
-    if ((decl.schema || decl.model) && decl.sync !== false) out.push({ name: decl.name, decl })
+    if (decl.schema || decl.model) out.push({ name: decl.name, decl })
+  }
+  return out
+}
+
+// Replace each folder leaf — which names a FILE — with one leaf per record that file
+// produced, and drop a leaf whose file produced none.
+//
+// ⭐ A FILE IS NOT ALWAYS ONE RECORD, and a record's `$id` is not always its file's
+// stem. A BibTeX or array-form file holds several; a `.md` whose frontmatter sets
+// `slug:` is one record named for that slug. The folder placed files and the payload
+// carries records, so until 2026-09-21 every such leaf pointed at an id nothing
+// produced and was dropped with a warning — harmless while `records.yml` rarely listed
+// those files, and on every push once every file in the directory is placed.
+//
+// ⚠️ A file that produced nothing is dropped WITHOUT a warning here: its schema did
+// not resolve (reported as schemaless), or its records were skipped (reported while
+// reading them). Saying it a second time, as a folder problem, names the wrong cause.
+function placeProducedRecords(nodes, producedBy) {
+  const out = []
+  for (const node of nodes || []) {
+    if (node?.kind === 'branch') {
+      out.push({ ...node, $children: placeProducedRecords(node.$children, producedBy) })
+      continue
+    }
+    for (const r of producedBy.get(node?.$entityId) || []) {
+      out.push({ kind: 'ref', name: r.slug, $entityId: r.id })
+    }
   }
   return out
 }
@@ -492,38 +523,13 @@ function resolveDeclaration(schema, modelName) {
   return null
 }
 
-// Load a query's ORIGINAL source records for export — the author's files,
-// untouched (raw frontmatter + raw markdown body, raw YAML/JSON, raw BibTeX). This
-// is deliberately NOT `processQueries` (the delivery pipeline that builds
-// public/data, converts bodies to ProseMirror, and copies assets). Sync carries
-// the source.
-//
-// ⭐ THE QUERY NAMES A SCHEMA AND THE POOL FOLLOWS. It does not name a directory,
-// and there is no disk path for it to name: `entities/{schema}/` declares the
-// model, so the entities of a schema ARE its records. That is the de-conflation —
-// `collections/<name>/` used to answer "which files", "which schema" and "grouped
-// how" with one directory, and only the first two were ever the same question.
-//
-// Remote (`url:`) queries have no local files; the caller warns and skips.
-function loadSourceRecordsFromPool(poolBySchema, decl, placements) {
-  if (!decl.schema) return null
-  const entities = poolBySchema.get(decl.schema)
-  if (!entities) return null
-  // ⛔ ONLY WHAT `records.yml` REFERENCES. An entity of the right schema that no
-  // entry places is not a record, so syncing it would create something nobody can
-  // reach — and would make the payload disagree with the folder describing it.
-  const placed = entities.filter((e) => placements.has(e.id))
-  return placed.length ? placed : null
-}
-
 /**
- * Build the collection entity descriptors + back-fill index for a site's
- * `model:`-mapped file collections — PURE assembly (no hashing, no emit), so it
- * composes with other entity sources (e.g. site-content) into one sync package.
- * First sync sends no `$uuid` (the backend mints); re-sync round-trips the
- * back-filled `$uuid`. `mappedCount` lets a caller tell "no `model:` collections
- * declared" (0) from "declared but empty". Throws on an unresolvable Model or a
- * duplicate ($model, $id) within the submission.
+ * Build the record entity descriptors + back-fill index for a site's records —
+ * PURE assembly (no hashing, no emit), so it composes with other entity sources
+ * (e.g. site-content) into one sync package. First sync sends no `$uuid` (the
+ * backend mints); re-sync round-trips the back-filled `$uuid`. Throws on an
+ * unresolvable EXPLICIT Model, an invalid `records.yml`, or a duplicate
+ * ($model, $id) within the submission.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
@@ -533,51 +539,77 @@ function loadSourceRecordsFromPool(poolBySchema, decl, placements) {
  *        `@uniweb/data-schema` declaration (or null). The verb wires this to the
  *        backend's Model-read route. Without it, the local foundation is required.
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
- * @returns {Promise<{ entities: object[], index: object[], warnings: string[], schemaless: Array<{name: string}>, mappedCount: number }>}
- *   `schemaless` lists collections that resolved no data schema (the convention-
- *   default soft-skip) — not synced as entities; the composite deploy delivers
- *   them statically via the data ball.
+ * @returns {Promise<{ entities: object[], index: object[], warnings: string[],
+ *   schemaless: Array<{name: string, model: string}>, colConfig: object,
+ *   folder: object, recordsDirExists: boolean }>}
+ *   `schemaless` lists the QUERIES whose schema resolved to nothing (the
+ *   convention-default soft-skip) — their records are not pushed as entities, and
+ *   the composite deploy delivers those queries statically instead.
+ *   `recordsDirExists` is false for a site with no records directory at all.
+ *   `sendFolder` is whether a push sends the folder — see `sendsFolder`.
  */
 export async function buildRecordEntities(siteRoot, opts = {}) {
-  // Merged collections config (collections.yml over site.yml::collections). Reused
-  // from the caller when provided (sync-package shares it with the folder builder).
-  // ⭐ `records.yml` IS THE FOLDER, AND IT DECIDES WHAT SYNCS. Listing an entity
-  // is what makes it a record; an entity nothing references exists but cannot be
-  // publicly fetched — so it is a draft, for free, with no flag to set. This is
-  // why `collections.yml::sync` is deleted rather than ported: "do not sync" is
-  // now "reference nothing", which is the actual round trip.
+  // ⭐ EVERY FILE IN `records/` IS A RECORD, AND EVERY RECORD IS PUSHED (ruled
+  // 2026-09-21 [Diego]). Placing a file in the directory is what makes it one —
+  // the file-side counterpart of placing a ref in the backend's folder — so nothing
+  // lists it and nothing leaves it out. `records.yml` only sorts records into
+  // sub-folders. A file named with a leading `_` is not read, so it is not a record.
   //
-  // ⛔ AND `missing` IS NOT `empty`. Missing means do not sync at all and leave
-  // the server's folder untouched; empty means sync an empty folder, REMOVING
-  // what is there. The safe state is the absence of a file, so a live folder
-  // cannot be wiped by deleting one — the destructive act requires affirmatively
-  // creating one, and the CLI asks before it happens.
+  // ⛔ A PUSHED RECORD IS NOT LIVE. It sits in the site's folder on the backend and
+  // is served once the SITE is published — publishing the site publishes its folder
+  // and what is in it. Nothing here decides that for a record.
   //
-  // ⚠️ READ FIRST, ABOVE EVERY EARLY RETURN. `recordsState` has to ride out of
-  // this function on every path, because its ABSENCE reads as "not missing" to a
-  // caller — measured: a site with no queries returned no state, the folder
-  // builder took that for `declared`, and a site with no `records.yml` at all
-  // emitted an empty folder that would have removed everything.
+  // ⛔ UNTIL 2026-09-21 THE SET WAS `records.yml`'s: an unlisted entity was not
+  // pushed, and a missing `records.yml` pushed nothing. The inert state moved with
+  // the membership: a site with NO RECORDS DIRECTORY sends no folder and leaves the
+  // backend's untouched (`recordsDirExists`), so a site whose records live only on
+  // the backend is not emptied by a push of its pages.
+  //
+  // ⛔ AND THE SET IS NOT A QUERY'S. This walked the queries until 2026-09-21 and
+  // mapped each query's records, so two queries over one schema mapped every record
+  // twice and the duplicate check refused the push (measured: "appears in more than
+  // one query"), and a record no query read was never pushed. Records are walked
+  // once, by the schema their folder declares.
+  const pool = await readEntityPool(siteRoot)
   const recordsCfg = await readRecordsConfig(siteRoot)
   if (recordsCfg.error) throw new Error(`uwx/records: ${recordsCfg.error}`)
-  const recordsState = recordsCfg.state
+  const folder = resolveFolder(recordsCfg.entries, pool.entities, { dir: pool.dir })
+  if (folder.errors.length) {
+    throw new Error(`uwx/records: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
+  }
+  const warnings = [...pool.errors, ...folder.warnings]
 
   const colConfig = opts.queriesConfig || (await resolveQueriesConfig(siteRoot))
-  const mapped = syncableQueries(colConfig.declarations)
-  if (mapped.length === 0) return { entities: [], index: [], warnings: [], schemaless: [], mappedCount: 0, colConfig, recordsState, folder: null }
+  const queries = siteQueries(colConfig.declarations)
+  const poolBySchema = groupPoolBySchema(pool.entities)
+  if (poolBySchema.size === 0 && queries.length === 0) {
+    return {
+      entities: [],
+      index: [],
+      warnings,
+      schemaless: [],
+      colConfig,
+      folder: { ...folder, nodes: [] },
+      recordsDirExists: pool.exists,
+      sendFolder: sendsFolder(pool, []),
+    }
+  }
 
   // A Model declaration comes from a LOCAL foundation (offline) or, for a
   // non-local Model, from the injected async `resolveModel(name)` — the verb wires
   // that to the backend's Model-read route (declaration form). The local
   // foundation is required ONLY when no resolver is provided.
   const resolveModel = typeof opts.resolveModel === 'function' ? opts.resolveModel : null
-  // The local foundation is REQUIRED only when at least one collection asked for a
-  // schema EXPLICITLY (and there's no remote resolver). Collections that only got a
-  // schema from the subfolder-name convention soft-skip when nothing resolves, so a
-  // delivery-only site with no foundation must not be forced to have one.
-  const hasExplicit = mapped.some((m) => m.decl.schemaExplicit)
+  // The local foundation is REQUIRED only when a query asked for a schema
+  // EXPLICITLY (and there's no remote resolver). A schema that only a folder name
+  // or a query name supplied soft-skips when nothing resolves, so a delivery-only
+  // site with no foundation must not be forced to have one.
+  const explicitBy = new Map() // schema (as written) → the first query that asked for it
+  for (const { name, decl } of queries) {
+    if (decl.schemaExplicit && !explicitBy.has(decl.schema)) explicitBy.set(decl.schema, name)
+  }
   const localSchema = loadLocalFoundationSchema(siteRoot, opts, {
-    required: !resolveModel && hasExplicit,
+    required: !resolveModel && explicitBy.size > 0,
   })
 
   const declCache = new Map()
@@ -588,35 +620,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     declaration = declaration || null
     declCache.set(modelName, declaration)
     return declaration
-  }
-
-  const sourceLocale =
-    opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
-
-  // Target locales for wrapping localized record fields per-locale: those with a
-  // structural-translation file (locales/records/{locale}.json) UNIONED with
-  // those that only have a free-form override dir (locales/freeform/{locale}/) — a
-  // record localized solely by a free-form body would otherwise go undiscovered.
-  const targetLocales = [
-    ...new Set([...discoverLocales(siteRoot, 'records'), ...discoverFreeformLocales(siteRoot)]),
-  ].filter((l) => l !== sourceLocale)
-  const translations =
-    targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'records') : null
-
-  const entities = []
-  const index = []
-  const warnings = []
-
-  // ⭐ THE POOL, READ ONCE. A query names a `schema:` and the entities of that
-  // schema are its records — so the pool is walked once here rather than a
-  // directory per declaration, and two queries over one schema read one set of
-  // files instead of two.
-  const pool = await readEntityPool(siteRoot)
-  const poolBySchema = groupPoolBySchema(pool.entities)
-
-  const folder = resolveFolder(recordsCfg.entries, pool.entities)
-  if (folder.errors.length) {
-    throw new Error(`uwx/records: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
   }
 
   // ⛔ `@/x` IS A FOUNDATION-RELATIVE ALIAS AND MUST BE RESOLVED BEFORE IT SHIPS.
@@ -640,78 +643,96 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // ⛔ The rule lives in `./self-scope.js`, shared with the `queries` Section
   // (`site.js::queriesNested`): a query's `schema` must name exactly the Model
   // these records are stored under, so both go through one function with one org.
-  // Collections that resolved no data schema (the convention-default soft-skip
-  // below) — not synced as folder entities. The composite deploy delivers these
-  // statically (the "data ball") instead, so the caller can route them there.
-  const schemaless = []
-  // The sync response is keyed per ($model, $id), so the pair must be unique
-  // within one submission (two queries over the same Model could otherwise
-  // reuse a slug).
-  const seen = new Set()
-  for (const { name, decl } of mapped) {
-    const declaredModel = decl.schema || decl.model
-    const modelName = resolveSelfScope(declaredModel, opts.org)
+  const warnedUnscoped = new Set()
+  const modelFor = (schema, where) => {
+    const modelName = resolveSelfScope(schema, opts.org)
     // Unresolvable `@/` — no org is known. Ship it rather than throwing (a `status`
     // probe on a never-pushed site has no org and must still count), but say so:
     // the backend's refusal names a missing Model and cannot name this cause.
-    if (modelName === declaredModel && typeof declaredModel === 'string' && declaredModel.startsWith('@/')) {
+    if (modelName === schema && typeof schema === 'string' && schema.startsWith('@/') && !warnedUnscoped.has(schema)) {
+      warnedUnscoped.add(schema)
       warnings.push(
-        `query "${name}": \`${declaredModel}\` is foundation-relative and no org is known, ` +
+        `${where}: \`${schema}\` is foundation-relative and no org is known, ` +
           `so it ships unresolved. The backend resolves Models by name and will refuse it. ` +
           `Pass \`--org @handle\`, or push once so the site records its org.`
       )
     }
+    return modelName
+  }
+
+  // ⚠️ AN EXPLICIT SCHEMA THAT RESOLVES TO NOTHING IS THE AUTHOR'S ERROR — and a
+  // depth-2 folder has two readings worth naming. `records/person/2024/ada.md`
+  // resolves as `@person/2024` — the rule is total, so it is not ambiguous — but an
+  // author who meant "records organised by year inside the `person` schema" needs to
+  // be told what the build actually read, not only that something failed to resolve.
+  const unresolvedExplicit = (modelName, queryName) => {
+    const dirs = poolDirsForSchema(modelName)
+    const { alternative } = dirs ? poolPathReadings(dirs) : { alternative: null }
+    return new Error(
+      `uwx/records: Model "${modelName}" (query "${queryName}") could not be ` +
+        'resolved — not defined by a local foundation' +
+        (resolveModel
+          ? ', and the backend has no such Model (register it first).'
+          : '. Run via `uniweb sync` (which fetches non-local Models from the ' +
+            'registry), or provide a local foundation that defines it.') +
+        (alternative
+          ? ` If you meant \`${pool.dir}/${dirs[0]}/\` (${alternative}) organised by ` +
+            `\`${dirs[1]}\`, note that a folder inside a schema folder is read as an ` +
+            `org scope. Organise records in records.yml, not on disk.`
+          : '')
+    )
+  }
+
+  const sourceLocale =
+    opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
+
+  // Target locales for wrapping localized record fields per-locale: those with a
+  // structural-translation file (locales/records/{locale}.json) UNIONED with
+  // those that only have a free-form override dir (locales/freeform/{locale}/) — a
+  // record localized solely by a free-form body would otherwise go undiscovered.
+  const targetLocales = [
+    ...new Set([...discoverLocales(siteRoot, 'records'), ...discoverFreeformLocales(siteRoot)]),
+  ].filter((l) => l !== sourceLocale)
+  const translations =
+    targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'records') : null
+
+  // ⭐ THE FILE'S `$uuid` IS OURS; THE WIRE'S IS THE BACKEND'S (2026-09-20).
+  //
+  // A record's `$uuid` is its stable identity and travels with the file, so moving
+  // or renaming it changes nothing. What goes on the WIRE to backend B is the uuid B
+  // minted for it — looked up in `sync.json::backends.<B>.records` — or none, so B
+  // mints one. ⛔ Never send a backend a uuid it did not mint: whether it would
+  // accept one is the backend's to say, and this is correct either way.
+  //
+  // For the FIRST backend a record reaches, B's minted uuid is written into the
+  // file and the map is identity — exactly what happened before this change, so a
+  // single-backend project behaves as it always did.
+  const recordMap = opts.backend ? readBackendState(siteRoot, opts.backend).records || {} : {}
+
+  const entities = []
+  const index = []
+  // pool id (the FILE) → the records it produced, so the folder places records.
+  const producedBy = new Map()
+  // record id → the file it came from, for messages that must name a file.
+  const sourceOf = new Map()
+  // Schemas (as written) whose Model resolved to nothing — soft-skipped.
+  const unresolved = new Set()
+  // The sync response is keyed per ($model, $id), so the pair must be unique
+  // within one submission.
+  const seen = new Set()
+
+  for (const [schema, poolEntities] of poolBySchema) {
+    const label = poolEntities[0].dirs.join('/')
+    const modelName = modelFor(schema, `${pool.dir}/${label}/`)
     const declaration = await declarationFor(modelName)
     if (!declaration) {
-      // A convention-defaulted schema (subfolder-name) that doesn't resolve is a
-      // soft skip — the collection is delivery-only, not a sync target. Only an
-      // EXPLICIT schema/model the author asked for is a hard error.
-      if (!decl.schemaExplicit) {
-        // ⛔ Deliberately NOT a `warnings` string. This is a product decision the
-        // author is making — entities or static files — and it needs to be
-        // reported at a prominence a prose warning cannot carry. Callers get the
-        // structured entry and say it themselves (`cli/src/commands/{publish,push}.js`).
-        //
-        // It used to push `"… — not synced"`, printed dim among everything else.
-        // That was misleading in the expensive direction: the data IS delivered,
-        // as static files. An author read "not synced" as "my data did not
-        // upload" — or skimmed it — and either way could not act on it.
-        schemaless.push({ name, model: modelName })
-        continue
-      }
-      // ⚠️ NAME BOTH READINGS OF A DEPTH-2 POOL PATH. `entities/person/2024/ada.md`
-      // resolves as `@person/2024` — the rule is total, so it is not ambiguous —
-      // but an author who meant "records organised by year inside the `person`
-      // schema" needs to be told what the build actually read, not only that
-      // something failed to resolve. The wrong reading is the plausible one.
-      const dirs = poolDirsForSchema(modelName)
-      const { alternative } = dirs ? poolPathReadings(dirs) : { alternative: null }
-      throw new Error(
-        `uwx/records: Model "${modelName}" (query "${name}") could not be ` +
-          'resolved — not defined by a local foundation' +
-          (resolveModel
-            ? ', and the backend has no such Model (register it first).'
-            : '. Run via `uniweb sync` (which fetches non-local Models from the ' +
-              'registry), or provide a local foundation that defines it.') +
-          (alternative
-            ? ` If you meant \`entities/${dirs[0]}/\` (${alternative}) organised by ` +
-              `\`${dirs[1]}\`, note that a folder inside a schema folder is read as an ` +
-              `org scope. Organise records in records.yml, not on disk.`
-            : '')
-      )
-    }
-    const poolEntities = loadSourceRecordsFromPool(poolBySchema, decl, folder.placements)
-    if (poolEntities == null) {
-      // No entities of this schema on disk. A remote (`url:`) query has none by
-      // definition; a file-based one with an empty pool is an author state worth
-      // naming, because "nothing synced" and "nothing there" look identical.
-      warnings.push(
-        decl.url
-          ? `${name}: a remote (\`url:\`) query has no local entities — skipped`
-          : `${name}: no entities of ${decl.schema} in the pool — nothing to sync`
-      )
+      // An explicit schema the author asked for is a hard error; one only the
+      // folder's name supplied is a soft skip, reported below.
+      if (explicitBy.has(schema)) throw unresolvedExplicit(modelName, explicitBy.get(schema))
+      unresolved.add(schema)
       continue
     }
+
     // Flatten source records into the mapper's flat shape; the markdown body
     // rides under `$body` (the mapper maps it to the brief's content body field).
     // Keep a per-slug pointer back to the source file for `$uuid` write-back —
@@ -720,39 +741,29 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     const flat = []
     const sourceBySlug = new Map()
     for (const pooled of poolEntities) {
+      const produced = []
       for (const r of await readEntityFile(pooled.absPath)) {
         if (!r.slug) {
-          warnings.push(`${name}: a record without a slug was skipped`)
+          warnings.push(`${pooled.relPath}: a record without a slug was skipped`)
           continue
         }
         const rec = { ...r.data, slug: r.slug }
         if (r.body !== undefined) rec.$body = r.body
-        // ⭐ THE RECORD'S IDENTITY IS ITS POOL POSITION, not `<query>/<slug>`. It
-        // has to be: the folder places entities and must reference the very ones
-        // the payload carries, and two queries over one schema would otherwise
-        // mint two identities for one file. `<dirs>/<slug>` is unique by
-        // construction and derivable on both sides.
+        // ⭐ THE RECORD'S IDENTITY IS ITS POSITION IN THE DIRECTORY — `<dirs>/<slug>`,
+        // unique by construction and derivable on both sides. The folder must
+        // reference the very records the payload carries.
         //
         // ⚠️ A multi-record file (array YAML, BibTeX) contributes several records
         // from one path, so the slug — not the file stem — completes the id.
         rec.$id = rec.$id || [...pooled.dirs, r.slug].join('/')
         flat.push(rec)
         sourceBySlug.set(r.slug, r)
+        produced.push({ id: rec.$id, slug: r.slug })
+        sourceOf.set(rec.$id, pooled.relPath)
       }
+      producedBy.set(pooled.id, produced)
     }
 
-    // ⭐ THE FILE'S `$uuid` IS OURS; THE WIRE'S IS THE BACKEND'S (2026-09-20).
-    //
-    // A record's `$uuid` is its stable identity and travels with the file, so moving
-    // or renaming it changes nothing. What goes on the WIRE to backend B is the uuid B
-    // minted for it — looked up in `sync.json::backends.<B>.records` — or none, so B
-    // mints one. ⛔ Never send a backend a uuid it did not mint: whether it would
-    // accept one is the backend's to say, and this is correct either way.
-    //
-    // For the FIRST backend a record reaches, B's minted uuid is written into the
-    // file and the map is identity — exactly what happened before this change, so a
-    // single-backend project behaves as it always did.
-    const recordMap = opts.backend ? readBackendState(siteRoot, opts.backend).records || {} : {}
     const ownIds = new Map()
     const onWire = flat.map((rec) => {
       const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
@@ -763,7 +774,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     })
 
     const mappedOut = recordsToEntities({
-      queryName: name,
+      label,
       records: onWire,
       declaration,
       sourceLocale,
@@ -774,7 +785,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     if (targetLocales.length > 0) {
       await applyFreeformRecordOverrides({
         entities: mappedOut.entities,
-        queryName: name,
         declaration,
         sourceLocale,
         targetLocales,
@@ -786,8 +796,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       if (seen.has(dupKey)) {
         throw new Error(
           `uwx/records: duplicate ($model, $id) in one sync — "${e.id}" of ` +
-            `${e.model} appears in more than one query. Each ($model, $id) ` +
-            'must be unique within a sync; make the slugs unique.'
+            `${e.model} comes from more than one record. Each record in a schema ` +
+            'folder needs its own slug; make the slugs unique.'
         )
       }
       seen.add(dupKey)
@@ -817,7 +827,105 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     warnings.push(...mappedOut.warnings)
   }
 
-  return { entities, index, warnings, schemaless, mappedCount: mapped.length, colConfig, folder, recordsState }
+  // Queries whose schema resolved to nothing — not pushed as entities. The composite
+  // deploy delivers these statically (the "data ball") instead, so the caller can
+  // route them there.
+  //
+  // ⛔ Deliberately NOT a `warnings` string. This is a product decision the author
+  // is making — entities or static files — and it needs to be reported at a
+  // prominence a prose warning cannot carry. Callers get the structured entry and
+  // say it themselves (`cli/src/commands/{publish,push}.js`). It used to push
+  // `"… — not synced"`, printed dim among everything else, and an author read that
+  // as "my data did not upload" when it is delivered, as static files.
+  const schemaless = []
+  for (const { name, decl } of queries) {
+    const schema = decl.schema || decl.model
+    const hasRecords = poolBySchema.has(schema)
+    const resolved = hasRecords
+      ? !unresolved.has(schema)
+      : Boolean(await declarationFor(modelFor(schema, `query "${name}"`)))
+    if (!resolved) {
+      if (decl.schemaExplicit) throw unresolvedExplicit(resolveSelfScope(schema, opts.org), name)
+      schemaless.push({ name, model: resolveSelfScope(schema, opts.org) })
+      continue
+    }
+    if (!hasRecords) {
+      // "Nothing pushed" and "nothing there" look identical, so say which.
+      const dirs = poolDirsForSchema(schema)
+      warnings.push(
+        `query "${name}": ${dirs ? `${pool.dir}/${dirs.join('/')}/` : pool.dir + '/'} holds no records of ${schema} — ` +
+          'nothing to push for it.'
+      )
+    }
+  }
+  // Records whose schema resolved to nothing and that no query reads: they are not
+  // pushed, and no static file carries them either — say so, once per folder.
+  for (const schema of unresolved) {
+    if (queries.some(({ decl }) => (decl.schema || decl.model) === schema)) continue
+    const n = poolBySchema.get(schema).length
+    warnings.push(
+      `${pool.dir}/${poolBySchema.get(schema)[0].dirs.join('/')}/: no data schema resolves for ${schema}, ` +
+        `and no query reads ${n === 1 ? 'this record' : `these ${n} records`} — not pushed.`
+    )
+  }
+
+  const nodes = placeProducedRecords(folder.nodes, producedBy)
+  const clashes = siblingNameClashes(nodes, sourceOf)
+  if (clashes.length) {
+    throw new Error(
+      `uwx/records: two things in one folder share a name —\n  ${clashes.join('\n  ')}\n` +
+        '  Names within a folder are unique. Put one of them in a `folder:` in records.yml, ' +
+        'or give it another slug.'
+    )
+  }
+
+  return {
+    entities,
+    index,
+    warnings,
+    schemaless,
+    colConfig,
+    folder: { ...folder, nodes },
+    recordsDirExists: pool.exists,
+    sendFolder: sendsFolder(pool, entities),
+  }
+}
+
+// Whether this push sends the site's folder — which REPLACES the backend's.
+//
+// ⭐ Only when the file side has a folder to state: some record was produced, or
+// the records directory is there and holds nothing at all (the deliberate empty,
+// which removes what the backend has — the CLI asks first).
+//
+// ⛔ NOT when every record's schema resolved to nothing, nor when the directory
+// holds only files that are not records (warned). Neither is an author emptying
+// the folder, and sending one would remove the backend's records — including any
+// authored there — for a state nobody chose. Inert instead, like no directory.
+function sendsFolder(pool, entities) {
+  if (!pool.exists) return false
+  if (entities.length > 0) return true
+  return pool.entities.length === 0 && pool.errors.length === 0
+}
+
+// ⛔ A FOLDER'S NAMES ARE SIBLING-UNIQUE — the backend's model declares `name` so
+// (`folder.js`), and placement identity is keyed by the `name` chain
+// (`collectFolderItemUuids`), so two siblings with one name would share a uuid.
+// Every record sits at the top of the folder unless `records.yml` places it, so two
+// schema folders holding the same slug — `article/intro.md`, `person/intro.md` —
+// meet there. That was possible while `records.yml` listed records at the top too;
+// placing every file made it the ordinary case, so it is refused here, naming files.
+function siblingNameClashes(nodes, sourceOf, where = 'the top of the folder') {
+  const out = []
+  const byName = new Map()
+  for (const node of nodes || []) {
+    const name = node?.name
+    if (typeof name !== 'string') continue
+    const what = node.kind === 'branch' ? `the folder "${name}"` : sourceOf.get(node.$entityId) || node.$entityId
+    if (byName.has(name)) out.push(`"${name}" at ${where}: ${byName.get(name)} and ${what}`)
+    else byName.set(name, what)
+    if (node.kind === 'branch') out.push(...siblingNameClashes(node.$children, sourceOf, `folder "${name}"`))
+  }
+  return out
 }
 
 /**
@@ -864,19 +972,13 @@ export function filterChanged(entities, index, { priorHashes = {}, sendAll = fal
  *        skipped: number }>}
  */
 export async function emitRecordSyncPackage(siteRoot, opts = {}) {
-  const { entities, index, warnings, mappedCount } = await buildRecordEntities(siteRoot, opts)
-  if (mappedCount === 0) {
-    throw new Error(
-      'uwx/records: no query declares a schema — nothing to export. ' +
-        'Add a query to queries.yml naming the schema its records use, e.g.\n' +
-        "  articles:\n    schema: '@/article'"
-    )
-  }
+  const { entities, index, warnings, recordsDirExists } = await buildRecordEntities(siteRoot, opts)
   if (entities.length === 0) {
     throw new Error(
-      'uwx/records: no records to export. Either records.yml references ' +
-        'nothing, or every query matched an empty pool — an entity is only a ' +
-        'record once records.yml lists it.'
+      'uwx/records: no records to export — ' +
+        (recordsDirExists
+          ? 'the records directory holds none whose data schema resolves.'
+          : 'the site has no records directory. Every file in `records/<schema>/` is a record.')
     )
   }
 

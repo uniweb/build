@@ -24,6 +24,7 @@ import { join, resolve, dirname } from 'node:path'
 import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
+import { resolveRecordsDir } from './entity-pool.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import {
@@ -61,7 +62,7 @@ import {
  *     re-derive, so we always ship enough for the ones that do.
  *   - `data/<collection>.json` (+ per-record files for `deferred:`
  *     collections) — same shape `processQueries` produces today.
- *   - `records/<path under entities/>` — the records' co-located assets, where
+ *   - `records/<path under the records directory>` — the records' co-located assets, where
  *     the compiled records point.
  *   - `assets/<media>` — processed images / video posters / PDF
  *     thumbnails. Filtered by the deploy CLI to MEDIA only at upload time.
@@ -143,7 +144,7 @@ export async function buildSiteData({
     const byQuery = await processQueries(
       resolvedSiteRoot,
       siteContent.config.queries,
-      siteContent.config?.paths?.entities,
+      resolveRecordsDir(resolvedSiteRoot, siteContent.config?.paths).rel,
       basePath,
       { locale: resolveDefaultLocale(siteContent.config) ?? null }
     )
@@ -155,7 +156,7 @@ export async function buildSiteData({
       await cp(publicDataDir, distDataDir, { recursive: true })
     }
 
-    // ⭐ AND THE RECORDS' CO-LOCATED ASSETS — `public/records/<path under entities/>`,
+    // ⭐ AND THE RECORDS' CO-LOCATED ASSETS — `public/records/<path under records/>`,
     // where the compiled records point (`/records/…`), mirrored the way vite mirrors
     // all of `public/` on the bundle lane. ⛔ Until 2026-09-14 only `public/data` was
     // copied, so a record's image URL named a file this lane's `dist/` did not have.

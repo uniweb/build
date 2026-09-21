@@ -56,8 +56,8 @@ export function resolveSelfScope(ref, org) {
  * The inverse, for a pull: `@<org>/x` → `@/x` for the site's own org.
  *
  * ⛔ WITHOUT THIS THE ROUND TRIP IS NOT A FIXED POINT, and the failure is silent
- * on both ends. A record authored under `entities/article/` comes back as
- * `@acme/article` and, placed literally, lands under `entities/acme/article/` — a
+ * on both ends. A record authored under `records/article/` comes back as
+ * `@acme/article` and, placed literally, lands under `records/acme/article/` — a
  * different schema folder, which the next build reads as a different schema. A
  * query declared `schema: '@/member'` comes back as `@acme/member`, and one that
  * relied on the query-name default comes back with an explicit schema it never

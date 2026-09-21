@@ -30,7 +30,7 @@ const site = () => {
   w('site.yml', 'name: T\n')
   w('queries.yml', "recent:\n  schema: '@/article'\neverything:\n  schema: '@/article'\n")
   w('records.yml', '- article/*.md\n')
-  w('entities/article/hello.md', '---\ntitle: Hello\n---\n\nBody.\n')
+  w('records/article/hello.md', '---\ntitle: Hello\n---\n\nBody.\n')
   const item = { slug: 'hello', title: 'Hello there' }
   w('public/data/recent.json', [item])
   w('public/data/everything.json', [item])
@@ -65,7 +65,7 @@ describe('the manifest is keyed by the record', () => {
     w('site.yml', 'name: T\n')
     w('queries.yml', "people:\n  schema: '@std/person'\n")
     w('records.yml', '- std/person/ada.md\n')
-    w('entities/std/person/ada.md', '---\nname: Ada Lovelace\n---\n')
+    w('records/std/person/ada.md', '---\nname: Ada Lovelace\n---\n')
     w('public/data/people.json', [{ slug: 'ada', name: 'Ada Lovelace' }])
 
     const manifest = await extractRecordContent(ROOT)
@@ -153,7 +153,7 @@ describe('free-form and hash-based record translation agree on the record, in de
   const freeformSite = async () => {
     site()
     w('public/data/recent.json', [{ slug: 'hello', title: 'Hello there' }, { slug: 'world', title: 'World news' }])
-    w('locales/freeform/es/entities/article/hello.md', '---\ntitle: Hola (libre)\n---\n\nCuerpo libre.\n')
+    w('locales/freeform/es/records/article/hello.md', '---\ntitle: Hola (libre)\n---\n\nCuerpo libre.\n')
     const manifest = await extractRecordContent(ROOT)
     const hashOf = (source) => Object.entries(manifest.units).find(([, u]) => u.source === source)[0]
     // An override keyed by the RECORD (`article/world`), which the default must not win over

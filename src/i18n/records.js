@@ -23,7 +23,7 @@ import { loadFreeformRecord } from './freeform.js'
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
 import { resolveQueriesConfig } from '../site/queries-config.js'
-import { poolDirsForSchema, schemaForPoolDirs, ENTITIES_DIR } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import {
   NON_TRANSLATABLE_TYPES,
   HEURISTIC_SKIP_FIELDS,
@@ -37,7 +37,11 @@ import {
 // contexts were keyed by the QUERY, so two queries over one schema produced two
 // entries for one record, each invisible from the other, and a renamed query
 // orphaned every translation under it.
-export const RECORDS_DIR = 'records'
+//
+// ⚠️ `RECORD_LOCALES_DIR`, and not `RECORDS_DIR`, since 2026-09-21: that name is the
+// site's own `records/` directory now (`site/entity-pool.js`), and this one is
+// `locales/records/` — two directories, one word, so the constant says which.
+export const RECORD_LOCALES_DIR = 'records'
 
 // ---------------------------------------------------------------------------
 // Schema resolution
@@ -72,7 +76,7 @@ async function resolveSchema(queryName, siteRoot) {
   // an author to write into it was the one remaining place the framework
   // contradicted its own rule that `collections/` is the only way to provide
   // structured data. The schema describes the source, so it lives with it.
-  const companionPath = join(siteRoot, ENTITIES_DIR, `${queryName}.schema.js`)
+  const companionPath = join(resolveRecordsDir(siteRoot).abs, `${queryName}.schema.js`)
   if (existsSync(companionPath)) {
     try {
       const mod = await import(pathToFileURL(companionPath).href)
@@ -657,7 +661,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
   const {
     locales = [],
     outputDir = join(siteRoot, 'dist'),
-    recordLocalesDir = join(siteRoot, 'locales', RECORDS_DIR),
+    recordLocalesDir = join(siteRoot, 'locales', RECORD_LOCALES_DIR),
     localesDir = join(siteRoot, 'locales'),
     freeformEnabled = true
   } = options
@@ -987,7 +991,7 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
  * @returns {Promise<string[]>} Array of locale codes
  */
 export async function getRecordLocales(localesPath) {
-  const recordLocalesDir = join(localesPath, RECORDS_DIR)
+  const recordLocalesDir = join(localesPath, RECORD_LOCALES_DIR)
   if (!existsSync(recordLocalesDir)) return []
 
   try {

@@ -20,17 +20,19 @@
 // old key's PRESENCE was the version signal, and there is no population to
 // carry.
 //
-// ⭐ THE ORGANIZATION IS AUTHORED, IN `records.yml`, AND IT IS THE ONLY SOURCE.
-// It used to be DERIVED — one branch per collection, mirroring the `collections/`
-// subfolders, with an optional `collections.yml::folders` virtual tree layered
-// over it. Both are gone, and the difference is the point: a folder is a thing
-// the author states, not a shadow of a directory layout. `records.yml` also
-// decides WHAT syncs at all, since listing an entity is what makes it a record.
+// ⭐ WHAT IS IN THE FOLDER IS THE RECORDS DIRECTORY; HOW IT IS ORGANIZED IS
+// `records.yml` (ruled 2026-09-21 [Diego]). Every file in `records/` is a record and
+// sits at the top of the folder unless `records.yml` places it in a sub-folder. The
+// organization used to be DERIVED — one branch per collection, mirroring the
+// `collections/` subfolders — and the difference is the point: a sub-folder is a
+// thing the author states, never a shadow of the schema folders, which declare a
+// model and nothing else.
 //
-// ⛔ SO THERE IS NO DEFAULT. A site with no `records.yml` has no folder and syncs
-// no records — which is the model's `missing ⇒ inert` ruling, not an empty folder.
-// Do not reintroduce a fallback grouping: it would resurrect exactly the
-// three-jobs-in-one-directory conflation the layout was changed to remove.
+// ⛔ A SITE WITH NO RECORDS DIRECTORY SENDS NO FOLDER, which is inert: the backend's
+// folder is left as it is, so a site whose records live only there is not emptied
+// by a push of its pages. A directory holding no records sends an EMPTY folder,
+// which removes what is there — the CLI asks first. (Until 2026-09-21 both states
+// were `records.yml`'s — missing and empty — when that file was the membership list.)
 //
 // The folder carries NO `$uuid` of its own: the backend owns the site's
 // `@uniweb/folder` and resolves it from the site-content uuid (the folder sync lane
@@ -57,7 +59,7 @@ function refLeaf(entity) {
 }
 
 /**
- * Turn the resolved `records.yml` tree into folder `contents`.
+ * Turn the placed records into folder `contents`.
  *
  * ⛔ A LEAF WHOSE ENTITY IS MISSING IS DROPPED AND REPORTED, never emitted empty.
  * A `ref` with neither `entry` nor `$ref` is a placement pointing at nothing —
@@ -169,8 +171,9 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  * @param {object} params
  * @param {object[]} params.recordEntities - the record entities (full set, BEFORE
  *        send-only-changed filtering), each `{ id, uuid, slug, model }`
- * @param {Array} params.folderNodes - the resolved `records.yml` tree
- * @param {boolean} [params.declared] - whether `records.yml` EXISTS. See below.
+ * @param {Array} params.folderNodes - the placed records: `records.yml`'s sub-folders,
+ *        then every record at the top
+ * @param {boolean} [params.declared] - whether the records DIRECTORY exists. See below.
  * @param {Record<string,string>} [params.itemUuids] - path → `$uuid`, harvested
  *        from the folder document a previous push returned. Absent on a first
  *        push, where every item is genuinely new.
@@ -181,17 +184,16 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
 export function buildFolderEntity({ recordEntities, folderNodes = [], declared, itemUuids = null, sourceLocale = 'en' }) {
   // ⛔ `missing` AND `empty` ARE DIFFERENT, AND THE ASYMMETRY IS DELIBERATE.
   //
-  //   no records.yml       → null. INERT: nothing is sent, and the server's
-  //                          folder is left exactly as it is.
-  //   records.yml, empty   → a folder with `contents: []`. DESTRUCTIVE: it says
-  //                          the folder holds nothing, so the backend removes
-  //                          what is there.
+  //   no records directory  → null. INERT: nothing is sent, and the backend's
+  //                           folder is left exactly as it is.
+  //   a directory, no records → a folder with `contents: []`. DESTRUCTIVE: it says
+  //                           the folder holds nothing, so the backend removes
+  //                           what is there.
   //
-  // ⭐ The safe state is the ABSENCE of a file and the destructive act requires
-  // affirmatively CREATING one — so a live folder cannot be wiped by deleting
-  // something. ⛔ Do not "simplify" these into one behaviour to avoid the
-  // placeholder hazard (an empty file created meaning to fill it in): that would
-  // delete a capability to avoid writing a prompt. The CLI asks, with a count.
+  // ⭐ The safe state is the ABSENCE of the directory, so a site that never had
+  // records — or keeps them only on the backend — cannot empty the backend's folder
+  // by pushing. ⛔ Do not "simplify" these into one behaviour: that would delete a
+  // capability to avoid writing a prompt. The CLI asks, with a count.
   const empty = !Array.isArray(folderNodes) || folderNodes.length === 0
   if (empty && !declared) return null
 
@@ -200,17 +202,17 @@ export function buildFolderEntity({ recordEntities, folderNodes = [], declared, 
 
   const missing = []
   const contents = contentsFromNodes(folderNodes, byEntityId, missing, sourceLocale)
-  // ⚠️ `id` IS THE ENTITY'S POOL PATH, NOT A FOLDER PATH — say so, because the two
-  // read identically and a reader who takes it for a placement concludes the
-  // emitter is dropping a branch it never had. *(Measured 2026-08-31: the backend
-  // lane read `folder: "articles/outdoor-hygge"` as a placement under an
+  // ⚠️ `id` IS THE RECORD'S PATH IN THE RECORDS DIRECTORY, NOT A FOLDER PATH — say
+  // so, because the two read identically and a reader who takes it for a placement
+  // concludes the emitter is dropping a branch it never had. *(Measured 2026-08-31:
+  // the backend lane read `folder: "articles/outdoor-hygge"` as a placement under an
   // `articles` branch and opened a channel about a missing branch node; the string
-  // was naming `entities/articles/outdoor-hygge.md`.)*
+  // was naming the file `articles/outdoor-hygge.md`.)*
   const warnings = missing.map(
     (id) =>
-      `records.yml: "${id}" — a path under entities/ — is listed, but no record ` +
-      `entity was produced for it (check that its schema resolves). The placement ` +
-      `was dropped rather than sent pointing at nothing.`
+      `the record "${id}" — a path under the records directory — is placed in the ` +
+      `folder, but no record entity was produced for it. The placement was dropped ` +
+      `rather than sent pointing at nothing.`
   )
 
   const document = {

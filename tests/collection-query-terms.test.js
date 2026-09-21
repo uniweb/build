@@ -36,8 +36,8 @@ async function items(declExtra) {
     writeFileSync(p, body)
   }
   w('site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n  posts:\n    schema: "@/post"\n${declExtra}`)
-  w('entities/post/a.md', '---\ntitle: A\ntier: gold\n---\n\nA\n')
-  w('entities/post/b.md', '---\ntitle: B\ntier: silver\n---\n\nB\n')
+  w('records/post/a.md', '---\ntitle: A\ntier: gold\n---\n\nA\n')
+  w('records/post/b.md', '---\ntitle: B\ntier: silver\n---\n\nB\n')
   const cfg = await resolveQueriesConfig(SITE)
   const out = await processQueries(SITE, cfg.declarations)
   return (out.posts?.items || out.posts || []).map((i) => i.title)

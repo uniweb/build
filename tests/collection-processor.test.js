@@ -25,7 +25,7 @@ describe('Collection Processor', () => {
 
   // ⛔ THE 'NESTED RECORDS' BLOCK WAS DELETED, NOT MIGRATED. It exercised
   // recursion into subdirectories of a collection — a capability
-  // `entities/{schema}/` deliberately does not have, because that path declares
+  // `records/{schema}/` deliberately does not have, because that path declares
   // a model and nothing else. Placement moved to `records.yml`, and the pool
   // reader refuses nesting outright (`entity-pool.test.js`).
   //
@@ -44,7 +44,7 @@ describe('Collection Processor', () => {
 
     it('warns when two files in one schema folder share a slug', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const root = join(testDir, 'entities', 'note')
+      const root = join(testDir, 'records', 'note')
       writeRecord(root, 'notes.md', 'From markdown')
       writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
       await processQueries(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
@@ -57,7 +57,7 @@ describe('Collection Processor', () => {
       // Reporting is the remedy, not repair — only the author can decide which
       // record owns the slug, so the build must not choose for them.
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      const root = join(testDir, 'entities', 'note')
+      const root = join(testDir, 'records', 'note')
       writeRecord(root, 'notes.md', 'From markdown')
       writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
       const out = await processQueries(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
@@ -66,7 +66,7 @@ describe('Collection Processor', () => {
     })
 
     it('every record in a flat pool carries the empty path', async () => {
-      const root = join(testDir, 'entities', 'flat')
+      const root = join(testDir, 'records', 'flat')
       writeRecord(root, 'a.md', 'A')
       writeRecord(root, 'b.md', 'B')
       const out = await processQueries(
@@ -83,7 +83,7 @@ describe('Collection Processor', () => {
   describe('processQueries', () => {
     it('should process markdown files into collection items', async () => {
       // Create test library folder
-      const contentDir = join(testDir, 'entities', 'articles')
+      const contentDir = join(testDir, 'records', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       // Create test markdown file
@@ -123,7 +123,7 @@ This is a test article.
     })
 
     it('should exclude unpublished items', async () => {
-      const contentDir = join(testDir, 'entities', 'articles')
+      const contentDir = join(testDir, 'records', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'published.md'), `---
@@ -150,7 +150,7 @@ Draft content.
     })
 
     it('should apply where predicates', async () => {
-      const contentDir = join(testDir, 'entities', 'posts')
+      const contentDir = join(testDir, 'records', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post1.md'), `---
@@ -179,7 +179,7 @@ Content.
     })
 
     it('should sort items by field', async () => {
-      const contentDir = join(testDir, 'entities', 'items')
+      const contentDir = join(testDir, 'records', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'a.md'), `---
@@ -211,7 +211,7 @@ order: 2
     })
 
     it('compiles every record — a query\'s limit is the runtime\'s, and its sort orders the file', async () => {
-      const contentDir = join(testDir, 'entities', 'posts')
+      const contentDir = join(testDir, 'records', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       for (let i = 1; i <= 5; i++) {
@@ -256,7 +256,7 @@ order: ${i}
     })
 
     it('bakes no link into a compiled record, and leaves an entity\'s own `route` field as the author wrote it', async () => {
-      const contentDir = join(testDir, 'entities', 'articles')
+      const contentDir = join(testDir, 'records', 'articles')
       mkdirSync(contentDir, { recursive: true })
       writeFileSync(join(contentDir, 'my-article.md'), `---\ntitle: My Article\nroute: north-trail\n---\n\nContent here.\n`)
       writeFileSync(join(contentDir, 'plain.md'), `---\ntitle: Plain\n---\n\nContent.\n`)
@@ -269,7 +269,7 @@ order: ${i}
     })
 
     it('should not add route when route config is absent', async () => {
-      const contentDir = join(testDir, 'entities', 'items')
+      const contentDir = join(testDir, 'records', 'items')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'item.md'), `---
@@ -313,7 +313,7 @@ Content.
 
   describe('YAML array-form items', () => {
     it('should parse a top-level YAML array as multiple items', async () => {
-      const contentDir = join(testDir, 'entities', 'team')
+      const contentDir = join(testDir, 'records', 'team')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'all.yml'), `- slug: alice
@@ -338,7 +338,7 @@ Content.
     })
 
     it('should mix array-form and mapping-form YAML in the same folder', async () => {
-      const contentDir = join(testDir, 'entities', 'team')
+      const contentDir = join(testDir, 'records', 'team')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'core.yml'), `- slug: alice
@@ -362,7 +362,7 @@ role: writer
     })
 
     it('should preserve mapping-form YAML behavior (slug from filename)', async () => {
-      const contentDir = join(testDir, 'entities', 'team')
+      const contentDir = join(testDir, 'records', 'team')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'alice.yml'), `name: Alice
@@ -381,7 +381,7 @@ role: engineer
 
   describe('BibTeX collections', () => {
     it('should parse a .bib file into CSL-JSON items with id as slug', async () => {
-      const contentDir = join(testDir, 'entities', 'bibliography')
+      const contentDir = join(testDir, 'records', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'refs.bib'), `@book{darwin1859,
@@ -419,7 +419,7 @@ role: engineer
     })
 
     it('should merge .bib and .yml entries in the same collection folder', async () => {
-      const contentDir = join(testDir, 'entities', 'bibliography')
+      const contentDir = join(testDir, 'records', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'main.bib'), `@book{darwin1859,
@@ -445,7 +445,7 @@ year: 1858
     })
 
     it('should merge entries from multiple .bib files in the same folder', async () => {
-      const contentDir = join(testDir, 'entities', 'bibliography')
+      const contentDir = join(testDir, 'records', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'primary.bib'), `@book{darwin1859,
@@ -479,7 +479,7 @@ year: 1858
     })
 
     it('should treat the BibTeX cite key as slug for per-record file emission', async () => {
-      const contentDir = join(testDir, 'entities', 'bibliography')
+      const contentDir = join(testDir, 'records', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'refs.bib'), `@book{darwin1859,
@@ -513,7 +513,7 @@ year: 1858
 
   describe('excerpt extraction', () => {
     it('should auto-extract excerpt from content', async () => {
-      const contentDir = join(testDir, 'entities', 'posts')
+      const contentDir = join(testDir, 'records', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---
@@ -533,7 +533,7 @@ This is the second paragraph.
     })
 
     it('should prefer explicit excerpt from frontmatter', async () => {
-      const contentDir = join(testDir, 'entities', 'posts')
+      const contentDir = join(testDir, 'records', 'posts')
       mkdirSync(contentDir, { recursive: true })
 
       writeFileSync(join(contentDir, 'post.md'), `---

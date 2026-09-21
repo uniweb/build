@@ -63,8 +63,8 @@ function site({ metaKey, queryName, querySchema = null, record = 'name: Ada\n' }
   mkdirSync(join(fdn, 'schemas'), { recursive: true })
   writeFileSync(join(fdn, 'schemas', 'member.yml'), 'fields:\n  name:\n    type: string\n')
 
-  mkdirSync(join(siteRoot, 'entities', 'member'), { recursive: true })
-  writeFileSync(join(siteRoot, 'entities', 'member', 'ada.yml'), record)
+  mkdirSync(join(siteRoot, 'records', 'member'), { recursive: true })
+  writeFileSync(join(siteRoot, 'records', 'member', 'ada.yml'), record)
   const decl = querySchema ? `{ schema: '${querySchema}' }` : '{}'
   writeFileSync(join(siteRoot, 'site.yml'), `name: t\nqueries:\n  ${queryName}: ${decl}\n`)
 

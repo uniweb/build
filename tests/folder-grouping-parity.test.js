@@ -59,9 +59,9 @@ const build = async () => {
 
 describe('records.yml reproduces the grouping the old producer derived', () => {
   beforeEach(() => {
-    w('entities/article/hello.md')
-    w('entities/article/world.md')
-    w('entities/person/ada.md')
+    w('records/article/hello.md')
+    w('records/article/world.md')
+    w('records/person/ada.md')
   })
 
   it('an authored two-branch folder equals the old default, node for node', async () => {
@@ -86,10 +86,10 @@ describe('records.yml reproduces the grouping the old producer derived', () => {
 
   // ⭐ AND THE DIFFERENCE THAT IS THE POINT. The old rule could only ever produce
   // the tree above — one branch per collection, whether or not the author wanted
-  // structure. The model's common case is a FLAT pool with queries doing the
-  // organizing, and that shape was previously unreachable.
-  it('a flat folder is now expressible, and it was not before', async () => {
-    w('records.yml', '- article/*.md\n- person/*.md\n')
+  // structure. The model's common case is a FLAT set of records with queries doing
+  // the organizing, and that shape was previously unreachable. It is the DEFAULT
+  // now: no records.yml at all (every file in `records/` sits at the top).
+  it('a flat folder is the default, and it was not reachable before', async () => {
     const { folder, entity } = await build()
     expect(folder.errors).toEqual([])
     expect(entity.document.contents).toEqual([

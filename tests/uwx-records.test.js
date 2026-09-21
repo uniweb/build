@@ -112,7 +112,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('maps each record to one by-name entity-content document (no $uuid on first sync)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [
         { slug: 'widget-x', title: 'Widget X', price: 9.99, published: '2026-01-01', sku: 'WX-1' },
       ],
@@ -138,7 +138,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('wraps a localized scalar field per-locale from translations (B)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'a', title: 'Hello' }],
       declaration,
       translations: { es: { [computeHash('Hello')]: 'Hola' } },
@@ -149,7 +149,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('without translations a localized scalar stays source-only (backward compatible)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'a', title: 'Hello' }],
       declaration,
     })
@@ -158,7 +158,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('canonical key order: $id, $model, then the section (no leading $uuid first sync)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'a', title: 'A' }],
       declaration,
     })
@@ -171,7 +171,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('emits the brief fields in schema-declared order', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'a', sku: 'S', published: '2026-01-01', price: 1, title: 'A' }],
       declaration,
     })
@@ -186,7 +186,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('wraps localized fields, leaves scalars/dates raw, drops slug', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [
         { slug: 'widget-x', title: 'Widget X', price: 9.99, published: '2026-01-01', sku: 'WX-1' },
       ],
@@ -203,7 +203,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('emits a `date` field as YYYY-MM-DD (not full ISO — backend rejects the latter)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'd', title: 'D', published: new Date('2026-03-01T00:00:00Z') }],
       declaration, // `published` is type `date`
     })
@@ -217,7 +217,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       '@acme/event'
     )
     const { entities } = recordsToEntities({
-      queryName: 'events',
+      label: 'events',
       records: [{ slug: 'e', title: 'E', at: new Date('2026-03-01T12:30:00Z') }],
       declaration: dt,
     })
@@ -226,7 +226,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('round-trips a back-filled $uuid for re-sync (as the leading key)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'widget-x', $uuid: 'abc-123', title: 'Widget X' }],
       declaration,
     })
@@ -238,7 +238,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('honors an explicit $id over the slug', () => {
     const { entities } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'file-name', $id: 'explicit-id', title: 'X' }],
       declaration,
     })
@@ -250,7 +250,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('warns about + drops a field not on the Model', () => {
     const { entities, warnings } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'g', title: 'G', color: 'red' }],
       declaration,
     })
@@ -260,7 +260,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
 
   it('skips a record without a slug (with a warning)', () => {
     const { entities, warnings } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ title: 'No slug' }],
       declaration,
     })
@@ -277,7 +277,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(declNoBrief.brief).toBeFalsy()
     expect(() =>
       recordsToEntities({
-        queryName: 'logs',
+        label: 'logs',
         records: [{ slug: 'a', msg: 'hi' }],
         declaration: declNoBrief,
       })
@@ -296,7 +296,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
 
   it('maps $body to the brief content field as the raw value (localized-wrapped, not ProseMirror)', () => {
     const { entities, warnings } = recordsToEntities({
-      queryName: 'articles',
+      label: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: '\n# Welcome\n' }],
       declaration: decl,
       sourceLocale: 'en',
@@ -309,7 +309,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
 
   it('lets an explicit frontmatter value win over the body', () => {
     const { entities } = recordsToEntities({
-      queryName: 'articles',
+      label: 'articles',
       records: [{ slug: 'h', title: 'H', body: 'explicit', $body: 'from-md-body' }],
       declaration: decl,
     })
@@ -318,7 +318,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
 
   it('never treats $body as an unknown field', () => {
     const { warnings } = recordsToEntities({
-      queryName: 'articles',
+      label: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'x' }],
       declaration: decl,
     })
@@ -332,7 +332,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
       '@acme/product'
     )
     const { warnings } = recordsToEntities({
-      queryName: 'products',
+      label: 'products',
       records: [{ slug: 'p', title: 'P', $body: 'orphan body' }],
       declaration: noRich,
     })
@@ -358,7 +358,7 @@ describe('recordsToEntities — markdown body → prosemirror content field (B)'
 
   it('converts the markdown body to a ProseMirror doc on the wire (not the raw string)', () => {
     const { entities, warnings } = recordsToEntities({
-      queryName: 'articles',
+      label: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
       declaration: decl,
     })
@@ -372,7 +372,7 @@ describe('recordsToEntities — markdown body → prosemirror content field (B)'
 
   it('wraps per-locale as a self-contained doc (resolved from translations)', () => {
     const { entities } = recordsToEntities({
-      queryName: 'articles',
+      label: 'articles',
       records: [{ slug: 'hello', title: 'Hello', $body: 'Hello world\n' }],
       declaration: decl,
       translations: { es: { [computeHash('Hello world')]: 'Hola mundo' } },
@@ -397,7 +397,7 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
     root = mkdtempSync(join(tmpdir(), 'uwx-sync-'))
     siteDir = join(root, 'site')
     const foundationDir = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'entities', 'acme', 'product'), { recursive: true })
+    mkdirSync(join(siteDir, 'records', 'acme', 'product'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
     // Site: a file collection mapped to a registry Model by name.
@@ -420,9 +420,8 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
       // that read `dependencies.foundation` — a key no template produces.
       JSON.stringify({ name: 'site', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
-    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'widget-x.yml'), 'title: Widget X\nprice: 9.99\n')
-    writeFileSync(join(siteDir, 'records.yml'), '- acme/product/*.yml\n')
-    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'gadget-y.yml'), 'title: Gadget Y\nprice: 19.5\n')
+    writeFileSync(join(siteDir, 'records', 'acme', 'product', 'widget-x.yml'), 'title: Widget X\nprice: 9.99\n')
+    writeFileSync(join(siteDir, 'records', 'acme', 'product', 'gadget-y.yml'), 'title: Gadget Y\nprice: 19.5\n')
 
     // Foundation: a built schema.json defining the @acme/product data-schema.
     const schema = {
@@ -461,7 +460,9 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
       // entry.uuid is the `$id` handle label (v1); model is by name.
       expect(entry.model).toBe('@acme/product')
       expect(entry).not.toHaveProperty('model_uuid')
-      expect(entry.file).toMatch(/^entities\/products\/.+\.json$/)
+      // Named for the schema folder the records came from — a query no longer
+      // decides which records sync, so it no longer names them in the package.
+      expect(entry.file).toMatch(/^entities\/acme\/product\/.+\.json$/)
       expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
 
       const doc = byFile(entry.file)
@@ -478,7 +479,7 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
   it('a record keeps its own id; the wire carries only what each backend minted', async () => {
     // A second site whose record already carries a $uuid (a prior back-fill).
     const reSite = join(root, 'resync-site')
-    mkdirSync(join(reSite, 'entities', 'acme', 'product'), { recursive: true })
+    mkdirSync(join(reSite, 'records', 'acme', 'product'), { recursive: true })
     writeFileSync(
       join(reSite, 'site.yml'),
       'name: Re\nfoundation: "@acme/marketing"\nqueries:\n  products:\n    model: \"@acme/product\"\n'
@@ -488,10 +489,9 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
       JSON.stringify({ name: 're', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
     writeFileSync(
-      join(reSite, 'entities', 'acme', 'product', 'widget-x.yml'),
+      join(reSite, 'records', 'acme', 'product', 'widget-x.yml'),
       '"$uuid": existing-uuid-1\ntitle: Widget X\n'
     )
-    writeFileSync(join(reSite, 'records.yml'), '- acme/product/*.yml\n')
 
     // ⭐ The file's `$uuid` is the record's OWN id. What reaches the wire is the uuid
     // THIS backend minted for it, from sync.json — here the first backend, so the map
@@ -564,14 +564,13 @@ describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), 'uwx-b3-'))
     siteDir = join(root, 'site')
-    mkdirSync(join(siteDir, 'entities', 'std', 'product'), { recursive: true })
+    mkdirSync(join(siteDir, 'records', 'std', 'product'), { recursive: true })
     // NO foundation dependency — the Model is non-local (e.g. a @std schema).
     writeFileSync(
       join(siteDir, 'site.yml'),
       'name: T\nqueries:\n  products:\n    model: \"@std/product\"\n'
     )
-    writeFileSync(join(siteDir, 'entities', 'std', 'product', 'a.yml'), 'title: A\nprice: 5\n')
-    writeFileSync(join(siteDir, 'records.yml'), '- std/product/*.yml\n')
+    writeFileSync(join(siteDir, 'records', 'std', 'product', 'a.yml'), 'title: A\nprice: 5\n')
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
@@ -601,7 +600,7 @@ describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
   it('prefers a local foundation when it defines the Model (resolver untouched)', async () => {
     const localSite = join(root, 'local')
     const foundationDir = join(root, 'local-foundation')
-    mkdirSync(join(localSite, 'entities', 'acme', 'product'), { recursive: true })
+    mkdirSync(join(localSite, 'records', 'acme', 'product'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
     writeFileSync(
       join(localSite, 'site.yml'),
@@ -611,8 +610,7 @@ describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
       join(localSite, 'package.json'),
       JSON.stringify({ name: 'l', dependencies: { '@acme/marketing': 'file:../local-foundation' } })
     )
-    writeFileSync(join(localSite, 'entities', 'acme', 'product', 'a.yml'), 'title: A\n')
-    writeFileSync(join(localSite, 'records.yml'), '- acme/product/*.yml\n')
+    writeFileSync(join(localSite, 'records', 'acme', 'product', 'a.yml'), 'title: A\n')
     writeFileSync(
       join(foundationDir, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -662,7 +660,7 @@ describe('emitRecordSyncPackage — send only changed', () => {
     root = mkdtempSync(join(tmpdir(), 'uwx-b4-'))
     siteDir = join(root, 'site')
     const fdn = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'entities', 'acme', 'product'), { recursive: true })
+    mkdirSync(join(siteDir, 'records', 'acme', 'product'), { recursive: true })
     mkdirSync(join(fdn, 'dist', 'meta'), { recursive: true })
     writeFileSync(
       join(siteDir, 'site.yml'),
@@ -672,9 +670,8 @@ describe('emitRecordSyncPackage — send only changed', () => {
       join(siteDir, 'package.json'),
       JSON.stringify({ name: 's', dependencies: { '@acme/marketing': 'file:../foundation' } })
     )
-    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'a.yml'), 'title: A\nprice: 1\n')
-    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'b.yml'), 'title: B\nprice: 2\n')
-    writeFileSync(join(siteDir, 'records.yml'), '- acme/product/*.yml\n')
+    writeFileSync(join(siteDir, 'records', 'acme', 'product', 'a.yml'), 'title: A\nprice: 1\n')
+    writeFileSync(join(siteDir, 'records', 'acme', 'product', 'b.yml'), 'title: B\nprice: 2\n')
     writeFileSync(
       join(fdn, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -712,7 +709,7 @@ describe('emitRecordSyncPackage — send only changed', () => {
 
   it('sends only the changed record after an edit (index correlates to the subset)', async () => {
     const first = await emitRecordSyncPackage(siteDir)
-    writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'b.yml'), 'title: B2\nprice: 2\n')
+    writeFileSync(join(siteDir, 'records', 'acme', 'product', 'b.yml'), 'title: B2\nprice: 2\n')
     const { entityCount, skipped, index } = await emitRecordSyncPackage(siteDir, {
       priorHashes: first.hashes,
     })
@@ -742,11 +739,11 @@ describe('buildRecordEntities — free-form collection body override (B-1)', () 
     root = mkdtempSync(join(tmpdir(), 'uwx-ff-'))
     siteDir = join(root, 'site')
     const foundationDir = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'entities', 'acme', 'article'), { recursive: true })
+    mkdirSync(join(siteDir, 'records', 'acme', 'article'), { recursive: true })
     // ⭐ The free-form override lives in the parallel locales/ tree, body-only
     // markdown, MIRRORING THE POOL — keyed by the entity, not by the query that
     // selects it, so two queries over one schema share one translation.
-    mkdirSync(join(siteDir, 'locales', 'freeform', 'es', 'entities', 'acme', 'article'), { recursive: true })
+    mkdirSync(join(siteDir, 'locales', 'freeform', 'es', 'records', 'acme', 'article'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
     writeFileSync(
@@ -759,13 +756,12 @@ describe('buildRecordEntities — free-form collection body override (B-1)', () 
     )
     // Source record: a markdown body that maps to the prosemirror content field.
     writeFileSync(
-      join(siteDir, 'entities', 'acme', 'article', 'hello.md'),
+      join(siteDir, 'records', 'acme', 'article', 'hello.md'),
       '---\ntitle: Hello\n---\nHello world\n'
     )
-    writeFileSync(join(siteDir, 'records.yml'), '- acme/article/*.md\n')
     // Free-form Spanish body — a full rewrite, not a per-string map.
     writeFileSync(
-      join(siteDir, 'locales', 'freeform', 'es', 'entities', 'acme', 'article', 'hello.md'),
+      join(siteDir, 'locales', 'freeform', 'es', 'records', 'acme', 'article', 'hello.md'),
       'Hola mundo distinto\n'
     )
 
@@ -816,7 +812,7 @@ describe('buildRecordEntities — `@/` model refs resolve into the publish org',
     root = mkdtempSync(join(tmpdir(), 'uwx-selfscope-'))
     siteDir = join(root, 'site')
     const foundationDir = join(root, 'foundation')
-    mkdirSync(join(siteDir, 'entities', 'member'), { recursive: true })
+    mkdirSync(join(siteDir, 'records', 'member'), { recursive: true })
     mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
     writeFileSync(
@@ -828,10 +824,9 @@ describe('buildRecordEntities — `@/` model refs resolve into the publish org',
       JSON.stringify({ name: 'site', dependencies: { '@acme/fnd': 'file:../foundation' } })
     )
     writeFileSync(
-      join(siteDir, 'entities', 'member', 'alice.md'),
+      join(siteDir, 'records', 'member', 'alice.md'),
       '---\nname: Alice\n---\nBio\n'
     )
-    writeFileSync(join(siteDir, 'records.yml'), '- member/*.md\n')
     writeFileSync(
       join(foundationDir, 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -874,7 +869,7 @@ describe('buildRecordEntities — `@/` model refs resolve into the publish org',
     // the publish org", and the second would silently re-home a shared or
     // other-org Model onto whoever happened to run the push.
     const alt = join(root, 'site2')
-    mkdirSync(join(alt, 'entities', 'acme', 'member'), { recursive: true })
+    mkdirSync(join(alt, 'records', 'acme', 'member'), { recursive: true })
     writeFileSync(
       join(alt, 'site.yml'),
       'name: S2\nfoundation: "@acme/fnd"\nqueries:\n  members:\n    schema: "@acme/member"\n'
@@ -883,8 +878,7 @@ describe('buildRecordEntities — `@/` model refs resolve into the publish org',
       join(alt, 'package.json'),
       JSON.stringify({ name: 'site2', dependencies: { '@acme/fnd': 'file:../foundation' } })
     )
-    writeFileSync(join(alt, 'entities', 'acme', 'member', 'alice.md'), '---\nname: Alice\n---\nBio\n')
-    writeFileSync(join(alt, 'records.yml'), '- acme/member/*.md\n')
+    writeFileSync(join(alt, 'records', 'acme', 'member', 'alice.md'), '---\nname: Alice\n---\nBio\n')
 
     const { entities } = await buildRecordEntities(alt, { org: '@proximify' })
     expect(entities[0].model).toBe('@acme/member')

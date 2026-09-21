@@ -16,9 +16,9 @@
 // rather keep one file. Precedence (per-query, per-key): queries.yml > site.yml.
 //
 // ⛔ THE THREE JOBS `collections/<name>/` USED TO FUSE ARE NOW THREE THINGS.
-// `entities/{schema}/` is the pool, `records.yml` is the folder (what makes an
-// entity a record), and a query asks the folder for a set. This file resolves the
-// LAST of those only.
+// `records/{schema}/` holds the site's records (placing a file there is what makes
+// it one), `records.yml` sorts them into folders, and a query asks for a set. This
+// file resolves the LAST of those only.
 //
 // ⚠️ `collections.yml` and `site.yml::collections` are GONE, with no alias and no
 // deprecation path — the model's §5 ruling, and there is nothing outside this
@@ -85,7 +85,7 @@ export function defaultSchema(name) {
 // address nothing local can derive.
 function normalizeQueryDecl(name, decl) {
   // ⭐ THE STRING SHORTHAND NAMES THE SCHEMA, because that is what a file-based
-  // query actually needs — `entities/{schema}/` supplies the records, so there is
+  // query actually needs — `records/{schema}/` supplies the records, so there is
   // no directory left to name. (It named a PATH while the pool was
   // `collections/<name>/` and the same directory answered both questions.)
   if (typeof decl === 'string') return { name, schema: decl }
@@ -165,7 +165,7 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
     if (decl.path && decl.url === undefined) {
       console.warn(
         `[uniweb] query "${decl.name}": \`path: ${decl.path}\` is ignored. A query names a ` +
-          `\`schema:\` and \`entities/{schema}/\` supplies its records — there is no directory ` +
+          `\`schema:\` and \`records/{schema}/\` supplies its records — there is no directory ` +
           `for it to name. Move the files under the schema folder instead.`
       )
     }
@@ -234,6 +234,16 @@ export function refuseQueryDeclaration(decl) {
   }
   refuseQueryRoute(decl, where)
   refuseLimit(decl.limit, where)
+  // ⛔ `sync:` IS RETIRED (2026-09-21). `sync: false` kept a query's records off a
+  // backend while a query owned its records; every record in `records/` is pushed
+  // now, whatever reads it, so an ignored `sync: false` would push exactly what the
+  // author meant to hold back. Refused, naming what does that now.
+  if (decl.sync !== undefined) {
+    throw new Error(
+      `[uniweb] ${where}: \`sync:\` is retired — a query does not own its records. Every file in ` +
+        `\`records/\` is a record and is pushed; a file whose name starts with \`_\` is not a record.`
+    )
+  }
   const external = decl.url !== undefined
   if (!external) {
     for (const key of ['method', 'body', 'transform', 'record']) {

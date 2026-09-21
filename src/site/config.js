@@ -484,7 +484,7 @@ export async function defineSiteConfig(options = {}) {
           const allowed = ['..']
           const parentDir = resolve(siteRoot, '..')
           const paths = siteConfig.paths || {}
-          for (const key of ['pages', 'layout', 'entities']) {
+          for (const key of ['pages', 'layout', 'records']) {
             if (paths[key]) {
               const resolved = resolve(siteRoot, paths[key])
               if (!resolved.startsWith(parentDir)) {

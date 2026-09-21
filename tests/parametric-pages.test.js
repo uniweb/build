@@ -258,8 +258,8 @@ describe('$name on compiled records — the record\'s final slug (ruled 2026-09-
   }
 
   it('from the filename, and from a frontmatter `slug:` that overrides it — what sync sends as the name', async () => {
-    w('entities/article/hello.md', '---\ntitle: Hello\n---\nBody\n')
-    w('entities/article/renamed.md', '---\ntitle: Renamed\nslug: custom\n---\nBody\n')
+    w('records/article/hello.md', '---\ntitle: Hello\n---\nBody\n')
+    w('records/article/renamed.md', '---\ntitle: Renamed\nslug: custom\n---\nBody\n')
     const { articles } = await run({ articles: { schema: '@/article' } })
     const byTitle = Object.fromEntries(articles.map((r) => [r.title, r]))
     expect(byTitle.Hello).toMatchObject({ slug: 'hello', $name: 'hello' })
@@ -267,7 +267,7 @@ describe('$name on compiled records — the record\'s final slug (ruled 2026-09-
   })
 
   it('on every format — an array-form file\'s own slugs', async () => {
-    w('entities/person/team.yml', '- slug: ada\n  name: Ada\n- slug: lin\n  name: Lin\n')
+    w('records/person/team.yml', '- slug: ada\n  name: Ada\n- slug: lin\n  name: Lin\n')
     const { people } = await run({ people: { schema: '@/person' } })
     expect(people.map((r) => r.$name).sort()).toEqual(['ada', 'lin'])
   })
@@ -275,8 +275,8 @@ describe('$name on compiled records — the record\'s final slug (ruled 2026-09-
 
 describe('a named query\'s narrowing at build — only what is fixed for every page', () => {
   beforeEach(() => {
-    w('entities/entry/a.md', '---\ntitle: A\n---\n')
-    w('entities/entry/b.md', '---\ntitle: B\n---\n')
+    w('records/entry/a.md', '---\ntitle: A\n---\n')
+    w('records/entry/b.md', '---\ntitle: B\n---\n')
     w('records.yml', ['- folder: field', '  records:', '    - entry/a.md', '- folder: lab', '  records:', '    - entry/b.md', ''].join('\n'))
   })
   const run = async (queries) => {

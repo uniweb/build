@@ -31,7 +31,7 @@ const SCHEMA = {
 const setup = ({ siteCollections, schemas = { '@/article': SCHEMA }, foundation = true } = {}) => {
   w('site/site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n${siteCollections}`)
   w('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
-  w('site/entities/article/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody text.\n')
+  w('site/records/article/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody text.\n')
   w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
   if (foundation) w('fdn/dist/meta/schema.json', { dataSchemas: schemas })
 }

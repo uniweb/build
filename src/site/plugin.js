@@ -50,7 +50,7 @@ import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
-import { ENTITIES_DIR } from './entity-pool.js'
+import { RECORDS_DIR, resolveRecordsDir } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { FONT_LINKS_MARKER } from './head-markers.js'
@@ -133,7 +133,7 @@ export function shouldPrefetchInDev(cfg) {
  *     query list just collected, reload. `queries.yml` declares queries, and so does
  *     `site.yml` (`queries:`), beside the rest of the site's configuration.
  *   - `'records'` — re-materialize the query files, reload: `records.yml` decides
- *     which entities are records, as an entity change decides what one says.
+ *     which folder each record sits in, which a query's `scope:` reads.
  *   - `'content'` — re-collect the site, reload.
  *
  * ⛔ Until 2026-09-14 nothing watched `records.yml` or `queries.yml`, a `site.yml`
@@ -665,7 +665,7 @@ export function siteContentPlugin(options = {}) {
   let resolvedPagesPath = null // Resolved from site.yml pagesDir or default
   let resolvedMountPaths = [] // Absolute dirs mounted under pages/ via site.yml paths:
   let resolvedLayoutPath = null // Resolved from site.yml layoutDir or default
-  let resolvedEntitiesDir = null // site.yml `paths.entities`, site-root-relative
+  let resolvedRecordsDir = null // site.yml `paths.records` as written, via `resolveRecordsDir`
   let headHtml = '' // Contents of site/head.html for injection
   let basePath = '/' // Vite's config.base, always has trailing slash
 
@@ -725,7 +725,7 @@ export function siteContentPlugin(options = {}) {
    */
   async function materializeQueries(queries, config) {
     if (!queries) return
-    const byQuery = await processQueries(resolvedSitePath, queries, resolvedEntitiesDir, basePath, {
+    const byQuery = await processQueries(resolvedSitePath, queries, resolvedRecordsDir, basePath, {
       locale: resolveDefaultLocale(config ?? {}) ?? null,
     })
     await writeQueryFiles(resolvedSitePath, byQuery, queries)
@@ -911,7 +911,7 @@ export function siteContentPlugin(options = {}) {
           resolvedLayoutPath = paths.layout
             ? resolve(resolvedSitePath, paths.layout)
             : resolve(resolvedSitePath, 'layout')
-          resolvedEntitiesDir = paths.entities || null
+          resolvedRecordsDir = resolveRecordsDir(resolvedSitePath, paths).rel
           resolvedMountPaths = mountEntriesOf(paths).map(([, rel]) => resolve(resolvedSitePath, rel))
 
           if (queriesConfig) {
@@ -934,7 +934,7 @@ export function siteContentPlugin(options = {}) {
         resolvedLayoutPath = paths.layout
           ? resolve(resolvedSitePath, paths.layout)
           : resolve(resolvedSitePath, 'layout')
-        resolvedEntitiesDir = paths.entities || null
+        resolvedRecordsDir = resolveRecordsDir(resolvedSitePath, paths).rel
       }
     },
 
@@ -954,7 +954,7 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here
         if (isProduction && siteContent.config?.queries) {
           console.log('[site-content] Materializing queries...')
-          const byQuery = await processQueries(resolvedSitePath, siteContent.config.queries, resolvedEntitiesDir, basePath)
+          const byQuery = await processQueries(resolvedSitePath, siteContent.config.queries, resolvedRecordsDir, basePath)
           await writeQueryFiles(resolvedSitePath, byQuery, siteContent.config.queries)
         }
 
@@ -1113,11 +1113,11 @@ export function siteContentPlugin(options = {}) {
         // ⭐ WATCH THE POOL, NOT A DIRECTORY PER QUERY. This used to resolve
         // `config.path` for each declaration and watch each one, so a schema
         // folder no query had mentioned yet — a new one, mid-session — was
-        // watched by nothing and its records never rebuilt. `entities/` is one
+        // watched by nothing and its records never rebuilt. `records/` is one
         // recursive root and covers every schema, present and future.
         {
           const contentPaths = new Set([
-            resolve(resolvedSitePath, resolvedEntitiesDir || ENTITIES_DIR)
+            resolve(resolvedSitePath, resolvedRecordsDir || RECORDS_DIR)
           ])
 
           for (const contentPath of contentPaths) {

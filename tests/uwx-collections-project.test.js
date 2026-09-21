@@ -71,7 +71,7 @@ describe('recordsToProject — placement', () => {
 
     const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
-    const f = join(dir, 'entities/acme/article/hello.md')
+    const f = join(dir, 'records/acme/article/hello.md')
     expect(report.placed).toEqual([f])
     expect(readFileSync(f, 'utf8')).toBe('---\n$uuid: U1\ntitle: Hello\n---\n\n# Hi\n')
   })
@@ -82,14 +82,14 @@ describe('recordsToProject — placement', () => {
 
     recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
-    const f = join(dir, 'entities/acme/widget/w1.yml')
+    const f = join(dir, 'records/acme/widget/w1.yml')
     expect(existsSync(f)).toBe(true)
     expect(yaml.load(readFileSync(f, 'utf8'))).toEqual({ $uuid: 'W1', title: 'Gear', price: 9.99 })
   })
 
   // ⛔ THE 'path override' CASE IS GONE, and its replacement is the assertion that
   // a record's home is decided by WHAT IT IS. A query has no directory to
-  // override — `entities/{schema}/` is the pool — so placement follows `$model`
+  // override — `records/{schema}/` is the pool — so placement follows `$model`
   // and survives a query being renamed, added or deleted, none of which is a fact
   // about the record.
   it('places by the MODEL, not by any query that happens to select the record', () => {
@@ -103,7 +103,7 @@ describe('recordsToProject — placement', () => {
       opts: { resolveDeclaration },
     })
 
-    expect(existsSync(join(dir, 'entities/acme/article/hello.md'))).toBe(true)
+    expect(existsSync(join(dir, 'records/acme/article/hello.md'))).toBe(true)
   })
 
   it('reports — never silently drops — a model that names no pool folder', () => {
@@ -127,18 +127,18 @@ describe('recordsToProject — placement', () => {
 
     const report = recordsToProject({ folderDoc, recordDocs: [orphan], siteRoot: dir, opts: { resolveDeclaration } })
 
-    expect(report.placed).toEqual([join(dir, 'entities/acme/article/bonus.md')])
+    expect(report.placed).toEqual([join(dir, 'records/acme/article/bonus.md')])
   })
 })
 
 describe('recordsToProject — update in place by $uuid', () => {
   it('re-renders over an existing file matched by $uuid, preserving its format and filename', () => {
     // Existing file: a different filename than the slug, in YAML, carrying U2.
-    mkdirSync(join(dir, 'entities/acme/article'), { recursive: true })
-    const existing = join(dir, 'entities/acme/article/legacy-name.yml')
+    mkdirSync(join(dir, 'records/acme/article'), { recursive: true })
+    const existing = join(dir, 'records/acme/article/legacy-name.yml')
     writeFileSync(existing, '$uuid: U2\ntitle: Old Title\n')
 
-    expect(findRecordFileByUuid(join(dir, 'entities/acme/article'), 'U2')).toEqual({ path: existing, format: 'yaml' })
+    expect(findRecordFileByUuid(join(dir, 'records/acme/article'), 'U2')).toEqual({ path: existing, format: 'yaml' })
 
     const folderDoc = folderFor([{ id: 'articles/fresh', uuid: 'U2', slug: 'fresh', collection: 'articles' }], 'F1')
     const report = recordsToProject({
@@ -150,7 +150,7 @@ describe('recordsToProject — update in place by $uuid', () => {
 
     // Updated the existing file (not placed a new fresh.md); stayed YAML.
     expect(report.updated).toEqual([existing])
-    expect(existsSync(join(dir, 'entities/acme/article/fresh.md'))).toBe(false)
+    expect(existsSync(join(dir, 'records/acme/article/fresh.md'))).toBe(false)
     expect(yaml.load(readFileSync(existing, 'utf8'))).toEqual({ $uuid: 'U2', title: 'New Title', body: '\nbody\n' })
   })
 
@@ -161,7 +161,7 @@ describe('recordsToProject — update in place by $uuid', () => {
 
     recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
     const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: o })
-    expect(report.unchanged).toEqual([join(dir, 'entities/acme/article/hello.md')])
+    expect(report.unchanged).toEqual([join(dir, 'records/acme/article/hello.md')])
     expect(report.placed).toEqual([])
   })
 })
@@ -172,7 +172,7 @@ describe('recordsToProject — folder identity + no silent skips', () => {
     recordsToProject({ folderDoc, recordDocs: [articleDoc('U1', 'Hi', '\nx\n')], siteRoot: dir, opts: { resolveDeclaration } })
 
     // the record is placed, but no folder identity is written to collections.yml
-    expect(existsSync(join(dir, 'entities/acme/article/hello.md'))).toBe(true)
+    expect(existsSync(join(dir, 'records/acme/article/hello.md'))).toBe(true)
     expect(existsSync(join(dir, 'collections/collections.yml'))).toBe(false)
   })
 
@@ -214,7 +214,7 @@ describe('recordsToProject — prosemirror content field (B)', () => {
     const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: resolvePm } })
 
     // body field (prosemirror) → markdown body in a .md file (briefHasContentBody → md format)
-    const f = join(dir, 'entities/acme/article/hello.md')
+    const f = join(dir, 'records/acme/article/hello.md')
     expect(report.placed).toContain(f)
     expect(readFileSync(f, 'utf8')).toContain('Hello world')
     // the target structural map → locales/records/es.json by source-text hash
@@ -234,7 +234,7 @@ describe('recordsToProject — localized record scalars (B)', () => {
     const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration } })
 
     // source-locale title stays inline in the record file
-    const f = join(dir, 'entities/acme/article/hello.md')
+    const f = join(dir, 'records/acme/article/hello.md')
     expect(readFileSync(f, 'utf8')).toContain('title: Hello')
     // target locale → locales/records/es.json keyed by hash(source)
     const es = JSON.parse(readFileSync(join(dir, 'locales/records/es.json'), 'utf8'))
@@ -267,7 +267,7 @@ describe('recordsToProject — prosemirror body free-form override (B-1)', () =>
     { type: 'paragraph', content: [{ type: 'text', text: 'Hola distinto dos' }] },
   ] }
 
-  it('writes a target-locale full-doc body to locales/freeform/{locale}/entities/', () => {
+  it('writes a target-locale full-doc body to locales/freeform/{locale}/records/', () => {
     const folderDoc = folderFor([{ id: 'articles/hello', uuid: 'U1', slug: 'hello', collection: 'articles' }], 'F1')
     const recordDocs = [
       { $uuid: 'U1', $model: '@acme/pmarticle', article: { $uuid: 'rec', title: { en: 'T' }, body: { en: srcDoc, es: ffDoc } } },
@@ -276,10 +276,10 @@ describe('recordsToProject — prosemirror body free-form override (B-1)', () =>
     const report = recordsToProject({ folderDoc, recordDocs, siteRoot: dir, opts: { resolveDeclaration: pmResolve } })
 
     // source-locale body → the record .md, in ITS model's pool folder
-    expect(readFileSync(join(dir, 'entities/acme/pmarticle/hello.md'), 'utf8')).toContain('Hi there')
+    expect(readFileSync(join(dir, 'records/acme/pmarticle/hello.md'), 'utf8')).toContain('Hi there')
     // ⭐ the target-locale full body mirrors the pool, NOT any query name — so two
     // queries over one schema find one translation instead of needing two copies.
-    const ff = join(dir, 'locales/freeform/es/entities/acme/pmarticle/hello.md')
+    const ff = join(dir, 'locales/freeform/es/records/acme/pmarticle/hello.md')
     expect(report.freeform.written).toContain(ff)
     expect(readFileSync(ff, 'utf8')).toContain('Hola distinto')
   })
@@ -295,6 +295,6 @@ describe('recordsToProject — prosemirror body free-form override (B-1)', () =>
     const es = JSON.parse(readFileSync(join(dir, 'locales/records/es.json'), 'utf8'))
     expect(es[computeHash('Hi there')]).toBe('Hola ahi')
     expect(report.freeform.written).toEqual([])
-    expect(existsSync(join(dir, 'locales/freeform/es/entities/acme/article/hello.md'))).toBe(false)
+    expect(existsSync(join(dir, 'locales/freeform/es/records/acme/article/hello.md'))).toBe(false)
   })
 })

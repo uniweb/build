@@ -116,23 +116,23 @@ export {
 } from './records.js'
 export { readEntityFile, parseFrontmatter } from './entity-source.js'
 
-// The folder's own vocabulary, so a verb can ask what `records.yml` SAYS without
-// re-reading or re-parsing it. ⛔ Note the allowlist: an export added to
-// `site/records-config.js` does not reach a caller until it is named here.
-// The pool's grammar — a schema ref to its directory and back. ⛔ Allowlist: an
-// export added to `site/entity-pool.js` does not reach a caller until it is here.
+// Where a site's records live, and the grammar of that directory — a schema ref to
+// its folder and back. ⛔ Allowlist: an export added to `site/entity-pool.js` does
+// not reach a caller until it is here.
 export {
   poolDirsForSchema,
   schemaForPoolDirs,
-  ENTITIES_DIR,
+  readEntityPool,
+  resolveRecordsDir,
+  RECORDS_DIR,
 } from '../site/entity-pool.js'
 
+// How the folder is organized, so a verb can ask what `records.yml` SAYS without
+// re-reading or re-parsing it. ⛔ Note the allowlist: an export added to
+// `site/records-config.js` does not reach a caller until it is named here.
 export {
   readRecordsConfig,
   RECORDS_YML_RELPATH,
-  FOLDER_MISSING,
-  FOLDER_EMPTY,
-  FOLDER_DECLARED,
 } from '../site/records-config.js'
 export {
   findRecordFile,

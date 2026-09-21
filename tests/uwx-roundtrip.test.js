@@ -24,9 +24,9 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'uwx-rt-'))
   siteDir = join(root, 'site')
   const foundationDir = join(root, 'foundation')
-  mkdirSync(join(siteDir, 'entities', 'acme', 'product'), { recursive: true })
-  mkdirSync(join(siteDir, 'entities', 'acme', 'article'), { recursive: true })
-  mkdirSync(join(siteDir, 'entities', 'acme', 'tag'), { recursive: true })
+  mkdirSync(join(siteDir, 'records', 'acme', 'product'), { recursive: true })
+  mkdirSync(join(siteDir, 'records', 'acme', 'article'), { recursive: true })
+  mkdirSync(join(siteDir, 'records', 'acme', 'tag'), { recursive: true })
   mkdirSync(join(foundationDir, 'dist', 'meta'), { recursive: true })
 
   writeFileSync(
@@ -48,14 +48,9 @@ beforeEach(() => {
     join(siteDir, 'package.json'),
     JSON.stringify({ name: 'site', dependencies: { '@acme/marketing': 'file:../foundation' } })
   )
-  writeFileSync(join(siteDir, 'entities', 'acme', 'product', 'widget-x.yml'), PRODUCT_YML)
-  writeFileSync(join(siteDir, 'entities', 'acme', 'article', 'hello.md'), ARTICLE_MD)
-  writeFileSync(join(siteDir, 'entities', 'acme', 'tag', 'all.yml'), TAGS_YML)
-  // ⭐ The folder: listing an entity is what makes it a record, and what syncs.
-  writeFileSync(
-    join(siteDir, 'records.yml'),
-    '- acme/product/*.yml\n- acme/article/*.md\n- acme/tag/*.yml\n'
-  )
+  writeFileSync(join(siteDir, 'records', 'acme', 'product', 'widget-x.yml'), PRODUCT_YML)
+  writeFileSync(join(siteDir, 'records', 'acme', 'article', 'hello.md'), ARTICLE_MD)
+  writeFileSync(join(siteDir, 'records', 'acme', 'tag', 'all.yml'), TAGS_YML)
 
   const schema = {
     _self: { name: '@acme/marketing', version: '1.0.0', role: 'foundation' },
@@ -108,9 +103,9 @@ async function syncCycle() {
   return { warnings, bf, finalized }
 }
 
-const ymlPath = () => join(siteDir, 'entities', 'acme', 'product', 'widget-x.yml')
-const mdPath = () => join(siteDir, 'entities', 'acme', 'article', 'hello.md')
-const tagsPath = () => join(siteDir, 'entities', 'acme', 'tag', 'all.yml')
+const ymlPath = () => join(siteDir, 'records', 'acme', 'product', 'widget-x.yml')
+const mdPath = () => join(siteDir, 'records', 'acme', 'article', 'hello.md')
+const tagsPath = () => join(siteDir, 'records', 'acme', 'tag', 'all.yml')
 const stripUuidLine = (text) => text.replace(/^\$uuid: .*\n/m, '')
 
 describe('collection-sync fixpoint', () => {

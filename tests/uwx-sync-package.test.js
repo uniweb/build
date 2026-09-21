@@ -42,11 +42,9 @@ beforeEach(() => {
   w('layout/header.md', '---\ntype: Header\n---\n# H\n')
   // a syncable query (resolvable @/article schema) + queries.yml
   w('queries.yml', 'articles:\n  schema: "@/article"\n  sort: date desc\n')
-  // ⭐ and the FOLDER — listing an entity is what makes it a record, and what
-  // makes it sync. An unlisted entity is a draft, for free.
-  w('records.yml', '- article/*.md\n')
-  w('entities/article/hello.md', '---\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
-  w('entities/article/world.md', '---\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
+  // ⭐ and the records — every file in `records/` is one, and every one syncs.
+  w('records/article/hello.md', '---\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
+  w('records/article/world.md', '---\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
   writeFileSync(
     join(fdn, 'dist', 'meta', 'schema.json'),
     JSON.stringify({
@@ -89,8 +87,8 @@ describe('emitSyncPackages — two directional lanes', () => {
     const folder = JSON.parse(readZip(pkg.records.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder.$model).toBe('@uniweb/folder')
     expect(folder).not.toHaveProperty('$uuid')
-    // ⭐ FLAT, because `records.yml` lists the records at the root and declares no
-    // folder. That is the model's common case — the pool is usually flat and
+    // ⭐ FLAT, because there is no `records.yml`: every record sits at the top of
+    // the folder. That is the model's common case — the pool is usually flat and
     // QUERIES do the organizing, not the folder. The old producer derived one
     // branch per collection whether the author wanted structure or not.
     expect(folder.contents.map((l) => l.$ref)).toEqual(['article/hello', 'article/world'])
@@ -118,7 +116,7 @@ describe('emitSyncPackages — two directional lanes', () => {
 
   it('editing a record fires ONLY the collections lane', async () => {
     const first = await emitSyncPackages(SITE)
-    w('entities/article/hello.md', '---\ntitle: Hello edited\ndate: 2026-01-01\n---\nBody\n')
+    w('records/article/hello.md', '---\ntitle: Hello edited\ndate: 2026-01-01\n---\nBody\n')
     const second = await emitSyncPackages(SITE, { priorHashes: first.hashes })
     expect(second.siteContent).toBeNull()
     expect(second.records).toBeTruthy()
@@ -150,8 +148,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // the subfolder-name convention, finds nothing, and soft-skips the sync. It
     // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
     w('queries.yml', 'articles:\n  schema: "@/article"\nnotes: {}\n')
-    w('entities/notes/first.md', '---\ntitle: First\n---\nNote body\n')
-    w('records.yml', '- article/*.md\n- notes/*.md\n')
+    w('records/notes/first.md', '---\ntitle: First\n---\nNote body\n')
     const pkg = await emitSyncPackages(SITE)
 
     // `model` carries the name the convention looked for and did not find. The CLI
@@ -173,8 +170,8 @@ describe('emitSyncPackages — two directional lanes', () => {
 
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {
     // Articles with embedded $uuid → the folder references them by `entry.model` (minted form).
-    w('entities/article/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
-    w('entities/article/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
+    w('records/article/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
+    w('records/article/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
     // ⭐ A RE-push: this backend minted both, so its map says so (identity). The
     // "minted form" the folder references them by is a fact about THIS backend.
     w('sync.json', JSON.stringify({

@@ -21,7 +21,7 @@ import {
   buildLocalizedRecords,
   getRecordLocales,
   translateRecordData,
-  RECORDS_DIR
+  RECORD_LOCALES_DIR
 } from './records.js'
 import { resolveDefaultLocale } from '@uniweb/core'
 import { generateSearchIndex } from '@uniweb/projections'
@@ -75,7 +75,7 @@ export {
   buildLocalizedRecords,
   getRecordLocales,
   translateRecordData,
-  RECORDS_DIR,
+  RECORD_LOCALES_DIR,
 
   // Locale resolution
   getAvailableLocales,
@@ -234,7 +234,7 @@ export async function extractRecordManifest(siteRoot, options = {}) {
   const manifest = await extractRecordContent(siteRoot)
 
   // Ensure collections locales directory exists
-  const recordLocalesDir = join(siteRoot, localesDir, RECORDS_DIR)
+  const recordLocalesDir = join(siteRoot, localesDir, RECORD_LOCALES_DIR)
   if (!existsSync(recordLocalesDir)) {
     await mkdir(recordLocalesDir, { recursive: true })
   }
@@ -517,7 +517,7 @@ async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
     }
 
     // Check for orphaned translations — only those this content can judge: never a
-    // record's (`entities/…`), which is read from records the site content does not hold.
+    // record's (`records/…`), which is read from records the site content does not hold.
     const orphaned = await getOrphanedTranslations(freeformDir, validPaths)
     for (const item of orphaned) {
       if (!canJudge(item.path)) continue

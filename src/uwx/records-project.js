@@ -1,46 +1,44 @@
-// Collections projection — write a folder + its record entities back to the
-// site's `collections/**` source files. The inverse of the collections producer
-// (collections.js + folder.js): the producer reads source records and emits the
+// Records projection — write a pulled folder and its records back to the site's
+// `records/**` files and `records.yml`. The inverse of the producer (`records.js`
+// + `folder.js`): the producer reads the records directory and emits the
 // `@uniweb/folder` entity + one section-keyed `$`-document per record; this takes
 // those documents back and renders them to files.
 //
-// Identity & placement. A record's on-disk home is `(collection, slug)`:
-//   - `slug` and `collection` come from the FOLDER document — each ref leaf is
-//     `{ entry: { model, entity: <uuid> }, name: <slug> }` inside a branch
-//     (its `$children`) whose `name` names the folder it was placed in.
-//     The folder is the authoritative organization on a read (the record
-//     document's own `$id` envelope is not guaranteed to be echoed back), with
-//     the record document's `$id` (its pool identity) as a fallback when present.
-//   - the record's directory comes from its `$model` — `entities/{schema}/` is
-//     where a thing of that model lives. Not from any query: a query has no
-//     directory, and which query selects a record is not a fact about it.
+// Identity & placement:
+//   - a record's slug comes from the FOLDER document — each ref leaf is
+//     `{ entry: { model, entity: <uuid> }, name: <slug> }`, at the top of the folder
+//     or inside a branch (its `$children`) whose `name` names the sub-folder. The
+//     folder is the authoritative organization on a read (the record document's own
+//     `$id` envelope is not guaranteed to be echoed back), with the record
+//     document's `$id` (its position in the directory) as a fallback when present.
+//   - the record's directory comes from its `$model` — `records/{schema}/` is where
+//     a record of that model lives (`site.yml::paths.records` moves it). Not from any
+//     query: a query has no directory, and which query selects a record is not a
+//     fact about it.
 //   - an existing local file carrying the same `$uuid` is re-rendered in place;
 //     otherwise a new single-record file is placed at `<slug>.<ext>`, its format
-//     matched to the collection's existing files, else markdown when the Model's
+//     matched to the schema folder's existing files, else markdown when the Model's
 //     brief has a content body field, else YAML.
 //
 // Field rendering reuses renderEntityDocument (via writeRecordFile) — localized
 // unwrap, date handling, content-body→body are already inverted there.
 //
-// v1 scope / deferred: array-form & BibTeX multi-record files (a pulled record is
-// placed as its own single-record file; merging into an existing array file is a
-// later nicety); deriving an on-disk collection from a deeply NESTED virtual
-// folder org when the record carries no `$id`; and rewriting `collections.yml`'s
-// `folders:` organization + synthesizing declarations for newly-introduced collections
-// (a comment-preserving config rewrite is a separate quality bar). The folder itself
-// carries no `$uuid` — the backend owns it, keyed by the site-content uuid — so
-// nothing is written into `collections.yml` here. Nothing is silently dropped: an
-// unplaceable or unresolvable record is reported.
+// Deferred: array-form & BibTeX multi-record files (a pulled record is placed as
+// its own single-record file; merging into an existing array file is a later
+// nicety). The folder itself carries no `$uuid` — the backend owns it, keyed by the
+// site-content uuid. Nothing is silently dropped: an unplaceable or unresolvable
+// record is reported.
 
 import { readBackendState, updateBackendMap } from './sync-store.js'
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, unlinkSync } from 'node:fs'
 import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
-import { poolDirsForSchema, ENTITIES_DIR } from '../site/entity-pool.js'
+import { poolDirsForSchema, resolveRecordsDir } from '../site/entity-pool.js'
+import { recordsYmlPath } from '../site/records-config.js'
 import { isContentBodyField } from './data-schema.js'
 import { unresolveSelfScope } from './self-scope.js'
 import { unwrapLocalized } from './backfill.js'
@@ -145,7 +143,7 @@ function indexFolder(folderDoc) {
 // Where a pulled record is written: the pool folder its MODEL names.
 //
 // ⛔ NOT THE QUERY'S DIRECTORY — a query has none. A record's home is decided by
-// what it IS, and `entities/{schema}/` is the one place a thing of that model
+// what it IS, and `records/{schema}/` is the one place a record of that model
 // lives. That is also why the placement survives a query being renamed, added or
 // deleted, none of which is a fact about the record.
 //
@@ -153,9 +151,9 @@ function indexFolder(folderDoc) {
 // `schemaForPoolDirs`, and deliberately not a second rule: if the two disagreed,
 // a pulled record would land somewhere the next build reads as a different
 // schema — silently, because both paths are well-formed.
-function recordDirFor(siteRoot, model, selfOrg) {
+function recordDirFor(recordsRoot, model, selfOrg) {
   const dirs = poolDirsForSchema(unresolveSelfScope(model, selfOrg))
-  return dirs ? join(siteRoot, ENTITIES_DIR, ...dirs) : null
+  return dirs ? join(recordsRoot, ...dirs) : null
 }
 
 // ⚠️ Undoing the producer's self-scope resolution (`unresolveSelfScope`) lives in
@@ -263,8 +261,8 @@ function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
     setIf(decl, 'transform', source.transform)
     setIf(decl, 'record', source.record)
   } else if (typeof source.path === 'string') {
-    // ⛔ A FILE-BASED QUERY HAS NO PATH TO WRITE BACK. `entities/{schema}/` is the
-    // pool and `schema:` addresses it, so a `path` arriving on the wire is either
+    // ⛔ A FILE-BASED QUERY HAS NO PATH TO WRITE BACK. `records/{schema}/` holds its
+    // records and `schema:` addresses them, so a `path` arriving on the wire is either
     // stale storage or something only a remote source could have meant. Dropping
     // it keeps the author's file saying what the build actually reads.
     decl.path = source.path
@@ -372,31 +370,37 @@ export function declarationsToQueriesYml({ document, siteRoot, org, backend = nu
 /**
  * Project a pulled `@uniweb/folder` document back to `records.yml`.
  *
- * ⭐ THE FOLDER IS THE ONE THING THAT ROUND-TRIPS TRIVIALLY, and that is by design
- * rather than luck: `records.yml` holds concrete refs on both sides, so there is
- * nothing to invert. The old shape put QUERY MACROS in the folder — a virtual
- * `folders:` tree naming collections — and inverting a macro is not possible in
- * general, which is why rewriting it stayed deferred for as long as it existed.
- * Taking queries out of the folder is what dissolved that.
+ * ⭐ THE FOLDER ROUND-TRIPS TRIVIALLY, and that is by design rather than luck:
+ * `records.yml` holds concrete paths on both sides, so there is nothing to invert.
+ * The old shape put QUERY MACROS in the folder — a virtual `folders:` tree naming
+ * collections — and inverting a macro is not possible in general. Taking queries
+ * out of the folder is what dissolved that.
  *
- * ⛔ AN EMPTY RESULT IS NOT WRITTEN. An empty `records.yml` means "the folder holds
- * nothing" and REMOVES on the next push, so a pull that carried no folder — or one
- * whose leaves could not be placed — must leave the file alone rather than author
- * the destructive state on the author's behalf.
+ * ⭐ ONLY THE SUB-FOLDERS ARE WRITTEN (ruled 2026-09-21 [Diego]). A record at the
+ * top of the folder needs no line — being in the records directory is what puts it
+ * there — so `records.yml` carries the branches and the records placed in them, and
+ * a folder with no branches is a site with no `records.yml`: a local one is REMOVED
+ * (it could only describe sub-folders the backend's folder no longer has). No state
+ * of the file removes a record, so this cannot empty anything.
+ *
+ * ⛔ A PULL THAT CARRIED NO FOLDER, or one with a placed record that was not written
+ * locally, leaves the file alone: it has nothing true to write.
  *
  * @param {object} params
  * @param {object} params.folderDoc - the stored `@uniweb/folder` document
  * @param {string} params.siteRoot
  * @param {Map<string,string>} params.poolPathByUuid - record `$uuid` → the path
- *        under `entities/` of the file just written for it. Supplied by
+ *        under `records/` of the file just written for it. Supplied by
  *        `recordsToProject`, which is the only thing that knows the extension
  *        each record landed with.
- * @returns {{ status: 'updated'|'unchanged'|'skipped', entries: Array, warnings: string[] }}
+ * @returns {{ status: 'updated'|'unchanged'|'removed'|'skipped', entries: Array, warnings: string[] }}
  */
 export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale = 'en' }) {
   const warnings = []
+  if (!folderDoc) return { status: 'skipped', entries: [], warnings }
+  let unplaceable = false
 
-  const walk = (nodes) => {
+  const walk = (nodes, inBranch) => {
     const out = []
     for (const node of nodes || []) {
       if (!node || typeof node !== 'object') continue
@@ -406,35 +410,53 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, source
         // does not caption its rows. On the wire the label is a localized map;
         // records.yml carries the source-locale string (a bare string passes).
         if (node.label !== undefined) entry.label = unwrapLocalized(node.label, sourceLocale)
-        entry.records = walk(node.$children)
+        entry.records = walk(node.$children, true)
         out.push(entry)
         continue
       }
       const uuid = node.entry?.entity ?? node.entry
       const rel = typeof uuid === 'string' ? poolPathByUuid.get(uuid) : null
+      // A record at the top of the folder needs no line — but one that did not land
+      // is still said: the next push sends the folder the directory holds, which
+      // would not have it.
+      if (!inBranch) {
+        if (!rel) {
+          warnings.push(
+            `the folder holds a record ("${node.name ?? '?'}") that was not written locally — ` +
+              `a push from here would remove it from the folder.`
+          )
+        }
+        continue
+      }
       if (!rel) {
-        // ⚠️ Reported, never dropped in silence. A leaf whose record did not land
-        // means the folder and the pool disagree, and writing the file without it
-        // would quietly unpublish that record on the next push.
+        // ⚠️ Reported, never dropped in silence. A placed record that did not land
+        // means the folder and the directory disagree, and writing the file without
+        // it would move that record to the top of the folder on the next push.
         warnings.push(
-          `records.yml: a folder leaf ("${node.name ?? '?'}") references a record that ` +
-            `was not written locally — the file was left unchanged rather than dropping it.`
+          `records.yml: the folder places a record ("${node.name ?? '?'}") that was not ` +
+            `written locally — the file was left unchanged rather than dropping it.`
         )
-        return null
+        unplaceable = true
+        continue
       }
       out.push(rel)
     }
     return out
   }
 
-  const entries = walk(folderDoc?.contents)
-  if (entries === null) return { status: 'skipped', entries: [], warnings }
-  if (entries.length === 0) return { status: 'skipped', entries: [], warnings }
+  const entries = walk(folderDoc.contents, false)
+  if (unplaceable) return { status: 'skipped', entries: [], warnings }
+  if (entries.length === 0) {
+    const file = recordsYmlPath(siteRoot)
+    if (!existsSync(file)) return { status: 'unchanged', entries, warnings }
+    unlinkSync(file)
+    return { status: 'removed', entries, warnings }
+  }
   return { status: writeRecordsConfig(siteRoot, entries), entries, warnings }
 }
 
 /**
- * Project a pulled folder + its record entities to `entities/**` files.
+ * Project a pulled folder + its record entities to `records/**` files.
  *
  * @param {object} params
  * @param {object} params.folderDoc   - the `@uniweb/folder` document `{ contents }` (no `$uuid`)
@@ -460,9 +482,14 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   }
 
   const folderIndex = indexFolder(folderDoc)
+  // Where records land — `site.yml::paths.records`, else `records/`: the one resolver
+  // the build and the push read too, so a pulled record lands where the next build
+  // looks. ⛔ This wrote into the default directory until 2026-09-21, whatever the
+  // site had moved its records to.
+  const recordsRoot = resolveRecordsDir(siteRoot).abs
   // Captures target-locale translations of localized record fields: SCALARs →
   // locales/records/{locale}.json (structural maps too), and a prosemirror
-  // BODY's free-form per-locale override → locales/freeform/{locale}/collections/.
+  // BODY's free-form per-locale override → locales/freeform/{locale}/records/.
   const collector = createTranslationCollector(sourceLocale)
   const updated = []
   const placed = []
@@ -474,7 +501,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   const ownIdByTheirs = new Map(Object.entries(recordMap).map(([own, theirs]) => [theirs, own]))
   // own id → their uuid, for every record this pull wrote. Recorded at the end.
   const learned = {}
-  // uuid → the path under `entities/` the record landed at. Only this loop knows
+  // uuid → the path under `records/` the record landed at. Only this loop knows
   // the extension each one got, so `records.yml` is written from it rather than
   // re-derived (a second rule could pick a different extension and the folder
   // would name a file that is not there).
@@ -492,7 +519,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       continue
     }
 
-    const poolDir = recordDirFor(siteRoot, document.$model, selfOrg)
+    const poolDir = recordDirFor(recordsRoot, document.$model, selfOrg)
     if (!poolDir) {
       skipped.push({
         uuid: document.$uuid,
@@ -542,7 +569,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     // Keyed by THEIR uuid: the folder document references records in the backend's
     // terms, so that is what `folderToRecordsYml` will look them up by.
     if (theirs) {
-      poolPathByUuid.set(theirs, relative(join(siteRoot, ENTITIES_DIR), filePath).split(sep).join('/'))
+      poolPathByUuid.set(theirs, relative(recordsRoot, filePath).split(sep).join('/'))
       if (own) learned[own] = theirs
     }
   }

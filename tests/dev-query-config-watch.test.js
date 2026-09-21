@@ -2,10 +2,11 @@
  * The dev server regenerates the query files when what DEFINES them changes — `queries.yml`,
  * `records.yml`, or the `queries:` of `site.yml` — not only when a record does.
  *
- * ⛔ Until 2026-09-14 it watched `entities/` alone, and it captured the query list once, at
+ * ⛔ Until 2026-09-14 it watched `records/` alone, and it captured the query list once, at
  * startup. Editing `queries.yml` or `records.yml` changed nothing in `public/data/` until the
  * server was restarted, and a `site.yml` edit re-collected the pages but left every query
- * file as it was — so a query added, narrowed or unpublished looked like it had not worked.
+ * file as it was — so a query added or narrowed, or a record moved to a folder, looked like
+ * it had not worked.
  *
  * These drive the plugin itself — `configResolved`, `buildStart`, `configureServer` — with
  * real file watchers, and read what lands on disk.
@@ -28,6 +29,11 @@ const w = (rel, body) => {
 const titles = (name) => {
   const file = join(ROOT, 'public/data', `${name}.json`)
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).map((r) => r.title) : null
+}
+// The folder each compiled record sits in, by title — what `records.yml` decides.
+const paths = (name) => {
+  const file = join(ROOT, 'public/data', `${name}.json`)
+  return existsSync(file) ? Object.fromEntries(JSON.parse(readFileSync(file, 'utf8')).map((r) => [r.title, r.path])) : null
 }
 const settle = (ms) => new Promise((done) => setTimeout(done, ms))
 
@@ -52,8 +58,8 @@ beforeEach(() => {
   console.warn = () => {}
   w('site.yml', 'name: t\n')
   w('pages/home/1-hero.md', '---\ntype: Hero\n---\n# Home\n')
-  w('entities/article/a.md', '---\ntitle: A\n---\n')
-  w('entities/article/b.md', '---\ntitle: B\n---\n')
+  w('records/article/a.md', '---\ntitle: A\n---\n')
+  w('records/article/b.md', '---\ntitle: B\n---\n')
 })
 afterEach(() => {
   plugin?.closeBundle()
@@ -91,18 +97,20 @@ describe('the dev server regenerates the query files', { timeout: 15000 }, () =>
   })
 
   it('when records.yml changes — and when it is created after the server started', async () => {
+    // `records.yml` decides which folder each record sits in, never whether it is one:
+    // every file in `records/` is compiled, so what moves is each record's `path`.
     w('queries.yml', "recent:\n  schema: '@/article'\n")
     await startDev()
-    expect(titles('recent')).toEqual(['A', 'B'])
+    expect(paths('recent')).toEqual({ A: '', B: '' })
 
-    w('records.yml', '- article/a.md\n')
+    w('records.yml', '- folder: archive\n  records:\n    - article/a.md\n')
     await vi.waitFor(() => {
-      expect(titles('recent')).toEqual(['A'])
+      expect(paths('recent')).toEqual({ A: 'archive', B: '' })
       expect(reloaded()).toBe(true)
     }, WAIT)
 
-    w('records.yml', '- article/*.md\n')
-    await vi.waitFor(() => expect(titles('recent')).toEqual(['A', 'B']), WAIT)
+    w('records.yml', '- folder: archive\n  records:\n    - article/*.md\n')
+    await vi.waitFor(() => expect(paths('recent')).toEqual({ A: 'archive', B: 'archive' }), WAIT)
   })
 
   it('when the `queries:` of site.yml changes', async () => {
@@ -121,7 +129,7 @@ describe('the dev server regenerates the query files', { timeout: 15000 }, () =>
   it('CONTROL — an entity change still regenerates, as it always did', async () => {
     w('queries.yml', "recent:\n  schema: '@/article'\n")
     await startDev()
-    w('entities/article/c.md', '---\ntitle: C\n---\n')
+    w('records/article/c.md', '---\ntitle: C\n---\n')
     await vi.waitFor(() => expect(titles('recent')).toEqual(['A', 'B', 'C']), WAIT)
   })
 })

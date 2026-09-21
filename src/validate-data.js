@@ -39,6 +39,7 @@ import { validateAndNormalizeSchema } from './resolve-data-schema.js'
 // reach it here) even though the implementation moved next to the vocabulary.
 export { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
 import { buildSchema } from './schema.js'
+import { resolveRecordsDir } from './site/entity-pool.js'
 import { toFetchList } from './site/data-fetcher.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
@@ -94,7 +95,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   let byQuery = {}
   if (config.queries && typeof config.queries === 'object') {
 
-    byQuery = await processQueries(siteRoot, config.queries, config.paths?.entities, basePath)
+    byQuery = await processQueries(siteRoot, config.queries, resolveRecordsDir(siteRoot, config.paths).rel, basePath)
   }
 
   // Declared here rather than beside pass 2's other accumulators because pass 1

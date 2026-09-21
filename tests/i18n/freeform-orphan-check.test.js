@@ -106,7 +106,7 @@ describe('every section the renderer translates is one the check knows', () => {
   })
 
   it('a record translation is the record lane\'s, not a page\'s to call orphaned', async () => {
-    w('locales/freeform/es/.manifest.json', { 'entities/article/hello.md': { hash: 'aaaaaaaa', recorded: '2025-01-28' } })
+    w('locales/freeform/es/.manifest.json', { 'records/article/hello.md': { hash: 'aaaaaaaa', recorded: '2025-01-28' } })
     await run()
     expect(orphaned()).toEqual([])
   })
@@ -120,12 +120,12 @@ describe('every section the renderer translates is one the check knows', () => {
 describe('a new free-form file is registered by the build', () => {
   it('discovery names each file by the path the manifest keys it by', async () => {
     w('locales/freeform/es/page-ids/ae274cc8/intro.md', 'Intro\n')
-    w('locales/freeform/es/entities/article/hello.md', 'Hola\n')
+    w('locales/freeform/es/records/article/hello.md', 'Hola\n')
     const found = await discoverFreeformTranslations('es', join(ROOT, 'locales'))
     expect(found).toEqual({
       pages: ['pages/about/story.md'],
       pageIds: ['page-ids/ae274cc8/intro.md'],
-      records: ['entities/article/hello.md'],
+      records: ['records/article/hello.md'],
     })
   })
 
@@ -173,7 +173,7 @@ describe('freeformSourceIndex', () => {
     const split = siteContent()
     split.pages.push({ route: '/team', id: 'b1b2', title: 'Team' })
     const { canJudge } = freeformSourceIndex(split)
-    expect(canJudge('entities/article/hello.md')).toBe(false)
+    expect(canJudge('records/article/hello.md')).toBe(false)
     expect(canJudge('pages/team/intro.md')).toBe(false)
     expect(canJudge('page-ids/b1b2/intro.md')).toBe(false)
     // CONTROL — a page whose sections it does carry, and a subpage of the unseen one

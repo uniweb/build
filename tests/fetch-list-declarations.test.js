@@ -64,10 +64,10 @@ function site(pageData) {
   writeFileSync(join(fdn, 'schemas', 'member.yml'), 'fields:\n  name:\n    type: string\n')
   writeFileSync(join(fdn, 'schemas', 'article.yml'), 'fields:\n  title:\n    type: string\n')
 
-  mkdirSync(join(siteRoot, 'entities', 'member'), { recursive: true })
-  writeFileSync(join(siteRoot, 'entities', 'member', 'ada.yml'), 'name: Ada\n')
-  mkdirSync(join(siteRoot, 'entities', 'article'), { recursive: true })
-  writeFileSync(join(siteRoot, 'entities', 'article', 'a1.yml'), 'title: One\n')
+  mkdirSync(join(siteRoot, 'records', 'member'), { recursive: true })
+  writeFileSync(join(siteRoot, 'records', 'member', 'ada.yml'), 'name: Ada\n')
+  mkdirSync(join(siteRoot, 'records', 'article'), { recursive: true })
+  writeFileSync(join(siteRoot, 'records', 'article', 'a1.yml'), 'title: One\n')
   writeFileSync(
     join(siteRoot, 'site.yml'),
     'name: t\nqueries:\n  team: { model: "@/member" }\n  articles: { model: "@/article" }\n'

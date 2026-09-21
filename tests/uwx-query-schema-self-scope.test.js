@@ -55,8 +55,7 @@ function makeSite({ queriesYml, org = null }) {
   w('site/queries.yml', queriesYml)
   w('site/package.json', { name: 'site', dependencies: { '@acme/fnd': 'file:../fdn' } })
   w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
-  w('site/entities/member/alice.md', '---\nname: Alice\n---\nBio\n')
-  w('site/records.yml', '- member/*.md\n')
+  w('site/records/member/alice.md', '---\nname: Alice\n---\nBio\n')
   w('fdn/dist/meta/schema.json', {
     _self: { name: '@acme/fnd', version: '1.0.0', role: 'foundation' },
     dataSchemas: {

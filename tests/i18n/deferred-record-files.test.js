@@ -34,7 +34,7 @@ async function compiledSite() {
   w('queries.yml', "recent:\n  schema: '@/article'\n  deferred: [content]\n")
   w('records.yml', '- article/*.md\n')
   // A heading, so the body holds a string the list's auto-excerpt does not
-  w('entities/article/hello.md', '---\ntitle: Hello there\n---\n\n## A heading\n\nThe body of the article.\n')
+  w('records/article/hello.md', '---\ntitle: Hello there\n---\n\n## A heading\n\nThe body of the article.\n')
   const byQuery = await processQueries(ROOT, queries, undefined, '/')
   await writeQueryFiles(ROOT, byQuery, queries)
 }
@@ -95,7 +95,7 @@ describe('a deferred query\'s per-record files', () => {
 
   it('a free-form record translation reaches the record file too', async () => {
     await compiledSite()
-    w('locales/freeform/es/entities/article/hello.md', '---\ntitle: Hola (libre)\n---\n\nCuerpo libre.\n')
+    w('locales/freeform/es/records/article/hello.md', '---\ntitle: Hola (libre)\n---\n\nCuerpo libre.\n')
     await buildLocalizedRecords(ROOT, { locales: ['es'] })
     const record = read('dist/es/data/recent/hello.json')
     expect(record.title).toBe('Hola (libre)')

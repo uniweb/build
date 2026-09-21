@@ -10,9 +10,9 @@
 // ⭐ THE FLAT-VS-RECURSIVE DIVERGENCE THIS FILE USED TO WARN ABOUT IS CLOSED.
 // It reported records below a collection's top level as building and rendering
 // locally while being absent from the synced set — the delivery lane recursed,
-// this one was one level deep. `entities/{schema}/` has no nesting to disagree
+// this one was one level deep. `records/{schema}/` has no nesting to disagree
 // about (`site/entity-pool.js` refuses it), and placement moved to `records.yml`,
-// so both lanes now read the same flat pool. The warning went with the ambiguity.
+// so both lanes now read the same flat directory. The warning went with the ambiguity.
 //
 // A collection `.md` is NOT a page-section `.md`: its frontmatter is structured
 // DATA whose schema is the collection type's data schema (the `model:` Model), and
@@ -55,7 +55,7 @@ function formatFor(ext) {
 /**
  * Read ONE entity file into its raw source record(s).
  *
- * ⭐ THE FILE IS THE UNIT NOW. `entities/{schema}/` supplies the model, so
+ * ⭐ THE FILE IS THE UNIT NOW. `records/{schema}/` supplies the model, so
  * nothing above this needs a directory scan to know what a file is — the pool
  * reader (`site/entity-pool.js`) already walked the tree and paired each file
  * with its schema. A single-record file yields one record; array-form YAML/JSON

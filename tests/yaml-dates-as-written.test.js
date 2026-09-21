@@ -48,20 +48,20 @@ afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 
 describe('a record\'s unquoted date reaches the compiled record as written', () => {
   it('in a markdown record\'s frontmatter', async () => {
-    w('entities/article/a.md', '---\ntitle: A\ndate: 2025-06-01\n---\n\nBody.\n')
+    w('records/article/a.md', '---\ntitle: A\ndate: 2025-06-01\n---\n\nBody.\n')
     const { articles } = await compile({ articles: { schema: '@/article' } })
     expect(articles[0].date).toBe('2025-06-01')
   })
 
   it('in a .yml record — a date and a timestamp', async () => {
-    w('entities/event/launch.yml', 'title: Launch\ndate: 2025-06-01\nat: 2025-06-01T10:20:30Z\n')
+    w('records/event/launch.yml', 'title: Launch\ndate: 2025-06-01\nat: 2025-06-01T10:20:30Z\n')
     const { events } = await compile({ events: { schema: '@/event' } })
     expect(events[0].date).toBe('2025-06-01')
     expect(events[0].at).toBe('2025-06-01T10:20:30Z')
   })
 
   it('in an array-form .yml file', async () => {
-    w('entities/event/all.yml', '- slug: a\n  date: 2025-06-01\n- slug: b\n  date: 2024-01-02\n')
+    w('records/event/all.yml', '- slug: a\n  date: 2025-06-01\n- slug: b\n  date: 2024-01-02\n')
     const { events } = await compile({ events: { schema: '@/event' } })
     expect(events.map((e) => e.date)).toEqual(['2025-06-01', '2024-01-02'])
   })
@@ -69,9 +69,9 @@ describe('a record\'s unquoted date reaches the compiled record as written', () 
 
 describe('a query over unquoted dates', () => {
   beforeEach(() => {
-    w('entities/article/a-old.md', '---\ntitle: Old\ndate: 2024-03-01\n---\n')
-    w('entities/article/b-mid.md', '---\ntitle: Mid\ndate: 2025-02-01\n---\n')
-    w('entities/article/c-new.md', '---\ntitle: New\ndate: 2025-06-01\n---\n')
+    w('records/article/a-old.md', '---\ntitle: Old\ndate: 2024-03-01\n---\n')
+    w('records/article/b-mid.md', '---\ntitle: Mid\ndate: 2025-02-01\n---\n')
+    w('records/article/c-new.md', '---\ntitle: New\ndate: 2025-06-01\n---\n')
   })
 
   it('a fixed `where` on dates selects at build time', async () => {
@@ -112,10 +112,10 @@ describe('configuration and section frontmatter keep an unquoted date as written
 
 describe('the sync lane reads the same values', () => {
   it('an entity file, markdown and YAML', async () => {
-    w('entities/event/launch.yml', 'title: Launch\ndate: 2025-06-01\n')
-    w('entities/article/a.md', '---\ntitle: A\ndate: 2025-06-01\n---\nBody\n')
-    const [yml] = await readEntityFile(join(ROOT, 'entities/event/launch.yml'))
-    const [md] = await readEntityFile(join(ROOT, 'entities/article/a.md'))
+    w('records/event/launch.yml', 'title: Launch\ndate: 2025-06-01\n')
+    w('records/article/a.md', '---\ntitle: A\ndate: 2025-06-01\n---\nBody\n')
+    const [yml] = await readEntityFile(join(ROOT, 'records/event/launch.yml'))
+    const [md] = await readEntityFile(join(ROOT, 'records/article/a.md'))
     expect(yml.data.date).toBe('2025-06-01')
     expect(md.data.date).toBe('2025-06-01')
   })
