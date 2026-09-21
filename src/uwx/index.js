@@ -93,6 +93,7 @@ export {
   updateBackendMap,
   carryServed,
   clearBackend,
+  clearBackendSections,
   refForAssetId,
   normalizeOrigin as normalizeBackendOrigin,
 } from './sync-store.js'

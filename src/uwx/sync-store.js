@@ -254,6 +254,39 @@ export function carryServed(next, prior) {
 }
 
 /**
+ * Empty named sections of one backend's state.
+ *
+ * ⛔ **`updateBackendState` cannot express this**: map sections MERGE, so passing
+ * `{ items: {} }` is a no-op. Clearing needs its own verb, and the absence of one is
+ * how a caller ends up reaching into the file by hand.
+ *
+ * @param {string} siteDir
+ * @param {string} origin
+ * @param {string[]} sections
+ * @returns {string[]} the sections that actually held something
+ */
+export function clearBackendSections(siteDir, origin, sections) {
+  const key = normalizeOrigin(origin)
+  if (!key || !Array.isArray(sections)) return []
+  const { backends } = readSyncStore(siteDir)
+  const prior = backends[key]
+  if (!prior) return []
+  const cleared = []
+  const next = { ...prior }
+  for (const section of sections) {
+    const v = prior[section]
+    if (v && typeof v === 'object' && Object.keys(v).length) {
+      cleared.push(section)
+      next[section] = {}
+    }
+  }
+  if (!cleared.length) return []
+  backends[key] = next
+  writeStore(siteDir, backends)
+  return cleared
+}
+
+/**
  * Forget one backend entirely. Every other backend is untouched — which is the
  * point of the keying, and the reason this is safe in a way clearing the old
  * single-valued identity never was.
