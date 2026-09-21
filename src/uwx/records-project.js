@@ -173,7 +173,7 @@ function locate(document, folderIndex) {
   return fromFolder || null
 }
 
-/** `site.yml::$org`, bare (`acme`), or null. Stored bare — see `writeSiteOrg`. */
+/** The site's own org on `backend` — its `site.org` in `sync.json` — bare (`acme`), or null. Stored bare — see `writeSiteOrg`. */
 // ⛔ `site.yml::$org` IS GONE (2026-09-20) — the org lives in
 // `sync.json::backends.<origin>.site.org`. This read `site.yml` and, once step 4
 // moved the key, silently returned null: every `@org/x` model a pull met would have
@@ -330,8 +330,10 @@ function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
  * @param {object} params.document - a site-content `$`-document (`{ queries }`)
  * @param {string} params.siteRoot
  * @param {string} [params.org] - the site's own org, so a `schema` the producer
- *        qualified from `@/x` is written back as `@/x`. Defaults to `site.yml::$org`,
- *        the same default `recordsToProject` places records by.
+ *        qualified from `@/x` is written back as `@/x`. Defaults to the org
+ *        `sync.json` records for `backend`, the same default `recordsToProject`
+ *        places records by.
+ * @param {string|null} [params.backend] - whose recorded org is that default
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
 export function declarationsToQueriesYml({ document, siteRoot, org, backend = null }) {
@@ -467,15 +469,17 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, source
  *        - resolve a Model's data-schema declaration by name (`$model`).
  * @param {string} [params.opts.org] - the site's own org, so a `@org/x` model the
  *        producer resolved from `@/x` is placed back where the author wrote it.
- *        Defaults to `site.yml::$org`.
+ *        Defaults to the org `sync.json` records for `opts.backend`.
+ * @param {string} [params.opts.backend] - whose record map to read and extend, and
+ *        whose recorded org is that default
  * @param {string} [params.opts.sourceLocale]
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
   const { resolveDeclaration, sourceLocale = 'en' } = opts
   // The site's own org, so a `@org/x` model the producer resolved from `@/x` is
-  // placed back where the author wrote it. Read from `site.yml::$org` unless the
-  // caller already has it.
+  // placed back where the author wrote it. Read from `sync.json` (this backend's
+  // `site.org`) unless the caller already has it.
   const selfOrg = opts.org ?? readSiteOrg(siteRoot, opts.backend)
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')

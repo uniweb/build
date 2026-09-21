@@ -2727,9 +2727,10 @@ export async function collectSiteContent(sitePath, options = {}) {
   // The `query:` shorthand ships as `config.fetch`, desugared below; carried raw
   // it would sit beside `config.queries`, the declarations, and read as one.
   const { publishLanguages: _publishLanguages, query: _query, ...runtimeSiteConfig } = siteConfig
-  // ⛔ `$`-prefixed keys are the project's BACKEND-SCOPED state — `$uuid`, `$org`,
-  // `$backend`, `$services`, `$secrets` — and this payload is a PUBLISHED artifact
-  // that a visitor can fetch. They have no runtime reader (nothing in core, runtime
+  // ⛔ `$`-prefixed keys were the project's BACKEND-SCOPED state — `$uuid`, `$org`,
+  // `$backend`, `$services`, `$secrets` — until they moved to `sync.json`
+  // (2026-09-20), and a `site.yml` written before then can still carry them. This
+  // payload is a PUBLISHED artifact that a visitor can fetch. They have no runtime reader (nothing in core, runtime
   // or kit reads a `config.$*` key), so this removes noise for four of them and a
   // real disclosure for the fifth: `$secrets` carries no values, but its entries
   // name every secret the site has, and an inventory of credential names is not

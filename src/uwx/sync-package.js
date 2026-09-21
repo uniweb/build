@@ -408,8 +408,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // ⛔ No identity attrs on `info`: it is a Section whose fields the host declares,
     // and `preview` is a real ASSET_SLOTS slot, so stamping would add
     // `previewAssetId`/`previewAssetExt` — fields the host refuses. Its bare strings
-    // are still swapped for their serve URLs, which `assets.json` recognizes on pull
-    // by fingerprint (asset-map.js → `servedFingerprint`).
+    // are still swapped for their serve URLs, which the asset map in `sync.json`
+    // recognizes on pull by fingerprint (asset-map.js → `servedFingerprint`).
     if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds, siteDoc.info)
     for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite, assetIds)
   }

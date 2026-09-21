@@ -26,7 +26,7 @@
 // (the foundation's scope, not the site's publish org) and stays there.
 
 /**
- * An org handle as `--org` or `site.yml::$org` gives it — `@acme`, `acme`, or
+ * An org handle as `--org` or `sync.json` gives it — `@acme`, `acme`, or
  * `@acme/…` — reduced to the bare handle, or `''`.
  *
  * @param {unknown} org
@@ -63,8 +63,8 @@ export function resolveSelfScope(ref, org) {
  * relied on the query-name default comes back with an explicit schema it never
  * had.
  *
- * ⭐ The site records its own org at create (`site.yml::$org` — "whose this is"),
- * which is exactly the inverse. A model scoped to ANOTHER org is left alone: it
+ * ⭐ The site records its own org at create (`site.org` in `sync.json`, per backend —
+ * "whose this is"), which is exactly the inverse. A model scoped to ANOTHER org is left alone: it
  * genuinely is that org's, and `@/` would be a lie.
  *
  * @param {unknown} ref

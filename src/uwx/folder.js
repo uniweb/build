@@ -45,7 +45,8 @@
 //
 // The folder carries NO `$uuid` of its own: the backend owns the site's
 // `@uniweb/folder` and resolves it from the site-content uuid (the folder sync lane
-// is keyed by `site.yml::$uuid`). The framework never holds a folder uuid.
+// is keyed by the site's uuid on that backend, from `sync.json`). The framework
+// never holds a folder uuid.
 
 export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'

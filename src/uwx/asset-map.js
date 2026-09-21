@@ -31,7 +31,8 @@ import { createHash } from 'node:crypto'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 
 /**
- * The fingerprint `assets.json` keeps of the URL a host serves an asset at.
+ * The fingerprint the asset map in `sync.json` keeps of the URL a host serves an
+ * asset at.
  *
  * A hash, never the URL: it can recognize an address a pull brings back and it
  * cannot be used to compose one — see the header. Prefixed so a reader of the

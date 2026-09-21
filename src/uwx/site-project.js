@@ -151,7 +151,7 @@ const INFO_TO_SITE_YML = {
   // ⭐ `preview` — the card image, verbatim: the app's timestamp, an author's URL, or
   // the path an author wrote for an image in the project, which `restoreAssetRefs`
   // has already put back by recognizing the serve URL the push recorded in
-  // `assets.json` (asset-map.js). [Diego, 2026-09-10]
+  // `sync.json`'s asset map (asset-map.js). [Diego, 2026-09-10]
   //
   // ⚠️ It was listed here as "DELIBERATELY ABSENT… BACKEND-STAMPED" until
   // 2026-09-10. Leaving an app-written field out of this map is what lets the next
@@ -349,8 +349,8 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // `data_bundle` and `foundation_schema`. It had been a build-derived upload
   // manifest that a pull deliberately never wrote back; framework never populated
   // it. Nothing to project, and nothing here to remove — the note is kept because
-  // `assets.json` (the committed local path → id map) is a DIFFERENT thing and the
-  // two get confused.
+  // the committed local path → id map (each backend's `assets` in `sync.json`;
+  // `assets.json` until 2026-09-20) is a DIFFERENT thing and the two get confused.
 
   return result
 }

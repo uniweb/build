@@ -14,13 +14,16 @@
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
 // truth).
 //
-// IDENTITY. The ENTITY `$uuid` lives in `site.yml` (top-level `$uuid`); we read it,
-// send it, and back-fill the minted value there. Nested pages/sections carry a `$id`
-// handle AND a per-item `$uuid`.
+// IDENTITY. The ENTITY `$uuid` is a backend's, recorded per backend in `sync.json`
+// (`backends.<origin>.site.uuid`): we read the one for the backend a document is
+// produced FOR, send it, and record the minted value there. Nested pages/sections
+// carry a `$id` handle AND a per-item `$uuid`. ⚠️ The entity `$uuid` lived in
+// `site.yml` until 2026-09-20 — one value, with no way to say which backend minted it.
 //
 // The per-item uuid is NOT authored — author files never carry sync uuids. It is
-// stamped at emit (`stampUnitUuids`) from an out-of-band cache populated by whatever
-// the backend last reported: a pull, or a push response's `finalized[].document`.
+// stamped at emit (`stampUnitUuids`) from that backend's `items` map in `sync.json`,
+// written from whatever the backend last reported: a pull, or a push response's
+// `finalized[].document`. (The map sat in the gitignored sync cache until 2026-09-20.)
 // This is load-bearing, not bookkeeping: the backend matches records by uuid, and
 // `pages` / `page_sections` / `layout_sections` are all `multi` sections, where a
 // uuid-less record is read as NEW — inserted, with its stored counterpart deleted as
@@ -385,7 +388,7 @@ const CATCH_ALL_MARKER = '...path'
 //     `page_sections`). Cross-section parentage is pure structure, never `$parent`.
 //   - `$id` (the stableId — the in-file handle) rides at every item level as the
 //     wire-only closure handle. Per-item `$uuid` is NOT authored here: it is
-//     stamped on by `stampUnitUuids` at emit, from the out-of-band identity cache,
+//     stamped on by `stampUnitUuids` at emit, from the backend's `items` map in `sync.json`,
 //     because the backend matches records by uuid and a uuid-less record in a
 //     `multi` section is read as new (inserted, stored counterpart deleted). See
 //     the IDENTITY note in the file header and `site-diff.js`.
@@ -401,8 +404,8 @@ const SITE_MODEL_NAME = '@uniweb/site-content'
 // `fields` already carries `stable_id` (the Model field); `$id` is the same value.
 // Both are kept: `$id` is the sync handle, `stable_id` is the declared content field
 // the editor/render reads. Per-item `$uuid` is added later by `stampUnitUuids` (it
-// comes from the identity cache, not from the authored files) — see the IDENTITY
-// note in the file header.
+// comes from `sync.json`, not from the authored files) — see the IDENTITY note in
+// the file header.
 function withIdentity(id, fields) {
   return Object.assign({ $id: id }, fields)
 }
@@ -1214,14 +1217,15 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
 /**
  * Map a file site project to the nested `@uniweb/site-content` `$`-document
  * (see the lane header above). PURE — reads the project, never mints, never writes.
- * The entity `$uuid` comes from `site.yml::$uuid` (back-filled after first sync);
- * nested items carry `$id` only.
+ * The entity `$uuid` is `opts.backend`'s, from `sync.json` (recorded after the first
+ * sync to it); nested items carry `$id` only.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
  * @param {string} [opts.backend] - whose `$uuid` to put on the wire (sync.json)
  * @param {string} [opts.entityUuid] - override the entity `$uuid` (tests); default
- *        is `site.yml::$uuid` (absent on first sync — `$id`-only document).
+ *        is `opts.backend`'s site uuid in `sync.json` (absent on a first sync to it,
+ *        or with no backend — a `$id`-only document).
  * @param {string} [opts.sourceLocale] - localized-field wrap locale. Defaults to
  *        the site's effective default locale (`defaultLanguage || languages[0] ||
  *        'en'` — the shared `resolveDefaultLocale` rule), NOT a bare 'en'.
@@ -1308,9 +1312,10 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // deploy-derived `info` field framework sends is `foundation`, via `injectInfo`
   // in `publish`.
   //
-  // ⚠️ The note stays because `assets.json` — the COMMITTED local map from an
-  // author's asset path to the backend's content-addressed id — is a different
-  // thing with a similar name, and it is very much alive.
+  // ⚠️ The note stays because the COMMITTED local map from an author's asset path
+  // to the backend's content-addressed id — each backend's `assets` in `sync.json`,
+  // `assets.json` until 2026-09-20 — is a different thing with a similar name, and
+  // it is very much alive.
   setIf(info, 'favicon', siteYml.favicon)
   // Site-level SEO/social metadata — the same shape as page.yml's `seo:` + the
   // top-level `keywords`, hoisted to the site root so the homepage social card
@@ -1421,7 +1426,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //     a site-root path to an image in the project, which push uploads like any
   //     content image and sends as its serve URL, and which pull puts back as the
   //     path the author wrote (`restoreAssetRefs` recognizes the URL by the
-  //     fingerprint `assets.json` recorded for it).
+  //     fingerprint recorded for it in `sync.json`'s asset map).
   // The app leaves an author's value alone.
   //
   // ⚠️ Until 2026-09-10 framework emitted no preview, on the premise that the host
@@ -1502,8 +1507,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // config (the records themselves are separate entities; this is just the config).
   const colConfig = await resolveQueriesConfig(siteRoot, { siteYml })
 
-  // `$uuid?` then `$id` `$model`, then sections in Model-declared order. The entity
-  // `$uuid` lives in site.yml (back-filled after first sync); absent on first sync.
+  // `$uuid?` then `$id` `$model`, then sections in Model-declared order.
   const doc = {}
   // ⭐ From `sync.json`, keyed by the backend this document is being produced FOR.
   // It was `site.yml::$uuid` — one scalar with no way to say which backend minted it.
@@ -1593,25 +1597,30 @@ export async function emitSiteSyncPackage(siteRoot, opts = {}) {
 // Identity back-fill.
 //
 // The ENTITY `$uuid` (the backend's identity for the whole site-content entity) is
-// back-filled into `site.yml::$uuid` after the first sync. That is the ONLY backend
-// uuid for site-content — its nested pages/sections sync wholesale (collision=force),
-// so there is no per-item uuid round-trip. Per-item identity for the eventual PULL is
-// recovered by in-file `stableId` + content-match (Plan D), not a local id store.
+// recorded after the first sync to a backend, in that backend's section of
+// `sync.json`, beside the org the site was created under. Per-item uuids round-trip
+// too, through the same section's `items` map — see the IDENTITY note in the file
+// header. ⚠️ Until 2026-09-21 this note put the entity `$uuid` in `site.yml`, where it
+// lived until 2026-09-20, and said nested items have no per-item uuid round-trip,
+// which the file header says is not so.
 // ===========================================================================
 
 /**
- * Back-fill the minted site-content entity `$uuid` into `site.yml` (top-level
- * `$uuid`), preserving the file's comments and key order.
+ * Record the minted site-content entity `$uuid` as `backend`'s site, in `sync.json`
+ * (`backends.<origin>.site.uuid`). Until 2026-09-20 it was back-filled into
+ * `site.yml` as a top-level `$uuid`.
  * @param {string} siteRoot
+ * @param {string} backend - the origin of the backend that minted it
  * @param {string} uuid - the entity uuid the backend minted/echoed
- * @returns {boolean} true if site.yml changed
+ * @returns {boolean} true if sync.json changed
  */
 export function writeSiteEntityUuid(siteRoot, backend, uuid) {
   return updateBackendState(siteRoot, backend, { site: { uuid } })
 }
 
 /**
- * Record the org the site was CREATED under (`site.yml::$org`), beside `$uuid`.
+ * Record the org the site was CREATED under — `backend`'s `site.org` in `sync.json`,
+ * beside the site's uuid. (It was `site.yml::$org` until 2026-09-20.)
  *
  * The org is consumed at exactly one moment — the `as_org` on the create that
  * mints `$uuid` — and after that the uuid carries the ownership binding. So this
@@ -1619,15 +1628,11 @@ export function writeSiteEntityUuid(siteRoot, backend, uuid) {
  * this site's storage charged to?"*, which `$uuid` alone cannot answer and which
  * otherwise costs a backend round-trip (or is simply unknowable from the repo).
  *
- * Stored as the BARE handle, never `@handle`: `upsertYamlScalar` writes the value
- * verbatim, and `@` is a reserved YAML indicator, so a plain scalar may not start
- * with one — `$org: @acme` is a parse error. The bare form is also the canonical
- * one everywhere else (`deriveScope` returns it, `createOrg` echoes it as
- * `org.handle`, `validateHandle` validates it); the `@` is display sugar the
- * reader re-adds.
- *
- * Safe to add to `site.yml` because the sync lane is an explicit allowlist
- * (`info.*` above is built key by key), so this never rides the wire.
+ * Stored as the BARE handle, never `@handle` — the canonical form everywhere else
+ * (`deriveScope` returns it, `createOrg` echoes it as `org.handle`,
+ * `validateHandle` validates it); the `@` is display sugar the reader re-adds. In
+ * `site.yml` it was also the only form that parsed: `@` is a reserved YAML
+ * indicator, so `$org: @acme` is an error.
  *
  * ⛔ NOT `deploy.yml`, though that file already holds the bound `backend` and the
  * two look like the same class of fact. Four reasons, and the first is the one that
@@ -1635,9 +1640,9 @@ export function writeSiteEntityUuid(siteRoot, backend, uuid) {
  *
  *  1. CARDINALITY. `deploy.yml` is multi-TARGET and `backend` sits *under* a target,
  *     so its shape says "this may vary per target." An org may not: one site has one
- *     owning org, fixed at create and preserved on replace. `$org` is a property of
- *     `$uuid`, which is singular and lives here — filing it under a target would
- *     encode a freedom that does not exist.
+ *     owning org, fixed at create and preserved on replace. The org is a property of
+ *     the site's uuid, and sits beside it in the same backend's section — filing it
+ *     under a target would encode a freedom that does not exist.
  *  2. WHO WRITES. Three paths mint a site (`ensureSiteExists`, the media-less push's
  *     content-lane create, and `clone` seeding an existing one) and **none of them
  *     write `deploy.yml`** — only `deploy` and `publish` call `recordLastDeploy`. The
@@ -1650,11 +1655,12 @@ export function writeSiteEntityUuid(siteRoot, backend, uuid) {
  *     ever being deployed. Ownership does not belong in a record of a deploy that
  *     may not have happened.
  *
- * `backend` answers *where this ships*; `$org` answers *whose this is*.
+ * `backend` answers *where this ships*; `site.org` answers *whose this is*.
  *
  * @param {string} siteRoot
+ * @param {string} backend - the origin of the backend the site was created on
  * @param {string} handle - the bare org handle (no leading `@`)
- * @returns {boolean} true if site.yml changed
+ * @returns {boolean} true if sync.json changed
  */
 export function writeSiteOrg(siteRoot, backend, handle) {
   return updateBackendState(siteRoot, backend, { site: { org: handle } })
