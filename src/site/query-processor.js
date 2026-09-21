@@ -63,6 +63,7 @@ import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryR
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder } from './records-config.js'
+import { isDraftRecord } from './record-draft.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 
 // Try to import content-reader for markdown parsing
@@ -98,7 +99,7 @@ try {
  * parseQueryConfig('articles', {
  *   schema: '@/article',
  *   sort: 'date desc',
- *   filter: 'published != false',
+ *   where: { featured: true },
  *   limit: 100
  * })
  */
@@ -450,25 +451,29 @@ async function processDataItemAssets(data, itemPath, siteRoot, recordsRoot, base
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - YAML filename (.yml or .yaml)
- * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
+ * @param {boolean} [includeDrafts] - keep `draft: true` records (a preview)
+ * @returns {Promise<Object|Array|null>} Processed item(s), or null for a draft this run withholds
  */
-async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath) {
+async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, includeDrafts = false) {
   const filepath = join(dir, filename)
+  const where = relative(siteRoot, filepath)
   const raw = await readFile(filepath, 'utf-8')
   const data = yaml.load(raw, YAML_OPTIONS) || {}
 
-  // Array → multiple items (single-file collection)
+  // Array → multiple items (single-file collection). A draft entry is dropped
+  // BEFORE its assets are copied, so nothing of it ships.
   if (Array.isArray(data)) {
-    for (const item of data) {
+    const kept = data.filter((item, i) => !withheld(item, `${where} [${i}]`, includeDrafts))
+    for (const item of kept) {
       if (item && typeof item === 'object') {
         await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
       }
     }
-    return data
+    return kept
   }
 
   // Mapping → single item
-  if (data.published === false) return null
+  if (withheld(data, where, includeDrafts)) return null
   const slug = basename(filename, extname(filename))
   const item = { slug, ...data }
   await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
@@ -484,26 +489,30 @@ async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath) {
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - JSON filename
- * @returns {Promise<Object|Array|null>} Processed item(s) or null if unpublished
+ * @param {boolean} [includeDrafts] - keep `draft: true` records (a preview)
+ * @returns {Promise<Object|Array|null>} Processed item(s), or null for a draft this run withholds
  */
-async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath) {
+async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath, includeDrafts = false) {
   const filepath = join(dir, filename)
+  const where = relative(siteRoot, filepath)
   const raw = await readFile(filepath, 'utf-8')
   const slug = basename(filename, '.json')
   const data = JSON.parse(raw)
 
-  // Array → multiple items (single-file collection)
+  // Array → multiple items (single-file collection). A draft entry is dropped
+  // BEFORE its assets are copied, so nothing of it ships.
   if (Array.isArray(data)) {
-    for (const item of data) {
+    const kept = data.filter((item, i) => !withheld(item, `${where} [${i}]`, includeDrafts))
+    for (const item of kept) {
       if (item && typeof item === 'object') {
         await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
       }
     }
-    return data
+    return kept
   }
 
   // Object → single item
-  if (data.published === false) return null
+  if (withheld(data, where, includeDrafts)) return null
   const item = { slug, ...data }
   await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
   return item
@@ -521,15 +530,26 @@ async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath) {
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - BibTeX filename (.bib)
+ * @param {string} siteRoot - Site root, for messages
+ * @param {boolean} [includeDrafts] - keep `draft: true` records (a preview)
  * @returns {Promise<Array<Object>>} Array of CSL-JSON items, each with `slug`
  */
-async function processBibtexItem(dir, filename) {
+async function processBibtexItem(dir, filename, siteRoot, includeDrafts = false) {
   const filepath = join(dir, filename)
+  const where = relative(siteRoot, filepath)
   const raw = await readFile(filepath, 'utf-8')
   const entries = parseBibtex(raw)
   return entries
-    .filter(entry => entry && entry.id)
+    .filter(entry => entry && entry.id && !withheld(entry, `${where} @${entry.id}`, includeDrafts))
     .map(entry => ({ slug: entry.id, ...entry }))
+}
+
+/**
+ * Is this record left out of this run? A draft is, unless the run previews drafts.
+ * `isDraftRecord` also refuses the retired `published: false` — on every run.
+ */
+function withheld(data, where, includeDrafts) {
+  return isDraftRecord(data, where) && !includeDrafts
 }
 
 /**
@@ -541,7 +561,7 @@ async function processBibtexItem(dir, filename) {
  * @param {string} siteRoot - Site root directory for asset resolution
  * @param {string} basePath - Site base path (e.g., '/' or '/docs/')
  * @param {string} recordsRoot - The site's records directory, absolute
- * @returns {Promise<Object|null>} Processed item or null if unpublished
+ * @returns {Promise<Object|null>} Processed item, or null for a draft this run withholds
  */
 async function processContentItem(dir, filename, config, siteRoot, basePath, recordsRoot) {
   const filepath = join(dir, filename)
@@ -551,8 +571,8 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
   // Parse frontmatter and body
   const { frontmatter, body } = parseFrontmatter(raw, filepath)
 
-  // Skip unpublished items by default
-  if (frontmatter.published === false) {
+  // A draft is left out — before its assets are copied, so nothing of it ships.
+  if (withheld(frontmatter, relative(siteRoot, filepath), config.includeDrafts)) {
     return null
   }
 
@@ -670,13 +690,13 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
       const dir = dirOf(e)
       const file = `${e.slug}${e.ext}`
       if (e.ext === '.bib') {
-        return processBibtexItem(dir, file)
+        return processBibtexItem(dir, file, siteDir, config.includeDrafts)
       }
       if (e.ext === '.json') {
-        return processJsonItem(dir, file, siteDir, recordsRoot, basePath)
+        return processJsonItem(dir, file, siteDir, recordsRoot, basePath, config.includeDrafts)
       }
       if (e.ext === '.yml' || e.ext === '.yaml') {
-        return processDataItem(dir, file, siteDir, recordsRoot, basePath)
+        return processDataItem(dir, file, siteDir, recordsRoot, basePath, config.includeDrafts)
       }
       return processContentItem(dir, file, config, siteDir, basePath, recordsRoot)
     })
@@ -704,7 +724,7 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // contribute their entries individually.
   items = items.flat()
 
-  // Filter out nulls (unpublished items)
+  // Filter out nulls (drafts this run withholds)
   items = items.filter(Boolean)
 
   // ⭐ `$name` IS THE RECORD HANDLE ON EVERY SITE (ruled 2026-09-11 [Diego]) — the
@@ -776,6 +796,9 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
  * @param {Object} [options]
  * @param {string|null} [options.locale] - the site's default language, which a query's `sort`
  *   collates texts in when it orders the compiled file
+ * @param {boolean} [options.includeDrafts=false] - keep `draft: true` records: a preview
+ *   (`pnpm dev`) or a check (`uniweb validate`). Off for anything a site DELIVERS — a
+ *   draft is a record that is not delivered while the site is published.
  * @returns {Promise<Object>} Map of query name to items array
  *
  * @example
@@ -784,7 +807,7 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
  * })
  * // { articles: [...] }
  */
-export async function processQueries(siteDir, queriesConfig, recordsDir, basePath = '/', { locale = null } = {}) {
+export async function processQueries(siteDir, queriesConfig, recordsDir, basePath = '/', { locale = null, includeDrafts = false } = {}) {
   if (!queriesConfig || typeof queriesConfig !== 'object') {
     return {}
   }
@@ -828,6 +851,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     const parsed = parseQueryConfig(name, config)
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
     parsed.placements = folder.placements
+    parsed.includeDrafts = includeDrafts
     if (parsed.poolEntities.length === 0) {
       const dirs = parsed.schema ? poolDirsForSchema(parsed.schema) : null
       console.warn(
@@ -852,8 +876,8 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
  *
  * Why this is not optional. `public/data/` is a persistent, normally-committed
  * directory, so anything written there survives until something removes it.
- * Without this, unpublishing a record (`published: false`, which the build
- * honours automatically) or deleting its source file drops it from the cascade
+ * Without this, making a record a draft (`draft: true`, which the build honours
+ * automatically) or deleting its source file drops it from the cascade
  * listing — it vanishes from the site — while its per-record file stays on
  * disk with the full body, gets committed, and gets deployed. The author has
  * every reason to believe the content is gone. It is still fetchable at a URL

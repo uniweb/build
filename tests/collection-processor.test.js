@@ -122,7 +122,7 @@ This is a test article.
       expect(article.excerpt).toBeDefined()
     })
 
-    it('should exclude unpublished items', async () => {
+    it('should leave draft records out', async () => {
       const contentDir = join(testDir, 'records', 'articles')
       mkdirSync(contentDir, { recursive: true })
 
@@ -135,7 +135,7 @@ Content here.
 
       writeFileSync(join(contentDir, 'draft.md'), `---
 title: Draft Article
-published: false
+draft: true
 ---
 
 Draft content.

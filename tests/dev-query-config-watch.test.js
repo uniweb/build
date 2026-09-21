@@ -126,6 +126,15 @@ describe('the dev server regenerates the query files', { timeout: 15000 }, () =>
     }, WAIT)
   })
 
+  it('a draft is previewed — the dev server compiles it, as it keeps a hidden page', async () => {
+    // A production build leaves it out (`record-draft.test.js`); `pnpm dev` is where the
+    // author looks at it.
+    w('queries.yml', "recent:\n  schema: '@/article'\n")
+    w('records/article/c.md', '---\ntitle: C\ndraft: true\n---\n')
+    await startDev()
+    expect(titles('recent')).toEqual(['A', 'B', 'C'])
+  })
+
   it('CONTROL — an entity change still regenerates, as it always did', async () => {
     w('queries.yml', "recent:\n  schema: '@/article'\n")
     await startDev()

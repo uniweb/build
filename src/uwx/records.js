@@ -63,6 +63,7 @@ import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformRecord } from '../i18n/freeform.js'
+import { isDraftRecord } from '../site/record-draft.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 // Identity/transport keys on a source record — never Model fields, never warned.
@@ -79,6 +80,8 @@ const SKIP_KEYS = new Set([
   '$unit',
   '$meta',
   '$body',
+  // The draft flag (`site/record-draft.js`) — framework's, never a Model field.
+  'draft',
 ])
 
 // Recursively drop IDENTITY `$`-sigil keys (`$uuid`/`$id`/`$model`/… — never
@@ -715,6 +718,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const producedBy = new Map()
   // record id → the file it came from, for messages that must name a file.
   const sourceOf = new Map()
+  // `draft: true` records found on the way — the push is refused if there are any.
+  const drafts = []
   // Schemas (as written) whose Model resolved to nothing — soft-skipped.
   const unresolved = new Set()
   // The sync response is keyed per ($model, $id), so the pair must be unique
@@ -745,6 +750,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       for (const r of await readEntityFile(pooled.absPath)) {
         if (!r.slug) {
           warnings.push(`${pooled.relPath}: a record without a slug was skipped`)
+          continue
+        }
+        if (isDraftRecord(r.data, pooled.relPath)) {
+          drafts.push(r.multiRecord ? `${pooled.relPath} (${r.slug})` : pooled.relPath)
           continue
         }
         const rec = { ...r.data, slug: r.slug }
@@ -825,6 +834,21 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     }
     entities.push(...mappedOut.entities)
     warnings.push(...mappedOut.warnings)
+  }
+
+  // ⛔ A DRAFT IS REFUSED, NOT PUSHED AND NOT SKIPPED. It is a record that stays in the
+  // folder but is not delivered — which a backend holds as the entity's `disabled`, a
+  // state this producer cannot send yet. Pushed without it, the backend would serve the
+  // draft once the site is published; skipped, it would leave the folder — and a site
+  // whose records were all drafts would send no folder at all, leaving the backend's
+  // live. So the push stops and says which records, until the flag can travel.
+  if (drafts.length) {
+    throw new Error(
+      `uwx/records: a push cannot mark a record as a draft yet, and the backend would serve it ` +
+        `once the site is published —\n  ${drafts.join('\n  ')}\n` +
+        '  Push them as records by removing `draft: true`, or keep them off the backend by ' +
+        'starting their names with `_`.'
+    )
   }
 
   // Queries whose schema resolved to nothing — not pushed as entities. The composite

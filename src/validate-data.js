@@ -95,7 +95,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   let byQuery = {}
   if (config.queries && typeof config.queries === 'object') {
 
-    byQuery = await processQueries(siteRoot, config.queries, resolveRecordsDir(siteRoot, config.paths).rel, basePath)
+    // Drafts included: a draft is content the site will deliver, so it is checked now.
+    byQuery = await processQueries(siteRoot, config.queries, resolveRecordsDir(siteRoot, config.paths).rel, basePath, { includeDrafts: true })
   }
 
   // Declared here rather than beside pass 2's other accumulators because pass 1

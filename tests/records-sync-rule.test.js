@@ -203,3 +203,32 @@ describe('a site with nothing to sync never emits a removing folder', () => {
     expect(folderDoc(pkg).contents).toEqual([])
   })
 })
+
+// ⭐ `draft: true` — a record in the folder that is not delivered. A backend holds that as
+// the entity's `disabled`, which a push cannot send yet; pushed without it the draft would
+// be served once the site is published, and skipped it would leave the folder. Refused.
+describe('a draft record is not pushed as a live one', () => {
+  it('⛔ the push is refused, naming the draft', async () => {
+    const root = site()
+    w('site/records/article/soon.md', '---\ntitle: Soon\ndraft: true\n---\n')
+    await expect(emitSyncPackages(root)).rejects.toThrow(
+      /cannot mark a record as a draft yet[\s\S]*records\/article\/soon\.md[\s\S]*starting their names with `_`/
+    )
+  })
+
+  it('⛔ `published: false` is refused on a push too, naming `draft: true`', async () => {
+    const root = site()
+    w('site/records/article/old.md', '---\ntitle: Old\npublished: false\n---\n')
+    await expect(emitSyncPackages(root)).rejects.toThrow(/`published: false` is retired/)
+  })
+
+  // ⛔ CONTROL — the flag itself is not the problem: a record that says it is NOT a draft
+  // pushes, and `draft` is framework's word, never reported as a field the Model lacks.
+  it('CONTROL — `draft: false` pushes, and is not a field', async () => {
+    const root = site()
+    w('site/records/article/kept.md', '---\ntitle: Kept\ndraft: false\n---\n')
+    const pkg = await emitSyncPackages(root)
+    expect(sentIds(pkg)).toContain('article/kept')
+    expect(pkg.warnings.some((x) => x.includes('"draft"'))).toBe(false)
+  })
+})

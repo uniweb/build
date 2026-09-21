@@ -727,6 +727,9 @@ export function siteContentPlugin(options = {}) {
     if (!queries) return
     const byQuery = await processQueries(resolvedSitePath, queries, resolvedRecordsDir, basePath, {
       locale: resolveDefaultLocale(config ?? {}) ?? null,
+      // ⭐ A draft is previewable here, as a hidden page is — `pnpm dev` is where the
+      // author looks at it. A production build leaves it out (`buildStart`).
+      includeDrafts: !isProduction,
     })
     await writeQueryFiles(resolvedSitePath, byQuery, queries)
   }

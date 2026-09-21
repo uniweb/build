@@ -31,7 +31,7 @@ export const HEURISTIC_SKIP_FIELDS = new Set([
   'pmid', 'bibtex', 'pdf', 'code', 'data', 'slides', 'video',
   'repository', 'caseStudy', 'website', 'avatar', 'image',
   'thumbnail', 'currency', 'order', 'hidden', 'current',
-  'featured', 'published', 'allDay', 'remote', 'hybrid',
+  'featured', 'published', 'draft', 'allDay', 'remote', 'hybrid',
   'noindex', 'corresponding', 'required', 'virtual',
   'lastModified', 'date', 'updated', 'posted', 'submitted',
   'accepted', 'startDate', 'endDate', 'deadline',
