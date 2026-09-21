@@ -207,14 +207,22 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     expect(home.page_sections[0]).not.toHaveProperty('$uuid')
   })
 
-  it('reads the entity $uuid from site.yml::$uuid', async () => {
+  it('reads the entity $uuid from sync.json, for the backend it is being produced for', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'uwx-site-uuid-'))
+    const ORIGIN = 'http://backend.test'
+    const UUID = '019e0000-0000-7000-8000-00000000abcd'
+    writeFileSync(join(dir, 'site.yml'), 'name: X\nfoundation: "@a/b@1"\n')
     writeFileSync(
-      join(dir, 'site.yml'),
-      '$uuid: 019e0000-0000-7000-8000-00000000abcd\nname: X\nfoundation: "@a/b@1"\n'
+      join(dir, 'sync.json'),
+      JSON.stringify({ version: 1, backends: { [ORIGIN]: { site: { uuid: UUID } } } })
     )
-    const doc = await siteProjectToDocument(dir)
-    expect(doc.$uuid).toBe('019e0000-0000-7000-8000-00000000abcd')
+    const doc = await siteProjectToDocument(dir, { backend: ORIGIN })
+    expect(doc.$uuid).toBe(UUID)
+
+    // ⭐ And a producer for ANOTHER backend emits none: the wire value is that
+    // backend's name for this site, and it has none yet.
+    const other = await siteProjectToDocument(dir, { backend: 'http://elsewhere.test' })
+    expect(other.$uuid).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
   })
 

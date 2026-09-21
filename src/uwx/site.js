@@ -67,6 +67,7 @@ import { emitEntitySyncPackage } from './entity-document.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
+import { updateBackendState, readBackendState } from './sync-store.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { resolveSelfScope } from './self-scope.js'
@@ -1212,6 +1213,7 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
+ * @param {string} [opts.backend] - whose `$uuid` to put on the wire (sync.json)
  * @param {string} [opts.entityUuid] - override the entity `$uuid` (tests); default
  *        is `site.yml::$uuid` (absent on first sync — `$id`-only document).
  * @param {string} [opts.sourceLocale] - localized-field wrap locale. Defaults to
@@ -1497,8 +1499,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // `$uuid?` then `$id` `$model`, then sections in Model-declared order. The entity
   // `$uuid` lives in site.yml (back-filled after first sync); absent on first sync.
   const doc = {}
+  // ⭐ From `sync.json`, keyed by the backend this document is being produced FOR.
+  // It was `site.yml::$uuid` — one scalar with no way to say which backend minted it.
+  // A producer with no backend emits no `$uuid`, which is exactly right: the wire
+  // value is that backend's name for this site, and there is no such name yet.
   const entityUuid =
-    opts.entityUuid || (typeof siteYml.$uuid === 'string' ? siteYml.$uuid : undefined)
+    opts.entityUuid ||
+    (opts.backend ? readBackendState(siteRoot, opts.backend).site?.uuid : undefined)
   if (entityUuid) doc.$uuid = entityUuid
   doc.$id = SITE_ENTITY_KEY // one site-content entity per project (stable handle)
   doc.$model = SITE_MODEL_NAME
@@ -1589,8 +1596,8 @@ export async function emitSiteSyncPackage(siteRoot, opts = {}) {
  * @param {string} uuid - the entity uuid the backend minted/echoed
  * @returns {boolean} true if site.yml changed
  */
-export function writeSiteEntityUuid(siteRoot, uuid) {
-  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$uuid', uuid)
+export function writeSiteEntityUuid(siteRoot, backend, uuid) {
+  return updateBackendState(siteRoot, backend, { site: { uuid } })
 }
 
 /**
@@ -1639,45 +1646,12 @@ export function writeSiteEntityUuid(siteRoot, uuid) {
  * @param {string} handle - the bare org handle (no leading `@`)
  * @returns {boolean} true if site.yml changed
  */
-export function writeSiteOrg(siteRoot, handle) {
-  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$org', handle)
+export function writeSiteOrg(siteRoot, backend, handle) {
+  return updateBackendState(siteRoot, backend, { site: { org: handle } })
 }
 
-/**
- * Record the backend this project SYNCS WITH (`site.yml::$backend`), beside `$uuid`/`$org`.
- *
- * ⭐ It is not a tag on the site uuid — it is the project's **sync scope**. Four surfaces
- * hold backend-minted identity, and this one fact is what makes all of them meaningful:
- * `site.yml::$uuid`, every collection record's `$uuid` in its own source file,
- * `assets.json`, and `.uniweb/sync-cache.json`. Change the backend and every one of them
- * is foreign at once — which is why a mismatch is a stop, not a fallback
- * (`assertSiteBackendScope` in the CLI).
- *
- * ⛔ **Written ONLY for a non-default backend.** The 98% case stays out of the file, and an
- * absent value reads as the default — correct both for a project written before this key
- * existed and for one synced against the default. Callers decide; this writer does not know
- * the CLI's default. See `recordSiteBackend` (cli/src/backend/site-sync.js), which is where
- * the "is it the default?" test lives.
- *
- * ⚠️ **The name is load-bearing. Five alternatives were considered and rejected (2026-08-24);
- * do not re-propose one.** `origin` is wrong twice over — a site HAS an origin (its own
- * served domain), and this lane is git-modeled, where `origin` names a remote rather than a
- * URL. `remote` implies a multiplicity this design closes. `hosting` and `platform` name the
- * hosting edge, which this package has no client for. `host` collides with
- * `deploy.yml::targets.<n>.host` (the deploy adapter). A `uuid: <id>@<backend>` suffix was
- * rejected too: it would make "this never reaches the backend" a discipline at every read
- * site instead of a property, and `siteProjectToDocument` assigns `$uuid` straight onto the
- * wire document.
- *
- * Safe as a plain YAML scalar: a URL's `:` is followed by `/` or a digit, never a space, so
- * it needs no quoting (verified against js-yaml for apex, `localhost:8080` and host:port+path
- * forms, 2026-08-24). This is the same class of hazard as `$org`'s leading `@`, which is
- * stripped for exactly that reason — but it lands on the safe side.
- *
- * @param {string} siteRoot
- * @param {string} origin - a bare origin, no trailing slash
- * @returns {boolean} true if site.yml changed
- */
-export function writeSiteBackend(siteRoot, origin) {
-  return upsertYamlScalar(join(siteRoot, 'site.yml'), '$backend', origin)
-}
+// ⛔ `writeSiteBackend` and `site.yml::$backend` are GONE (2026-09-20). The scope is
+// no longer a value recorded beside the uuid — it is the KEY the identity is stored
+// under (`sync.json::backends.<origin>`), so there is nothing to record and nothing
+// that can disagree with it. `kb/framework/reference/sync-json.md`.
+

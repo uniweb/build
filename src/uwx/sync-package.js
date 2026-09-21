@@ -316,6 +316,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const siteDoc = includeSite
     ? await siteProjectToDocument(siteRoot, {
         sourceLocale,
+        // Whose $uuid belongs on this wire document — see siteProjectToDocument.
+        ...(opts.backend ? { backend: opts.backend } : {}),
         ...(opts.queryUuids ? { queryUuids: opts.queryUuids } : {}),
         // ⛔ THE SAME ORG `buildRecordEntities` WAS GIVEN ABOVE. A query's `schema`
         // must name the Model its records are stored under, and both are qualified
