@@ -34,7 +34,7 @@ describe('loadDeployYml', () => {
           '  production:',
           '    host: s3-cloudfront',
           '    bucket: my-bucket',
-          'autoSave: lastDeploy',
+          'saveDeploys: true',
           '',
         ].join('\n'),
         'utf8'
@@ -42,17 +42,17 @@ describe('loadDeployYml', () => {
       const doc = await loadDeployYml(dir)
       expect(doc.default).toBe('production')
       expect(doc.targets.production.host).toBe('s3-cloudfront')
-      expect(doc.autoSave).toBe('lastDeploy')
+      expect(doc.saveDeploys).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  test('rejects unknown autoSave value', async () => {
+  test('rejects a non-boolean saveDeploys', async () => {
     const dir = await makeSiteDir()
     try {
-      await writeFile(join(dir, 'deploy.yml'), 'autoSave: maybe\n', 'utf8')
-      await expect(loadDeployYml(dir)).rejects.toThrow(/autoSave.*must be one of/)
+      await writeFile(join(dir, 'deploy.yml'), 'saveDeploys: maybe\n', 'utf8')
+      await expect(loadDeployYml(dir)).rejects.toThrow(/saveDeploys.*must be true or false/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -73,7 +73,11 @@ describe('loadDeployYml', () => {
   // site, and the other silently describes one that does not exist. The per-target
   // `backend` key makes that look expressible, which is why it is rejected rather
   // than left to be discovered.
-  test('rejects a second host: uniweb target, naming both', async () => {
+  test('⭐ ACCEPTS two host: uniweb targets on different backends — the rejection is gone', async () => {
+    // This test used to assert the OPPOSITE, with this exact fixture. A site had one
+    // identity (`site.yml::$uuid`), so two Uniweb targets could not both be coherent.
+    // Identity is keyed by backend origin in sync.json now: these are two sites on two
+    // backends, which is precisely the shape this work exists to make possible.
     const dir = await makeSiteDir()
     try {
       await writeFile(
@@ -84,9 +88,10 @@ describe('loadDeployYml', () => {
           '  staging:\n    host: uniweb\n    backend: http://localhost:8080\n',
         'utf8'
       )
-      await expect(loadDeployYml(dir)).rejects.toThrow(
-        /only one target may use `host: uniweb`.*production, staging/s
-      )
+      const doc = await loadDeployYml(dir)
+      expect(doc.targets.production.backend).toBe('https://uniweb.app')
+      expect(doc.targets.staging.backend).toBe('http://localhost:8080')
+      expect(resolveTarget(doc, 'staging').config.backend).toBe('http://localhost:8080')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -137,7 +142,7 @@ describe('resolveTarget', () => {
     const r = resolveTarget(null, null)
     expect(r.host).toBe('uniweb')
     expect(r.fromFile).toBe(false)
-    expect(r.autoSave).toBe('lastDeploy')
+    expect(r.saveDeploys).toBe(true)
   })
 
   test('null deployYml + --target → error', () => {
@@ -181,21 +186,21 @@ describe('resolveTarget', () => {
     expect(() => resolveTarget(doc, null)).toThrow(/missing `host`/)
   })
 
-  test('autoSave defaults to lastDeploy when unset', () => {
+  test('saveDeploys defaults to true when unset', () => {
     const doc = { default: 'p', targets: { p: { host: 'uniweb' } } }
-    expect(resolveTarget(doc, null).autoSave).toBe('lastDeploy')
+    expect(resolveTarget(doc, null).saveDeploys).toBe(true)
   })
 })
 
 describe('recordLastDeploy', () => {
-  test('autoSave: off is a no-op', async () => {
+  test('saveDeploys: false is a no-op', async () => {
     const dir = await makeSiteDir()
     try {
       const result = await recordLastDeploy(dir, {
         targetName: 'production',
         targetConfig: { host: 'uniweb' },
         lastDeploy: { at: '2026-05-05T00:00:00Z' },
-        autoSave: 'off',
+        saveDeploys: false,
       })
       expect(result).toBeNull()
     } finally {
@@ -210,7 +215,7 @@ describe('recordLastDeploy', () => {
         targetName: 'production',
         targetConfig: { host: 's3-cloudfront', bucket: 'my-bucket' },
         lastDeploy: { at: '2026-05-05T00:00:00Z', url: 'https://example.com' },
-        autoSave: 'lastDeploy',
+        saveDeploys: true,
       })
       expect(result.created).toBe(true)
 
@@ -222,15 +227,15 @@ describe('recordLastDeploy', () => {
       expect(text).toMatch(/default: production/)
       expect(text).toMatch(/host: s3-cloudfront/)
       expect(text).toMatch(/bucket: my-bucket/)
-      expect(text).toMatch(/autoSave: lastDeploy/)
-      expect(text).toMatch(/lastDeploy:/)
+      expect(text).toMatch(/saveDeploys: true/)
+      expect(text).toMatch(/deploys:/)
       expect(text).toMatch(/url: https:\/\/example\.com/)
 
       // Round-trip parses cleanly.
       const doc = await loadDeployYml(dir)
       expect(doc.default).toBe('production')
       expect(doc.targets.production.host).toBe('s3-cloudfront')
-      expect(doc.lastDeploy.production.url).toBe('https://example.com')
+      expect(doc.deploys.production.url).toBe('https://example.com')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -243,7 +248,7 @@ describe('recordLastDeploy', () => {
         recordLastDeploy(dir, {
           targetName: 'production',
           lastDeploy: { at: 'now' },
-          autoSave: 'lastDeploy',
+          saveDeploys: true,
         })
       ).rejects.toThrow(/targetConfig\.host/)
     } finally {
@@ -263,7 +268,7 @@ describe('recordLastDeploy', () => {
         '    # bucket comment',
         '    bucket: my-bucket',
         '    region: us-east-1',
-        'autoSave: lastDeploy',
+        'saveDeploys: true',
         '',
       ].join('\n')
       await writeFile(join(dir, 'deploy.yml'), original, 'utf8')
@@ -271,7 +276,7 @@ describe('recordLastDeploy', () => {
       await recordLastDeploy(dir, {
         targetName: 'production',
         lastDeploy: { at: '2026-05-05T00:00:00Z', url: 'https://example.com' },
-        autoSave: 'lastDeploy',
+        saveDeploys: true,
       })
 
       const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
@@ -285,15 +290,15 @@ describe('recordLastDeploy', () => {
       expect(hostIdx).toBeGreaterThan(productionIdx)
       expect(bucketIdx).toBeGreaterThan(hostIdx)
       expect(regionIdx).toBeGreaterThan(bucketIdx)
-      // lastDeploy.production exists.
-      expect(text).toMatch(/lastDeploy:/)
+      // deploys.production exists.
+      expect(text).toMatch(/deploys:/)
       expect(text).toMatch(/url: https:\/\/example\.com/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
   })
 
-  test('replaces existing lastDeploy.<target> in place', async () => {
+  test('replaces existing deploys.<target> in place', async () => {
     const dir = await makeSiteDir()
     try {
       const original = [
@@ -301,7 +306,7 @@ describe('recordLastDeploy', () => {
         'targets:',
         '  production:',
         '    host: uniweb',
-        'lastDeploy:',
+        'deploys:',
         '  production:',
         '    at: 2026-01-01T00:00:00Z',
         '    url: https://old.example.com',
@@ -312,11 +317,11 @@ describe('recordLastDeploy', () => {
       await recordLastDeploy(dir, {
         targetName: 'production',
         lastDeploy: { at: '2026-05-05T00:00:00Z', url: 'https://new.example.com' },
-        autoSave: 'lastDeploy',
+        saveDeploys: true,
       })
 
       const doc = await loadDeployYml(dir)
-      expect(doc.lastDeploy.production.url).toBe('https://new.example.com')
+      expect(doc.deploys.production.url).toBe('https://new.example.com')
       // js-yaml parses ISO timestamps as Date objects; check the on-disk
       // representation directly so we can assert against a string.
       const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
@@ -346,17 +351,17 @@ describe('recordLastDeploy', () => {
       await recordLastDeploy(dir, {
         targetName: 'production',
         lastDeploy: { at: 't1', url: 'https://prod' },
-        autoSave: 'lastDeploy',
+        saveDeploys: true,
       })
       await recordLastDeploy(dir, {
         targetName: 'preview',
         lastDeploy: { at: 't2', url: 'https://preview' },
-        autoSave: 'lastDeploy',
+        saveDeploys: true,
       })
 
       const doc = await loadDeployYml(dir)
-      expect(doc.lastDeploy.production.url).toBe('https://prod')
-      expect(doc.lastDeploy.preview.url).toBe('https://preview')
+      expect(doc.deploys.production.url).toBe('https://prod')
+      expect(doc.deploys.preview.url).toBe('https://preview')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -364,7 +369,7 @@ describe('recordLastDeploy', () => {
 })
 
 describe('recordTarget', () => {
-  test('first call scaffolds deploy.yml with this target as default and no lastDeploy block', async () => {
+  test('first call scaffolds deploy.yml with this target as default and no deploys block', async () => {
     const dir = await makeSiteDir()
     try {
       const result = await recordTarget(dir, {
@@ -381,9 +386,9 @@ describe('recordTarget', () => {
       expect(text).toMatch(/default: github-pages/)
       expect(text).toMatch(/host: github-pages/)
       expect(text).toMatch(/domain: mysite\.com/)
-      expect(text).toMatch(/autoSave: lastDeploy/)
-      // No deploy has happened yet — lastDeploy block stays out.
-      expect(text).not.toMatch(/^lastDeploy:/m)
+      expect(text).toMatch(/saveDeploys: true/)
+      // No deploy has happened yet — deploys block stays out.
+      expect(text).not.toMatch(/^deploys:/m)
 
       const doc = await loadDeployYml(dir)
       expect(doc.default).toBe('github-pages')
@@ -421,7 +426,7 @@ describe('recordTarget', () => {
         '    host: s3-cloudfront',
         '    bucket: my-bucket',
         '    region: us-east-1',
-        'autoSave: lastDeploy',
+        'saveDeploys: true',
         '',
       ].join('\n')
       await writeFile(join(dir, 'deploy.yml'), original)
@@ -465,7 +470,7 @@ describe('recordTarget', () => {
         '    host: github-pages',
         '    domain: old.com',
         '    notes: hand-edited field',
-        'autoSave: lastDeploy',
+        'saveDeploys: true',
         '',
       ].join('\n')
       await writeFile(join(dir, 'deploy.yml'), original)
@@ -484,15 +489,15 @@ describe('recordTarget', () => {
     }
   })
 
-  test('does not touch lastDeploy when updating a target', async () => {
+  test('does not touch deploys when updating a target', async () => {
     const dir = await makeSiteDir()
     try {
-      // Pre-existing file with a real lastDeploy entry
+      // Pre-existing file with a real deploys entry
       await recordLastDeploy(dir, {
         targetName: 'production',
         targetConfig: { host: 's3-cloudfront', bucket: 'b' },
         lastDeploy: { at: '2026-05-05T00:00:00Z', url: 'https://prod' },
-        autoSave: 'lastDeploy',
+        saveDeploys: true,
       })
 
       await recordTarget(dir, {
@@ -501,7 +506,7 @@ describe('recordTarget', () => {
       })
 
       const doc = await loadDeployYml(dir)
-      expect(doc.lastDeploy.production.url).toBe('https://prod')
+      expect(doc.deploys.production.url).toBe('https://prod')
       expect(doc.targets['github-pages'].domain).toBe('mysite.com')
       // Default unchanged
       expect(doc.default).toBe('production')

@@ -5,14 +5,21 @@
  * by name. Read-only — never writes. See deploy-config-writer.js for
  * the write path.
  *
- * On-disk shape:
+ * On-disk shape (spec: kb/framework/reference/deploy-yml.md):
  *   default: production
  *   targets:
- *     production: { host, ...host-specific config }
+ *     production: { host, backend?, ...host-specific config }
  *     preview:    { host, ...host-specific config }
- *   autoSave: lastDeploy | off | full
- *   lastDeploy:
- *     production: { at, url, foundation, runtime, artifactSha, ... }
+ *   deploys:
+ *     production: { at, host, url?, git?, servicesRequest? }
+ *   saveDeploys: true
+ *
+ * ⚠️ `deploys` was `lastDeploy` and `saveDeploys` was `autoSave: off|lastDeploy|full`
+ * until 2026-09-20. `full` was "reserved; behaves as lastDeploy" — so the tri-state
+ * was already a boolean in practice, and the rename says so. `autoSave` also
+ * SOUNDED like it covered the whole file, which it never did.
+ *
+ * ⚠️ Nothing a backend minted lives here any more. Identity is `sync.json`'s.
  *
  * The CLI and the build pipeline both call resolveTarget() to turn a
  * loaded document + a (possibly null) --target flag into a concrete
@@ -28,7 +35,6 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 const DEFAULT_TARGET_NAME = 'production'
-const VALID_AUTOSAVE = new Set(['off', 'lastDeploy', 'full'])
 
 /**
  * Load and validate deploy.yml from `siteDir`. Returns null when the
@@ -57,7 +63,7 @@ export async function loadDeployYml(siteDir) {
  *   targetName: string,
  *   host: string,
  *   config: object,
- *   autoSave: 'off'|'lastDeploy'|'full',
+ *   saveDeploys: boolean,
  *   fromFile: boolean,
  * }}
  */
@@ -73,7 +79,7 @@ export function resolveTarget(deployYml, requestedTarget) {
       targetName: DEFAULT_TARGET_NAME,
       host: 'uniweb',
       config: {},
-      autoSave: 'lastDeploy',
+      saveDeploys: true,
       fromFile: false,
     }
   }
@@ -99,7 +105,7 @@ export function resolveTarget(deployYml, requestedTarget) {
     targetName: name,
     host,
     config,
-    autoSave: deployYml.autoSave || 'lastDeploy',
+    saveDeploys: deployYml.saveDeploys !== false,
     fromFile: true,
   }
 }
@@ -111,39 +117,19 @@ function validate(doc, path) {
   if (doc.targets !== undefined && (typeof doc.targets !== 'object' || Array.isArray(doc.targets))) {
     throw new Error(`${path}: \`targets\` must be a map.`)
   }
-  // A site has exactly ONE Uniweb identity — `site.yml::$uuid`, a single scalar,
-  // set by the create and never moved. So two targets naming `host: uniweb` cannot
-  // both be coherent: whichever one `default:` selects is the site, and the other
-  // silently describes a site that does not exist. The per-target `backend` key
-  // makes that look expressible, which is exactly why it is worth rejecting rather
-  // than leaving to be discovered.
-  //
-  // *(Diego, 2026-08-12: multiple deploys are not expected in general, and are not
-  // allowed for Uniweb Cloud specifically — the only host that reads `$uuid` at
-  // all. Every other host is stateless from the CLI's side, so any number of those
-  // targets is fine.)*
-  if (doc.targets && typeof doc.targets === 'object' && !Array.isArray(doc.targets)) {
-    const uniwebTargets = Object.entries(doc.targets)
-      .filter(([, t]) => t && typeof t === 'object' && t.host === 'uniweb')
-      .map(([name]) => name)
-    if (uniwebTargets.length > 1) {
-      throw new Error(
-        `${path}: only one target may use \`host: uniweb\` — found ${uniwebTargets.length} (${uniwebTargets.join(', ')}). ` +
-          'A site has a single Uniweb identity (site.yml::$uuid), so a second Uniweb target cannot describe a different site. ' +
-          'Keep one, or point the others at a third-party host.'
-      )
-    }
-  }
-  if (doc.autoSave !== undefined && !VALID_AUTOSAVE.has(doc.autoSave)) {
-    throw new Error(
-      `${path}: \`autoSave\` must be one of: ${[...VALID_AUTOSAVE].join(', ')}.`
-    )
+  // ⭐ SEVERAL `host: uniweb` TARGETS ARE LEGAL (2026-09-20). This rejected a second one
+  // because a site had a single identity, `site.yml::$uuid`, so two Uniweb targets
+  // could not both be coherent. Identity is keyed by backend origin in `sync.json`
+  // now: two targets naming DIFFERENT backends are two sites, and two naming the SAME
+  // backend are one site shipped twice. The reason is gone, so the rejection is too.
+  if (doc.saveDeploys !== undefined && typeof doc.saveDeploys !== 'boolean') {
+    throw new Error(`${path}: \`saveDeploys\` must be true or false.`)
   }
   if (doc.default !== undefined && typeof doc.default !== 'string') {
     throw new Error(`${path}: \`default\` must be a string.`)
   }
-  if (doc.lastDeploy !== undefined && (typeof doc.lastDeploy !== 'object' || Array.isArray(doc.lastDeploy))) {
-    throw new Error(`${path}: \`lastDeploy\` must be a map.`)
+  if (doc.deploys !== undefined && (typeof doc.deploys !== 'object' || Array.isArray(doc.deploys))) {
+    throw new Error(`${path}: \`deploys\` must be a map.`)
   }
   return doc
 }

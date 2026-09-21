@@ -1,23 +1,23 @@
 /**
  * deploy.yml writer
  *
- * Updates the lastDeploy.<target> block of a site's deploy.yml without
+ * Updates the deploys.<target> block of a site's deploy.yml without
  * reformatting the rest of the file. Uses the eemeli/yaml Document API
  * because js-yaml does not preserve comments on round-trip — the writer
- * must not destroy a developer's comments on the targets:/autoSave:
+ * must not destroy a developer's comments on the targets:/saveDeploys:
  * regions of the file.
  *
  * This is the only place in @uniweb/build that depends on `yaml`. The
  * loader (deploy-config.js) stays on js-yaml for read-only ingestion.
  *
- * Auto-save semantics:
- *   - 'off'        : no-op (CI / `--no-save`)
- *   - 'lastDeploy' : touch ONLY lastDeploy.<targetName>
- *   - 'full'       : reserved; behaves as 'lastDeploy' for now
+ * `saveDeploys: false` (or `--no-save`) makes this a no-op; otherwise it
+ * touches ONLY deploys.<targetName>. ⚠️ It was `autoSave: off|lastDeploy|full`
+ * until 2026-09-20, and `full` was reserved and behaved as `lastDeploy` — a
+ * boolean wearing a tri-state.
  *
  * First-deploy path: when deploy.yml does not exist, writes a fresh
  * file scaffolded with `default:`, a single entry under `targets:`, and
- * `autoSave: lastDeploy`. This is the only code path that writes the
+ * `saveDeploys: true`. This is the only code path that writes the
  * config region.
  */
 
@@ -39,7 +39,7 @@ const SCAFFOLD_HEADER = [
   ' deploy.yml — written by `uniweb deploy` / `uniweb publish`.',
   '',
   ' You do not create this file. The first successful deploy does, recording the',
-  ' target you picked and what happened. Later deploys rewrite only `lastDeploy:`',
+  ' target you picked and what happened. Later deploys rewrite only `deploys:`',
   ' and leave the rest — including your comments — alone.',
   '',
   ' Safe to commit; no credentials live here. Host credentials come from the',
@@ -48,13 +48,17 @@ const SCAFFOLD_HEADER = [
   '   default:     which target is used when none is named',
   '   targets:     where this site ships. Edit to change the destination, or add',
   '                a target and pick it with `--target <name>`',
-  '   autoSave:    `lastDeploy` to keep the record below, `off` to stop writing it',
-  '   lastDeploy:  what the last deploy did. A record, not a setting — nothing',
-  '                reads it back, so a stale one is safe to delete',
+  '   deploys:     what each target\'s last deploy did. A record, not a setting.',
+  '                `publish` reads one field back — a fingerprint of the service',
+  '                request it last sent — so deleting it only means the next',
+  '                publish re-sends that request',
+  '   saveDeploys: false to stop recording deploys',
+  '',
+  ' Which site this is on each backend lives in sync.json, not here.',
 ].join('\n')
 
 /**
- * Update or create deploy.yml with a fresh lastDeploy.<target> entry.
+ * Update or create deploy.yml with a fresh deploys.<target> entry.
  *
  * @param {string} siteDir
  * @param {object} opts
@@ -63,14 +67,14 @@ const SCAFFOLD_HEADER = [
  *                                       used on first-deploy scaffold.
  * @param {object} opts.lastDeploy       { at, url, foundation, runtime,
  *                                          artifactSha, ... }
- * @param {'off'|'lastDeploy'|'full'} opts.autoSave
+ * @param {boolean} opts.saveDeploys - false makes this a no-op
  * @returns {Promise<{ created: boolean, path: string } | null>}
- *          null when autoSave is 'off' (no-op).
+ *          null when saveDeploys is false (no-op).
  */
 export async function recordLastDeploy(siteDir, opts) {
-  const { targetName, targetConfig, lastDeploy, autoSave } = opts
+  const { targetName, targetConfig, lastDeploy, saveDeploys } = opts
 
-  if (autoSave === 'off') return null
+  if (saveDeploys === false) return null
 
   const path = join(siteDir, 'deploy.yml')
 
@@ -90,12 +94,12 @@ export async function recordLastDeploy(siteDir, opts) {
   const text = await readFile(path, 'utf8')
   const doc = parseDocument(text)
 
-  // Touch ONLY lastDeploy.<targetName>. Never reach into targets/default/autoSave.
-  let lastDeployNode = doc.get('lastDeploy', true)
-  if (!isMap(lastDeployNode)) {
-    doc.set('lastDeploy', { [targetName]: lastDeploy })
+  // Touch ONLY deploys.<targetName>. Never reach into targets/default/saveDeploys.
+  let deploysNode = doc.get('deploys', true)
+  if (!isMap(deploysNode)) {
+    doc.set('deploys', { [targetName]: lastDeploy })
   } else {
-    lastDeployNode.set(targetName, lastDeploy)
+    deploysNode.set(targetName, lastDeploy)
   }
 
   await writeFile(path, doc.toString(), 'utf8')
@@ -106,8 +110,8 @@ function scaffold({ targetName, targetConfig, lastDeploy }) {
   const doc = new Document({
     default: targetName,
     targets: { [targetName]: targetConfig },
-    autoSave: 'lastDeploy',
-    lastDeploy: { [targetName]: lastDeploy },
+    deploys: { [targetName]: lastDeploy },
+    saveDeploys: true,
   })
   doc.commentBefore = SCAFFOLD_HEADER
   return doc
@@ -131,11 +135,11 @@ function scaffold({ targetName, targetConfig, lastDeploy }) {
  *
  * Behavior:
  *   - File missing: scaffold a fresh file with this target, set as
- *     default, autoSave: lastDeploy. No lastDeploy block (no deploy
+ *     default, saveDeploys: true. No deploys block (no deploy
  *     has happened yet).
  *   - File exists: merge targetConfig into targets.<targetName>
  *     (overlapping keys overwritten, other keys preserved). Never
- *     touches `default`, `autoSave`, `lastDeploy`, or other targets,
+ *     touches `default`, `saveDeploys`, `deploys`, or other targets,
  *     so adding a CI workflow to a project that already deploys
  *     elsewhere doesn't change its deploy semantics.
  */
@@ -155,7 +159,7 @@ export async function recordTarget(siteDir, opts) {
     const doc = new Document({
       default: targetName,
       targets: { [targetName]: targetConfig },
-      autoSave: 'lastDeploy',
+      saveDeploys: true,
     })
     doc.commentBefore = SCAFFOLD_HEADER
     await writeFile(path, doc.toString(), 'utf8')
