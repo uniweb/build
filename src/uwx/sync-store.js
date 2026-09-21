@@ -35,7 +35,7 @@
  * @module
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export const SYNC_STORE_FILE = 'sync.json'
@@ -299,8 +299,36 @@ export function clearBackend(siteDir, origin) {
   const { backends } = readSyncStore(siteDir)
   if (!backends[key]) return false
   delete backends[key]
+  // ⭐ The last backend gone ⇒ the FILE goes. An empty ledger reads exactly like no
+  // ledger, and leaving one behind is an untracked file in `git status` — a trace
+  // of the very sync the caller asked to forget (the throwaway dev-server lane).
+  if (!Object.keys(backends).length) {
+    unlinkSync(storePath(siteDir))
+    return true
+  }
   writeStore(siteDir, backends)
   return true
+}
+
+/**
+ * Delete `sync.json` outright — `uniweb forget --all`, which turns a COPY of a
+ * project into a new one.
+ *
+ * Every id in this file belongs to the project it was copied from, and keeping any
+ * of them is how a copy's push updates the original's site. There is no partial
+ * version of that: a copy owns none of these sites.
+ *
+ * @param {string} siteDir
+ * @returns {string[]|null} the origins it held, or null when there was no file. A
+ *   file that does not parse is removed all the same — it is still the original's —
+ *   and reports `[]`.
+ */
+export function forgetSyncStore(siteDir) {
+  const p = storePath(siteDir)
+  if (!existsSync(p)) return null
+  const origins = Object.keys(readSyncStore(siteDir).backends).sort()
+  unlinkSync(p)
+  return origins
 }
 
 /**

@@ -51,4 +51,4 @@ export {
   mergeDataIntoContent
 } from './data-fetcher.js'
 export { loadDeployYml, resolveTarget } from './deploy-config.js'
-export { recordLastDeploy, recordTarget } from './deploy-config-writer.js'
+export { recordLastDeploy, recordTarget, forgetDeploys, forgetDeployYml } from './deploy-config-writer.js'

@@ -3,11 +3,17 @@
  */
 
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { loadDeployYml, resolveTarget } from '../src/site/deploy-config.js'
-import { recordLastDeploy, recordTarget } from '../src/site/deploy-config-writer.js'
+import {
+  recordLastDeploy,
+  recordTarget,
+  forgetDeploys,
+  forgetDeployYml,
+} from '../src/site/deploy-config-writer.js'
 
 async function makeSiteDir() {
   return mkdtemp(join(tmpdir(), 'uniweb-deploy-yml-'))
@@ -510,6 +516,162 @@ describe('recordTarget', () => {
       expect(doc.targets['github-pages'].domain).toBe('mysite.com')
       // Default unchanged
       expect(doc.default).toBe('production')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// A project that published to two backends and deploys to one static host.
+const TWO_BACKENDS = [
+  '# Header comment',
+  'default: production',
+  'targets:',
+  '  production:',
+  '    host: uniweb',
+  '    backend: https://uniweb.app',
+  '  staging:',
+  '    # the dev box',
+  '    host: uniweb',
+  '    backend: http://localhost:8080',
+  '  pages:',
+  '    host: cloudflare-pages',
+  '    project: acme',
+  'deploys:',
+  '  production:',
+  '    at: 2026-09-01T00:00:00Z',
+  '    host: uniweb',
+  '    backend: https://uniweb.app',
+  '    siteUuid: SITE-PROD',
+  '  staging:',
+  '    at: 2026-09-02T00:00:00Z',
+  '    host: uniweb',
+  '    backend: http://localhost:8080',
+  '    siteUuid: SITE-DEV',
+  '  pages:',
+  '    at: 2026-09-03T00:00:00Z',
+  '    host: cloudflare-pages',
+  '    url: https://acme.pages.dev',
+  'saveDeploys: true',
+  '',
+].join('\n')
+
+describe('forgetDeploys — one backend\'s records, nothing else', () => {
+  async function withFile(text, fn) {
+    const dir = await makeSiteDir()
+    try {
+      await writeFile(join(dir, 'deploy.yml'), text, 'utf8')
+      await fn(dir)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  test('⭐ removes the record that names the backend and keeps every target', async () => {
+    await withFile(TWO_BACKENDS, async (dir) => {
+      expect(await forgetDeploys(dir, 'http://localhost:8080')).toEqual(['staging'])
+
+      const after = await loadDeployYml(dir)
+      expect(Object.keys(after.deploys).sort()).toEqual(['pages', 'production'])
+      expect(Object.keys(after.targets).sort()).toEqual(['pages', 'production', 'staging'])
+      expect(after.targets.staging.backend, 'the choice of where to ship stays').toBe(
+        'http://localhost:8080'
+      )
+      const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
+      expect(text).toMatch(/# Header comment/)
+      expect(text).toMatch(/# the dev box/)
+      expect(text).not.toMatch(/SITE-DEV/)
+      expect(text).toMatch(/SITE-PROD/)
+    })
+  })
+
+  test('matches a whole endpoint URL by its origin', async () => {
+    await withFile(TWO_BACKENDS, async (dir) => {
+      expect(await forgetDeploys(dir, 'https://uniweb.app/dev/site/x')).toEqual(['production'])
+    })
+  })
+
+  test('a record naming no backend falls back to its uniweb target', async () => {
+    const text = TWO_BACKENDS.replace('    backend: http://localhost:8080\n    siteUuid: SITE-DEV', '    siteUuid: SITE-DEV')
+    expect(text).not.toBe(TWO_BACKENDS)
+    await withFile(text, async (dir) => {
+      expect(await forgetDeploys(dir, 'http://localhost:8080')).toEqual(['staging'])
+    })
+  })
+
+  test('⛔ never touches another host\'s history', async () => {
+    await withFile(TWO_BACKENDS, async (dir) => {
+      await forgetDeploys(dir, 'https://uniweb.app')
+      await forgetDeploys(dir, 'http://localhost:8080')
+      const after = await loadDeployYml(dir)
+      expect(Object.keys(after.deploys)).toEqual(['pages'])
+    })
+  })
+
+  test('the last record gone takes the empty `deploys:` with it', async () => {
+    const one = [
+      'default: production',
+      'targets:',
+      '  production:',
+      '    host: uniweb',
+      '    backend: http://localhost:8080',
+      'deploys:',
+      '  production:',
+      '    at: 2026-09-02T00:00:00Z',
+      '    backend: http://localhost:8080',
+      'saveDeploys: true',
+      '',
+    ].join('\n')
+    await withFile(one, async (dir) => {
+      expect(await forgetDeploys(dir, 'http://localhost:8080')).toEqual(['production'])
+      const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
+      expect(text).not.toMatch(/deploys:/)
+      expect(text).toMatch(/targets:/)
+    })
+  })
+
+  test('an unknown backend, or no file, removes nothing', async () => {
+    await withFile(TWO_BACKENDS, async (dir) => {
+      expect(await forgetDeploys(dir, 'http://never.test')).toEqual([])
+      expect(await readFile(join(dir, 'deploy.yml'), 'utf8')).toBe(TWO_BACKENDS)
+    })
+    const empty = await makeSiteDir()
+    try {
+      expect(await forgetDeploys(empty, 'http://localhost:8080')).toEqual([])
+      expect(existsSync(join(empty, 'deploy.yml'))).toBe(false)
+    } finally {
+      await rm(empty, { recursive: true, force: true })
+    }
+  })
+
+  test('a file that does not parse is reported, never rewritten', async () => {
+    const broken = 'targets: [unclosed\n'
+    await withFile(broken, async (dir) => {
+      await expect(forgetDeploys(dir, 'http://localhost:8080')).rejects.toThrow(/did not parse/)
+      expect(await readFile(join(dir, 'deploy.yml'), 'utf8')).toBe(broken)
+    })
+  })
+})
+
+describe('forgetDeployYml — a copy becoming a new project', () => {
+  test('⭐ deletes the whole file, targets included, and names what it held', async () => {
+    const dir = await makeSiteDir()
+    try {
+      await writeFile(join(dir, 'deploy.yml'), TWO_BACKENDS, 'utf8')
+      expect(await forgetDeployYml(dir)).toEqual(['pages', 'production', 'staging'])
+      expect(existsSync(join(dir, 'deploy.yml'))).toBe(false)
+      expect(await forgetDeployYml(dir), 'no file: null, not an error').toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('removes a file that does not parse — it is still the original\'s', async () => {
+    const dir = await makeSiteDir()
+    try {
+      await writeFile(join(dir, 'deploy.yml'), 'targets: [unclosed\n', 'utf8')
+      expect(await forgetDeployYml(dir)).toEqual([])
+      expect(existsSync(join(dir, 'deploy.yml'))).toBe(false)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

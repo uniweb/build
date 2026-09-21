@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -27,6 +27,7 @@ import {
   updateBackendState,
   updateBackendMap,
   clearBackend,
+  forgetSyncStore,
   refForAssetId
 } from '../src/uwx/sync-store.js'
 
@@ -90,6 +91,38 @@ describe('two backends in one project', () => {
     expect(readBackendState(dir, B)).toEqual({})
     expect(readBackendState(dir, A).site.uuid).toBe('site-A')
     expect(clearBackend(dir, 'https://never.test')).toBe(false)
+  })
+
+  it('⭐ clearing the LAST backend removes the file — an empty ledger is a trace', () => {
+    updateBackendState(dir, A, { site: { uuid: 'site-A' } })
+    updateBackendState(dir, B, { site: { uuid: 'site-B' } })
+
+    expect(clearBackend(dir, A)).toBe(true)
+    expect(existsSync(file()), 'one backend left: the file stays').toBe(true)
+    expect(clearBackend(dir, B)).toBe(true)
+    expect(existsSync(file()), 'none left: no file').toBe(false)
+    expect(readBackendState(dir, B)).toEqual({})
+  })
+})
+
+describe('forgetSyncStore — for a copy that becomes a new project', () => {
+  it('deletes the file and reports every origin it held', () => {
+    updateBackendState(dir, A, { site: { uuid: 'site-A' } })
+    updateBackendState(dir, B, { site: { uuid: 'site-B' } })
+
+    expect(forgetSyncStore(dir)).toEqual([A, B].sort())
+    expect(existsSync(file())).toBe(false)
+    expect(listSyncedBackends(dir)).toEqual([])
+  })
+
+  it('null when there is no file — nothing to forget is not an error', () => {
+    expect(forgetSyncStore(dir)).toBeNull()
+  })
+
+  it('removes a file that does not parse — it is still the original\'s', () => {
+    writeFileSync(file(), '{ not json')
+    expect(forgetSyncStore(dir)).toEqual([])
+    expect(existsSync(file())).toBe(false)
   })
 })
 

@@ -19,12 +19,17 @@
  * file scaffolded with `default:`, a single entry under `targets:`, and
  * `saveDeploys: true`. This is the only code path that writes the
  * config region.
+ *
+ * And two removals, for `uniweb forget`: `forgetDeploys` drops the records one
+ * backend wrote and keeps every target; `forgetDeployYml` deletes the file, for a
+ * copy that is to become a new project.
  */
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { Document, parseDocument, isMap } from 'yaml'
+import { normalizeOrigin } from '../uwx/sync-store.js'
 
 // The header every generated deploy.yml carries. It has to answer the question
 // a reader has while looking AT the file — who wrote this, and may I edit it —
@@ -190,4 +195,85 @@ export async function recordTarget(siteDir, opts) {
 
   await writeFile(path, doc.toString(), 'utf8')
   return { created: false, path, action: 'merge' }
+}
+
+/**
+ * Remove the deploy records one backend wrote — `uniweb forget --backend <url>`.
+ *
+ * A record belongs to the backend it names: every publish writes
+ * `deploys.<target>.backend`. A record naming none falls back to its target's
+ * `backend:`, which only a `host: uniweb` target has — so no other host's history
+ * can match, and a record that names no backend anywhere is left alone rather than
+ * guessed at.
+ *
+ * ⛔ **`targets:` stays.** A target is a CHOICE of where to ship, not something a
+ * backend told us — the spec's own line between this file and `sync.json`. After
+ * the forget, the next publish there simply creates a new site.
+ *
+ * Why the records go at all: each names the forgotten site (`siteUuid`, `url`), and
+ * its request fingerprint describes what was sent to THAT site. Kept, they would
+ * sit beside a target that now publishes somewhere else entirely.
+ *
+ * @param {string} siteDir
+ * @param {string} origin
+ * @returns {Promise<string[]>} the target names whose record was removed, sorted
+ * @throws when deploy.yml exists and does not parse — the caller decides whether
+ *   that blocks anything; this does not rewrite a file it could not read
+ */
+export async function forgetDeploys(siteDir, origin) {
+  const key = normalizeOrigin(origin)
+  const path = join(siteDir, 'deploy.yml')
+  if (!key || !existsSync(path)) return []
+
+  const doc = parseDocument(await readFile(path, 'utf8'))
+  if (doc.errors.length) {
+    throw new Error(`deploy.yml did not parse: ${doc.errors[0].message.split('\n')[0]}`)
+  }
+  const deploysNode = doc.get('deploys', true)
+  if (!isMap(deploysNode)) return []
+
+  const js = doc.toJS() || {}
+  const removed = []
+  for (const [name, record] of Object.entries(js.deploys || {})) {
+    const target = js.targets?.[name]
+    const named =
+      record?.backend ?? (target?.host === 'uniweb' ? target?.backend : undefined)
+    if (normalizeOrigin(named) === key) removed.push(name)
+  }
+  if (!removed.length) return []
+
+  for (const name of removed) deploysNode.delete(name)
+  // An empty `deploys: {}` says nothing and would be the only thing left of the
+  // backend in this file.
+  if (!deploysNode.items.length) doc.delete('deploys')
+  await writeFile(path, doc.toString(), 'utf8')
+  return removed.sort()
+}
+
+/**
+ * Delete deploy.yml outright — `uniweb forget --all`, for a copy that is to become a
+ * new project.
+ *
+ * ⭐ **The targets go too, not just the records** *[Diego, 2026-09-21: "if it's for
+ * duplicating a site project and making a new site from it, … the whole deploy.yml
+ * file has to be deleted"]*. They name the ORIGINAL's destinations — its Pages
+ * project, its bucket, its domain — so a deploy from the copy would overwrite the
+ * original there. The copy's first deploy writes a fresh file.
+ *
+ * @param {string} siteDir
+ * @returns {Promise<string[]|null>} the target names it held, or null when there
+ *   was no file. A file that does not parse is removed all the same and reports `[]`.
+ */
+export async function forgetDeployYml(siteDir) {
+  const path = join(siteDir, 'deploy.yml')
+  if (!existsSync(path)) return null
+  let names = []
+  try {
+    const doc = parseDocument(await readFile(path, 'utf8'))
+    if (!doc.errors.length) names = Object.keys(doc.toJS()?.targets || {}).sort()
+  } catch {
+    /* unreadable — still the original's, still removed */
+  }
+  await unlink(path)
+  return names
 }
