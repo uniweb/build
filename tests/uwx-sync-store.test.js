@@ -64,6 +64,8 @@ describe('origins', () => {
     expect(normalizeOrigin('not a url')).toBeNull()
     expect(normalizeOrigin('')).toBeNull()
     expect(normalizeOrigin(null)).toBeNull()
+    // no scheme: `new URL()` parses it as the scheme `localhost:`, origin "null"
+    expect(normalizeOrigin('localhost:8080')).toBeNull()
     expect(updateBackendState(dir, 'not a url', { site: { uuid: 'x' } })).toBe(false)
   })
 })

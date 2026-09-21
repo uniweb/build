@@ -58,7 +58,11 @@ const storePath = (siteDir) => join(siteDir, SYNC_STORE_FILE)
 export function normalizeOrigin(value) {
   if (typeof value !== 'string' || !value.trim()) return null
   try {
-    return new URL(value).origin
+    // ⛔ http(s) only: `new URL('localhost:8080')` PARSES — as the scheme `localhost:` —
+    // and its origin is the string "null". Keyed by that, a mistyped backend would get a
+    // section of its own.
+    const u = new URL(value)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null
   } catch {
     return null
   }
