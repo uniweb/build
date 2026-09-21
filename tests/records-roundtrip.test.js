@@ -55,7 +55,7 @@ const RECORDS_YML = [
 
 const seed = (dir) => {
   const write = w(dir)
-  write('site/site.yml', '$org: acme\nname: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
+  write('site/site.yml', 'name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
   write('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
   write('site/entities/article/hello.md', '---\n$uuid: U1\ntitle: Hello\n---\n\nBody one.\n')
   write('site/entities/article/older.md', '---\n$uuid: U2\ntitle: Older\n---\n\nBody two.\n')
