@@ -42,6 +42,8 @@ const w = (root) => (rel, body) => {
 
 // A site whose folder has BOTH shapes: records at the root and a labelled branch.
 // A flat-only fixture would pass for a projector that could not write a branch.
+const BACKEND = 'http://backend.test'
+
 const RECORDS_YML = [
   '- article/hello.md',
   '- folder: archive',
@@ -59,11 +61,20 @@ const seed = (dir) => {
   write('site/entities/article/older.md', '---\n$uuid: U2\ntitle: Older\n---\n\nBody two.\n')
   write('site/records.yml', RECORDS_YML)
   write('fdn/dist/meta/schema.json', SCHEMA_JSON)
+  // ⭐ The backend has already minted U1 and U2 — this is a RE-push. The file holds
+  // the records' own ids; the map says what this backend calls them (identity, since
+  // it is the backend that minted them). Without it the wire carries no uuids, which
+  // is correct for a backend that has never seen these records, and is not what a
+  // round trip against the one that stores them looks like.
+  write('site/sync.json', {
+    version: 1,
+    backends: { [BACKEND]: { site: { org: 'acme' }, records: { U1: 'U1', U2: 'U2' } } }
+  })
   return join(dir, 'site')
 }
 
 const produce = async (siteRoot) => {
-  const col = await buildRecordEntities(siteRoot, { org: '@acme' })
+  const col = await buildRecordEntities(siteRoot, { org: '@acme', backend: BACKEND })
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     folderNodes: col.folder.nodes,
@@ -91,14 +102,15 @@ describe('push → pull → push is a fixed point', () => {
     // Project into a FRESH site — no entities/, no records.yml — the way a clone does.
     const dest = join(ROOT, 'dest')
     const writeDest = w(ROOT)
-    writeDest('dest/site.yml', '$org: acme\nname: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
+    writeDest('dest/site.yml', 'name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
+    writeDest('dest/sync.json', { version: 1, backends: { [BACKEND]: { site: { org: 'acme' } } } })
     writeDest('dest/package.json', { name: 'dest', dependencies: { '@acme/base': 'file:../fdn' } })
 
     const report = recordsToProject({
       folderDoc: first.folder.document,
       recordDocs: first.col.entities.map((e) => e.document),
       siteRoot: dest,
-      opts: { resolveDeclaration },
+      opts: { resolveDeclaration, backend: BACKEND },
     })
     expect(report.warnings).toEqual([])
     expect(report.records).toBe('updated')
@@ -123,13 +135,14 @@ describe('push → pull → push is a fixed point', () => {
     const { col, folder } = await produce(src)
     const dest = join(ROOT, 'dest')
     const writeDest = w(ROOT)
-    writeDest('dest/site.yml', '$org: acme\nname: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
+    writeDest('dest/site.yml', 'name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
+    writeDest('dest/sync.json', { version: 1, backends: { [BACKEND]: { site: { org: 'acme' } } } })
     writeDest('dest/package.json', { name: 'dest', dependencies: { '@acme/base': 'file:../fdn' } })
     recordsToProject({
       folderDoc: folder.document,
       recordDocs: col.entities.map((e) => e.document),
       siteRoot: dest,
-      opts: { resolveDeclaration },
+      opts: { resolveDeclaration, backend: BACKEND },
     })
 
     expect(yaml.load(readFileSync(join(dest, 'records.yml'), 'utf8'))).toEqual([
@@ -150,7 +163,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: { contents: [] },
       recordDocs: [],
       siteRoot: dest,
-      opts: { resolveDeclaration },
+      opts: { resolveDeclaration, backend: BACKEND },
     })
     expect(report.records).toBe('skipped')
     expect(readFileSync(join(dest, 'records.yml'), 'utf8')).toBe('- article/kept.md\n')
@@ -167,7 +180,7 @@ describe('push → pull → push is a fixed point', () => {
       },
       recordDocs: [], // the record never arrived
       siteRoot: dest,
-      opts: { resolveDeclaration },
+      opts: { resolveDeclaration, backend: BACKEND },
     })
     expect(report.records).toBe('skipped')
     expect(report.warnings.some((x) => x.includes('not written locally'))).toBe(true)

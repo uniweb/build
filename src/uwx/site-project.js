@@ -893,7 +893,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   )
 
   report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
-  report.queries = declarationsToQueriesYml({ document, siteRoot })
+  report.queries = declarationsToQueriesYml({ document, siteRoot, backend })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

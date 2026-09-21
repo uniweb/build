@@ -32,6 +32,7 @@
 // nothing is written into `collections.yml` here. Nothing is silently dropped: an
 // unplaceable or unresolvable record is reported.
 
+import { readBackendState, updateBackendMap } from './sync-store.js'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
@@ -175,13 +176,13 @@ function locate(document, folderIndex) {
 }
 
 /** `site.yml::$org`, bare (`acme`), or null. Stored bare — see `writeSiteOrg`. */
-function readSiteOrg(siteRoot) {
-  try {
-    const y = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
-    return typeof y.$org === 'string' && y.$org ? y.$org : null
-  } catch {
-    return null
-  }
+// ⛔ `site.yml::$org` IS GONE (2026-09-20) — the org lives in
+// `sync.json::backends.<origin>.site.org`. This read `site.yml` and, once step 4
+// moved the key, silently returned null: every `@org/x` model a pull met would have
+// been placed back as if the site had no org. No test spanned it.
+function readSiteOrg(siteRoot, backend) {
+  const org = backend ? readBackendState(siteRoot, backend).site?.org : null
+  return typeof org === 'string' && org ? org : null
 }
 
 // Skip undefined when copying optional fields into a projected declaration.
@@ -335,7 +336,7 @@ function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
  *        the same default `recordsToProject` places records by.
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
-export function declarationsToQueriesYml({ document, siteRoot, org }) {
+export function declarationsToQueriesYml({ document, siteRoot, org, backend = null }) {
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
   if (decls.length === 0) return report
@@ -353,7 +354,7 @@ export function declarationsToQueriesYml({ document, siteRoot, org }) {
     siteYml = null
   }
   const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
-  const selfOrg = org ?? readSiteOrg(siteRoot)
+  const selfOrg = org ?? readSiteOrg(siteRoot, backend)
 
   const queries = {}
   for (const d of decls) {
@@ -453,7 +454,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // The site's own org, so a `@org/x` model the producer resolved from `@/x` is
   // placed back where the author wrote it. Read from `site.yml::$org` unless the
   // caller already has it.
-  const selfOrg = opts.org ?? readSiteOrg(siteRoot)
+  const selfOrg = opts.org ?? readSiteOrg(siteRoot, opts.backend)
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')
   }
@@ -468,6 +469,11 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   const unchanged = []
   const skipped = []
   const warnings = []
+  // This backend's record map, inverted: its uuid → the record's own id.
+  const recordMap = opts.backend ? readBackendState(siteRoot, opts.backend).records || {} : {}
+  const ownIdByTheirs = new Map(Object.entries(recordMap).map(([own, theirs]) => [theirs, own]))
+  // own id → their uuid, for every record this pull wrote. Recorded at the end.
+  const learned = {}
   // uuid → the path under `entities/` the record landed at. Only this loop knows
   // the extension each one got, so `records.yml` is written from it rather than
   // re-derived (a second rule could pick a different extension and the folder
@@ -495,7 +501,13 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       })
       continue
     }
-    const existing = document.$uuid ? findRecordFileByUuid(poolDir, document.$uuid) : null
+    // ⭐ The incoming `$uuid` is the BACKEND's. The file holds the record's OWN id, so
+    // reverse this backend's map to find it. With no mapping the two are the same —
+    // the first backend a record reaches minted the id it keeps — so the backend's
+    // uuid is the own id, exactly as before identity was keyed by backend.
+    const theirs = document.$uuid || null
+    const own = theirs ? ownIdByTheirs.get(theirs) || theirs : null
+    const existing = own ? findRecordFileByUuid(poolDir, own) : null
 
     let filePath
     let format
@@ -514,9 +526,12 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     // target-locale full-doc body is written under locales/freeform/{locale}/here.
     const freeformRelPath = buildFreeformRecordPath(document.$model, where.slug)
 
+    // ⛔ The file gets the record's OWN id, never this backend's — a pull from a second
+    // backend must not overwrite the identity the record already has.
+    const toWrite = own && own !== theirs ? { ...document, $uuid: own } : document
     let status
     try {
-      status = writeRecordFile({ filePath, document, declaration, format, sourceLocale, collector, freeformRelPath })
+      status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath })
     } catch (err) {
       warnings.push(`${where.slug}: ${err.message}`)
       continue
@@ -524,8 +539,11 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     if (status === 'unchanged') unchanged.push(filePath)
     else if (isNew) placed.push(filePath)
     else updated.push(filePath)
-    if (document.$uuid) {
-      poolPathByUuid.set(document.$uuid, relative(join(siteRoot, ENTITIES_DIR), filePath).split(sep).join('/'))
+    // Keyed by THEIR uuid: the folder document references records in the backend's
+    // terms, so that is what `folderToRecordsYml` will look them up by.
+    if (theirs) {
+      poolPathByUuid.set(theirs, relative(join(siteRoot, ENTITIES_DIR), filePath).split(sep).join('/'))
+      if (own) learned[own] = theirs
     }
   }
 
@@ -542,6 +560,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
   const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'records')
   const freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
+
+  if (opts.backend && Object.keys(learned).length) {
+    updateBackendMap(siteRoot, opts.backend, 'records', learned)
+  }
 
   return { updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status }
 }

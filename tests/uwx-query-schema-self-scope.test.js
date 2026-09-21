@@ -45,8 +45,13 @@ const w = (rel, body) => {
 // A site whose query reads a Model from its OWN foundation, with one record of it.
 // Queries live in `queries.yml`, the one home a pull writes, so a round trip reads
 // back the file it wrote.
-function makeSite({ queriesYml, siteYmlExtra = '' }) {
-  w('site/site.yml', `name: T\nfoundation: "@acme/fnd"\n${siteYmlExtra}`)
+const BACKEND = 'http://backend.test'
+
+// ⭐ The org lives in sync.json per backend since 2026-09-20, not site.yml::$org. The
+// fixtures still say `org:` because that reads as the setup a person pictures.
+function makeSite({ queriesYml, org = null }) {
+  w('site/site.yml', 'name: T\nfoundation: "@acme/fnd"\n')
+  if (org) w('site/sync.json', { version: 1, backends: { [BACKEND]: { site: { org } } } })
   w('site/queries.yml', queriesYml)
   w('site/package.json', { name: 'site', dependencies: { '@acme/fnd': 'file:../fdn' } })
   w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
@@ -142,9 +147,10 @@ describe('push — the query names the Model its records were stored under', () 
 
 describe('pull — the author’s `@/` comes back', () => {
   it('⭐ a qualified self-org schema is written back as the author wrote it', () => {
-    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', siteYmlExtra: '$org: proximify\n' })
+    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', org: 'proximify' })
 
     declarationsToQueriesYml({
+      backend: BACKEND,
       document: {
         queries: [
           { name: 'members', schema: '@proximify/member', limit: 5 },
@@ -166,10 +172,11 @@ describe('pull — the author’s `@/` comes back', () => {
     expect(written.partners.schema).toBe('@acme/partner')
   })
 
-  it('an explicit `org` wins over `site.yml::$org`', () => {
-    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', siteYmlExtra: '$org: someone-else\n' })
+  it('an explicit `org` wins over the stored one', () => {
+    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', org: 'someone-else' })
 
     declarationsToQueriesYml({
+      backend: BACKEND,
       document: { queries: [{ name: 'members', schema: '@proximify/member' }] },
       siteRoot: SITE,
       org: '@proximify'
@@ -183,7 +190,8 @@ describe('pull — the author’s `@/` comes back', () => {
     // `@/`-keyed data schemas. Handed `@acme/article` it would miss, call the
     // derivation authored, and persist it — the 2026-08-29 defect, reintroduced
     // through the qualifying. Same fixture as `uwx-derived-deferred-not-persisted`.
-    w('site/site.yml', 'name: T\nfoundation: "@acme/base"\n$org: acme\n')
+    w('site/site.yml', 'name: T\nfoundation: "@acme/base"\n')
+    w('site/sync.json', { version: 1, backends: { [BACKEND]: { site: { org: 'acme' } } } })
     w('site/queries.yml', 'articles:\n  path: collections/articles\n  schema: "@/article"\n')
     w('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
     w('site/collections/articles/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody.\n')
@@ -204,7 +212,7 @@ describe('pull — the author’s `@/` comes back', () => {
     expect(decl.schema).toBe('@acme/article')
     expect(decl.deferred).toEqual(['content', 'footnotes'])
 
-    declarationsToQueriesYml({ document: doc, siteRoot: SITE })
+    declarationsToQueriesYml({ document: doc, siteRoot: SITE, backend: BACKEND })
     const written = pulledQueries().articles
 
     expect(written.deferred).toBeUndefined()
@@ -216,11 +224,11 @@ describe('round trip — push(pull(x)) is a fixed point', () => {
   it('survives file → wire → file → wire with an org', async () => {
     makeSite({
       queriesYml: 'members:\n  schema: "@/member"\n  limit: 5\npeople: {}\n',
-      siteYmlExtra: '$org: proximify\n'
+      org: 'proximify'
     })
 
     const first = await siteProjectToDocument(SITE, { org: '@proximify' })
-    declarationsToQueriesYml({ document: first, siteRoot: SITE })
+    declarationsToQueriesYml({ document: first, siteRoot: SITE, backend: BACKEND })
     const second = await siteProjectToDocument(SITE, { org: '@proximify' })
 
     expect(second.queries).toEqual(first.queries)

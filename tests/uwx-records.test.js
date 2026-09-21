@@ -475,7 +475,7 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
     }
   })
 
-  it('round-trips a back-filled $uuid on re-sync', async () => {
+  it('a record keeps its own id; the wire carries only what each backend minted', async () => {
     // A second site whose record already carries a $uuid (a prior back-fill).
     const reSite = join(root, 'resync-site')
     mkdirSync(join(reSite, 'entities', 'acme', 'product'), { recursive: true })
@@ -493,12 +493,43 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
     )
     writeFileSync(join(reSite, 'records.yml'), '- acme/product/*.yml\n')
 
-    const { buffer } = await emitRecordSyncPackage(reSite)
-    const { manifest, byFile } = unzip(buffer)
-    const entry = manifest.entries.find((e) => e.kind === 'entity')
-    const doc = byFile(entry.file)
+    // ⭐ The file's `$uuid` is the record's OWN id. What reaches the wire is the uuid
+    // THIS backend minted for it, from sync.json — here the first backend, so the map
+    // is identity, exactly as a single-backend project always behaved.
+    const A = 'http://backend-a.test'
+    writeFileSync(
+      join(reSite, 'sync.json'),
+      JSON.stringify({ version: 1, backends: { [A]: { records: { 'existing-uuid-1': 'existing-uuid-1' } } } })
+    )
+    const emit = async (backend) => {
+      const { buffer } = await emitRecordSyncPackage(reSite, backend ? { backend } : {})
+      const { manifest, byFile } = unzip(buffer)
+      return byFile(manifest.entries.find((e) => e.kind === 'entity').file)
+    }
+
+    const doc = await emit(A)
     expect(doc.$uuid).toBe('existing-uuid-1')
     expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$model', 'product'])
+
+    // ⭐ A backend that minted something ELSE for it gets its own uuid, not ours.
+    writeFileSync(
+      join(reSite, 'sync.json'),
+      JSON.stringify({
+        version: 1,
+        backends: {
+          [A]: { records: { 'existing-uuid-1': 'existing-uuid-1' } },
+          'http://backend-b.test': { records: { 'existing-uuid-1': 'uuid-minted-by-b' } }
+        }
+      })
+    )
+    expect((await emit('http://backend-b.test')).$uuid).toBe('uuid-minted-by-b')
+
+    // ⛔ And a backend that never minted one gets NONE — never a uuid it did not
+    // mint. Whether it would accept one is the backend's to say; this is correct
+    // either way, and it is what stops one backend's ids reaching another.
+    expect((await emit('http://backend-c.test')).$uuid).toBeUndefined()
+    // No backend named is the same answer.
+    expect((await emit(null)).$uuid).toBeUndefined()
   })
 
   it('errors when no records are syncable (convention schema unresolved, soft-skipped)', async () => {

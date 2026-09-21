@@ -318,13 +318,21 @@ function writeIfChanged(filePath, text) {
  *        order: `{ id, model, slug, sourceFile, format?, multiRecord?, declaration? }`.
  * @param {object[]} params.finalized - response entries `{ index, uuid, changed?, document? }`.
  * @param {string} [params.sourceLocale]
- * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[] }}
+ * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[], mapped: Object<string,string> }}
+ *   `mapped` is own id → the uuid this backend minted, for the caller to record per backend.
  */
 export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
   const updated = []
   const unchanged = []
   const deferred = []
   const warnings = []
+  // ⭐ own id → the uuid THIS backend minted. The caller files it under the backend in
+  // `sync.json::backends.<origin>.records`; this function knows no backend.
+  const mapped = {}
+  // Files holding only records that already carry their own id. Counted ONCE per file
+  // at the end: an array-form file holds several records, and "examined, nothing
+  // written" is a statement about the file, not about each record in it.
+  const ownIdFiles = new Set()
   // Multi-record files are written ONCE per file, applying every (slug → uuid).
   const arrayFiles = new Map() // array-form YAML/JSON: sourceFile -> Map(slug -> uuid)
   const bibFiles = new Map() // BibTeX: sourceFile -> Map(cite key -> uuid)
@@ -345,6 +353,22 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     if (entry.kind === 'site' || entry.kind === 'folder') continue
     if (!entry.sourceFile) {
       deferred.push({ index: i, id: entry.id, reason: 'no source file on disk' })
+      continue
+    }
+
+    // ⭐ Every record the backend returned is mapped: own id → the uuid it minted.
+    // A record new to EVERY backend has no own id yet, so the minted uuid becomes it
+    // (written below) and the mapping is identity — which is exactly the behaviour
+    // before identity was keyed by backend, so a single-backend project is unchanged.
+    mapped[entry.ownId || uuid] = uuid
+
+    // ⛔ A record that already carries its OWN id is NOT rewritten. Its id is stable
+    // and travels with the file; this backend's uuid belongs in the map, not in the
+    // author's file. And it must not be: variant A below re-renders the WHOLE file from
+    // the backend's document, which carries THIS backend's `$uuid` — so a second
+    // backend would silently overwrite the record's identity with its own.
+    if (entry.ownId) {
+      ownIdFiles.add(entry.sourceFile)
       continue
     }
     if (entry.multiRecord) {
@@ -405,5 +429,8 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     else warnings.push(`${file}: ${res.message}`)
   }
 
-  return { updated, unchanged, deferred, warnings }
+  for (const file of ownIdFiles) {
+    if (!updated.includes(file) && !unchanged.includes(file)) unchanged.push(file)
+  }
+  return { updated, unchanged, deferred, warnings, mapped }
 }

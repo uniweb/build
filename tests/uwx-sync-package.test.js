@@ -175,8 +175,14 @@ describe('emitSyncPackages — two directional lanes', () => {
     // Articles with embedded $uuid → the folder references them by `entry.model` (minted form).
     w('entities/article/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
     w('entities/article/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
+    // ⭐ A RE-push: this backend minted both, so its map says so (identity). The
+    // "minted form" the folder references them by is a fact about THIS backend.
+    w('sync.json', JSON.stringify({
+      version: 1,
+      backends: { [ORIGIN]: { records: { '0192-hello': '0192-hello', '0192-world': '0192-world' } } }
+    }))
 
-    const first = await emitSyncPackages(SITE)
+    const first = await emitSyncPackages(SITE, { backend: ORIGIN })
     const articleModel = first.records.models.find((m) => m !== '@uniweb/folder')
     expect(articleModel).toBeTruthy()
 
@@ -184,7 +190,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // (no prior hash) while the article records are cache-hits (filtered from the package).
     const priorHashes = { ...first.hashes }
     for (const k of Object.keys(priorHashes)) if (k.startsWith('@uniweb/folder ')) delete priorHashes[k]
-    const second = await emitSyncPackages(SITE, { priorHashes })
+    const second = await emitSyncPackages(SITE, { backend: ORIGIN, priorHashes })
 
     expect(second.records).toBeTruthy()
     // the package carries only the folder (records filtered) …

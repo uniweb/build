@@ -39,6 +39,7 @@
 // injected `opts.resolveModel`. A scope note that under-claims is worse than none:
 // it sends a reader to build what is already there.
 
+import { readBackendState } from './sync-store.js'
 import { readFileSync, existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -740,9 +741,30 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       }
     }
 
+    // ⭐ THE FILE'S `$uuid` IS OURS; THE WIRE'S IS THE BACKEND'S (2026-09-20).
+    //
+    // A record's `$uuid` is its stable identity and travels with the file, so moving
+    // or renaming it changes nothing. What goes on the WIRE to backend B is the uuid B
+    // minted for it — looked up in `sync.json::backends.<B>.records` — or none, so B
+    // mints one. ⛔ Never send a backend a uuid it did not mint: whether it would
+    // accept one is the backend's to say, and this is correct either way.
+    //
+    // For the FIRST backend a record reaches, B's minted uuid is written into the
+    // file and the map is identity — exactly what happened before this change, so a
+    // single-backend project behaves as it always did.
+    const recordMap = opts.backend ? readBackendState(siteRoot, opts.backend).records || {} : {}
+    const ownIds = new Map()
+    const onWire = flat.map((rec) => {
+      const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
+      ownIds.set(rec.slug, own)
+      const minted = own ? recordMap[own] : undefined
+      const { $uuid: _own, ...rest } = rec
+      return minted ? { ...rest, $uuid: minted } : rest
+    })
+
     const mappedOut = recordsToEntities({
       queryName: name,
-      records: flat,
+      records: onWire,
       declaration,
       sourceLocale,
       translations,
@@ -780,6 +802,9 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         // per-entry `$uuid` write keyed by slug (see backfill.js). `format` lets
         // the writer route (array-form vs BibTeX, the latter still deferred).
         sourceFile: src ? src.sourceFile : null,
+        // The record's OWN id (the file's `$uuid`), or null for one never synced.
+        // The back-fill maps it to what the backend returns; see above.
+        ownId: ownIds.get(e.slug) ?? null,
         format: src ? src.format : null,
         multiRecord: src ? src.multiRecord : false,
         // The Model declaration, so the back-fill can render the finalized

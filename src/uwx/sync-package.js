@@ -273,6 +273,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const exportedAt = opts.exportedAt
 
   const col = await buildRecordEntities(siteRoot, {
+    // Which backend's record uuids go on the wire (sync.json) — see records.js.
+    ...(opts.backend ? { backend: opts.backend } : {}),
     ...(opts.foundationDir ? { foundationDir: opts.foundationDir } : {}),
     ...(opts.resolveModel ? { resolveModel: opts.resolveModel } : {}),
     ...(sourceLocale ? { sourceLocale } : {}),
