@@ -71,12 +71,17 @@ describe('loadPackageJson — the three states', () => {
     expect(out.supports).toEqual(['search', 'submit'])
   })
 
-  it('coexists with uniweb.id and uniweb.scope in the same block', async () => {
+  it('coexists with uniweb.scope in the same block — and a leftover uniweb.id is ignored, said', async () => {
+    // `uniweb.id` was a registry-name override until 2026-09-21; the name lives in
+    // main.js now. The build says so and reads the package name; `register` refuses it.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const out = await loadPackageJson(
       foundationDir({ uniweb: { id: 'docs', scope: '@acme', supports: ['search'] } })
     )
-    expect(out.name).toBe('docs')
+    expect(out.name).toBe('acme-foundation')
     expect(out.supports).toEqual(['search'])
+    expect(warn.mock.calls.flat().join(' ')).toContain('`uniweb.id` is no longer read')
+    warn.mockRestore()
   })
 })
 

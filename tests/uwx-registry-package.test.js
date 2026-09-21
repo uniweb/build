@@ -192,7 +192,7 @@ describe('register --scope output — locked contract (regression)', () => {
   // ref, registered under @acme — the shape `uniweb register --scope @acme` sends.
   function bareNamedSchema() {
     return {
-      _self: { name: 'src', version: '0.1.0', role: 'foundation' },
+      _self: { name: 'marketing', version: '0.1.0', role: 'foundation' },
       dataSchemas: {
         '@/event': validateAndNormalizeSchema(
           { fields: { title: { type: 'string', required: true } } },
@@ -209,9 +209,9 @@ describe('register --scope output — locked contract (regression)', () => {
     exporter: { tool: 'uniweb', version: '9.9.9', instance: 'build' },
   })
 
-  it('resolves the bare foundation name into the scope (src -> @acme/src)', () => {
+  it('resolves the bare foundation name into the scope (marketing -> @acme/marketing)', () => {
     const f = doc.entities.find((e) => e.model === '@uniweb/foundation-schema')
-    expect(f.info.name).toBe('@acme/src')
+    expect(f.info.name).toBe('@acme/marketing')
   })
 
   it('resolves DEFINED @/ schema names into the scope; leaves shared refs as-is', () => {

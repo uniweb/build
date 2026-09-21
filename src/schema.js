@@ -23,6 +23,8 @@ import {
   deriveRecordsSupport,
   unnameableIn,
 } from './foundation/derive-supports.js'
+import { foundationNameOf } from './foundation-name.js'
+import { resolveFoundationSrcDir } from './utils/foundation-source-root.js'
 
 // Component meta file name
 const META_FILE_NAME = 'meta.js'
@@ -176,13 +178,21 @@ export async function loadPackageJson(srcDir) {
     const content = await readFile(packagePath, 'utf-8')
     const pkg = JSON.parse(content)
 
-    // Extract only identity fields for schema.
-    // `uniweb.id` is the REGISTERED name (registry identity), decoupled from the
-    // workspace package `name` (pnpm linking / file: deps / site.yml). It lets a
-    // foundation keep a scaffold-default package name like "src" while registering
-    // under a distinct id (e.g. "docs" → @org/docs). Falls back to `name`.
+    // Extract only identity fields for schema. `name` here is the package's — the
+    // FALLBACK for the foundation's name, which `main.js` supplies first
+    // (`foundation-name.js`, applied in `buildSchema`).
+    //
+    // ⛔ `uniweb.id` is no longer read (retired 2026-09-21): it was a registry-name
+    // override, and the name lives in `main.js` now. Said here rather than refused —
+    // a build does not register, and `uniweb register` refuses it by name.
+    if (pkg.uniweb?.id !== undefined) {
+      console.warn(
+        `[uniweb] ${packagePath}: \`uniweb.id\` is no longer read — a foundation's name is ` +
+          `\`name\` in main.js's default export (name: '${pkg.uniweb.id}').`
+      )
+    }
     return {
-      name: pkg.uniweb?.id || pkg.name,
+      name: pkg.name,
       version: pkg.version,
       description: pkg.description,
       // `uniweb.supports` joins them because it is the same KIND of fact: static,
@@ -194,6 +204,43 @@ export async function loadPackageJson(srcDir) {
   } catch (error) {
     console.warn(`Warning: Failed to load package.json:`, error.message)
     return {}
+  }
+}
+
+/**
+ * A local foundation's name, read from its source by the one rule
+ * (`foundation-name.js`) — for `uniweb register` and for `push` / `publish` looking
+ * the foundation up, which need it before a build, or without one.
+ *
+ * ⛔ Refuses `package.json::uniweb.id` (retired 2026-09-21). This is the reader
+ * whose answer registers, so a leftover stops here rather than registering the
+ * foundation under a different name than the one it was given.
+ *
+ * @param {string} foundationDir - the foundation package's root
+ * @returns {Promise<{ name: string|null, source: 'main.js'|'package.json'|null, mainFile: string }>}
+ *   `mainFile` is the foundation's `main.js`, whether or not it exists yet
+ */
+export async function readFoundationName(foundationDir) {
+  const pkgPath = join(foundationDir, 'package.json')
+  let pkg = {}
+  if (existsSync(pkgPath)) {
+    try {
+      pkg = JSON.parse(await readFile(pkgPath, 'utf-8')) || {}
+    } catch {
+      pkg = {}
+    }
+  }
+  if (pkg.uniweb?.id !== undefined) {
+    throw new Error(
+      `${pkgPath}: \`uniweb.id\` is no longer read — a foundation's name is \`name\` in ` +
+        `main.js's default export. Move it there (name: '${pkg.uniweb.id}') and remove uniweb.id.`
+    )
+  }
+  const srcDir = join(foundationDir, resolveFoundationSrcDir(foundationDir))
+  const config = await loadFoundationConfig(srcDir)
+  return {
+    ...foundationNameOf({ config, pkg }),
+    mainFile: join(srcDir, FOUNDATION_FILE_NAMES[0]),
   }
 }
 
@@ -310,7 +357,12 @@ function warnMisplacedCapabilities(module, filePath) {
  * still resolve from the project's own `node_modules`.
  */
 async function importFoundationConfig(filePath) {
-  const href = pathToFileURL(filePath).href
+  // ⭐ IMPORTED BY CONTENT, as `loadMetaFile` imports `meta.js`: Node caches a module
+  // by URL, so a second read in one process returned the FIRST content. That matters
+  // since 2026-09-21, when `register` can write a `name` into this file and `push`
+  // reads the name again after the release, in the same process that read it before.
+  const content = createHash('sha1').update(await readFile(filePath)).digest('hex').slice(0, 16)
+  const href = `${pathToFileURL(filePath).href}?content=${content}`
   try {
     return await import(href)
   } catch (error) {
@@ -333,7 +385,7 @@ async function importFoundationConfig(filePath) {
         external: ['react', 'react/*', 'react-dom', 'react-dom/*'],
         logLevel: 'silent',
       })
-      return await import(pathToFileURL(outfile).href)
+      return await import(`${pathToFileURL(outfile).href}?content=${content}`)
     } finally {
       await rm(outfile, { force: true }).catch(() => {})
     }
@@ -932,13 +984,18 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
   const supports = composeSupports(identity.supports, derived)
   reportSupports(srcDir, identity.supports, derived, supports.supports)
 
+  // The foundation's name, by the one rule every reader shares (`foundation-name.js`):
+  // `main.js`'s `name`, else `package.json`'s. ⚠️ Until 2026-09-21 the `main.js` value
+  // was described here as "editor-facing identity", as if a display name — but it is
+  // the name that registers, and the only name the framework sends.
+  const { name } = foundationNameOf({ config: foundationConfig, pkg: identity })
+
   return {
     _self: {
       ...configWithoutExtension,
       ...identity,
       ...supports,
-      // foundation.js overrides package.json for editor-facing identity
-      ...(foundationConfig.name && { name: foundationConfig.name }),
+      ...(name && { name }),
       ...(foundationConfig.description && { description: foundationConfig.description }),
       ...(foundationConfig.defaultLayout && { defaultLayout: foundationConfig.defaultLayout }),
       ...(isExtension && { role: 'extension' }),

@@ -26,6 +26,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { toDataSchemaDeclaration } from './data-schema.js'
+import { checkFoundationName } from '../foundation-name.js'
 
 const FOUNDATION_SCHEMA = '@uniweb/foundation-schema'
 const DATA_SCHEMA = '@uniweb/data-schema'
@@ -148,8 +149,14 @@ function wrapEntities(entities, exporter, exportedAt) {
 // optional `digest` (sha256:…) is the foundation's content fingerprint; the
 // backend stores it opaque and returns it on the foundation-latest read.
 function buildInfo(self, org, digest, runtime) {
-  // Scope a bare foundation name (`src` -> `@acme/src`); leave an already-scoped name.
+  // Scope a bare foundation name (`marketing` -> `@acme/marketing`); leave an
+  // already-scoped name.
   const name = org && !String(self.name).startsWith('@') ? `@${org}/${self.name}` : self.name
+  // ⛔ The producer's own guard. `uniweb register` asks for a name before it gets
+  // here; this refuses for any other caller, so nothing registers as `@org/src`
+  // (`foundation-name.js`).
+  const problem = checkFoundationName(name)
+  if (problem) throw new Error(`buildRegistryPackage: ${problem}`)
   const info = { name, version: self.version, role: self.role || 'foundation' }
   if (self.description !== undefined) info.description = self.description
   if (digest) info.digest = digest

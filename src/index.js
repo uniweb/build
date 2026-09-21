@@ -11,7 +11,15 @@ export {
   discoverComponents,
   buildSchema,
   getExposedComponents,
+  readFoundationName,
 } from './schema.js'
+
+// A foundation's name — the one rule the build, `register` and `push` share
+export {
+  foundationNameOf,
+  checkFoundationName,
+  FORBIDDEN_FOUNDATION_NAMES,
+} from './foundation-name.js'
 
 // Data-conformance checking (your content vs the schemas your foundation declares)
 export {
