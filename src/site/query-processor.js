@@ -136,7 +136,7 @@ function parseQueryConfig(name, config) {
     // model, so the site's records of a schema are the query's records.
     schema: config.schema || null,
     url: config.url || null,
-    // The folder branch the query reads (`records.yml` placement). ⛔ Not read
+    // The folder branch the query reads (`folder.yml` placement). ⛔ Not read
     // here until 2026-09-11: a named query's `scope` was ignored on this lane.
     scope: typeof config.scope === 'string' ? config.scope : null,
     sort: config.sort || null,
@@ -702,7 +702,7 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
     })
   )
 
-  // ⭐ `path` IS THE FOLDER `records.yml` PLACED THE RECORD IN — `''` at the top —
+  // ⭐ `path` IS THE FOLDER `folder.yml` PLACED THE RECORD IN — `''` at the top —
   // and it is the whole reason folders exist: `scope: archive` is how a query asks
   // for a slice. Structure is query scope, not navigation.
   //
@@ -820,18 +820,19 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   }
 
   // ⭐ EVERY FILE IN `records/` IS A RECORD (ruled 2026-09-21 [Diego]), so every one
-  // is compiled; `records.yml` only says which folder each sits in (`path`), which
-  // is what a query's `scope` reads. ⛔ Until 2026-09-21 `records.yml` listed the
-  // records, and an unlisted file was left out of `/data/<name>.json` here.
+  // is compiled; `records/folder.yml` only says which folder each sits in (`path`),
+  // which is what a query's `scope` reads. ⛔ Until 2026-09-21 `records.yml`, at the
+  // site root, listed the records, and an unlisted file was left out of
+  // `/data/<name>.json` here.
   //
   // ⛔ A MALFORMED FILE STILL STOPS THE BUILD. It read as absent here until
   // 2026-09-14 while the sync lane refused the same file (`uwx/records.js`); what an
   // author meant to organize cannot be guessed.
-  const recordsCfg = await readRecordsConfig(siteDir)
+  const recordsCfg = await readRecordsConfig(siteDir, { dir: pool.dir })
   if (recordsCfg.error) {
     throw new Error(
       `[uniweb] ${recordsCfg.error}\n` +
-        `  records.yml says which folder each record sits in, and a query's \`scope:\` reads that — fix it to build.`
+        `  ${recordsCfg.file} says which folder each record sits in, and a query's \`scope:\` reads that — fix it to build.`
     )
   }
   const folder = resolveFolder(recordsCfg.entries, pool.entities, { dir: pool.dir })

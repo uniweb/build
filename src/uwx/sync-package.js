@@ -291,9 +291,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     recordEntities: col.entities,
     ...(sourceLocale ? { sourceLocale } : {}),
     // ⭐ Every record in the directory, at the top of the folder or in the
-    // sub-folder `records.yml` places it in — and NOTHING when there is no folder to
+    // sub-folder `folder.yml` places it in — and NOTHING when there is no folder to
     // state. ⛔ Gated here as well as by `declared`, because the builder sends any
-    // non-empty tree: a `records.yml` whose folders hold only records that resolved
+    // non-empty tree: a `folder.yml` whose folders hold only records that resolved
     // no schema is a tree of empty branches, and sending it would replace the
     // backend's folder with them (measured on the `dynamic` template, 2026-09-21).
     folderNodes: col.sendFolder === true ? (col.folder?.nodes ?? []) : [],

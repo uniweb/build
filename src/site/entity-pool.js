@@ -4,9 +4,17 @@
 // [Diego]). The directory is the file side of the site's records folder: the
 // backend's folder holds references to entities, and putting a ref in it is what
 // makes one a record — putting a file in this directory is the same act. Nothing
-// else is needed, and nothing lists it. (`records.yml` only organizes records into
-// sub-folders; see `records-config.js`.) A file whose name starts with `_` or `.`
+// else is needed, and nothing lists it. A file whose name starts with `_` or `.`
 // is not read, so it is not a record.
+//
+// ⭐ ONE FILE AT THE TOP IS NOT A RECORD: `folder.yml`, the folder's organization —
+// which records sit in which sub-folder (`records-config.js`). The top of the
+// directory is the one place no record can be (a file there names no model), so the
+// name collides with nothing. It lives here because the directory IS the site's
+// folder on the file side: its organization moves with `paths.records` and travels
+// with a records directory that sites share, as a pages directory's own
+// `folder.yml` does. ⛔ It was `records.yml` at the site root until 2026-09-21
+// [Diego]; that file is refused by name (`refuseRetiredLayout`).
 //
 // ⛔ A RECORD IS NOT "PUBLISHED" BY BEING HERE. `push` sends the site's records to a
 // backend, and they are served once the SITE is published — publishing the site
@@ -15,7 +23,7 @@
 // ⛔ THE PATH DECLARES THE MODEL, AND NOTHING ELSE. `collections/<name>/` used to
 // mean three things at once — these files are entities, their schema is
 // `@/<name>`, and they are grouped as `<name>` for placement. A schema folder here
-// declares only the model; grouping is `records.yml`'s.
+// declares only the model; grouping is `folder.yml`'s.
 //
 // ⇒ So nothing here reads a query or a folder. A site's records are a fact about
 // the filesystem — plus `site.yml::paths.records`, which says where they live.
@@ -32,13 +40,13 @@
 // ⛔ BARE, NOT `records/@std/`. Measured: `@` is a reserved indicator in YAML
 // 1.2, so a bare `@std/person/*.md` scalar throws in js-yaml — and the message is
 // `bad indentation of a sequence entry`, which names neither the cause nor the
-// fix. The `@` form would force quotes on every pattern in `records.yml` that
+// fix. The `@` form would force quotes on every pattern in `folder.yml` that
 // names a scoped schema.
 //
 // ⛔ AND NO NESTING BELOW THE SCHEMA DIR, which is what makes the depth rule
 // total: it is the FILE's depth that decides, so one path answers the question
 // with nothing to classify and no ambiguous case to resolve. Organization is a
-// `folder:` in `records.yml`, never a directory.
+// `folder:` in `folder.yml`, never a directory.
 //
 // ⛔ THE DIRECTORY WAS `entities/` UNTIL 2026-09-21, and `site.yml::paths.entities`
 // the key that moved it. Both are refused by name rather than read (no alias —
@@ -56,6 +64,15 @@ export const RECORDS_DIR = 'records'
 
 /** The directory's name until 2026-09-21. Read only to refuse it. */
 const RETIRED_DIR = 'entities'
+
+/**
+ * The folder's organization, at the top of the records directory — the one file
+ * there that is not a record. See the header, and `records-config.js`.
+ */
+export const FOLDER_YML = 'folder.yml'
+
+/** Where the folder's organization lived until 2026-09-21: the site root. Read only to refuse it. */
+const RETIRED_FOLDER_FILE = 'records.yml'
 
 function isDirectory(path) {
   try {
@@ -92,8 +109,36 @@ export function refuseRetiredRecordsDir(siteRoot, rel) {
   throw new Error(
     `[uniweb] ${RETIRED_DIR}/ is not read — a site's records live in \`${rel}/\` now. ` +
       `Rename the directory (\`git mv ${RETIRED_DIR} ${rel}\`) and every file in it is a record, ` +
-      `as before; records.yml no longer lists them.`
+      `as before; nothing lists them any more.`
   )
+}
+
+/**
+ * Refuse the retired `records.yml` at the site root: the folder's organization is
+ * `folder.yml` inside the records directory now.
+ *
+ * ⛔ SAME REASON AS THE DIRECTORY ABOVE. Left in place it would be read by nothing,
+ * every record would sit at the top of the folder, and the next push would send
+ * that — replacing the backend folder's sub-folders — with nothing to say why. Its
+ * contents move unchanged: the paths in it were always relative to the records
+ * directory.
+ */
+export function refuseRetiredFolderFile(siteRoot, rel) {
+  const retired = resolve(siteRoot, RETIRED_FOLDER_FILE)
+  // A records directory at the site root itself would make that path a record's.
+  if (resolve(siteRoot, rel) === resolve(siteRoot)) return
+  if (!existsSync(retired)) return
+  throw new Error(
+    `[uniweb] ${RETIRED_FOLDER_FILE} is not read — the records folder's organization is ` +
+      `\`${rel}/${FOLDER_YML}\` now, inside the directory it organizes. Move it ` +
+      `(\`git mv ${RETIRED_FOLDER_FILE} ${rel}/${FOLDER_YML}\`); its contents are unchanged.`
+  )
+}
+
+/** Both retired layouts, refused wherever the records directory is resolved. */
+function refuseRetiredLayout(siteRoot, rel) {
+  refuseRetiredRecordsDir(siteRoot, rel)
+  refuseRetiredFolderFile(siteRoot, rel)
 }
 
 /**
@@ -120,7 +165,7 @@ export function resolveRecordsDir(siteRoot, paths) {
     )
   }
   const rel = typeof p.records === 'string' && p.records.trim() ? p.records.trim().replace(/\/+$/, '') : RECORDS_DIR
-  refuseRetiredRecordsDir(siteRoot, rel)
+  refuseRetiredLayout(siteRoot, rel)
   return { rel, abs: resolve(siteRoot, rel) }
 }
 
@@ -211,7 +256,7 @@ export async function readEntityPool(siteRoot, opts = {}) {
   let rel
   if (opts.dir) {
     rel = String(opts.dir).replace(/\/+$/, '')
-    refuseRetiredRecordsDir(siteRoot, rel)
+    refuseRetiredLayout(siteRoot, rel)
   } else {
     rel = resolveRecordsDir(siteRoot).rel
   }
@@ -243,7 +288,7 @@ export async function readEntityPool(siteRoot, opts = {}) {
             `${rel}/${[...dirs, e.name].join('/')}/ is nested below a schema folder. ` +
               `\`${rel}/\` declares a model and nothing else — \`${[...dirs].join('/')}\` ` +
               `already names ${read}, so there is no meaning left for a folder inside it. ` +
-              `Organise records in records.yml (a \`folder:\` entry), not on disk.`
+              `Organise records in ${rel}/${FOLDER_YML} (a \`folder:\` entry), not on disk.`
           )
           continue
         }
@@ -251,13 +296,16 @@ export async function readEntityPool(siteRoot, opts = {}) {
         continue
       }
       if (!e.isFile()) continue
+      // The folder's organization, not a record — see the header.
+      if (dirs.length === 0 && e.name === FOLDER_YML) continue
       const ext = extname(e.name).toLowerCase()
       if (!ENTITY_EXTENSIONS.has(ext)) continue
       if (dirs.length === 0) {
         errors.push(
           `${rel}/${e.name} sits directly in \`${rel}/\`, which names no model. ` +
             `Move it under a schema folder — \`${rel}/<name>/\` for \`@/<name>\`, ` +
-            `or \`${rel}/<org>/<name>/\` for \`@<org>/<name>\`.`
+            `or \`${rel}/<org>/<name>/\` for \`@<org>/<name>\`. The one file that belongs ` +
+            `at the top is \`${FOLDER_YML}\`, the folder's organization.`
         )
         continue
       }

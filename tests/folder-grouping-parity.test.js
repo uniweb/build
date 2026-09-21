@@ -1,10 +1,10 @@
-// ⭐ THE DONE-CRITERION FOR THE FOLDER PRODUCER: an authored `records.yml` that
+// ⭐ THE DONE-CRITERION FOR THE FOLDER PRODUCER: an authored `records/folder.yml` that
 // says what the old rule DERIVED must produce the same folder.
 //
 // The old producer grouped record entities by their collection and emitted one
 // branch per collection, records as leaves. That was a shadow of a directory
 // layout — `collections/<name>/` supplied the grouping — and it is exactly what
-// `records.yml` now states instead. So the parity worth pinning is: writing down
+// `folder.yml` now states instead. So the parity worth pinning is: writing down
 // what used to be inferred reproduces it, byte for byte.
 //
 // ⚠️ THE EXPECTED TREE BELOW IS THE OLD PRODUCER'S OUTPUT, held as a literal.
@@ -57,7 +57,7 @@ const build = async () => {
   return { folder, entity: buildFolderEntity({ recordEntities: entities, folderNodes: folder.nodes }) }
 }
 
-describe('records.yml reproduces the grouping the old producer derived', () => {
+describe('folder.yml reproduces the grouping the old producer derived', () => {
   beforeEach(() => {
     w('records/article/hello.md')
     w('records/article/world.md')
@@ -66,7 +66,7 @@ describe('records.yml reproduces the grouping the old producer derived', () => {
 
   it('an authored two-branch folder equals the old default, node for node', async () => {
     w(
-      'records.yml',
+      'records/folder.yml',
       [
         '- folder: articles',
         '  records:',
@@ -88,7 +88,7 @@ describe('records.yml reproduces the grouping the old producer derived', () => {
   // the tree above — one branch per collection, whether or not the author wanted
   // structure. The model's common case is a FLAT set of records with queries doing
   // the organizing, and that shape was previously unreachable. It is the DEFAULT
-  // now: no records.yml at all (every file in `records/` sits at the top).
+  // now: no folder.yml at all (every file in `records/` sits at the top).
   it('a flat folder is the default, and it was not reachable before', async () => {
     const { folder, entity } = await build()
     expect(folder.errors).toEqual([])
@@ -102,11 +102,11 @@ describe('records.yml reproduces the grouping the old producer derived', () => {
   })
 
   // ⛔ CONTROL. Both cases above assert a SHAPE; without this, a producer that
-  // ignored `records.yml` and always emitted one branch per schema would pass the
+  // ignored `folder.yml` and always emitted one branch per schema would pass the
   // first and could be mistaken for correct.
   it('CONTROL — the tree follows the file, not the pool layout', async () => {
     w(
-      'records.yml',
+      'records/folder.yml',
       ['- folder: everything', '  records:', '    - article/*.md', '    - person/*.md', ''].join('\n')
     )
     const { entity } = await build()

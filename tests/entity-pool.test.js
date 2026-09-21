@@ -90,7 +90,7 @@ describe('shape errors — reported, never silent', () => {
     expect(entities).toEqual([])
     expect(errors).toHaveLength(1)
     expect(errors[0]).toContain('@person/2024')
-    expect(errors[0]).toContain('records.yml')
+    expect(errors[0]).toContain('records/folder.yml')
   })
 
   // ⛔ CONTROL. Every assertion above is about something being REFUSED; without

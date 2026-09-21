@@ -87,7 +87,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     const folder = JSON.parse(readZip(pkg.records.buffer).get('entities/folder.json').toString('utf8'))
     expect(folder.$model).toBe('@uniweb/folder')
     expect(folder).not.toHaveProperty('$uuid')
-    // ⭐ FLAT, because there is no `records.yml`: every record sits at the top of
+    // ⭐ FLAT, because there is no `records/folder.yml`: every record sits at the top of
     // the folder. That is the model's common case — the pool is usually flat and
     // QUERIES do the organizing, not the folder. The old producer derived one
     // branch per collection whether the author wanted structure or not.

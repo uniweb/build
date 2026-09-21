@@ -32,7 +32,6 @@ async function compiledSite() {
   w('site.yml', 'name: T\n')
   const queries = { recent: { schema: '@/article', deferred: ['content'] } }
   w('queries.yml', "recent:\n  schema: '@/article'\n  deferred: [content]\n")
-  w('records.yml', '- article/*.md\n')
   // A heading, so the body holds a string the list's auto-excerpt does not
   w('records/article/hello.md', '---\ntitle: Hello there\n---\n\n## A heading\n\nThe body of the article.\n')
   const byQuery = await processQueries(ROOT, queries, undefined, '/')

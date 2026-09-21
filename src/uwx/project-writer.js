@@ -19,7 +19,7 @@ import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-wri
 import { parseFrontmatter } from './entity-source.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
-import { recordsYmlPath } from '../site/records-config.js'
+import { folderYmlPath } from '../site/records-config.js'
 import { DECLARATION_KEYS } from '../site/fetch-shapes.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
@@ -294,23 +294,25 @@ export function writeQueriesConfig(siteRoot, queries) {
 }
 
 /**
- * Write `records.yml` — the site's folder, as a LIST.
+ * Write the records folder's organization — `folder.yml` in the records directory
+ * (`records/`, or wherever `site.yml::paths.records` puts it), as a LIST.
  *
  * ⛔ A FULL WRITE, NOT A MERGE, and that is the one place this differs from every
- * other projected config. `records.yml` IS the folder: concrete refs on both
- * sides, nothing to invert, so a pull is a mirror rather than an update. There is
- * also nothing a shallow merge could mean here — the file is a sequence, and
- * merging two lists either duplicates entries or silently drops them.
+ * other projected config. The file mirrors the folder's sub-folders: concrete refs
+ * on both sides, nothing to invert, so a pull is a mirror rather than an update.
+ * There is also nothing a shallow merge could mean here — the file is a sequence,
+ * and merging two lists either duplicates entries or silently drops them.
  *
- * ⚠️ WHICH IS WHY AN EMPTY LIST IS NOT WRITTEN AS A FILE-WITH-NOTHING BY ACCIDENT.
- * An empty `records.yml` is DESTRUCTIVE on the next push — it says the folder holds
- * nothing. A pull that carried no folder must leave the file alone, so the caller
- * decides, and this only writes what it was actually given.
+ * The caller decides whether there is anything to write: a folder with no
+ * sub-folders is no file at all (`folderToFolderYml` removes it), since missing and
+ * empty mean the same. ⚠️ *Until 2026-09-21 this said an empty file was destructive
+ * on the next push; that stopped being true when the directory, not this file,
+ * became what decides which records the folder holds.*
  *
  * @returns {'updated'|'unchanged'}
  */
 export function writeRecordsConfig(siteRoot, entries) {
-  return writeYamlFile(recordsYmlPath(siteRoot), entries)
+  return writeYamlFile(folderYmlPath(siteRoot).abs, entries)
 }
 
 /**

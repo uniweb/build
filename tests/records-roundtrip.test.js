@@ -43,10 +43,10 @@ const w = (root) => (rel, body) => {
 // A site whose folder has BOTH shapes: a record at the top and a labelled branch.
 // A flat-only fixture would pass for a projector that could not write a branch.
 // ⭐ `hello` needs no line: every record in `records/` sits at the top of the folder
-// unless `records.yml` places it (ruled 2026-09-21).
+// unless `records/folder.yml` places it (ruled 2026-09-21).
 const BACKEND = 'http://backend.test'
 
-const RECORDS_YML = [
+const FOLDER_YML = [
   '- folder: archive',
   '  label: The Archive',
   '  records:',
@@ -60,7 +60,7 @@ const seed = (dir) => {
   write('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
   write('site/records/article/hello.md', '---\n$uuid: U1\ntitle: Hello\n---\n\nBody one.\n')
   write('site/records/article/older.md', '---\n$uuid: U2\ntitle: Older\n---\n\nBody two.\n')
-  write('site/records.yml', RECORDS_YML)
+  write('site/records/folder.yml', FOLDER_YML)
   write('fdn/dist/meta/schema.json', SCHEMA_JSON)
   // ⭐ The backend has already minted U1 and U2 — this is a RE-push. The file holds
   // the records' own ids; the map says what this backend calls them (identity, since
@@ -101,7 +101,7 @@ describe('push → pull → push is a fixed point', () => {
     expect(first.folder.document.contents[1].name).toBe('hello')
     expect(first.col.entities.map((e) => e.id)).toEqual(['article/hello', 'article/older'])
 
-    // Project into a FRESH site — no records/, no records.yml — the way a clone does.
+    // Project into a FRESH site — no records/, no folder.yml — the way a clone does.
     const dest = join(ROOT, 'dest')
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
@@ -118,7 +118,7 @@ describe('push → pull → push is a fixed point', () => {
     expect(report.records).toBe('updated')
 
     // ⭐ The pull wrote the NEW files, in the new layout.
-    expect(existsSync(join(dest, 'records.yml'))).toBe(true)
+    expect(existsSync(join(dest, 'records', 'folder.yml'))).toBe(true)
     // ⭐ `records/article/`, not `records/acme/article/`. The producer resolves
     // `@/article` to `@acme/article` before it ships; the pull undoes that against
     // the site's own `$org`, or the next build reads a different schema.
@@ -132,7 +132,7 @@ describe('push → pull → push is a fixed point', () => {
     )
   })
 
-  it('the projected records.yml is the folder\'s ORGANIZATION, in the shape an author writes', async () => {
+  it('the projected folder.yml is the folder\'s ORGANIZATION, in the shape an author writes', async () => {
     const src = seed(ROOT)
     const { col, folder } = await produce(src)
     const dest = join(ROOT, 'dest')
@@ -148,18 +148,18 @@ describe('push → pull → push is a fixed point', () => {
     })
 
     // Only the sub-folder: the record at the top needs no line.
-    expect(yaml.load(readFileSync(join(dest, 'records.yml'), 'utf8'))).toEqual([
+    expect(yaml.load(readFileSync(join(dest, 'records', 'folder.yml'), 'utf8'))).toEqual([
       { folder: 'archive', label: 'The Archive', records: ['article/older.md'] },
     ])
   })
 
-  // ⭐ records.yml CARRIES ONLY SUB-FOLDERS NOW, and no state of it removes a record,
+  // ⭐ folder.yml CARRIES ONLY SUB-FOLDERS NOW, and no state of it removes a record,
   // so a pull mirrors the backend's organization — including having none.
-  it('a pull that carried no folder leaves records.yml untouched', async () => {
+  it('a pull that carried no folder leaves folder.yml untouched', async () => {
     const dest = join(ROOT, 'dest')
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\n')
-    writeDest('dest/records.yml', '- folder: kept\n  records:\n    - article/kept.md\n')
+    writeDest('dest/records/folder.yml', '- folder: kept\n  records:\n    - article/kept.md\n')
     const report = recordsToProject({
       folderDoc: null,
       recordDocs: [],
@@ -167,17 +167,17 @@ describe('push → pull → push is a fixed point', () => {
       opts: { resolveDeclaration, backend: BACKEND },
     })
     expect(report.records).toBe('skipped')
-    expect(readFileSync(join(dest, 'records.yml'), 'utf8')).toBe('- folder: kept\n  records:\n    - article/kept.md\n')
+    expect(readFileSync(join(dest, 'records', 'folder.yml'), 'utf8')).toBe('- folder: kept\n  records:\n    - article/kept.md\n')
   })
 
-  it('a folder with no sub-folders REMOVES a local records.yml — it could only describe ones the backend no longer has', async () => {
+  it('a folder with no sub-folders REMOVES a local folder.yml — it could only describe ones the backend no longer has', async () => {
     const src = seed(ROOT)
     const flat = await produce(src)
     const dest = join(ROOT, 'dest')
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
     writeDest('dest/sync.json', { version: 1, backends: { [BACKEND]: { site: { org: 'acme' } } } })
-    writeDest('dest/records.yml', '- folder: stale\n  records:\n    - article/hello.md\n')
+    writeDest('dest/records/folder.yml', '- folder: stale\n  records:\n    - article/hello.md\n')
     const report = recordsToProject({
       // the backend's folder, flattened: both records at the top
       folderDoc: { contents: flat.folder.document.contents.flatMap((n) => (n.kind === 'branch' ? n.$children : [n])) },
@@ -186,13 +186,13 @@ describe('push → pull → push is a fixed point', () => {
       opts: { resolveDeclaration, backend: BACKEND },
     })
     expect(report.records).toBe('removed')
-    expect(existsSync(join(dest, 'records.yml'))).toBe(false)
+    expect(existsSync(join(dest, 'records', 'folder.yml'))).toBe(false)
     // CONTROL — the records themselves landed; only the organization went.
     expect(existsSync(join(dest, 'records', 'article', 'hello.md'))).toBe(true)
     expect(existsSync(join(dest, 'records', 'article', 'older.md'))).toBe(true)
   })
 
-  it('CONTROL — with no local records.yml, a flat folder writes none', async () => {
+  it('CONTROL — with no local folder.yml, a flat folder writes none', async () => {
     const dest = join(ROOT, 'dest')
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\n')
@@ -203,7 +203,7 @@ describe('push → pull → push is a fixed point', () => {
       opts: { resolveDeclaration, backend: BACKEND },
     })
     expect(report.records).toBe('unchanged')
-    expect(existsSync(join(dest, 'records.yml'))).toBe(false)
+    expect(existsSync(join(dest, 'records', 'folder.yml'))).toBe(false)
   })
 
   it('a placed record that did not land is reported, and the file is left alone', async () => {
@@ -211,7 +211,7 @@ describe('push → pull → push is a fixed point', () => {
     const writeDest = w(ROOT)
     writeDest('dest/site.yml', 'name: T\n')
     const kept = '- folder: archive\n  records:\n    - article/kept.md\n'
-    writeDest('dest/records.yml', kept)
+    writeDest('dest/records/folder.yml', kept)
     const report = recordsToProject({
       folderDoc: {
         contents: [
@@ -229,7 +229,7 @@ describe('push → pull → push is a fixed point', () => {
     expect(report.records).toBe('skipped')
     expect(report.warnings.some((x) => x.includes('not written locally'))).toBe(true)
     // ⚠️ Writing the file without it would move the record to the top of the folder.
-    expect(readFileSync(join(dest, 'records.yml'), 'utf8')).toBe(kept)
+    expect(readFileSync(join(dest, 'records', 'folder.yml'), 'utf8')).toBe(kept)
   })
 
   it('a record at the top that did not land is reported too — the next push would drop it', async () => {

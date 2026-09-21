@@ -11,7 +11,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
-import { folderToRecordsYml } from '../src/uwx/records-project.js'
+import { folderToFolderYml } from '../src/uwx/records-project.js'
 
 const rec = (dir, slug, uuid = null) => ({ id: `${dir}/${slug}`, slug, uuid, model: '@acme/x' })
 
@@ -54,7 +54,7 @@ describe('the pull reader reads { name, label }', () => {
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-  it('writes records.yml from `name`, and unwraps a localized `label` to the source-locale string', () => {
+  it('writes folder.yml from `name`, and unwraps a localized `label` to the source-locale string', () => {
     const folderDoc = {
       contents: [
         { kind: 'branch', name: 'blog', label: { fr: 'Le blog', en: 'Blog' }, $children: [
@@ -63,9 +63,9 @@ describe('the pull reader reads { name, label }', () => {
       ],
     }
     const poolPathByUuid = new Map([['U1', 'article/hello.md']])
-    const report = folderToRecordsYml({ folderDoc, siteRoot: root, poolPathByUuid, sourceLocale: 'fr' })
+    const report = folderToFolderYml({ folderDoc, siteRoot: root, poolPathByUuid, sourceLocale: 'fr' })
     expect(report.warnings).toEqual([])
-    const yml = readFileSync(join(root, 'records.yml'), 'utf8')
+    const yml = readFileSync(join(root, 'records', 'folder.yml'), 'utf8')
     expect(yml).toContain('folder: blog')
     expect(yml).toContain('label: Le blog')
     expect(yml).not.toContain('path_segment')
@@ -75,7 +75,7 @@ describe('the pull reader reads { name, label }', () => {
     const folderDoc = { contents: [{ kind: 'branch', name: 'blog', label: 'Blog', $children: [
       { kind: 'ref', name: 'hello', entry: { model: '@acme/article', entity: 'U1' } } ] }] }
     const poolPathByUuid = new Map([['U1', 'article/hello.md']])
-    folderToRecordsYml({ folderDoc, siteRoot: root, poolPathByUuid })
-    expect(readFileSync(join(root, 'records.yml'), 'utf8')).toContain('label: Blog')
+    folderToFolderYml({ folderDoc, siteRoot: root, poolPathByUuid })
+    expect(readFileSync(join(root, 'records', 'folder.yml'), 'utf8')).toContain('label: Blog')
   })
 })

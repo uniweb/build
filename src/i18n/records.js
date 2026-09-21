@@ -158,7 +158,7 @@ function isFieldTranslatable(fieldDef) {
  * ⛔ A RECORD'S SYSTEM FIELDS ARE NEVER PROSE — never extracted, never translated, by
  * either path. A `$`-prefixed key at any depth is the system's (`$name`, the handle a
  * parametric page's URL names; `$uuid`), and a record's top-level `slug` and `path`
- * are its handle and its placement in `records.yml`. Until 2026-09-14 they became
+ * are its handle and its placement in `folder.yml`. Until 2026-09-14 they became
  * translation units, and a translation whose source happened to equal one rewrote it,
  * so a record's page stopped matching its URL.
  *

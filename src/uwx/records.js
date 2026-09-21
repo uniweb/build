@@ -48,7 +48,7 @@ import { join, resolve } from 'node:path'
 
 import { resolveQueriesConfig } from './queries-config.js'
 import { readEntityFile } from './entity-source.js'
-import { readRecordsConfig, resolveFolder, RECORDS_YML_RELPATH } from '../site/records-config.js'
+import { readRecordsConfig, resolveFolder } from '../site/records-config.js'
 import {
   readEntityPool,
   groupPoolBySchema,
@@ -532,7 +532,7 @@ function resolveDeclaration(schema, modelName) {
  * PURE assembly (no hashing, no emit), so it composes with other entity sources
  * (e.g. site-content) into one sync package. First sync sends no `$uuid` (the
  * backend mints); re-sync round-trips the back-filled `$uuid`. Throws on an
- * unresolvable EXPLICIT Model, an invalid `records.yml`, or a duplicate
+ * unresolvable EXPLICIT Model, an invalid `records/folder.yml`, or a duplicate
  * ($model, $id) within the submission.
  *
  * @param {string} siteRoot - directory containing site.yml
@@ -556,7 +556,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // ⭐ EVERY FILE IN `records/` IS A RECORD, AND EVERY RECORD IS PUSHED (ruled
   // 2026-09-21 [Diego]). Placing a file in the directory is what makes it one —
   // the file-side counterpart of placing a ref in the backend's folder — so nothing
-  // lists it and nothing leaves it out. `records.yml` only sorts records into
+  // lists it and nothing leaves it out. `records/folder.yml` only sorts records into
   // sub-folders. A file named with a leading `_` is not read, so it is not a record.
   //
   // ⛔ A PUSHED RECORD IS NOT LIVE. It sits in the site's folder on the backend and
@@ -575,11 +575,11 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // one query"), and a record no query read was never pushed. Records are walked
   // once, by the schema their folder declares.
   const pool = await readEntityPool(siteRoot)
-  const recordsCfg = await readRecordsConfig(siteRoot)
+  const recordsCfg = await readRecordsConfig(siteRoot, { dir: pool.dir })
   if (recordsCfg.error) throw new Error(`uwx/records: ${recordsCfg.error}`)
   const folder = resolveFolder(recordsCfg.entries, pool.entities, { dir: pool.dir })
   if (folder.errors.length) {
-    throw new Error(`uwx/records: ${RECORDS_YML_RELPATH} is invalid —\n  ${folder.errors.join('\n  ')}`)
+    throw new Error(`uwx/records: ${recordsCfg.file} is invalid —\n  ${folder.errors.join('\n  ')}`)
   }
   const warnings = [...pool.errors, ...folder.warnings]
 
@@ -682,7 +682,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         (alternative
           ? ` If you meant \`${pool.dir}/${dirs[0]}/\` (${alternative}) organised by ` +
             `\`${dirs[1]}\`, note that a folder inside a schema folder is read as an ` +
-            `org scope. Organise records in records.yml, not on disk.`
+            `org scope. Organise records in records/folder.yml, not on disk.`
           : '')
     )
   }

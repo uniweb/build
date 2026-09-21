@@ -30,8 +30,8 @@
 // carry.
 //
 // ⭐ WHAT IS IN THE FOLDER IS THE RECORDS DIRECTORY; HOW IT IS ORGANIZED IS
-// `records.yml` (ruled 2026-09-21 [Diego]). Every file in `records/` is a record and
-// sits at the top of the folder unless `records.yml` places it in a sub-folder. The
+// `records/folder.yml` (ruled 2026-09-21 [Diego]). Every file in `records/` is a
+// record and sits at the top of the folder unless `folder.yml` places it in a sub-folder. The
 // organization used to be DERIVED — one branch per collection, mirroring the
 // `collections/` subfolders — and the difference is the point: a sub-folder is a
 // thing the author states, never a shadow of the schema folders, which declare a
@@ -209,7 +209,7 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  * @param {object} params
  * @param {object[]} params.recordEntities - the record entities (full set, BEFORE
  *        send-only-changed filtering), each `{ id, uuid, slug, model }`
- * @param {Array} params.folderNodes - the placed records: `records.yml`'s sub-folders,
+ * @param {Array} params.folderNodes - the placed records: `folder.yml`'s sub-folders,
  *        then every record at the top
  * @param {boolean} [params.declared] - whether the records DIRECTORY exists. See below.
  * @param {Record<string,string>} [params.itemUuids] - path → `$uuid`, harvested

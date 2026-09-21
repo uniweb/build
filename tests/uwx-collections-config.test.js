@@ -69,10 +69,10 @@ describe('resolveQueriesConfig', () => {
     expect(a.schema).toBe('@acme/article') // site.yml key survived (not overridden)
   })
 
-  // ⛔ `sync:` and `folders:` were `collections.yml` keys and are GONE — the model
-  // deletes the first (referencing nothing in `records.yml` is the control) and
-  // moves the second into `records.yml`. A file still carrying them declares two
-  // queries with those names; nothing is silently honoured.
+  // ⛔ `sync:` and `folders:` were `collections.yml` keys and are GONE — the records
+  // directory is the sync control now (every file in it is sent), and folders moved
+  // into `records/folder.yml`. A file still carrying them declares two queries with
+  // those names; nothing is silently honoured.
   it('a stray `sync:`/`folders:` is just a query name now, never a control', async () => {
     w('site.yml', 'name: X\nfoundation: "@a/b@1"\n')
     w('queries.yml', 'sync: false\nfolders:\n  - segment: blog\narticles:\n  schema: "@/article"\n')

@@ -1,6 +1,6 @@
 // The `01-` filename convention — ONE rule, for pages and for records.
 //
-// ⛔ IT WAS PRIVATE TO THE PAGES LANE, and `records.yml` needs exactly the same
+// ⛔ IT WAS PRIVATE TO THE PAGES LANE, and `records/folder.yml` needs exactly the same
 // rule: a leading `01-` orders a file and is stripped from the name it produces.
 // Two copies would drift, and the drift would be invisible — a section ordering
 // one way and a record another, both plausible, with nothing comparing them.

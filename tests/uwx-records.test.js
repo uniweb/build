@@ -124,7 +124,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(e.id).toBe('products/widget-x') // path-style payload-local handle
     expect(e.slug).toBe('widget-x')
     // ⛔ No `collection` field. The folder used to be DERIVED by grouping entities
-    // on it; it is authored in records.yml now, so nothing groups and nothing reads it.
+    // on it; it is authored in records/folder.yml now, so nothing groups and nothing reads it.
     expect(e).not.toHaveProperty('collection')
     expect(e.uuid).toBeNull() // first sync — backend mints
     expect(e.file).toBe('entities/products/widget-x.json')

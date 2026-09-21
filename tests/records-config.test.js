@@ -1,6 +1,8 @@
-// `records.yml` — how the site's records folder is ORGANIZED. Every file in
+// `records/folder.yml` — how the site's records folder is ORGANIZED. Every file in
 // `records/` is a record already (placing it there is what makes one); this file
-// only sorts records into sub-folders, and a flat site has none.
+// only sorts records into sub-folders, and a flat site has none. It lives IN the
+// records directory — the one file there that is not a record — and was
+// `records.yml` at the site root until 2026-09-21.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,44 +22,92 @@ const w = (rel, body = '---\ntitle: X\n---\n\nB\n') => {
 }
 const pool = async () => (await readEntityPool(ROOT)).entities
 const folder = async (yml) => {
-  if (yml !== null) w('records.yml', yml)
+  if (yml !== null) w('records/folder.yml', yml)
   const cfg = await readRecordsConfig(ROOT)
   return { cfg, ...resolveFolder(cfg.entries, await pool()) }
 }
 beforeEach(() => { ROOT = mkdtempSync(join(tmpdir(), 'records-')) })
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 
-describe('records.yml — missing and empty mean the same: no sub-folders', () => {
+describe('folder.yml — missing and empty mean the same: no sub-folders', () => {
   it('missing is no organization', async () => {
     const cfg = await readRecordsConfig(ROOT)
-    expect(cfg).toEqual({ exists: false, entries: [], error: null })
+    expect(cfg).toEqual({ exists: false, entries: [], error: null, file: 'records/folder.yml' })
   })
 
   it('empty is no organization too — it cannot remove anything', async () => {
     // ⛔ Until 2026-09-21 an empty file was the DESTRUCTIVE state (the folder holds
     // nothing), because this file listed the records. The directory lists them now.
-    w('records.yml', '')
-    expect(await readRecordsConfig(ROOT)).toEqual({ exists: true, entries: [], error: null })
-    w('records.yml', '[]\n')
-    expect(await readRecordsConfig(ROOT)).toEqual({ exists: true, entries: [], error: null })
+    w('records/folder.yml', '')
+    expect(await readRecordsConfig(ROOT)).toEqual({ exists: true, entries: [], error: null, file: 'records/folder.yml' })
+    w('records/folder.yml', '[]\n')
+    expect(await readRecordsConfig(ROOT)).toEqual({ exists: true, entries: [], error: null, file: 'records/folder.yml' })
   })
 
   it('a list is carried as written', async () => {
-    w('records.yml', '- folder: archive\n  records:\n    - person/ada.md\n')
+    w('records/folder.yml', '- folder: archive\n  records:\n    - person/ada.md\n')
     const cfg = await readRecordsConfig(ROOT)
     expect(cfg.error).toBeNull()
     expect(cfg.entries).toEqual([{ folder: 'archive', records: ['person/ada.md'] }])
   })
 
   it('refuses a mapping, and shows the shape it wants', async () => {
-    w('records.yml', 'person:\n  - ada.md\n')
+    w('records/folder.yml', 'person:\n  - ada.md\n')
     const cfg = await readRecordsConfig(ROOT)
     expect(cfg.error).toContain('must be a LIST of folders')
     expect(cfg.error).toContain('- folder: archive')
   })
 })
 
-describe('every record in the directory is placed — no records.yml needed', () => {
+describe('⭐ folder.yml lives IN the records directory — the one file there that is not a record', () => {
+  it('is read from records/, and is not itself read as a record', async () => {
+    w('records/person/ada.md')
+    w('records/folder.yml', '- folder: team\n  records:\n    - person/ada.md\n')
+    const found = await readEntityPool(ROOT)
+    expect(found.entities.map((e) => e.id)).toEqual(['person/ada'])
+    expect(found.errors).toEqual([])
+    const cfg = await readRecordsConfig(ROOT, { dir: found.dir })
+    expect(cfg.file).toBe('records/folder.yml')
+    expect(cfg.entries).toEqual([{ folder: 'team', records: ['person/ada.md'] }])
+  })
+
+  it('CONTROL — any other file at the top of records/ still names no model', async () => {
+    w('records/person/ada.md')
+    w('records/other.yml', 'title: X\n')
+    const found = await readEntityPool(ROOT)
+    expect(found.errors).toHaveLength(1)
+    expect(found.errors[0]).toContain('records/other.yml sits directly in `records/`, which names no model')
+    expect(found.errors[0]).toContain('The one file that belongs at the top is `folder.yml`')
+  })
+
+  it('moves with paths.records — the organization travels with the directory', async () => {
+    w('site.yml', 'name: X\npaths:\n  records: content/records\n')
+    w('content/records/person/ada.md')
+    w('content/records/folder.yml', '- folder: team\n  records:\n    - person/ada.md\n')
+    const cfg = await readRecordsConfig(ROOT)
+    expect(cfg.file).toBe('content/records/folder.yml')
+    expect(cfg.entries).toEqual([{ folder: 'team', records: ['person/ada.md'] }])
+  })
+
+  it('⛔ the retired records.yml at the site root is refused by name, naming the move', async () => {
+    // Left in place it would be read by nothing: every record at the top of the
+    // folder, and a push replacing the backend folder's sub-folders with that.
+    w('records/person/ada.md')
+    w('records.yml', '- folder: team\n  records:\n    - person/ada.md\n')
+    await expect(readEntityPool(ROOT)).rejects.toThrow('git mv records.yml records/folder.yml')
+    await expect(readEntityPool(ROOT, { dir: 'records' })).rejects.toThrow('records.yml is not read')
+    await expect(readRecordsConfig(ROOT)).rejects.toThrow('git mv records.yml records/folder.yml')
+  })
+
+  it('⛔ … and names the moved directory when paths.records is set', async () => {
+    w('site.yml', 'name: X\npaths:\n  records: content/records\n')
+    w('content/records/person/ada.md')
+    w('records.yml', '- folder: team\n')
+    await expect(readEntityPool(ROOT)).rejects.toThrow('git mv records.yml content/records/folder.yml')
+  })
+})
+
+describe('every record in the directory is placed — no folder.yml needed', () => {
   it('a flat site: every record at the top of the folder, with the empty path', async () => {
     w('records/person/ada.md')
     w('records/person/grace.md')
@@ -118,7 +168,7 @@ describe('⛔ a path at the top level is refused — it used to LIST records', (
 
   it('names the directory the site actually uses', async () => {
     w('records/person/ada.md')
-    w('records.yml', '- person/*.md\n')
+    w('records/folder.yml', '- person/*.md\n')
     const cfg = await readRecordsConfig(ROOT)
     const { errors } = resolveFolder(cfg.entries, await pool(), { dir: 'content/records' })
     expect(errors[0]).toContain('Every file in content/records/ is a record already')

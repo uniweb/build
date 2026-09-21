@@ -407,7 +407,7 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
       for (const paramValue of values) {
 
         // Create concrete route: /blog/:slug → /blog/my-post. Under `[...path]` the
-        // record's URL is its placement (the folder `records.yml` put it in, carried
+        // record's URL is its placement (the folder `folder.yml` put it in, carried
         // as `path`) plus its handle — the split rule in reverse. ⛔ A FILE PATH, so
         // decoded: the server decodes the request before looking the file up.
         const capture = catchAll ? joinPathCapture({ dir: item.path, slug: paramValue }) : null

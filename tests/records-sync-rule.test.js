@@ -1,5 +1,5 @@
 // ⭐ WHAT A PUSH SENDS IS THE RECORDS DIRECTORY — every file in `records/` is a
-// record, and every record is pushed (ruled 2026-09-21 [Diego]). `records.yml`
+// record, and every record is pushed (ruled 2026-09-21 [Diego]). `records/folder.yml`
 // only sorts records into sub-folders. ⛔ Until 2026-09-21 it was the other way:
 // what synced was exactly what `records.yml` listed.
 //
@@ -35,7 +35,7 @@ const site = ({ records = true, recordsYml = null, queries = '  articles:\n    s
     w('site/records/article/world.md', '---\ntitle: World\n---\nBody2.\n')
   }
   w('fdn/dist/meta/schema.json', { dataSchemas: { '@/article': ARTICLE, '@/note': NOTE } })
-  if (recordsYml !== null) w('site/records.yml', recordsYml)
+  if (recordsYml !== null) w('site/records/folder.yml', recordsYml)
   return join(ROOT, 'site')
 }
 const folderDoc = (pkg) =>
@@ -65,14 +65,14 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
 
   // ⛔ CONTROL. Without it, an emitter that never produced a records lane would
   // pass the first case, and one that always produced an empty folder the second.
-  it('CONTROL — records in the directory are sent, with no records.yml at all', async () => {
+  it('CONTROL — records in the directory are sent, with no folder.yml at all', async () => {
     const pkg = await emitSyncPackages(site())
     expect(pkg.records).toBeTruthy()
     expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual(['article/hello', 'article/world'])
     expect(sentIds(pkg)).toEqual(['article/hello', 'article/world'])
   })
 
-  it('an empty records.yml removes nothing — it only organizes', async () => {
+  it('an empty folder.yml removes nothing — it only organizes', async () => {
     // ⛔ Until 2026-09-21 an empty records.yml was THE destructive state.
     const pkg = await emitSyncPackages(site({ recordsYml: '' }))
     expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual(['article/hello', 'article/world'])
@@ -89,8 +89,8 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     expect(pkg.warnings.some((x) => x.includes('no data schema resolves') && x.includes('not pushed'))).toBe(true)
   })
 
-  it('⛔ …nor a folder of EMPTY BRANCHES when records.yml organizes those records', async () => {
-    // The tree is not empty — records.yml declares folders — but every record in it
+  it('⛔ …nor a folder of EMPTY BRANCHES when folder.yml organizes those records', async () => {
+    // The tree is not empty — folder.yml declares folders — but every record in it
     // resolved no schema, so each branch is empty. Sending it would replace the
     // backend's folder with empty branches. Measured on the `dynamic` template.
     const root = site({ records: false, queries: '', recordsYml: '- folder: field\n  records:\n    - untyped/a.yml\n' })
@@ -126,7 +126,7 @@ describe('every record is pushed — nothing lists them', () => {
     expect(sentIds(pkg)).toEqual(['article/hello', 'article/world'])
   })
 
-  it('records.yml places a record in a sub-folder; every other record sits at the top', async () => {
+  it('folder.yml places a record in a sub-folder; every other record sits at the top', async () => {
     const pkg = await emitSyncPackages(
       site({ recordsYml: '- folder: archive\n  records:\n    - article/world.md\n' })
     )
@@ -135,7 +135,7 @@ describe('every record is pushed — nothing lists them', () => {
     expect(contents[0].$children.map((c) => c.$ref)).toEqual(['article/world'])
   })
 
-  it('⛔ a records.yml that LISTS records at the top level is refused, naming why', async () => {
+  it('⛔ a folder.yml that LISTS records at the top level is refused, naming why', async () => {
     await expect(emitSyncPackages(site({ recordsYml: '- article/*.md\n' }))).rejects.toThrow(
       /lists records at the top level/
     )

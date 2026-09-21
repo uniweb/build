@@ -11,7 +11,7 @@
 // It reported records below a collection's top level as building and rendering
 // locally while being absent from the synced set — the delivery lane recursed,
 // this one was one level deep. `records/{schema}/` has no nesting to disagree
-// about (`site/entity-pool.js` refuses it), and placement moved to `records.yml`,
+// about (`site/entity-pool.js` refuses it), and placement moved to `records/folder.yml`,
 // so both lanes now read the same flat directory. The warning went with the ambiguity.
 //
 // A collection `.md` is NOT a page-section `.md`: its frontmatter is structured

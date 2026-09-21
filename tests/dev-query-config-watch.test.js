@@ -1,6 +1,6 @@
 /**
  * The dev server regenerates the query files when what DEFINES them changes — `queries.yml`,
- * `records.yml`, or the `queries:` of `site.yml` — not only when a record does.
+ * `records/folder.yml`, or the `queries:` of `site.yml` — not only when a record does.
  *
  * ⛔ Until 2026-09-14 it watched `records/` alone, and it captured the query list once, at
  * startup. Editing `queries.yml` or `records.yml` changed nothing in `public/data/` until the
@@ -30,7 +30,7 @@ const titles = (name) => {
   const file = join(ROOT, 'public/data', `${name}.json`)
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).map((r) => r.title) : null
 }
-// The folder each compiled record sits in, by title — what `records.yml` decides.
+// The folder each compiled record sits in, by title — what `records/folder.yml` decides.
 const paths = (name) => {
   const file = join(ROOT, 'public/data', `${name}.json`)
   return existsSync(file) ? Object.fromEntries(JSON.parse(readFileSync(file, 'utf8')).map((r) => [r.title, r.path])) : null
@@ -72,7 +72,7 @@ describe('what a change at the site root asks the dev server to redo', () => {
   it('names the three files that define the query files, and what else it reads', () => {
     expect(siteRootChange('queries.yml')).toBe('queries')
     expect(siteRootChange('site.yml')).toBe('queries')
-    expect(siteRootChange('records.yml')).toBe('records')
+    expect(siteRootChange('records.yml')).toBe('records') // retired: its rebuild refuses it
     expect(siteRootChange('theme.yml')).toBe('content')
     expect(siteRootChange('head.html')).toBe('content')
     // CONTROL — a file the dev server does not read, an editor's swap file, and no name
@@ -96,20 +96,20 @@ describe('the dev server regenerates the query files', { timeout: 15000 }, () =>
     }, WAIT)
   })
 
-  it('when records.yml changes — and when it is created after the server started', async () => {
-    // `records.yml` decides which folder each record sits in, never whether it is one:
+  it('when records/folder.yml changes — and when it is created after the server started', async () => {
+    // `records/folder.yml` decides which folder each record sits in, never whether it is one:
     // every file in `records/` is compiled, so what moves is each record's `path`.
     w('queries.yml', "recent:\n  schema: '@/article'\n")
     await startDev()
     expect(paths('recent')).toEqual({ A: '', B: '' })
 
-    w('records.yml', '- folder: archive\n  records:\n    - article/a.md\n')
+    w('records/folder.yml', '- folder: archive\n  records:\n    - article/a.md\n')
     await vi.waitFor(() => {
       expect(paths('recent')).toEqual({ A: 'archive', B: '' })
       expect(reloaded()).toBe(true)
     }, WAIT)
 
-    w('records.yml', '- folder: archive\n  records:\n    - article/*.md\n')
+    w('records/folder.yml', '- folder: archive\n  records:\n    - article/*.md\n')
     await vi.waitFor(() => expect(paths('recent')).toEqual({ A: 'archive', B: 'archive' }), WAIT)
   })
 

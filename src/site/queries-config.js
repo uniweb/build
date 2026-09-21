@@ -17,7 +17,7 @@
 //
 // ⛔ THE THREE JOBS `collections/<name>/` USED TO FUSE ARE NOW THREE THINGS.
 // `records/{schema}/` holds the site's records (placing a file there is what makes
-// it one), `records.yml` sorts them into folders, and a query asks for a set. This
+// it one), `records/folder.yml` sorts them into folders, and a query asks for a set. This
 // file resolves the LAST of those only.
 //
 // ⚠️ `collections.yml` and `site.yml::collections` are GONE, with no alias and no
@@ -116,7 +116,7 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
   const ymlPath = join(siteRoot, QUERIES_YML_RELPATH)
   const hasQueriesYml = existsSync(ymlPath)
   // ⛔ A BARE MAP — `queries.yml` has no root key. The file IS the map, the way
-  // `records.yml` IS the list. A `queries:` key inside it would be a name a query
+  // `records/folder.yml` IS the list. A `queries:` key inside it would be a name a query
   // could then collide with.
   const queriesYml = hasQueriesYml ? await readYamlFile(ymlPath) : {}
 

@@ -1,4 +1,4 @@
-// ⛔ `records.yml`'s PLACEMENT REACHES THE DELIVERY LANE — it did not, and both
+// ⛔ `records/folder.yml`'s PLACEMENT REACHES THE DELIVERY LANE — it did not, and both
 // suites were green while it did not.
 //
 // The DELIVERY lane — `/data/<name>.json`, which is what every static host and every
@@ -7,7 +7,7 @@
 // exist only to be queried, so the feature was inert on the lane that serves it.
 //
 // ⭐ AND EVERY RECORD IS DELIVERED (ruled 2026-09-21 [Diego]). Placing a file in
-// `records/` is what makes it a record; `records.yml` only sorts records into
+// `records/` is what makes it a record; `records/folder.yml` only sorts records into
 // folders. ⛔ Until 2026-09-21 `records.yml` listed the records, and a file it did
 // not list was left out of the compiled file here.
 //
@@ -51,10 +51,10 @@ afterEach(() => {
 describe('placement reaches the records a query returns', () => {
   const ARCHIVE = ['- folder: archive', '  records:', '    - publication/2025-b.md', ''].join('\n')
 
-  it('stamps each record with the folder records.yml put it in — the top for the rest', async () => {
+  it('stamps each record with the folder folder.yml put it in — the top for the rest', async () => {
     w('records/publication/2026-a.md', entity('Current'))
     w('records/publication/2025-b.md', entity('Older'))
-    w('records.yml', ARCHIVE)
+    w('records/folder.yml', ARCHIVE)
 
     const { pubs } = await deliver()
     const byslug = Object.fromEntries(pubs.map((r) => [r.slug, r.path]))
@@ -67,7 +67,7 @@ describe('placement reaches the records a query returns', () => {
   it('a folder slice actually selects — the point of folders', async () => {
     w('records/publication/2026-a.md', entity('Current'))
     w('records/publication/2025-b.md', entity('Older'))
-    w('records.yml', ARCHIVE)
+    w('records/folder.yml', ARCHIVE)
 
     const { pubs } = await deliver()
     // a folder branch is `scope:` (ruled 2026-09-11; `where: { path: { under } }` is retired)
@@ -78,7 +78,7 @@ describe('placement reaches the records a query returns', () => {
 
   it('nests to any depth', async () => {
     w('records/publication/deep.md', entity('Deep'))
-    w('records.yml', ['- folder: archive', '  records:', '    - folder: 2023', '      records:', '        - publication/deep.md', ''].join('\n'))
+    w('records/folder.yml', ['- folder: archive', '  records:', '    - folder: 2023', '      records:', '        - publication/deep.md', ''].join('\n'))
 
     const { pubs } = await deliver()
     expect(pubs[0].path).toBe('archive/2023')
@@ -86,8 +86,8 @@ describe('placement reaches the records a query returns', () => {
   })
 })
 
-describe('⭐ every record in the directory is delivered — records.yml only organizes', () => {
-  it('no records.yml delivers every record, at the top', async () => {
+describe('⭐ every record in the directory is delivered — folder.yml only organizes', () => {
+  it('no folder.yml delivers every record, at the top', async () => {
     w('records/publication/a.md', entity('A'))
     w('records/publication/b.md', entity('B'))
 
@@ -96,10 +96,10 @@ describe('⭐ every record in the directory is delivered — records.yml only or
     expect(pubs.every((r) => r.path === '')).toBe(true)
   })
 
-  it('an EMPTY records.yml delivers every record too — it removes nothing', async () => {
+  it('an EMPTY folder.yml delivers every record too — it removes nothing', async () => {
     // ⛔ Until 2026-09-21 it delivered NOTHING: it said the folder held nothing.
     w('records/publication/a.md', entity('A'))
-    w('records.yml', '')
+    w('records/folder.yml', '')
 
     const { pubs } = await deliver()
     expect(pubs.map((r) => r.slug)).toEqual(['a'])
@@ -115,10 +115,10 @@ describe('⭐ every record in the directory is delivered — records.yml only or
     expect(pubs.map((r) => r.slug)).toEqual(['published'])
   })
 
-  it('⛔ a path at the top of records.yml is refused loudly — and every record is still delivered', async () => {
+  it('⛔ a path at the top of folder.yml is refused loudly — and every record is still delivered', async () => {
     w('records/publication/a.md', entity('A'))
     w('records/publication/b.md', entity('B'))
-    w('records.yml', '- publication/a.md\n')
+    w('records/folder.yml', '- publication/a.md\n')
 
     const { pubs } = await deliver()
     expect(pubs.map((r) => r.slug).sort()).toEqual(['a', 'b'])
@@ -128,30 +128,30 @@ describe('⭐ every record in the directory is delivered — records.yml only or
   // ⛔ A MALFORMED records.yml ONCE PUBLISHED EVERYTHING WITH ONE WARNING while the sync
   // lane refused the same file. It stops the build: what it meant to organize cannot be
   // guessed, and a query's `scope:` reads the organization.
-  describe('a malformed records.yml stops the build, as it stops a sync', () => {
+  describe('a malformed folder.yml stops the build, as it stops a sync', () => {
     beforeEach(() => {
       w('records/publication/published.md', entity('Published'))
     })
 
     it('invalid YAML — naming the file and the problem', async () => {
-      w('records.yml', '- folder: a\n  bad: [unclosed\n')
-      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml: .*\n[\s\S]*fix it to build/)
-      await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\.yml/)
+      w('records/folder.yml', '- folder: a\n  bad: [unclosed\n')
+      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\/folder\.yml: .*\n[\s\S]*fix it to build/)
+      await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\/folder\.yml/)
     })
 
     it('a mapping instead of a list', async () => {
-      w('records.yml', 'archive:\n  - publication/published.md\n')
-      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\.yml must be a LIST of folders, not a mapping/)
-      await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\.yml must be a LIST/)
+      w('records/folder.yml', 'archive:\n  - publication/published.md\n')
+      await expect(deliver()).rejects.toThrow(/\[uniweb\] records\/folder\.yml must be a LIST of folders, not a mapping/)
+      await expect(buildRecordEntities(ROOT)).rejects.toThrow(/records\/folder\.yml must be a LIST/)
     })
 
     it('a single value instead of a list, said as such', async () => {
-      w('records.yml', 'publication/published.md\n')
-      await expect(deliver()).rejects.toThrow(/records\.yml must be a LIST of folders, not a single value/)
+      w('records/folder.yml', 'publication/published.md\n')
+      await expect(deliver()).rejects.toThrow(/records\/folder\.yml must be a LIST of folders, not a single value/)
     })
 
     it('CONTROL — the same record placed through a list builds, in its folder', async () => {
-      w('records.yml', '- folder: archive\n  records:\n    - publication/published.md\n')
+      w('records/folder.yml', '- folder: archive\n  records:\n    - publication/published.md\n')
       const { pubs } = await deliver()
       expect(pubs.map((r) => [r.slug, r.path])).toEqual([['published', 'archive']])
     })

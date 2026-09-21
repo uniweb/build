@@ -822,7 +822,7 @@ function resolveDisplayTitle(declaredTitle, segment, sections) {
   return extractH1(sections[0]?.content) || prettifySlug(segment)
 }
 
-// ⭐ The rule now lives in `utils/numeric-prefix.js` — `records.yml` needs the
+// ⭐ The rule now lives in `utils/numeric-prefix.js` — `records/folder.yml` needs the
 // identical one, and a records reader cannot import this module without closing
 // a cycle. Imported at the top; still re-exported below for existing callers.
 

@@ -277,7 +277,7 @@ describe('a named query\'s narrowing at build — only what is fixed for every p
   beforeEach(() => {
     w('records/entry/a.md', '---\ntitle: A\n---\n')
     w('records/entry/b.md', '---\ntitle: B\n---\n')
-    w('records.yml', ['- folder: field', '  records:', '    - entry/a.md', '- folder: lab', '  records:', '    - entry/b.md', ''].join('\n'))
+    w('records/folder.yml', ['- folder: field', '  records:', '    - entry/a.md', '- folder: lab', '  records:', '    - entry/b.md', ''].join('\n'))
   })
   const run = async (queries) => {
     const restore = quiet()

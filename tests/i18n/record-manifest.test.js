@@ -29,7 +29,6 @@ const w = (rel, body) => {
 const site = () => {
   w('site.yml', 'name: T\n')
   w('queries.yml', "recent:\n  schema: '@/article'\neverything:\n  schema: '@/article'\n")
-  w('records.yml', '- article/*.md\n')
   w('records/article/hello.md', '---\ntitle: Hello\n---\n\nBody.\n')
   const item = { slug: 'hello', title: 'Hello there' }
   w('public/data/recent.json', [item])
@@ -64,7 +63,6 @@ describe('the manifest is keyed by the record', () => {
   it('an org-scoped schema keys by its full pool path', async () => {
     w('site.yml', 'name: T\n')
     w('queries.yml', "people:\n  schema: '@std/person'\n")
-    w('records.yml', '- std/person/ada.md\n')
     w('records/std/person/ada.md', '---\nname: Ada Lovelace\n---\n')
     w('public/data/people.json', [{ slug: 'ada', name: 'Ada Lovelace' }])
 
@@ -192,7 +190,7 @@ describe('free-form and hash-based record translation agree on the record, in de
 })
 
 // ⛔ A RECORD'S SYSTEM FIELDS ARE NOT PROSE. A compiled record carries `$name` (the handle
-// a parametric page's URL names) and `path` (its placement in records.yml) beside its
+// a parametric page's URL names) and `path` (its placement in folder.yml) beside its
 // data, and both were extracted as translatable text — and translated, so a Spanish
 // build could rewrite a handle and the record's page stopped matching its URL.
 describe('system fields are never extracted, nor translated', () => {

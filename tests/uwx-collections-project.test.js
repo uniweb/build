@@ -48,7 +48,7 @@ const articleDoc = (uuid, title, body) => ({
 // folder carries no $uuid — the backend owns it, keyed by the site-content uuid — so a
 // second arg some call sites still pass is ignored.)
 // A stored folder document, as the backend would return it — one branch per
-// group, records as leaves. The tree is AUTHORED now (`records.yml`), so the
+// group, records as leaves. The tree is AUTHORED now (`records/folder.yml`), so the
 // helper builds the resolved nodes the producer would have been given.
 const folderFor = (records) =>
   buildFolderEntity({

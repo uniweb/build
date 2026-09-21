@@ -1,8 +1,8 @@
 // Records projection — write a pulled folder and its records back to the site's
-// `records/**` files and `records.yml`. The inverse of the producer (`records.js`
-// + `folder.js`): the producer reads the records directory and emits the
-// `@uniweb/folder` entity + one section-keyed `$`-document per record; this takes
-// those documents back and renders them to files.
+// `records/**` files and the folder's organization, `records/folder.yml`. The
+// inverse of the producer (`records.js` + `folder.js`): the producer reads the
+// records directory and emits the `@uniweb/folder` entity + one section-keyed
+// `$`-document per record; this takes those documents back and renders them to files.
 //
 // Identity & placement:
 //   - a record's slug comes from the FOLDER document — each ref leaf is
@@ -38,7 +38,7 @@ import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
 import { poolDirsForSchema, resolveRecordsDir } from '../site/entity-pool.js'
-import { recordsYmlPath } from '../site/records-config.js'
+import { folderYmlPath } from '../site/records-config.js'
 import { isContentBodyField } from './data-schema.js'
 import { unresolveSelfScope } from './self-scope.js'
 import { unwrapLocalized } from './backfill.js'
@@ -370,18 +370,19 @@ export function declarationsToQueriesYml({ document, siteRoot, org, backend = nu
 }
 
 /**
- * Project a pulled `@uniweb/folder` document back to `records.yml`.
+ * Project a pulled `@uniweb/folder` document back to `folder.yml` in the records
+ * directory (`records/folder.yml`, or under `site.yml::paths.records`).
  *
  * ⭐ THE FOLDER ROUND-TRIPS TRIVIALLY, and that is by design rather than luck:
- * `records.yml` holds concrete paths on both sides, so there is nothing to invert.
+ * `folder.yml` holds concrete paths on both sides, so there is nothing to invert.
  * The old shape put QUERY MACROS in the folder — a virtual `folders:` tree naming
  * collections — and inverting a macro is not possible in general. Taking queries
  * out of the folder is what dissolved that.
  *
  * ⭐ ONLY THE SUB-FOLDERS ARE WRITTEN (ruled 2026-09-21 [Diego]). A record at the
  * top of the folder needs no line — being in the records directory is what puts it
- * there — so `records.yml` carries the branches and the records placed in them, and
- * a folder with no branches is a site with no `records.yml`: a local one is REMOVED
+ * there — so `folder.yml` carries the branches and the records placed in them, and
+ * a folder with no branches is a site with no `folder.yml`: a local one is REMOVED
  * (it could only describe sub-folders the backend's folder no longer has). No state
  * of the file removes a record, so this cannot empty anything.
  *
@@ -395,11 +396,13 @@ export function declarationsToQueriesYml({ document, siteRoot, org, backend = nu
  *        under `records/` of the file just written for it. Supplied by
  *        `recordsToProject`, which is the only thing that knows the extension
  *        each record landed with.
- * @returns {{ status: 'updated'|'unchanged'|'removed'|'skipped', entries: Array, warnings: string[] }}
+ * @returns {{ status: 'updated'|'unchanged'|'removed'|'skipped', entries: Array, warnings: string[], file: string }}
+ *   `file` is where the organization lives, as the author would write it
  */
-export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale = 'en' }) {
+export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale = 'en' }) {
   const warnings = []
-  if (!folderDoc) return { status: 'skipped', entries: [], warnings }
+  const { abs, rel: file } = folderYmlPath(siteRoot)
+  if (!folderDoc) return { status: 'skipped', entries: [], warnings, file }
   let unplaceable = false
 
   const walk = (nodes, inBranch) => {
@@ -410,7 +413,7 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, source
         const entry = { folder: node.name }
         // Only a BRANCH takes a label. A record carries its own title; the folder
         // does not caption its rows. On the wire the label is a localized map;
-        // records.yml carries the source-locale string (a bare string passes).
+        // folder.yml carries the source-locale string (a bare string passes).
         if (node.label !== undefined) entry.label = unwrapLocalized(node.label, sourceLocale)
         entry.records = walk(node.$children, true)
         out.push(entry)
@@ -435,7 +438,7 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, source
         // means the folder and the directory disagree, and writing the file without
         // it would move that record to the top of the folder on the next push.
         warnings.push(
-          `records.yml: the folder places a record ("${node.name ?? '?'}") that was not ` +
+          `${file}: the folder places a record ("${node.name ?? '?'}") that was not ` +
             `written locally — the file was left unchanged rather than dropping it.`
         )
         unplaceable = true
@@ -447,14 +450,13 @@ export function folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, source
   }
 
   const entries = walk(folderDoc.contents, false)
-  if (unplaceable) return { status: 'skipped', entries: [], warnings }
+  if (unplaceable) return { status: 'skipped', entries: [], warnings, file }
   if (entries.length === 0) {
-    const file = recordsYmlPath(siteRoot)
-    if (!existsSync(file)) return { status: 'unchanged', entries, warnings }
-    unlinkSync(file)
-    return { status: 'removed', entries, warnings }
+    if (!existsSync(abs)) return { status: 'unchanged', entries, warnings, file }
+    unlinkSync(abs)
+    return { status: 'removed', entries, warnings, file }
   }
-  return { status: writeRecordsConfig(siteRoot, entries), entries, warnings }
+  return { status: writeRecordsConfig(siteRoot, entries), entries, warnings, file }
 }
 
 /**
@@ -506,7 +508,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // own id → their uuid, for every record this pull wrote. Recorded at the end.
   const learned = {}
   // uuid → the path under `records/` the record landed at. Only this loop knows
-  // the extension each one got, so `records.yml` is written from it rather than
+  // the extension each one got, so `folder.yml` is written from it rather than
   // re-derived (a second rule could pick a different extension and the folder
   // would name a file that is not there).
   const poolPathByUuid = new Map()
@@ -571,20 +573,20 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     else if (isNew) placed.push(filePath)
     else updated.push(filePath)
     // Keyed by THEIR uuid: the folder document references records in the backend's
-    // terms, so that is what `folderToRecordsYml` will look them up by.
+    // terms, so that is what `folderToFolderYml` will look them up by.
     if (theirs) {
       poolPathByUuid.set(theirs, relative(recordsRoot, filePath).split(sep).join('/'))
       if (own) learned[own] = theirs
     }
   }
 
-  // ⭐ THE FOLDER ITSELF, written back as `records.yml`. Steps that only touched the
+  // ⭐ THE FOLDER ITSELF, written back as `folder.yml`. Steps that only touched the
   // READ path would leave every pull authoring the old shape — the site would build
   // from the new layout and be projected back into the one it replaced.
   //
   // The folder ENTITY still carries no `$uuid` we persist: the backend owns the
   // site's folder, keyed by the site-content uuid.
-  const records = folderToRecordsYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
+  const records = folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
   warnings.push(...records.warnings)
 
   // Flush localized record-field translations to locales/records/{locale}.json,
@@ -596,5 +598,5 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     updateBackendMap(siteRoot, opts.backend, 'records', learned)
   }
 
-  return { updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status }
+  return { updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status, recordsFile: records.file }
 }

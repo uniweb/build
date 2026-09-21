@@ -7,11 +7,12 @@ import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 // The folder carries NO `$uuid` of its own — the backend owns the site's folder,
 // keyed by the site-content uuid, so the framework never holds a folder uuid.
 //
-// ⭐ THE TREE IS AUTHORED, in `records.yml`, and `folderNodes` is what its resolver
-// produced. It used to be DERIVED — one branch per collection — so these tests used
-// to pass record entities alone and get a shape back. There is no default now: a
-// site with no `records.yml` has no folder, which is the model's `missing ⇒ inert`
-// ruling rather than an empty one.
+// ⭐ THE TREE IS AUTHORED, in `records/folder.yml`, and `folderNodes` is what its
+// resolver produced. It used to be DERIVED — one branch per collection — so these
+// tests used to pass record entities alone and get a shape back. There is no default
+// tree now: with no `folder.yml` every record sits at the top of the folder, and a
+// site with no records DIRECTORY sends no folder at all — the model's
+// `missing ⇒ inert` ruling rather than an empty one.
 
 // Minimal record-entity descriptors (the shape buildRecordEntities emits).
 // `id` is the entity's POOL id — `<schema dirs>/<slug>` — which is what a folder
@@ -20,7 +21,7 @@ function rec(dir, slug, uuid = null) {
   return { id: `${dir}/${slug}`, slug, uuid, model: '@acme/x' }
 }
 
-// A resolved `records.yml` branch holding the given entities as leaves.
+// A resolved `folder.yml` branch holding the given entities as leaves.
 const branch = (segment, ids, label) => ({
   kind: 'branch',
   name: segment,

@@ -26,7 +26,7 @@ describe('Collection Processor', () => {
   // ⛔ THE 'NESTED RECORDS' BLOCK WAS DELETED, NOT MIGRATED. It exercised
   // recursion into subdirectories of a collection — a capability
   // `records/{schema}/` deliberately does not have, because that path declares
-  // a model and nothing else. Placement moved to `records.yml`, and the pool
+  // a model and nothing else. Placement moved to `records/folder.yml`, and the pool
   // reader refuses nesting outright (`entity-pool.test.js`).
   //
   // ⭐ Deleting it CLOSED a divergence rather than losing coverage: the sync lane

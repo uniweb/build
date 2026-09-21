@@ -132,8 +132,10 @@ export function shouldPrefetchInDev(cfg) {
  *   - `'queries'` — re-collect the site, re-materialize every query file from the
  *     query list just collected, reload. `queries.yml` declares queries, and so does
  *     `site.yml` (`queries:`), beside the rest of the site's configuration.
- *   - `'records'` — re-materialize the query files, reload: `records.yml` decides
- *     which folder each record sits in, which a query's `scope:` reads.
+ *   - `'records'` — re-materialize the query files, reload. Only the retired
+ *     `records.yml` maps here now, so that the rebuild REPORTS it: the folder's
+ *     organization is `records/folder.yml` since 2026-09-21, and an edit to it is
+ *     seen by the records directory's own recursive watch.
  *   - `'content'` — re-collect the site, reload.
  *
  * ⛔ Until 2026-09-14 nothing watched `records.yml` or `queries.yml`, a `site.yml`
@@ -148,7 +150,7 @@ export function siteRootChange(filename) {
     case 'site.yml':
     case 'queries.yml':
       return 'queries'
-    case 'records.yml':
+    case 'records.yml': // retired — watched so the rebuild refuses it
       return 'records'
     case 'theme.yml':
     case 'head.html':
@@ -1096,10 +1098,10 @@ export function siteContentPlugin(options = {}) {
           }
         }
 
-        // Watch the site root — `site.yml`, `queries.yml`, `records.yml`, `theme.yml`,
-        // `head.html` — as ONE directory rather than a watch per file: a file watch
-        // cannot be set on a file created after the server started (a first
-        // `records.yml`), and an editor that saves by replacing a file ends its watch.
+        // Watch the site root — `site.yml`, `queries.yml`, `theme.yml`, `head.html`,
+        // and the retired `records.yml` — as ONE directory rather than a watch per
+        // file: a file watch cannot be set on a file created after the server started
+        // (a first `queries.yml`), and an editor that saves by replacing a file ends its watch.
         // Not recursive, so what the build writes below the root (`public/data/`) is
         // not seen here. What each change redoes is `siteRootChange`.
         try {

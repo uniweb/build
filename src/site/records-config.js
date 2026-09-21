@@ -1,9 +1,17 @@
-// `records.yml` — how the site's records folder is ORGANIZED. Optional.
+// `records/folder.yml` — how the site's records folder is ORGANIZED. Optional.
 //
 // ⭐ IT DOES NOT SAY WHAT IS IN THE FOLDER (ruled 2026-09-21 [Diego]). Every file in
 // `records/` is a record — placing it there is what makes one (`entity-pool.js`).
 // This file only sorts records into sub-folders, so a site whose records are one
-// flat set has no `records.yml` at all, which is the common case.
+// flat set has no `folder.yml` at all, which is the common case.
+//
+// ⭐ IT LIVES IN THE DIRECTORY IT ORGANIZES (ruled 2026-09-21 [Diego]) — the one file
+// at the top of `records/` that is not a record. The directory is the site's folder
+// on the file side, and this is that folder's organization: its paths are relative
+// to the directory, it moves with `paths.records`, and it travels with a records
+// directory that sites share — as a pages directory's own `folder.yml` does.
+// ⛔ It was `records.yml` at the site root until 2026-09-21, and a file there is
+// refused by name (`entity-pool.js::refuseRetiredFolderFile`), not read.
 //
 // ⛔ UNTIL 2026-09-21 THIS FILE WAS THE MEMBERSHIP LIST: a bare string at the top
 // level listed an entity and made it a record, an unlisted one was left out, and
@@ -34,21 +42,30 @@
 
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { resolve } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { compareByNumericPrefix } from '../utils/numeric-prefix.js'
-import { RECORDS_DIR } from './entity-pool.js'
+import { RECORDS_DIR, FOLDER_YML, resolveRecordsDir } from './entity-pool.js'
 
-export const RECORDS_YML_RELPATH = 'records.yml'
+export { FOLDER_YML }
 
-/** Path to the records.yml file (whether or not it exists yet). */
-export function recordsYmlPath(siteRoot) {
-  return join(siteRoot, RECORDS_YML_RELPATH)
+/**
+ * Where the folder's organization lives — `folder.yml` in the records directory
+ * (`site.yml::paths.records`, else `records/`) — whether or not it exists yet.
+ *
+ * @param {string} siteRoot
+ * @param {string} [dir] - the records directory as written, when the caller has it;
+ *   otherwise it is resolved here, which also refuses the retired layouts
+ * @returns {{ abs: string, rel: string }} `rel` for messages (`records/folder.yml`)
+ */
+export function folderYmlPath(siteRoot, dir) {
+  const rel = dir ?? resolveRecordsDir(siteRoot).rel
+  return { abs: resolve(siteRoot, rel, FOLDER_YML), rel: `${rel}/${FOLDER_YML}` }
 }
 
 /**
- * Match one record path against a `records.yml` pattern.
+ * Match one record path against a `folder.yml` pattern.
  *
  * ⛔ `*` DOES NOT CROSS A `/`, which is what a reader expects of a file pattern
  * and is NOT what `@uniweb/core`'s `globMatch` does. That one backs the `like`
@@ -85,7 +102,7 @@ export function slugForEntity(entity) {
 }
 
 /**
- * Read `records.yml` — the folder's organization.
+ * Read `folder.yml` — the folder's organization, in the records directory.
  *
  * ⭐ MISSING AND EMPTY MEAN THE SAME: no sub-folders, every record at the top.
  * ⛔ Until 2026-09-21 they differed — missing left a backend's folder alone, empty
@@ -94,34 +111,40 @@ export function slugForEntity(entity) {
  *
  * ⛔ A MALFORMED FILE IS STILL AN ERROR: what it meant to organize cannot be guessed.
  *
- * @returns {Promise<{ exists: boolean, entries: Array, error: string|null }>}
+ * @param {string} siteRoot
+ * @param {object} [opts]
+ * @param {string} [opts.dir] - the records directory as written (`readEntityPool`'s
+ *   `dir`), when the caller has it; otherwise it is resolved from `site.yml`
+ * @returns {Promise<{ exists: boolean, entries: Array, error: string|null, file: string }>}
+ *   `file` is where it was looked for, as the author would write it
  */
-export async function readRecordsConfig(siteRoot) {
-  const file = join(siteRoot, RECORDS_YML_RELPATH)
-  if (!existsSync(file)) return { exists: false, entries: [], error: null }
+export async function readRecordsConfig(siteRoot, { dir } = {}) {
+  const { abs, rel: file } = folderYmlPath(siteRoot, dir)
+  if (!existsSync(abs)) return { exists: false, entries: [], error: null, file }
 
   let doc
   try {
-    doc = yaml.load(await readFile(file, 'utf8'), YAML_OPTIONS)
+    doc = yaml.load(await readFile(abs, 'utf8'), YAML_OPTIONS)
   } catch (err) {
-    return { exists: true, entries: [], error: `${RECORDS_YML_RELPATH}: ${err.message}` }
+    return { exists: true, entries: [], error: `${file}: ${err.message}`, file }
   }
 
-  if (doc === null || doc === undefined) return { exists: true, entries: [], error: null }
+  if (doc === null || doc === undefined) return { exists: true, entries: [], error: null, file }
   if (!Array.isArray(doc)) {
     return {
       exists: true,
       entries: [],
       error:
-        `${RECORDS_YML_RELPATH} must be a LIST of folders, not ${typeof doc === 'object' ? 'a mapping' : 'a single value'}. ` +
+        `${file} must be a LIST of folders, not ${typeof doc === 'object' ? 'a mapping' : 'a single value'}. ` +
         `For example:\n  - folder: archive\n    records:\n      - publication/2025-*.md`,
+      file,
     }
   }
-  return { exists: true, entries: doc, error: null }
+  return { exists: true, entries: doc, error: null, file }
 }
 
 /**
- * Place the site's records in its folder: the sub-folders `records.yml` declares,
+ * Place the site's records in its folder: the sub-folders `folder.yml` declares,
  * and the top of the folder for every record no sub-folder names.
  *
  * Every rule here is a guard, and each one exists because its failure was
@@ -136,7 +159,7 @@ export async function readRecordsConfig(siteRoot) {
  * evaluates `scope` natively, so widening it is a cross-lane change to agree first,
  * not to infer. Until then the file lane is the floor: one folder.
  *
- * @param {Array} entries - the parsed `records.yml` list
+ * @param {Array} entries - the parsed `folder.yml` list
  * @param {Array} pool - records from `readEntityPool`
  * @param {object} [opts]
  * @param {string} [opts.dir] - the records directory as written, for messages
@@ -146,6 +169,8 @@ export async function readRecordsConfig(siteRoot) {
  *   `{ entity, path, slug }`, `path` being `''` at the top of the folder.
  */
 export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
+  // The file as the author sees it, for every message below.
+  const file = `${dir}/${FOLDER_YML}`
   const errors = []
   const warnings = []
   const placements = new Map()
@@ -165,7 +190,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
     const prior = claimedBy.get(key)
     if (prior) {
       errors.push(
-        `${RECORDS_YML_RELPATH}: "${entity.relPath}" is placed twice — by ${prior} and by ${where}. ` +
+        `${file}: "${entity.relPath}" is placed twice — by ${prior} and by ${where}. ` +
           `A record sits in one folder; a computed subset is a named query, not a second placement.`
       )
       return null
@@ -187,21 +212,21 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       // would claim to choose while choosing nothing: refused, with the reason.
       if (pathSegs.length === 0) {
         errors.push(
-          `${RECORDS_YML_RELPATH}: ${where} ("${pattern}") lists records at the top level. Every file in ` +
-            `${dir}/ is a record already — ${RECORDS_YML_RELPATH} only sorts records into folders. ` +
+          `${file}: ${where} ("${pattern}") lists records at the top level. Every file in ` +
+            `${dir}/ is a record already — ${file} only sorts records into folders. ` +
             `Remove the entry, or put it under a \`folder:\`.`
         )
         return []
       }
       if (!pattern) {
-        errors.push(`${RECORDS_YML_RELPATH}: ${where} is an empty string.`)
+        errors.push(`${file}: ${where} is an empty string.`)
         return []
       }
       if (!isPattern(pattern)) {
         const hit = byRelPath.get(pattern)
         if (!hit) {
           errors.push(
-            `${RECORDS_YML_RELPATH}: ${where} names "${pattern}", which is not in ${dir}/. ` +
+            `${file}: ${where} names "${pattern}", which is not in ${dir}/. ` +
               `A path is relative to ${dir}/, extension included.`
           )
           return []
@@ -217,7 +242,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
         .map(([, e]) => e)
       if (matches.length === 0) {
         errors.push(
-          `${RECORDS_YML_RELPATH}: ${where} pattern "${pattern}" matches no record in ${dir}/. ` +
+          `${file}: ${where} pattern "${pattern}" matches no record in ${dir}/. ` +
             `Check the schema folder name and the extension.`
         )
         return []
@@ -231,7 +256,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
 
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       errors.push(
-        `${RECORDS_YML_RELPATH}: ${where} is neither ${pathSegs.length ? 'a path nor ' : ''}a \`folder:\` entry.`
+        `${file}: ${where} is neither ${pathSegs.length ? 'a path nor ' : ''}a \`folder:\` entry.`
       )
       return []
     }
@@ -246,7 +271,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       const raw = entry.folder
       const segment = raw === null || raw === undefined ? '' : String(raw).trim()
       if (!segment) {
-        errors.push(`${RECORDS_YML_RELPATH}: ${where} declares a folder with no name.`)
+        errors.push(`${file}: ${where} declares a folder with no name.`)
         return []
       }
       // ⭐ A folder's `name` is the segment a query's `scope:` names; `label` is its
@@ -260,7 +285,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       const kids = Array.isArray(entry.records) ? entry.records : []
       if (kids.length === 0) {
         warnings.push(
-          `${RECORDS_YML_RELPATH}: folder "${segment}" (${where}) holds no records. ` +
+          `${file}: folder "${segment}" (${where}) holds no records. ` +
             `A folder exists to be QUERIED — if no query needs the slice, do not make it.`
         )
       }
@@ -277,7 +302,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
     if (entry.url !== undefined || entry.asset !== undefined) {
       const kind = entry.url !== undefined ? 'url' : 'asset'
       errors.push(
-        `${RECORDS_YML_RELPATH}: ${where} declares \`${kind}:\`, which the folder producer ` +
+        `${file}: ${where} declares \`${kind}:\`, which the folder producer ` +
           `does not emit yet. A folder holds urls and assets by design, but nothing would ` +
           `be sent for this entry — so it is refused rather than dropped.`
       )
@@ -285,7 +310,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
     }
 
     errors.push(
-      `${RECORDS_YML_RELPATH}: ${where} has no recognized kind. ` +
+      `${file}: ${where} has no recognized kind. ` +
         (pathSegs.length
           ? `Inside a folder, a path names records; anything else says \`folder:\`.`
           : `An entry is a \`folder:\` — its \`records:\` are paths under ${dir}/.`)
