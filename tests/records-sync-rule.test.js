@@ -11,7 +11,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { emitSyncPackages, readZip, collectFolderItemUuids, stampFolderItemUuids } from '../src/uwx/index.js'
+import { emitSyncPackages, readZip, collectFolderItemUuids, stampFolderItemUuids, entityContentHash } from '../src/uwx/index.js'
 
 const ARTICLE = {
   name: 'article',
@@ -243,15 +243,65 @@ describe('a site with nothing to sync never emits a removing folder', () => {
 })
 
 // ⭐ `draft: true` — a record in the folder that is not delivered. A backend holds that as
-// the entity's `disabled`, which a push cannot send yet; pushed without it the draft would
-// be served once the site is published, and skipped it would leave the folder. Refused.
-describe('a draft record is not pushed as a live one', () => {
-  it('⛔ the push is refused, naming the draft', async () => {
+// the entity's disabled state, and the record entity document carries it as
+// `$disabled: true`. Only `true` travels: an absent key means enabled [Diego, 2026-09-21].
+// ⛔ Until 2026-09-21 a push refused a draft, because the state could not travel.
+const docOf = (pkg, path) =>
+  JSON.parse(readZip(pkg.records.buffer).get(`entities/${path}.json`).toString('utf8'))
+
+describe('a draft record is pushed as a disabled entity', () => {
+  it('⭐ the draft is sent with `$disabled: true`, and placed in the folder', async () => {
     const root = site()
     w('site/records/article/soon.md', '---\ntitle: Soon\ndraft: true\n---\n')
-    await expect(emitSyncPackages(root)).rejects.toThrow(
-      /cannot mark a record as a draft yet[\s\S]*records\/article\/soon\.md[\s\S]*starting their names with `_`/
-    )
+    const pkg = await emitSyncPackages(root)
+    expect(sentIds(pkg)).toContain('article/soon')
+    expect(docOf(pkg, 'article/soon').$disabled).toBe(true)
+    // `draft` is framework's word, never a Model field
+    expect(docOf(pkg, 'article/soon').article).not.toHaveProperty('draft')
+    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toContain('article/soon')
+    expect(pkg.records.index.find((e) => e.id === 'article/soon').draft).toBe(true)
+  })
+
+  // ⛔ CONTROL — a record that is not a draft carries no key at all, not even `false`.
+  it('CONTROL — a record that is not a draft carries no `$disabled`, even with `draft: false`', async () => {
+    const root = site()
+    w('site/records/article/kept.md', '---\ntitle: Kept\ndraft: false\n---\n')
+    const pkg = await emitSyncPackages(root)
+    expect(docOf(pkg, 'article/kept')).not.toHaveProperty('$disabled')
+    expect(docOf(pkg, 'article/hello')).not.toHaveProperty('$disabled')
+    expect(pkg.records.index.find((e) => e.id === 'article/kept').draft).toBe(false)
+    expect(pkg.warnings.some((x) => x.includes('"draft"'))).toBe(false)
+  })
+
+  // ⛔ "Send only changed" hashes a document without its `$`-sigils. `$disabled` is state,
+  // not identity: stripped, a record drafted with nothing else changed would never be sent.
+  it('drafting a record with nothing else changed changes what "send only changed" sees', async () => {
+    const root = site()
+    const before = entityContentHash(docOf(await emitSyncPackages(root), 'article/hello'))
+    w('site/records/article/hello.md', '---\ntitle: Hello\ndraft: true\n---\nBody.\n')
+    const after = entityContentHash(docOf(await emitSyncPackages(root), 'article/hello'))
+    expect(after).not.toBe(before)
+    // CONTROL — un-drafting it returns the hash it had
+    w('site/records/article/hello.md', '---\ntitle: Hello\n---\nBody.\n')
+    expect(entityContentHash(docOf(await emitSyncPackages(root), 'article/hello'))).toBe(before)
+  })
+
+  it('a draft inside a many-record file is disabled alone', async () => {
+    const root = site()
+    w('site/records/article/batch.yml', '- slug: one\n  title: One\n  draft: true\n- slug: two\n  title: Two\n')
+    const pkg = await emitSyncPackages(root)
+    expect(docOf(pkg, 'article/one').$disabled).toBe(true)
+    expect(docOf(pkg, 'article/two')).not.toHaveProperty('$disabled')
+  })
+
+  // ⭐ One reason the push used to REFUSE rather than skip: a site whose records were all
+  // drafts would have produced nothing, sent no folder, and left the backend's live.
+  it('a site whose records are all drafts still sends its folder', async () => {
+    const root = site({ records: false })
+    w('site/records/article/soon.md', '---\ntitle: Soon\ndraft: true\n---\n')
+    const pkg = await emitSyncPackages(root)
+    expect(pkg.records).toBeTruthy()
+    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual(['article/soon'])
   })
 
   it('⛔ `published: false` is refused on a push too, naming `draft: true`', async () => {
@@ -260,13 +310,9 @@ describe('a draft record is not pushed as a live one', () => {
     await expect(emitSyncPackages(root)).rejects.toThrow(/`published: false` is retired/)
   })
 
-  // ⛔ CONTROL — the flag itself is not the problem: a record that says it is NOT a draft
-  // pushes, and `draft` is framework's word, never reported as a field the Model lacks.
-  it('CONTROL — `draft: false` pushes, and is not a field', async () => {
+  it('⛔ a `draft:` that is not true or false is refused, naming the file', async () => {
     const root = site()
-    w('site/records/article/kept.md', '---\ntitle: Kept\ndraft: false\n---\n')
-    const pkg = await emitSyncPackages(root)
-    expect(sentIds(pkg)).toContain('article/kept')
-    expect(pkg.warnings.some((x) => x.includes('"draft"'))).toBe(false)
+    w('site/records/article/odd.md', '---\ntitle: Odd\ndraft: soon\n---\n')
+    await expect(emitSyncPackages(root)).rejects.toThrow(/records\/article\/odd\.md: `draft:` is true or false/)
   })
 })

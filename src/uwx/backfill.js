@@ -228,6 +228,8 @@ function briefHasContentBody(declaration) {
  * entity: the entity `$uuid` + the brief section's fields (localized unwrapped,
  * date/scalars verbatim), with the brief record's own `$uuid` DROPPED (the backend
  * matches a single-section item by singularity) and `$model`/`$id`/`$meta` omitted.
+ * A disabled entity (`$disabled: true`) writes `draft: true`, and an enabled one writes
+ * no `draft:` at all.
  * For markdown, the content body field becomes the body; for YAML/JSON it stays a field.
  *
  * @param {object} params
@@ -283,6 +285,11 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
     }
     record[key] = value
   }
+  // ⭐ A DISABLED ENTITY IS A DRAFT ON THE FILE SIDE. It is kept in the folder and never
+  // publicly delivered, which is exactly what `draft: true` means. An enabled entity
+  // carries no key and writes no `draft:`, so a record re-enabled on the backend
+  // comes back without the line.
+  if (document.$disabled === true) record.draft = true
 
   if (format === 'json') return JSON.stringify(record, null, 2) + '\n'
   if (format === 'md') return `---\n${yaml.dump(record)}---\n${body}`
@@ -318,8 +325,9 @@ function writeIfChanged(filePath, text) {
  *        order: `{ id, model, slug, sourceFile, format?, multiRecord?, declaration? }`.
  * @param {object[]} params.finalized - response entries `{ index, uuid, changed?, document? }`.
  * @param {string} [params.sourceLocale]
- * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[], mapped: Object<string,string> }}
+ * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[], mapped: Object<string,string>, notKeptAsDrafts: string[] }}
  *   `mapped` is own id → the uuid this backend minted, for the caller to record per backend.
+ *   `notKeptAsDrafts` names records sent as drafts whose returned document is not disabled.
  */
 export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
   const updated = []
@@ -336,6 +344,8 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
   // Multi-record files are written ONCE per file, applying every (slug → uuid).
   const arrayFiles = new Map() // array-form YAML/JSON: sourceFile -> Map(slug -> uuid)
   const bibFiles = new Map() // BibTeX: sourceFile -> Map(cite key -> uuid)
+  // Records sent as drafts that the backend stored enabled. See the check below.
+  const notKeptAsDrafts = []
 
   for (const fin of finalized || []) {
     const uuid = fin.uuid
@@ -351,6 +361,15 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     // (no uuid to back-fill — the backend owns the site's folder, keyed by the
     // site-content uuid). Both are positional placeholders with no record source file.
     if (entry.kind === 'site' || entry.kind === 'folder') continue
+    // ⛔ A DRAFT THE BACKEND DID NOT KEEP AS ONE. A backend is obliged to echo
+    // `$disabled: true` on the document of an entity it stored disabled. One that predates
+    // the key skips it without a word and stores the record enabled, so it is delivered
+    // once the site is published. Rendering that document over the file (variant A) would
+    // then erase `draft: true` from the author's file as well, so the file keeps its own
+    // text and the caller is told. Only a returned document that lacks the flag counts:
+    // with no document there is nothing to judge.
+    const draftNotKept = entry.draft === true && fin.document && fin.document.$disabled !== true
+    if (draftNotKept) notKeptAsDrafts.push(entry.sourceFile || entry.id)
     if (!entry.sourceFile) {
       deferred.push({ index: i, id: entry.id, reason: 'no source file on disk' })
       continue
@@ -389,6 +408,7 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     // the declaration, and it's lossless for the format (md needs a content body
     // field for its body). Otherwise variant B: back-fill the uuid in place.
     const canRenderA =
+      !draftNotKept &&
       fin.document &&
       entry.declaration &&
       (entry.format !== 'md' || briefHasContentBody(entry.declaration))
@@ -432,5 +452,5 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
   for (const file of ownIdFiles) {
     if (!updated.includes(file) && !unchanged.includes(file)) unchanged.push(file)
   }
-  return { updated, unchanged, deferred, warnings, mapped }
+  return { updated, unchanged, deferred, warnings, mapped, notKeptAsDrafts }
 }

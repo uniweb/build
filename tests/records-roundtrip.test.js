@@ -244,3 +244,53 @@ describe('push → pull → push is a fixed point', () => {
     expect(report.warnings.some((x) => x.includes('"ghost"') && x.includes('remove it from the folder'))).toBe(true)
   })
 })
+
+// ⭐ A DRAFT ROUND-TRIPS. `draft: true` goes out as the entity's `$disabled: true` and
+// comes back as `draft: true`, so push → pull → push stays a fixed point with one in it.
+describe('a draft survives the round trip', () => {
+  const freshDest = () => {
+    const writeDest = w(ROOT)
+    writeDest('dest/site.yml', 'name: T\nfoundation: "@acme/base"\nqueries:\n  articles:\n    schema: "@/article"\n')
+    writeDest('dest/sync.json', { version: 1, backends: { [BACKEND]: { site: { org: 'acme' } } } })
+    writeDest('dest/package.json', { name: 'dest', dependencies: { '@acme/base': 'file:../fdn' } })
+    return join(ROOT, 'dest')
+  }
+
+  it('push → pull → push keeps it a draft', async () => {
+    const src = seed(ROOT)
+    w(ROOT)('site/records/article/hello.md', '---\n$uuid: U1\ntitle: Hello\ndraft: true\n---\n\nBody one.\n')
+    const first = await produce(src)
+    const byId = (p) => Object.fromEntries(p.col.entities.map((e) => [e.id, e.document]))
+    expect(byId(first)['article/hello'].$disabled).toBe(true)
+    // CONTROL — the other record is not a draft, and carries no key
+    expect(byId(first)['article/older']).not.toHaveProperty('$disabled')
+
+    const dest = freshDest()
+    recordsToProject({
+      folderDoc: first.folder.document,
+      recordDocs: first.col.entities.map((e) => e.document),
+      siteRoot: dest,
+      opts: { resolveDeclaration, backend: BACKEND },
+    })
+    expect(readFileSync(join(dest, 'records', 'article', 'hello.md'), 'utf8')).toContain('draft: true')
+    expect(readFileSync(join(dest, 'records', 'article', 'older.md'), 'utf8')).not.toContain('draft')
+
+    const second = await produce(dest)
+    expect(second.col.entities.map((e) => e.document)).toEqual(first.col.entities.map((e) => e.document))
+  })
+
+  // An absent key means enabled, so a pull that finds a record re-enabled on the backend
+  // must drop the local line — kept, the next push would disable it again.
+  it('a record re-enabled on the backend comes back without its `draft:` line', async () => {
+    const src = seed(ROOT)
+    const { col, folder } = await produce(src) // the backend's copy: enabled
+    w(ROOT)('site/records/article/hello.md', '---\n$uuid: U1\ntitle: Hello\ndraft: true\n---\n\nBody one.\n')
+    recordsToProject({
+      folderDoc: folder.document,
+      recordDocs: col.entities.map((e) => e.document),
+      siteRoot: src,
+      opts: { resolveDeclaration, backend: BACKEND },
+    })
+    expect(readFileSync(join(src, 'records', 'article', 'hello.md'), 'utf8')).not.toContain('draft')
+  })
+})

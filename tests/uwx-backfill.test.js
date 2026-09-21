@@ -204,6 +204,77 @@ describe('renderEntityDocument — variant A (document → authoring file)', () 
     const obj = yaml.load(renderEntityDocument({ document: doc, declaration: articleDecl, format: 'yaml' }))
     expect(obj).toEqual({ $uuid: 'E1', title: 'Hello', body: 'plain text' })
   })
+
+  // ⭐ A disabled entity is a draft on the file side: in the folder, never delivered.
+  it('a disabled entity renders `draft: true`, in markdown and yaml', () => {
+    const doc = {
+      $uuid: 'E1',
+      $model: '@acme/article',
+      $disabled: true,
+      article: { title: { en: 'Soon' }, body: { en: 'Later.\n' } },
+    }
+    const md = renderEntityDocument({ document: doc, declaration: articleDecl, format: 'md' })
+    expect(md).toBe('---\n$uuid: E1\ntitle: Soon\ndraft: true\n---\nLater.\n')
+    const obj = yaml.load(renderEntityDocument({ document: doc, declaration: articleDecl, format: 'yaml' }))
+    expect(obj).toEqual({ $uuid: 'E1', title: 'Soon', body: 'Later.\n', draft: true })
+  })
+
+  // CONTROL — an enabled entity carries no key and writes no `draft:` at all, so a
+  // record re-enabled on the backend comes back without the line.
+  it('CONTROL — an enabled entity writes no `draft:`', () => {
+    const doc = { $uuid: 'E1', $model: '@acme/article', article: { title: { en: 'Now' } } }
+    const obj = yaml.load(renderEntityDocument({ document: doc, declaration: articleDecl, format: 'yaml' }))
+    expect(obj).not.toHaveProperty('draft')
+  })
+})
+
+// ⛔ A backend must echo `$disabled: true` on an entity it stored disabled. One that
+// predates the key drops it without a word and stores the record enabled, and
+// rendering its document over the file would erase `draft: true` from the author's
+// file as well.
+describe('backfillEntityUuids — a draft the backend did not keep', () => {
+  const declaration = {
+    name: '@acme/article',
+    sections: { article: { brief: true, fields: { title: { type: 'string' } } } },
+  }
+  const draftFile = () => {
+    const f = join(dir, 'soon.yml')
+    writeFileSync(f, 'title: Soon\ndraft: true\n')
+    return f
+  }
+  const entry = (f, draft) => ({ id: 'article/soon', slug: 'soon', sourceFile: f, format: 'yaml', declaration, draft })
+  const fin = (disabled) => [
+    {
+      index: 0,
+      uuid: 'E0',
+      document: { $uuid: 'E0', $model: '@acme/article', ...(disabled ? { $disabled: true } : {}), article: { title: 'Soon' } },
+    },
+  ]
+
+  it('⛔ is reported, and the file keeps its `draft: true`', () => {
+    const f = draftFile()
+    const res = backfillEntityUuids({ index: [entry(f, true)], finalized: fin(false) })
+    expect(res.notKeptAsDrafts).toEqual([f])
+    const out = yaml.load(readFileSync(f, 'utf8'))
+    expect(out.draft).toBe(true) // not rendered over from the enabled document
+    expect(out.$uuid).toBe('E0') // identity is still written back
+  })
+
+  // CONTROL — a backend that kept it: rendered over as usual, `draft: true` and all.
+  it('CONTROL — a draft the backend kept is rendered, and nothing is reported', () => {
+    const f = draftFile()
+    const res = backfillEntityUuids({ index: [entry(f, true)], finalized: fin(true) })
+    expect(res.notKeptAsDrafts).toEqual([])
+    expect(yaml.load(readFileSync(f, 'utf8'))).toEqual({ $uuid: 'E0', title: 'Soon', draft: true })
+  })
+
+  // CONTROL — a record that was not sent as a draft is never reported.
+  it('CONTROL — an enabled record coming back enabled is not reported', () => {
+    const f = join(dir, 'now.yml')
+    writeFileSync(f, 'title: Now\n')
+    const res = backfillEntityUuids({ index: [{ ...entry(f, false), slug: 'now' }], finalized: fin(false) })
+    expect(res.notKeptAsDrafts).toEqual([])
+  })
 })
 
 describe('backfillEntityUuids — correlate by index', () => {

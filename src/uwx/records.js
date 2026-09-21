@@ -80,17 +80,22 @@ const SKIP_KEYS = new Set([
   '$unit',
   '$meta',
   '$body',
-  // The draft flag (`site/record-draft.js`) — framework's, never a Model field.
+  // The draft flag (`site/record-draft.js`) — framework's, never a Model field. It
+  // travels as the entity's `$disabled` (see the document below).
   'draft',
 ])
 
 // Recursively drop IDENTITY `$`-sigil keys (`$uuid`/`$id`/`$model`/… — never
 // field data; the sigil-exclusivity invariant guarantees this) at every level,
-// so a back-filled `$uuid` doesn't change the hash. `$children` is the exception:
-// it is STRUCTURAL content (a self-nesting record's subtree, e.g. site-content's
-// nested pages/sections), so it is KEPT and recursed into — otherwise a nesting
-// change would be invisible to "send only changed". Flat records carry no
-// `$children`, so this is a no-op for the collection lane.
+// so a back-filled `$uuid` doesn't change the hash. Two are exceptions, because
+// they are content rather than identity:
+//   - `$children` is STRUCTURAL content (a self-nesting record's subtree, e.g.
+//     site-content's nested pages/sections), so it is KEPT and recursed into —
+//     otherwise a nesting change would be invisible to "send only changed". Flat
+//     records carry no `$children`, so this is a no-op for the collection lane.
+//   - `$disabled` is a record's delivery STATE (`draft: true` on the file side). It
+//     is KEPT so that drafting or un-drafting a record with nothing else changed is
+//     still sent; stripped, "send only changed" would never send the toggle.
 function stripSigils(value) {
   if (Array.isArray(value)) return value.map(stripSigils)
   if (value && typeof value === 'object') {
@@ -123,9 +128,9 @@ function stripSigils(value) {
     const out = {}
     for (const [k, v] of Object.entries(value)) {
       if (isFolderRefLeaf && (k === '$ref' || k === 'entry')) continue
-      // `$children` (a self-nesting subtree) is structural CONTENT, not an identity
-      // sigil — kept and recursed into, so a nesting change stays visible.
-      if (k === '$children') {
+      // `$children` (a self-nesting subtree) and `$disabled` (a delivery state) are
+      // CONTENT, not identity sigils — kept, so a change to either stays visible.
+      if (k === '$children' || k === '$disabled') {
         out[k] = stripSigils(v)
         continue
       }
@@ -338,13 +343,19 @@ export function recordsToEntities({
       )
     }
 
-    // The `$`-document, in canonical key order: `$uuid?`, `$id`, `$model`, then each
-    // populated section in declared order (the brief always present as the card).
-    // `$owner`/`$unit`/`$meta` are omitted — the backend binds owner + unit on its side.
+    // The `$`-document, in canonical key order: `$uuid?`, `$id`, `$model`, `$disabled?`,
+    // then each populated section in declared order (the brief always present as the
+    // card). `$owner`/`$unit`/`$meta` are omitted — the backend binds owner + unit on
+    // its side.
     const document = {}
     if (uuid) document.$uuid = uuid
     document.$id = id
     document.$model = declaration.name
+    // ⭐ A DRAFT IS SENT AS A DISABLED ENTITY: it stays in the folder and is never
+    // publicly delivered. Only `true` travels. An absent key means enabled [Diego,
+    // 2026-09-21], so a record whose `draft: true` is removed is sent without the key
+    // and is delivered again.
+    if (isDraftRecord(record, `${label}/${slug}`)) document.$disabled = true
     document[briefName] = sectionData[briefName] || {}
     for (const [secName] of recordSections) {
       if (secName !== briefName && sectionData[secName]) document[secName] = sectionData[secName]
@@ -717,8 +728,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const index = []
   // pool id (the FILE) → the records it produced, so the folder places records.
   const producedBy = new Map()
-  // `draft: true` records found on the way — the push is refused if there are any.
-  const drafts = []
   // Schemas (as written) whose Model resolved to nothing — soft-skipped.
   const unresolved = new Set()
   // The sync response is keyed per ($model, $id), so the pair must be unique
@@ -751,10 +760,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
           warnings.push(`${pooled.relPath}: a record without a slug was skipped`)
           continue
         }
-        if (isDraftRecord(r.data, pooled.relPath)) {
-          drafts.push(r.multiRecord ? `${pooled.relPath} (${r.slug})` : pooled.relPath)
-          continue
-        }
+        // A draft is a record like any other, placed in the folder; the mapper sends it
+        // disabled. Checked here too so that a malformed `draft:`, or the retired
+        // `published: false`, is refused naming the FILE rather than the record.
+        isDraftRecord(r.data, r.multiRecord ? `${pooled.relPath} (${r.slug})` : pooled.relPath)
         const rec = { ...r.data, slug: r.slug }
         if (r.body !== undefined) rec.$body = r.body
         // ⭐ THE RECORD'S IDENTITY IS ITS POSITION IN THE DIRECTORY — `<dirs>/<slug>`,
@@ -828,25 +837,12 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         // document → authoring shape (variant A): unwrap localized fields, route
         // the content body field to the md body, drop the brief record `$uuid`.
         declaration,
+        // Sent disabled, so the back-fill can check that the backend kept it that way.
+        draft: e.document.$disabled === true,
       })
     }
     entities.push(...mappedOut.entities)
     warnings.push(...mappedOut.warnings)
-  }
-
-  // ⛔ A DRAFT IS REFUSED, NOT PUSHED AND NOT SKIPPED. It is a record that stays in the
-  // folder but is not delivered — which a backend holds as the entity's `disabled`, a
-  // state this producer cannot send yet. Pushed without it, the backend would serve the
-  // draft once the site is published; skipped, it would leave the folder — and a site
-  // whose records were all drafts would send no folder at all, leaving the backend's
-  // live. So the push stops and says which records, until the flag can travel.
-  if (drafts.length) {
-    throw new Error(
-      `uwx/records: a push cannot mark a record as a draft yet, and the backend would serve it ` +
-        `once the site is published —\n  ${drafts.join('\n  ')}\n` +
-        '  Push them as records by removing `draft: true`, or keep them off the backend by ' +
-        'starting their names with `_`.'
-    )
   }
 
   // Queries whose schema resolved to nothing — not pushed as entities. The composite
