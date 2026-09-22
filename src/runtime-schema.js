@@ -194,8 +194,10 @@ function leanDataSchema(value, dataSchemaMap) {
   if (ref) {
     const resolved = dataSchemaMap[ref]
     // ⛔ `flatRecordFields`, NOT `resolved.fields`. `dataSchemaMap` holds each
-    // schema AS AUTHORED — resolution and lowering are different steps, and only
-    // the second normalizes the two authoring forms. `fields:` at the top is the
+    // schema NORMALIZED but still in the form it was authored in — `fields:` or
+    // `sections:` — because only lowering (`uwx/data-schema.js`) folds the two
+    // forms into one. (This said "AS AUTHORED" until 2026-09-22; aliases and
+    // `many:` are already folded here.) `fields:` at the top is the
     // SUGAR for a one-section model; a sections-form schema has no such key, so
     // reading it directly returned null for every `@std/*` binding and the
     // section's `data:` declaration supplied no field defaults at all. Silent:

@@ -1,5 +1,5 @@
 // Map a file site project to one `@uniweb/site-content` entity, as the
-// section-keyed `-document (docs/reference/entity-content.md), then to a
+// section-keyed `$`-document (docs/reference/entity-content.md), then to a
 // `subtype: entity` .uwx on the SYNC lane.
 //
 // SOURCE LAYER: the content-collector's return is flattened and lossy for
@@ -8,9 +8,13 @@
 // processMarkdownFile, ordering, mode detection) so those semantics stay
 // identical to a normal build — only the directory/mode/order *walk* is ours.
 //
-// The document mirrors the @uniweb/site-content Model: `info` (brief) · `pages`
-// (self-nesting; each page carries its `page_sections` as an inline field) ·
-// `layout_sections` · `extensions` · `queries`. `info.foundation`
+// The document mirrors the @uniweb/site-content Model: `info` (brief) · `settings`
+// · `pages` (self-nesting; each page carries its `page_sections` as an inline
+// field) · `layout_sections` · `extensions` · `queries` · `services` · `secrets`.
+// `settings` is emitted only when non-empty; `services` and `secrets` only when the
+// backend being pushed to has that key in `sync.json` (absent is not empty — see
+// below). `emit-surface.json` states which `site.yml` key lands in `info` and
+// `settings`. `info.foundation`
 // carries the verbatim `site.yml::foundation` string (the round-trip source of
 // truth).
 //
@@ -1009,16 +1013,19 @@ function queriesNested(declarations, uuids = null, org = null) {
 // ⛔ ABSENT IS NOT EMPTY, and the difference is destructive. The Section is
 // REPLACED by what we send, so `[]` means "drop every stored config row" while a
 // missing key means "I am not telling you about this". A project that has never
-// pulled has no `$services`, and its ordinary push must not read as a request to
-// wipe a service the operator configured in the app. So: emit the Section only when
-// the file declares the key. Clearing is available and explicit — `$services: []`.
+// pulled has no `services` for that backend, and its ordinary push must not read as
+// a request to wipe a service the operator configured in the app. So: emit the
+// Section only when that backend's entry in `sync.json` carries the key. Clearing is
+// available and explicit — `services: []` there. *(Both said `site.yml::$services`
+// until the move on 2026-09-20.)*
 //
 // ⚠️ The push gate is NOT what makes this safe, though it usually catches it: its
 // tokens live in a gitignored per-clone cache, so a fresh clone pushes
 // unconditionally. Correctness has to sit here.
 
 /**
- * `$services` / `$secrets` → Section records, or undefined when the key is absent.
+ * A backend's provisioned `services` / `secrets` (its `sync.json` entry) → Section
+ * records, or undefined when the key is absent.
  *
  * ⭐ PASSTHROUGH, NOT AN ALLOWLIST — the same rule and the same reason as
  * `queriesNested` above. The field set belongs to the backend's Model, a service's
@@ -1027,7 +1034,8 @@ function queriesNested(declarations, uuids = null, org = null) {
  * would DESTROY whatever is stored under it on every push. Framework can enumerate
  * its own vocabulary and cannot enumerate theirs; withhold ours, forward the rest.
  *
- * @param {*} declared - the raw `$services` / `$secrets` value from site.yml
+ * @param {*} declared - the raw `services` / `secrets` value from that backend's
+ *        `sync.json` entry
  * @param {(entry: object) => string|null} identify - the record's stable `$id`
  * @param {string} label - the key name, for the one warning below
  * @returns {object[]|undefined}
@@ -1233,7 +1241,8 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  *        foundation-relative `schema` (`@/x` → `@org/x`). Pass the same org the
  *        records are emitted with; absent, `@/x` ships as written.
  * @returns {Promise<object>} the section-keyed `$`-document:
- *        `{ $uuid?, $id, $model, info, pages, layout_sections, extensions, queries }`
+ *        `{ $uuid?, $id, $model, info, settings?, pages, layout_sections, extensions,
+ *        queries, services?, secrets? }`
  */
 export async function siteProjectToDocument(siteRoot, opts = {}) {
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))

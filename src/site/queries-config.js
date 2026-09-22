@@ -368,7 +368,7 @@ async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
  * The `deferred:` a schema implies — every record field its **brief** does not name.
  *
  * ⛔ ONE IMPLEMENTATION, TWO CALLERS, and that is the point. `deriveDeferredFromSchemas`
- * above uses it to FILL an unstated `deferred:`; `uwx/collections-project.js` uses it to
+ * above uses it to FILL an unstated `deferred:`; `uwx/records-project.js` uses it to
  * RECOGNIZE a derived value on the way back in, so a pull does not write a derivation
  * into the author's file as though they had typed it.
  *
