@@ -17,6 +17,13 @@
 // ⛔ `package.json::uniweb.id` WAS A REGISTRY-NAME OVERRIDE, 2026-07-17 → 2026-09-21.
 // It is retired: the name lives in `main.js`, and two homes for one fact is how `push`
 // and `register` came to look the same foundation up under different names.
+//
+// ⭐ THE SCOPE IS PART OF THE NAME (2026-09-22 [Diego]) — `@acme/marketing` — so the
+// org a foundation registers under lives where the rest of its name does. A bare name
+// has no scope yet; `uniweb register` gives it one and writes it into `main.js`.
+// ⛔ `package.json::uniweb.scope` held it until then, a second home for half of one
+// fact, and the halves disagreed: a foundation named `@acme/fnd` registered its data
+// schemas under whatever `uniweb.scope` said (measured: `@proximify/member`).
 
 /** Names that say where the code lives, not what the foundation is. */
 export const FORBIDDEN_FOUNDATION_NAMES = new Set(['src', 'foundation'])
@@ -60,4 +67,23 @@ export function checkFoundationName(name) {
     return `"${name}" is not a foundation name — use lowercase letters, digits and hyphens (like "marketing")`
   }
   return null
+}
+
+/**
+ * A foundation's name in its two halves: the scope it registers under, and the name
+ * within that scope. `@acme/marketing` → `{ scope: '@acme', bare: 'marketing' }`;
+ * `marketing` → `{ scope: null, bare: 'marketing' }` — a name that has not registered
+ * yet, since `register` writes the scope it chooses into the name.
+ *
+ * ⭐ The scope is what a foundation's own `@/x` data schemas resolve into — at
+ * register, and in a site's records and queries, which name those same Models.
+ *
+ * @param {unknown} name
+ * @returns {{ scope: string|null, bare: string|null }} `scope` as `@org`
+ */
+export function splitFoundationName(name) {
+  const text = typeof name === 'string' ? name.trim() : ''
+  if (!text) return { scope: null, bare: null }
+  const scoped = /^@([^/]+)\/([^/]+)$/.exec(text)
+  return scoped ? { scope: `@${scoped[1]}`, bare: scoped[2] } : { scope: null, bare: text }
 }

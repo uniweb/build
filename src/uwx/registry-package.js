@@ -17,16 +17,17 @@
  * `@uniweb/data-schema` entities, no foundation-schema — for a schemas-only
  * package (the standard schemas under `@std`, or an org's own `@org/schemas`).
  *
- * Scope: pass `scope` ('@acme' or 'acme') to resolve a schema's own `@/x` (and the
- * foundation's `data-schemas.refs`) to a concrete `@acme/x` for submission. With no
- * `scope`, names stay `@/x` (local preview / dry-run). See `uwx-format.md`.
+ * Scope: a foundation whose name is scoped (`@acme/fnd`) registers under that scope —
+ * its name and its schemas' own `@/x` alike. A bare name takes `scope` ('@acme' or
+ * 'acme'). With neither, names stay `@/x` (local preview / dry-run). A schemas-only
+ * package has no name to carry one, so it always takes `scope`. See `uwx-format.md`.
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { toDataSchemaDeclaration } from './data-schema.js'
-import { checkFoundationName } from '../foundation-name.js'
+import { checkFoundationName, splitFoundationName } from '../foundation-name.js'
 
 const FOUNDATION_SCHEMA = '@uniweb/foundation-schema'
 const DATA_SCHEMA = '@uniweb/data-schema'
@@ -46,7 +47,9 @@ try {
  * @param {Object} params
  * @param {Object} params.schema - parsed `dist/meta/schema.json`.
  * @param {string} [params.foundationDir] - foundation root, for the `i18n/` bundles.
- * @param {string} [params.scope] - org scope (`@acme` or `acme`) resolving `@/x` -> `@acme/x`.
+ * @param {string} [params.scope] - org scope (`@acme` or `acme`) resolving `@/x` -> `@acme/x`,
+ *   for a foundation whose name is bare. A scoped name's own scope is used instead, and
+ *   a `scope` that contradicts it throws.
  * @param {Object} [params.exporter] - `{ tool, version, instance }` for the envelope.
  * @param {string} [params.exportedAt] - ISO timestamp (default: now).
  * @param {string} [params.runtime] - the `@uniweb/runtime` version this build
@@ -70,7 +73,10 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
   // own `@/x`), each resolved to the concrete publish scope. Shared refs
   // (`@std/x`, `@other/x`) are named in the foundation's data-schemas.refs but
   // their declarations are not bundled — already published.
-  const { entities: dataSchemaEntities, scoped, org } = buildDataSchemaEntities(dataSchemas, scope)
+  const { entities: dataSchemaEntities, scoped, org } = buildDataSchemaEntities(
+    dataSchemas,
+    registrationScope(self.name, scope)
+  )
 
   const foundationEntity = {
     model: FOUNDATION_SCHEMA,
@@ -106,6 +112,27 @@ export function buildSchemaOnlyPackage({ schemas, scope, exporter, exportedAt } 
     throw new Error('buildSchemaOnlyPackage: no data schemas to register (expected a map of "@/<name>" -> schema).')
   }
   return wrapEntities(entities, exporter, exportedAt)
+}
+
+// The scope a foundation registers under: the one in its name, else `scope`.
+//
+// ⭐ A SCOPED NAME IS THE SCOPE (2026-09-22). `@acme/fnd` registers under `@acme` —
+// the foundation and its data schemas both, because a site's records name those
+// schemas by the same scope. ⛔ Until then the schemas took `scope` while the name
+// kept its own, so one foundation registered `@acme/fnd` beside `@proximify/member`.
+// A `scope` that contradicts the name is refused rather than chosen between: which
+// org was meant is not ours to guess.
+function registrationScope(name, scope) {
+  const { scope: nameScope } = splitFoundationName(name)
+  const handle = scope ? String(scope).replace(/^@/, '').replace(/\/.*$/, '') : ''
+  const given = handle ? `@${handle}` : null
+  if (nameScope && given && given !== nameScope) {
+    throw new Error(
+      `buildRegistryPackage: the foundation is named ${name}, so it registers under ` +
+        `${nameScope} — not ${given}. A foundation's scope is the one in its name.`
+    )
+  }
+  return nameScope || scope
 }
 
 // Lower a `{ '@/<name>': normalizedSchema }` map into the sorted

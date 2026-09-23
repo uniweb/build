@@ -47,7 +47,8 @@ describe('buildRegistryPackage', () => {
   it('bundles a data-schema entity per DEFINED (@/) schema, not shared ones', () => {
     const dataSchemaEntities = doc.entities.filter((e) => e.model === '@uniweb/data-schema')
     expect(dataSchemaEntities).toHaveLength(1) // @/article only; @std/person not bundled
-    expect(dataSchemaEntities[0]).toMatchObject({ model: '@uniweb/data-schema', name: '@/article' })
+    // Under the scope in the foundation's name — `@acme/marketing` — with no `scope` given.
+    expect(dataSchemaEntities[0]).toMatchObject({ model: '@uniweb/data-schema', name: '@acme/article' })
     const article = Object.values(dataSchemaEntities[0].sections).find((s) => s.brief)
     expect(article).toBeTruthy() // a single brief section
     // the lowering ran: enum stays ON the field (the backend relocates it to a
@@ -77,7 +78,7 @@ describe('buildRegistryPackage', () => {
     })
 
     it('lists every rendered data schema by name (own + shared)', () => {
-      expect(f['data-schemas'].refs).toEqual([{ name: '@/article' }, { name: '@std/person' }])
+      expect(f['data-schemas'].refs).toEqual([{ name: '@acme/article' }, { name: '@std/person' }])
     })
 
     it('has an empty locales map when no i18n/ dir', () => {
@@ -107,9 +108,54 @@ describe('buildRegistryPackage', () => {
         '@/categories': validateAndNormalizeSchema({ fields: { label: { type: 'string' } } }, '@/categories'),
       },
     }
-    const post = buildRegistryPackage({ schema }).entities.find((e) => e.name === '@/post')
+    const post = buildRegistryPackage({ schema }).entities.find((e) => e.name === '@acme/post')
     const postBrief = Object.values(post.sections).find((s) => s.brief)
-    expect(postBrief.fields.cat).toEqual({ type: 'item_ref', options: '@/categories/categories' })
+    expect(postBrief.fields.cat).toEqual({ type: 'item_ref', options: '@acme/categories/categories' })
+  })
+})
+
+// ⭐ A foundation's scope is the one in its name (2026-09-22). Its data schemas register
+// under it too, because a site's records name those schemas by the same scope.
+// ⛔ Until then the schemas took `scope` while a scoped name kept its own, so one
+// foundation registered `@acme/marketing` beside `@proximify/article`.
+describe('buildRegistryPackage — the scope is the one in the name', () => {
+  const withName = (name) => ({ ...schemaJson(), _self: { ...schemaJson()._self, name } })
+  const namesOf = (doc) => ({
+    foundation: doc.entities.at(-1).info.name,
+    schemas: doc.entities.filter((e) => e.model === '@uniweb/data-schema').map((e) => e.name),
+  })
+
+  it('a scoped name registers the foundation and its schemas under that scope', () => {
+    expect(namesOf(buildRegistryPackage({ schema: withName('@acme/marketing') }))).toEqual({
+      foundation: '@acme/marketing',
+      schemas: ['@acme/article'],
+    })
+  })
+
+  it('a bare name takes `scope` — for the name and the schemas alike', () => {
+    expect(namesOf(buildRegistryPackage({ schema: withName('marketing'), scope: 'acme' }))).toEqual({
+      foundation: '@acme/marketing',
+      schemas: ['@acme/article'],
+    })
+  })
+
+  it('a bare name with no scope previews unqualified', () => {
+    expect(namesOf(buildRegistryPackage({ schema: withName('marketing') }))).toEqual({
+      foundation: 'marketing',
+      schemas: ['@/article'],
+    })
+  })
+
+  it('a `scope` that agrees with a scoped name is accepted, in either spelling', () => {
+    expect(namesOf(buildRegistryPackage({ schema: withName('@acme/marketing'), scope: 'acme' })).schemas).toEqual([
+      '@acme/article',
+    ])
+  })
+
+  it('⛔ a `scope` that contradicts a scoped name is refused — never a split identity', () => {
+    expect(() => buildRegistryPackage({ schema: withName('@acme/marketing'), scope: '@proximify' })).toThrow(
+      /named @acme\/marketing, so it registers under @acme — not @proximify/
+    )
   })
 })
 

@@ -18,6 +18,7 @@ export {
 export {
   foundationNameOf,
   checkFoundationName,
+  splitFoundationName,
   FORBIDDEN_FOUNDATION_NAMES,
 } from './foundation-name.js'
 

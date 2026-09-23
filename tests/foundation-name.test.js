@@ -1,13 +1,15 @@
 // A foundation's NAME — one rule for the build, `register` and `push`: `main.js`'s
 // `name`, else `package.json`'s. `src` and `foundation` name the folder, not the
 // foundation, and are refused as one's name: every project in an org would otherwise
-// register the same `@org/src`. `package.json::uniweb.id` is retired (2026-09-21).
+// register the same `@org/src`. `package.json::uniweb.id` is retired (2026-09-21), and
+// so is `uniweb.scope` (2026-09-22) — the scope is part of the name, `@acme/marketing`.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   foundationNameOf,
   checkFoundationName,
+  splitFoundationName,
   FORBIDDEN_FOUNDATION_NAMES,
 } from '../src/foundation-name.js'
 import { readFoundationName, buildSchema } from '../src/schema.js'
@@ -85,10 +87,49 @@ describe('⛔ src and foundation are not foundation names', () => {
   })
 })
 
+describe('splitFoundationName — the scope is half of the name', () => {
+  it('splits a scoped name into its scope and the name within it', () => {
+    expect(splitFoundationName('@acme/marketing')).toEqual({ scope: '@acme', bare: 'marketing' })
+  })
+
+  it('a bare name has no scope yet', () => {
+    expect(splitFoundationName('marketing')).toEqual({ scope: null, bare: 'marketing' })
+  })
+
+  it('nothing to split is nothing', () => {
+    expect(splitFoundationName('')).toEqual({ scope: null, bare: null })
+    expect(splitFoundationName(undefined)).toEqual({ scope: null, bare: null })
+  })
+})
+
 describe('readFoundationName', () => {
   it('⛔ refuses a leftover uniweb.id, naming the move', async () => {
     const dir = foundation({ pkg: { uniweb: { id: 'docs' } } })
     await expect(readFoundationName(dir)).rejects.toThrow("Move it there (name: 'docs')")
+  })
+
+  it('⛔ refuses a leftover uniweb.scope, naming the line that replaces it', async () => {
+    // A leftover would register the name and the data schemas under two orgs.
+    const dir = foundation({
+      pkg: { uniweb: { scope: '@acme' } },
+      main: "export default { name: 'marketing' }\n",
+    })
+    await expect(readFoundationName(dir)).rejects.toThrow("Move it there (name: '@acme/marketing')")
+  })
+
+  it('⛔ …and says it can simply go when main.js already scopes the name', async () => {
+    const dir = foundation({
+      pkg: { uniweb: { scope: 'acme' } },
+      main: "export default { name: '@acme/marketing' }\n",
+    })
+    await expect(readFoundationName(dir)).rejects.toThrow(
+      "main.js already names it '@acme/marketing', so remove uniweb.scope"
+    )
+  })
+
+  it('reads a scoped name whole — the scope is part of it', async () => {
+    const dir = foundation({ main: "export default { name: '@acme/marketing' }\n" })
+    expect((await readFoundationName(dir)).name).toBe('@acme/marketing')
   })
 
   it('reads main.js again after it changes — the import is by content', async () => {

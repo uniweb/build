@@ -23,7 +23,7 @@ import {
   deriveRecordsSupport,
   unnameableIn,
 } from './foundation/derive-supports.js'
-import { foundationNameOf } from './foundation-name.js'
+import { foundationNameOf, splitFoundationName } from './foundation-name.js'
 import { resolveFoundationSrcDir } from './utils/foundation-source-root.js'
 
 // Component meta file name
@@ -191,6 +191,14 @@ export async function loadPackageJson(srcDir) {
           `\`name\` in main.js's default export (name: '${pkg.uniweb.id}').`
       )
     }
+    // ⛔ `uniweb.scope` likewise (retired 2026-09-22) — the scope is part of the name.
+    // The build never read it; `uniweb register` refuses it, naming the line to write.
+    if (pkg.uniweb?.scope !== undefined) {
+      console.warn(
+        `[uniweb] ${packagePath}: \`uniweb.scope\` is no longer read — a foundation's scope is ` +
+          `part of its name in main.js's default export (name: '@<org>/<name>').`
+      )
+    }
     return {
       name: pkg.name,
       version: pkg.version,
@@ -212,9 +220,10 @@ export async function loadPackageJson(srcDir) {
  * (`foundation-name.js`) — for `uniweb register` and for `push` / `publish` looking
  * the foundation up, which need it before a build, or without one.
  *
- * ⛔ Refuses `package.json::uniweb.id` (retired 2026-09-21). This is the reader
- * whose answer registers, so a leftover stops here rather than registering the
- * foundation under a different name than the one it was given.
+ * ⛔ Refuses `package.json::uniweb.id` (retired 2026-09-21) and `uniweb.scope`
+ * (retired 2026-09-22 — the scope is part of the name). This is the reader whose
+ * answer registers, so a leftover stops here rather than registering the foundation
+ * under a different name than the one it was given.
  *
  * @param {string} foundationDir - the foundation package's root
  * @returns {Promise<{ name: string|null, source: 'main.js'|'package.json'|null, mainFile: string }>}
@@ -238,10 +247,29 @@ export async function readFoundationName(foundationDir) {
   }
   const srcDir = join(foundationDir, resolveFoundationSrcDir(foundationDir))
   const config = await loadFoundationConfig(srcDir)
+  const read = foundationNameOf({ config, pkg })
+  // ⛔ `package.json::uniweb.scope` is retired (2026-09-22): a foundation's scope is
+  // part of its name. Refused here, the reader whose answer registers, because a
+  // leftover would register the name and the data schemas under two different orgs.
+  if (pkg.uniweb?.scope !== undefined) {
+    throw new Error(retiredScopeMessage(pkgPath, pkg.uniweb.scope, read.name))
+  }
   return {
-    ...foundationNameOf({ config, pkg }),
+    ...read,
     mainFile: join(srcDir, FOUNDATION_FILE_NAMES[0]),
   }
+}
+
+/**
+ * What to say about a leftover `package.json::uniweb.scope`: the `main.js` line that
+ * replaces it, or — when `main.js` already scopes the name — that it can go.
+ */
+function retiredScopeMessage(pkgPath, scope, name) {
+  const { scope: nameScope, bare } = splitFoundationName(name)
+  const intro = `${pkgPath}: \`uniweb.scope\` is no longer read — a foundation's scope is part of its name, \`name\` in main.js's default export.`
+  if (nameScope) return `${intro} main.js already names it '${name}', so remove uniweb.scope.`
+  const handle = String(scope ?? '').replace(/^@/, '').replace(/\/.*$/, '') || '<org>'
+  return `${intro} Move it there (name: '@${handle}/${bare || '<name>'}') and remove uniweb.scope.`
 }
 
 /**
