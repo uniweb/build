@@ -723,24 +723,18 @@ describe('model-level keys on the declaration', () => {
       '@demo/session'
     )
 
-  it('emits label, description, source_locale and creatable_by', () => {
+  it('emits label, description and source_locale — and never creatable_by (retired: Models are open)', () => {
     const decl = toDataSchemaDeclaration(
       normalize({
         label: 'Session',
         description: 'A talk.',
-        source_locale: 'en',
-        creatable_by: 'unit_members'
+        source_locale: 'en'
       }),
       { name: '@demo/session' }
     )
     expect(decl.label).toBe('Session')
     expect(decl.description).toBe('A talk.')
     expect(decl.source_locale).toBe('en')
-    expect(decl.creatable_by).toBe('unit_members')
-  })
-
-  it('omits creatable_by when unstated — absent is the registry default, and saying it would state a policy the author did not', () => {
-    const decl = toDataSchemaDeclaration(normalize({}), { name: '@demo/session' })
     expect('creatable_by' in decl).toBe(false)
   })
 
