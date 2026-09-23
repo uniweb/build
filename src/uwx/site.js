@@ -77,7 +77,7 @@ import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
-import { resolveSelfScope } from './self-scope.js'
+import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { siteContentDirs } from './site-dirs.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
@@ -919,7 +919,7 @@ function externalSource(d) {
   return source
 }
 
-function queriesNested(declarations, uuids = null, org = null) {
+function queriesNested(declarations, uuids = null, scope = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
@@ -930,13 +930,13 @@ function queriesNested(declarations, uuids = null, org = null) {
     // the runtime fetches it from (never the records service).
     const source = d.path ? { path: d.path } : d.url !== undefined ? externalSource(d) : d.source
     setIf(data, 'source', source)
-    // ⛔ QUALIFIED, WITH THE SAME RULE AND THE SAME ORG AS THE RECORDS' `$model`
-    // (`records.js::buildRecordEntities`). A consumer answers a query by matching
-    // this name against the Models its records were stored under, so a verbatim
-    // `@/member` beside records stored as `@org/member` names nothing: the query
-    // resolves no Model and the page that binds it renders empty. The pull puts the
-    // author's `@/` back (`records-project.js::declarationsToQueriesYml`).
-    setIf(data, 'schema', resolveSelfScope(d.schema, org))
+    // ⛔ QUALIFIED, WITH THE SAME RULE AND THE SAME SCOPE AS THE RECORDS' `$model`
+    // (`records.js::buildRecordEntities`) — the site's foundation's. A consumer
+    // answers a query by matching this name against the Models its records were
+    // stored under, so a verbatim `@/member` beside records stored as `@acme/member`
+    // names nothing: the query resolves no Model and the page that binds it renders
+    // empty. The pull puts the author's `@/` back (`records-project.js::declarationsToQueriesYml`).
+    setIf(data, 'schema', resolveSelfScope(d.schema, scope))
     setIf(data, 'sort', d.sort)
     // Legacy `filter:` is not synced — it is translated to `where` upstream
     // (the canonical predicate). No legacy fields on the wire.
@@ -1237,14 +1237,16 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  * @param {string} [opts.sourceLocale] - localized-field wrap locale. Defaults to
  *        the site's effective default locale (`defaultLanguage || languages[0] ||
  *        'en'` — the shared `resolveDefaultLocale` rule), NOT a bare 'en'.
- * @param {string} [opts.org] - the publish org, which qualifies a query's
- *        foundation-relative `schema` (`@/x` → `@org/x`). Pass the same org the
- *        records are emitted with; absent, `@/x` ships as written.
+ * @param {string|null} [opts.scope] - the scope a query's foundation-relative `schema`
+ *        resolves into (`@/x` → `@scope/x`): the site's foundation's. Defaults to
+ *        `siteSelfScope`; pass the scope the records are emitted with. With none
+ *        known, `@/x` ships as written.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $model, info, settings?, pages, layout_sections, extensions,
  *        queries, services?, secrets? }`
  */
 export async function siteProjectToDocument(siteRoot, opts = {}) {
+  refuseOrgOption(opts, 'uwx/site')
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
   const sourceLocale = opts.sourceLocale || resolveDefaultLocale(siteYml)
   if (!siteYml.name) {
@@ -1542,7 +1544,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   //
   // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
-  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, opts.org)
+  const scope = opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot)
+  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, scope)
   // Emitted ONLY when the file declares the key — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.

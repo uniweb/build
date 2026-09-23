@@ -40,7 +40,8 @@ import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './quer
 import { poolDirsForSchema, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
 import { isContentBodyField } from './data-schema.js'
-import { unresolveSelfScope } from './self-scope.js'
+import { unresolveSelfScope, refuseOrgOption } from './self-scope.js'
+import { parseCatalogRef } from '../site/foundation-ref.js'
 import { unwrapLocalized } from './backfill.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
@@ -151,8 +152,8 @@ function indexFolder(folderDoc) {
 // `schemaForPoolDirs`, and deliberately not a second rule: if the two disagreed,
 // a pulled record would land somewhere the next build reads as a different
 // schema — silently, because both paths are well-formed.
-function recordDirFor(recordsRoot, model, selfOrg) {
-  const dirs = poolDirsForSchema(unresolveSelfScope(model, selfOrg))
+function recordDirFor(recordsRoot, model, scope) {
+  const dirs = poolDirsForSchema(unresolveSelfScope(model, scope))
   return dirs ? join(recordsRoot, ...dirs) : null
 }
 
@@ -171,16 +172,6 @@ function locate(document, folderIndex) {
     return { folderPath: parts.slice(0, -1).join('/'), slug: parts[parts.length - 1] }
   }
   return fromFolder || null
-}
-
-/** The site's own org on `backend` — its `site.org` in `sync.json` — bare (`acme`), or null. Stored bare — see `writeSiteOrg`. */
-// ⛔ `site.yml::$org` IS GONE (2026-09-20) — the org lives in
-// `sync.json::backends.<origin>.site.org`. This read `site.yml` and, once step 4
-// moved the key, silently returned null: every `@org/x` model a pull met would have
-// been placed back as if the site had no org. No test spanned it.
-function readSiteOrg(siteRoot, backend) {
-  const org = backend ? readBackendState(siteRoot, backend).site?.org : null
-  return typeof org === 'string' && org ? org : null
 }
 
 // Skip undefined when copying optional fields into a projected declaration.
@@ -239,15 +230,15 @@ function isDerivedDeferred(d, dataSchemas) {
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
+function declToFileShape(wire, dataSchemas = null, scope = null) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
-  // `schema`. The push qualifies a foundation-relative `@/x` to `@org/x`
+  // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
-  // `@/x`: against `@org/x` the query-name default would never match — writing an
+  // `@/x`: against `@scope/x` the query-name default would never match — writing an
   // explicit schema the author never had — and the derived-`deferred` lookup would
   // miss, persisting a derivation into their file (the 2026-08-29 defect).
-  const d = selfOrg && typeof wire.schema === 'string'
-    ? { ...wire, schema: unresolveSelfScope(wire.schema, selfOrg) }
+  const d = scope && typeof wire.schema === 'string'
+    ? { ...wire, schema: unresolveSelfScope(wire.schema, scope) }
     : wire
   const name = d.name || d.$id
   const decl = {}
@@ -329,14 +320,14 @@ function declToFileShape(wire, dataSchemas = null, selfOrg = null) {
  * @param {object} params
  * @param {object} params.document - a site-content `$`-document (`{ queries }`)
  * @param {string} params.siteRoot
- * @param {string} [params.org] - the site's own org, so a `schema` the producer
- *        qualified from `@/x` is written back as `@/x`. Defaults to the org
- *        `sync.json` records for `backend`, the same default `recordsToProject`
- *        places records by.
- * @param {string|null} [params.backend] - whose recorded org is that default
+ * @param {string|null} [params.scope] - the scope the push qualified a `schema` from
+ *        `@/x` with — the site's foundation's — so it is written back as `@/x`.
+ *        Defaults to the scope of the foundation ref the pulled document carries
+ *        (`info.foundation`, the pinned `@org/name@version`), which is that scope.
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
-export function declarationsToQueriesYml({ document, siteRoot, org, backend = null }) {
+export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest }) {
+  refuseOrgOption(rest, 'declarationsToQueriesYml')
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
   if (decls.length === 0) return report
@@ -354,11 +345,12 @@ export function declarationsToQueriesYml({ document, siteRoot, org, backend = nu
     siteYml = null
   }
   const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
-  const selfOrg = org ?? readSiteOrg(siteRoot, backend)
+  const selfScope =
+    scope !== undefined ? scope : (parseCatalogRef(document?.info?.foundation)?.scope ?? null)
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfOrg)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfScope)
     if (!name) continue
     queries[name] = decl
   }
@@ -469,20 +461,21 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
  * @param {object} params.opts
  * @param {(modelName: string) => object|null|undefined} params.opts.resolveDeclaration
  *        - resolve a Model's data-schema declaration by name (`$model`).
- * @param {string} [params.opts.org] - the site's own org, so a `@org/x` model the
- *        producer resolved from `@/x` is placed back where the author wrote it.
- *        Defaults to the org `sync.json` records for `opts.backend`.
- * @param {string} [params.opts.backend] - whose record map to read and extend, and
- *        whose recorded org is that default
+ * @param {string|null} [params.opts.scope] - the scope the push qualified a record's
+ *        `@/x` Model with — the site's foundation's — so a `@scope/x` model is placed
+ *        back where the author wrote it. The caller resolves it up front, as it does
+ *        Models (`siteSelfScope`); absent, a model is placed under its own scope.
+ * @param {string} [params.opts.backend] - whose record map to read and extend
  * @param {string} [params.opts.sourceLocale]
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
   const { resolveDeclaration, sourceLocale = 'en' } = opts
-  // The site's own org, so a `@org/x` model the producer resolved from `@/x` is
-  // placed back where the author wrote it. Read from `sync.json` (this backend's
-  // `site.org`) unless the caller already has it.
-  const selfOrg = opts.org ?? readSiteOrg(siteRoot, opts.backend)
+  refuseOrgOption(opts, 'recordsToProject')
+  // The scope the push qualified `@/x` with — the site's foundation's — so a
+  // `@scope/x` model is placed back where the author wrote it. ⛔ It was the site
+  // owner's org, read from `sync.json`, until 2026-09-22 (`self-scope.js`).
+  const selfScope = opts.scope ?? null
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')
   }
@@ -525,7 +518,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       continue
     }
 
-    const poolDir = recordDirFor(recordsRoot, document.$model, selfOrg)
+    const poolDir = recordDirFor(recordsRoot, document.$model, selfScope)
     if (!poolDir) {
       skipped.push({
         uuid: document.$uuid,

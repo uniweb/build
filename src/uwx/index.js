@@ -64,6 +64,9 @@ export {
   folderToFolderYml,
   findRecordFileByUuid,
 } from './records-project.js'
+// The scope a site's `@/x` refs resolve into — its foundation's. A pull resolves it
+// up front and hands it to the synchronous projections above.
+export { siteSelfScope } from './self-scope.js'
 export {
   siteInfoToConfig,
   sectionRecordToFile,

@@ -868,9 +868,12 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  *        files that have no corresponding incoming item (git-pull-like). Off by
  *        default; `uniweb pull` opts in. Guarded against wiping a level on an
  *        empty set.
+ * @param {string|null} [params.scope] - the scope the push qualified a query's
+ *        `@/x` schema with, so it is written back as `@/x` — see
+ *        `declarationsToQueriesYml`, whose default it overrides.
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope }) {
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
@@ -893,7 +896,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   )
 
   report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
-  report.queries = declarationsToQueriesYml({ document, siteRoot, backend })
+  report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

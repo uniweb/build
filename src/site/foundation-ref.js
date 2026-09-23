@@ -32,6 +32,20 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 
 /**
+ * A catalog ref — `@org/name@version` — in its parts, or null for anything else.
+ *
+ * The grammar lives here once: `detectFoundationType` refuses a ref for a build, and a
+ * site's sync reads the ref's scope to qualify its `@/x` refs (`uwx/self-scope.js`).
+ *
+ * @param {unknown} value
+ * @returns {{ scope: string, name: string, version: string }|null} `scope` as `@org`
+ */
+export function parseCatalogRef(value) {
+  const m = typeof value === 'string' ? /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(value) : null
+  return m ? { scope: `@${m[1]}`, name: m[2], version: m[3] } : null
+}
+
+/**
  * Detect foundation type from the foundation config value
  *
  * Foundations are runtime federated modules, never npm packages — there is
@@ -104,8 +118,7 @@ export function detectFoundationType(foundation, siteRoot) {
   // match the documented backend selection — so `--backend`, `uniweb login
   // --backend` and the documented env var all left it pinned — and the artifact
   // names were the pre-`entry.js` ones the build stopped emitting.
-  const orgScopedMatch = /^@([a-z0-9_-]+)\/([a-z0-9_-]+)@(.+)$/.exec(name)
-  if (orgScopedMatch) {
+  if (parseCatalogRef(name)) {
     throw new Error(
       [
         `Foundation "${name}" is a catalog ref, and a build cannot resolve it to a URL.`,

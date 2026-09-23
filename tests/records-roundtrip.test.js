@@ -45,6 +45,11 @@ const w = (root) => (rel, body) => {
 // ⭐ `hello` needs no line: every record in `records/` sits at the top of the folder
 // unless `records/folder.yml` places it (ruled 2026-09-21).
 const BACKEND = 'http://backend.test'
+// The scope in the foundation's name, `@acme/base` — what a record's `@/article`
+// resolves into on push, and what a pull undoes. Stated, as `uniweb pull` states it
+// (it resolves the scope up front); this fixture's foundation has no `main.js` to read
+// it from. ⛔ Not the site owner's org, which pull read from sync.json until 2026-09-22.
+const SCOPE = '@acme'
 
 const FOLDER_YML = [
   '- folder: archive',
@@ -75,7 +80,7 @@ const seed = (dir) => {
 }
 
 const produce = async (siteRoot) => {
-  const col = await buildRecordEntities(siteRoot, { org: '@acme', backend: BACKEND })
+  const col = await buildRecordEntities(siteRoot, { scope: SCOPE, backend: BACKEND })
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     folderNodes: col.folder.nodes,
@@ -112,7 +117,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: first.folder.document,
       recordDocs: first.col.entities.map((e) => e.document),
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(report.warnings).toEqual([])
     expect(report.records).toBe('updated')
@@ -121,7 +126,7 @@ describe('push → pull → push is a fixed point', () => {
     expect(existsSync(join(dest, 'records', 'folder.yml'))).toBe(true)
     // ⭐ `records/article/`, not `records/acme/article/`. The producer resolves
     // `@/article` to `@acme/article` before it ships; the pull undoes that against
-    // the site's own `$org`, or the next build reads a different schema.
+    // the foundation's scope, or the next build reads a different schema.
     expect(existsSync(join(dest, 'records', 'article', 'hello.md'))).toBe(true)
     expect(existsSync(join(dest, 'collections'))).toBe(false)
 
@@ -144,7 +149,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: folder.document,
       recordDocs: col.entities.map((e) => e.document),
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
 
     // Only the sub-folder: the record at the top needs no line.
@@ -164,7 +169,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: null,
       recordDocs: [],
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(report.records).toBe('skipped')
     expect(readFileSync(join(dest, 'records', 'folder.yml'), 'utf8')).toBe('- folder: kept\n  records:\n    - article/kept.md\n')
@@ -183,7 +188,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: { contents: flat.folder.document.contents.flatMap((n) => (n.kind === 'branch' ? n.$children : [n])) },
       recordDocs: flat.col.entities.map((e) => e.document),
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(report.records).toBe('removed')
     expect(existsSync(join(dest, 'records', 'folder.yml'))).toBe(false)
@@ -200,7 +205,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: { contents: [] },
       recordDocs: [],
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(report.records).toBe('unchanged')
     expect(existsSync(join(dest, 'records', 'folder.yml'))).toBe(false)
@@ -224,7 +229,7 @@ describe('push → pull → push is a fixed point', () => {
       },
       recordDocs: [], // the record never arrived
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(report.records).toBe('skipped')
     expect(report.warnings.some((x) => x.includes('not written locally'))).toBe(true)
@@ -239,7 +244,7 @@ describe('push → pull → push is a fixed point', () => {
       folderDoc: { contents: [{ kind: 'ref', name: 'ghost', entry: { model: '@acme/article', entity: 'U9' } }] },
       recordDocs: [],
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(report.warnings.some((x) => x.includes('"ghost"') && x.includes('remove it from the folder'))).toBe(true)
   })
@@ -270,7 +275,7 @@ describe('a draft survives the round trip', () => {
       folderDoc: first.folder.document,
       recordDocs: first.col.entities.map((e) => e.document),
       siteRoot: dest,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(readFileSync(join(dest, 'records', 'article', 'hello.md'), 'utf8')).toContain('draft: true')
     expect(readFileSync(join(dest, 'records', 'article', 'older.md'), 'utf8')).not.toContain('draft')
@@ -289,7 +294,7 @@ describe('a draft survives the round trip', () => {
       folderDoc: folder.document,
       recordDocs: col.entities.map((e) => e.document),
       siteRoot: src,
-      opts: { resolveDeclaration, backend: BACKEND },
+      opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE },
     })
     expect(readFileSync(join(src, 'records', 'article', 'hello.md'), 'utf8')).not.toContain('draft')
   })

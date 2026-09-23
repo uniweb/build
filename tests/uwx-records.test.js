@@ -804,7 +804,11 @@ describe('buildRecordEntities — free-form collection body override (B-1)', () 
 // register-side rule lives in `uwx/registry-package.js` (`scoped`), this side in
 // `buildRecordEntities`, and a test that only asserted one would let them
 // drift again.
-describe('buildRecordEntities — `@/` model refs resolve into the publish org', () => {
+//
+// ⭐ The scope is the FOUNDATION's (2026-09-22) — derived from its name by default,
+// which `uwx-query-schema-self-scope.test.js` pins. This fixture's foundation has no
+// `main.js`, so nothing names it: these cases state the scope, or have none.
+describe('buildRecordEntities — `@/` model refs resolve into the foundation scope', () => {
   let root
   let siteDir
 
@@ -843,31 +847,37 @@ describe('buildRecordEntities — `@/` model refs resolve into the publish org',
 
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-  it('resolves `@/member` to `@org/member` on the entity and leaves `@uniweb/*` alone', async () => {
-    const { entities } = await buildRecordEntities(siteDir, { org: '@proximify' })
+  it('resolves `@/member` to `@scope/member` on the entity and leaves `@uniweb/*` alone', async () => {
+    const { entities } = await buildRecordEntities(siteDir, { scope: '@acme' })
     expect(entities).toHaveLength(1)
     // The value that becomes `$model` on the wire, and `models_required` in the manifest.
-    expect(entities[0].model).toBe('@proximify/member')
-    expect(entities[0].document.$model).toBe('@proximify/member')
+    expect(entities[0].model).toBe('@acme/member')
+    expect(entities[0].document.$model).toBe('@acme/member')
   })
 
-  it('accepts a bare org handle as well as `@handle`', async () => {
-    const { entities } = await buildRecordEntities(siteDir, { org: 'proximify' })
-    expect(entities[0].model).toBe('@proximify/member')
+  it('accepts a bare scope handle as well as `@handle`', async () => {
+    const { entities } = await buildRecordEntities(siteDir, { scope: 'acme' })
+    expect(entities[0].model).toBe('@acme/member')
   })
 
-  it('⛔ WARNS rather than throwing when no org is known — a `status` probe has none', async () => {
-    // Throwing here would break `probeUnpushed`, which is offline and orgless and
-    // must still be able to count changed entities on a never-pushed site.
+  it('⛔ WARNS rather than throwing when the foundation has no scope yet — a `status` probe may meet one', async () => {
+    // Throwing here would break `probeUnpushed`, which is offline and must still be
+    // able to count changed entities on a site whose foundation never registered.
     const { entities, warnings } = await buildRecordEntities(siteDir)
     expect(entities[0].model).toBe('@/member')
     expect(warnings.join('\n')).toMatch(/foundation-relative/)
+    expect(warnings.join('\n')).toMatch(/scope is part of its name/)
   })
 
-  it('⛔ CONTROL — an ALREADY-QUALIFIED ref is NOT re-scoped to the publisher', async () => {
+  it('⛔ refuses the retired `org` — the site owner is not the foundation scope', async () => {
+    await expect(buildRecordEntities(siteDir, { org: '@proximify' })).rejects.toThrow(
+      /`org` is no longer read/
+    )
+  })
+
+  it('⛔ CONTROL — an ALREADY-QUALIFIED ref is NOT re-scoped', async () => {
     // Without this the suite cannot tell "resolves @/" from "rewrites every ref to
-    // the publish org", and the second would silently re-home a shared or
-    // other-org Model onto whoever happened to run the push.
+    // the scope", and the second would silently re-home a shared or other-org Model.
     const alt = join(root, 'site2')
     mkdirSync(join(alt, 'records', 'acme', 'member'), { recursive: true })
     writeFileSync(
@@ -880,7 +890,7 @@ describe('buildRecordEntities — `@/` model refs resolve into the publish org',
     )
     writeFileSync(join(alt, 'records', 'acme', 'member', 'alice.md'), '---\nname: Alice\n---\nBio\n')
 
-    const { entities } = await buildRecordEntities(alt, { org: '@proximify' })
+    const { entities } = await buildRecordEntities(alt, { scope: '@proximify' })
     expect(entities[0].model).toBe('@acme/member')
   })
 })

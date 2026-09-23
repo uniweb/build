@@ -57,7 +57,7 @@ import {
 } from '../site/entity-pool.js'
 import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isContentBodyField } from './data-schema.js'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { resolveSelfScope } from './self-scope.js'
+import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
@@ -554,6 +554,9 @@ function resolveDeclaration(schema, modelName) {
  *        `@uniweb/data-schema` declaration (or null). The verb wires this to the
  *        backend's Model-read route. Without it, the local foundation is required.
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
+ * @param {string|null} [opts.scope] - the scope a record's `@/x` Model resolves into.
+ *        Defaults to the site's foundation's (`siteSelfScope`); a caller that has it
+ *        already passes it, so one emit reads it once.
  * @returns {Promise<{ entities: object[], index: object[], warnings: string[],
  *   schemaless: Array<{name: string, model: string}>, colConfig: object,
  *   folder: object, recordsDirExists: boolean }>}
@@ -585,6 +588,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // twice and the duplicate check refused the push (measured: "appears in more than
   // one query"), and a record no query read was never pushed. Records are walked
   // once, by the schema their folder declares.
+  refuseOrgOption(opts, 'uwx/records')
   const pool = await readEntityPool(siteRoot)
   const recordsCfg = await readRecordsConfig(siteRoot, { dir: pool.dir })
   if (recordsCfg.error) throw new Error(`uwx/records: ${recordsCfg.error}`)
@@ -657,19 +661,25 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   //
   // ⛔ The rule lives in `./self-scope.js`, shared with the `queries` Section
   // (`site.js::queriesNested`): a query's `schema` must name exactly the Model
-  // these records are stored under, so both go through one function with one org.
+  // these records are stored under, so both go through one function with one scope.
+  //
+  // ⭐ THE SCOPE IS THE FOUNDATION'S — the one `register` stored these Models under —
+  // never the site owner's (2026-09-22; `self-scope.js` has the record).
+  const scope =
+    opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot, { foundationDir: opts.foundationDir })
   const warnedUnscoped = new Set()
   const modelFor = (schema, where) => {
-    const modelName = resolveSelfScope(schema, opts.org)
-    // Unresolvable `@/` — no org is known. Ship it rather than throwing (a `status`
-    // probe on a never-pushed site has no org and must still count), but say so:
-    // the backend's refusal names a missing Model and cannot name this cause.
+    const modelName = resolveSelfScope(schema, scope)
+    // Unresolvable `@/` — the foundation has no scope yet. Ship it rather than
+    // throwing (a `status` probe on a never-registered foundation must still count),
+    // but say so: the backend's refusal names a missing Model and cannot name this cause.
     if (modelName === schema && typeof schema === 'string' && schema.startsWith('@/') && !warnedUnscoped.has(schema)) {
       warnedUnscoped.add(schema)
       warnings.push(
-        `${where}: \`${schema}\` is foundation-relative and no org is known, ` +
+        `${where}: \`${schema}\` is foundation-relative and the foundation has no scope yet, ` +
           `so it ships unresolved. The backend resolves Models by name and will refuse it. ` +
-          `Pass \`--org @handle\`, or push once so the site records its org.`
+          `A foundation's scope is part of its name — \`name: '@org/<name>'\` in its main.js, ` +
+          `which \`uniweb register\` writes.`
       )
     }
     return modelName
@@ -863,8 +873,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       ? !unresolved.has(schema)
       : Boolean(await declarationFor(modelFor(schema, `query "${name}"`)))
     if (!resolved) {
-      if (decl.schemaExplicit) throw unresolvedExplicit(resolveSelfScope(schema, opts.org), name)
-      schemaless.push({ name, model: resolveSelfScope(schema, opts.org) })
+      if (decl.schemaExplicit) throw unresolvedExplicit(resolveSelfScope(schema, scope), name)
+      schemaless.push({ name, model: resolveSelfScope(schema, scope) })
       continue
     }
     if (!hasRecords) {

@@ -23,6 +23,7 @@ import { buildRecordEntities, entityContentHash } from './records.js'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
+import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { isLocalAssetPath } from '../site/assets.js'
@@ -205,6 +206,9 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
  * @param {string} [opts.foundationDir]   - local foundation root (collection Models)
+ * @param {string|null} [opts.scope]      - the scope the site's `@/x` refs resolve
+ *        into. Defaults to its foundation's (`siteSelfScope`) — the one in the
+ *        foundation's name. `org` is refused: it carried the site owner's.
  * @param {Function} [opts.resolveModel]  - async non-local Model resolver
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
@@ -271,6 +275,13 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const stamp = withBaseVersion(opts.baseVersions || {}, opts.itemBaseVersions || {})
   const exporter = opts.exporter
   const exportedAt = opts.exportedAt
+  refuseOrgOption(opts, 'emitSyncPackages')
+  // ⭐ ONE SCOPE FOR THE WHOLE EMIT — the site's foundation's, the one `register`
+  // stored its Models under — so a record's `$model` and a query's `schema` are
+  // qualified alike. Read once here and handed to both. ⛔ It was the org that owns
+  // the SITE until 2026-09-22 (`self-scope.js`).
+  const scope =
+    opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot, { foundationDir: opts.foundationDir })
 
   const col = await buildRecordEntities(siteRoot, {
     // Which backend's record uuids go on the wire (sync.json) — see records.js.
@@ -278,10 +289,10 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     ...(opts.foundationDir ? { foundationDir: opts.foundationDir } : {}),
     ...(opts.resolveModel ? { resolveModel: opts.resolveModel } : {}),
     ...(sourceLocale ? { sourceLocale } : {}),
-    // The publish org — resolves a foundation-relative `@/x` model ref into
-    // `@org/x` before it ships. Absent on an offline probe, which is why
-    // buildRecordEntities warns rather than throws.
-    ...(opts.org ? { org: opts.org } : {}),
+    // Resolves a foundation-relative `@/x` model ref into `@scope/x` before it ships.
+    // Null for a foundation with no scope yet, which is why buildRecordEntities
+    // warns rather than throws.
+    scope,
   })
   const warnings = [...col.warnings, ...(col.folder?.warnings ?? [])]
 
@@ -325,10 +336,10 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         // Whose $uuid belongs on this wire document — see siteProjectToDocument.
         ...(opts.backend ? { backend: opts.backend } : {}),
         ...(opts.queryUuids ? { queryUuids: opts.queryUuids } : {}),
-        // ⛔ THE SAME ORG `buildRecordEntities` WAS GIVEN ABOVE. A query's `schema`
+        // ⛔ THE SAME SCOPE `buildRecordEntities` WAS GIVEN ABOVE. A query's `schema`
         // must name the Model its records are stored under, and both are qualified
-        // from one `@/x` by one rule (`./self-scope.js`) — so they take one org.
-        ...(opts.org ? { org: opts.org } : {}),
+        // from one `@/x` by one rule (`./self-scope.js`) — so they take one scope.
+        scope,
         // Withhold the `$services`/`$secrets` Sections when the caller has
         // determined the file is not asking for anything new by them. Passed
         // through rather than decided here: the last-agreed state is project

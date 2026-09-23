@@ -179,9 +179,11 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     const col = doc.queries[0]
     expect(col.$id).toBe('articles')
     expect(col.name).toBe('articles')
-    expect(col.schema).toBe('@/article')
+    // The site's foundation is `@acme/marketing@1.2.3`, so its `@/article` is that
+    // foundation's — `@acme/article`, the name its records are stored under.
+    expect(col.schema).toBe('@acme/article')
     expect(col.sort).toBe('date desc')
-    // ⛔ No `source`. A file-based query addresses `entities/{schema}/` through
+    // ⛔ No `source`. A file-based query addresses `records/{schema}/` through
     // its schema; a path would be a derivation shipped as authored config.
     expect(col.source).toBeUndefined()
   })
