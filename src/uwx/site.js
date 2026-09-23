@@ -1630,53 +1630,13 @@ export function writeSiteEntityUuid(siteRoot, backend, uuid) {
   return updateBackendState(siteRoot, backend, { site: { uuid } })
 }
 
-/**
- * Record the org the site was CREATED under — `backend`'s `site.org` in `sync.json`,
- * beside the site's uuid. (It was `site.yml::$org` until 2026-09-20.)
- *
- * The org is consumed at exactly one moment — the `as_org` on the create that
- * mints `$uuid` — and after that the uuid carries the ownership binding. So this
- * is not a knob the backend re-reads; it is the answer to *"whose workspace is
- * this site's storage charged to?"*, which `$uuid` alone cannot answer and which
- * otherwise costs a backend round-trip (or is simply unknowable from the repo).
- *
- * Stored as the BARE handle, never `@handle` — the canonical form everywhere else
- * (`deriveScope` returns it, `createOrg` echoes it as `org.handle`,
- * `validateHandle` validates it); the `@` is display sugar the reader re-adds. In
- * `site.yml` it was also the only form that parsed: `@` is a reserved YAML
- * indicator, so `$org: @acme` is an error.
- *
- * ⛔ NOT `deploy.yml`, though that file already holds the bound `backend` and the
- * two look like the same class of fact. Four reasons, and the first is the one that
- * settles it:
- *
- *  1. CARDINALITY. `deploy.yml` is multi-TARGET and `backend` sits *under* a target,
- *     so its shape says "this may vary per target." An org may not: one site has one
- *     owning org, fixed at create and preserved on replace. The org is a property of
- *     the site's uuid, and sits beside it in the same backend's section — filing it
- *     under a target would encode a freedom that does not exist.
- *  2. WHO WRITES. Three paths mint a site (`ensureSiteExists`, the media-less push's
- *     content-lane create, and `clone` seeding an existing one) and **none of them
- *     write `deploy.yml`** — only `deploy` and `publish` call `recordLastDeploy`. The
- *     record would exist or not depending on which verb the developer reached for.
- *  3. SUPPRESSIBLE. `recordLastDeploy` is a no-op under `autoSave: off` / `--no-save`.
- *     Turning off deploy *receipts* would silently drop an *ownership* record.
- *  4. SEMANTICS. `deploy.yml` describes the act of shipping (`lastDeploy` is a
- *     receipt) and is optional entirely. But `push` creates a site and never
- *     publishes — a site can exist, be owned, and accrue storage charges without
- *     ever being deployed. Ownership does not belong in a record of a deploy that
- *     may not have happened.
- *
- * `backend` answers *where this ships*; `site.org` answers *whose this is*.
- *
- * @param {string} siteRoot
- * @param {string} backend - the origin of the backend the site was created on
- * @param {string} handle - the bare org handle (no leading `@`)
- * @returns {boolean} true if sync.json changed
- */
-export function writeSiteOrg(siteRoot, backend, handle) {
-  return updateBackendState(siteRoot, backend, { site: { org: handle } })
-}
+// ⛔ `writeSiteOrg` is GONE (2026-09-23). The workspace a project's requests name is two
+// keys of `site` now — `org` (a handle, bare) and `unit` (the uuid of a workspace with no
+// handle), at most one set — and every site request names it, so it is no longer a note
+// written once at the create. A writer of one key would leave the other stale; write
+// both through `updateBackendState`. Why it lives here rather than in `deploy.yml`: a
+// site has one workspace per backend, fixed by the create, while `deploy.yml` is per
+// target and records the act of shipping, which `push` never does.
 
 // ⛔ `writeSiteBackend` and `site.yml::$backend` are GONE (2026-09-20). The scope is
 // no longer a value recorded beside the uuid — it is the KEY the identity is stored
