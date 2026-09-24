@@ -100,6 +100,18 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     expect(posts.map((p) => p.title)).toEqual(['New', 'Old'])
   })
 
+  it('a `where` outside the brief answers as the records service does: a path through its section', async () => {
+    // A bare field outside the brief is missing on every delivered record; a dotted path that
+    // starts at the section reaches it — the query language's rule on both lanes.
+    site('posts:\n  schema: "@/post"\n')
+    w('site/records/post/a.md', '---\ncard:\n  title: A\ndetails:\n  author: Ada\n---\n')
+    w('site/records/post/b.md', '---\ncard:\n  title: B\ndetails:\n  author: Bob\n---\n')
+    const byPath = await processQueries(SITE, { posts: { schema: '@/post', where: { 'details.author': 'Ada' } } }, undefined, '/')
+    expect(byPath.posts.map((p) => p.title)).toEqual(['A'])
+    const bare = await processQueries(SITE, { posts: { schema: '@/post', where: { author: 'Ada' } } }, undefined, '/')
+    expect(bare.posts).toEqual([])
+  })
+
   it('a YAML record, and a `many` section — delivered as a list under its name', async () => {
     site('courses:\n  schema: "@/course"\n')
     w('site/records/course/rust.yml', 'identity:\n  title: Rust 101\nmodules:\n  - title: Basics\n  - title: Ownership\n')
