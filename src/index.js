@@ -26,7 +26,6 @@ export {
 export {
   validateItem,
   validateDataInputs,
-  validateConceptBlocks,
   validateTaggedDataBlocks,
   isStaticallyCheckable,
 } from './validate-data.js'

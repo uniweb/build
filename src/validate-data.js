@@ -217,7 +217,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const violations = []
   const schemasSeen = new Set()
   let recordCount = 0
-  // (schema, slug) of every record this pass checked, so pass 5 checks the rest.
+  // (schema, slug) of every record this pass checked, so pass 4 checks the rest.
   const checkedRecords = new Set()
 
   for (const entry of work.values()) {
@@ -257,21 +257,21 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
     })
   }
 
-  // Pass 3 — concept blocks, which join to a schema by CONVENTION rather than
-  // by a foundation binding. Additive and silent unless a schema resolves.
-  const concepts = await validateConceptBlocks(site)
-  violations.push(...concepts.violations)
-  for (const ref of concepts.schemas) schemasSeen.add(ref)
-  recordCount += concepts.checked
+  // ⛔ No pass checks a ```md:<tag> CONCEPT BLOCK — removed 2026-09-24 [Diego]. Its
+  // structure is recovered from the markdown by the semantic parser, so a schema has
+  // nothing to add: the pass matched `md:<tag>` to `@std/<tag>` and checked the parsed
+  // items, which either could not produce a finding (a schema in the item vocabulary)
+  // or produced ones no author could satisfy (`name` on `md:person` — markdown has no
+  // `name`). It was advisory while findings only warned; they now fail the run.
 
-  // Pass 4 — tagged data blocks, which join by the component's OWN binding.
+  // Pass 3 — tagged data blocks, which join by the component's OWN binding.
   const blocks = validateTaggedDataBlocks(site, foundation, dataSchemas)
   violations.push(...blocks.violations)
   deferred.push(...blocks.deferred)
   for (const ref of blocks.schemas) schemasSeen.add(ref)
   recordCount += blocks.checked
 
-  // Pass 5 — every record file no section's binding reached, against the data schema
+  // Pass 4 — every record file no section's binding reached, against the data schema
   // its folder names. ⭐ The set a push sends: every file in the records directory is
   // a record and every record is pushed, whether or not a section reads it — and
   // until 2026-09-24 one that no section read was never checked here.
@@ -369,144 +369,6 @@ function withBody(schema, r) {
   return record
 }
 
-/**
- * Check each ```md:<tag> concept block against `@std/<tag>`, when that schema
- * exists.
- *
- * THREE PROPERTIES MAKE THIS SAFE, and all three have to hold:
- *
- * 1. It adds NO REGISTRY. The resolution is mechanical — `md:faq` → `@std/faq`,
- *    the same `@std` → `@uniweb/schemas` mapping every other ref uses. What the
- *    framework gains is a naming convention; no code branches on the value of a
- *    tag, and nothing here knows which concepts exist. A hardcoded list of
- *    concept names is the thing this whole design exists to avoid, and it would
- *    arrive through this door if the check needed to know what `faq` means.
- *
- * 2. It never touches SHAPE. A concept block's shape comes from its fence,
- *    unconditionally. This runs after the parse and changes nothing: a block
- *    with no resolvable schema still parses, still delivers items, still
- *    renders. The schema is a check, never a gate.
- *
- * 3. It never fails at RENDER. Findings only — this whole module is a pre-live
- *    dev/CI gate and the runtime stays tolerant.
- *
- * ⛔ A standard schema for a concept MUST be authored in the ITEM vocabulary —
- * `title`, `paragraphs`, and the rest of the parsed shape — because that is what
- * a concept block always produces. An `@std/faq` written as `{ question, answer }`
- * could only be checked with a per-concept field mapping, which is the forbidden
- * registry arriving by the back door. Author the schema to match the parse, or
- * do not ship the schema.
- *
- * ⛔ AND FOR A PROSE CONCEPT, NO FACET CAN FIRE AT ALL — so do not write an
- * `@std` schema for one. Measured 2026-07-30:
- *
- *   - `required` is inert. The item vocabulary is TOTAL — `flattenGroup` fills
- *     every field it declares, so a titleless item has `title: ''` rather than
- *     no title, and `required` fires only on absent or null. "The author
- *     actually wrote a question" is not expressible.
- *   - `type` cannot fail either. Inside a concept block `title` is always a
- *     string (never an array — `alwaysItems` suppresses the same-level merge
- *     that would make one) and `paragraphs` is always an array of strings.
- *   - which leaves `enum` / `format`, and neither has a natural application to
- *     a question or an answer. The test suite had to invent `format: 'url'` on
- *     a question to make anything fire — that is the tell, not a fixture quirk.
- *
- * The mechanism still earns its place, but it is waiting for a different shape:
- * a concept that carries a tagged DATA BLOCK. Verified that one reaches the item
- * — ```` ```md:steps ```` holding a ```` ```yaml:meta ```` gives
- * `items[0].data.meta` — and there `required` fires when an author omits the
- * block, `enum` constrains a status, `format` constrains a duration. That is the
- * trigger to write a schema. Until then the frontend holds the concept names and
- * their shapes, which is where they belong: its extension encodes the shape
- * executably, and a `standard/faq.js` in `@uniweb/schemas` whose only consumer is
- * that app would be this framework stating which concepts exist — the registry
- * this design forbids, spelled as a filename instead of a switch.
- *
- * Note on resolution: this deliberately does NOT go through `resolveSchemaRef`,
- * which resolves a package from a FOUNDATION's node_modules and throws when a
- * ref is unknown. Neither fits — a concept block needs no foundation (so this
- * works on a link-mode site whose foundation is a registry ref with nothing
- * local), and an unresolved tag must be silent rather than an error. So the
- * package is resolved from this build's own graph, where it is an
- * optionalDependency, exactly as `i18n/records.js` resolves it.
- *
- * @param {Object} site - collected site content (`{ pages }`)
- * @returns {Promise<{ violations: Array, schemas: Set<string>, checked: number }>}
- */
-export async function validateConceptBlocks(site) {
-  const empty = { violations: [], schemas: new Set(), checked: 0 }
-
-  const parse = await loadSemanticParser()
-  if (!parse) return empty // no parser available — nothing to derive items from
-
-  const standards = await loadStandardSchemas()
-  if (!standards) return empty // @uniweb/schemas absent — nothing to check against
-
-  const violations = []
-  const schemasSeen = new Set()
-  let checked = 0
-
-  for (const page of site.pages || []) {
-    walkSections(page.sections || [], (section) => {
-      const doc = section.content
-      if (doc?.type !== 'doc') return
-
-      for (const node of conceptBlockNodes(doc)) {
-        const tag = node.attrs?.tag
-        if (!tag) continue
-
-        const raw = standards(tag)
-        if (!raw) continue // no `@std/<tag>` — say nothing, by design
-
-        let schema
-        try {
-          schema = validateAndNormalizeSchema(raw, `@std/${tag}`)
-        } catch {
-          continue // a malformed standard schema is that package's problem
-        }
-        schemasSeen.add(`@std/${tag}`)
-        const { items } = parse({ type: 'doc', content: node.content || [] }, { alwaysItems: true })
-        const where = {
-          file: `${page.route || '/'} › ${section.type || 'section'} › md:${tag}`,
-          schema: `@std/${tag}`,
-          users: [{ route: page.route, section: section.type, key: tag }],
-        }
-
-        // A list-rooted standard describes the block's items TOGETHER, so they are
-        // checked as that list; any other describes each item. ⛔ Until 2026-09-24 a
-        // list-rooted standard was skipped here without a word.
-        if (rootListSection(schema)) {
-          checked += items.length
-          for (const finding of validateBound(schema, items)) {
-            violations.push(listViolation(finding, (idx) => `item ${idx + 1}`, where))
-          }
-          continue
-        }
-
-        items.forEach((item, idx) => {
-          checked++
-          for (const finding of validateItem(schema, item)) {
-            violations.push({
-              file: `${page.route || '/'} › ${section.type || 'section'} › md:${tag}`,
-              schema: `@std/${tag}`,
-              item: `item ${idx + 1}`,
-              users: [{ route: page.route, section: section.type, key: tag }],
-              ...finding,
-            })
-          }
-        })
-      }
-    })
-  }
-
-  return { violations, schemas: schemasSeen, checked }
-}
-
-/** Every concept block in a doc, including any nested inside a container. */
-function conceptBlockNodes(doc) {
-  return nodesOfType(doc, 'concept_block')
-}
-
 function nodesOfType(doc, type) {
   const out = []
   const walk = (nodes) => {
@@ -531,11 +393,9 @@ function nodesOfType(doc, type) {
  * tagged block fills was never applied to anything. `@std/form` existed for
  * exactly this and had never run outside its own contract test.
  *
- * Unlike concept blocks (pass 3), the join here is NOT by convention. A concept
- * block resolves `md:faq` → `@std/faq` mechanically, which is why that pass must
- * stay silent when no such schema exists. This one uses the binding the component
- * actually declared, so there is no naming rule and no registry — a tag nobody
- * bound is simply not governed, and says nothing.
+ * The join is the binding the component actually declared, so there is no naming
+ * rule and no registry — a tag nobody bound is simply not governed, and says
+ * nothing.
  *
  * The value needs no parsing: a tagged fence lands as a `dataBlock` node with its
  * parsed value already on `attrs.data`, and a body that FAILED to parse never
@@ -596,28 +456,6 @@ export function validateTaggedDataBlocks(site, foundation, dataSchemas) {
   }
 
   return { violations, schemas, checked, deferred }
-}
-
-/** `parseContent`, or null when the parser is not installed. */
-async function loadSemanticParser() {
-  try {
-    const mod = await import('@uniweb/semantic-parser')
-    return typeof mod.parseContent === 'function' ? mod.parseContent : null
-  } catch {
-    return null
-  }
-}
-
-/** A `(name) => schema | undefined` lookup over `@std`, or null when absent. */
-async function loadStandardSchemas() {
-  try {
-    const mod = await import('@uniweb/schemas')
-    if (typeof mod.getSchema === 'function') return (name) => mod.getSchema(name)
-    const table = mod.schemas ?? mod.default
-    return table ? (name) => table[name] : null
-  } catch {
-    return null
-  }
 }
 
 /**
