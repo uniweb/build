@@ -44,9 +44,16 @@ const FAQ = {
   },
 }
 
+// A standard whose ROOT IS A LIST — one `many` section, in the same item vocabulary.
+// Its value is the block's items together, so they are checked as that list.
+const STEPS = {
+  name: 'steps',
+  sections: { items: { many: true, fields: { title: { type: 'string', format: 'url' } } } },
+}
+
 vi.mock('@uniweb/schemas', () => ({
-  schemas: { faq: FAQ },
-  getSchema: (name) => ({ faq: FAQ })[name],
+  schemas: { faq: FAQ, steps: STEPS },
+  getSchema: (name) => ({ faq: FAQ, steps: STEPS })[name],
 }))
 
 const { validateConceptBlocks } = await import('../src/validate-data.js')
@@ -107,6 +114,17 @@ describe('validateConceptBlocks', () => {
     expect(report.checked).toBe(2)
     expect(report.violations).toHaveLength(1)
     expect(report.violations[0].item).toBe('item 2')
+  })
+
+  it("checks a list-rooted standard's items as its list — no longer skipped", async () => {
+    // ⛔ Until 2026-09-24 a standard whose root is a list was skipped here without a
+    // word, so a block tagged with one was never looked at.
+    const site = siteWith(concept('steps', h('https://example.com/1'), p('A'), h('Not a URL'), p('B')))
+    const report = await validateConceptBlocks(site)
+
+    expect([...report.schemas]).toEqual(['@std/steps'])
+    expect(report.checked).toBe(2)
+    expect(report.violations.map((v) => `${v.item} ${v.field}:${v.rule}`)).toEqual(['item 2 title:format'])
   })
 
   it('says NOTHING for a tag with no standard schema', async () => {

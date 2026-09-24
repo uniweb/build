@@ -31,7 +31,7 @@ import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
 import { parentRouteOf } from '@uniweb/core/route-match'
 
-import { validateItem, isStaticallyCheckable, validateBound, flatRecordFields } from '@uniweb/schemas/conform'
+import { validateItem, validateBound, flatRecordFields, rootListSection } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
 // The pure checker, re-exported so `@uniweb/build/validate` stays the one import
@@ -75,7 +75,7 @@ import { processQueries } from './site/query-processor.js'
  *
  * @typedef {Object} Report
  * @property {Array<Object>} violations - Each: { file, schema, item, field, rule, message, users }.
- * @property {Array<Object>} deferred - Inputs not statically checkable: { route, section, key, reason, ref?, url? }.
+ * @property {Array<Object>} deferred - Inputs not checked: data not in the project (an external query), or an inline schema on a binding — { route, section, key, reason, ref?, url? }.
  * @property {Array<Object>} setupErrors - Read failures: { file, message, users }.
  * @property {{ records: number, schemas: number, violations: number, deferred: number }} summary
  */
@@ -197,13 +197,10 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
         const schema = dataSchemas[ref]
         if (!schema) continue // build guarantees refs resolve; defensive skip
 
-        // ⭐ A sections-form schema is checked like any other now (`isStaticallyCheckable`,
-        // 2026-09-24) — a record can be flat or written by section. What is left out is a
-        // schema whose ROOT IS A LIST: it describes a whole value, not one record.
-        if (!isStaticallyCheckable(schema)) {
-          deferred.push({ route: page.route, section: type, key, reason: 'its root is a list, not a record', ref })
-          continue
-        }
+        // ⭐ Every schema is checked (2026-09-24): a sections-form one per record, flat or
+        // written by section, and one whose ROOT IS A LIST as the list the key receives
+        // (pass 2). A list root was deferred here until then, though the query's records
+        // are exactly that list.
 
         const pairKey = `${input.path} ${ref}`
         let entry = work.get(pairKey)
@@ -232,6 +229,19 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
 
     schemasSeen.add(entry.ref)
     const items = Array.isArray(records) ? records : [records]
+
+    // A schema whose ROOT IS A LIST describes the whole value the key receives, and the
+    // query's records ARE that list — so they are checked once, as the list. Any other
+    // schema describes one record, checked per record.
+    if (rootListSection(entry.schema)) {
+      recordCount += items.length
+      const base = { file: entry.path, schema: entry.ref, users: entry.users }
+      for (const finding of validateBound(entry.schema, items)) {
+        violations.push(listViolation(finding, (idx) => itemLabel(items[idx], idx), base))
+      }
+      continue
+    }
+
     items.forEach((item, idx) => {
       recordCount++
       if (item && typeof item.slug === 'string') checkedRecords.add(recordKey(entry.ref, item.slug))
@@ -286,6 +296,16 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
 
 const recordKey = (ref, slug) => `${ref}\u0000${slug}`
 
+// A finding from checking a whole list (`validateBound`) names its element by index —
+// `[3].label` — so the element is named the way a per-record finding names its record,
+// by `label(3)`, and the path is left relative to it.
+function listViolation(finding, label, base) {
+  const m = /^\[(\d+)\]\.?/.exec(finding.field || '')
+  if (!m) return { ...base, item: 'the list', ...finding }
+  const idx = Number(m[1])
+  return { ...base, item: label(idx), ...finding, field: finding.field.slice(m[0].length) || finding.field }
+}
+
 /**
  * Check the records in the records directory that pass 2 did not, each against the
  * data schema its folder names (`records/member/` → `@/member`).
@@ -304,7 +324,9 @@ async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths, check
   const pool = await readEntityPool(siteRoot, { dir: resolveRecordsDir(siteRoot, paths).rel })
   for (const [ref, entities] of groupPoolBySchema(pool.entities)) {
     const schema = await schemaForRecords(ref, { srcDir, dataSchemas })
-    if (!schema || !isStaticallyCheckable(schema)) continue
+    // An entity of a list-rooted schema too: it holds the list under its section's key.
+    // ⛔ Until 2026-09-24 such a folder was skipped here without a word.
+    if (!schema) continue
     for (const pooled of entities) {
       let records
       try {
@@ -442,10 +464,24 @@ export async function validateConceptBlocks(site) {
         } catch {
           continue // a malformed standard schema is that package's problem
         }
-        if (!isStaticallyCheckable(schema)) continue
-
         schemasSeen.add(`@std/${tag}`)
         const { items } = parse({ type: 'doc', content: node.content || [] }, { alwaysItems: true })
+        const where = {
+          file: `${page.route || '/'} › ${section.type || 'section'} › md:${tag}`,
+          schema: `@std/${tag}`,
+          users: [{ route: page.route, section: section.type, key: tag }],
+        }
+
+        // A list-rooted standard describes the block's items TOGETHER, so they are
+        // checked as that list; any other describes each item. ⛔ Until 2026-09-24 a
+        // list-rooted standard was skipped here without a word.
+        if (rootListSection(schema)) {
+          checked += items.length
+          for (const finding of validateBound(schema, items)) {
+            violations.push(listViolation(finding, (idx) => `item ${idx + 1}`, where))
+          }
+          continue
+        }
 
         items.forEach((item, idx) => {
           checked++
