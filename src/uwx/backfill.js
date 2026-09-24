@@ -249,9 +249,12 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
  * @param {string} [params.freeformRelPath] - the free-form path for this record's
  *        content body (buildFreeformRecordPath); lets a target-locale full-doc
  *        body be written under locales/freeform/{locale}/ instead of being dropped.
+ * @param {(model: string, uuid: string) => string|null} [params.refName] - the name a
+ *        referenced record goes by in the project, for a reference's uuid; a reference
+ *        it has no name for is written as the uuid.
  * @returns {string} the source-file text
  */
-export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector, freeformRelPath }) {
+export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName }) {
   const layout = recordFileLayout(declaration)
   if (layout.sections.length === 0) {
     throw new Error('uwx/render: the data schema declares no sections')
@@ -264,7 +267,7 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   }
   // Markdown: the content body field, wherever its single section is, becomes the body.
   const { target } = contentBodyTarget(declaration)
-  const dec = { sourceLocale, collector, freeformRelPath, bodyAt: format === 'md' ? target : null, body: '' }
+  const dec = { sourceLocale, collector, freeformRelPath, refName, bodyAt: format === 'md' ? target : null, body: '' }
 
   const record = {}
   if (document?.$uuid) record.$uuid = document.$uuid
@@ -332,6 +335,7 @@ function decodeList(def, value, dec) {
 // collector (the content body's are captured by `unwrapLocalizedContent`, with its
 // free-form path); a list of localized values is unwrapped element by element.
 function decodeLeaf(raw, field, dec, isBody) {
+  if (field?.type === 'entity_ref') return decodeReference(raw, field, dec)
   if (isProseMirrorField(field)) {
     const sourceDoc = field.localized
       ? unwrapLocalizedContent(raw, dec.sourceLocale, dec.collector, isBody ? dec.freeformRelPath : undefined)
@@ -345,6 +349,14 @@ function decodeLeaf(raw, field, dec, isBody) {
   }
   if (!isBody) dec.collector?.add(raw)
   return unwrapLocalized(raw, dec.sourceLocale)
+}
+
+// A reference comes back as the backend's uuid; the file names its record by handle — the
+// name the site's folder gives it (`refName`), which is what a push resolves back to that
+// uuid. A record the folder does not hold keeps its uuid, and a push sends it as it is.
+function decodeReference(raw, field, dec) {
+  const one = (v) => (typeof v === 'string' && dec.refName ? dec.refName(field.model, v) ?? v : v)
+  return Array.isArray(raw) ? raw.map(one) : one(raw)
 }
 
 /**

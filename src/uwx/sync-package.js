@@ -33,6 +33,18 @@ const SITE_ENTITY_KEY = 'site-content'
 
 const cacheKey = (entity) => `${entity.model} ${entity.id}`
 
+// The folder's placements without the records a push leaves out — `{ kind: 'ref' }` leaves
+// naming them by `$entityId`, inside any branch.
+function withoutRecords(nodes, ids) {
+  if (!ids.size) return nodes
+  const out = []
+  for (const node of nodes || []) {
+    if (node?.kind === 'branch') out.push({ ...node, $children: withoutRecords(node.$children, ids) })
+    else if (!ids.has(node?.$entityId)) out.push(node)
+  }
+  return out
+}
+
 // Attach the push gate's optimistic-concurrency token to an entity, keyed by the
 // BACKEND uuid in its document body (`$uuid`). A never-synced entity has no
 // `$uuid` and therefore no base — correctly unconditional, since there is no
@@ -253,7 +265,11 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  *   records: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], refusals: string[],
  *   skipped: number, schemaless: Array<{name: string, model: string}>,
- *   localAssets: string[], applied: object }>}
+ *   localAssets: string[], applied: object,
+ *   waiting: Array<{id: string, model: string, slug: string, held: boolean, pending: object[]}> }>}
+ *   `waiting` lists the records whose references name a record this backend has not
+ *   minted yet — sent without them, or held back. A caller that sends pushes again
+ *   once this push has been applied (`records.js::encodeReference`).
  *   `refusals` names the records that cannot be sent as written, one line each
  *   (`records.js::recordsToEntities`). A caller that submits must not submit while
  *   any is present: the backend would refuse the records lane — or, for a record
@@ -300,10 +316,43 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   })
   const warnings = [...col.warnings, ...(col.folder?.warnings ?? [])]
 
+  // ⭐ RECORDS WAITING FOR A REFERENCE (`records.js::encodeReference`). A record whose
+  // reference names a record this backend has not minted yet cannot name it on the wire,
+  // so this push sends what it can and the next pass completes it (the CLI's
+  // `pushInPasses`):
+  //   · new, and nothing it waits for is required → sent now without those references,
+  //     so after one pass every record exists, whatever refers to what;
+  //   · new, and a required reference waits → HELD and placed nowhere: it cannot be
+  //     created without it;
+  //   · already on this backend → HELD, left as it is there: sent without a reference it
+  //     has, it would lose that reference until the next pass.
+  // A held record is not sent and keeps the hash last banked for it, so the next pass
+  // sees it as changed.
+  const held = new Set()
+  const unplaced = new Set()
+  for (const e of col.entities) {
+    if (!e.pending?.length) continue
+    if (e.uuid) held.add(e.id)
+    else if (e.pending.some((p) => p.required)) {
+      held.add(e.id)
+      unplaced.add(e.id)
+    }
+  }
+  const waiting = col.entities
+    .filter((e) => e.pending?.length)
+    .map((e) => ({ id: e.id, model: e.model, slug: e.slug, held: held.has(e.id), pending: e.pending }))
+  const placedEntities = []
+  const placedIndex = []
+  col.entities.forEach((e, i) => {
+    if (unplaced.has(e.id)) return
+    placedEntities.push(e)
+    placedIndex.push(col.index[i])
+  })
+
   // The folder rides over the FULL record set (before filtering) so its references
   // are complete — new records by `$ref`, already-minted ones by `entry: <uuid>`.
   const folder = buildFolderEntity({
-    recordEntities: col.entities,
+    recordEntities: placedEntities,
     ...(sourceLocale ? { sourceLocale } : {}),
     // ⭐ Every record in the directory, at the top of the folder or in the
     // sub-folder `folder.yml` places it in — and NOTHING when there is no folder to
@@ -311,7 +360,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // non-empty tree: a `folder.yml` whose folders hold only records that resolved
     // no schema is a tree of empty branches, and sending it would replace the
     // backend's folder with them (measured on the `dynamic` template, 2026-09-21).
-    folderNodes: col.sendFolder === true ? (col.folder?.nodes ?? []) : [],
+    folderNodes: col.sendFolder === true ? withoutRecords(col.folder?.nodes ?? [], unplaced) : [],
     // ⛔ Whether the file side HAS a folder to state (`records.js::sendsFolder`) —
     // not whether it holds anything. A site with no records directory sends none
     // and leaves the backend's alone; an empty directory sends an empty folder,
@@ -469,7 +518,17 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // changed() has side effects (hashes/skipped), so evaluate every entity exactly
   // once, in a stable order: folder, then each record.
   const folderChanged = folder ? changed(folder) : false
-  const recordChanged = col.entities.map((e, i) => ({ entity: e, index: col.index[i], changed: changed(e) }))
+  // A held record keeps its last banked hash — it was not sent (see `held` above).
+  const keepBanked = (entity) => {
+    const key = cacheKey(entity)
+    if (priorHashes[key] !== undefined) hashes[key] = priorHashes[key]
+    return false
+  }
+  const recordChanged = placedEntities.map((e, i) => ({
+    entity: e,
+    index: placedIndex[i],
+    changed: held.has(e.id) ? keepBanked(e) : changed(e),
+  }))
   const changedRecords = recordChanged.filter((r) => r.changed)
 
   let records = null
@@ -523,6 +582,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
 
   return {
     siteContent, records, siteContentUuid, hashes, warnings, skipped,
+    // Records waiting for a reference's record — see `held` above. Non-empty ⇒ the caller
+    // pushes again once this push has been applied.
+    waiting,
     refusals: col.refusals || [],
     schemaless: col.schemaless, localAssets, applied,
     // { stamped, unknown } when identity was applied; null when the caller passed

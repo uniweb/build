@@ -45,6 +45,9 @@ function site(queriesYml) {
   )
   // The `fields:` shorthand, its body a markup text field.
   w('fdn/schemas/bio.yml', 'name: bio\nfields:\n  name: string\n  text: markdown\n')
+  // A reference: a talk names its speaker.
+  w('fdn/schemas/speaker.yml', 'name: speaker\nfields:\n  name: string\n  role: string\n')
+  w('fdn/schemas/talk.yml', "name: talk\nfields:\n  title: string\n  speaker: { ref: '@/speaker' }\n  panel: { ref: '@/speaker', many: true }\n")
   // A brief and a list, and no field a markdown body could fill.
   w(
     'fdn/schemas/course.yml',
@@ -167,6 +170,31 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     const [article] = (await compile({ articles: { schema: '@std/article' } })).articles
     expect(article.title).toBe('Hi')
     expect(textOf(article.article_body.content)).toEqual(['Body text.'])
+  })
+})
+
+describe('a reference is delivered as a host delivers it — { entity, brief }', () => {
+  it('the record it names, reduced to its brief, and its id when its file carries one', async () => {
+    site('talks:\n  schema: "@/talk"\n')
+    w('site/records/speaker/ada.yml', '$uuid: OWN-ADA\nname: Ada Lovelace\nrole: Keynote\n')
+    w('site/records/speaker/grace.yml', 'name: Grace Hopper\n')
+    w('site/records/talk/opening.yml', 'title: Opening\nspeaker: ada\npanel: [ada, grace]\n')
+    const [talk] = (await compile({ talks: { schema: '@/talk' } })).talks
+    expect(talk.speaker).toEqual({ entity: 'OWN-ADA', brief: { name: 'Ada Lovelace', role: 'Keynote' } })
+    expect(talk.panel).toEqual([
+      { entity: 'OWN-ADA', brief: { name: 'Ada Lovelace', role: 'Keynote' } },
+      { brief: { name: 'Grace Hopper' } },
+    ])
+  })
+
+  it('a name no record answers to is delivered as written, and said', async () => {
+    site('talks:\n  schema: "@/talk"\n')
+    w('site/records/talk/ghost.yml', 'title: Ghost\nspeaker: nobody\n')
+    const warnings = []
+    console.warn = (m) => warnings.push(String(m))
+    const [talk] = (await compile({ talks: { schema: '@/talk' } })).talks
+    expect(talk.speaker).toBe('nobody')
+    expect(warnings.some((m) => /"speaker" names "nobody", and no record of @\/speaker is called that/.test(m))).toBe(true)
   })
 })
 

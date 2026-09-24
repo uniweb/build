@@ -42,3 +42,10 @@ export function mintUuidV7() {
     hex.slice(20)
   )
 }
+
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Is this a uuid (any version), as the exchange writes one? */
+export function isUuid(value) {
+  return typeof value === 'string' && UUID_SHAPE.test(value)
+}

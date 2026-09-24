@@ -380,9 +380,11 @@ export function writeThemeFile(siteRoot, theme) {
  * @param {object} [opts.collector] - translation collector for localized scalar fields
  * @param {string} [opts.freeformRelPath] - free-form path for this record's content
  *        body (so a target-locale full-doc body is captured for locales/freeform/)
+ * @param {(model: string, uuid: string) => string|null} [opts.refName] - the name a
+ *        referenced record goes by, so a reference is written as that name
  * @returns {'updated'|'unchanged'}
  */
-export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en', collector, freeformRelPath }) {
-  const text = renderEntityDocument({ document, declaration, format, sourceLocale, collector, freeformRelPath })
+export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName }) {
+  const text = renderEntityDocument({ document, declaration, format, sourceLocale, collector, freeformRelPath, refName })
   return writeIfChanged(filePath, text)
 }

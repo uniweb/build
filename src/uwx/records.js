@@ -23,8 +23,13 @@
 // Nested sections are encoded by their own declaration, so a localized field inside one
 // is wrapped per locale like any other.
 //
-// ⚠️ entity_ref / item_ref / file fields are still sent as the file writes them; a
-// reference's value is not resolved to the backend's uuid here.
+// ⭐ A REFERENCE (`entity_ref`) NAMES ITS RECORD BY HANDLE in a file — `speaker: ada`,
+// the target's file name or its `slug:` — and is sent as the uuid THIS backend minted for
+// that record (`refResolver`). A target this backend has not minted yet (new in this
+// push) cannot be named on the wire, so its referrer WAITS: sent without that reference
+// and completed by the next pass, or held back when it cannot exist without it — see
+// `sync-package.js`, and the CLI's `pushInPasses`, which repeats the push.
+// ⚠️ item_ref and file fields are still sent as the file writes them.
 //
 // ⚠️ A record of a `many` section is sent without a `$uuid`, so a push that changes a
 // record replaces that section's records rather than updating them in place.
@@ -50,6 +55,7 @@ import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
+import { isUuid } from './uuid.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
 import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
@@ -209,10 +215,14 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * @param {string} [params.sourceLocale]   - locale for localized-field wrap
  * @param {object} [params.translations]   - `{ locale: { hash: tgt } }` for wrapping
  *        localized scalar fields per-locale (from loadLocaleTranslations)
+ * @param {{ resolve: (model: string, value: *) => object }} [params.refs] - what a
+ *        reference sends (`refResolver`). Without it a reference is sent as written.
  * @returns {{ entities: object[], warnings: string[], refusals: string[] }} each
- *   entity is `{ id, uuid, model, file, document }` — `document` is the section-keyed
- *   body. `refusals` names the records that cannot be sent as written, one line
- *   each; a caller that sends must not send while any is present.
+ *   entity is `{ id, uuid, model, file, document, pending }` — `document` is the
+ *   section-keyed body, and `pending` the references it WAITS on, left out of it:
+ *   `{ path, model, name, required }`, one per reference whose record this backend has
+ *   not minted yet. `refusals` names the records that cannot be sent as written, one
+ *   line each; a caller that sends must not send while any is present.
  */
 export function recordsToEntities({
   label,
@@ -220,6 +230,7 @@ export function recordsToEntities({
   declaration,
   sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale,
   translations,
+  refs = null,
 }) {
   if (!declaration || !declaration.name) {
     throw new Error('uwx/records: a declaration with a name is required')
@@ -269,7 +280,7 @@ export function recordsToEntities({
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
-    const enc = encoder(sourceLocale, translations)
+    const enc = encoder(sourceLocale, translations, refs)
     const sections = layout.flat ? readFlat(layout, record, enc) : readBySection(layout, record, enc)
     // The markdown body fills the content body field, in whatever section declares it,
     // unless the file already sets that field.
@@ -304,6 +315,7 @@ export function recordsToEntities({
       )
     }
     for (const problem of enc.shape) refusals.push(`${where}: ${problem}`)
+    for (const bad of enc.unresolved) refusals.push(`${where}: ${describeUnresolved(bad)}`)
     if (hasBody && !bodyTarget) {
       refusals.push(
         `${where}: the file has a markdown body, and ${declaration.name} has no field for ` +
@@ -312,7 +324,10 @@ export function recordsToEntities({
       )
     }
     if (!enc.misplaced.length && !enc.shape.length) {
-      const missing = missingRequired(layout, sections)
+      // A required reference that waits for its record is owed, not missing: the push
+      // that completes the record sends it (see `pending` below).
+      const waiting = new Set(enc.pending.map((p) => `"${p.path}"`))
+      const missing = missingRequired(layout, sections).filter((m) => !waiting.has(m))
       if (missing.length) {
         refusals.push(
           `${where}: ${declaration.name} requires ${listOf(missing)}, and this record ` +
@@ -349,6 +364,7 @@ export function recordsToEntities({
       // unique within its schema folder, and an authored `$id` need not be.
       file: `entities/${label}/${slug}.json`,
       document,
+      pending: enc.pending,
     })
   }
   return { entities, warnings, refusals }
@@ -357,8 +373,8 @@ export function recordsToEntities({
 // What one record's read collects beside the values: the keys with no place in the
 // schema, the keys written flat in a schema written by section, and values of the
 // wrong shape for their section.
-function encoder(sourceLocale, translations) {
-  return { sourceLocale, translations, undeclared: [], misplaced: [], shape: [] }
+function encoder(sourceLocale, translations, refs = null) {
+  return { sourceLocale, translations, refs, undeclared: [], misplaced: [], shape: [], pending: [], unresolved: [] }
 }
 
 // A flat record: its keys, minus the record's own, are the one section's fields.
@@ -447,7 +463,9 @@ function encodeRecord(fields, value, enc, prefix, reserved) {
     const encoded =
       field?.type === 'section'
         ? encodeSection(field, v, enc, `${prefix}${key}`)
-        : encodeFieldValue(v, field, enc.sourceLocale, enc.translations)
+        : field?.type === 'entity_ref'
+          ? encodeReference(v, field, enc, `${prefix}${key}`)
+          : encodeFieldValue(v, field, enc.sourceLocale, enc.translations)
     if (encoded !== undefined) out[key] = encoded
   }
   for (const key of Object.keys(value)) {
@@ -458,6 +476,86 @@ function encodeRecord(fields, value, enc, prefix, reserved) {
 }
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+// A reference, as a push sends it: the uuid this backend minted for the record the file
+// names (`refResolver`). A list of them is each of those. One whose record this backend
+// has not minted yet is left out and noted as WAITING (`enc.pending`) — the push that
+// completes it sends it. Without a resolver, and for a reference open to several Models
+// (which our schemas do not author), the value is sent as written.
+function encodeReference(value, field, enc, path) {
+  if (!enc.refs || typeof field.model !== 'string') return value
+  if (field.multiple === true) {
+    if (!Array.isArray(value)) {
+      enc.shape.push(`"${path}" is a list of references — write it as a list of record names.`)
+      return undefined
+    }
+    const sent = []
+    const waiting = []
+    value.forEach((one, i) => {
+      const uuid = resolveReference(one, field, enc, `${path}[${i}]`, waiting)
+      if (uuid !== undefined) sent.push(uuid)
+    })
+    // A required list with nothing to send yet waits whole; otherwise what is known goes now.
+    const required = field.required === true && sent.length === 0
+    for (const w of waiting) enc.pending.push({ ...w, required })
+    return sent
+  }
+  const waiting = []
+  const uuid = resolveReference(value, field, enc, path, waiting)
+  for (const w of waiting) enc.pending.push({ ...w, required: field.required === true })
+  return uuid
+}
+
+function resolveReference(value, field, enc, path, waiting) {
+  const answer = enc.refs.resolve(field.model, value)
+  if (answer.uuid) return answer.uuid
+  if (answer.pending) waiting.push({ path, model: field.model, name: value })
+  else enc.unresolved.push({ path, model: field.model, value, ...answer })
+  return undefined
+}
+
+// Why a reference names no record the push can send.
+function describeUnresolved({ path, model, value, invalid, ambiguous }) {
+  if (invalid) return `"${path}" is a reference — write the name of the ${model} record it points at.`
+  if (ambiguous) return `"${path}" names "${value}", and more than one record of ${model} is called that — give them distinct names.`
+  return `"${path}" names "${value}", and no record of ${model} is called that — write the name of one, or remove the reference.`
+}
+
+// Which record a reference names, and what a push sends for it: the uuid THIS backend
+// minted for that record. A record is named by its handle — its file's name, or its
+// `slug:` — among the records of its Model. A uuid is taken as written too: the record's
+// own id (mapped like a handle's), or the backend's id of a record the project does not
+// hold, which is what a pull writes for one.
+//
+// ⛔ A record this backend has not minted yet — never pushed there — answers `pending`: a
+// uuid it did not mint is never sent (see `buildRecordEntities`), so its referrer waits.
+const AMBIGUOUS = Symbol('ambiguous')
+function refResolver(readSchemas, recordMap) {
+  const byModel = new Map() // Model → handle → the record's own id (null before its first push)
+  const ownIds = new Set()
+  for (const { declaration, flat } of readSchemas) {
+    let names = byModel.get(declaration.name)
+    if (!names) byModel.set(declaration.name, (names = new Map()))
+    for (const rec of flat) {
+      const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
+      names.set(rec.slug, names.has(rec.slug) ? AMBIGUOUS : own)
+      if (own) ownIds.add(own)
+    }
+  }
+  const minted = (own) => (own && recordMap[own] ? { uuid: recordMap[own] } : { pending: true })
+  return {
+    resolve(model, value) {
+      if (typeof value !== 'string' || value === '') return { invalid: true }
+      const names = byModel.get(model)
+      if (names?.has(value)) {
+        const own = names.get(value)
+        return own === AMBIGUOUS ? { ambiguous: true } : minted(own)
+      }
+      if (isUuid(value)) return ownIds.has(value) ? minted(value) : { uuid: value }
+      return { missing: true }
+    },
+  }
+}
 
 // "a", "a and b", "a, b and c" — items are already formatted.
 function listOf(items) {
@@ -908,6 +1006,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // within one submission.
   const seen = new Set()
 
+  // ⭐ EVERY MODEL'S RECORDS ARE READ BEFORE ANY IS MAPPED: a reference names a record
+  // of another Model by its handle (`speaker: ada`), and the push sends that record's
+  // uuid in its place (`refResolver`).
+  const readSchemas = []
   for (const [schema, poolEntities] of poolBySchema) {
     const label = poolEntities[0].dirs.join('/')
     const modelName = modelFor(schema, `${pool.dir}/${label}/`)
@@ -953,7 +1055,11 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       }
       producedBy.set(pooled.id, produced)
     }
+    readSchemas.push({ label, declaration, flat, sourceBySlug })
+  }
+  const refs = refResolver(readSchemas, recordMap)
 
+  for (const { label, declaration, flat, sourceBySlug } of readSchemas) {
     const ownIds = new Map()
     const onWire = flat.map((rec) => {
       const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
@@ -969,6 +1075,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       declaration,
       sourceLocale,
       translations,
+      refs,
     })
     // Free-form per-locale body overrides (a full localized doc beats the structural
     // map) — only meaningful for a multi-locale site with a prosemirror content field.

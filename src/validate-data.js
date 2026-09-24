@@ -31,7 +31,8 @@ import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
 import { parentRouteOf } from '@uniweb/core/route-match'
 
-import { validateItem, validateRecordFile, validateBound, contentBodyField, rootListSection } from '@uniweb/schemas/conform'
+import { validateItem, validateRecordFile, validateBound, contentBodyField, rootListSection, referencesOf } from '@uniweb/schemas/conform'
+import { isUuid } from './uwx/uuid.js'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
 // The pure checker, re-exported so `@uniweb/build/validate` stays the one import
@@ -316,6 +317,10 @@ function listViolation(finding, label, base) {
  * the retired flat form is reported under the rule `section`. Pass 2 checks the records
  * a section receives, in the shape it receives them (`validateItem`).
  *
+ * Every record's references are checked here too, whichever pass checked the rest: one
+ * that names no record of its schema is reported under the rule `ref`, since a push
+ * cannot send it.
+ *
  * A folder whose schema resolves to nothing is left out in silence: its records are
  * schema-less, delivered as files, and the push says so itself.
  *
@@ -324,11 +329,14 @@ function listViolation(finding, label, base) {
 async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths, checked }) {
   const out = { violations: [], setupErrors: [], schemas: new Set(), checked: 0 }
   const pool = await readEntityPool(siteRoot, { dir: resolveRecordsDir(siteRoot, paths).rel })
+  // Every record is read first: a reference names a record of another schema by its
+  // name — its file's, or its `slug:` — or by the id its file carries.
+  const read = []
+  const names = new Map() // schema (as its folder names it) → the names and ids of its records
   for (const [ref, entities] of groupPoolBySchema(pool.entities)) {
     const schema = await schemaForRecords(ref, { srcDir, dataSchemas })
-    // An entity of a list-rooted schema too: it holds the list under its section's key.
-    // ⛔ Until 2026-09-24 such a folder was skipped here without a word.
-    if (!schema) continue
+    const known = names.get(ref) ?? new Set()
+    names.set(ref, known)
     for (const pooled of entities) {
       let records
       try {
@@ -338,12 +346,38 @@ async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths, check
         continue
       }
       for (const r of records) {
-        if (!r.slug || checked.has(recordKey(ref, r.slug))) continue
+        if (r.slug) known.add(String(r.slug))
+        if (typeof r.data?.$uuid === 'string') known.add(r.data.$uuid)
+      }
+      // An entity of a list-rooted schema too: it holds the list under its section's key.
+      // ⛔ Until 2026-09-24 such a folder was skipped here without a word.
+      if (schema) read.push({ ref, schema, pooled, records })
+    }
+  }
+  for (const { ref, schema, pooled, records } of read) {
+    for (const r of records) {
+      if (!r.slug) continue
+      const record = withBody(schema, r)
+      if (!checked.has(recordKey(ref, r.slug))) {
         out.checked++
         out.schemas.add(ref)
-        for (const finding of validateRecordFile(schema, withBody(schema, r))) {
+        for (const finding of validateRecordFile(schema, record)) {
           out.violations.push({ file: pooled.relPath, schema: ref, item: r.slug, users: [], ...finding })
         }
+      }
+      // ⭐ A reference must name a record — a push refuses one that does not. A uuid is
+      // left alone: it may be a record the backend holds and this project does not.
+      for (const { path, ref: target, value } of referencesOf(schema, record)) {
+        if (typeof value !== 'string' || isUuid(value) || names.get(target)?.has(value)) continue
+        out.violations.push({
+          file: pooled.relPath,
+          schema: ref,
+          item: r.slug,
+          users: [],
+          field: path,
+          rule: 'ref',
+          message: `names "${value}", and no record of ${target} is called that`,
+        })
       }
     }
   }

@@ -66,7 +66,8 @@ import { readRecordsConfig, resolveFolder } from './records-config.js'
 import { isDraftRecord } from './record-draft.js'
 import { resolveRecordSchemas } from './queries-config.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
-import { toDeliveredRecord, contentBodyField, misplacedFields } from '@uniweb/schemas/conform'
+import { toDeliveredRecord, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
+import { collectNestedRefs } from '@uniweb/schemas/format'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -608,6 +609,8 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
  * also gets `excerpt` and `image` where it states none, derived from its body: the
  * static lane's own, and not what a host adds.
  *
+ * Its references are delivered hydrated, as a host delivers them (`referenceHydrator`).
+ *
  * ⛔ A record written in the retired flat form (`misplacedFields`) STOPS THE BUILD, as it
  * stops a push: which section a key belongs in is not a guess to make.
  *
@@ -640,6 +643,7 @@ function deliverRecord(record, config, where, body = null) {
       out.excerpt = extractExcerpt(out, body.doc, config.excerpt)
       out.image = out.image || extractFirstImage(body.doc)
     }
+    if (config.references) out = config.references.deliver(schema, out, where)
   }
   const handle = record.slug
   if (handle !== undefined && handle !== null && handle !== '') out.$name = String(handle)
@@ -761,6 +765,125 @@ function warnDuplicateSlugs(items, queryName) {
 }
 
 /**
+ * Read a set of pooled record files, each by its format (markdown → content items,
+ * YAML/JSON → data items, BibTeX → CSL-JSON), delivering each as `config` says. A
+ * record's co-located assets are copied by their path under the records directory
+ * (`recordAssetPath`).
+ *
+ * @returns {Promise<Array>} one result per file — a record, a list of them, or null
+ */
+function readPooledRecords(pooled, config, siteDir, recordsRoot, basePath) {
+  return Promise.all(
+    pooled.map((e) => {
+      const dir = resolve(recordsRoot, ...e.dirs)
+      const file = `${e.slug}${e.ext}`
+      if (e.ext === '.bib') {
+        return processBibtexItem(dir, file, siteDir, config.includeDrafts)
+      }
+      if (e.ext === '.json') {
+        return processJsonItem(dir, file, siteDir, recordsRoot, basePath, config)
+      }
+      if (e.ext === '.yml' || e.ext === '.yaml') {
+        return processDataItem(dir, file, siteDir, recordsRoot, basePath, config)
+      }
+      return processContentItem(dir, file, config, siteDir, basePath, recordsRoot)
+    })
+  )
+}
+
+/**
+ * References, delivered as a host's records service delivers them — measured 2026-09-24
+ * on a local backend: `{ entity, brief }`, the record a reference names reduced to its
+ * brief's fields, `entity` being its id (here, the one its file carries, if any). So a
+ * component reads `talk.speaker.brief.name` on a static site and a hosted one alike.
+ * ⚠️ A host also sends `model`, the Model's id on that backend; nothing a static build
+ * holds corresponds to it, and whether it stays is backend's to say.
+ *
+ * The records a reference names are read here, once per data schema, whether or not a
+ * query selects them — and without their own references delivered, as a host delivers
+ * one level.
+ *
+ * A reference names its record by handle — its file's name, or `slug:` — or by the id
+ * its file carries. One that names no record of its schema is delivered as written, with
+ * a warning; `uniweb validate` reports it too.
+ */
+function referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts }) {
+  const targets = new Map() // schema ref → Map(name or own id → the delivered reference)
+  const warned = new Set()
+
+  const load = async (ref) => {
+    const schema = dataSchemas[ref] || null
+    const pooled = poolBySchema.get(ref) || []
+    const byName = new Map()
+    if (!schema || pooled.length === 0) return byName
+    const config = { schema: ref, dataSchema: schema, includeDrafts, excerpt: { maxLength: 160 }, references: null }
+    const keys = briefKeysOf(schema)
+    for (const result of await readPooledRecords(pooled, config, siteDir, recordsRoot, basePath)) {
+      for (const record of [result].flat()) {
+        if (!record || typeof record !== 'object') continue
+        const delivered = {
+          ...(typeof record.$uuid === 'string' ? { entity: record.$uuid } : {}),
+          brief: pickBrief(record, keys),
+        }
+        if (record.$name !== undefined) byName.set(String(record.$name), delivered)
+        if (typeof record.$uuid === 'string') byName.set(record.$uuid, delivered)
+      }
+    }
+    return byName
+  }
+
+  return {
+    async prepare(refs) {
+      for (const ref of refs || []) {
+        if (!targets.has(ref)) targets.set(ref, await load(ref))
+      }
+    },
+    deliver(schema, record, where) {
+      return mapReferences(
+        schema,
+        record,
+        (value, { path, ref }) => {
+          const hit = typeof value === 'string' ? targets.get(ref)?.get(value) : undefined
+          if (hit) return hit
+          const key = `${where} ${path}`
+          if (typeof value === 'string' && !warned.has(key)) {
+            warned.add(key)
+            console.warn(`[query-processor] ${where}: "${path}" names "${value}", and no record of ${ref} is called that.`)
+          }
+          return value
+        },
+        { delivered: true }
+      )
+    },
+  }
+}
+
+// The keys of a record's brief — the fields of the section a reference hydrates to: the
+// one section of a flat schema, else the brief. Null when there is none (a list at the
+// root), and the whole record stands in for it, as a host answers such a Model.
+function briefKeysOf(schema) {
+  const layout = recordLayout(schema)
+  if (!layout) return null
+  if (schema.fields) return Object.keys(schema.fields)
+  const def = layout.flat ? layout.sections[0][1] : layout.sections.find(([name]) => name === layout.brief)?.[1]
+  return def ? [...Object.keys(def.fields || {}), ...Object.keys(def.sections || {})] : null
+}
+
+// A delivered record's brief: its brief's fields that it has, or — with no brief — every
+// field but the record's own keys.
+function pickBrief(record, keys) {
+  const out = {}
+  if (keys) {
+    for (const key of keys) if (record[key] !== undefined) out[key] = record[key]
+    return out
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (!key.startsWith('$') && !['slug', 'path', 'excerpt', 'image', 'draft'].includes(key)) out[key] = value
+  }
+  return out
+}
+
+/**
  * Collect and process all of a query's records
  *
  * @param {string} siteDir - Site root directory
@@ -776,28 +899,15 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   const pooled = config.poolEntities || []
   if (pooled.length === 0) return []
 
-  // A record's co-located assets are copied by their path under the records
-  // directory (`recordAssetPath`).
-  const dirOf = (e) => resolve(recordsRoot, ...e.dirs)
+  // The records this query's references name, read before its own — delivering one
+  // is synchronous (`deliverRecord`).
+  if (config.dataSchema && config.references) {
+    await config.references.prepare(collectNestedRefs(config.dataSchema))
+  }
 
   // Process every record file (markdown → content items, YAML/JSON → data items,
   // BibTeX → CSL-JSON bibliography items).
-  let items = await Promise.all(
-    pooled.map((e) => {
-      const dir = dirOf(e)
-      const file = `${e.slug}${e.ext}`
-      if (e.ext === '.bib') {
-        return processBibtexItem(dir, file, siteDir, config.includeDrafts)
-      }
-      if (e.ext === '.json') {
-        return processJsonItem(dir, file, siteDir, recordsRoot, basePath, config)
-      }
-      if (e.ext === '.yml' || e.ext === '.yaml') {
-        return processDataItem(dir, file, siteDir, recordsRoot, basePath, config)
-      }
-      return processContentItem(dir, file, config, siteDir, basePath, recordsRoot)
-    })
-  )
+  let items = await readPooledRecords(pooled, config, siteDir, recordsRoot, basePath)
 
   // ⭐ `path` IS THE FOLDER `folder.yml` PLACED THE RECORD IN — `''` at the top —
   // and it is the whole reason folders exist: `scope: archive` is how a query asks
@@ -948,6 +1058,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   // from the foundation's source once for every query. A query with none compiles its
   // records as their files hold them.
   const dataSchemas = options.dataSchemas ?? (await querySchemas(siteDir, queriesConfig))
+  const references = referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts })
 
   const results = {}
 
@@ -961,6 +1072,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     parsed.placements = folder.placements
     parsed.includeDrafts = includeDrafts
     parsed.dataSchema = (parsed.schema && dataSchemas[parsed.schema]) || null
+    parsed.references = references
     if (parsed.poolEntities.length === 0) {
       const dirs = parsed.schema ? poolDirsForSchema(parsed.schema) : null
       console.warn(

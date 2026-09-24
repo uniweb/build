@@ -133,7 +133,8 @@ function indexFolder(folderDoc) {
       } else if (node?.kind === 'ref' && node.entry) {
         // `entry` is `{ schema, entity: <uuid> }`; tolerate a bare uuid defensively.
         const uuid = typeof node.entry === 'object' ? node.entry.entity : node.entry
-        if (uuid) byUuid.set(uuid, { folderPath, slug: node.name })
+        const schema = typeof node.entry === 'object' ? node.entry.schema : undefined
+        if (uuid) byUuid.set(uuid, { folderPath, slug: node.name, schema })
       }
     }
   }
@@ -481,6 +482,14 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   }
 
   const folderIndex = indexFolder(folderDoc)
+  // ⭐ A REFERENCE IS WRITTEN AS THE NAME OF THE RECORD IT POINTS AT — `speaker: ada` —
+  // which is what a push resolves back to this backend's uuid. The folder names every
+  // record of the site; a reference to a record it does not hold (or holds under another
+  // Model) is written as the uuid.
+  const refName = (model, uuid) => {
+    const hit = folderIndex.get(uuid)
+    return hit?.slug && (!hit.schema || hit.schema === model) ? hit.slug : null
+  }
   // Where records land — `site.yml::paths.records`, else `records/`: the one resolver
   // the build and the push read too, so a pulled record lands where the next build
   // looks. ⛔ This wrote into the default directory until 2026-09-21, whatever the
@@ -566,7 +575,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     const toWrite = own && own !== theirs ? { ...document, $uuid: own } : document
     let status
     try {
-      status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath })
+      status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName })
     } catch (err) {
       // ⛔ A record that could not be written was not placed, so it is a SKIP, not a
       // warning: a caller that counts what it placed (the CLI's pull) must see it.
