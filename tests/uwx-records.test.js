@@ -248,14 +248,21 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(entities[0].file).toBe('entities/products/file-name.json')
   })
 
-  it('warns about + drops a field not on the Model', () => {
-    const { entities, warnings } = recordsToEntities({
+  // ⛔ A key the Model does not declare is lost twice — the backend never gets it and
+  // the next pull writes the file without it — so the push refuses it rather than
+  // warning "not synced" (until 2026-09-24).
+  it('refuses a record carrying a field not on the Model, and never sends the field', () => {
+    const { entities, refusals } = recordsToEntities({
       label: 'products',
-      records: [{ slug: 'g', title: 'G', color: 'red' }],
+      records: [{ slug: 'g', title: 'G', color: 'red', size: 'L' }],
       declaration,
     })
     expect(entities[0].document.product).not.toHaveProperty('color')
-    expect(warnings.some((w) => w.includes('color'))).toBe(true)
+    expect(refusals).toEqual([
+      'products/g: "color" and "size" are not fields of @acme/product — a push cannot carry ' +
+        'them, and the next pull would drop them from the file. Declare them in the schema, or ' +
+        'remove them.',
+    ])
   })
 
   it('skips a record without a slug (with a warning)', () => {
@@ -395,18 +402,18 @@ describe('recordsToEntities — markdown body → content body field', () => {
     expect(warnings.some((w) => w.includes('$body'))).toBe(false)
   })
 
-  it('warns when a body is present but the Model has no content body field', () => {
+  it('refuses a markdown body the Model has no field for', () => {
     const noRich = lower(
       { name: 'product', fields: { title: { type: 'string' } } },
       '@/product',
       '@acme/product'
     )
-    const { warnings } = recordsToEntities({
+    const { refusals } = recordsToEntities({
       label: 'products',
       records: [{ slug: 'p', title: 'P', $body: 'orphan body' }],
       declaration: noRich,
     })
-    expect(warnings.some((w) => w.includes('no content body field'))).toBe(true)
+    expect(refusals).toEqual([expect.stringMatching(/^products\/p: the file has a markdown body, and @acme\/product has no field for it/)])
   })
 })
 

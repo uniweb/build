@@ -338,27 +338,15 @@ export function recordsToEntities({
       }
       if (Object.keys(data).length) sectionData[secName] = data
     }
-    // Warn for author keys not on ANY record section. A real unknown key means the
-    // frontmatter doesn't match the collection's data schema — that SHOULD warn
-    // (only identity/transport keys in SKIP_KEYS are silent). A key naming a SECTION
-    // is not unknown: the record is written by section, refused below.
+    // Author keys on no record section (only identity/transport keys in SKIP_KEYS are
+    // exempt). A key naming a SECTION is not unknown: the record is written by
+    // section, refused below.
     const bySection = []
+    const undeclared = []
     for (const key of Object.keys(record)) {
       if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
-      if (sectionNames.has(key)) {
-        bySection.push(key)
-        continue
-      }
-      warnings.push(
-        `${label}/${slug}: field "${key}" is not on ` +
-          `${declaration.name} — not synced`
-      )
-    }
-    if (hasBody && !bodyTarget) {
-      warnings.push(
-        `${label}/${slug}: markdown body present but ` +
-          `${declaration.name} has no content body field — body not synced`
-      )
+      if (sectionNames.has(key)) bySection.push(key)
+      else undeclared.push(key)
     }
 
     // ⛔ A RECORD THE BACKEND WOULD REFUSE — OR WOULD STORE EMPTY — IS REFUSED HERE,
@@ -377,6 +365,27 @@ export function recordsToEntities({
     // entities with no data behind, so every later push of the site's records was
     // refused. The backend's push has been one transaction since 2026-09-24; a refusal
     // now writes nothing.
+    // ⛔ And what a push cannot carry is refused too, because it is lost twice over: the
+    // backend never receives it, and the next pull writes the file without it — an
+    // undeclared key (`tags:` beside a schema with no `tags`), or a markdown body where
+    // the schema has no field to hold it. Both were warnings until 2026-09-24
+    // ("not synced"), and a pull then deleted the value from the author's file.
+    if (undeclared.length) {
+      const one = undeclared.length === 1
+      refusals.push(
+        `${label}/${slug}: ${quoted(undeclared)} ${one ? 'is not a field' : 'are not fields'} of ` +
+          `${declaration.name} — a push cannot carry ${one ? 'it' : 'them'}, and the next pull would ` +
+          `drop ${one ? 'it' : 'them'} from the file. Declare ${one ? 'it' : 'them'} in the schema, ` +
+          `or remove ${one ? 'it' : 'them'}.`
+      )
+    }
+    if (hasBody && !bodyTarget) {
+      refusals.push(
+        `${label}/${slug}: the file has a markdown body, and ${declaration.name} has no field for ` +
+          'it (a `markdown` or `richtext` field) — a push cannot carry it. Add one to the schema, ' +
+          'or move the text into a field.'
+      )
+    }
     if (bySection.length) {
       refusals.push(sectionShapeRefusal(`${label}/${slug}`, bySection, listSections, declaration.name))
     } else {

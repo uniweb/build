@@ -174,19 +174,22 @@ describe('validateItem — date handling', () => {
   })
 })
 
-describe('validateItem — sections-form is deferred upstream', () => {
+// ⛔ Until 2026-09-24 a sections-form schema was deferred here — "rich", even one with
+// nothing but a single section — and these two tests pinned that. A record of one is
+// checked now, flat or written by section (`@uniweb/schemas/conform`).
+describe('validateItem — a sections-form record is checked', () => {
   const rich = validateAndNormalizeSchema(
     { sections: { profile: { kind: 'single', fields: { name: { type: 'string', required: true } } } } },
     '@std/nav'
   )
 
-  it('returns no findings for a sections-form schema (rich model)', () => {
-    expect(validateItem(rich, {})).toEqual([])
+  it('checks a flat record against its single sections', () => {
+    expect(validateItem(rich, {}).map((f) => `${f.field}:${f.rule}`)).toEqual(['name:required'])
   })
 
-  it('isStaticallyCheckable: fields-form yes, sections-form no', () => {
+  it('isStaticallyCheckable: fields-form and a record-rooted sections-form, yes', () => {
     expect(isStaticallyCheckable(project)).toBe(true)
-    expect(isStaticallyCheckable(rich)).toBe(false)
+    expect(isStaticallyCheckable(rich)).toBe(true)
     expect(isStaticallyCheckable(null)).toBe(false)
   })
 })

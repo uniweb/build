@@ -31,15 +31,17 @@ import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
 import { parentRouteOf } from '@uniweb/core/route-match'
 
-import { validateItem, isStaticallyCheckable, validateBound } from '@uniweb/schemas/conform'
-import { validateAndNormalizeSchema } from './resolve-data-schema.js'
+import { validateItem, isStaticallyCheckable, validateBound, flatRecordFields } from '@uniweb/schemas/conform'
+import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
 // The pure checker, re-exported so `@uniweb/build/validate` stays the one import
 // path callers know (`uniweb validate`, the CLI, and the contract tests all
 // reach it here) even though the implementation moved next to the vocabulary.
 export { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
 import { buildSchema } from './schema.js'
-import { resolveRecordsDir } from './site/entity-pool.js'
+import { resolveRecordsDir, readEntityPool, groupPoolBySchema } from './site/entity-pool.js'
+import { readEntityFile } from './uwx/entity-source.js'
+import { isContentBodyField } from './uwx/data-schema.js'
 import { toFetchList } from './site/data-fetcher.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
@@ -195,8 +197,11 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
         const schema = dataSchemas[ref]
         if (!schema) continue // build guarantees refs resolve; defensive skip
 
+        // ⭐ A sections-form schema is checked like any other now (`isStaticallyCheckable`,
+        // 2026-09-24) — a record can be flat or written by section. What is left out is a
+        // schema whose ROOT IS A LIST: it describes a whole value, not one record.
         if (!isStaticallyCheckable(schema)) {
-          deferred.push({ route: page.route, section: type, key, reason: 'rich sections-form schema', ref })
+          deferred.push({ route: page.route, section: type, key, reason: 'its root is a list, not a record', ref })
           continue
         }
 
@@ -215,6 +220,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const violations = []
   const schemasSeen = new Set()
   let recordCount = 0
+  // (schema, slug) of every record this pass checked, so pass 5 checks the rest.
+  const checkedRecords = new Set()
 
   for (const entry of work.values()) {
     const { records, error } = await resolveRecords(entry.path, { byQuery, siteRoot })
@@ -227,6 +234,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
     const items = Array.isArray(records) ? records : [records]
     items.forEach((item, idx) => {
       recordCount++
+      if (item && typeof item.slug === 'string') checkedRecords.add(recordKey(entry.ref, item.slug))
       for (const finding of validateItem(entry.schema, item)) {
         violations.push({
           file: entry.path,
@@ -253,6 +261,16 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   for (const ref of blocks.schemas) schemasSeen.add(ref)
   recordCount += blocks.checked
 
+  // Pass 5 — every record file no section's binding reached, against the data schema
+  // its folder names. ⭐ The set a push sends: every file in the records directory is
+  // a record and every record is pushed, whether or not a section reads it — and
+  // until 2026-09-24 one that no section read was never checked here.
+  const files = await validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths: config.paths, checked: checkedRecords })
+  violations.push(...files.violations)
+  setupErrors.push(...files.setupErrors)
+  for (const ref of files.schemas) schemasSeen.add(ref)
+  recordCount += files.checked
+
   return {
     violations,
     deferred,
@@ -264,6 +282,69 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       deferred: deferred.length,
     },
   }
+}
+
+const recordKey = (ref, slug) => `${ref}\u0000${slug}`
+
+/**
+ * Check the records in the records directory that pass 2 did not, each against the
+ * data schema its folder names (`records/member/` → `@/member`).
+ *
+ * A record is read the way a push reads it (`uwx/entity-source.js`), and a markdown
+ * record's body is the value of its schema's content body field unless its
+ * frontmatter sets one — which is what a push sends it as (`uwx/records.js`).
+ *
+ * A folder whose schema resolves to nothing is left out in silence: its records are
+ * schema-less, delivered as files, and the push says so itself.
+ *
+ * @returns {Promise<{ violations: object[], setupErrors: object[], schemas: Set<string>, checked: number }>}
+ */
+async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths, checked }) {
+  const out = { violations: [], setupErrors: [], schemas: new Set(), checked: 0 }
+  const pool = await readEntityPool(siteRoot, { dir: resolveRecordsDir(siteRoot, paths).rel })
+  for (const [ref, entities] of groupPoolBySchema(pool.entities)) {
+    const schema = await schemaForRecords(ref, { srcDir, dataSchemas })
+    if (!schema || !isStaticallyCheckable(schema)) continue
+    for (const pooled of entities) {
+      let records
+      try {
+        records = await readEntityFile(pooled.absPath)
+      } catch (err) {
+        out.setupErrors.push({ file: pooled.relPath, message: err.message, users: [] })
+        continue
+      }
+      for (const r of records) {
+        if (!r.slug || checked.has(recordKey(ref, r.slug))) continue
+        out.checked++
+        out.schemas.add(ref)
+        for (const finding of validateItem(schema, withBody(schema, r))) {
+          out.violations.push({ file: pooled.relPath, schema: ref, item: r.slug, users: [], ...finding })
+        }
+      }
+    }
+  }
+  return out
+}
+
+// The schema a records folder names — the one a section binds if any does, else
+// resolved the way every other ref is. Null when nothing resolves.
+async function schemaForRecords(ref, { srcDir, dataSchemas }) {
+  if (dataSchemas[ref]) return dataSchemas[ref]
+  try {
+    return (await buildDataSchemaMap([ref], { srcDir }))[ref] || null
+  } catch {
+    return null
+  }
+}
+
+// A record as a push sends it: a markdown body fills the schema's content body field
+// when the frontmatter does not set it.
+function withBody(schema, r) {
+  const record = { ...(r.data || {}) }
+  if (typeof r.body !== 'string' || r.body.trim() === '') return record
+  const key = Object.entries(flatRecordFields(schema) || {}).find(([, f]) => isContentBodyField(f))?.[0]
+  if (key && record[key] === undefined) record[key] = r.body
+  return record
 }
 
 /**
