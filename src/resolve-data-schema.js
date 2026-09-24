@@ -287,15 +287,38 @@ async function collectSchemasFromExports(packageDir) {
 // Source 2: a bare `schemas/` directory of schema files, one schema per file
 // (named by basename). Returns `{}` when the directory is absent.
 async function collectSchemasFromDir(dir) {
-  if (!existsSync(dir)) return {}
   const out = {}
-  for (const file of readdirSync(dir).sort()) {
-    const ext = extname(file)
-    if (!SCHEMA_EXTENSIONS.includes(ext)) continue
-    const name = basename(file, ext)
+  for (const { file, name } of schemaFilesIn(dir)) {
     out[`@/${name}`] = validateAndNormalizeSchema(await loadSchemaFile(join(dir, file)), `@/${name}`)
   }
   return out
+}
+
+// The schema files directly in a folder, one schema per file, named by basename.
+// ⭐ A leading `_` leaves a file out — a draft — as it does for a record.
+function schemaFilesIn(dir) {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .sort()
+    .filter((file) => SCHEMA_EXTENSIONS.includes(extname(file)) && !file.startsWith('_'))
+    .map((file) => ({ file, name: basename(file, extname(file)) }))
+}
+
+/**
+ * The data schemas a foundation DEFINES: one `@/<name>` per file in its `schemas/`
+ * folder, a file named with a leading `_` left out.
+ *
+ * ⭐ THE FOLDER IS THE DECLARATION [Diego, 2026-09-24] — the same rule as for a
+ * record: placing the file there is what makes it one. Until then a foundation's
+ * data schemas were only the ones a section binding reached, so a type only the app
+ * uses — a lesson, a quiz, a learner's progress, which no section renders — was
+ * never in `schema.json` and never registered.
+ *
+ * @param {string} srcDir - the foundation's source root
+ * @returns {string[]}
+ */
+export function ownSchemaRefs(srcDir) {
+  return schemaFilesIn(join(srcDir, 'schemas')).map(({ name }) => `@/${name}`)
 }
 
 // Resolve a package's module entry FILE (absolute) from its package.json —

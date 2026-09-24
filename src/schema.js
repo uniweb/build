@@ -17,7 +17,7 @@ import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inferTitle } from './utils/infer-title.js'
-import { collectSchemaRefs, buildDataSchemaMap } from './resolve-data-schema.js'
+import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
   deriveRecordsSupport,
@@ -960,10 +960,13 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
   // Discover section types
   const components = await discoverComponents(srcDir, sectionPaths)
 
-  // Resolve the data schemas referenced by section bindings (carried in
-  // schema.json for the editor/platform — see named-data-schemas.md).
+  // Resolve the data schemas the foundation DEFINES — every file in its `schemas/`
+  // folder (`ownSchemaRefs`) — and the ones its section bindings reference, carried
+  // in schema.json for the editor/platform (see named-data-schemas.md); `register`
+  // submits the `@/` ones. Bound refs come first, so a foundation whose schemas are
+  // all bound builds the same schema.json it always did.
   const dataSchemas = await buildDataSchemaMap(
-    collectSchemaRefs(components, foundationConfig.data),
+    new Set([...collectSchemaRefs(components, foundationConfig.data), ...ownSchemaRefs(srcDir)]),
     { srcDir },
   )
 
