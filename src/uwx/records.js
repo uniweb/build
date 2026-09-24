@@ -3,41 +3,31 @@
 //
 // Each record becomes a section-keyed `$`-document (docs/reference/entity-content.md):
 // `$id` (the producer-local handle), `$schema` (its data schema, by scoped name), and
-// each SINGLE section keyed by its name — the brief plus any sibling singles, not
-// the brief alone. The backend MINTS `$uuid` on first sync and
-// returns it in the finalized response; the verb back-fills it into the source
+// each section the record holds, keyed by its name — the brief, the other single
+// sections, and `many` sections as lists of records. The backend MINTS `$uuid` on first
+// sync and returns it in the finalized response; the verb back-fills it into the source
 // file. A record that already carries `$uuid` (a prior back-fill) round-trips it
 // for restore-in-place. No id sidecar — identity is the file-embedded `$uuid` plus
 // the back-fill round-trip.
 //
-// To shape each record, the mapper needs the Model's declaration — the brief
-// section name, its field order, and which fields are localized. The orchestrator
-// reads that from the LOCAL foundation's built `dist/meta/schema.json` (lowered
-// via `toDataSchemaDeclaration`, the same path `uniweb register` uses), so it
-// stays offline.
+// To shape each record, the mapper needs the Model's declaration — its sections, their
+// field order, and which fields are localized. The orchestrator reads that from the
+// LOCAL foundation's built `dist/meta/schema.json` (lowered via
+// `toDataSchemaDeclaration`, the same path `uniweb register` uses), so it stays offline,
+// or, for a Model no local foundation defines, through the injected `opts.resolveModel`.
 //
-// Scope: this mapper implements the FLAT-RECORD shape — one source file whose
-// frontmatter keys are field names — so it walks the Model's `single` sections
-// and skips `multi` ones.
+// ⭐ A RECORD FILE IS READ BY ITS SCHEMA'S LAYOUT (`./record-layout.js`): flat when the
+// schema has one top-level section holding one record, by section otherwise — which is
+// also the only way a `many` section, a self-nesting list (`children:` in the file,
+// `$children` on the wire) or a schema whose root is a list (`@std/nav`) is written.
+// Nested sections are encoded by their own declaration, so a localized field inside one
+// is wrapped per locale like any other.
 //
-// ⛔ That is a property of THIS MAPPER, not of the schema system, and saying
-// otherwise has already misled twice. `multi` is first-class: the author writes
-// `many: true`, which lowers to IR `kind: 'multi'` and to wire `multiple: true`.
-// A Model whose ONLY section is `many` is a supported shape in its own right — a
-// root list, content authored as a bare array (`@uniweb/schemas` `rootListSection`;
-// `@std/nav` and `@std/form` are exactly this). Such a Model has no flat-record
-// surface at all, so it is not that its records "cannot be expressed" — it is
-// that they are not this shape, and this mapper only knows this shape.
+// ⚠️ entity_ref / item_ref / file fields are still sent as the file writes them; a
+// reference's value is not resolved to the backend's uuid here.
 //
-// Nested sections (a `type: section` field) and entity_ref / item_ref / file
-// fields have no branch in `encodeFieldValue`; unverified either way.
-//
-// ⚠️ Two claims that used to sit here were stale and were removed rather than
-// re-worded, because both named real capabilities as missing: NON-BRIEF single
-// sections are handled (see `recordSections` below — the filter is `multiple !==
-// true`, not `brief === true`), and REMOTE foundations are handled through the
-// injected `opts.resolveModel`. A scope note that under-claims is worse than none:
-// it sends a reader to build what is already there.
+// ⚠️ A record of a `many` section is sent without a `$uuid`, so a push that changes a
+// record replaces that section's records rather than updating them in place.
 
 import { readBackendState } from './sync-store.js'
 import { readFileSync, existsSync } from 'node:fs'
@@ -55,23 +45,25 @@ import {
   poolPathReadings,
   poolDirsForSchema,
 } from '../site/entity-pool.js'
-import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isContentBodyField } from './data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField } from './data-schema.js'
+import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
-import { localizeScalar, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
+import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
-// Identity/transport keys on a source record — never Model fields, never warned.
-// `$body` carries the markdown body (mapped to the brief's content body field below).
+// The record's OWN keys — identity and transport, never a field of any section, never
+// warned. `$body` carries the markdown body (mapped to the schema's content body field,
+// wherever a single section declares it).
 // Note: there is NO delivery-derived ignore list (route/excerpt/image/content) —
 // the source reader never produces those, and a real unknown key SHOULD warn (it
 // means the frontmatter doesn't match the collection's data schema).
-const SKIP_KEYS = new Set([
+const RECORD_KEYS = new Set([
   'slug',
   '$id',
   '$uuid',
@@ -91,8 +83,8 @@ const SKIP_KEYS = new Set([
 // they are content rather than identity:
 //   - `$children` is STRUCTURAL content (a self-nesting record's subtree, e.g.
 //     site-content's nested pages/sections), so it is KEPT and recursed into —
-//     otherwise a nesting change would be invisible to "send only changed". Flat
-//     records carry no `$children`, so this is a no-op for the collection lane.
+//     otherwise a nesting change would be invisible to "send only changed". A record
+//     of a self-nesting list (`children:` in its file) carries them too.
 //   - `$disabled` is a record's delivery STATE (`draft: true` on the file side). It
 //     is KEPT so that drafting or un-drafting a record with nothing else changed is
 //     still sent; stripped, "send only changed" would never send the toggle.
@@ -170,6 +162,12 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     return isLocalizedContent(localized) ? localized : { [sourceLocale]: localized }
   }
   if (field.localized) {
+    // A list of localized values rides as a list of `{ lang: value }` maps, one per
+    // element — the shape page `keywords` already take. ⛔ It went up as a bare list
+    // until 2026-09-24: `localizeScalar` passes any object through, arrays included.
+    if (Array.isArray(value) && !isMarkupTextField(field)) {
+      return localizeScalarList(value, sourceLocale, translations)
+    }
     // A markup `text` BODY (format markdown|html) rides as a RAW string, wrapped
     // per-locale wholesale (its per-string translations live in the i18n manifest /
     // free-form, not the scalar map). Other localized scalars wrap per-string from
@@ -195,13 +193,19 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * no I/O, no minting. The backend mints `$uuid` on first sync; a record that
  * already carries `$uuid` (back-filled from a prior sync) round-trips it.
  *
+ * A record is read by its schema's layout (`./record-layout.js`): FLAT when the schema
+ * has one top-level section holding one record, its keys that section's fields; BY
+ * SECTION otherwise, each top-level section under its own name. Either way the document
+ * is the same section-keyed shape, so a pull writes the record back as it was written.
+ *
  * @param {object} params
  * @param {string} params.label  - what the records are, for messages and the path
  *        inside the package — the schema folder they came from (`article`,
  *        `std/person`)
- * @param {object[]} params.records        - [{ slug, ...fields }]
+ * @param {object[]} params.records        - [{ slug, ...the file's keys }], a
+ *        markdown body under `$body`
  * @param {object} params.declaration      - the `@uniweb/data-schema` declaration
- *        (from toDataSchemaDeclaration): `{ name, brief, sections }`
+ *        (from toDataSchemaDeclaration): `{ name, sections }`
  * @param {string} [params.sourceLocale]   - locale for localized-field wrap
  * @param {object} [params.translations]   - `{ locale: { hash: tgt } }` for wrapping
  *        localized scalar fields per-locale (from loadLocaleTranslations)
@@ -220,79 +224,24 @@ export function recordsToEntities({
   if (!declaration || !declaration.name) {
     throw new Error('uwx/records: a declaration with a name is required')
   }
-  // A record (one source file) maps to the Model's SINGLE sections in declared
-  // order — the brief (the card) plus any sibling single sections, e.g. a body
-  // section like `article_body`. Multi-section Models are the norm for `@std/*`
-  // types; the markdown body lands in the designated content field WHEREVER it is
-  // declared (the brief, or a non-brief body section). `multi` sections (repeating
-  // items) can't be expressed by one flat record and are skipped. The brief is the
-  // section marked `brief: true` (the sections-tree has no schema-level back-ref).
-  const sectionEntries = Object.entries(declaration.sections || {})
-  const briefEntry = sectionEntries.find(([, s]) => s && s.brief === true)
-  const briefName = briefEntry?.[0]
-  if (!briefName) {
-    throw new Error(`uwx/records: Model ${declaration.name} has no brief section`)
+  const layout = recordFileLayout(declaration)
+  if (layout.sections.length === 0) {
+    throw new Error(`uwx/records: ${declaration.name} declares no sections`)
   }
-  // The single sections one record can populate (the brief + sibling singles).
-  //
-  // ⛔ `fieldByKey` IS NOT A FIELD→SECTION ROUTING TABLE, and must not be used as
-  // one. It answers exactly one question — "is this frontmatter key declared
-  // anywhere on this Model?" — for the unknown-key warning below. The assignment
-  // loop does not consult it: it walks each section and reads `record[key]` afresh.
-  //
-  // ⚠️ SO A FIELD NAME DECLARED IN TWO SECTIONS FANS OUT. The same frontmatter
-  // value is written into BOTH sections, each encoded per its own field's type — so
-  // a name shared by, say, a `string` and a `json` field yields one plausible value
-  // and one malformed one, silently. And flat frontmatter has no way to give the
-  // two fields different values in the first place: the representation is lossy
-  // exactly where names collide.
-  //
-  // ⛔ Nothing prevents this. A previous version of this comment asserted that
-  // "field names are unique across a Model's sections (the declaration's own
-  // convention)" — that is FALSE, no such convention holds, and nothing validates
-  // it: `resolve-data-schema.js` throws in 14 places and never checks this, and the
-  // only `unique_field` in the schema translator is a section-scoped constraint on
-  // an open map's KEY VALUE, which is unrelated. The invariant was asserted, relied
-  // on, and never provided.
-  const recordSections = sectionEntries.filter(([, s]) => s && s.multiple !== true)
-  const fieldByKey = new Map()
-  for (const [, sec] of recordSections) {
-    for (const [key, field] of Object.entries(sec.fields || {})) {
-      if (!fieldByKey.has(key)) fieldByKey.set(key, field)
-    }
-  }
-  // Every section by name, single or list — to recognize a record written BY SECTION
-  // (`details: { title: … }`), the shape docs/reference/entity-content.md gives a
-  // sections-form record. This mapper reads a record's fields from the top of its
-  // file, so such a record is refused below rather than sent without them.
-  const sectionNames = new Set(sectionEntries.map(([name]) => name))
-  const listSections = new Set(
-    sectionEntries.filter(([, s]) => s && s.multiple === true).map(([name]) => name)
-  )
-
-  // The markdown body of a `.md` record is the value of the Model's CONTENT body
-  // field — a markup `text` field (raw source string) or a `format: prosemirror`
-  // json field (docs/reference/entity-content.md) — wherever it is declared (the
-  // brief, or a non-brief body section like `article_body.content`). encodeFieldValue
-  // does the md→ProseMirror conversion per field kind. One content field is the body
-  // target; zero means a `.md` body has nowhere to go (warn per record).
-  const contentMatches = []
-  for (const [secName, sec] of recordSections) {
-    for (const [key, field] of Object.entries(sec.fields || {})) {
-      if (isContentBodyField(field)) contentMatches.push({ secName, key })
-    }
-  }
-  const bodyTarget = contentMatches[0] || null
+  // The markdown body of a `.md` record is the value of the schema's CONTENT body field,
+  // wherever a top-level single section declares it — the brief, or a body section like
+  // `article_body.content`. One field is the target; zero means a body has nowhere to go.
+  const { target: bodyTarget, count: bodyFields } = contentBodyTarget(declaration)
 
   const entities = []
   const warnings = []
-  // Records that cannot be sent as written — see the ⛔ at the end of the loop.
+  // Records that cannot be sent as written — see the ⛔ below.
   const refusals = []
-  if (contentMatches.length > 1) {
+  if (bodyFields > 1) {
     warnings.push(
       `${label}: ${declaration.name} has more than one content ` +
         `(markdown / html / prosemirror) field — the markdown body maps to ` +
-        `"${bodyTarget.secName}.${bodyTarget.key}"`
+        `"${bodyTarget.section}.${bodyTarget.key}"`
     )
   }
   for (const record of records || []) {
@@ -301,6 +250,7 @@ export function recordsToEntities({
       warnings.push(`${label}: a record without a slug was skipped`)
       continue
     }
+    const where = `${label}/${slug}`
     // ⛔ `$id` IS NOT THE SLUG. It is the payload-local, PATH-QUALIFIED handle, so
     // the @uniweb/folder entity can point a leaf at it via `$ref`. An explicit
     // frontmatter `$id` wins.
@@ -319,88 +269,61 @@ export function recordsToEntities({
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
-    // Per-section data in schema-declared field order (the wire's canonical order).
-    // Frontmatter keys land in their declaring section; the markdown body fills the
-    // designated content field (in whatever section declares it) unless frontmatter
-    // already set it explicitly. An absent field is simply omitted — an incomplete
-    // entity is a valid stored state; the foundation copes at render time.
-    const sectionData = {}
-    for (const [secName, sec] of recordSections) {
-      const data = {}
-      for (const [key, field] of Object.entries(sec.fields || {})) {
-        let value = record[key]
-        if (value === undefined && bodyTarget && secName === bodyTarget.secName && key === bodyTarget.key && hasBody) {
-          value = record.$body
-        }
-        if (value === undefined) continue
-        const encoded = encodeFieldValue(value, field, sourceLocale, translations)
-        if (encoded !== undefined) data[key] = encoded
+    const enc = encoder(sourceLocale, translations)
+    const sections = layout.flat ? readFlat(layout, record, enc) : readBySection(layout, record, enc)
+    // The markdown body fills the content body field, in whatever section declares it,
+    // unless the file already sets that field.
+    if (hasBody && bodyTarget) {
+      const data = (sections[bodyTarget.section] ??= {})
+      if (data[bodyTarget.key] == null) {
+        data[bodyTarget.key] = encodeFieldValue(record.$body, bodyTarget.field, sourceLocale, translations)
       }
-      if (Object.keys(data).length) sectionData[secName] = data
     }
-    // Author keys on no record section (only identity/transport keys in SKIP_KEYS are
-    // exempt). A key naming a SECTION is not unknown: the record is written by
-    // section, refused below.
-    const bySection = []
-    const undeclared = []
-    for (const key of Object.keys(record)) {
-      if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
-      if (sectionNames.has(key)) bySection.push(key)
-      else undeclared.push(key)
-    }
+    // The brief is the card, and is always sent — an empty one included, so a required
+    // field it lacks is refused here rather than stored empty.
+    if (layout.brief && !sections[layout.brief]) sections[layout.brief] = {}
 
     // ⛔ A RECORD THE BACKEND WOULD REFUSE — OR WOULD STORE EMPTY — IS REFUSED HERE,
-    // before anything is sent. Two cases are visible from here, and the second is only
-    // checked when the first does not already explain it:
-    //   - a record written by section, whose sections' contents this mapper cannot
-    //     send (it reads fields from the top of the file). Sent, it arrives with an
-    //     empty brief: refused when the brief has a `required` field, and otherwise
-    //     STORED EMPTY, in silence — so this stays whatever the backend does with a
-    //     refusal;
-    //   - a `required` field the send would lack — the brief is always sent, another
-    //     single section only when the record fills it. The backend refuses it too,
-    //     but names the field, not the file.
-    // Measured 2026-09-23: a record written by section went up with an empty brief and
-    // the lane was refused — and the refused lane left the folder's entries and
-    // entities with no data behind, so every later push of the site's records was
-    // refused. The backend's push has been one transaction since 2026-09-24; a refusal
-    // now writes nothing.
-    // ⛔ And what a push cannot carry is refused too, because it is lost twice over: the
-    // backend never receives it, and the next pull writes the file without it — an
-    // undeclared key (`tags:` beside a schema with no `tags`), or a markdown body where
-    // the schema has no field to hold it. Both were warnings until 2026-09-24
-    // ("not synced"), and a pull then deleted the value from the author's file.
-    if (undeclared.length) {
-      const one = undeclared.length === 1
+    // before anything is sent: a key written where the schema has no place for it
+    // (flat in a schema written by section, or declared nowhere), a value of the wrong
+    // shape for its section, a markdown body with no field to hold it, and a `required`
+    // field the send would lack. Measured 2026-09-23: a record the backend refused
+    // left the folder's entries with no data behind them, and every later push of the
+    // site's records was refused. The backend's push has been one transaction since
+    // 2026-09-24, so a refusal now writes nothing — but what a push cannot carry is
+    // still lost twice over: the backend never receives it, and the next pull writes
+    // the file without it.
+    if (enc.misplaced.length) refusals.push(bySectionRefusal(where, declaration.name, layout, enc.misplaced))
+    if (enc.undeclared.length) {
+      const one = enc.undeclared.length === 1
       refusals.push(
-        `${label}/${slug}: ${quoted(undeclared)} ${one ? 'is not a field' : 'are not fields'} of ` +
+        `${where}: ${quoted(enc.undeclared)} ${one ? 'is not a field' : 'are not fields'} of ` +
           `${declaration.name} — a push cannot carry ${one ? 'it' : 'them'}, and the next pull would ` +
           `drop ${one ? 'it' : 'them'} from the file. Declare ${one ? 'it' : 'them'} in the schema, ` +
           `or remove ${one ? 'it' : 'them'}.`
       )
     }
+    for (const problem of enc.shape) refusals.push(`${where}: ${problem}`)
     if (hasBody && !bodyTarget) {
       refusals.push(
-        `${label}/${slug}: the file has a markdown body, and ${declaration.name} has no field for ` +
+        `${where}: the file has a markdown body, and ${declaration.name} has no field for ` +
           'it (a `markdown` or `richtext` field) — a push cannot carry it. Add one to the schema, ' +
           'or move the text into a field.'
       )
     }
-    if (bySection.length) {
-      refusals.push(sectionShapeRefusal(`${label}/${slug}`, bySection, listSections, declaration.name))
-    } else {
-      const missing = missingRequired(recordSections, sectionData, briefName)
+    if (!enc.misplaced.length && !enc.shape.length) {
+      const missing = missingRequired(layout, sections)
       if (missing.length) {
         refusals.push(
-          `${label}/${slug}: ${declaration.name} requires ${listOf(missing)}, and this record ` +
+          `${where}: ${declaration.name} requires ${listOf(missing)}, and this record ` +
             `has no value for ${missing.length === 1 ? 'it' : 'them'}.`
         )
       }
     }
 
     // The `$`-document, in canonical key order: `$uuid?`, `$id`, `$schema`, `$disabled?`,
-    // then each populated section in declared order (the brief always present as the
-    // card). `$owner`/`$unit`/`$meta` are omitted — the backend binds owner + unit on
+    // then the brief (the card) and every other section the record holds, in declared
+    // order. `$owner`/`$unit`/`$meta` are omitted — the backend binds owner + unit on
     // its side.
     const document = {}
     if (uuid) document.$uuid = uuid
@@ -410,10 +333,10 @@ export function recordsToEntities({
     // publicly delivered. Only `true` travels. An absent key means enabled [Diego,
     // 2026-09-21], so a record whose `draft: true` is removed is sent without the key
     // and is delivered again.
-    if (isDraftRecord(record, `${label}/${slug}`)) document.$disabled = true
-    document[briefName] = sectionData[briefName] || {}
-    for (const [secName] of recordSections) {
-      if (secName !== briefName && sectionData[secName]) document[secName] = sectionData[secName]
+    if (isDraftRecord(record, where)) document.$disabled = true
+    if (layout.brief) document[layout.brief] = sections[layout.brief]
+    for (const [name] of layout.sections) {
+      if (name !== layout.brief && sections[name] !== undefined) document[name] = sections[name]
     }
 
     entities.push({
@@ -431,6 +354,111 @@ export function recordsToEntities({
   return { entities, warnings, refusals }
 }
 
+// What one record's read collects beside the values: the keys with no place in the
+// schema, the keys written flat in a schema written by section, and values of the
+// wrong shape for their section.
+function encoder(sourceLocale, translations) {
+  return { sourceLocale, translations, undeclared: [], misplaced: [], shape: [] }
+}
+
+// A flat record: its keys, minus the record's own, are the one section's fields.
+function readFlat(layout, record, enc) {
+  const [name, def] = layout.sections[0]
+  const values = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (!RECORD_KEYS.has(key)) values[key] = value
+  }
+  // The record's handle fills a `slug` field the section declares, as the flat form
+  // always has (`@std/article`'s brief has one). Written by section, the field is
+  // written under its section like any other.
+  if (record.slug !== undefined && Object.hasOwn(def.fields || {}, 'slug') && values.slug === undefined) {
+    values.slug = record.slug
+  }
+  return { [name]: encodeRecord(def.fields, values, enc, '', null) }
+}
+
+// A record written by section: each top-level key names a section of the schema. A key
+// that is instead a FIELD of one is the retired flat form — refused, naming the section
+// it belongs under — and a key that is neither is undeclared.
+function readBySection(layout, record, enc) {
+  const byName = new Map(layout.sections)
+  const out = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (RECORD_KEYS.has(key)) continue
+    const def = byName.get(key)
+    if (def) {
+      const encoded = encodeSection(def, value, enc, key)
+      if (encoded !== undefined) out[key] = encoded
+      continue
+    }
+    const owners = layout.sections.filter(([, s]) => s.fields && Object.hasOwn(s.fields, key)).map(([n]) => n)
+    if (owners.length) enc.misplaced.push({ key, owners })
+    else enc.undeclared.push(key)
+  }
+  return out
+}
+
+// A section's value: one record for a single section (a binder included — its fields
+// are its child sections), a list of records for a `many` one.
+function encodeSection(def, value, enc, path) {
+  if (def.multiple === true) {
+    if (!Array.isArray(value)) {
+      enc.shape.push(`"${path}" holds a list of records — write it as a list ("- …" under "${path}:").`)
+      return undefined
+    }
+    return value.map((item, i) => encodeItem(def, item, enc, `${path}[${i}]`))
+  }
+  if (!isPlainObject(value)) {
+    enc.shape.push(`"${path}" is a section — write its fields under it ("${path}:" then each field indented).`)
+    return undefined
+  }
+  return encodeRecord(def.fields, value, enc, `${path}.`, null)
+}
+
+// One record of a `many` section. A self-nesting section's records nest under the
+// reserved `children:` key in a file (as `@std/nav` documents it) and under
+// `$children` on the wire, where the backend derives each one's parent.
+function encodeItem(def, item, enc, path) {
+  if (!isPlainObject(item)) {
+    enc.shape.push(`"${path}" is one record of a list — write it as a map of its fields.`)
+    return {}
+  }
+  const nests = def.self_nesting === true
+  const out = encodeRecord(def.fields, item, enc, `${path}.`, nests ? 'children' : null)
+  if (nests && item.children !== undefined) {
+    if (!Array.isArray(item.children)) {
+      enc.shape.push(`"${path}.children" nests records under this one — write it as a list.`)
+    } else {
+      out.$children = item.children.map((child, j) => encodeItem(def, child, enc, `${path}.children[${j}]`))
+    }
+  }
+  return out
+}
+
+// Encode one record's fields in declared order — a nested section by its own
+// declaration, a leaf by its kind. A key the fields do not declare is recorded as
+// undeclared; `$`-keys (identity a pull may have left on a record) are not content, and
+// `reserved` is the one extra key a caller allows (`children`, on a self-nesting list).
+function encodeRecord(fields, value, enc, prefix, reserved) {
+  const out = {}
+  for (const [key, field] of Object.entries(fields || {})) {
+    const v = value[key]
+    if (v === undefined) continue
+    const encoded =
+      field?.type === 'section'
+        ? encodeSection(field, v, enc, `${prefix}${key}`)
+        : encodeFieldValue(v, field, enc.sourceLocale, enc.translations)
+    if (encoded !== undefined) out[key] = encoded
+  }
+  for (const key of Object.keys(value)) {
+    if (key === reserved || key.startsWith('$') || Object.hasOwn(fields || {}, key)) continue
+    enc.undeclared.push(`${prefix}${key}`)
+  }
+  return out
+}
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
 // "a", "a and b", "a, b and c" — items are already formatted.
 function listOf(items) {
   if (items.length <= 1) return items.join('')
@@ -439,42 +467,75 @@ function listOf(items) {
 
 const quoted = (keys) => listOf(keys.map((k) => `"${k}"`))
 
-// Why a record written by section cannot be sent, and what to do about each kind of
-// section it names: a single section's fields can move to the top of the file; a
-// list section has no file form a push can send.
-function sectionShapeRefusal(where, keys, listSections, modelName) {
-  const singles = keys.filter((k) => !listSections.has(k))
-  const lists = keys.filter((k) => listSections.has(k))
-  const one = keys.length === 1
-  let message =
-    `${where}: ${quoted(keys)} ${one ? 'is a section' : 'are sections'} of ${modelName}, and a ` +
-    `push reads a record's fields from the top of its file — what ${one ? 'it holds' : 'they hold'} ` +
-    'would not be sent.'
-  if (singles.length) message += ` Move the fields of ${quoted(singles)} up a level.`
-  if (lists.length) {
-    message +=
-      ` ${quoted(lists)} ${lists.length === 1 ? 'holds' : 'hold'} a list, which a push cannot ` +
-      'send from a file yet.'
+// A schema written by section — more than one section, or a list at its root — takes no
+// field at the top of the file: say where each one written there belongs. A field that
+// single sections declare belongs under one of them (named with every candidate, since
+// sections are namespaces and only the author knows which one they meant); a field only
+// a list declares goes into one of the list's records.
+function bySectionRefusal(where, modelName, layout, misplaced) {
+  const multiple = new Map(layout.sections.map(([n, s]) => [n, s.multiple === true]))
+  const moves = []
+  const bySection = new Map()
+  for (const { key, owners } of misplaced) {
+    const singles = owners.filter((o) => !multiple.get(o))
+    if (singles.length === 1) {
+      if (!bySection.has(singles[0])) bySection.set(singles[0], [])
+      bySection.get(singles[0]).push(key)
+    } else if (singles.length > 1) {
+      moves.push(`"${key}" under ${listOf(singles.map((o) => `"${o}:"`)).replace(/ and ([^ ]+)$/, ' or $1')}`)
+    } else {
+      moves.push(`"${key}" into a record of ${listOf(owners.map((o) => `"${o}:"`)).replace(/ and ([^ ]+)$/, ' or $1')}`)
+    }
   }
-  return message
+  const grouped = [...bySection].map(([section, keys]) => `${quoted(keys)} under "${section}:"`)
+  const names = layout.sections.map(([n]) => n)
+  return (
+    `${where}: ${modelName} is written by section, each section under its own name ` +
+    `(${quoted(names)}) — move ${listOf([...grouped, ...moves])}.`
+  )
 }
 
-// The `required` fields a record's send would lack. The brief is always sent; another
-// single section only when the record fills it, so an empty one is not checked. A
-// field counts as present when the send carries a value for it (`null` is none).
-function missingRequired(recordSections, sectionData, briefName) {
+// The `required` fields the send would lack — checked in every record the send holds:
+// the brief (always sent), each other single section the record fills, each record of a
+// list, and the records nested in them. Each is named by its path in the file —
+// `"title"` in a flat record, `"details.title"` or `"sessions[0].title"` in one written
+// by section. A field counts as present when the send carries a value for it (`null`
+// is none).
+function missingRequired(layout, sections) {
   const missing = []
-  for (const [secName, sec] of recordSections) {
-    const data = sectionData[secName]
-    if (secName !== briefName && !data) continue
-    for (const [key, field] of Object.entries(sec.fields || {})) {
-      if (field?.required !== true || data?.[key] != null) continue
-      missing.push(secName === briefName ? `"${key}"` : `"${key}" (section "${secName}")`)
+  for (const [name, def] of layout.sections) {
+    const value = sections[name]
+    if (value === undefined) continue
+    const base = layout.flat ? '' : name
+    if (def.multiple === true) {
+      value.forEach((item, i) => missingIn(def, item, `${base}[${i}]`, missing))
+    } else {
+      missingIn(def, value, base, missing)
     }
   }
   return missing
 }
 
+// `def` is the section (or nested section field) `record` is one record of.
+function missingIn(def, record, path, missing) {
+  if (!isPlainObject(record)) return
+  const at = (key) => (path ? `${path}.${key}` : key)
+  for (const [key, field] of Object.entries(def.fields || {})) {
+    const value = record[key]
+    if (field?.type === 'section') {
+      if (field.multiple === true && Array.isArray(value)) {
+        value.forEach((item, i) => missingIn(field, item, `${at(key)}[${i}]`, missing))
+      } else if (field.multiple !== true && isPlainObject(value)) {
+        missingIn(field, value, at(key), missing)
+      }
+      continue
+    }
+    if (field?.required === true && value == null) missing.push(`"${at(key)}"`)
+  }
+  if (def.self_nesting === true && Array.isArray(record.$children)) {
+    record.$children.forEach((child, j) => missingIn(def, child, `${path}.children[${j}]`, missing))
+  }
+}
 // Post-pass: override a collection record's localized CONTENT body with a per-locale
 // FREE-FORM body when `locales/freeform/{locale}/records/<schema>/<slug>.md` exists
 // — the override wins over the structural map, exactly like site-content sections
@@ -488,15 +549,16 @@ async function applyFreeformRecordOverrides({
   targetLocales,
   localesBase,
 }) {
-  const briefEntry = Object.entries(declaration.sections || {}).find(([, s]) => s && s.brief === true)
-  const briefName = briefEntry?.[0]
-  const fields = briefEntry?.[1]?.fields || {}
-  // The body target for a free-form override is the prosemirror CONTENT field.
-  const contentKey = Object.entries(fields).find(([, f]) => isProseMirrorField(f) && f.localized)?.[0]
-  if (!briefName || !contentKey) return
+  // The body target for a free-form override is the schema's CONTENT body field, wherever
+  // a single section declares it — only a localized prosemirror one can take a per-locale
+  // doc. ⛔ It looked in the brief alone until 2026-09-24, so `@std/article`'s
+  // `article_body.content` never took its translation.
+  const { target } = contentBodyTarget(declaration)
+  if (!target || !isProseMirrorField(target.field) || !target.field.localized) return
+  const { section: sectionName, key: contentKey } = target
 
   for (const entity of entities) {
-    const data = entity.document?.[briefName]
+    const data = entity.document?.[sectionName]
     if (!data || data[contentKey] === undefined) continue
     let localized = data[contentKey]
     // The source-locale doc to promote to the localized-map form (when the field is

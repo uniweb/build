@@ -33,6 +33,11 @@ beforeAll(async () => {
   )
   // A markdown body is the value of the content body field, as a push sends it.
   write(join(foundationPath, 'schemas', 'note.yml'), 'name: note\nfields:\n  title: { type: string, required: true }\n  text: { type: markdown, required: true }\n')
+  // A body in a section other than the brief — `@std/article`'s layout.
+  write(
+    join(foundationPath, 'schemas', 'post.yml'),
+    'name: post\nsections:\n  card:\n    brief: true\n    fields:\n      title: { type: string, required: true }\n  body:\n    fields:\n      content: { type: richtext }\n'
+  )
   write(join(foundationPath, 'sections', 'Team', 'meta.js'), "export default { title: 'Team', data: { members: '@/member' } }\n")
 
   write(join(siteRoot, 'site.yml'), 'name: fixture\nfoundation: foundation\nqueries:\n  members:\n    schema: "@/member"\n')
@@ -43,9 +48,13 @@ beforeAll(async () => {
   write(join(siteRoot, 'records', 'member', 'bob.yml'), 'name: Bob\njoined: March 2021\n')
   write(join(siteRoot, 'records', 'course', 'rust.yml'), 'identity:\n  title: Rust 101\nmodules:\n  - title: Basics\n  - {}\n')
   write(join(siteRoot, 'records', 'course', 'go.yml'), 'modules: []\n')
-  write(join(siteRoot, 'records', 'course', 'flat.yml'), 'summary: no title here\n')
+  // Written in the retired flat form: `title` belongs under `identity:`.
+  write(join(siteRoot, 'records', 'course', 'flat.yml'), 'title: Rust 102\n')
   write(join(siteRoot, 'records', 'note', 'hello.md'), '---\ntitle: Hello\n---\n\nThe text.\n')
   write(join(siteRoot, 'records', 'note', 'empty.md'), '---\ntitle: Empty\n---\n')
+  // The body lands in `body.content`, where the file holds it — never at the top.
+  write(join(siteRoot, 'records', 'post', 'hello.md'), '---\ncard:\n  title: Hello\n---\n\nThe body.\n')
+  write(join(siteRoot, 'records', 'post', 'untitled.md'), '---\ncard: {}\n---\n\nThe body.\n')
 
   report = await validateDataInputs({ siteRoot, foundationPath })
 })
@@ -61,10 +70,12 @@ describe('validateDataInputs — every record file', () => {
     expect(found()).toEqual(
       [
         `${queryDataUrl('members')} bob joined:format`,
-        'records/course/flat.yml flat title:required',
+        'records/course/flat.yml flat title:section',
+        'records/course/flat.yml flat identity.title:required',
         'records/course/go.yml go identity.title:required',
         'records/course/rust.yml rust modules[1].title:required',
         'records/note/empty.md empty text:required',
+        'records/post/untitled.md untitled card.title:required',
       ].sort()
     )
   })
@@ -74,8 +85,8 @@ describe('validateDataInputs — every record file', () => {
   })
 
   it('counts each record once', () => {
-    // 2 members (by their section) + 3 courses + 2 notes (by their files).
-    expect(report.summary.records).toBe(7)
-    expect(report.summary.schemas).toBe(3)
+    // 2 members (by their section) + 3 courses + 2 notes + 2 posts (by their files).
+    expect(report.summary.records).toBe(9)
+    expect(report.summary.schemas).toBe(4)
   })
 })

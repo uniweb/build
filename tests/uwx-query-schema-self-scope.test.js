@@ -266,7 +266,7 @@ describe('pull — the author’s `@/` comes back', () => {
     const decl = queryOf(doc, 'articles')
     // CONTROL — the wire really carries both the qualified name and a derivation.
     expect(decl.schema).toBe('@acme/article')
-    expect(decl.deferred).toEqual(['content', 'footnotes'])
+    expect(decl.deferred).toEqual(['body'])
 
     declarationsToQueriesYml({ document: doc, siteRoot: SITE, scope: '@acme' })
     const written = pulledQueries().articles

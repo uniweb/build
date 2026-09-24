@@ -257,7 +257,7 @@ describe('a draft record is pushed as a disabled entity', () => {
     expect(sentIds(pkg)).toContain('article/soon')
     expect(docOf(pkg, 'article/soon').$disabled).toBe(true)
     // `draft` is framework's word, never a Model field
-    expect(docOf(pkg, 'article/soon').article).not.toHaveProperty('draft')
+    expect(docOf(pkg, 'article/soon').brief).not.toHaveProperty('draft')
     expect(folderDoc(pkg).contents.map((c) => c.$ref)).toContain('article/soon')
     expect(pkg.records.index.find((e) => e.id === 'article/soon').draft).toBe(true)
   })

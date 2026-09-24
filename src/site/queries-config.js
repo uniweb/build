@@ -30,8 +30,10 @@
 
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { briefFields, flatRecordFields } from '@uniweb/schemas/conform'
+import { recordLayout } from '@uniweb/schemas/conform'
 import { detectFoundationType } from './foundation-ref.js'
+import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
+import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
@@ -325,13 +327,17 @@ export function toConfigQueries(declarations) {
  * schema should not have to say it twice, in a second vocabulary, with nothing
  * checking the two against each other.
  *
- * ⇒ `deferred` = the schema's flat-record fields MINUS its brief fields.
+ * ⇒ `deferred` = every top-level section of the schema other than its brief — the keys
+ * a delivered record holds them under (`article_body` for `@std/article`), which is
+ * exactly what a host's records service leaves out of a list and adds for `whole`.
+ * ⛔ It was the flat form's fields minus the brief's until 2026-09-24; a delivered
+ * record carries those under their section, so stripping them by name stripped nothing.
  *
  * Derived from the SCHEMA, never from a record. That is what keeps the
  * build-derived keys safe without a reserved list: `slug`, `route`, `path`,
- * `excerpt`, `image` and `lastModified` are not schema fields, so they are never
- * in the difference and never stripped. `content` is not exempt — it is
- * schema-governed, and usually the heavy field the split exists for.
+ * `excerpt`, `image` and `lastModified` are not sections, so they are never
+ * stripped. A markdown body goes where its content field is — inside `article_body`,
+ * say — so it is deferred with that section.
  *
  * ⛔ Silent on every path that cannot answer, because none of them is an error:
  *
@@ -342,8 +348,8 @@ export function toConfigQueries(declarations) {
  *     sync lane already applies. `dist/meta/schema.json` carries the schemas
  *     COMPONENTS reference, so a collection whose schema no component binds is
  *     simply not there;
- *   - the schema states no brief (`briefFields` → null, e.g. a root list) → there
- *     is no lean shape to honour, so records stay whole.
+ *   - the schema has no brief, or only one section (`recordLayout`) → there is no
+ *     lean shape to honour, so records stay whole.
  *
  * The last two are why this reads the built artifact rather than resolving
  * schemas itself: it is the same input the sync lane uses, so both lanes agree
@@ -365,7 +371,7 @@ async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
 }
 
 /**
- * The `deferred:` a schema implies — every record field its **brief** does not name.
+ * The `deferred:` a schema implies — every top-level section but its **brief**, by name.
  *
  * ⛔ ONE IMPLEMENTATION, TWO CALLERS, and that is the point. `deriveDeferredFromSchemas`
  * above uses it to FILL an unstated `deferred:`; `uwx/records-project.js` uses it to
@@ -382,12 +388,61 @@ async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
  *   derivation to recognize
  */
 export function deferredFromSchema(schema) {
-  if (!schema) return null
-  const brief = briefFields(schema)
-  if (!brief) return null
-  const all = Object.keys(flatRecordFields(schema) || {})
-  const heavy = all.filter((f) => !brief.has(f))
+  const layout = schema ? recordLayout(schema) : null
+  if (!layout || layout.flat || !layout.brief) return null
+  const heavy = layout.sections.map(([name]) => name).filter((name) => name !== layout.brief)
   return heavy.length ? heavy : null
+}
+
+/**
+ * The data schemas a site's records are shaped by, keyed by ref — each resolved from
+ * the LOCAL foundation's SOURCE by the resolver its build uses (`buildDataSchemaMap`),
+ * so the static lane delivers a record in the shape a component is written against
+ * (`query-processor.js`) whether or not the foundation has been built.
+ *
+ * ⛔ Not `dist/meta/schema.json`, which `foundationDataSchemas` below reads for the
+ * sync lane: a dev server does not build the foundation, so a site that had never been
+ * built would compile its records in one shape under `pnpm dev` and another in
+ * production — and a component reads them in exactly one.
+ *
+ * A `@/name` ref the foundation defines no schema for is absent without a word: a query
+ * is named after no schema when its records have none. Any other ref that does not
+ * resolve is absent too, and reported in `failures`. With no local foundation only
+ * `@std/*` refs resolve — from the build's own copy of the standard schemas — since
+ * nothing else is on disk.
+ *
+ * @param {string} siteRoot
+ * @param {Iterable<string>} refs - the `schema:` refs of the site's queries
+ * @param {{ siteYml?: object }} [opts] - an already-read site.yml
+ * @returns {Promise<{ schemas: object, failures: Array<{ ref: string, message: string }> }>}
+ */
+export async function resolveRecordSchemas(siteRoot, refs, opts = {}) {
+  const wanted = [...new Set([...(refs || [])].filter((r) => typeof r === 'string' && r))]
+  const schemas = {}
+  const failures = []
+  if (wanted.length === 0) return { schemas, failures }
+  const siteYml = opts.siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
+  const srcDir = localFoundationSrcDir(siteRoot, siteYml)
+  for (const ref of wanted) {
+    if (!srcDir && !ref.startsWith('@std/')) continue
+    try {
+      Object.assign(schemas, await buildDataSchemaMap([ref], { srcDir: srcDir ?? siteRoot }))
+    } catch (err) {
+      if (err?.code !== SCHEMA_NOT_FOUND) failures.push({ ref, message: err?.message || String(err) })
+    }
+  }
+  return { schemas, failures }
+}
+
+/** The source directory of the site's foundation when it is local, else null. */
+function localFoundationSrcDir(siteRoot, siteYml) {
+  if (!siteYml?.foundation) return null
+  try {
+    const info = detectFoundationType(siteYml.foundation, siteRoot)
+    return info?.type === 'local' && info.path ? resolveFoundationSrcPath(info.path) : null
+  } catch {
+    return null // a declaration the resolver refuses is reported by the build that reads it
+  }
 }
 
 /** The data schemas a site's foundation declares, or null when unresolvable. */

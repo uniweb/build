@@ -91,7 +91,7 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
 
   const { sections, brief } = normalized.sections
     ? lowerSectionsForm(normalized.sections, resolve, optResolve)
-    : lowerFieldsForm(normalized.fields || {}, shortName(name), resolve, optResolve)
+    : lowerFieldsForm(normalized.fields || {}, resolve, optResolve)
 
   // The model-level sort axis is inline: `sort_date: true` on the brief's named
   // date field (replaces the old schema-level `sort_date_field` back-reference).
@@ -139,13 +139,22 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
 
 // --- shapes ------------------------------------------------------------------
 
-// The `fields:` shorthand: a flat field set is ONE single brief section named the
-// model short-name. Our producer-side sugar — the registry's root is always
-// `sections:`; this expands to it.
-function lowerFieldsForm(fields, sectionName, resolve, optResolve) {
+// The `fields:` shorthand: a flat field set is ONE single section, named `brief` and
+// marked `brief: true` — exactly `sections: { brief: { brief: true, fields } }`. Our
+// producer-side sugar — the registry's root is always `sections:`; this expands to it.
+//
+// ⭐ THE NAME IS FIXED, NOT DERIVED (2026-09-22 [Diego]: "We assume it is single section,
+// `brief: true` and named `brief`"). It was the schema's short name until then —
+// `@std/person` → `person` — a name nobody wrote, stored on every entity and in every
+// `item_ref` path, that a schema growing into the `sections:` form had to reuse exactly
+// with nothing to say so. A `sections:` schema still names its own sections; `brief` is
+// only the recommended name for its card.
+export const SHORTHAND_SECTION = 'brief'
+
+function lowerFieldsForm(fields, resolve, optResolve) {
   return {
-    sections: { [sectionName]: lowerSection({ kind: 'single', brief: true, fields }, resolve, optResolve) },
-    brief: sectionName,
+    sections: { [SHORTHAND_SECTION]: lowerSection({ kind: 'single', brief: true, fields }, resolve, optResolve) },
+    brief: SHORTHAND_SECTION,
   }
 }
 
@@ -458,10 +467,6 @@ function sectionAttrsFromField(field) {
   if (field.nestable) out.nestable = true
   if (field.append_only) out.append_only = true
   return out
-}
-
-function shortName(name) {
-  return String(name).split('/').pop()
 }
 
 // `@/x` resolves into the schema's own org; other scopes pass through.

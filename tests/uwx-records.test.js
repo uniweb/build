@@ -105,9 +105,9 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     '@acme/product'
   )
 
-  it('lowers to a single brief section named by the short name', () => {
-    expect(Object.keys(declaration.sections)).toEqual(['product'])
-    expect(declaration.sections.product.brief).toBe(true)
+  it('lowers to a single section named `brief`, marked brief — never the short name', () => {
+    expect(Object.keys(declaration.sections)).toEqual(['brief'])
+    expect(declaration.sections.brief.brief).toBe(true)
   })
 
   it('maps each record to one by-name entity-content document (no $uuid on first sync)', () => {
@@ -133,7 +133,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(e.document.$schema).toBe('@acme/product')
     expect(e.document).not.toHaveProperty('$uuid')
     // brief section keyed by its name; its value is the fields object.
-    expect(e.document.product).toMatchObject({ price: 9.99, published: '2026-01-01' })
+    expect(e.document.brief).toMatchObject({ price: 9.99, published: '2026-01-01' })
   })
 
   it('wraps a localized scalar field per-locale from translations (B)', () => {
@@ -144,7 +144,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       translations: { es: { [computeHash('Hello')]: 'Hola' } },
     })
     // localized scalar → { source, ...targets }; a non-localized (machine) field is untouched.
-    expect(entities[0].document.product.title).toEqual({ en: 'Hello', es: 'Hola' })
+    expect(entities[0].document.brief.title).toEqual({ en: 'Hello', es: 'Hola' })
   })
 
   it('without translations a localized scalar stays source-only (backward compatible)', () => {
@@ -153,7 +153,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       records: [{ slug: 'a', title: 'Hello' }],
       declaration,
     })
-    expect(entities[0].document.product.title).toEqual({ en: 'Hello' })
+    expect(entities[0].document.brief.title).toEqual({ en: 'Hello' })
   })
 
   it('canonical key order: $id, $schema, then the section (no leading $uuid first sync)', () => {
@@ -162,7 +162,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       records: [{ slug: 'a', title: 'A' }],
       declaration,
     })
-    expect(Object.keys(entities[0].document)).toEqual(['$id', '$schema', 'product'])
+    expect(Object.keys(entities[0].document)).toEqual(['$id', '$schema', 'brief'])
     // ⚠️ The caller supplies `$id` now — it is the entity's POOL id, and only the
     // caller knows the pool position. This unit exercises the mapper alone, so it
     // falls back to `<queryName>/<slug>`; the real producer always sets it.
@@ -176,7 +176,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       declaration,
     })
     // declared order is title, price, published, sku — not the record's order.
-    expect(Object.keys(entities[0].document.product)).toEqual([
+    expect(Object.keys(entities[0].document.brief)).toEqual([
       'title',
       'price',
       'published',
@@ -193,7 +193,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       declaration,
       sourceLocale: 'en',
     })
-    const data = entities[0].document.product
+    const data = entities[0].document.brief
     expect(data.title).toEqual({ en: 'Widget X' }) // localized wrap
     expect(data.price).toBe(9.99) // raw scalar
     expect(data.published).toBe('2026-01-01') // date string passthrough
@@ -207,7 +207,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       records: [{ slug: 'd', title: 'D', published: new Date('2026-03-01T00:00:00Z') }],
       declaration, // `published` is type `date`
     })
-    expect(entities[0].document.product.published).toBe('2026-03-01')
+    expect(entities[0].document.brief.published).toBe('2026-03-01')
   })
 
   it('emits a `datetime` field as full RFC3339', () => {
@@ -221,7 +221,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       records: [{ slug: 'e', title: 'E', at: new Date('2026-03-01T12:30:00Z') }],
       declaration: dt,
     })
-    expect(entities[0].document.event.at).toBe('2026-03-01T12:30:00.000Z')
+    expect(entities[0].document.brief.at).toBe('2026-03-01T12:30:00.000Z')
   })
 
   it('round-trips a back-filled $uuid for re-sync (as the leading key)', () => {
@@ -233,7 +233,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     const [e] = entities
     expect(e.uuid).toBe('abc-123')
     expect(e.document.$uuid).toBe('abc-123')
-    expect(Object.keys(e.document)).toEqual(['$uuid', '$id', '$schema', 'product'])
+    expect(Object.keys(e.document)).toEqual(['$uuid', '$id', '$schema', 'brief'])
   })
 
   it('honors an explicit $id over the slug', () => {
@@ -257,7 +257,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       records: [{ slug: 'g', title: 'G', color: 'red', size: 'L' }],
       declaration,
     })
-    expect(entities[0].document.product).not.toHaveProperty('color')
+    expect(entities[0].document.brief).not.toHaveProperty('color')
     expect(refusals).toEqual([
       'products/g: "color" and "size" are not fields of @acme/product — a push cannot carry ' +
         'them, and the next pull would drop them from the file. Declare them in the schema, or ' +
@@ -275,30 +275,41 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(warnings.some((w) => w.includes('without a slug'))).toBe(true)
   })
 
-  it('throws for a brief-less Model (no single section)', () => {
+  it('a Model whose root is a list is written by section and sent — it has no brief', () => {
     const declNoBrief = lower(
       { name: 'log', sections: { entries: { kind: 'multi', fields: { msg: { type: 'string' } } } } },
       '@/log',
       '@acme/log'
     )
-    expect(declNoBrief.brief).toBeFalsy()
-    expect(() =>
-      recordsToEntities({
-        label: 'logs',
-        records: [{ slug: 'a', msg: 'hi' }],
-        declaration: declNoBrief,
-      })
-    ).toThrow(/no brief section/)
+    expect(Object.values(declNoBrief.sections).some((s) => s.brief)).toBe(false)
+    const { entities, refusals } = recordsToEntities({
+      label: 'logs',
+      records: [{ slug: 'a', entries: [{ msg: 'hi' }, { msg: 'there' }] }],
+      declaration: declNoBrief,
+    })
+    expect(refusals).toEqual([])
+    expect(entities[0].document).toEqual({
+      $id: 'logs/a',
+      $schema: '@acme/log',
+      entries: [{ msg: { en: 'hi' } }, { msg: { en: 'there' } }],
+    })
+    // …and its fields are not written flat: a list has no flat form.
+    expect(
+      recordsToEntities({ label: 'logs', records: [{ slug: 'b', msg: 'hi' }], declaration: declNoBrief }).refusals
+    ).toEqual([
+      'logs/b: @acme/log is written by section, each section under its own name ("entries") — ' +
+        'move "msg" into a record of "entries:".',
+    ])
   })
 })
 
-// ── A record the backend would refuse is refused before anything is sent ──────
+// ── A multi-section record is written by section; what cannot be sent is refused ──
 
-describe('recordsToEntities — refuses a record that cannot be sent as written', () => {
-  // Measured 2026-09-23: a record written by section — the shape
-  // docs/reference/entity-content.md gives a sections-form record — went up with an
-  // empty brief, the backend refused the records lane over its required field, and
-  // what the lane had already written stopped every later push of the site's records.
+describe('recordsToEntities — a multi-section record is written by section', () => {
+  // ⭐ A schema with more than one section is written by section — each under its own
+  // name, the stored entity's shape — and the retired flat form is refused, naming where
+  // each field belongs [Diego, 2026-09-22]. Measured before: a pull wrote such a record
+  // back from its brief alone, so everything else was lost from the author's file.
   const event = lower(
     {
       name: 'event',
@@ -319,46 +330,179 @@ describe('recordsToEntities — refuses a record that cannot be sent as written'
   const map = (record) =>
     recordsToEntities({ label: 'event', records: [{ slug: 'launch', ...record }], declaration: event })
 
-  it('⛔ a record written by section is refused, naming each section and what to do about it', () => {
-    const { refusals, warnings } = map({
-      details: { title: 'Launch' },
-      sessions: [{ title: 'Keynote' }],
+  it('a record written by section is sent, every section it holds included — a list as its records', () => {
+    const { refusals, entities } = map({
+      details: { title: 'Launch', location: 'Toronto' },
+      sessions: [{ title: 'Keynote' }, { title: 'Workshop' }],
     })
+    expect(refusals).toEqual([])
+    expect(entities[0].document).toEqual({
+      $id: 'event/launch',
+      $schema: '@acme/event',
+      details: { title: { en: 'Launch' }, location: { en: 'Toronto' } },
+      sessions: [{ title: { en: 'Keynote' } }, { title: { en: 'Workshop' } }],
+    })
+  })
+
+  it('⛔ the flat form is refused, naming the section each field belongs under', () => {
+    const { refusals } = map({ location: 'Toronto', note: 'Bring a badge' })
     expect(refusals).toEqual([
-      'event/launch: "details" and "sessions" are sections of @acme/event, and a push reads ' +
-        "a record's fields from the top of its file — what they hold would not be sent. " +
-        'Move the fields of "details" up a level. "sessions" holds a list, which a push ' +
-        'cannot send from a file yet.',
-    ])
-    // Not also called unknown: "field "details" is not on @acme/event" said the Model
-    // lacks a section it has.
-    expect(warnings.filter((w) => /is not on/.test(w))).toEqual([])
-  })
-
-  it('⛔ a record missing a required field of the brief is refused', () => {
-    expect(map({ location: 'Toronto' }).refusals).toEqual([
-      'event/launch: @acme/event requires "title", and this record has no value for it.',
+      'event/launch: @acme/event is written by section, each section under its own name ' +
+        '("details", "extra" and "sessions") — move "location" under "details:" and "note" under "extra:".',
     ])
   })
 
-  it('an empty value is no value — `title:` with nothing after it reads as null', () => {
-    expect(map({ title: null }).refusals).toHaveLength(1)
+  it('a field two single sections declare is named with both — sections are namespaces', () => {
+    const both = lower(
+      {
+        name: 'pair',
+        sections: {
+          a: { brief: true, fields: { title: { type: 'string' } } },
+          b: { fields: { title: { type: 'string' } } },
+        },
+      },
+      '@/pair',
+      '@acme/pair'
+    )
+    const { refusals } = recordsToEntities({ label: 'pair', records: [{ slug: 'x', title: 'T' }], declaration: both })
+    expect(refusals).toEqual([
+      'pair/x: @acme/pair is written by section, each section under its own name ("a" and "b") — ' +
+        'move "title" under "a:" or "b:".',
+    ])
+    // Written by section, the two fields hold two values.
+    const ok = recordsToEntities({
+      label: 'pair',
+      records: [{ slug: 'y', a: { title: 'A' }, b: { title: 'B' } }],
+      declaration: both,
+    })
+    expect(ok.refusals).toEqual([])
+    expect(ok.entities[0].document.a).toEqual({ title: { en: 'A' } })
+    expect(ok.entities[0].document.b).toEqual({ title: { en: 'B' } })
+  })
+
+  it('⛔ a record missing a required field of the brief is refused, by its path in the file', () => {
+    expect(map({ details: { location: 'Toronto' } }).refusals).toEqual([
+      'event/launch: @acme/event requires "details.title", and this record has no value for it.',
+    ])
+  })
+
+  it('the brief is always sent — an absent one is empty, and its required field is refused', () => {
+    expect(map({ extra: { note: 'n', contact: 'c' } }).refusals).toEqual([
+      'event/launch: @acme/event requires "details.title", and this record has no value for it.',
+    ])
+  })
+
+  it('an empty value is no value — a field written with nothing after it reads as null', () => {
+    expect(map({ details: { title: null } }).refusals).toHaveLength(1)
   })
 
   it("another single section's required field counts only once the record fills that section", () => {
-    // `extra` left empty is not sent, so its `contact` cannot fail the send…
-    expect(map({ title: 'Launch' }).refusals).toEqual([])
+    // `extra` left out is not sent, so its `contact` cannot fail the send…
+    expect(map({ details: { title: 'Launch' } }).refusals).toEqual([])
     // …but a record that fills it sends it, and then it needs its required field.
-    expect(map({ title: 'Launch', note: 'Bring a badge' }).refusals).toEqual([
-      'event/launch: @acme/event requires "contact" (section "extra"), and this record has ' +
-        'no value for it.',
+    expect(map({ details: { title: 'Launch' }, extra: { note: 'Bring a badge' } }).refusals).toEqual([
+      'event/launch: @acme/event requires "extra.contact", and this record has no value for it.',
     ])
   })
 
-  it('CONTROL — a complete record written by field is sent, not refused', () => {
-    const { refusals, entities } = map({ title: 'Launch', location: 'Toronto' })
+  it("a list's records are checked for their required fields too, each by its index", () => {
+    expect(map({ details: { title: 'Launch' }, sessions: [{ title: 'Keynote' }, {}] }).refusals).toEqual([
+      'event/launch: @acme/event requires "sessions[1].title", and this record has no value for it.',
+    ])
+  })
+
+  it('⛔ a value of the wrong shape for its section is refused, saying which shape it takes', () => {
+    expect(map({ details: { title: 'Launch' }, sessions: { title: 'Keynote' } }).refusals).toEqual([
+      'event/launch: "sessions" holds a list of records — write it as a list ("- …" under "sessions:").',
+    ])
+    expect(map({ details: 'Launch' }).refusals).toEqual([
+      'event/launch: "details" is a section — write its fields under it ("details:" then each field indented).',
+    ])
+  })
+
+  it('a key a section does not declare is refused by its path in the file', () => {
+    expect(map({ details: { title: 'Launch', color: 'red' } }).refusals).toEqual([
+      'event/launch: "details.color" is not a field of @acme/event — a push cannot carry it, and ' +
+        'the next pull would drop it from the file. Declare it in the schema, or remove it.',
+    ])
+  })
+})
+
+describe('recordsToEntities — nested sections and self-nesting lists', () => {
+  const course = lower(
+    {
+      name: 'course',
+      sections: {
+        identity: { brief: true, fields: { title: { type: 'string' } } },
+        outline: {
+          many: true,
+          tree: true,
+          fields: {
+            heading: { type: 'string' },
+            links: { type: 'object', many: true, fields: { href: { type: 'string', translatable: false } } },
+          },
+        },
+      },
+    },
+    '@/course',
+    '@acme/course'
+  )
+
+  it('a self-nesting list nests under `children:` in the file and `$children` on the wire', () => {
+    const { refusals, entities } = recordsToEntities({
+      label: 'course',
+      records: [
+        {
+          slug: 'rust',
+          identity: { title: 'Rust' },
+          outline: [{ heading: 'Basics', links: [{ href: '/a' }], children: [{ heading: 'Install' }] }],
+        },
+      ],
+      declaration: course,
+    })
     expect(refusals).toEqual([])
-    expect(Object.keys(entities[0].document.details)).toEqual(['title', 'location'])
+    expect(entities[0].document.outline).toEqual([
+      { heading: { en: 'Basics' }, links: [{ href: '/a' }], $children: [{ heading: { en: 'Install' } }] },
+    ])
+  })
+
+  it('a localized field inside a nested section is wrapped per locale, like any other', () => {
+    const post = lower(
+      {
+        name: 'post',
+        sections: {
+          card: { brief: true, fields: { title: { type: 'string' } } },
+          body: {
+            fields: { seo: { type: 'object', fields: { title: { type: 'string' }, noindex: { type: 'boolean' } } } },
+          },
+        },
+      },
+      '@/post',
+      '@acme/post'
+    )
+    const { entities } = recordsToEntities({
+      label: 'post',
+      records: [{ slug: 'p', card: { title: 'P' }, body: { seo: { title: 'SEO', noindex: true } } }],
+      declaration: post,
+    })
+    expect(entities[0].document.body).toEqual({ seo: { title: { en: 'SEO' }, noindex: true } })
+  })
+
+  it('a list of localized values goes up as one locale map per element', () => {
+    const tagged = lower(
+      { name: 'tagged', fields: { title: { type: 'string' }, labels: { type: 'string', many: true } } },
+      '@/tagged',
+      '@acme/tagged'
+    )
+    const { entities } = recordsToEntities({
+      label: 'tagged',
+      records: [{ slug: 't', title: 'T', labels: ['one', 'two'] }],
+      declaration: tagged,
+    })
+    expect(entities[0].document.brief).toEqual({
+      title: { en: 'T' },
+      labels: [{ en: 'one' }, { en: 'two' }],
+    })
   })
 })
 
@@ -379,7 +523,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
       sourceLocale: 'en',
     })
     expect(warnings).toEqual([])
-    const data = entities[0].document.article
+    const data = entities[0].document.brief
     expect(data.title).toEqual({ en: 'Hello' })
     expect(data.body).toEqual({ en: '\n# Welcome\n' }) // raw markdown string
   })
@@ -390,7 +534,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
       records: [{ slug: 'h', title: 'H', body: 'explicit', $body: 'from-md-body' }],
       declaration: decl,
     })
-    expect(entities[0].document.article.body).toEqual({ en: 'explicit' })
+    expect(entities[0].document.brief.body).toEqual({ en: 'explicit' })
   })
 
   it('never treats $body as an unknown field', () => {
@@ -548,8 +692,8 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
       expect(doc).not.toHaveProperty('$uuid') // first sync — backend mints
       expect(doc).not.toHaveProperty('items')
       // human-text `title` lowers to localized → wrapped `{ en: ... }`; `price` raw.
-      expect(doc.product.title).toHaveProperty('en')
-      expect(typeof doc.product.price).toBe('number')
+      expect(doc.brief.title).toHaveProperty('en')
+      expect(typeof doc.brief.price).toBe('number')
     }
   })
 
@@ -586,7 +730,7 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
 
     const doc = await emit(A)
     expect(doc.$uuid).toBe('existing-uuid-1')
-    expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$schema', 'product'])
+    expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$schema', 'brief'])
 
     // ⭐ A backend that minted something ELSE for it gets its own uuid, not ours.
     writeFileSync(
@@ -860,7 +1004,7 @@ describe('buildRecordEntities — free-form collection body override (B-1)', () 
   it('reads the free-form body as the per-locale value (override wins) even with no structural translations', async () => {
     const { entities } = await buildRecordEntities(siteDir)
     expect(entities).toHaveLength(1)
-    const body = entities[0].document.article.body
+    const body = entities[0].document.brief.body
     // Wrapped per-locale: source doc + the free-form Spanish doc (not a map).
     expect(body.en.type).toBe('doc')
     expect(JSON.stringify(body.en)).toContain('Hello world')

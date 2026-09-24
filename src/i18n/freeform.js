@@ -117,7 +117,7 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
  * @param {string} schema - the entity's model ref (`@/name` or `@org/name`)
  * @param {string} locale - Locale code
  * @param {string} localesDir - Path to locales directory
- * @returns {Promise<Object|null>} Parsed translation { frontmatter, content } or null
+ * @returns {Promise<Object|null>} Parsed translation { frontmatter, content, markdown } or null
  */
 export async function loadFreeformRecord(item, schema, locale, localesDir) {
   const slug = item.slug
@@ -142,6 +142,8 @@ export async function loadFreeformRecord(item, schema, locale, localesDir) {
     return {
       frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : null,
       content: proseMirrorContent,
+      // The body's markdown source — what a markup `text` body field holds.
+      markdown: proseMirrorContent ? body : null,
       filePath,
       relativePath: relative(join(localesDir, 'freeform', locale), filePath)
     }

@@ -229,7 +229,7 @@ describe('recordsToProject — the data schema is named by `$schema`', () => {
     })
     expect(report.placed).toEqual([])
     expect(report.skipped).toEqual([
-      { uuid: 'W1', slug: 'w1', reason: expect.stringContaining('no resolvable brief section') },
+      { uuid: 'W1', slug: 'w1', reason: expect.stringContaining("holds none of its data schema's sections") },
     ])
     expect(report.warnings.filter((w) => w.startsWith('w1:'))).toEqual([])
   })

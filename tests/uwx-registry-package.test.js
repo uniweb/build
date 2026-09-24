@@ -110,7 +110,7 @@ describe('buildRegistryPackage', () => {
     }
     const post = buildRegistryPackage({ schema }).entities.find((e) => e.name === '@acme/post')
     const postBrief = Object.values(post.sections).find((s) => s.brief)
-    expect(postBrief.fields.cat).toEqual({ type: 'item_ref', options: '@acme/categories/categories' })
+    expect(postBrief.fields.cat).toEqual({ type: 'item_ref', options: '@acme/categories/brief' })
   })
 })
 

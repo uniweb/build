@@ -18,11 +18,12 @@
 //     fact about it.
 //   - an existing local file carrying the same `$uuid` is re-rendered in place;
 //     otherwise a new single-record file is placed at `<slug>.<ext>`, its format
-//     matched to the schema folder's existing files, else markdown when the Model's
-//     brief has a content body field, else YAML.
+//     matched to the schema folder's existing files, else markdown when the schema
+//     has a content body field, else YAML.
 //
-// Field rendering reuses renderEntityDocument (via writeRecordFile) — localized
-// unwrap, date handling, content-body→body are already inverted there. Asset paths
+// Field rendering reuses renderEntityDocument (via writeRecordFile), which writes the
+// record in its schema's layout — flat, or by section — with localized unwrap, date
+// handling and content-body→body inverted. Asset paths
 // are restored before it runs (`restoreAssetRefs`), as the content lane does.
 //
 // Deferred: array-form & BibTeX multi-record files (a pulled record is placed as
@@ -43,7 +44,7 @@ import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './proje
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
 import { poolDirsForSchema, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
-import { isContentBodyField } from './data-schema.js'
+import { contentBodyTarget } from './record-layout.js'
 import { unresolveSelfScope, refuseOrgOption } from './self-scope.js'
 import { parseCatalogRef } from '../site/foundation-ref.js'
 import { unwrapLocalized } from './backfill.js'
@@ -96,8 +97,8 @@ export function findRecordFileByUuid(poolDir, uuid) {
 }
 
 // The format to give a NEW record file in a collection: match the collection's
-// existing single-record files, else markdown when the Model's brief carries a
-// content body field (so the body has a home), else YAML.
+// existing single-record files, else markdown when the schema has a content body field
+// (so the body has a home), else YAML.
 function defaultFormat(poolDir, declaration) {
   if (existsSync(poolDir)) {
     for (const entry of readdirSync(poolDir)) {
@@ -106,14 +107,9 @@ function defaultFormat(poolDir, declaration) {
       if (format) return format
     }
   }
-  return briefHasContentBody(declaration) ? 'md' : 'yaml'
-}
-
-// Whether the declaration's brief section declares a content body field — a markup
-// `text` field or a `format: prosemirror` json field (the md-body target).
-function briefHasContentBody(declaration) {
-  const brief = Object.values(declaration?.sections || {}).find((s) => s && s.brief === true)
-  return Object.values(brief?.fields || {}).some((f) => isContentBodyField(f))
+  // ⛔ This asked the brief alone until 2026-09-24, so a pulled `@std/article` — its
+  // body in `article_body` — was placed as YAML, the body a field.
+  return contentBodyTarget(declaration).target ? 'md' : 'yaml'
 }
 
 // Build `uuid → { collection, slug }` from the folder document's ref leaves. The
@@ -223,7 +219,7 @@ const DECL_WIRE_CONSUMED = new Set([
 ])
 
 // Is this wire `deferred` exactly what the schema's brief would have derived? Compared
-// as an ORDER-INSENSITIVE set: the deriver walks `flatRecordFields`, and a round trip
+// as an ORDER-INSENSITIVE set: the deriver walks the schema's sections, and a round trip
 // through YAML and the store is not obliged to preserve that order. Comparing as a list
 // would classify a reordered-but-identical value as authored, and persist it.
 function isDerivedDeferred(d, dataSchemas) {

@@ -31,7 +31,7 @@ import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
 import { parentRouteOf } from '@uniweb/core/route-match'
 
-import { validateItem, validateBound, flatRecordFields, rootListSection } from '@uniweb/schemas/conform'
+import { validateItem, validateRecordFile, validateBound, contentBodyField, rootListSection } from '@uniweb/schemas/conform'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
 // The pure checker, re-exported so `@uniweb/build/validate` stays the one import
@@ -41,7 +41,6 @@ export { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
 import { buildSchema } from './schema.js'
 import { resolveRecordsDir, readEntityPool, groupPoolBySchema } from './site/entity-pool.js'
 import { readEntityFile } from './uwx/entity-source.js'
-import { isContentBodyField } from './uwx/data-schema.js'
 import { toFetchList } from './site/data-fetcher.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
@@ -310,9 +309,12 @@ function listViolation(finding, label, base) {
  * Check the records in the records directory that pass 2 did not, each against the
  * data schema its folder names (`records/member/` → `@/member`).
  *
- * A record is read the way a push reads it (`uwx/entity-source.js`), and a markdown
- * record's body is the value of its schema's content body field unless its
- * frontmatter sets one — which is what a push sends it as (`uwx/records.js`).
+ * A record is checked as its FILE holds it (`validateRecordFile`) — read the way a push
+ * reads it (`uwx/entity-source.js`), a markdown body in its schema's content body field
+ * unless the file sets that field, which is what a push sends it as (`uwx/records.js`).
+ * So a finding names the path an author edits (`article.title`), and a field written in
+ * the retired flat form is reported under the rule `section`. Pass 2 checks the records
+ * a section receives, in the shape it receives them (`validateItem`).
  *
  * A folder whose schema resolves to nothing is left out in silence: its records are
  * schema-less, delivered as files, and the push says so itself.
@@ -339,7 +341,7 @@ async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths, check
         if (!r.slug || checked.has(recordKey(ref, r.slug))) continue
         out.checked++
         out.schemas.add(ref)
-        for (const finding of validateItem(schema, withBody(schema, r))) {
+        for (const finding of validateRecordFile(schema, withBody(schema, r))) {
           out.violations.push({ file: pooled.relPath, schema: ref, item: r.slug, users: [], ...finding })
         }
       }
@@ -359,13 +361,20 @@ async function schemaForRecords(ref, { srcDir, dataSchemas }) {
   }
 }
 
-// A record as a push sends it: a markdown body fills the schema's content body field
-// when the frontmatter does not set it.
+// A record as its file holds it, with a markdown body in the schema's content body field
+// — under its section, in a file written by section — when the file does not set it.
 function withBody(schema, r) {
   const record = { ...(r.data || {}) }
   if (typeof r.body !== 'string' || r.body.trim() === '') return record
-  const key = Object.entries(flatRecordFields(schema) || {}).find(([, f]) => isContentBodyField(f))?.[0]
-  if (key && record[key] === undefined) record[key] = r.body
+  const target = contentBodyField(schema)
+  if (!target) return record
+  if (!target.fileSection) {
+    if (record[target.key] === undefined) record[target.key] = r.body
+    return record
+  }
+  const held = record[target.fileSection]
+  if (held != null && (typeof held !== 'object' || Array.isArray(held))) return record
+  if (held?.[target.key] === undefined) record[target.fileSection] = { ...(held || {}), [target.key]: r.body }
   return record
 }
 

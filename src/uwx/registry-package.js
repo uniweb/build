@@ -26,7 +26,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { toDataSchemaDeclaration } from './data-schema.js'
+import { toDataSchemaDeclaration, SHORTHAND_SECTION } from './data-schema.js'
 import { checkFoundationName, splitFoundationName } from '../foundation-name.js'
 
 const FOUNDATION_SCHEMA = '@uniweb/foundation-schema'
@@ -231,8 +231,8 @@ function makeOptionsResolver(dataSchemas, scoped) {
 }
 
 function itemBearingSectionName(normalized, ref) {
-  // fields-form → the synthesized single section (named by the ref's short segment)
-  if (normalized.fields) return String(ref).split('/').pop()
+  // fields-form → the shorthand's one section, always named `brief`
+  if (normalized.fields) return SHORTHAND_SECTION
   // sections-form → the first item-bearing (single/multi) section
   for (const [name, sec] of Object.entries(normalized.sections || {})) {
     const kind = sec.kind || 'single'

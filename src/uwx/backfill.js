@@ -32,7 +32,8 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './entity-source.js'
-import { isProseMirrorField, isContentBodyField } from './data-schema.js'
+import { isProseMirrorField } from './data-schema.js'
+import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
 
@@ -213,28 +214,32 @@ export function unwrapLocalizedList(value, sourceLocale) {
   return unwrapLocalized(value, sourceLocale)
 }
 
-// The brief is the section marked `brief: true` in the declaration's sections map
-// (the sections-tree has no schema-level `brief:` back-reference). Returned with
-// its name attached (the map key) so callers can key the document by it.
-function briefSectionOf(declaration) {
-  const entry = Object.entries(declaration?.sections || {}).find(([, s]) => s && s.brief === true)
-  return entry ? { name: entry[0], ...entry[1] } : null
-}
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 /**
  * Render an entity `document` a pull brought back to its source-file authoring shape
  * — the file becomes a projection of the backend's state, which is what a pull is
- * (`writeRecordFile`, `records-project.js`). A push never uses it (header ⛔). For a
- * flat/brief entity: the entity `$uuid` + the brief section's fields (localized unwrapped,
- * date/scalars verbatim), with the brief record's own `$uuid` DROPPED (the backend
- * matches a single-section item by singularity) and `$schema`/`$id`/`$meta` omitted.
- * A disabled entity (`$disabled: true`) writes `draft: true`, and an enabled one writes
- * no `draft:` at all.
+ * (`writeRecordFile`, `records-project.js`). A push never uses it (header ⛔).
+ *
+ * The file takes its schema's layout (`./record-layout.js`), the one the push reads:
+ * FLAT for a schema with one top-level section holding one record — that section's
+ * fields at the top — and BY SECTION otherwise, every section the document holds under
+ * its own name: an object for a single section, a list of records for a `many` one, a
+ * self-nesting record's `$children` written back as `children:`. Values are decoded by
+ * their declaration at every depth (localized unwrapped to the source locale, a
+ * ProseMirror doc to markdown, dates and scalars verbatim). Every record's own `$uuid`
+ * is dropped — the backend matches a single section's record by singularity — and
+ * `$schema`/`$id`/`$meta` are omitted; the entity's `$uuid` leads. A disabled entity
+ * (`$disabled: true`) writes `draft: true`, and an enabled one writes no `draft:`.
  * For markdown, the content body field becomes the body; for YAML/JSON it stays a field.
  *
+ * ⛔ Until 2026-09-24 this wrote the BRIEF section alone, flat. Every other section was
+ * dropped from the file — a pulled `@std/article` markdown record came back with an
+ * empty body, its `article_body` gone — and nothing said so.
+ *
  * @param {object} params
- * @param {object} params.document     - pulled `{ $uuid, $schema, <brief>: {…} }`
- * @param {object} params.declaration  - the Model declaration (`brief` + `sections`)
+ * @param {object} params.document     - a pulled `{ $uuid, $schema, <section>: … }`
+ * @param {object} params.declaration  - the data schema's declaration (`sections`)
  * @param {string} params.format       - 'yaml' | 'json' | 'md'
  * @param {string} [params.sourceLocale]
  * @param {object} [params.collector]  - translation collector; target locales of
@@ -247,53 +252,99 @@ function briefSectionOf(declaration) {
  * @returns {string} the source-file text
  */
 export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector, freeformRelPath }) {
-  const brief = briefSectionOf(declaration)
-  const section = brief ? document?.[brief.name] : null
-  if (!brief || !section || typeof section !== 'object') {
-    throw new Error('uwx/render: document has no resolvable brief section')
+  const layout = recordFileLayout(declaration)
+  if (layout.sections.length === 0) {
+    throw new Error('uwx/render: the data schema declares no sections')
   }
-  const fields = brief.fields || {}
-  // The body target is the CONTENT field — a markup `text` field (raw source
-  // string) or a `format: prosemirror` json field (a ProseMirror doc on the wire).
-  const contentKey = Object.entries(fields).find(([, f]) => isContentBodyField(f))?.[0]
+  // ⛔ An entity holding NONE of its schema's sections — what a partly applied push
+  // left, before the backend's push became one transaction — is not written: rendered,
+  // it would replace the author's record with an empty one. The caller skips it.
+  if (!layout.sections.some(([name]) => document?.[name] != null)) {
+    throw new Error("uwx/render: the entity holds none of its data schema's sections — nothing to write")
+  }
+  // Markdown: the content body field, wherever its single section is, becomes the body.
+  const { target } = contentBodyTarget(declaration)
+  const dec = { sourceLocale, collector, freeformRelPath, bodyAt: format === 'md' ? target : null, body: '' }
 
   const record = {}
-  if (document.$uuid) record.$uuid = document.$uuid
-  let body = ''
-  for (const [key, field] of Object.entries(fields)) {
-    const raw = section[key]
-    if (raw === undefined) continue
-
-    // A `format: prosemirror` field is a ProseMirror doc (or localized doc+maps)
-    // on the wire → markdown on disk. unwrapLocalizedContent yields the source doc
-    // and captures target-locale structural maps into the collector.
-    if (isProseMirrorField(field)) {
-      const sourceDoc = field.localized ? unwrapLocalizedContent(raw, sourceLocale, collector, freeformRelPath) : raw
-      const md = sourceDoc ? proseMirrorToMarkdown(sourceDoc) : ''
-      if (format === 'md' && key === contentKey) body = md
-      else record[key] = md
-      continue
+  if (document?.$uuid) record.$uuid = document.$uuid
+  if (layout.flat) {
+    const [name, def] = layout.sections[0]
+    Object.assign(record, decodeRecord(def.fields, document?.[name], dec, name))
+  } else {
+    for (const [name, def] of layout.sections) {
+      const value = document?.[name]
+      if (value == null) continue
+      if (def.multiple === true) {
+        const list = decodeList(def, value, dec)
+        if (list.length) record[name] = list
+      } else {
+        const data = decodeRecord(def.fields, value, dec, name)
+        if (Object.keys(data).length) record[name] = data
+      }
     }
-
-    // Capture target-locale translations of localized SCALAR fields (not the
-    // content body) into the collector when one is supplied.
-    if (field.localized && key !== contentKey) collector?.add(raw)
-    const value = field.localized ? unwrapLocalized(raw, sourceLocale) : raw
-    if (format === 'md' && key === contentKey) {
-      body = typeof value === 'string' ? value : String(value ?? '')
-      continue
-    }
-    record[key] = value
   }
   // ⭐ A DISABLED ENTITY IS A DRAFT ON THE FILE SIDE. It is kept in the folder and never
   // publicly delivered, which is exactly what `draft: true` means. An enabled entity
   // carries no key and writes no `draft:`, so a record re-enabled on the backend
   // comes back without the line.
-  if (document.$disabled === true) record.draft = true
+  if (document?.$disabled === true) record.draft = true
 
   if (format === 'json') return JSON.stringify(record, null, 2) + '\n'
-  if (format === 'md') return `---\n${yaml.dump(record)}---\n${body}`
+  if (format === 'md') return `---\n${yaml.dump(record)}---\n${dec.body}`
   return yaml.dump(record) // yaml / yaml
+}
+
+// One record of a section, its declared fields in declared order. `sectionName` is the
+// top-level section the record belongs to, so the content body can be found; null below.
+function decodeRecord(fields, value, dec, sectionName) {
+  const out = {}
+  if (!isPlainObject(value)) return out
+  for (const [key, field] of Object.entries(fields || {})) {
+    const raw = value[key]
+    if (raw === undefined) continue
+    if (field?.type === 'section') {
+      out[key] = field.multiple === true ? decodeList(field, raw, dec) : decodeRecord(field.fields, raw, dec, null)
+      continue
+    }
+    const isBody = Boolean(dec.bodyAt) && sectionName === dec.bodyAt.section && key === dec.bodyAt.key
+    const decoded = decodeLeaf(raw, field, dec, isBody)
+    if (isBody) dec.body = typeof decoded === 'string' ? decoded : String(decoded ?? '')
+    else out[key] = decoded
+  }
+  return out
+}
+
+// The records of a `many` section; a self-nesting one's `$children` nest back under
+// `children:`, the reserved key the push reads them from.
+function decodeList(def, value, dec) {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    const out = decodeRecord(def.fields, item, dec, null)
+    if (def.self_nesting === true && Array.isArray(item?.$children) && item.$children.length) {
+      out.children = decodeList(def, item.$children, dec)
+    }
+    return out
+  })
+}
+
+// A leaf's authored value. A localized SCALAR's target locales are captured into the
+// collector (the content body's are captured by `unwrapLocalizedContent`, with its
+// free-form path); a list of localized values is unwrapped element by element.
+function decodeLeaf(raw, field, dec, isBody) {
+  if (isProseMirrorField(field)) {
+    const sourceDoc = field.localized
+      ? unwrapLocalizedContent(raw, dec.sourceLocale, dec.collector, isBody ? dec.freeformRelPath : undefined)
+      : raw
+    return sourceDoc ? proseMirrorToMarkdown(sourceDoc) : ''
+  }
+  if (!field?.localized) return raw
+  if (Array.isArray(raw)) {
+    if (!isBody) for (const item of raw) dec.collector?.add(item)
+    return unwrapLocalizedList(raw, dec.sourceLocale)
+  }
+  if (!isBody) dec.collector?.add(raw)
+  return unwrapLocalized(raw, dec.sourceLocale)
 }
 
 /**

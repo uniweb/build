@@ -22,7 +22,9 @@ import { loadFreeformRecord } from './freeform.js'
 // answer for a tagged data block's payload — a `label` is prose and an `href`
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
-import { resolveQueriesConfig } from '../site/queries-config.js'
+import { resolveQueriesConfig, resolveRecordSchemas } from '../site/queries-config.js'
+import { toDeliveredRecord, contentBodyField, misplacedFields } from '@uniweb/schemas/conform'
+import { flatFormRefusal } from '../site/query-processor.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import {
   NON_TRANSLATABLE_TYPES,
@@ -171,6 +173,57 @@ function isRecordSystemField(key, topLevel) {
   return key.startsWith('$') || (topLevel && (key === 'slug' || key === 'path'))
 }
 
+/**
+ * A record's handle — `$name`, which the build sets from the record's file (`slug:` or
+ * its name). ⭐ Not `slug` alone: a record of a schema whose brief declares a `slug`
+ * FIELD (`@std/article`) is delivered with that field at the top, and it need not be
+ * the file's name, which is what the free-form tree and a translation's context use.
+ */
+function recordHandle(item) {
+  return item.$name ?? item.slug ?? item.id ?? item.name ?? 'unknown'
+}
+
+/** Is this value a ProseMirror document? */
+function isProseMirrorDoc(value) {
+  return !!value && typeof value === 'object' && value.type === 'doc' && Array.isArray(value.content)
+}
+
+/**
+ * Every ProseMirror document a record holds, with its path. ⭐ A markdown body is
+ * delivered in its schema's content body field — `article_body.content` for
+ * `@std/article` — and at `content` only for a record with no schema; a rich field can
+ * sit anywhere else. ⛔ Until 2026-09-24 only `content` at the top was read, which is
+ * where a delivered `@std/article` holds no body.
+ *
+ * @returns {Array<{ path: string, doc: Object }>}
+ */
+function proseMirrorDocs(value, path = '', out = [], depth = 0) {
+  if (!value || typeof value !== 'object' || depth > MAX_HEURISTIC_DEPTH) return out
+  if (isProseMirrorDoc(value)) {
+    out.push({ path, doc: value })
+    return out
+  }
+  const list = Array.isArray(value)
+  for (const [key, v] of list ? value.map((x, i) => [i, x]) : Object.entries(value)) {
+    if (!list && isRecordSystemField(key, depth === 0)) continue
+    const at = list ? `${path}[${key}]` : path ? `${path}.${key}` : key
+    proseMirrorDocs(v, at, out, depth + 1)
+  }
+  return out
+}
+
+/** The record with every ProseMirror document it holds translated — the rest copied as is. */
+function translateDocs(value, context, translations, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > MAX_HEURISTIC_DEPTH) return value
+  if (isProseMirrorDoc(value)) return translateProseMirrorDoc(value, context, translations)
+  if (Array.isArray(value)) return value.map((v) => translateDocs(v, context, translations, depth + 1))
+  const out = {}
+  for (const [key, v] of Object.entries(value)) {
+    out[key] = isRecordSystemField(key, depth === 0) ? v : translateDocs(v, context, translations, depth + 1)
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Schema-guided extraction
 // ---------------------------------------------------------------------------
@@ -184,15 +237,12 @@ function isRecordSystemField(key, topLevel) {
  * @param {Object} units - Accumulator
  */
 function extractWithSchema(item, schema, recordDir, units) {
-  const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { record: `${recordDir}/${slug}` }
+  const context = { record: `${recordDir}/${recordHandle(item)}` }
 
   extractFromItemWithSchema(item, schema.fields, '', context, units)
 
-  // Also extract ProseMirror content body (not covered by schema fields)
-  if (item.content?.type === 'doc') {
-    extractFromProseMirrorDoc(item.content, context, units)
-  }
+  // Also extract the record's ProseMirror documents (not covered by schema fields)
+  for (const { path, doc } of proseMirrorDocs(item)) extractFromProseMirrorDoc(doc, context, units, path)
 }
 
 /**
@@ -247,15 +297,12 @@ function extractFromItemWithSchema(data, fields, pathPrefix, context, units) {
  * Recursively walks the data, extracting strings that look like human-readable text.
  */
 function extractHeuristic(item, recordDir, units) {
-  const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { record: `${recordDir}/${slug}` }
+  const context = { record: `${recordDir}/${recordHandle(item)}` }
 
   extractFromItemHeuristic(item, '', context, units, 0)
 
-  // Also extract ProseMirror content body
-  if (item.content?.type === 'doc') {
-    extractFromProseMirrorDoc(item.content, context, units)
-  }
+  // Also extract the record's ProseMirror documents, wherever it holds them
+  for (const { path, doc } of proseMirrorDocs(item)) extractFromProseMirrorDoc(doc, context, units, path)
 }
 
 /**
@@ -277,8 +324,8 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
     if (value === undefined || value === null) continue
     if (!Array.isArray(data) && isRecordSystemField(key, depth === 0)) continue
 
-    // Skip ProseMirror content (handled separately)
-    if (key === 'content' && typeof value === 'object' && value?.type === 'doc') continue
+    // Skip a ProseMirror document (handled separately)
+    if (isProseMirrorDoc(value)) continue
 
     if (typeof value === 'string') {
       // Skip known structural field names
@@ -306,15 +353,9 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
 /**
  * Translate item fields using schema guidance.
  */
-function translateWithSchema(item, schema, context, translations, includeContent = true) {
-  const translated = { ...item }
+function translateWithSchema(item, schema, context, translations) {
+  const translated = translateDocs(item, context, translations)
   translateItemWithSchema(translated, schema.fields, context, translations)
-
-  // Translate ProseMirror content
-  if (includeContent && translated.content?.type === 'doc') {
-    translated.content = translateProseMirrorDoc(translated.content, context, translations)
-  }
-
   return translated
 }
 
@@ -364,14 +405,9 @@ function translateItemWithSchema(data, fields, context, translations, topLevel =
 /**
  * Translate item fields using heuristics.
  */
-function translateHeuristic(item, context, translations, includeContent = true) {
-  const translated = { ...item }
+function translateHeuristic(item, context, translations) {
+  const translated = translateDocs(item, context, translations)
   translateItemHeuristic(translated, context, translations, 0)
-
-  if (includeContent && translated.content?.type === 'doc') {
-    translated.content = translateProseMirrorDoc(translated.content, context, translations)
-  }
-
   return translated
 }
 
@@ -390,8 +426,8 @@ function translateItemHeuristic(data, context, translations, depth) {
     if (value === undefined || value === null) continue
     if (!Array.isArray(data) && isRecordSystemField(key, depth === 0)) continue
 
-    // Skip ProseMirror content (handled separately)
-    if (key === 'content' && typeof value === 'object' && value?.type === 'doc') continue
+    // Skip a ProseMirror document (translated separately)
+    if (isProseMirrorDoc(value)) continue
 
     if (typeof value === 'string') {
       if (!Array.isArray(data) && HEURISTIC_SKIP_FIELDS.has(key)) continue
@@ -423,18 +459,34 @@ function translateItemHeuristic(data, context, translations, depth) {
  * where there is no record on disk to be identified.
  */
 async function poolDirsByQuery(siteRoot) {
-  const out = new Map()
+  return (await recordQueries(siteRoot)).poolDirs
+}
+
+/**
+ * Each query's pool directory (`poolDirsByQuery`) and the data schema its records are
+ * delivered in (`resolveRecordSchemas`, null for none) — what a free-form translation
+ * needs to put a body and frontmatter where the delivered record holds them.
+ *
+ * @returns {Promise<{ poolDirs: Map<string, string>, schemas: Map<string, Object|null> }>}
+ */
+async function recordQueries(siteRoot) {
+  const poolDirs = new Map()
+  const schemas = new Map()
   try {
     const { declarations } = await resolveQueriesConfig(siteRoot)
-    for (const [name, decl] of Object.entries(declarations || {})) {
+    const entries = Object.entries(declarations || {})
+    for (const [name, decl] of entries) {
       const dirs = decl.schema ? poolDirsForSchema(decl.schema) : null
-      out.set(name, dirs ? dirs.join('/') : name)
+      poolDirs.set(name, dirs ? dirs.join('/') : name)
     }
+    const refs = entries.filter(([, d]) => d.url === undefined && d.schema).map(([, d]) => d.schema)
+    const resolved = (await resolveRecordSchemas(siteRoot, refs)).schemas
+    for (const [name, decl] of entries) schemas.set(name, (decl.schema && resolved[decl.schema]) || null)
   } catch {
     // No resolvable config — every record keys by its query name, which is what
     // the extractor did before records existed.
   }
-  return out
+  return { poolDirs, schemas }
 }
 
 
@@ -558,9 +610,10 @@ async function pruneRecordFiles(recordsDir, dataDir, keep) {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract from ProseMirror document
+ * Extract from a ProseMirror document — `field` is where the record holds it
+ * (`content`, `article_body.content`), which each unit's `field` starts with.
  */
-function extractFromProseMirrorDoc(doc, context, units) {
+function extractFromProseMirrorDoc(doc, context, units, field = 'content') {
   if (!doc.content) return
 
   let headingIndex = 0
@@ -570,17 +623,17 @@ function extractFromProseMirrorDoc(doc, context, units) {
     if (node.type === 'heading') {
       const text = extractTextFromNode(node)
       if (text) {
-        addUnit(units, text, `content.heading.${headingIndex}`, context)
+        addUnit(units, text, `${field}.heading.${headingIndex}`, context)
         headingIndex++
       }
     } else if (node.type === 'paragraph') {
       const text = extractTextFromNode(node)
       if (text) {
-        addUnit(units, text, `content.paragraph.${paragraphIndex}`, context)
+        addUnit(units, text, `${field}.paragraph.${paragraphIndex}`, context)
         paragraphIndex++
       }
     } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-      extractFromList(node, context, units)
+      extractFromList(node, context, units, field)
     }
   }
 }
@@ -588,7 +641,7 @@ function extractFromProseMirrorDoc(doc, context, units) {
 /**
  * Extract from list nodes
  */
-function extractFromList(listNode, context, units) {
+function extractFromList(listNode, context, units, field = 'content') {
   if (!listNode.content) return
 
   listNode.content.forEach((listItem, index) => {
@@ -597,7 +650,7 @@ function extractFromList(listNode, context, units) {
         if (child.type === 'paragraph') {
           const text = extractTextFromNode(child)
           if (text) {
-            addUnit(units, text, `content.list.${index}`, context)
+            addUnit(units, text, `${field}.list.${index}`, context)
           }
         }
       }
@@ -690,7 +743,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
   // simply miss and every string falls back to its source. (This was missing for
   // a while and the failure was swallowed by the per-file catch below — the build
   // stayed green while nothing was translated.)
-  const poolDirs = await poolDirsByQuery(siteRoot)
+  const { poolDirs, schemas: dataSchemas } = await recordQueries(siteRoot)
 
   const outputs = {}
   // Reported rather than only logged — see the catch below.
@@ -737,6 +790,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
         // Resolve schema once per collection
         const schema = await resolveSchema(queryName, siteRoot)
         const recordDir = poolDirs.get(queryName) ?? queryName
+        const dataSchema = dataSchemas.get(queryName) ?? null
 
         // Translate each item (with free-form support)
         const translatedItems = await Promise.all(
@@ -744,7 +798,8 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
             translateItemAsync(item, recordDir, translations, schema, {
               locale,
               localesDir,
-              freeformEnabled: hasFreeform
+              freeformEnabled: hasFreeform,
+              dataSchema
             })
           )
         )
@@ -765,7 +820,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
           try {
             const record = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
             const translatedRecord = record && typeof record === 'object' && !Array.isArray(record)
-              ? await translateItemAsync(record, recordDir, translations, schema, { locale, localesDir, freeformEnabled: hasFreeform })
+              ? await translateItemAsync(record, recordDir, translations, schema, { locale, localesDir, freeformEnabled: hasFreeform, dataSchema })
               : record
             await mkdir(localeRecordsDir, { recursive: true })
             await writeFile(join(localeRecordsDir, name), JSON.stringify(translatedRecord, null, 2))
@@ -803,42 +858,67 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
 /**
  * Apply translations to a collection item (async, with free-form support)
  *
- * Resolution order:
- * 1. Check for free-form translation (complete or partial replacement)
- * 2. Fall back to hash-based translation (schema-guided or heuristic)
+ * The hash-based translations apply first — every field and every ProseMirror document
+ * (schema-guided or heuristic) — and a free-form translation then replaces what it
+ * states (`applyFreeform`): its frontmatter, its body, or both.
+ *
+ * @param {Object} [options.dataSchema] - the data schema the record is delivered in
+ *   (`recordQueries`), which says where a free-form body and frontmatter go
  */
 async function translateItemAsync(item, recordDir, translations, schema, options = {}) {
-  const { locale, localesDir, freeformEnabled } = options
-  const translated = { ...item }
-  const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { record: `${recordDir}/${slug}` }
+  const { locale, localesDir, freeformEnabled, dataSchema = null } = options
+  const translated = translateItemSync(item, recordDir, translations, schema)
+  if (!freeformEnabled || !locale || !localesDir) return translated
 
-  // Check for free-form translation first. ⛔ The loader takes the record's SCHEMA ref
-  // and derives the pool path from it (`buildFreeformRecordPath`); handed the pool
-  // directory itself (`article`), it derived nothing and found no file — so until
-  // 2026-09-14 no free-form record translation applied on this lane.
-  if (freeformEnabled && locale && localesDir) {
-    const freeform = await loadFreeformRecord(item, schemaForPoolDirs(recordDir.split('/')), locale, localesDir)
+  // ⛔ The loader takes the record's SCHEMA ref and derives the pool path from it
+  // (`buildFreeformRecordPath`); handed the pool directory itself (`article`), it
+  // derived nothing and found no file — so until 2026-09-14 no free-form record
+  // translation applied on this lane. And it is named by the record's HANDLE
+  // (`recordHandle`), never a brief's `slug` field.
+  const schemaRef = schemaForPoolDirs(recordDir.split('/'))
+  const freeform = await loadFreeformRecord({ slug: item.$name ?? item.slug }, schemaRef, locale, localesDir)
+  return freeform ? applyFreeform(translated, freeform, dataSchema, schemaRef) : translated
+}
 
-    if (freeform) {
-      // Merge free-form data (supports partial: frontmatter only, body only, or both)
-      if (freeform.frontmatter) {
-        Object.assign(translated, freeform.frontmatter)
+/**
+ * A free-form translation over a record, in the shape the record is DELIVERED in (see
+ * `site/query-processor.js::deliverRecord`): its frontmatter read the way the record's
+ * file is — by section, the brief lifted to the top — and merged section by section; its
+ * body put in the schema's content body field — the markdown source for a markup `text`
+ * field — or at `content` for a record with no schema or no such field. ⛔ Until
+ * 2026-09-24 both went to the top of the record, where a delivered `@std/article` holds
+ * neither its body nor anything of `article_body`.
+ *
+ * ⛔ Frontmatter written in the retired flat form is refused, as the record's own file is.
+ */
+function applyFreeform(record, freeform, dataSchema, schemaRef) {
+  const out = { ...record }
+  if (freeform.frontmatter) {
+    let fm = freeform.frontmatter
+    if (dataSchema) {
+      const misplaced = misplacedFields(dataSchema, fm)
+      if (misplaced.length) {
+        throw new Error(flatFormRefusal(freeform.relativePath ?? freeform.filePath, schemaRef, dataSchema, misplaced))
       }
-      if (freeform.content) {
-        translated.content = freeform.content
-        // Skip hash-based content translation since we have free-form
-        // Still translate frontmatter fields via schema/heuristic
-        if (schema?.fields) {
-          return translateWithSchema(translated, schema, context, translations, false)
-        }
-        return translateHeuristic(translated, context, translations, false)
-      }
+      fm = toDeliveredRecord(dataSchema, fm)
+    }
+    const sections = new Set(Object.keys(dataSchema?.sections || {}))
+    for (const [key, value] of Object.entries(fm)) {
+      out[key] = sections.has(key) && isPlainObject(out[key]) && isPlainObject(value) ? { ...out[key], ...value } : value
     }
   }
+  if (freeform.content) {
+    const target = dataSchema ? contentBodyField(dataSchema) : null
+    const value = target?.field?.type === 'text' ? freeform.markdown : freeform.content
+    if (!target) out.content = freeform.content
+    else if (!target.section) out[target.key] = value
+    else out[target.section] = { ...(isPlainObject(out[target.section]) ? out[target.section] : {}), [target.key]: value }
+  }
+  return out
+}
 
-  // Fall back to hash-based translation
-  return translateItemSync(translated, recordDir, translations, schema)
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 /**
@@ -846,8 +926,7 @@ async function translateItemAsync(item, recordDir, translations, schema, options
  */
 function translateItemSync(item, recordDir, translations, schema) {
   const translated = { ...item }
-  const slug = item.slug || item.id || item.name || 'unknown'
-  const context = { record: `${recordDir}/${slug}` }
+  const context = { record: `${recordDir}/${recordHandle(item)}` }
 
   if (schema?.fields) {
     return translateWithSchema(translated, schema, context, translations)
@@ -962,7 +1041,8 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
   const records = one ? [items] : items
 
   const schema = await resolveSchema(queryName, siteRoot)
-  const recordDir = (await poolDirsByQuery(siteRoot)).get(queryName) ?? queryName
+  const { poolDirs, schemas: dataSchemas } = await recordQueries(siteRoot)
+  const recordDir = poolDirs.get(queryName) ?? queryName
 
   const translated = freeformEnabled
     ? await Promise.all(
@@ -970,7 +1050,8 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
           translateItemAsync(item, recordDir, translations, schema, {
             locale,
             localesDir,
-            freeformEnabled
+            freeformEnabled,
+            dataSchema: dataSchemas.get(queryName) ?? null
           })
         )
       )

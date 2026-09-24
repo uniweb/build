@@ -23,17 +23,33 @@ const w = (rel, body) => {
 
 const SCHEMA = {
   sections: {
-    card: { kind: 'single', brief: true, fields: { title: {}, date: {} } },
-    body: { kind: 'single', fields: { content: {}, footnotes: {} } },
+    card: { kind: 'single', brief: true, fields: { title: { type: 'string' }, date: { type: 'date' } } },
+    body: {
+      kind: 'single',
+      fields: { content: { type: 'json', format: 'prosemirror' }, footnotes: { type: 'string' } },
+    },
   },
 }
+
+// The same schema as its foundation's source holds it — what the static build delivers
+// records by (`resolveRecordSchemas`), where the derivation reads the built map above.
+const SOURCE = [
+  'name: article',
+  'sections:',
+  '  card: { brief: true, fields: { title: string, date: date } }',
+  '  body: { fields: { content: richtext, footnotes: string } }',
+  '',
+].join('\n')
 
 const setup = ({ siteCollections, schemas = { '@/article': SCHEMA }, foundation = true } = {}) => {
   w('site/site.yml', `name: T\nfoundation: "@acme/base"\nqueries:\n${siteCollections}`)
   w('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
-  w('site/records/article/hi.md', '---\ntitle: Hi\ndate: 2026-01-01\n---\n\nBody text.\n')
+  w('site/records/article/hi.md', '---\ncard:\n  title: Hi\n  date: 2026-01-01\n---\n\nBody text.\n')
   w('site/pages/home/index.md', '---\ntype: Hero\n---\n\n# Home\n')
-  if (foundation) w('fdn/dist/meta/schema.json', { dataSchemas: schemas })
+  if (foundation) {
+    w('fdn/dist/meta/schema.json', { dataSchemas: schemas })
+    w('fdn/src/schemas/article.yml', SOURCE)
+  }
 }
 
 const declared = async () =>
@@ -48,9 +64,9 @@ afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 const WITH_SCHEMA = '  articles:\n    schema: "@/article"\n'
 
 describe('deriving deferred from the brief', () => {
-  it('defers every field the brief does not name', async () => {
+  it('defers every section but the brief, by the name a delivered record holds it under', async () => {
     setup({ siteCollections: WITH_SCHEMA })
-    expect((await declared()).deferred).toEqual(['content', 'footnotes'])
+    expect((await declared()).deferred).toEqual(['body'])
   })
 
   it('never overrides an author-declared deferred', async () => {
@@ -100,24 +116,27 @@ describe('what the derived split actually emits', () => {
     }
   }
 
-  it('strips the non-brief fields from the cascade and writes the full record', async () => {
+  it('strips the non-brief sections from the cascade and writes the full record', async () => {
     setup({ siteCollections: WITH_SCHEMA })
     const { cascade, recordPath } = await build()
+    expect('body' in cascade[0]).toBe(false)
     expect('content' in cascade[0]).toBe(false)
     expect(existsSync(recordPath)).toBe(true)
-    expect('content' in JSON.parse(readFileSync(recordPath, 'utf8'))).toBe(true)
+    // The markdown body is delivered in the schema's content body field.
+    expect(JSON.parse(readFileSync(recordPath, 'utf8')).body.content.type).toBe('doc')
   })
 
   it('keeps the build-derived keys, with no reserved list to maintain', async () => {
     // The split is computed from the SCHEMA, never from a record — so `slug`,
-    // `route`, `path`, `excerpt`, `image` and `lastModified` are not schema
-    // fields, are never in the difference, and are never stripped. Nothing has
-    // to enumerate them.
+    // `path`, `excerpt`, `image` and `$name` are not sections, and are never
+    // stripped. Nothing has to enumerate them.
     setup({ siteCollections: WITH_SCHEMA })
     const { cascade } = await build()
-    for (const key of ['slug', 'excerpt', 'image', 'path']) {
+    for (const key of ['slug', 'excerpt', 'image', 'path', '$name']) {
       expect(key in cascade[0]).toBe(true)
     }
+    // The brief's fields at the top, as delivered.
     expect(cascade[0].title).toBe('Hi')
+    expect('card' in cascade[0]).toBe(false)
   })
 })

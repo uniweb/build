@@ -395,3 +395,92 @@ describe('backfillEntityUuids — correlate by index', () => {
     expect(res.warnings).toHaveLength(0)
   })
 })
+
+// ⭐ A pull writes a record in its schema's layout — by section when the schema has more
+// than one section — and every section it holds, not the brief alone. ⛔ Until 2026-09-24
+// it wrote the brief alone: a pulled `@std/article` markdown record came back with an empty
+// body, and `article_body` gone from the file.
+describe('renderEntityDocument — a record written by section comes back whole', () => {
+  const articleDecl = {
+    name: '@std/article',
+    sections: {
+      article: { brief: true, fields: { title: { type: 'string', localized: true }, date: { type: 'date' } } },
+      article_body: {
+        fields: {
+          content: { type: 'json', format: 'prosemirror', localized: true },
+          status: { type: 'string' },
+          seo: { type: 'section', fields: { title: { type: 'string', localized: true } } },
+        },
+      },
+    },
+  }
+  const doc = {
+    $uuid: 'E1',
+    $schema: '@std/article',
+    article: { $uuid: 'r1', title: { en: 'Hello' }, date: '2026-05-12' },
+    article_body: {
+      $uuid: 'r2',
+      status: 'draft',
+      seo: { title: { en: 'SEO Hello' } },
+      content: { en: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The body.' }] }] } },
+    },
+  }
+
+  it('markdown: every section by name, the body taken from the section that declares it', () => {
+    const text = renderEntityDocument({ document: doc, declaration: articleDecl, format: 'md' })
+    const [, front, body] = text.split('---\n')
+    expect(yaml.load(front)).toEqual({
+      $uuid: 'E1',
+      article: { title: 'Hello', date: '2026-05-12' },
+      article_body: { status: 'draft', seo: { title: 'SEO Hello' } },
+    })
+    expect(body.trim()).toBe('The body.')
+  })
+
+  it('yaml: the body stays a field of its section', () => {
+    const obj = yaml.load(renderEntityDocument({ document: doc, declaration: articleDecl, format: 'yaml' }))
+    expect(obj.article_body.content.trim()).toBe('The body.')
+    expect(obj.article).toEqual({ title: 'Hello', date: '2026-05-12' })
+  })
+
+  it("a self-nesting list's `$children` come back under `children:`, each record's `$uuid` dropped", () => {
+    const navDecl = {
+      name: '@std/nav',
+      sections: {
+        items: {
+          multiple: true,
+          self_nesting: true,
+          fields: { label: { type: 'string', localized: true }, href: { type: 'string' } },
+        },
+      },
+    }
+    const navDoc = {
+      $uuid: 'N1',
+      items: [
+        { $uuid: 'i1', label: { en: 'Docs' }, href: '/docs', $children: [{ $uuid: 'i2', label: { en: 'API' }, href: '/api' }] },
+      ],
+    }
+    const obj = yaml.load(renderEntityDocument({ document: navDoc, declaration: navDecl, format: 'yaml' }))
+    expect(obj).toEqual({
+      $uuid: 'N1',
+      items: [{ label: 'Docs', href: '/docs', children: [{ label: 'API', href: '/api' }] }],
+    })
+  })
+
+  it('a list of localized values is unwrapped element by element', () => {
+    const decl = {
+      name: '@acme/tagged',
+      sections: { brief: { brief: true, fields: { labels: { type: 'string', multiple: true, localized: true } } } },
+    }
+    const obj = yaml.load(
+      renderEntityDocument({ document: { brief: { labels: [{ en: 'one' }, { en: 'two' }] } }, declaration: decl, format: 'yaml' })
+    )
+    expect(obj).toEqual({ labels: ['one', 'two'] })
+  })
+
+  it("⛔ an entity holding none of its schema's sections is not written — the caller skips it", () => {
+    expect(() => renderEntityDocument({ document: { $uuid: 'E9' }, declaration: articleDecl, format: 'md' })).toThrow(
+      /holds none of its data schema's sections/
+    )
+  })
+})

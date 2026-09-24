@@ -25,7 +25,7 @@
  */
 
 import { isRichSchema } from '@uniweb/core'
-import { flatRecordFields } from '@uniweb/schemas/conform'
+import { deliveredFields } from '@uniweb/schemas/conform'
 
 /**
  * A `data:` entry's schema ref — a ref string, or `{ schema }` — or null for an inline
@@ -193,22 +193,20 @@ function leanDataSchema(value, dataSchemaMap) {
     : (value && typeof value.schema === 'string' ? value.schema : null)
   if (ref) {
     const resolved = dataSchemaMap[ref]
-    // ⛔ `flatRecordFields`, NOT `resolved.fields`. `dataSchemaMap` holds each
-    // schema NORMALIZED but still in the form it was authored in — `fields:` or
-    // `sections:` — because only lowering (`uwx/data-schema.js`) folds the two
-    // forms into one. (This said "AS AUTHORED" until 2026-09-22; aliases and
-    // `many:` are already folded here.) `fields:` at the top is the
-    // SUGAR for a one-section model; a sections-form schema has no such key, so
-    // reading it directly returned null for every `@std/*` binding and the
-    // section's `data:` declaration supplied no field defaults at all. Silent:
-    // the data still arrived, just without its defaults.
+    // ⭐ THE DELIVERED RECORD'S FIELDS (`deliveredFields`) — the brief's at the top and each
+    // other section as one field under its name — so a default lands where the record
+    // a component receives carries its field: `@std/article`'s `status` inside
+    // `article_body`, as the records service delivers it (measured 2026-09-24). A section
+    // is filled only when the record holds it (`applySchemaToObject` recurses into what is
+    // there), so a list of briefs gains no section it was not sent.
     //
-    // This helper is the reader that takes both forms (`if (schema.fields)
-    // return schema.fields`, else walk the single sections), and
-    // `site/queries-config.js` already used it for exactly this reason.
-    // Measured 2026-09-03: `@std/article` → undefined here, 15 fields through
-    // the helper; `@/member` (sugar) → 4 either way.
-    const fields = flatRecordFields(resolved)
+    // ⛔ It was `flatRecordFields` until 2026-09-24 — the retired flat form, every single
+    // section's fields at the top — so on a delivered record those defaults landed beside
+    // the section they belong to. And before 2026-09-03 it read `resolved.fields`, which a
+    // sections-form schema does not have: no defaults at all. `dataSchemaMap` holds each
+    // schema normalized in its authored form (`fields:` or `sections:`), and only these
+    // readers say what one record of it looks like.
+    const fields = deliveredFields(resolved)
     if (!fields) return null
     const lean = extractSchemaFields(fields)
     return Object.keys(lean).length > 0 ? lean : null

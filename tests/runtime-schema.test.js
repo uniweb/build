@@ -151,29 +151,35 @@ describe('extractRuntimeSchema', () => {
           },
         },
       })
+      // As DELIVERED: the brief's fields at the top, another section under its name —
+      // so `status`'s default lands inside `article_body`, where the record carries it.
       expect(withoutData(result)).toEqual({
         schemas: {
           articles: {
             title: 'string',
             slug: 'string',
-            status: { type: 'string', default: 'published' },
+            article_body: { type: 'object', fields: { status: { type: 'string', default: 'published' } } },
           },
         },
       })
     })
 
-    it('skips a `multi` section when flattening — those are items, not record fields', () => {
+    it('a `multi` section is one field of the delivered record — a list, each record filled', () => {
       const meta = { data: { x: '@/thing' } }
       const result = extractRuntimeSchema(meta, {
         '@/thing': {
           name: 'thing',
           sections: {
             thing: { brief: true, fields: { title: 'string' } },
-            entries: { kind: 'multi', fields: { note: 'string' } },
+            entries: { kind: 'multi', fields: { note: { type: 'string', default: '—' } } },
           },
         },
       })
-      expect(result.schemas.x).toEqual({ title: 'string' })
+      expect(result.schemas.x).toEqual({
+        title: 'string',
+        entries: { type: 'array', items: { type: 'object', fields: { note: { type: 'string', default: '—' } } } },
+      })
+      // Never a field of the record itself.
       expect(result.schemas.x.note).toBeUndefined()
     })
 

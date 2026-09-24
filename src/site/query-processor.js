@@ -64,7 +64,9 @@ import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder } from './records-config.js'
 import { isDraftRecord } from './record-draft.js'
+import { resolveRecordSchemas } from './queries-config.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
+import { toDeliveredRecord, contentBodyField, misplacedFields } from '@uniweb/schemas/conform'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -451,33 +453,42 @@ async function processDataItemAssets(data, itemPath, siteRoot, recordsRoot, base
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - YAML filename (.yml or .yaml)
- * @param {boolean} [includeDrafts] - keep `draft: true` records (a preview)
+ * @param {Object} config - the parsed query (`includeDrafts`, `dataSchema`)
  * @returns {Promise<Object|Array|null>} Processed item(s), or null for a draft this run withholds
  */
-async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, includeDrafts = false) {
+async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, config) {
   const filepath = join(dir, filename)
   const where = relative(siteRoot, filepath)
   const raw = await readFile(filepath, 'utf-8')
   const data = yaml.load(raw, YAML_OPTIONS) || {}
+  return processDataRecords(data, basename(filename, extname(filename)), filepath, where, siteRoot, recordsRoot, basePath, config)
+}
 
+/**
+ * The records a YAML or JSON file holds, delivered (`deliverRecord`): an array → one
+ * record per entry, each carrying its own `slug`; a mapping → one record, its `slug` the
+ * file's name unless it states one.
+ */
+async function processDataRecords(data, fileSlug, filepath, where, siteRoot, recordsRoot, basePath, config) {
   // Array → multiple items (single-file collection). A draft entry is dropped
   // BEFORE its assets are copied, so nothing of it ships.
   if (Array.isArray(data)) {
-    const kept = data.filter((item, i) => !withheld(item, `${where} [${i}]`, includeDrafts))
-    for (const item of kept) {
+    const out = []
+    for (const [i, item] of data.entries()) {
+      if (withheld(item, `${where} [${i}]`, config.includeDrafts)) continue
       if (item && typeof item === 'object') {
         await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
       }
+      out.push(deliverRecord(item, config, `${where} [${i}]`))
     }
-    return kept
+    return out
   }
 
   // Mapping → single item
-  if (withheld(data, where, includeDrafts)) return null
-  const slug = basename(filename, extname(filename))
-  const item = { slug, ...data }
+  if (withheld(data, where, config.includeDrafts)) return null
+  const item = { slug: fileSlug, ...data }
   await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
-  return item
+  return deliverRecord(item, config, where)
 }
 
 /**
@@ -489,33 +500,15 @@ async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, i
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - JSON filename
- * @param {boolean} [includeDrafts] - keep `draft: true` records (a preview)
+ * @param {Object} config - the parsed query (`includeDrafts`, `dataSchema`)
  * @returns {Promise<Object|Array|null>} Processed item(s), or null for a draft this run withholds
  */
-async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath, includeDrafts = false) {
+async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath, config) {
   const filepath = join(dir, filename)
   const where = relative(siteRoot, filepath)
   const raw = await readFile(filepath, 'utf-8')
-  const slug = basename(filename, '.json')
   const data = JSON.parse(raw)
-
-  // Array → multiple items (single-file collection). A draft entry is dropped
-  // BEFORE its assets are copied, so nothing of it ships.
-  if (Array.isArray(data)) {
-    const kept = data.filter((item, i) => !withheld(item, `${where} [${i}]`, includeDrafts))
-    for (const item of kept) {
-      if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
-      }
-    }
-    return kept
-  }
-
-  // Object → single item
-  if (withheld(data, where, includeDrafts)) return null
-  const item = { slug, ...data }
-  await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
-  return item
+  return processDataRecords(data, basename(filename, '.json'), filepath, where, siteRoot, recordsRoot, basePath, config)
 }
 
 /**
@@ -590,20 +583,124 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
   // This modifies content in place, updating paths to site-root-relative
   await processRecordAssets(content, filepath, siteRoot, recordsRoot, basePath)
 
-  // Extract excerpt
-  const excerpt = extractExcerpt(frontmatter, content, config.excerpt)
+  return deliverRecord({ slug, ...frontmatter }, config, relative(siteRoot, filepath), { doc: content, markdown: body })
+}
 
-  // Extract first image (frontmatter takes precedence)
-  // Note: paths in the frontmatter and the content have already been rewritten above
-  const image = frontmatter.image || extractFirstImage(content)
-
-  return {
-    slug,
-    ...frontmatter,
-    excerpt,
-    image,
-    content
+/**
+ * One record as its file holds it → the record a component receives.
+ *
+ * ⭐ THE SHAPE A HOST'S RECORDS SERVICE ANSWERS — measured 2026-09-24 on a local
+ * backend: the brief's fields at the top and every other section under its own name
+ * (`@uniweb/schemas/conform`'s `toDeliveredRecord`), with a markdown body in the
+ * schema's content body field — the ProseMirror document for a `format: prosemirror`
+ * field (`article_body.content`, for `@std/article`), the markdown source for a markup
+ * `text` one. A component is written against one shape, so a static site hands it that
+ * one (ruled 2026-09-24 [Diego]: the same as hosted). ⛔ Until then a record reached a
+ * component as its file held it, its body in `content` at the top — a shape no host
+ * delivers.
+ *
+ * `$name` is the record's handle, taken BEFORE the lift: a brief may declare a `slug`
+ * field of its own (`@std/article`'s does), and the lift puts that one over the file's.
+ *
+ * A record whose query has no data schema (`resolveRecordSchemas`) is delivered as its
+ * file holds it, a markdown body as `content`, which is what the static lane always did;
+ * so is a body its schema has no field for — a push refuses that one. A markdown record
+ * also gets `excerpt` and `image` where it states none, derived from its body: the
+ * static lane's own, and not what a host adds.
+ *
+ * ⛔ A record written in the retired flat form (`misplacedFields`) STOPS THE BUILD, as it
+ * stops a push: which section a key belongs in is not a guess to make.
+ *
+ * @param {*} record - the record as its file holds it, `slug` included
+ * @param {Object} config - the parsed query (`dataSchema`, `excerpt`)
+ * @param {string} where - the file, and the entry in a file of several, for a message
+ * @param {{ doc: Object, markdown: string }|null} [body] - a markdown record's body
+ * @returns {*} the delivered record (anything but a record, as it came)
+ */
+function deliverRecord(record, config, where, body = null) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return record
+  const schema = config.dataSchema || null
+  let out
+  if (!schema) {
+    out = body
+      ? {
+          ...record,
+          excerpt: extractExcerpt(record, body.doc, config.excerpt),
+          // paths in the record and the body have already been rewritten
+          image: record.image || extractFirstImage(body.doc),
+          content: body.doc,
+        }
+      : { ...record }
+  } else {
+    const misplaced = misplacedFields(schema, record)
+    if (misplaced.length) throw new Error(flatFormRefusal(where, config.schema, schema, misplaced))
+    out = { ...toDeliveredRecord(schema, record) }
+    if (body) {
+      placeBody(out, schema, body)
+      out.excerpt = extractExcerpt(out, body.doc, config.excerpt)
+      out.image = out.image || extractFirstImage(body.doc)
+    }
   }
+  const handle = record.slug
+  if (handle !== undefined && handle !== null && handle !== '') out.$name = String(handle)
+  return out
+}
+
+/**
+ * Put a markdown body where the delivered record carries its schema's content body
+ * field (`contentBodyField`) — unless the record already states that field, or the body
+ * is empty. With no such field the body stays `content`, at the top.
+ */
+function placeBody(out, schema, body) {
+  const blank = !body.markdown || !body.markdown.trim()
+  const target = contentBodyField(schema)
+  if (!target) {
+    if (!blank) out.content = body.doc
+    return
+  }
+  if (blank) return
+  const value = target.field?.type === 'text' ? body.markdown : body.doc
+  if (!target.section) {
+    if (out[target.key] == null) out[target.key] = value
+    return
+  }
+  const held = out[target.section]
+  // A section that is not a record is the file's to fix — `uniweb validate` names it.
+  if (held != null && (typeof held !== 'object' || Array.isArray(held))) return
+  if (held?.[target.key] != null) return
+  out[target.section] = { ...(held || {}), [target.key]: value }
+}
+
+/**
+ * The message a record written in the retired flat form stops the build with — each
+ * misplaced key (`misplacedFields`) moved under the section that declares it.
+ *
+ * @param {string} where - the file, for the message
+ * @param {string|null} ref - the schema's ref, as the query names it
+ * @param {Object} schema - the normalized schema
+ * @param {Array<{ key: string, sections: string[] }>} misplaced
+ * @returns {string}
+ */
+export function flatFormRefusal(where, ref, schema, misplaced) {
+  const under = new Map()
+  const either = []
+  for (const { key, sections } of misplaced) {
+    if (sections.length === 1) {
+      if (!under.has(sections[0])) under.set(sections[0], [])
+      under.get(sections[0]).push(key)
+    } else {
+      either.push(`"${key}" under ${sections.map((n) => `"${n}:"`).join(' or ')}`)
+    }
+  }
+  const moves = [
+    ...[...under].map(([section, keys]) => `${keys.map((k) => `"${k}"`).join(', ')} under "${section}:"`),
+    ...either,
+  ]
+  const names = Object.keys(schema.sections || {}).map((n) => `"${n}"`).join(', ')
+  return (
+    `[uniweb] ${where}: ${ref || schema.name} records are written by section, each section ` +
+    `under its own name (${names}) — move ${moves.join('; ')}.`
+  )
 }
 
 /**
@@ -693,10 +790,10 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
         return processBibtexItem(dir, file, siteDir, config.includeDrafts)
       }
       if (e.ext === '.json') {
-        return processJsonItem(dir, file, siteDir, recordsRoot, basePath, config.includeDrafts)
+        return processJsonItem(dir, file, siteDir, recordsRoot, basePath, config)
       }
       if (e.ext === '.yml' || e.ext === '.yaml') {
-        return processDataItem(dir, file, siteDir, recordsRoot, basePath, config.includeDrafts)
+        return processDataItem(dir, file, siteDir, recordsRoot, basePath, config)
       }
       return processContentItem(dir, file, config, siteDir, basePath, recordsRoot)
     })
@@ -729,13 +826,15 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
 
   // ⭐ `$name` IS THE RECORD HANDLE ON EVERY SITE (ruled 2026-09-11 [Diego]) — the
   // field a `[slug]` or `[...path]` page matches, and the one the records service
-  // serves. It is the record's FINAL slug: set here, after every format has been
-  // read and flattened, so a frontmatter `slug:` (which wins over the filename),
-  // a BibTeX cite key and an array-form file's own `slug` all count — exactly what
-  // our sync sends as the entry's name (`uwx/entity-source.js`). `slug` stays:
-  // foundations and templates read it.
+  // serves. It is the record's FINAL slug — a frontmatter `slug:` (which wins over the
+  // filename), a BibTeX cite key and an array-form file's own `slug` all count — exactly
+  // what our sync sends as the entry's name (`uwx/entity-source.js`). `deliverRecord`
+  // sets it for a markdown, YAML or JSON record, before the brief is lifted (a brief's
+  // own `slug` FIELD must not become the handle); a BibTeX entry gets it here. `slug`
+  // stays: foundations and templates read it.
   items = items.map((item) => (
-    item && typeof item === 'object' && item.slug !== undefined && item.slug !== null && item.slug !== ''
+    item && typeof item === 'object' && item.$name === undefined &&
+    item.slug !== undefined && item.slug !== null && item.slug !== ''
       ? { ...item, $name: String(item.slug) }
       : item
   ))
@@ -799,6 +898,8 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
  * @param {boolean} [options.includeDrafts=false] - keep `draft: true` records: a preview
  *   (`pnpm dev`) or a check (`uniweb validate`). Off for anything a site DELIVERS — a
  *   draft is a record that is not delivered while the site is published.
+ * @param {Object} [options.dataSchemas] - normalized data schemas by ref, to deliver the
+ *   records in; resolved from the site's foundation when absent (`resolveRecordSchemas`)
  * @returns {Promise<Object>} Map of query name to items array
  *
  * @example
@@ -807,7 +908,8 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
  * })
  * // { articles: [...] }
  */
-export async function processQueries(siteDir, queriesConfig, recordsDir, basePath = '/', { locale = null, includeDrafts = false } = {}) {
+export async function processQueries(siteDir, queriesConfig, recordsDir, basePath = '/', options = {}) {
+  const { locale = null, includeDrafts = false } = options
   if (!queriesConfig || typeof queriesConfig !== 'object') {
     return {}
   }
@@ -842,6 +944,11 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   const poolBySchema = groupPoolBySchema(pool.entities)
   const recordsRoot = resolve(siteDir, pool.dir)
 
+  // ⭐ THE DATA SCHEMA EACH QUERY'S RECORDS ARE DELIVERED IN (`deliverRecord`) — resolved
+  // from the foundation's source once for every query. A query with none compiles its
+  // records as their files hold them.
+  const dataSchemas = options.dataSchemas ?? (await querySchemas(siteDir, queriesConfig))
+
   const results = {}
 
   for (const [name, config] of Object.entries(queriesConfig)) {
@@ -853,6 +960,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
     parsed.placements = folder.placements
     parsed.includeDrafts = includeDrafts
+    parsed.dataSchema = (parsed.schema && dataSchemas[parsed.schema]) || null
     if (parsed.poolEntities.length === 0) {
       const dirs = parsed.schema ? poolDirsForSchema(parsed.schema) : null
       console.warn(
@@ -868,6 +976,29 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   }
 
   return results
+}
+
+/**
+ * The data schemas of the site's record queries, by ref (`resolveRecordSchemas`). A ref
+ * that is not a schema-less query's name and still does not resolve is warned about:
+ * its records are compiled as their files hold them, which is not the shape a
+ * component receives from a host.
+ */
+async function querySchemas(siteDir, queriesConfig) {
+  const refs = []
+  for (const config of Object.values(queriesConfig)) {
+    if (config && typeof config === 'object' && config.url !== undefined) continue
+    const ref = typeof config === 'string' ? config : config?.schema
+    if (typeof ref === 'string') refs.push(ref)
+  }
+  const { schemas, failures } = await resolveRecordSchemas(siteDir, refs)
+  for (const { ref, message } of failures) {
+    console.warn(
+      `[query-processor] Data schema ${ref} did not resolve, so its records are compiled as ` +
+        `their files hold them rather than as a component receives them: ${message}`
+    )
+  }
+  return schemas
 }
 
 /**

@@ -28,7 +28,8 @@ let ROOT, SITE
 const SCHEMA = {
   sections: {
     card: { kind: 'single', brief: true, fields: { title: {}, date: {} } },
-    body: { kind: 'single', fields: { content: {}, footnotes: {} } }
+    body: { kind: 'single', fields: { content: {}, footnotes: {} } },
+    notes: { kind: 'single', fields: { remark: {} } }
   }
 }
 
@@ -63,10 +64,8 @@ describe('a derived deferred does not become authored config', () => {
     // anything at all: "not written back" and "never existed" look identical in the file.
     makeSite()
     const doc = await siteProjectToDocument(SITE)
-    expect(doc.queries.find((c) => c.name === 'articles').deferred).toEqual([
-      'content',
-      'footnotes'
-    ])
+    // Every section but the brief, by name.
+    expect(doc.queries.find((c) => c.name === 'articles').deferred).toEqual(['body', 'notes'])
   })
 
   it('⛔ pull does NOT write the derived value into the author file', async () => {
@@ -76,25 +75,25 @@ describe('a derived deferred does not become authored config', () => {
   })
 
   it('⛔ an AUTHORED deferred survives the round trip', async () => {
-    // The guard against over-correcting. `footnotes` alone is narrower than the brief
+    // The guard against over-correcting. `notes` alone is narrower than the brief
     // implies, so it is intent, not derivation — dropping it would silently discard what
     // the author asked for, which is worse than the bug being fixed.
-    makeSite('    deferred: [footnotes]\n')
+    makeSite('    deferred: [notes]\n')
     const doc = await siteProjectToDocument(SITE)
-    expect(pulledDecl(doc).deferred).toEqual(['footnotes'])
+    expect(pulledDecl(doc).deferred).toEqual(['notes'])
   })
 
   it('an authored deferred that HAPPENS to equal the derivation is dropped, and that is correct', async () => {
     // It is indistinguishable from the derived value by construction — nothing on the
     // wire records who wrote it — and dropping it is lossless: the schema re-derives the
     // same list. Pinned so the behaviour is a decision rather than an accident.
-    makeSite('    deferred: [content, footnotes]\n')
+    makeSite('    deferred: [body, notes]\n')
     const doc = await siteProjectToDocument(SITE)
     expect(pulledDecl(doc).deferred).toBeUndefined()
   })
 
   it('order does not decide it — a reordered derivation is still recognized', async () => {
-    // The deriver walks `flatRecordFields`; a round trip through YAML and the store is
+    // The deriver walks the schema's sections; a round trip through YAML and the store is
     // not obliged to preserve that order. A list comparison would call this authored.
     makeSite()
     const doc = await siteProjectToDocument(SITE)

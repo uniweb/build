@@ -72,6 +72,13 @@ export {
 // across foundations — locally, with no backend. '@uniweb' is reserved for the
 // platform system namespace and is never a data-schema source.
 const SCOPE_PACKAGE = { std: '@uniweb/schemas' }
+
+/**
+ * The `code` of the error a `@/name` ref raises when the foundation defines no schema of
+ * that name — the one failure that is an answer rather than a fault: a query named after
+ * no schema is a query over schema-less records.
+ */
+export const SCHEMA_NOT_FOUND = 'SCHEMA_NOT_FOUND'
 const RESERVED_SYSTEM_SCOPE = 'uniweb'
 const packageForScope = (scope) => SCOPE_PACKAGE[scope] ?? `@${scope}/schemas`
 
@@ -121,7 +128,10 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
     const file = findSelfSchemaFile(srcDir, name)
     if (!file) {
       const tried = SCHEMA_EXTENSIONS.map((e) => `schemas/${name}${e}`).join(', ')
-      throw new Error(`Data schema '${ref}' not found. Expected one of: ${tried} under the foundation root.`)
+      throw Object.assign(
+        new Error(`Data schema '${ref}' not found. Expected one of: ${tried} under the foundation root.`),
+        { code: SCHEMA_NOT_FOUND }
+      )
     }
     return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
   }

@@ -33,18 +33,18 @@ describe('toDataSchemaDeclaration — fields-form (flat shorthand)', () => {
     '@acme/article'
   )
 
-  it('carries model attributes and synthesizes one single brief section (root map)', () => {
+  it('carries model attributes and synthesizes one single section named `brief`, marked brief (root map)', () => {
     expect(decl.name).toBe('@acme/article')
     expect(decl.description).toBe('A post')
     // No schema-level brief / sort_date_field — both are inline now.
     expect(decl).not.toHaveProperty('brief')
     expect(decl).not.toHaveProperty('sort_date_field')
-    expect(Object.keys(decl.sections)).toEqual(['article'])
-    expect(decl.sections.article.brief).toBe(true)
-    expect(decl.sections.article).not.toHaveProperty('multiple') // single
+    expect(Object.keys(decl.sections)).toEqual(['brief'])
+    expect(decl.sections.brief.brief).toBe(true)
+    expect(decl.sections.brief).not.toHaveProperty('multiple') // single
   })
 
-  const fields = () => decl.sections.article.fields
+  const fields = () => decl.sections.brief.fields
 
   it('maps scalars 1:1 and required (no `key`, no `kind`)', () => {
     expect(fields().title).toMatchObject({ type: 'string', required: true })
@@ -101,7 +101,7 @@ describe('toDataSchemaDeclaration — fields-form (flat shorthand)', () => {
  * a future regression names the attribute it dropped.
  */
 describe('toDataSchemaDeclaration — a multi-valued leaf keeps its attributes', () => {
-  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.brief.fields.f
 
   it('keeps label, description and required', () => {
     expect(field({ type: 'string', many: true, required: true, label: 'Tags', description: 'D' })).toEqual({
@@ -185,7 +185,7 @@ describe('toDataSchemaDeclaration — a multi-valued leaf keeps its attributes',
 })
 
 describe('toDataSchemaDeclaration — a reference keeps its attributes', () => {
-  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.brief.fields.f
 
   it('entity_ref carries label, description and required', () => {
     expect(field({ ref: '@/person', required: true, label: 'Author', description: 'D' })).toEqual({
@@ -241,7 +241,7 @@ describe('toDataSchemaDeclaration — a reference keeps its attributes', () => {
  * fail the publish outright, the way `settings.submit` did.
  */
 describe('toDataSchemaDeclaration — section prose travels, section `required` does not', () => {
-  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.brief.fields.f
 
   it('a nested object carries label and description onto the section', () => {
     expect(field({ type: 'object', label: 'L', description: 'D', fields: { a: 'string' } })).toEqual({
@@ -306,7 +306,7 @@ describe('toDataSchemaDeclaration — section prose travels, section `required` 
  * never saw the constraint, so components still handle an empty list).
  */
 describe('toDataSchemaDeclaration — a section-shaped field carries its constraints', () => {
-  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.brief.fields.f
   const MIN1 = [{ kind: 'min_items', value: 1 }]
 
   it('a list of records carries them — the shape that needed this', () => {
@@ -342,7 +342,7 @@ describe('toDataSchemaDeclaration — a section-shaped field carries its constra
   it('@std/publication declares min_items on its authors, and it reaches the wire', async () => {
     const { publication } = await import('@uniweb/schemas')
     const decl = lower(publication, '@std/publication', '@std/publication')
-    expect(decl.sections.publication.fields.authors.constraints).toEqual([{ kind: 'min_items', value: 1 }])
+    expect(decl.sections.brief.fields.authors.constraints).toEqual([{ kind: 'min_items', value: 1 }])
   })
 })
 
@@ -356,7 +356,7 @@ describe('toDataSchemaDeclaration — a section-shaped field carries its constra
  * the identical thing in `sections:` form could. Nothing decided that either.
  */
 describe('toDataSchemaDeclaration — a section-shaped field carries tree and append_only', () => {
-  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.x.fields.f
+  const field = (authored) => lower({ fields: { f: authored } }, '@/x', '@acme/x').sections.brief.fields.f
 
   it('`tree` becomes self_nesting on the section', () => {
     const out = field({ type: 'object', many: true, tree: true, fields: { a: 'string' } })
@@ -411,7 +411,7 @@ describe('toDataSchemaDeclaration — json + format: prosemirror (content fields
     '@/doc',
     '@acme/doc'
   )
-  const f = () => decl.sections.doc.fields
+  const f = () => decl.sections.brief.fields
 
   it('marks a format: prosemirror json field localized (content, not machine-ish)', () => {
     // Like url/email, `format` rides on the field — but prosemirror is a MARKER,
@@ -477,8 +477,8 @@ describe('toDataSchemaDeclaration — references', () => {
 describe('toDataSchemaDeclaration — brief & linkable', () => {
   it('omits linkable when a brief section exists (default true)', () => {
     const d = lower({ fields: { name: { type: 'string' } } }, '@/x', '@acme/x')
-    expect(briefName(d)).toBe('x')
-    expect(d.sections.x.brief).toBe(true)
+    expect(briefName(d)).toBe('brief')
+    expect(d.sections.brief.brief).toBe(true)
     expect(d).not.toHaveProperty('linkable')
   })
 
@@ -626,7 +626,7 @@ describe('toDataSchemaDeclaration — open map (values:)', () => {
     '@std/form',
     '@std/form'
   )
-  const map = decl.sections.form.fields.fields
+  const map = decl.sections.brief.fields.fields
 
   test('lowers to a nested section, not a leaf', () => {
     expect(map.type).toBe('section')
