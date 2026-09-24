@@ -88,12 +88,12 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     const doc = await siteProjectToDocument(ROOT)
     expect(doc).not.toHaveProperty('items') // not the flat lane
     expect(doc.$id).toBe('site-content')
-    expect(doc.$model).toBe('@uniweb/site-content')
+    expect(doc.$schema).toBe('@uniweb/site-content')
     expect(doc).not.toHaveProperty('$uuid') // no sidecar → first-sync shape
     // top-level sections present (Model-declared order)
     expect(Object.keys(doc)).toEqual([
       '$id',
-      '$model',
+      '$schema',
       'info',
       // ⭐ `settings` — the authored configuration that came off the `info` brief on
       // 2026-09-09, emitted right after it.
@@ -202,7 +202,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
       entityUuid: '019e0000-0000-7000-8000-0000000000ee',
     })
     expect(doc.$uuid).toBe('019e0000-0000-7000-8000-0000000000ee')
-    expect(Object.keys(doc).slice(0, 3)).toEqual(['$uuid', '$id', '$model'])
+    expect(Object.keys(doc).slice(0, 3)).toEqual(['$uuid', '$id', '$schema'])
     const home = doc.pages.find((p) => p.slug?.en === 'home')
     expect(home).not.toHaveProperty('$uuid')
     expect(home.$id).toBe('home') // identity handle stays
@@ -253,7 +253,7 @@ describe('uwx/site emitSiteSyncPackage', () => {
     expect(manifest.package_sha256).toMatch(/^[0-9a-f]{64}$/)
 
     const body = JSON.parse(files.get('entities/site-content.json').toString('utf8'))
-    expect(body.$model).toBe('@uniweb/site-content')
+    expect(body.$schema).toBe('@uniweb/site-content')
     expect(body.info.foundation).toBe('@acme/marketing@1.2.3')
     expect(body.pages.find((p) => p.slug?.en === 'home').page_sections[0].type).toBe('Hero')
   })

@@ -3,7 +3,7 @@ import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 // The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the record
 // entities. A brand-new record is pointed at by `$ref` (its payload-local pool-id
 // handle); an already-minted one by the entity_ref open form
-// `entry: { model, entity: uuid }`.
+// `entry: { schema, entity: uuid }`.
 // The folder carries NO `$uuid` of its own — the backend owns the site's folder,
 // keyed by the site-content uuid, so the framework never holds a folder uuid.
 //
@@ -63,7 +63,7 @@ describe('buildFolderEntity', () => {
       folderNodes: [branch('articles', ['articles/hello', 'articles/world'])],
     })
     const leaves = folder.document.contents[0].$children
-    expect(leaves[0]).toEqual({ kind: 'ref', name: 'hello', entry: { model: '@acme/x', entity: 'uuid-1' } })
+    expect(leaves[0]).toEqual({ kind: 'ref', name: 'hello', entry: { schema: '@acme/x', entity: 'uuid-1' } })
     expect(leaves[1]).toEqual({ kind: 'ref', name: 'world', $ref: 'articles/world' })
   })
 
@@ -74,7 +74,7 @@ describe('buildFolderEntity', () => {
     })
     expect(folder.uuid).toBeNull()
     expect(folder.document).not.toHaveProperty('$uuid')
-    expect(Object.keys(folder.document)).toEqual(['$id', '$model', 'contents'])
+    expect(Object.keys(folder.document)).toEqual(['$id', '$schema', 'contents'])
   })
 
   it('nests branches to any depth, decoupled from the pool layout', () => {
@@ -194,7 +194,7 @@ describe('folder placement identity', () => {
  *
  * The folder is the one entity whose document depends on OTHER entities' identity
  * state: `refLeaf` writes `$ref: "<collection>/<slug>"` while a record is new and
- * `entry: { model, entity: <uuid> }` once it is minted. Both denote the same
+ * `entry: { schema, entity: <uuid> }` once it is minted. Both denote the same
  * record.
  *
  * That made the folder's banked hash unreproducible, because a push does all three

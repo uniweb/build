@@ -24,7 +24,7 @@ describe('the emitter writes { name, label }', () => {
     })
     const [blog] = folder.document.contents
     expect(blog).toMatchObject({ kind: 'branch', name: 'blog', label: { fr: 'Blog' } })
-    expect(blog.$children[0]).toEqual({ kind: 'ref', name: 'hello', entry: { model: '@acme/x', entity: 'u-1' } })
+    expect(blog.$children[0]).toEqual({ kind: 'ref', name: 'hello', entry: { schema: '@acme/x', entity: 'u-1' } })
     expect(JSON.stringify(folder.document)).not.toContain('path_segment')
   })
 
@@ -58,7 +58,7 @@ describe('the pull reader reads { name, label }', () => {
     const folderDoc = {
       contents: [
         { kind: 'branch', name: 'blog', label: { fr: 'Le blog', en: 'Blog' }, $children: [
-          { kind: 'ref', name: 'hello', entry: { model: '@acme/article', entity: 'U1' } },
+          { kind: 'ref', name: 'hello', entry: { schema: '@acme/article', entity: 'U1' } },
         ] },
       ],
     }
@@ -73,7 +73,7 @@ describe('the pull reader reads { name, label }', () => {
 
   it('a bare-string label passes through unchanged', () => {
     const folderDoc = { contents: [{ kind: 'branch', name: 'blog', label: 'Blog', $children: [
-      { kind: 'ref', name: 'hello', entry: { model: '@acme/article', entity: 'U1' } } ] }] }
+      { kind: 'ref', name: 'hello', entry: { schema: '@acme/article', entity: 'U1' } } ] }] }
     const poolPathByUuid = new Map([['U1', 'article/hello.md']])
     folderToFolderYml({ folderDoc, siteRoot: root, poolPathByUuid })
     expect(readFileSync(join(root, 'records', 'folder.yml'), 'utf8')).toContain('label: Blog')

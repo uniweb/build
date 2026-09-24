@@ -59,7 +59,7 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     const pkg = await emitSyncPackages(root)
     expect(pkg.records).toBeTruthy()
     const doc = folderDoc(pkg)
-    expect(doc.$model).toBe('@uniweb/folder')
+    expect(doc.$schema).toBe('@uniweb/folder')
     expect(doc.contents).toEqual([])
   })
 
@@ -168,9 +168,9 @@ describe('two records with one name in one folder', () => {
   it('each keeps its own placement identity across a push', () => {
     const stored = {
       contents: [
-        { kind: 'ref', name: 'hello', entry: { model: '@acme/article', entity: 'R-A' }, $uuid: 'P-A' },
-        { kind: 'ref', name: 'hello', entry: { model: '@acme/note', entity: 'R-N' }, $uuid: 'P-N' },
-        { kind: 'ref', name: 'world', entry: { model: '@acme/article', entity: 'R-W' }, $uuid: 'P-W' },
+        { kind: 'ref', name: 'hello', entry: { schema: '@acme/article', entity: 'R-A' }, $uuid: 'P-A' },
+        { kind: 'ref', name: 'hello', entry: { schema: '@acme/note', entity: 'R-N' }, $uuid: 'P-N' },
+        { kind: 'ref', name: 'world', entry: { schema: '@acme/article', entity: 'R-W' }, $uuid: 'P-W' },
       ],
     }
     const banked = collectFolderItemUuids(stored)
@@ -188,7 +188,7 @@ describe('two records with one name in one folder', () => {
   // ⛔ CONTROL — a map banked before record keys existed holds `name` chains only, and
   // a leaf whose name is unique still finds its uuid there.
   it('CONTROL — a name-chain map from before still stamps a uniquely named leaf', () => {
-    const next = { contents: [{ kind: 'ref', name: 'world', entry: { model: '@acme/article', entity: 'R-W' } }] }
+    const next = { contents: [{ kind: 'ref', name: 'world', entry: { schema: '@acme/article', entity: 'R-W' } }] }
     stampFolderItemUuids(next, { world: 'P-W' })
     expect(next.contents[0].$uuid).toBe('P-W')
   })
@@ -197,8 +197,8 @@ describe('two records with one name in one folder', () => {
     // a stale chain key could otherwise hand one row to two leaves
     const next = {
       contents: [
-        { kind: 'ref', name: 'x', entry: { model: '@acme/a', entity: 'R-1' } },
-        { kind: 'ref', name: 'y', entry: { model: '@acme/a', entity: 'R-2' } },
+        { kind: 'ref', name: 'x', entry: { schema: '@acme/a', entity: 'R-1' } },
+        { kind: 'ref', name: 'y', entry: { schema: '@acme/a', entity: 'R-2' } },
       ],
     }
     stampFolderItemUuids(next, { '@R-1': 'P-1', y: 'P-1' })

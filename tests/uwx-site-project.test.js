@@ -749,6 +749,56 @@ describe('collection declarations — round-trip against the real producer', () 
     expect(out.articles).toEqual({})
     expect(out.old).toEqual({ schema: 'stale' })
   })
+
+  // ⛔ Measured 2026-09-23 on a push-then-pull round trip: `events: '@/event'` — the
+  // string shorthand docs/reference/queries.md documents — came back as
+  // `{ '0': '@', '1': '/', …, schema: '@/event' }`. The pulled declaration was merged
+  // INTO the author's string, and a spread string is its characters.
+  const AUTHORED =
+    "members:\n  schema: '@/member'\n  sort: name asc\n\n" +
+    'featured:\n  schema: \'@/member\'\n  where: { featured: true }\n\n' +
+    "events: '@/event'\nteam:\n"
+  const pulledBack = [
+    { $id: 'members', name: 'members', schema: '@/member', sort: 'name asc' },
+    { $id: 'featured', name: 'featured', schema: '@/member', where: { featured: true } },
+    { $id: 'events', name: 'events', schema: '@/event' },
+    // `@/team` is the default for a query named `team`, so it is dropped: `{}`.
+    { $id: 'team', name: 'team', schema: '@/team' },
+  ]
+  const siteWith = (text) => {
+    const site = join(dir, 'site')
+    mkdirSync(site, { recursive: true })
+    writeFileSync(join(site, 'queries.yml'), text)
+    return site
+  }
+
+  it('⛔ a pull that restates every query leaves queries.yml exactly as written — shorthands included', () => {
+    const site = siteWith(AUTHORED)
+    const report = declarationsToQueriesYml({ document: { queries: pulledBack }, siteRoot: site })
+    expect(report.queries).toBe('unchanged')
+    expect(readFileSync(join(site, 'queries.yml'), 'utf8')).toBe(AUTHORED)
+  })
+
+  it('a changed query replaces the shorthand whole — never spread into it', () => {
+    const site = siteWith(AUTHORED)
+    declarationsToQueriesYml({
+      document: { queries: [{ $id: 'events', name: 'events', schema: '@/event', limit: 5 }] },
+      siteRoot: site,
+    })
+    const out = yaml.load(readFileSync(join(site, 'queries.yml'), 'utf8'))
+    expect(out.events).toEqual({ schema: '@/event', limit: 5 })
+  })
+
+  it('a query is replaced whole: a key the backend no longer has does not survive the pull', () => {
+    // The defect `writeSiteConfig` records for the declaration keys, on queries.yml.
+    const site = siteWith("members:\n  schema: '@/member'\n  sort: name asc\n  limit: 3\n")
+    declarationsToQueriesYml({
+      document: { queries: [{ $id: 'members', name: 'members', schema: '@/member', sort: 'name asc' }] },
+      siteRoot: site,
+    })
+    const out = yaml.load(readFileSync(join(site, 'queries.yml'), 'utf8'))
+    expect(out.members).toEqual({ schema: '@/member', sort: 'name asc' })
+  })
 })
 
 describe('localized scalar projection → locales/{locale}.json (B)', () => {

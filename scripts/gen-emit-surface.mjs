@@ -70,8 +70,9 @@ const NON_CLOSED = {
 // the variable the producer accumulates into.
 const CLOSED = ['info', 'settings']
 
-// Keys the document carries that are the consumer's own system vocabulary.
-const SYSTEM_KEYS = ['$uuid', '$id', '$model']
+// Keys the document carries that are the consumer's own system vocabulary. `$schema`
+// names the document's data schema — `$model` until 2026-09-24 (`uwx-format.md` § 8).
+const SYSTEM_KEYS = ['$uuid', '$id', '$schema']
 
 const src = readFileSync(PRODUCER, 'utf8')
 

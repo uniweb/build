@@ -10,7 +10,7 @@
   "systemKeys": [
     "$uuid",
     "$id",
-    "$model"
+    "$schema"
   ],
   "sections": {
     "info": {

@@ -2,7 +2,7 @@
 // referenced BY NAME, on the entity-content SYNC lane.
 //
 // Each record becomes a section-keyed `$`-document (docs/reference/entity-content.md):
-// `$id` (the producer-local handle), `$model` (the Model by name), and
+// `$id` (the producer-local handle), `$schema` (its data schema, by scoped name), and
 // each SINGLE section keyed by its name — the brief plus any sibling singles, not
 // the brief alone. The backend MINTS `$uuid` on first sync and
 // returns it in the finalized response; the verb back-fills it into the source
@@ -75,7 +75,7 @@ const SKIP_KEYS = new Set([
   'slug',
   '$id',
   '$uuid',
-  '$model',
+  '$schema',
   '$owner',
   '$unit',
   '$meta',
@@ -85,7 +85,7 @@ const SKIP_KEYS = new Set([
   'draft',
 ])
 
-// Recursively drop IDENTITY `$`-sigil keys (`$uuid`/`$id`/`$model`/… — never
+// Recursively drop IDENTITY `$`-sigil keys (`$uuid`/`$id`/`$schema`/… — never
 // field data; the sigil-exclusivity invariant guarantees this) at every level,
 // so a back-filled `$uuid` doesn't change the hash. Two are exceptions, because
 // they are content rather than identity:
@@ -103,7 +103,7 @@ function stripSigils(value) {
     // encoding rather than the reference made the folder's hash unreproducible.
     //
     // `refLeaf` (uwx/folder.js) emits `$ref: <the record's $id>` — the pool position
-    // `<dirs>/<slug>` — while the record is brand-new, and `entry: { model, entity:
+    // `<dirs>/<slug>` — while the record is brand-new, and `entry: { schema, entity:
     // <uuid> }` once it has been minted.
     // Both denote the same record. A push hashes the folder BEFORE submitting, then
     // back-fills the minted `$uuid` into every record's source file — so the very
@@ -205,8 +205,10 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * @param {string} [params.sourceLocale]   - locale for localized-field wrap
  * @param {object} [params.translations]   - `{ locale: { hash: tgt } }` for wrapping
  *        localized scalar fields per-locale (from loadLocaleTranslations)
- * @returns {{ entities: object[], warnings: string[] }} each entity is
- *   `{ id, uuid, model, file, document }` — `document` is the section-keyed body.
+ * @returns {{ entities: object[], warnings: string[], refusals: string[] }} each
+ *   entity is `{ id, uuid, model, file, document }` — `document` is the section-keyed
+ *   body. `refusals` names the records that cannot be sent as written, one line
+ *   each; a caller that sends must not send while any is present.
  */
 export function recordsToEntities({
   label,
@@ -259,6 +261,14 @@ export function recordsToEntities({
       if (!fieldByKey.has(key)) fieldByKey.set(key, field)
     }
   }
+  // Every section by name, single or list — to recognize a record written BY SECTION
+  // (`details: { title: … }`), the shape docs/reference/entity-content.md gives a
+  // sections-form record. This mapper reads a record's fields from the top of its
+  // file, so such a record is refused below rather than sent without them.
+  const sectionNames = new Set(sectionEntries.map(([name]) => name))
+  const listSections = new Set(
+    sectionEntries.filter(([, s]) => s && s.multiple === true).map(([name]) => name)
+  )
 
   // The markdown body of a `.md` record is the value of the Model's CONTENT body
   // field — a markup `text` field (raw source string) or a `format: prosemirror`
@@ -276,6 +286,8 @@ export function recordsToEntities({
 
   const entities = []
   const warnings = []
+  // Records that cannot be sent as written — see the ⛔ at the end of the loop.
+  const refusals = []
   if (contentMatches.length > 1) {
     warnings.push(
       `${label}: ${declaration.name} has more than one content ` +
@@ -299,7 +311,7 @@ export function recordsToEntities({
     // only the fallback for a record that did not arrive that way.
     //
     // The qualification is a CONSTRAINT, not a style: the sync response is keyed per
-    // (`$model`, `$id`), so a bare slug would collide whenever two schema folders
+    // (`$schema`, `$id`), so a bare slug would collide whenever two schema folders
     // resolving to one Model reuse one (see the duplicate check). ⇒ Do not describe this
     // value as "the slug" — the folder leaf's `name` is the bare segment, and
     // conflating the two has already misdirected a naming decision.
@@ -328,9 +340,15 @@ export function recordsToEntities({
     }
     // Warn for author keys not on ANY record section. A real unknown key means the
     // frontmatter doesn't match the collection's data schema — that SHOULD warn
-    // (only identity/transport keys in SKIP_KEYS are silent).
+    // (only identity/transport keys in SKIP_KEYS are silent). A key naming a SECTION
+    // is not unknown: the record is written by section, refused below.
+    const bySection = []
     for (const key of Object.keys(record)) {
       if (SKIP_KEYS.has(key) || fieldByKey.has(key)) continue
+      if (sectionNames.has(key)) {
+        bySection.push(key)
+        continue
+      }
       warnings.push(
         `${label}/${slug}: field "${key}" is not on ` +
           `${declaration.name} — not synced`
@@ -343,14 +361,42 @@ export function recordsToEntities({
       )
     }
 
-    // The `$`-document, in canonical key order: `$uuid?`, `$id`, `$model`, `$disabled?`,
+    // ⛔ A RECORD THE BACKEND WOULD REFUSE — OR WOULD STORE EMPTY — IS REFUSED HERE,
+    // before anything is sent. Two cases are visible from here, and the second is only
+    // checked when the first does not already explain it:
+    //   - a record written by section, whose sections' contents this mapper cannot
+    //     send (it reads fields from the top of the file). Sent, it arrives with an
+    //     empty brief: refused when the brief has a `required` field, and otherwise
+    //     STORED EMPTY, in silence — so this stays whatever the backend does with a
+    //     refusal;
+    //   - a `required` field the send would lack — the brief is always sent, another
+    //     single section only when the record fills it. The backend refuses it too,
+    //     but names the field, not the file.
+    // Measured 2026-09-23: a record written by section went up with an empty brief and
+    // the lane was refused — and the refused lane left the folder's entries and
+    // entities with no data behind, so every later push of the site's records was
+    // refused. The backend's push has been one transaction since 2026-09-24; a refusal
+    // now writes nothing.
+    if (bySection.length) {
+      refusals.push(sectionShapeRefusal(`${label}/${slug}`, bySection, listSections, declaration.name))
+    } else {
+      const missing = missingRequired(recordSections, sectionData, briefName)
+      if (missing.length) {
+        refusals.push(
+          `${label}/${slug}: ${declaration.name} requires ${listOf(missing)}, and this record ` +
+            `has no value for ${missing.length === 1 ? 'it' : 'them'}.`
+        )
+      }
+    }
+
+    // The `$`-document, in canonical key order: `$uuid?`, `$id`, `$schema`, `$disabled?`,
     // then each populated section in declared order (the brief always present as the
     // card). `$owner`/`$unit`/`$meta` are omitted — the backend binds owner + unit on
     // its side.
     const document = {}
     if (uuid) document.$uuid = uuid
     document.$id = id
-    document.$model = declaration.name
+    document.$schema = declaration.name
     // ⭐ A DRAFT IS SENT AS A DISABLED ENTITY: it stays in the folder and is never
     // publicly delivered. Only `true` travels. An absent key means enabled [Diego,
     // 2026-09-21], so a record whose `draft: true` is removed is sent without the key
@@ -373,7 +419,51 @@ export function recordsToEntities({
       document,
     })
   }
-  return { entities, warnings }
+  return { entities, warnings, refusals }
+}
+
+// "a", "a and b", "a, b and c" — items are already formatted.
+function listOf(items) {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+const quoted = (keys) => listOf(keys.map((k) => `"${k}"`))
+
+// Why a record written by section cannot be sent, and what to do about each kind of
+// section it names: a single section's fields can move to the top of the file; a
+// list section has no file form a push can send.
+function sectionShapeRefusal(where, keys, listSections, modelName) {
+  const singles = keys.filter((k) => !listSections.has(k))
+  const lists = keys.filter((k) => listSections.has(k))
+  const one = keys.length === 1
+  let message =
+    `${where}: ${quoted(keys)} ${one ? 'is a section' : 'are sections'} of ${modelName}, and a ` +
+    `push reads a record's fields from the top of its file — what ${one ? 'it holds' : 'they hold'} ` +
+    'would not be sent.'
+  if (singles.length) message += ` Move the fields of ${quoted(singles)} up a level.`
+  if (lists.length) {
+    message +=
+      ` ${quoted(lists)} ${lists.length === 1 ? 'holds' : 'hold'} a list, which a push cannot ` +
+      'send from a file yet.'
+  }
+  return message
+}
+
+// The `required` fields a record's send would lack. The brief is always sent; another
+// single section only when the record fills it, so an empty one is not checked. A
+// field counts as present when the send carries a value for it (`null` is none).
+function missingRequired(recordSections, sectionData, briefName) {
+  const missing = []
+  for (const [secName, sec] of recordSections) {
+    const data = sectionData[secName]
+    if (secName !== briefName && !data) continue
+    for (const [key, field] of Object.entries(sec.fields || {})) {
+      if (field?.required !== true || data?.[key] != null) continue
+      missing.push(secName === briefName ? `"${key}"` : `"${key}" (section "${secName}")`)
+    }
+  }
+  return missing
 }
 
 // Post-pass: override a collection record's localized CONTENT body with a per-locale
@@ -544,7 +634,7 @@ function resolveDeclaration(schema, modelName) {
  * (e.g. site-content) into one sync package. First sync sends no `$uuid` (the
  * backend mints); re-sync round-trips the back-filled `$uuid`. Throws on an
  * unresolvable EXPLICIT Model, an invalid `records/folder.yml`, or a duplicate
- * ($model, $id) within the submission.
+ * ($schema, $id) within the submission.
  *
  * @param {string} siteRoot - directory containing site.yml
  * @param {object} [opts]
@@ -558,8 +648,9 @@ function resolveDeclaration(schema, modelName) {
  *        Defaults to the site's foundation's (`siteSelfScope`); a caller that has it
  *        already passes it, so one emit reads it once.
  * @returns {Promise<{ entities: object[], index: object[], warnings: string[],
- *   schemaless: Array<{name: string, model: string}>, colConfig: object,
- *   folder: object, recordsDirExists: boolean }>}
+ *   refusals: string[], schemaless: Array<{name: string, model: string}>,
+ *   colConfig: object, folder: object, recordsDirExists: boolean }>}
+ *   `refusals` — records that cannot be sent as written (`recordsToEntities`).
  *   `schemaless` lists the QUERIES whose schema resolved to nothing (the
  *   convention-default soft-skip) — their records are not pushed as entities, and
  *   the composite deploy delivers those queries statically instead.
@@ -597,6 +688,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     throw new Error(`uwx/records: ${recordsCfg.file} is invalid —\n  ${folder.errors.join('\n  ')}`)
   }
   const warnings = [...pool.errors, ...folder.warnings]
+  const refusals = []
 
   const colConfig = opts.queriesConfig || (await resolveQueriesConfig(siteRoot))
   const queries = siteQueries(colConfig.declarations)
@@ -606,6 +698,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       entities: [],
       index: [],
       warnings,
+      refusals,
       schemaless: [],
       colConfig,
       folder: { ...folder, nodes: [] },
@@ -657,7 +750,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // ⭐ Resolving BEFORE `declarationFor` is what keeps this to one line of behaviour:
   // `resolveDeclaration` already matches a fully-qualified name against the
   // foundation's `@/`-keyed `dataSchemas`, so a resolved name looks up correctly and
-  // `declaration.name` — the value that becomes `$model` — is the resolved one.
+  // `declaration.name` — the value that becomes `$schema` — is the resolved one.
   //
   // ⛔ The rule lives in `./self-scope.js`, shared with the `queries` Section
   // (`site.js::queriesNested`): a query's `schema` must name exactly the Model
@@ -740,7 +833,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const producedBy = new Map()
   // Schemas (as written) whose Model resolved to nothing — soft-skipped.
   const unresolved = new Set()
-  // The sync response is keyed per ($model, $id), so the pair must be unique
+  // The sync response is keyed per ($schema, $id), so the pair must be unique
   // within one submission.
   const seen = new Set()
 
@@ -821,14 +914,14 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       const dupKey = `${e.model} ${e.id}`
       if (seen.has(dupKey)) {
         throw new Error(
-          `uwx/records: duplicate ($model, $id) in one sync — "${e.id}" of ` +
+          `uwx/records: duplicate ($schema, $id) in one sync — "${e.id}" of ` +
             `${e.model} comes from more than one record. Each record in a schema ` +
             'folder needs its own slug; make the slugs unique.'
         )
       }
       seen.add(dupKey)
       // The verb back-fills the minted `$uuid` into this source file, matched
-      // back from the finalized response by ($model, $id).
+      // back from the finalized response by ($schema, $id).
       const src = sourceBySlug.get(e.slug)
       index.push({
         id: e.id,
@@ -843,16 +936,13 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         ownId: ownIds.get(e.slug) ?? null,
         format: src ? src.format : null,
         multiRecord: src ? src.multiRecord : false,
-        // The Model declaration, so the back-fill can render the finalized
-        // document → authoring shape (variant A): unwrap localized fields, route
-        // the content body field to the md body, drop the brief record `$uuid`.
-        declaration,
         // Sent disabled, so the back-fill can check that the backend kept it that way.
         draft: e.document.$disabled === true,
       })
     }
     entities.push(...mappedOut.entities)
     warnings.push(...mappedOut.warnings)
+    refusals.push(...mappedOut.refusals)
   }
 
   // Queries whose schema resolved to nothing — not pushed as entities. The composite
@@ -903,6 +993,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     entities,
     index,
     warnings,
+    refusals,
     schemaless,
     colConfig,
     folder: { ...folder, nodes },
@@ -968,11 +1059,11 @@ export function filterChanged(entities, index, { priorHashes = {}, sendAll = fal
  * @param {object} [opts] - buildRecordEntities opts, plus `priorHashes`,
  *        `sendAll`, `exporter`, `exportedAt`.
  * @returns {Promise<{ buffer: Buffer|null, models: string[], entityCount: number,
- *        warnings: string[], index: object[], hashes: Object<string,string>,
- *        skipped: number }>}
+ *        warnings: string[], refusals: string[], index: object[],
+ *        hashes: Object<string,string>, skipped: number }>}
  */
 export async function emitRecordSyncPackage(siteRoot, opts = {}) {
-  const { entities, index, warnings, recordsDirExists } = await buildRecordEntities(siteRoot, opts)
+  const { entities, index, warnings, refusals, recordsDirExists } = await buildRecordEntities(siteRoot, opts)
   if (entities.length === 0) {
     throw new Error(
       'uwx/records: no records to export — ' +
@@ -989,7 +1080,7 @@ export async function emitRecordSyncPackage(siteRoot, opts = {}) {
 
   const sentModels = [...new Set(sendEntities.map((e) => e.model))]
   if (sendEntities.length === 0) {
-    return { buffer: null, models: sentModels, entityCount: 0, warnings, index: [], hashes, skipped }
+    return { buffer: null, models: sentModels, entityCount: 0, warnings, refusals, index: [], hashes, skipped }
   }
 
   const buffer = emitEntitySyncPackage({
@@ -1000,5 +1091,5 @@ export async function emitRecordSyncPackage(siteRoot, opts = {}) {
     exportedAt: opts.exportedAt,
   })
 
-  return { buffer, models: sentModels, entityCount: sendEntities.length, warnings, index: sendIndex, hashes, skipped }
+  return { buffer, models: sentModels, entityCount: sendEntities.length, warnings, refusals, index: sendIndex, hashes, skipped }
 }

@@ -12,6 +12,14 @@
 // canonical). It reads from the SOURCE file (not the backend's finalized document),
 // so field values round-trip untouched and no inverse decode is needed in v1.
 //
+// ⛔ A PUSH NEVER RENDERS THE BACKEND'S DOCUMENT OVER THE AUTHOR'S FILE. It did, for
+// a record's first push, from 2026-05-29 to 2026-09-23 ("variant A"), and that
+// document is not the author's file: it carries the serve URL the push put where the
+// author wrote `/images/x.png`, and only the brief section's declared fields. So a
+// first push rewrote the record's images to a backend route and deleted every key the
+// Model does not declare, and every field of any other section. What a backend holds
+// reaches the file on a pull (`records-project.js`), which restores asset paths first.
+//
 // Single-record YAML/JSON/markdown files are rendered/back-filled in place.
 // Multi-record files — array-form YAML/JSON and BibTeX (many records in one
 // file) — are grouped by file and written once, one `$uuid` per record keyed by
@@ -213,27 +221,19 @@ function briefSectionOf(declaration) {
   return entry ? { name: entry[0], ...entry[1] } : null
 }
 
-// Whether a Model's brief section declares a CONTENT body field (a markup `text`
-// field, or a `format: prosemirror` json field) — the md-body target. A markdown
-// source file can only be safely rendered from the document when its body has a
-// field home — otherwise the body would be lost (variant B then).
-function briefHasContentBody(declaration) {
-  const brief = briefSectionOf(declaration)
-  return Object.values(brief?.fields || {}).some((f) => isContentBodyField(f))
-}
-
 /**
- * Render a finalized entity `document` back to its source-file authoring shape
- * (variant A — the file becomes a projection of backend state). For a flat/brief
- * entity: the entity `$uuid` + the brief section's fields (localized unwrapped,
+ * Render an entity `document` a pull brought back to its source-file authoring shape
+ * — the file becomes a projection of the backend's state, which is what a pull is
+ * (`writeRecordFile`, `records-project.js`). A push never uses it (header ⛔). For a
+ * flat/brief entity: the entity `$uuid` + the brief section's fields (localized unwrapped,
  * date/scalars verbatim), with the brief record's own `$uuid` DROPPED (the backend
- * matches a single-section item by singularity) and `$model`/`$id`/`$meta` omitted.
+ * matches a single-section item by singularity) and `$schema`/`$id`/`$meta` omitted.
  * A disabled entity (`$disabled: true`) writes `draft: true`, and an enabled one writes
  * no `draft:` at all.
  * For markdown, the content body field becomes the body; for YAML/JSON it stays a field.
  *
  * @param {object} params
- * @param {object} params.document     - finalized `{ $uuid, $model, <brief>: {…} }`
+ * @param {object} params.document     - pulled `{ $uuid, $schema, <brief>: {…} }`
  * @param {object} params.declaration  - the Model declaration (`brief` + `sections`)
  * @param {string} params.format       - 'yaml' | 'json' | 'md'
  * @param {string} [params.sourceLocale]
@@ -296,40 +296,26 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   return yaml.dump(record) // yaml / yaml
 }
 
-// Write text only when it differs from what's on disk (idempotent).
-function writeIfChanged(filePath, text) {
-  let current = ''
-  try {
-    current = readFileSync(filePath, 'utf8')
-  } catch {
-    // new file / unreadable — treat as a change
-  }
-  if (text === current) return 'unchanged'
-  writeFileSync(filePath, text)
-  return 'updated'
-}
-
 /**
  * Back-fill the sync response into the source files. Correlation is by **`index`**
  * — `finalized[i].index` is the 0-based position of the entity in the submitted
  * sequence, which equals the producer's `index` array order (the backend does not
- * echo `$id`). Single-record files are rendered from the finalized `document`
- * (variant A) when the document + declaration are present and lossless for the
- * format (markdown needs a content body field to carry the body); otherwise the
- * entity `$uuid` is back-filled in place (variant B). Multi-record YAML/JSON files
- * get a per-entry `$uuid` keyed by slug, grouped so each file is written once;
- * BibTeX stays deferred.
+ * echo `$id`). A single-record file gains the entity `$uuid` and nothing else —
+ * never the returned `document` (see the ⛔ in the header). Multi-record YAML/JSON
+ * files get a per-entry `$uuid` keyed by slug, and BibTeX one per cite key, grouped
+ * so each file is written once.
  *
  * @param {object} params
  * @param {object[]} params.index     - the emitter's per-entity index, in submit
- *        order: `{ id, model, slug, sourceFile, format?, multiRecord?, declaration? }`.
+ *        order: `{ id, model, slug, sourceFile, format?, multiRecord?, ownId?, draft? }`.
  * @param {object[]} params.finalized - response entries `{ index, uuid, changed?, document? }`.
- * @param {string} [params.sourceLocale]
+ *        `document` is read for one thing only: whether a record sent as a draft
+ *        came back disabled.
  * @returns {{ updated: string[], unchanged: string[], deferred: object[], warnings: string[], mapped: Object<string,string>, notKeptAsDrafts: string[] }}
  *   `mapped` is own id → the uuid this backend minted, for the caller to record per backend.
  *   `notKeptAsDrafts` names records sent as drafts whose returned document is not disabled.
  */
-export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
+export function backfillEntityUuids({ index, finalized }) {
   const updated = []
   const unchanged = []
   const deferred = []
@@ -364,10 +350,9 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
     // ⛔ A DRAFT THE BACKEND DID NOT KEEP AS ONE. A backend is obliged to echo
     // `$disabled: true` on the document of an entity it stored disabled. One that predates
     // the key skips it without a word and stores the record enabled, so it is delivered
-    // once the site is published. Rendering that document over the file (variant A) would
-    // then erase `draft: true` from the author's file as well, so the file keeps its own
-    // text and the caller is told. Only a returned document that lacks the flag counts:
-    // with no document there is nothing to judge.
+    // once the site is published. The file keeps its `draft: true` — only the uuid is
+    // written — and the caller is told. Only a returned document that lacks the flag
+    // counts: with no document there is nothing to judge.
     const draftNotKept = entry.draft === true && fin.document && fin.document.$disabled !== true
     if (draftNotKept) notKeptAsDrafts.push(entry.sourceFile || entry.id)
     if (!entry.sourceFile) {
@@ -383,9 +368,9 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
 
     // ⛔ A record that already carries its OWN id is NOT rewritten. Its id is stable
     // and travels with the file; this backend's uuid belongs in the map, not in the
-    // author's file. And it must not be: variant A below re-renders the WHOLE file from
-    // the backend's document, which carries THIS backend's `$uuid` — so a second
-    // backend would silently overwrite the record's identity with its own.
+    // author's file. And it must not be: the write below puts THIS backend's `$uuid` in
+    // the file, so a second backend would silently overwrite the record's identity
+    // with its own.
     if (entry.ownId) {
       ownIdFiles.add(entry.sourceFile)
       continue
@@ -404,31 +389,8 @@ export function backfillEntityUuids({ index, finalized, sourceLocale = 'en' }) {
       continue
     }
 
-    // Variant A: render the finalized document over the file when we have it +
-    // the declaration, and it's lossless for the format (md needs a content body
-    // field for its body). Otherwise variant B: back-fill the uuid in place.
-    const canRenderA =
-      !draftNotKept &&
-      fin.document &&
-      entry.declaration &&
-      (entry.format !== 'md' || briefHasContentBody(entry.declaration))
-    let res
-    if (canRenderA) {
-      try {
-        const text = renderEntityDocument({
-          document: fin.document,
-          declaration: entry.declaration,
-          format: entry.format,
-          sourceLocale,
-        })
-        res = { status: writeIfChanged(entry.sourceFile, text) }
-      } catch (err) {
-        warnings.push(`${entry.sourceFile}: ${err.message}; fell back to uuid back-fill`)
-        res = backfillUuid(entry.sourceFile, uuid)
-      }
-    } else {
-      res = backfillUuid(entry.sourceFile, uuid)
-    }
+    // The uuid, into the author's own file — never the returned document (header ⛔).
+    const res = backfillUuid(entry.sourceFile, uuid)
     if (res.status === 'updated') updated.push(entry.sourceFile)
     else if (res.status === 'unchanged') unchanged.push(entry.sourceFile)
     else if (res.status === 'deferred') deferred.push({ index: i, id: entry.id, file: entry.sourceFile, reason: res.message })

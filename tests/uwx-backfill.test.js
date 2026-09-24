@@ -260,8 +260,8 @@ describe('backfillEntityUuids — a draft the backend did not keep', () => {
     expect(out.$uuid).toBe('E0') // identity is still written back
   })
 
-  // CONTROL — a backend that kept it: rendered over as usual, `draft: true` and all.
-  it('CONTROL — a draft the backend kept is rendered, and nothing is reported', () => {
+  // CONTROL — a backend that kept it: nothing to report, and the file keeps its line.
+  it('CONTROL — a draft the backend kept is not reported, and the file keeps `draft: true`', () => {
     const f = draftFile()
     const res = backfillEntityUuids({ index: [entry(f, true)], finalized: fin(true) })
     expect(res.notKeptAsDrafts).toEqual([])
@@ -315,42 +315,60 @@ describe('backfillEntityUuids — correlate by index', () => {
     expect(yaml.load(readFileSync(wx, 'utf8')).$uuid).toBe('0192-aaaa')
   })
 
-  it('variant A: renders the finalized document over the file (entity uuid only)', () => {
+  // ⛔ The returned document is not the author's file. It carries the serve URL the push
+  // put where the author wrote a local path, and only the brief section's declared
+  // fields. Rendered over the file (until 2026-09-23), a record's first push rewrote
+  // its image to a backend route — measured on a live push — and, by what the renderer
+  // writes, dropped every key the Model does not declare. The declaration rides in the
+  // index as it did then, so this fails if the render comes back.
+  const product = {
+    name: '@acme/product',
+    sections: {
+      product: {
+        brief: true,
+        fields: {
+          title: { type: 'string', localized: true },
+          photo: { type: 'file' },
+          bio: { type: 'text', format: 'markdown' },
+        },
+      },
+    },
+  }
+  const returned = (fields) => [
+    {
+      index: 0,
+      uuid: 'E0',
+      changed: true,
+      document: { $uuid: 'E0', $model: '@acme/product', product: { $uuid: 'rec', ...fields } },
+    },
+  ]
+
+  it('⛔ a YAML record gains its `$uuid` and nothing else, whatever the returned document holds', () => {
     const wx = join(dir, 'widget-x.yml')
-    writeFileSync(wx, 'title: Widget X\nprice: 9.99\n')
-    const declaration = {
-      name: '@acme/product',
-      sections: {
-        product: {
-          brief: true,
-          fields: {
-            title: { type: 'string', localized: true },
-            price: { type: 'decimal' },
-          },
-        },
-      },
-    }
-    const index = [{ id: 'widget-x', slug: 'widget-x', sourceFile: wx, format: 'yaml', declaration }]
-    const finalized = [
-      {
-        index: 0,
-        uuid: 'E0',
-        changed: true,
-        document: {
-          $uuid: 'E0',
-          $model: '@acme/product',
-          product: { $uuid: 'rec', title: { en: 'Widget X' }, price: 9.99 },
-        },
-      },
-    ]
-    const res = backfillEntityUuids({ index, finalized })
+    writeFileSync(wx, 'title: Widget X\nphoto: /images/x.png\ncolor: red\n')
+    const res = backfillEntityUuids({
+      index: [{ id: 'widget-x', slug: 'widget-x', sourceFile: wx, format: 'yaml', declaration: product }],
+      finalized: returned({ title: { en: 'Widget X' }, photo: '/serve/4846/base.png' }),
+    })
     expect(res.updated).toEqual([wx])
-    const out = yaml.load(readFileSync(wx, 'utf8'))
-    expect(out.$uuid).toBe('E0') // entity uuid persisted
-    expect(out.title).toBe('Widget X') // localized unwrapped
-    expect(out.price).toBe(9.99)
-    expect(out).not.toHaveProperty('product') // not the wire shape
-    expect(JSON.stringify(out)).not.toContain('rec') // brief record uuid dropped (singularity)
+    expect(readFileSync(wx, 'utf8')).toBe(
+      '$uuid: E0\ntitle: Widget X\nphoto: /images/x.png\ncolor: red\n'
+    )
+  })
+
+  it('⛔ a markdown record keeps its frontmatter and its body, and gains only its `$uuid`', () => {
+    const md = join(dir, 'alice.md')
+    const authored = '---\ntitle: Alice\nphoto: /images/x.png\n---\n\nShe builds **tools**.\n'
+    writeFileSync(md, authored)
+    backfillEntityUuids({
+      index: [{ id: 'alice', slug: 'alice', sourceFile: md, format: 'md', declaration: product }],
+      finalized: returned({
+        title: { en: 'Alice' },
+        photo: '/serve/4846/base.png',
+        bio: 'She builds **tools**.\n',
+      }),
+    })
+    expect(readFileSync(md, 'utf8')).toBe(authored.replace('---\n', '---\n$uuid: E0\n'))
   })
 
   it('warns on a finalized index with no matching submitted entity', () => {

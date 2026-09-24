@@ -80,7 +80,7 @@ describe('folder.yml reproduces the grouping the old producer derived', () => {
     const { folder, entity } = await build()
     expect(folder.errors).toEqual([])
     expect(entity.document.contents).toEqual(OLD_PRODUCER_OUTPUT)
-    expect(entity.document.$model).toBe('@uniweb/folder')
+    expect(entity.document.$schema).toBe('@uniweb/folder')
     expect(entity.document).not.toHaveProperty('$uuid')
   })
 

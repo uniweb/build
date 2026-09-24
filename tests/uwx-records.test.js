@@ -130,7 +130,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(e.file).toBe('entities/products/widget-x.json')
     expect(e.document).not.toHaveProperty('items') // not the legacy items[] shape
     expect(e.document.$id).toBe('products/widget-x')
-    expect(e.document.$model).toBe('@acme/product')
+    expect(e.document.$schema).toBe('@acme/product')
     expect(e.document).not.toHaveProperty('$uuid')
     // brief section keyed by its name; its value is the fields object.
     expect(e.document.product).toMatchObject({ price: 9.99, published: '2026-01-01' })
@@ -156,13 +156,13 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(entities[0].document.product.title).toEqual({ en: 'Hello' })
   })
 
-  it('canonical key order: $id, $model, then the section (no leading $uuid first sync)', () => {
+  it('canonical key order: $id, $schema, then the section (no leading $uuid first sync)', () => {
     const { entities } = recordsToEntities({
       label: 'products',
       records: [{ slug: 'a', title: 'A' }],
       declaration,
     })
-    expect(Object.keys(entities[0].document)).toEqual(['$id', '$model', 'product'])
+    expect(Object.keys(entities[0].document)).toEqual(['$id', '$schema', 'product'])
     // ⚠️ The caller supplies `$id` now — it is the entity's POOL id, and only the
     // caller knows the pool position. This unit exercises the mapper alone, so it
     // falls back to `<queryName>/<slug>`; the real producer always sets it.
@@ -233,7 +233,7 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     const [e] = entities
     expect(e.uuid).toBe('abc-123')
     expect(e.document.$uuid).toBe('abc-123')
-    expect(Object.keys(e.document)).toEqual(['$uuid', '$id', '$model', 'product'])
+    expect(Object.keys(e.document)).toEqual(['$uuid', '$id', '$schema', 'product'])
   })
 
   it('honors an explicit $id over the slug', () => {
@@ -282,6 +282,76 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
         declaration: declNoBrief,
       })
     ).toThrow(/no brief section/)
+  })
+})
+
+// ── A record the backend would refuse is refused before anything is sent ──────
+
+describe('recordsToEntities — refuses a record that cannot be sent as written', () => {
+  // Measured 2026-09-23: a record written by section — the shape
+  // docs/reference/entity-content.md gives a sections-form record — went up with an
+  // empty brief, the backend refused the records lane over its required field, and
+  // what the lane had already written stopped every later push of the site's records.
+  const event = lower(
+    {
+      name: 'event',
+      sections: {
+        details: {
+          brief: true,
+          fields: { title: { type: 'string', required: true }, location: { type: 'string' } },
+        },
+        extra: {
+          fields: { note: { type: 'string' }, contact: { type: 'string', required: true } },
+        },
+        sessions: { many: true, fields: { title: { type: 'string', required: true } } },
+      },
+    },
+    '@/event',
+    '@acme/event'
+  )
+  const map = (record) =>
+    recordsToEntities({ label: 'event', records: [{ slug: 'launch', ...record }], declaration: event })
+
+  it('⛔ a record written by section is refused, naming each section and what to do about it', () => {
+    const { refusals, warnings } = map({
+      details: { title: 'Launch' },
+      sessions: [{ title: 'Keynote' }],
+    })
+    expect(refusals).toEqual([
+      'event/launch: "details" and "sessions" are sections of @acme/event, and a push reads ' +
+        "a record's fields from the top of its file — what they hold would not be sent. " +
+        'Move the fields of "details" up a level. "sessions" holds a list, which a push ' +
+        'cannot send from a file yet.',
+    ])
+    // Not also called unknown: "field "details" is not on @acme/event" said the Model
+    // lacks a section it has.
+    expect(warnings.filter((w) => /is not on/.test(w))).toEqual([])
+  })
+
+  it('⛔ a record missing a required field of the brief is refused', () => {
+    expect(map({ location: 'Toronto' }).refusals).toEqual([
+      'event/launch: @acme/event requires "title", and this record has no value for it.',
+    ])
+  })
+
+  it('an empty value is no value — `title:` with nothing after it reads as null', () => {
+    expect(map({ title: null }).refusals).toHaveLength(1)
+  })
+
+  it("another single section's required field counts only once the record fills that section", () => {
+    // `extra` left empty is not sent, so its `contact` cannot fail the send…
+    expect(map({ title: 'Launch' }).refusals).toEqual([])
+    // …but a record that fills it sends it, and then it needs its required field.
+    expect(map({ title: 'Launch', note: 'Bring a badge' }).refusals).toEqual([
+      'event/launch: @acme/event requires "contact" (section "extra"), and this record has ' +
+        'no value for it.',
+    ])
+  })
+
+  it('CONTROL — a complete record written by field is sent, not refused', () => {
+    const { refusals, entities } = map({ title: 'Launch', location: 'Toronto' })
+    expect(refusals).toEqual([])
+    expect(Object.keys(entities[0].document.details)).toEqual(['title', 'location'])
   })
 })
 
@@ -466,7 +536,7 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
       expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/)
 
       const doc = byFile(entry.file)
-      expect(doc.$model).toBe('@acme/product')
+      expect(doc.$schema).toBe('@acme/product')
       expect(doc.$id).toBe(entry.uuid) // entry.uuid mirrors the body's $id
       expect(doc).not.toHaveProperty('$uuid') // first sync — backend mints
       expect(doc).not.toHaveProperty('items')
@@ -509,7 +579,7 @@ describe('emitRecordSyncPackage — site + local foundation → .uwx', () => {
 
     const doc = await emit(A)
     expect(doc.$uuid).toBe('existing-uuid-1')
-    expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$model', 'product'])
+    expect(Object.keys(doc)).toEqual(['$uuid', '$id', '$schema', 'product'])
 
     // ⭐ A backend that minted something ELSE for it gets its own uuid, not ours.
     writeFileSync(
@@ -586,7 +656,7 @@ describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
     expect(entityCount).toBe(1)
     const { manifest, byFile } = unzip(buffer)
     const doc = byFile(manifest.entries[0].file)
-    expect(doc.$model).toBe('@std/product')
+    expect(doc.$schema).toBe('@std/product')
     expect(doc.product.title).toEqual({ en: 'A' }) // declaration drove the localized wrap
     expect(doc.product.price).toBe(5)
   })
@@ -636,18 +706,18 @@ describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
 
 describe('entityContentHash', () => {
   it('is identity-independent — stable across a back-filled $uuid', () => {
-    const first = entityContentHash({ $id: 'x', $model: '@a/m', m: { title: { en: 'Hi' } } })
+    const first = entityContentHash({ $id: 'x', $schema: '@a/m', m: { title: { en: 'Hi' } } })
     const resync = entityContentHash({
       $uuid: 'minted',
       $id: 'x',
-      $model: '@a/m',
+      $schema: '@a/m',
       m: { $uuid: 'rec', title: { en: 'Hi' } },
     })
     expect(first).toBe(resync)
   })
   it('changes when field content changes', () => {
-    const a = entityContentHash({ $id: 'x', $model: '@a/m', m: { title: { en: 'Hi' } } })
-    const b = entityContentHash({ $id: 'x', $model: '@a/m', m: { title: { en: 'Bye' } } })
+    const a = entityContentHash({ $id: 'x', $schema: '@a/m', m: { title: { en: 'Hi' } } })
+    const b = entityContentHash({ $id: 'x', $schema: '@a/m', m: { title: { en: 'Bye' } } })
     expect(a).not.toBe(b)
   })
 })
@@ -850,9 +920,9 @@ describe('buildRecordEntities — `@/` model refs resolve into the foundation sc
   it('resolves `@/member` to `@scope/member` on the entity and leaves `@uniweb/*` alone', async () => {
     const { entities } = await buildRecordEntities(siteDir, { scope: '@acme' })
     expect(entities).toHaveLength(1)
-    // The value that becomes `$model` on the wire, and `models_required` in the manifest.
+    // The value that becomes `$schema` on the wire, and `models_required` in the manifest.
     expect(entities[0].model).toBe('@acme/member')
-    expect(entities[0].document.$model).toBe('@acme/member')
+    expect(entities[0].document.$schema).toBe('@acme/member')
   })
 
   it('accepts a bare scope handle as well as `@handle`', async () => {

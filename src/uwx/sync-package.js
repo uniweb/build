@@ -71,7 +71,7 @@ function emitLane(entities, exporter, exportedAt, extraModels = []) {
   return { buffer, entityCount: entities.length, models }
 }
 
-// Collect the Models referenced by the folder's `ref` leaves (`entry.model`), walking
+// Collect the Models referenced by the folder's `ref` leaves (`entry.schema`), walking
 // the contents/$children tree. The folder is built from the FULL record set, so it
 // references every record's Model — including records the send-only-changed filter
 // drops from THIS package (a re-push where the folder changed but the records didn't).
@@ -79,7 +79,7 @@ function emitLane(entities, exporter, exportedAt, extraModels = []) {
 // ride even when their record entities don't.
 function collectReferencedModels(node, acc) {
   if (!node || typeof node !== 'object') return acc
-  if (node.entry && typeof node.entry.model === 'string') acc.add(node.entry.model)
+  if (node.entry && typeof node.entry.schema === 'string') acc.add(node.entry.schema)
   for (const key of ['$children', 'contents']) {
     if (Array.isArray(node[key])) for (const child of node[key]) collectReferencedModels(child, acc)
   }
@@ -251,9 +251,13 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   records: { buffer, entityCount, index, models }|null,
- *   hashes: Object<string,string>, warnings: string[], skipped: number,
- *   schemaless: Array<{name: string, model: string}>, localAssets: string[],
- *   applied: object }>}
+ *   hashes: Object<string,string>, warnings: string[], refusals: string[],
+ *   skipped: number, schemaless: Array<{name: string, model: string}>,
+ *   localAssets: string[], applied: object }>}
+ *   `refusals` names the records that cannot be sent as written, one line each
+ *   (`records.js::recordsToEntities`). A caller that submits must not submit while
+ *   any is present: the backend would refuse the records lane — or, for a record
+ *   written by section whose brief requires nothing, store it empty.
  *   `schemaless` lists queries that resolved no data schema (soft-skipped from
  *   the sync) — the composite deploy delivers these statically via the data ball.
  *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
@@ -277,7 +281,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const exportedAt = opts.exportedAt
   refuseOrgOption(opts, 'emitSyncPackages')
   // ⭐ ONE SCOPE FOR THE WHOLE EMIT — the site's foundation's, the one `register`
-  // stored its Models under — so a record's `$model` and a query's `schema` are
+  // stored its Models under — so a record's `$schema` and a query's `schema` are
   // qualified alike. Read once here and handed to both. ⛔ It was the org that owns
   // the SITE until 2026-09-22 (`self-scope.js`).
   const scope =
@@ -446,7 +450,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const localAssets = [...localAssetSet]
 
   const siteEntity = siteDoc
-    ? { id: siteDoc.$id, model: siteDoc.$model, file: 'entities/site-content.json', document: siteDoc }
+    ? { id: siteDoc.$id, model: siteDoc.$schema, file: 'entities/site-content.json', document: siteDoc }
     : null
 
   // One hash map over every entity (both lanes) — the sync-cache the caller persists.
@@ -519,6 +523,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
 
   return {
     siteContent, records, siteContentUuid, hashes, warnings, skipped,
+    refusals: col.refusals || [],
     schemaless: col.schemaless, localAssets, applied,
     // { stamped, unknown } when identity was applied; null when the caller passed
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed

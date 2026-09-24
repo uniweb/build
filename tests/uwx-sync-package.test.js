@@ -85,7 +85,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // the folder references both records by $ref (uuid-less first push) and carries no
     // $uuid of its own (the backend owns it, keyed by the site-content uuid)
     const folder = JSON.parse(readZip(pkg.records.buffer).get('entities/folder.json').toString('utf8'))
-    expect(folder.$model).toBe('@uniweb/folder')
+    expect(folder.$schema).toBe('@uniweb/folder')
     expect(folder).not.toHaveProperty('$uuid')
     // ⭐ FLAT, because there is no `records/folder.yml`: every record sits at the top of
     // the folder. That is the model's common case — the pool is usually flat and
@@ -98,7 +98,7 @@ describe('emitSyncPackages — two directional lanes', () => {
   it('the site-content .uwx carries $id but no per-item $uuid', async () => {
     const pkg = await emitSyncPackages(SITE)
     const body = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
-    expect(body.$model).toBe('@uniweb/site-content')
+    expect(body.$schema).toBe('@uniweb/site-content')
     expect(body).not.toHaveProperty('$uuid')
     const home = body.pages.find((p) => p.slug?.en === 'home')
     expect(home.$id).toBe('home')
@@ -169,7 +169,7 @@ describe('emitSyncPackages — two directional lanes', () => {
   })
 
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {
-    // Articles with embedded $uuid → the folder references them by `entry.model` (minted form).
+    // Articles with embedded $uuid → the folder references them by `entry.schema` (minted form).
     w('records/article/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')
     w('records/article/world.md', '---\n$uuid: 0192-world\ntitle: World\ndate: 2026-02-01\n---\nBody2\n')
     // ⭐ A RE-push: this backend minted both, so its map says so (identity). The

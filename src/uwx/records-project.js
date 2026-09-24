@@ -6,12 +6,13 @@
 //
 // Identity & placement:
 //   - a record's slug comes from the FOLDER document — each ref leaf is
-//     `{ entry: { model, entity: <uuid> }, name: <slug> }`, at the top of the folder
+//     `{ entry: { schema, entity: <uuid> }, name: <slug> }`, at the top of the folder
 //     or inside a branch (its `$children`) whose `name` names the sub-folder. The
 //     folder is the authoritative organization on a read (the record document's own
 //     `$id` envelope is not guaranteed to be echoed back), with the record
 //     document's `$id` (its position in the directory) as a fallback when present.
-//   - the record's directory comes from its `$model` — `records/{schema}/` is where
+//   - the record's directory comes from its data schema (`$schema`, read by
+//     `documentSchema`) — `records/{schema}/` is where
 //     a record of that model lives (`site.yml::paths.records` moves it). Not from any
 //     query: a query has no directory, and which query selects a record is not a
 //     fact about it.
@@ -21,7 +22,8 @@
 //     brief has a content body field, else YAML.
 //
 // Field rendering reuses renderEntityDocument (via writeRecordFile) — localized
-// unwrap, date handling, content-body→body are already inverted there.
+// unwrap, date handling, content-body→body are already inverted there. Asset paths
+// are restored before it runs (`restoreAssetRefs`), as the content lane does.
 //
 // Deferred: array-form & BibTeX multi-record files (a pulled record is placed as
 // its own single-record file; merging into an existing array file is a later
@@ -30,6 +32,8 @@
 // record is reported.
 
 import { readBackendState, updateBackendMap } from './sync-store.js'
+import { restoreAssetRefs } from './asset-map.js'
+import { documentSchema } from './entity-document.js'
 import { readFileSync, readdirSync, existsSync, unlinkSync } from 'node:fs'
 import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
@@ -116,7 +120,7 @@ function briefHasContentBody(declaration) {
 // folder is a self-nesting tree under `contents`, nesting via `$children` (the
 // site-content invariant — folder.js). A leaf sits in a branch whose `name` is
 // the collection; the leaf's `name` is the slug (the handle) and its `entry` is
-// the entity_ref open form `{ model, entity: <uuid> }`. ⛔ `path_segment` is not
+// the entity_ref open form `{ schema, entity: <uuid> }`. ⛔ `path_segment` is not
 // read: the store renamed it on 2026-09-04 and a pull emits the new shape only —
 // a reader that kept the old key would index every record as
 // `{ folderPath: null, slug: undefined }` and rewrite records.yml with
@@ -131,7 +135,7 @@ function indexFolder(folderDoc) {
       if (node?.kind === 'branch') {
         walk(node.$children, node.name ?? folderPath)
       } else if (node?.kind === 'ref' && node.entry) {
-        // `entry` is `{ model, entity: <uuid> }`; tolerate a bare uuid defensively.
+        // `entry` is `{ schema, entity: <uuid> }`; tolerate a bare uuid defensively.
         const uuid = typeof node.entry === 'object' ? node.entry.entity : node.entry
         if (uuid) byUuid.set(uuid, { folderPath, slug: node.name })
       }
@@ -456,11 +460,11 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
  *
  * @param {object} params
  * @param {object} params.folderDoc   - the `@uniweb/folder` document `{ contents }` (no `$uuid`)
- * @param {object[]} params.recordDocs - record `$`-documents `{ $uuid?, $id?, $model, <brief> }`
+ * @param {object[]} params.recordDocs - record `$`-documents `{ $uuid?, $id?, $schema, <brief> }`
  * @param {string} params.siteRoot
  * @param {object} params.opts
  * @param {(modelName: string) => object|null|undefined} params.opts.resolveDeclaration
- *        - resolve a Model's data-schema declaration by name (`$model`).
+ *        - resolve a data schema's declaration by its scoped name (`documentSchema`).
  * @param {string|null} [params.opts.scope] - the scope the push qualified a record's
  *        `@/x` Model with — the site's foundation's — so a `@scope/x` model is placed
  *        back where the author wrote it. The caller resolves it up front, as it does
@@ -495,8 +499,16 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   const unchanged = []
   const skipped = []
   const warnings = []
+  const backendState = opts.backend ? readBackendState(siteRoot, opts.backend) : {}
+  // ⛔ PUT THE AUTHOR'S ASSET PATHS BACK BEFORE ANYTHING IS RENDERED — the step the
+  // content lane takes (`site-project.js`), for the same reason. A pushed record goes
+  // up with the serve URL the push put where its author wrote `/images/x.png`, and it
+  // comes back that way; rendered as is, a pull rewrites the author's file to a
+  // backend route. Asset ids and fingerprints are per backend, so a projection tied
+  // to none restores nothing. Missing here until 2026-09-23.
+  restoreAssetRefs(recordDocs, backendState.assets || {})
   // This backend's record map, inverted: its uuid → the record's own id.
-  const recordMap = opts.backend ? readBackendState(siteRoot, opts.backend).records || {} : {}
+  const recordMap = backendState.records || {}
   const ownIdByTheirs = new Map(Object.entries(recordMap).map(([own, theirs]) => [theirs, own]))
   // own id → their uuid, for every record this pull wrote. Recorded at the end.
   const learned = {}
@@ -512,18 +524,19 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       skipped.push({ uuid: document.$uuid, reason: 'no slug (not in the folder, no $id)' })
       continue
     }
-    const declaration = document.$model ? resolveDeclaration(document.$model) : null
+    const schema = documentSchema(document)
+    const declaration = schema ? resolveDeclaration(schema) : null
     if (!declaration) {
-      skipped.push({ uuid: document.$uuid, slug: where.slug, reason: `unresolved model ${document.$model || '(none)'}` })
+      skipped.push({ uuid: document.$uuid, slug: where.slug, reason: `unresolved model ${schema || '(none)'}` })
       continue
     }
 
-    const poolDir = recordDirFor(recordsRoot, document.$model, selfScope)
+    const poolDir = recordDirFor(recordsRoot, schema, selfScope)
     if (!poolDir) {
       skipped.push({
         uuid: document.$uuid,
         slug: where.slug,
-        reason: `model ${document.$model} names no pool folder (expected @/name or @org/name)`,
+        reason: `model ${schema} names no pool folder (expected @/name or @org/name)`,
       })
       continue
     }
@@ -550,7 +563,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
 
     // The free-form home for this record's content body (locale-independent); a
     // target-locale full-doc body is written under locales/freeform/{locale}/here.
-    const freeformRelPath = buildFreeformRecordPath(document.$model, where.slug)
+    const freeformRelPath = buildFreeformRecordPath(schema, where.slug)
 
     // ⛔ The file gets the record's OWN id, never this backend's — a pull from a second
     // backend must not overwrite the identity the record already has.
@@ -559,7 +572,11 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     try {
       status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath })
     } catch (err) {
-      warnings.push(`${where.slug}: ${err.message}`)
+      // ⛔ A record that could not be written was not placed, so it is a SKIP, not a
+      // warning: a caller that counts what it placed (the CLI's pull) must see it.
+      // Until 2026-09-24 it was a warning, and a pull over records with no Sections —
+      // what a partly applied push left — reported every one of them as taken.
+      skipped.push({ uuid: document.$uuid, slug: where.slug, reason: err.message })
       continue
     }
     if (status === 'unchanged') unchanged.push(filePath)

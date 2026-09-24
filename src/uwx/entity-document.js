@@ -3,7 +3,7 @@
 // Distinct from package.js's emitEntityPackage (the register / site-content lane,
 // whose per-entity body is the legacy `items[]` shape). The sync lane's per-entity
 // body is the section-keyed `$`-document (see docs/reference/entity-content.md):
-// `$uuid?` then `$id` `$model`, then one key per top-level section.
+// `$uuid?` then `$id` `$schema`, then one key per top-level section.
 //
 // Identity rides in the BODY — the backend reads `$id` always, `$uuid` when
 // present, and MINTS `$uuid` on first sync. The manifest is the INDEX, not a copy
@@ -24,6 +24,25 @@ import {
   buildManifest,
   computePackageSha256,
 } from './manifest.js'
+
+/**
+ * The data schema a `$`-document names — its scoped name (`@scope/name`), or null.
+ *
+ * ⭐ `$schema` is the key, agreed with backend on 2026-09-24 to match the query wire's
+ * `schema` for the same value: what the two lanes exchange is a data schema, and a
+ * data schema's identity is its scoped name on every backend. It was `$model` until
+ * then, and ⛔ nothing reads that spelling — no production backend existed to keep a
+ * window for [Diego, 2026-09-24]. The value comes back as it is, so a caller can still
+ * tell an id from a name and say which it met.
+ * Record: `kb/framework/build/uwx-format.md` § *The data schema an entity names*.
+ *
+ * @param {object} doc - an entity `$`-document
+ * @returns {string|null}
+ */
+export function documentSchema(doc) {
+  const value = doc?.$schema
+  return typeof value === 'string' && value ? value : null
+}
 
 // `exporter.instance`: caller-override -> env UNIWEB_INSTANCE_ID -> "unknown".
 // Provenance only; neutralized in the digest, so its value is inert.

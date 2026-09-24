@@ -9,7 +9,7 @@
 //
 // ⭐ ONE RULE FOR EVERY PATH THAT SHIPS A REF FROM ONE PUBLISH, and its inverse:
 //
-//   - a record's `$model`             `records.js::buildRecordEntities`
+//   - a record's `$schema`            `records.js::buildRecordEntities`
 //   - a query's `schema`              `site.js::queriesNested` (the `queries` Section)
 //   - the author's spelling, on pull  `records-project.js` (placement and declarations)
 //

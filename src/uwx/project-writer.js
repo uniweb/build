@@ -212,13 +212,20 @@ function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
     if (value === null || value === undefined) {
       delete existing[key]
     } else if (typeof value === 'object' && !Array.isArray(value) && !replace.includes(key)) {
-      existing[key] = { ...(existing[key] || {}), ...value }
+      // ⛔ Merged only INTO AN OBJECT. Spread, a string becomes its characters: a
+      // pull wrote `events: '@/event'` back as `events: { '0': '@', '1': '/', …,
+      // schema: '@/event' }` (measured 2026-09-23). Anything else that is not an
+      // object has nothing to keep, so the incoming value replaces it.
+      const prior = existing[key]
+      existing[key] = isPlainObject(prior) ? { ...prior, ...value } : value
     } else {
       existing[key] = value
     }
   }
   return writeIfChanged(filePath, yaml.dump(existing, YAML_DUMP_OPTS))
 }
+
+const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 
 /**
  * Merge `config` into `site.yml` (shallow). Preserves keys not present in the
@@ -290,8 +297,44 @@ export function writeMergedYaml(filePath, projected, managedKeys) {
  * @returns {'updated'|'unchanged'}
  */
 export function writeQueriesConfig(siteRoot, queries) {
-  return mergeYamlConfig(queriesYmlPath(siteRoot), queries)
+  const filePath = queriesYmlPath(siteRoot)
+  let authored = {}
+  try {
+    authored = yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) || {}
+  } catch {
+    // missing / invalid → nothing authored to keep
+  }
+  // ⭐ A query the file already states is left as the author wrote it — in the same
+  // words, or in a shorthand (`team: '@/person'` is `{ schema: '@/person' }`, a bare
+  // `events:` is `{}`), which a pull brings back in its long form. And a pull that
+  // restates every query writes nothing: the file is re-dumped whole otherwise, which
+  // rewrites a bare `events:` as `events: null` and flow style as block style.
+  const changes = {}
+  for (const [name, decl] of Object.entries(queries)) {
+    if (restates(authored?.[name], decl)) continue
+    changes[name] = decl
+  }
+  if (Object.keys(changes).length === 0) return 'unchanged'
+  // ⛔ Each query WHOLE (`replace`), as this function's header always said. Merged into
+  // the local one — what the call did until 2026-09-23 — a key the backend's
+  // declaration no longer has survived every pull: the defect `writeSiteConfig`
+  // records for the declaration keys ("a stale `limit` survived every pull").
+  return mergeYamlConfig(filePath, changes, { replace: Object.keys(changes) })
 }
+
+// Whether a pulled declaration says only what the author's entry already says.
+function restates(authored, decl) {
+  const keys = Object.keys(decl || {})
+  if (typeof authored === 'string') return keys.length === 1 && decl.schema === authored
+  if (authored === null) return keys.length === 0
+  return isPlainObject(authored) && canonicalJson(authored) === canonicalJson(decl)
+}
+
+// JSON with every object's keys sorted — equal for equal values, whatever the order.
+const canonicalJson = (value) =>
+  JSON.stringify(value, (_, v) =>
+    isPlainObject(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v
+  )
 
 /**
  * Write the records folder's organization — `folder.yml` in the records directory
@@ -324,13 +367,13 @@ export function writeThemeFile(siteRoot, theme) {
 }
 
 /**
- * Render a finalized collection-record `document` to its source-file shape
- * (variant A, via renderEntityDocument) and write it idempotently. The record
- * half of the collections lane's write step.
+ * Render a collection-record `document` a pull brought back to its source-file shape
+ * (via renderEntityDocument) and write it idempotently. The record half of the
+ * collections lane's write step.
  *
  * @param {object} opts
  * @param {string} opts.filePath
- * @param {object} opts.document    - finalized `{ $uuid, $model, <brief>: {…} }`
+ * @param {object} opts.document    - pulled `{ $uuid, $schema, <brief>: {…} }`
  * @param {object} opts.declaration - the record's data-schema declaration
  * @param {'yaml'|'json'|'md'} opts.format
  * @param {string} [opts.sourceLocale]

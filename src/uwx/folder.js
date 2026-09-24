@@ -52,18 +52,20 @@ export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'
 
 // Point one authored leaf at the record entity it names. The folder's `contents`
-// field is polymorphic (it can reference any Model), so the ref uses the
-// entity_ref OPEN form `{ model, entity }` — not a bare uuid (a bare uuid is only
-// valid when the field pins a single model). Known uuid → `entry: { model, entity
+// field is polymorphic (it can reference any data schema), so the ref uses the
+// entity_ref OPEN form `{ schema, entity }` — not a bare uuid (a bare uuid is only
+// valid when the field pins a single schema). Known uuid → `entry: { schema, entity
 // }`; brand-new → `$ref` handle (resolved within this payload to the minted
 // entity).
 //
-// TODO: the sync lane is uuid-keyed, so `model` should be the resolved Model UUID;
-// it currently carries the Model NAME (e.g. `@std/article`). Wire the name→uuid
-// resolution (a registry data-schema read) as a follow-up.
+// ⭐ `schema` carries the data schema's SCOPED NAME (`@std/article`), never a Model id
+// — agreed with backend 2026-09-24: a Model id is minted per backend and does not
+// cross `/dev`, while a scoped name is the same on every backend. (A TODO here asked
+// for the id until then; the agreement settled it the other way.) The key was `model`
+// until the same date. Record: `kb/framework/build/uwx-format.md` § 8.
 function refLeaf(entity) {
   const leaf = { kind: 'ref', name: entity.slug }
-  if (entity.uuid) leaf.entry = { model: entity.model, entity: entity.uuid }
+  if (entity.uuid) leaf.entry = { schema: entity.model, entity: entity.uuid }
   else leaf.$ref = entity.id // the payload-local handle
   return leaf
 }
@@ -103,7 +105,7 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
   return out
 }
 
-// The uuid of the record a leaf references — once minted, `entry: { model, entity }`
+// The uuid of the record a leaf references — once minted, `entry: { schema, entity }`
 // (a bare uuid is tolerated). A brand-new record's leaf carries `$ref` instead.
 function recordOf(item) {
   if (item?.kind !== 'ref') return null
@@ -255,7 +257,7 @@ export function buildFolderEntity({ recordEntities, folderNodes = [], declared, 
 
   const document = {
     $id: FOLDER_ENTITY_KEY,
-    $model: FOLDER_MODEL_NAME,
+    $schema: FOLDER_MODEL_NAME,
     contents,
   }
   // Re-arm placement identity. Without it a second send reads as "every item is

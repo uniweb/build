@@ -2,7 +2,7 @@
 // qualified with the FOUNDATION's scope.
 //
 // ⛔ WHY THE PAIR. One publish ships a foundation-relative ref (`@/member`) down two
-// paths: each record's `$model` (`records.js::buildRecordEntities`) and the query's
+// paths: each record's `$schema` (`records.js::buildRecordEntities`) and the query's
 // `schema` in the site-content `queries` Section (`site.js::queriesNested`). The
 // records path qualified it (`@org/member`); the query path shipped it verbatim. A
 // consumer answers a query by matching `schema` against the Models its records were
@@ -20,7 +20,7 @@
 // [Diego], so the two differ by design.
 //
 // ⭐ The push half pins the PAIR and the SCOPE: the query's `schema` is compared with
-// the `$model` the same emit produced, and both with the foundation's name. The pull
+// the `$schema` the same emit produced, and both with the foundation's name. The pull
 // half pins the inverse, because a qualified value written back verbatim would change
 // the author's file on every round trip — and, through the derived-`deferred` lookup,
 // reintroduce the 2026-08-29 defect.
@@ -80,13 +80,13 @@ function makeSite({ queriesYml, owner = null, foundationName = '@acme/fnd' }) {
 const siteDocOf = (pkg) =>
   JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
 
-// Every record entity's `$model`, as it ships — the folder is not a record.
+// Every record entity's `$schema`, as it ships — the folder is not a record.
 const recordModelsOf = (pkg) =>
   [...readZip(pkg.records.buffer).entries()]
     .filter(([file]) => file.startsWith('entities/') && file.endsWith('.json'))
     .map(([, buf]) => JSON.parse(buf.toString('utf8')))
-    .filter((doc) => doc.$model && doc.$model !== '@uniweb/folder')
-    .map((doc) => doc.$model)
+    .filter((doc) => doc.$schema && doc.$schema !== '@uniweb/folder')
+    .map((doc) => doc.$schema)
 
 const queryOf = (doc, name) => doc.queries.find((q) => q.name === name)
 

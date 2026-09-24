@@ -850,7 +850,7 @@ export function isSiteRelativeExtensionUrl(decl) {
  * @param {Object<string,string>} [uuids] `name` → backend `$uuid`, from a push
  *        response or a pull. Absent on a first sync, where minting is correct.
  * @param {string} [org] the publish org. A foundation-relative `schema` (`@/x`)
- *        is qualified with it (`./self-scope.js`), exactly as the records' `$model`
+ *        is qualified with it (`./self-scope.js`), exactly as the records' `$schema`
  *        is — see the note at the `schema` line below.
  */
 // ⛔ KEYS THAT MUST NOT REACH THE WIRE. Everything else on an authored declaration
@@ -930,7 +930,7 @@ function queriesNested(declarations, uuids = null, scope = null) {
     // the runtime fetches it from (never the records service).
     const source = d.path ? { path: d.path } : d.url !== undefined ? externalSource(d) : d.source
     setIf(data, 'source', source)
-    // ⛔ QUALIFIED, WITH THE SAME RULE AND THE SAME SCOPE AS THE RECORDS' `$model`
+    // ⛔ QUALIFIED, WITH THE SAME RULE AND THE SAME SCOPE AS THE RECORDS' `$schema`
     // (`records.js::buildRecordEntities`) — the site's foundation's. A consumer
     // answers a query by matching this name against the Models its records were
     // stored under, so a verbatim `@/member` beside records stored as `@acme/member`
@@ -1242,7 +1242,7 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  *        `siteSelfScope`; pass the scope the records are emitted with. With none
  *        known, `@/x` ships as written.
  * @returns {Promise<object>} the section-keyed `$`-document:
- *        `{ $uuid?, $id, $model, info, settings?, pages, layout_sections, extensions,
+ *        `{ $uuid?, $id, $schema, info, settings?, pages, layout_sections, extensions,
  *        queries, services?, secrets? }`
  */
 export async function siteProjectToDocument(siteRoot, opts = {}) {
@@ -1518,7 +1518,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // config (the records themselves are separate entities; this is just the config).
   const colConfig = await resolveQueriesConfig(siteRoot, { siteYml })
 
-  // `$uuid?` then `$id` `$model`, then sections in Model-declared order.
+  // `$uuid?` then `$id` `$schema`, then sections in Model-declared order.
   const doc = {}
   // ⭐ From `sync.json`, keyed by the backend this document is being produced FOR.
   // It was `site.yml::$uuid` — one scalar with no way to say which backend minted it.
@@ -1529,7 +1529,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     (opts.backend ? readBackendState(siteRoot, opts.backend).site?.uuid : undefined)
   if (entityUuid) doc.$uuid = entityUuid
   doc.$id = SITE_ENTITY_KEY // one site-content entity per project (stable handle)
-  doc.$model = SITE_MODEL_NAME
+  doc.$schema = SITE_MODEL_NAME
   doc.info = info
   // Emitted only when the file declares something — see `settingsNested`.
   const settings = settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations })
@@ -1594,7 +1594,7 @@ export async function emitSiteSyncPackage(siteRoot, opts = {}) {
     entities: [
       {
         id: document.$id,
-        model: document.$model,
+        model: document.$schema,
         file: 'entities/site-content.json',
         document,
       },
