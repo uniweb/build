@@ -29,8 +29,10 @@ import {
  * The data schema a `$`-document names — its scoped name (`@scope/name`), or null.
  *
  * ⭐ `$schema` is the key, agreed with backend on 2026-09-24 to match the query wire's
- * `schema` for the same value: what the two lanes exchange is a data schema, and a
- * data schema's identity is its scoped name on every backend. It was `$model` until
+ * `schema` for the same value: what the two lanes exchange is a data schema, and the
+ * scoped name is how we address one in the registry of the backend we talk to. ⛔ Not
+ * an identity ACROSS backends — each has its own registry, so one name on two of them
+ * names two data schemas [Diego, 2026-09-24]. It was `$model` until
  * then, and ⛔ nothing reads that spelling — no production backend existed to keep a
  * window for [Diego, 2026-09-24]. The value comes back as it is, so a caller can still
  * tell an id from a name and say which it met.

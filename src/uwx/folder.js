@@ -59,8 +59,10 @@ export const FOLDER_ENTITY_KEY = '@folder'
 // entity).
 //
 // ⭐ `schema` carries the data schema's SCOPED NAME (`@std/article`), never a Model id
-// — agreed with backend 2026-09-24: a Model id is minted per backend and does not
-// cross `/dev`, while a scoped name is the same on every backend. (A TODO here asked
+// — agreed with backend 2026-09-24: a Model id is the backend's internal identity and
+// does not cross `/dev`, while a scoped name is how we address a data schema in the
+// registry of the backend we talk to. ⛔ Neither is an identity across backends: each
+// has its own registry [Diego, 2026-09-24]. (A TODO here asked
 // for the id until then; the agreement settled it the other way.) The key was `model`
 // until the same date. Record: `kb/framework/build/uwx-format.md` § 8.
 function refLeaf(entity) {
