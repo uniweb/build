@@ -286,3 +286,64 @@ describe('register --scope output — locked contract (regression)', () => {
     expect(json).not.toContain('models_required')
   })
 })
+
+// ⭐ A backend installs a package's data schemas one at a time, in the order they arrive, and
+// refuses a reference to a Model it does not hold yet — so a schema another one references goes
+// first. Measured 2026-09-25: `exhibit` → `specimen`, sorted alphabetically, was refused whole.
+describe('data schemas are listed referenced-first', () => {
+  const norm = (ref, def) => validateAndNormalizeSchema(def, ref)
+  const names = (schemas) =>
+    buildSchemaOnlyPackage({ schemas, scope: '@acme', exportedAt: '2026-09-25T00:00:00Z' }).entities.map((e) => e.name)
+
+  it('puts a referenced schema before the one referencing it, however they sort', () => {
+    expect(
+      names({
+        '@/exhibit': norm('@/exhibit', { fields: { title: { type: 'string' }, specimen: { ref: '@/specimen' } } }),
+        '@/specimen': norm('@/specimen', { fields: { name: { type: 'string' } } }),
+      })
+    ).toEqual(['@acme/specimen', '@acme/exhibit'])
+  })
+
+  it('follows references in nested sections, lists of references and item_ref options', () => {
+    expect(
+      names({
+        '@/aaa': norm('@/aaa', {
+          sections: {
+            brief: { brief: true, fields: { title: { type: 'string' } } },
+            rooms: { many: true, fields: { name: { type: 'string' } }, sections: { cases: { many: true, fields: { thing: { ref: '@/zzz', many: true } } } } },
+          },
+        }),
+        '@/bbb': norm('@/bbb', { fields: { kind: { type: 'string', options: '@/yyy' } } }),
+        '@/yyy': norm('@/yyy', { sections: { items: { many: true, fields: { label: { type: 'string' } } } } }),
+        '@/zzz': norm('@/zzz', { fields: { name: { type: 'string' } } }),
+      })
+    ).toEqual(['@acme/zzz', '@acme/aaa', '@acme/yyy', '@acme/bbb'])
+  })
+
+  it('CONTROL — no references between them: alphabetical, as before', () => {
+    expect(
+      names({
+        '@/b': norm('@/b', { fields: { x: { type: 'string' } } }),
+        '@/a': norm('@/a', { fields: { x: { type: 'string' } } }),
+      })
+    ).toEqual(['@acme/a', '@acme/b'])
+  })
+
+  it('a schema naming itself, or a shared schema, is not a dependency', () => {
+    expect(
+      names({
+        '@/book': norm('@/book', { fields: { title: { type: 'string' }, related: { ref: '@/book', many: true }, by: { ref: '@std/person' } } }),
+        '@/author': norm('@/author', { fields: { name: { type: 'string' } } }),
+      })
+    ).toEqual(['@acme/author', '@acme/book'])
+  })
+
+  it('a cycle cannot be ordered — both are listed once, in a stable order', () => {
+    const cycle = () => ({
+      '@/author': norm('@/author', { fields: { name: { type: 'string' }, wrote: { ref: '@/book', many: true } } }),
+      '@/book': norm('@/book', { fields: { title: { type: 'string' }, by: { ref: '@/author' } } }),
+    })
+    expect(names(cycle())).toEqual(['@acme/book', '@acme/author'])
+    expect(names(cycle())).toEqual(names(cycle()))
+  })
+})

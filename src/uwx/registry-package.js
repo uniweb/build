@@ -157,7 +157,56 @@ function buildDataSchemaEntities(dataSchemas, scope) {
       // way; item_ref `options` get the full `@org/x/<section>` path (§10.1).
       ...toDataSchemaDeclaration(normalized, { name: scoped(ref), resolveName: scoped, resolveOptions }),
     }))
-  return { entities, scoped, org }
+  return { entities: referencedFirst(entities), scoped, org }
+}
+
+/**
+ * The data schemas in an order a backend can install one at a time: a schema another one in
+ * the package references comes BEFORE it — alphabetical otherwise, so the order is stable.
+ *
+ * ⭐ WHY. A backend installs a package's data schemas in the order they arrive, and refuses a
+ * reference to a Model it holds neither yet nor from before: measured 2026-09-25, a foundation
+ * whose `exhibit` references its own `specimen` was refused whole — *"entity_ref target
+ * `@x/specimen` matches no model declared in this fixture or registered on the host"* — because
+ * `exhibit` sorts first. Alphabetical order was right only by luck (`speaker` before `talk`).
+ *
+ * ⚠️ A CYCLE CANNOT BE ORDERED — `author` names `book` and `book` names `author` — and keeps
+ * the order the walk gives it. Whether one package may reference itself in any order is the
+ * backend's to accept; this only stops refusing what an order can fix. A schema naming ITSELF
+ * is not a dependency.
+ *
+ * @param {Array<{ name: string, sections?: object }>} entities - lowered declarations
+ * @returns {Array} the same entities, referenced ones first
+ */
+function referencedFirst(entities) {
+  const byName = new Map(entities.map((e) => [e.name, e]))
+  const targets = (entity) => {
+    const out = new Set()
+    const walk = (fields) => {
+      for (const field of Object.values(fields || {})) {
+        if (!field || typeof field !== 'object') continue
+        if (field.type === 'entity_ref') for (const m of [field.model].flat()) out.add(m)
+        // `options: '@org/x/<section>'` names a section of Model `@org/x`.
+        if (field.type === 'item_ref' && typeof field.options === 'string') {
+          out.add(field.options.split('/').slice(0, 2).join('/'))
+        }
+        if (field.type === 'section') walk(field.fields)
+      }
+    }
+    for (const section of Object.values(entity.sections || {})) walk(section.fields)
+    return [...out].filter((name) => name !== entity.name && byName.has(name)).sort()
+  }
+  const ordered = []
+  const state = new Map() // name → 'visiting' | 'done'
+  const visit = (entity) => {
+    if (state.get(entity.name)) return // done, or on the walk now — a cycle
+    state.set(entity.name, 'visiting')
+    for (const name of targets(entity)) visit(byName.get(name))
+    state.set(entity.name, 'done')
+    ordered.push(entity)
+  }
+  for (const entity of entities) visit(entity)
+  return ordered
 }
 
 // The shared `.uwx` envelope (uwx/1 + exporter + timestamp) around an entity list.
