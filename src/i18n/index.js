@@ -7,11 +7,12 @@
  *   import { extractManifest, syncManifest, mergeLocale } from '@uniweb/build/i18n'
  */
 
-import { readFile, writeFile, mkdir, readdir } from 'fs/promises'
+import { readFile, writeFile, mkdir } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
 import { computeHash, normalizeText } from './hash.js'
+import { availableLocales, resolveLocaleList } from './locales.js'
 import { extractTranslatableContent } from './extract.js'
 import { syncManifests, formatSyncReport } from './sync.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
@@ -118,7 +119,6 @@ const DEFAULTS = {
 /**
  * Reserved files in the locales directory (not locale translation files)
  */
-const RESERVED_FILES = new Set(['manifest.json', '_memory.json'])
 
 /**
  * Get available locales by scanning the locales directory for *.json files
@@ -126,19 +126,7 @@ const RESERVED_FILES = new Set(['manifest.json', '_memory.json'])
  * @returns {Promise<string[]>} Array of locale codes found
  */
 async function getAvailableLocales(localesPath) {
-  if (!existsSync(localesPath)) {
-    return []
-  }
-
-  try {
-    const files = await readdir(localesPath)
-    return files
-      .filter(f => f.endsWith('.json') && !RESERVED_FILES.has(f))
-      .map(f => f.replace('.json', ''))
-      .sort()
-  } catch {
-    return []
-  }
+  return availableLocales(localesPath)
 }
 
 /**
@@ -154,23 +142,8 @@ async function getAvailableLocales(localesPath) {
  * @returns {Promise<string[]>} Resolved array of locale codes
  */
 async function resolveLocales(configLocales, localesPath) {
-  // Explicit list of locales
-  if (Array.isArray(configLocales) && configLocales.length > 0) {
-    // Check for '*' in array (e.g., locales: ['*'])
-    if (configLocales.includes('*')) {
-      return getAvailableLocales(localesPath)
-    }
-    // Normalize: support both string codes and objects ({code, label})
-    return configLocales.map(l => typeof l === 'string' ? l : l.code)
-  }
-
-  // String value '*' means all available
-  if (configLocales === '*') {
-    return getAvailableLocales(localesPath)
-  }
-
-  // undefined, null, or empty array → all available
-  return getAvailableLocales(localesPath)
+  // The one rule, shared with the push (`uwx/site.js`) — see `./locales.js`.
+  return resolveLocaleList(configLocales, localesPath)
 }
 
 /**

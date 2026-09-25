@@ -74,6 +74,7 @@ import { emitEntitySyncPackage } from './entity-document.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
+import { resolveLocaleList } from '../i18n/locales.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
@@ -1287,7 +1288,10 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // Target-locale translations (locales/{locale}.json) for wrapping localized
   // scalars back into per-locale form. Source-locale-only when no target locales /
   // no locale files exist (single-locale sites are unaffected).
-  const targetLocales = (Array.isArray(siteYml.languages) ? siteYml.languages : []).filter(
+  // ⭐ The site's locales by the build's own rule (`i18n/locales.js`): an explicit
+  // `languages:` list, else every translation file. ⛔ Until 2026-09-25 only an explicit list
+  // counted, so a site with none — the `international` template — pushed no translations.
+  const targetLocales = resolveLocaleList(siteYml.languages, localesDir(siteRoot)).filter(
     (l) => l !== sourceLocale
   )
   const translations = targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales) : null
