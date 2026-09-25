@@ -68,14 +68,14 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
   it('CONTROL — records in the directory are sent, with no folder.yml at all', async () => {
     const pkg = await emitSyncPackages(site())
     expect(pkg.records).toBeTruthy()
-    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual(['article/hello', 'article/world'])
+    expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toEqual(['article/hello', 'article/world'])
     expect(sentIds(pkg)).toEqual(['article/hello', 'article/world'])
   })
 
   it('an empty folder.yml removes nothing — it only organizes', async () => {
     // ⛔ Until 2026-09-21 an empty records.yml was THE destructive state.
     const pkg = await emitSyncPackages(site({ recordsYml: '' }))
-    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual(['article/hello', 'article/world'])
+    expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toEqual(['article/hello', 'article/world'])
   })
 
   it('⛔ records whose schema resolves to nothing do not send an EMPTY folder', async () => {
@@ -132,7 +132,7 @@ describe('every record is pushed — nothing lists them', () => {
     )
     const contents = folderDoc(pkg).contents
     expect(contents.map((c) => [c.kind, c.name])).toEqual([['branch', 'archive'], ['ref', 'hello']])
-    expect(contents[0].$children.map((c) => c.$ref)).toEqual(['article/world'])
+    expect(contents[0].$children.map((c) => c.entry?.$ref)).toEqual(['article/world'])
   })
 
   it('⛔ a folder.yml that LISTS records at the top level is refused, naming why', async () => {
@@ -214,7 +214,7 @@ describe('the folder references the records files produce', () => {
     const root = site()
     w('site/records/article/renamed.md', '---\ntitle: R\nslug: custom\n---\n')
     const pkg = await emitSyncPackages(root)
-    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toContain('article/custom')
+    expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toContain('article/custom')
     expect(pkg.warnings.some((x) => x.includes('no record entity was produced'))).toBe(false)
   })
 })
@@ -258,7 +258,7 @@ describe('a draft record is pushed as a disabled entity', () => {
     expect(docOf(pkg, 'article/soon').$disabled).toBe(true)
     // `draft` is framework's word, never a Model field
     expect(docOf(pkg, 'article/soon').brief).not.toHaveProperty('draft')
-    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toContain('article/soon')
+    expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toContain('article/soon')
     expect(pkg.records.index.find((e) => e.id === 'article/soon').draft).toBe(true)
   })
 
@@ -301,7 +301,7 @@ describe('a draft record is pushed as a disabled entity', () => {
     w('site/records/article/soon.md', '---\ntitle: Soon\ndraft: true\n---\n')
     const pkg = await emitSyncPackages(root)
     expect(pkg.records).toBeTruthy()
-    expect(folderDoc(pkg).contents.map((c) => c.$ref)).toEqual(['article/soon'])
+    expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toEqual(['article/soon'])
   })
 
   it('⛔ `published: false` is refused on a push too, naming `draft: true`', async () => {

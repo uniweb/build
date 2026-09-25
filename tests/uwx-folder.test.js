@@ -1,7 +1,7 @@
 import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 
 // The @uniweb/folder entity: one per site sync, a tree of REFERENCES to the record
-// entities. A brand-new record is pointed at by `$ref` (its payload-local pool-id
+// entities. A brand-new record is pointed at by `entry: { $ref }` (its payload-local pool-id
 // handle); an already-minted one by the entity_ref open form
 // `entry: { schema, entity: uuid }`.
 // The folder carries NO `$uuid` of its own — the backend owns the site's folder,
@@ -36,7 +36,7 @@ describe('buildFolderEntity', () => {
     expect(buildFolderEntity({ recordEntities: [], folderNodes: [] })).toBeNull()
   })
 
-  it('builds the authored tree, records as leaves ($ref when new)', () => {
+  it('builds the authored tree, records as leaves (entry: { $ref } when new)', () => {
     const folder = buildFolderEntity({
       recordEntities: [rec('articles', 'hello'), rec('articles', 'world'), rec('team', 'ada')],
       folderNodes: [
@@ -52,19 +52,19 @@ describe('buildFolderEntity', () => {
     const articles = branches[0]
     expect(articles.kind).toBe('branch')
     expect(articles.$children).toEqual([
-      { kind: 'ref', name: 'hello', $ref: 'articles/hello' },
-      { kind: 'ref', name: 'world', $ref: 'articles/world' },
+      { kind: 'ref', name: 'hello', entry: { $ref: 'articles/hello' } },
+      { kind: 'ref', name: 'world', entry: { $ref: 'articles/world' } },
     ])
   })
 
-  it('uses entry: uuid for an already-minted record, $ref for a new one', () => {
+  it('uses entry: uuid for an already-minted record, entry: { $ref } for a new one', () => {
     const folder = buildFolderEntity({
       recordEntities: [rec('articles', 'hello', 'uuid-1'), rec('articles', 'world')],
       folderNodes: [branch('articles', ['articles/hello', 'articles/world'])],
     })
     const leaves = folder.document.contents[0].$children
     expect(leaves[0]).toEqual({ kind: 'ref', name: 'hello', entry: { schema: '@acme/x', entity: 'uuid-1' } })
-    expect(leaves[1]).toEqual({ kind: 'ref', name: 'world', $ref: 'articles/world' })
+    expect(leaves[1]).toEqual({ kind: 'ref', name: 'world', entry: { $ref: 'articles/world' } })
   })
 
   it('carries no folder $uuid — the backend owns it (keyed by the site-content uuid)', () => {
@@ -92,13 +92,13 @@ describe('buildFolderEntity', () => {
     const [blog, about] = folder.document.contents
     expect(blog.name).toBe('blog')
     expect(blog.label).toEqual({ en: 'Blog' })
-    expect(blog.$children).toEqual([{ kind: 'ref', name: 'hello', $ref: 'articles/hello' }])
+    expect(blog.$children).toEqual([{ kind: 'ref', name: 'hello', entry: { $ref: 'articles/hello' } }])
     expect(about.$children[0].kind).toBe('branch')
     expect(about.$children[0].name).toBe('people')
     expect(about.$children[0].$children[0]).toEqual({
       kind: 'ref',
       name: 'ada',
-      $ref: 'team/ada',
+      entry: { $ref: 'team/ada' },
     })
   })
 
@@ -193,14 +193,14 @@ describe('folder placement identity', () => {
  * ⛔ MINTING A RECORD MUST NOT MOVE THE FOLDER'S CONTENT HASH.
  *
  * The folder is the one entity whose document depends on OTHER entities' identity
- * state: `refLeaf` writes `$ref: "<collection>/<slug>"` while a record is new and
+ * state: `refLeaf` writes `entry: { $ref: "<collection>/<slug>" }` while a record is new and
  * `entry: { schema, entity: <uuid> }` once it is minted. Both denote the same
  * record.
  *
  * That made the folder's banked hash unreproducible, because a push does all three
  * of these in one function, in this order:
  *
- *   1. emit + hash          (records new  → `$ref`)
+ *   1. emit + hash          (records new  → `entry: { $ref }`)
  *   2. submit, back-fill    (writes each record's `$uuid` into its source file)
  *   3. bank the step-1 hash (now describes a document that no longer exists)
  *
@@ -230,7 +230,7 @@ describe('folder hash is identity-independent', () => {
     rec('team', 'grace', '01a0-bbbb'),
   ]
 
-  it('is unchanged when records are minted ($ref → entry)', async () => {
+  it('is unchanged when records are minted (entry: { $ref } → entry: { schema, entity })', async () => {
     expect(await hashOf(minted)).toBe(await hashOf(nu))
   })
 

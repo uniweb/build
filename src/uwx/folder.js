@@ -7,9 +7,10 @@
 //   - `contents` is the self-nesting tree (an array), nesting via `$children` — the
 //     same mechanism site-content pages/sections use. Each node holds REFERENCES,
 //     never content:
-//       - a LEAF references one record entity: `{ kind: 'ref', name, ... }` with
-//         `entry: <uuid>` once the record was minted (back-filled into its file),
-//         or `$ref: "<id>"` while brand-new (resolved within this payload).
+//       - a LEAF references one record entity: `{ kind: 'ref', name, entry }` —
+//         `entry: { schema, entity: <uuid> }` once the record was minted (back-filled
+//         into its file), or `entry: { $ref: "<$id>" }` while brand-new (resolved
+//         within this payload).
 //       - a BRANCH is a sub-folder: `{ kind: 'branch', name, label?, $children }`.
 //
 // ⭐ A LEAF'S `name` IS ITS RECORD'S HANDLE — the slug, the records service's `$name` —
@@ -55,8 +56,13 @@ export const FOLDER_ENTITY_KEY = '@folder'
 // field is polymorphic (it can reference any data schema), so the ref uses the
 // entity_ref OPEN form `{ schema, entity }` — not a bare uuid (a bare uuid is only
 // valid when the field pins a single schema). Known uuid → `entry: { schema, entity
-// }`; brand-new → `$ref` handle (resolved within this payload to the minted
-// entity).
+// }`; brand-new → `entry: { $ref: <$id> }`, the record's payload-local handle, which
+// the backend resolves to the uuid it mints for that record in the same package.
+//
+// ⛔ `$ref` IS THE REFERENCE'S VALUE, NOT A KEY OF THE LEAF (2026-09-25). A backend
+// resolves `{ $ref }` wherever a reference value goes, and refuses the key form it
+// replaced, `{ kind: 'ref', name, $ref }`. There is no window: a CLI that writes the key
+// form cannot push a site with a record new to that backend.
 //
 // ⭐ `schema` carries the data schema's SCOPED NAME (`@std/article`), never a Model id
 // — agreed with backend 2026-09-24: a Model id is the backend's internal identity and
@@ -68,7 +74,7 @@ export const FOLDER_ENTITY_KEY = '@folder'
 function refLeaf(entity) {
   const leaf = { kind: 'ref', name: entity.slug }
   if (entity.uuid) leaf.entry = { schema: entity.model, entity: entity.uuid }
-  else leaf.$ref = entity.id // the payload-local handle
+  else leaf.entry = { $ref: entity.id } // the payload-local handle
   return leaf
 }
 
@@ -76,7 +82,7 @@ function refLeaf(entity) {
  * Turn the placed records into folder `contents`.
  *
  * ⛔ A LEAF WHOSE ENTITY IS MISSING IS DROPPED AND REPORTED, never emitted empty.
- * A `ref` with neither `entry` nor `$ref` is a placement pointing at nothing —
+ * A `ref` with no `entry` is a placement pointing at nothing —
  * the backend cannot resolve it, and the failure would surface there rather than
  * here, as somebody else's error.
  *
@@ -108,7 +114,8 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
 }
 
 // The uuid of the record a leaf references — once minted, `entry: { schema, entity }`
-// (a bare uuid is tolerated). A brand-new record's leaf carries `$ref` instead.
+// (a bare uuid is tolerated). A brand-new record's leaf carries `entry: { $ref }`, and
+// has none.
 function recordOf(item) {
   if (item?.kind !== 'ref') return null
   const e = item.entry

@@ -91,7 +91,7 @@ describe('emitSyncPackages — two directional lanes', () => {
     // the folder. That is the model's common case — the pool is usually flat and
     // QUERIES do the organizing, not the folder. The old producer derived one
     // branch per collection whether the author wanted structure or not.
-    expect(folder.contents.map((l) => l.$ref)).toEqual(['article/hello', 'article/world'])
+    expect(folder.contents.map((l) => l.entry?.$ref)).toEqual(['article/hello', 'article/world'])
     expect(folder.contents.every((l) => l.kind === 'ref')).toBe(true)
   })
 

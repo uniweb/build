@@ -18,20 +18,20 @@ import { readRecordsConfig, resolveFolder } from '../src/site/records-config.js'
 import { buildFolderEntity } from '../src/uwx/folder.js'
 
 // What `defaultContents` produced for a two-collection site: one branch per
-// collection, in declaration order, records as `$ref` leaves.
+// collection, in declaration order, records as `entry: { $ref }` leaves.
 const OLD_PRODUCER_OUTPUT = [
   {
     kind: 'branch',
     name: 'articles',
     $children: [
-      { kind: 'ref', name: 'hello', $ref: 'article/hello' },
-      { kind: 'ref', name: 'world', $ref: 'article/world' },
+      { kind: 'ref', name: 'hello', entry: { $ref: 'article/hello' } },
+      { kind: 'ref', name: 'world', entry: { $ref: 'article/world' } },
     ],
   },
   {
     kind: 'branch',
     name: 'team',
-    $children: [{ kind: 'ref', name: 'ada', $ref: 'person/ada' }],
+    $children: [{ kind: 'ref', name: 'ada', entry: { $ref: 'person/ada' } }],
   },
 ]
 
@@ -93,9 +93,9 @@ describe('folder.yml reproduces the grouping the old producer derived', () => {
     const { folder, entity } = await build()
     expect(folder.errors).toEqual([])
     expect(entity.document.contents).toEqual([
-      { kind: 'ref', name: 'hello', $ref: 'article/hello' },
-      { kind: 'ref', name: 'world', $ref: 'article/world' },
-      { kind: 'ref', name: 'ada', $ref: 'person/ada' },
+      { kind: 'ref', name: 'hello', entry: { $ref: 'article/hello' } },
+      { kind: 'ref', name: 'world', entry: { $ref: 'article/world' } },
+      { kind: 'ref', name: 'ada', entry: { $ref: 'person/ada' } },
     ])
     // every record at the root — the path a query slices on is the empty string
     expect([...folder.placements.values()].map((p) => p.path)).toEqual(['', '', ''])
@@ -113,7 +113,7 @@ describe('folder.yml reproduces the grouping the old producer derived', () => {
     expect(entity.document.contents).toHaveLength(1)
     expect(entity.document.contents[0].name).toBe('everything')
     // two schemas, one branch — impossible under the derived rule
-    expect(entity.document.contents[0].$children.map((c) => c.$ref)).toEqual([
+    expect(entity.document.contents[0].$children.map((c) => c.entry?.$ref)).toEqual([
       'article/hello',
       'article/world',
       'person/ada',

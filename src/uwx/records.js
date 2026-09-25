@@ -100,9 +100,10 @@ function stripSigils(value) {
     // ⛔ A `@uniweb/folder` REF LEAF ENCODES ONE REFERENCE TWO WAYS, and hashing the
     // encoding rather than the reference made the folder's hash unreproducible.
     //
-    // `refLeaf` (uwx/folder.js) emits `$ref: <the record's $id>` — the pool position
-    // `<dirs>/<slug>` — while the record is brand-new, and `entry: { schema, entity:
-    // <uuid> }` once it has been minted.
+    // `refLeaf` (uwx/folder.js) emits `entry: { $ref: <the record's $id> }` — the pool
+    // position `<dirs>/<slug>` — while the record is brand-new, and `entry: { schema,
+    // entity: <uuid> }` once it has been minted. (`$ref` was a key of the leaf itself
+    // until 2026-09-25, when the backend made it a reference's value.)
     // Both denote the same record. A push hashes the folder BEFORE submitting, then
     // back-fills the minted `$uuid` into every record's source file — so the very
     // next emit builds the OTHER encoding, and the hash the push just banked can
@@ -116,16 +117,16 @@ function stripSigils(value) {
     // `name` (the record's handle) at its position inside the branch that holds it.
     // Two siblings may share a name — records of different schemas can — and position
     // still tells them apart; a leaf that comes to reference another record arrives
-    // with that record changed, which re-sends the folder anyway. `$ref` adds a
-    // payload-local handle and `entry` adds identity, and both are exactly what
-    // `$uuid` is stripped for.
+    // with that record changed, which re-sends the folder anyway. `entry` carries a
+    // payload-local handle or an identity, and both are exactly what `$uuid` is
+    // stripped for.
     //
     // ⚖️ The previous rule kept `$ref` "so a reference change is visible". It still
     // is: point a leaf at a different record and its `name` moves with it.
     const isFolderRefLeaf = value.kind === 'ref'
     const out = {}
     for (const [k, v] of Object.entries(value)) {
-      if (isFolderRefLeaf && (k === '$ref' || k === 'entry')) continue
+      if (isFolderRefLeaf && k === 'entry') continue
       // `$children` (a self-nesting subtree) and `$disabled` (a delivery state) are
       // CONTENT, not identity sigils — kept, so a change to either stays visible.
       if (k === '$children' || k === '$disabled') {
