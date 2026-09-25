@@ -41,7 +41,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
-import { defaultSchema, deferredFromSchema, foundationDataSchemas, foundationSchemaJson } from './queries-config.js'
+import { defaultSchema, deferredFromSchema, foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -283,7 +283,7 @@ function isDerivedDeferred(d, dataSchemas) {
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null) {
+function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null, authored = null) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
   // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
@@ -317,8 +317,14 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null, key
   // The default is the query's name — or, when no data schema has that name, the type the
   // foundation declares for the data key of that name (`data-key-types.js`), which is what a
   // push sent in its place. Either one stays unwritten, so the terse file stays terse.
+  // ⛔ UNLESS THE AUTHOR WROTE IT: a `schema:` the local file already states for this query is
+  // written back as it is. Until 2026-09-25 a pull into a working copy dropped international's
+  // `articles: { schema: '@std/article' }`, because a section types `articles` as `@std/article`.
   const keyDefault = name && !own?.has(name) ? keyTypes?.get(name) : null
-  if (d.schema && d.schema !== defaultSchema(name) && d.schema !== keyDefault) decl.schema = d.schema
+  const written = name ? authored?.get(name) : undefined
+  if (d.schema && (d.schema === written || (d.schema !== defaultSchema(name) && d.schema !== keyDefault))) {
+    decl.schema = d.schema
+  }
   setIf(decl, 'sort', d.sort)
   setIf(decl, 'where', d.where)
   setIf(decl, 'limit', d.limit)
@@ -383,6 +389,26 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null, key
  *        (`info.foundation`, the pinned `@org/name@version`), which is that scope.
  * @returns {{ collections?: 'updated'|'unchanged' }}
  */
+// The `schema:` each query's author wrote, by query name — `queries.yml` over `site.yml::queries`,
+// the precedence the build reads them in. A query written without one is absent.
+function authoredQuerySchemas(siteRoot, siteYml) {
+  let file = null
+  try {
+    file = yaml.load(readFileSync(join(siteRoot, QUERIES_YML_RELPATH), 'utf8'), YAML_OPTIONS)
+  } catch {
+    file = null
+  }
+  const out = new Map()
+  for (const decls of [siteYml?.queries, file]) {
+    if (!decls || typeof decls !== 'object') continue
+    for (const [name, decl] of Object.entries(decls)) {
+      if (typeof decl?.schema === 'string') out.set(name, decl.schema)
+      else if (out.has(name)) out.delete(name)
+    }
+  }
+  return out
+}
+
 export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest }) {
   refuseOrgOption(rest, 'declarationsToQueriesYml')
   const decls = Array.isArray(document?.queries) ? document.queries : []
@@ -408,10 +434,11 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
   // (`unresolveSelfScope`) — and the types of its data keys.
   const own = ownSchemaNames(dataSchemas)
   const keyTypes = siteYml ? dataKeyTypes(foundationSchemaJson(siteRoot, siteYml)) : null
+  const authored = authoredQuerySchemas(siteRoot, siteYml)
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes, authored)
     if (!name) continue
     queries[name] = decl
   }

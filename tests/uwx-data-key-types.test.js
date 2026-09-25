@@ -119,6 +119,16 @@ describe('pull — the same rule, backwards', () => {
     expect(q.team?.schema).toBeUndefined()
   })
 
+  it('⭐ a `schema:` its author wrote is written back, though the key’s type implies it', () => {
+    makeSite({ queriesYml: 'team:\n  schema: "@/member"\n  sort: name\n' })
+    declarationsToQueriesYml({
+      document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [{ name: 'team', schema: '@acme/member', sort: 'name' }] },
+      siteRoot: SITE,
+    })
+    const q = yaml.load(readFileSync(join(SITE, 'queries.yml'), 'utf8'))
+    expect(q.team).toEqual({ schema: '@/member', sort: 'name' })
+  })
+
   it('a new member is placed where the project keeps them — `records/team/`', () => {
     makeSite()
     const report = recordsToProject({
