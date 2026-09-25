@@ -33,7 +33,10 @@
 // ⚠️ item_ref and file fields are still sent as the file writes them.
 //
 // ⚠️ A record of a `many` section is sent without a `$uuid`, so a push that changes a
-// record replaces that section's records rather than updating them in place.
+// record whose section the backend already holds is REFUSED, whole (`identity_required`):
+// applied, it would re-identify every stored item. Measured 2026-09-25 — this said such a
+// push "replaces that section's records" until then. Its first push, which creates the
+// items, is not affected.
 
 import { readBackendState } from './sync-store.js'
 import { readFileSync, existsSync } from 'node:fs'
