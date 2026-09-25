@@ -44,7 +44,7 @@ import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writ
 import { declarationsToQueriesYml } from './records-project.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
-import { buildFreeformPath } from '../i18n/freeform.js'
+import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteContentDirs } from './site-dirs.js'
@@ -416,14 +416,14 @@ function reinlineInsets(content, insets) {
  *        structural maps on a localized `content` field are captured into it
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null }) {
   const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
   // free-form target body is captured with `freeformRelPath` for writing under
   // locales/freeform/. A bare doc (source-only / pre-localization) passes through.
-  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath)
+  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates)
 
   const frontmatter = {}
   if (type !== undefined) frontmatter.type = type
@@ -547,7 +547,9 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
       const freeformRelPath = pageContext
         ? buildFreeformPath({ stableId }, pageContext)
         : null
-      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, freeformRelPath })
+      // Every path the renderer would find it at, so one the author keeps is written back in place.
+      const freeformCandidates = pageContext ? freeformPathsFor({ stableId }, pageContext) : null
+      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, freeformRelPath, freeformCandidates })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
       entries.push(children.length > 0 ? { [fileBase]: buildEntries(children) } : fileBase)
@@ -878,7 +880,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).
-  const collector = createTranslationCollector(sourceLocale)
+  const collector = createTranslationCollector(sourceLocale, { siteRoot })
 
   // Put the author's own asset paths back before anything is serialized. Stored
   // content carries an id and a serve URL; only the committed map knows the ref

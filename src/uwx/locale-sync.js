@@ -217,7 +217,7 @@ export function isLocalizedContent(value) {
  * (source text hashed exactly as `i18n extract` keys it). Non-string or missing
  * values are skipped (only hashable scalars belong in the hash manifest).
  */
-export function createTranslationCollector(sourceLocale) {
+export function createTranslationCollector(sourceLocale, { siteRoot = null } = {}) {
   const byLocale = {} // { locale: { hash: target } }
   const freeformPending = [] // [{ locale, content }] — target-locale free-form bodies
 
@@ -253,7 +253,21 @@ export function createTranslationCollector(sourceLocale) {
     freeformPending.push({ locale, target, source, relpath: relpath || null })
   }
 
-  return { add, addStructuralMap, noteFreeform, byLocale, freeformPending }
+  // ⭐ The FREE-FORM file the site keeps for this translation, if any — the first of `relpaths` (the
+  // order the renderer looks them up in, `freeformPathsFor`) that exists for `locale`. A pulled
+  // translation goes back into that file, whatever its shape. ⛔ Until 2026-09-25 a free-form body
+  // whose paragraphs lined up with its source's was read as a structural translation, and a pull into
+  // the author's copy wrote its text over their `locales/{locale}.json` entries for those paragraphs —
+  // measured on the `international` template's `about/story`, in Spanish and French.
+  function keptFreeform(locale, relpaths) {
+    if (!siteRoot) return null
+    for (const rel of [].concat(relpaths || [])) {
+      if (rel && existsSync(join(localesDir(siteRoot), 'freeform', locale, rel))) return rel
+    }
+    return null
+  }
+
+  return { add, addStructuralMap, noteFreeform, keptFreeform, byLocale, freeformPending }
 }
 
 /**
@@ -303,16 +317,18 @@ function deriveStructuralMap(sourceDoc, targetDoc) {
  * reserved `@` (and `$`-prefixed) key is opaque metadata — NEVER a locale. A bare
  * doc (no locale wrap) is returned unchanged.
  */
-export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath) {
+export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null) {
   if (!isLocalizedContent(content)) return content
   const source = content[sourceLocale]
   for (const [locale, value] of Object.entries(content)) {
     if (locale === sourceLocale) continue
     if (locale === '@' || locale.startsWith('$')) continue // reserved metadata, not a locale
     if (isProseMirrorDoc(value)) {
-      const map = deriveStructuralMap(source, value)
+      // A translation the site keeps as a free-form file stays one, even when it lines up.
+      const kept = collector?.keptFreeform?.(locale, freeformCandidates || freeformRelPath) || null
+      const map = kept ? null : deriveStructuralMap(source, value)
       if (map) collector?.addStructuralMap?.(locale, map)
-      else collector?.noteFreeform?.(locale, value, source, freeformRelPath)
+      else collector?.noteFreeform?.(locale, value, source, kept || freeformRelPath)
     } else {
       collector?.addStructuralMap?.(locale, value)
     }

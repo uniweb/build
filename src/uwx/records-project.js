@@ -589,7 +589,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // Captures target-locale translations of localized record fields: SCALARs →
   // locales/records/{locale}.json (structural maps too), and a prosemirror
   // BODY's free-form per-locale override → locales/freeform/{locale}/records/.
-  const collector = createTranslationCollector(sourceLocale)
+  const collector = createTranslationCollector(sourceLocale, { siteRoot })
   const updated = []
   const placed = []
   const unchanged = []
