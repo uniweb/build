@@ -35,7 +35,7 @@
 import { readBackendState, updateBackendMap } from './sync-store.js'
 import { restoreAssetRefs } from './asset-map.js'
 import { documentSchema } from './entity-document.js'
-import { readFileSync, readdirSync, existsSync, unlinkSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -48,7 +48,8 @@ import { folderYmlPath } from '../site/records-config.js'
 import { contentBodyTarget } from './record-layout.js'
 import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption } from './self-scope.js'
 import { parseCatalogRef } from '../site/foundation-ref.js'
-import { unwrapLocalized } from './backfill.js'
+import { unwrapLocalized, renderEntityDocument } from './backfill.js'
+import { parseBibtex } from '@citestyle/bibtex'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
@@ -95,6 +96,49 @@ export function findRecordFileByUuid(poolDir, uuid) {
     if (readFileUuid(path, format) === uuid) return { path, format }
   }
   return null
+}
+
+// ⭐ A RECORD KEPT IN A LIST FILE — a JSON or YAML array, or a BibTeX file: several records in one —
+// is found by its entry's `$uuid`, which the push's back-fill writes into each entry. ⛔ Until
+// 2026-09-25 a pull looked in single-record files alone, wrote each such record again as a file of
+// its own beside the list, and the next push held it twice — measured on the `international`
+// template's `records/team/team.json`.
+export function findListEntryByUuid(poolDir, uuid) {
+  if (!uuid || !existsSync(poolDir)) return null
+  for (const name of readdirSync(poolDir)) {
+    if (name.startsWith('_')) continue
+    const ext = extname(name).toLowerCase()
+    const format = ext === '.bib' ? 'bib' : formatForExt(ext)
+    if (format !== 'json' && format !== 'yaml' && format !== 'bib') continue
+    const path = join(poolDir, name)
+    let entries
+    try {
+      const text = readFileSync(path, 'utf8')
+      entries = format === 'json' ? JSON.parse(text) : format === 'yaml' ? yaml.load(text, YAML_OPTIONS) : parseBibtex(text)
+    } catch {
+      continue
+    }
+    if (!Array.isArray(entries)) continue
+    const index = entries.findIndex((e) => e && typeof e === 'object' && e.$uuid === uuid)
+    if (index >= 0) return { path, format, index, list: true }
+  }
+  return null
+}
+
+// A pulled record written back into its entry of a JSON or YAML list, every other entry untouched.
+// The entry keeps its `slug`, which names it where a single-record file's name would.
+function writeRecordIntoList({ list, document, declaration, sourceLocale, collector, freeformRelPath, refName }) {
+  const text = readFileSync(list.path, 'utf8')
+  const entries = list.format === 'json' ? JSON.parse(text) : yaml.load(text, YAML_OPTIONS)
+  const rendered = renderEntityDocument({ document, declaration, format: list.format, sourceLocale, collector, freeformRelPath, refName })
+  const { $uuid, ...fields } = list.format === 'json' ? JSON.parse(rendered) : yaml.load(rendered, YAML_OPTIONS)
+  const slug = entries[list.index]?.slug
+  const entry = { ...($uuid ? { $uuid } : {}), ...(slug !== undefined ? { slug } : {}), ...fields }
+  const next = entries.map((e, i) => (i === list.index ? entry : e))
+  const out = list.format === 'json' ? JSON.stringify(next, null, 2) + '\n' : yaml.dump(next)
+  if (out === text) return 'unchanged'
+  writeFileSync(list.path, out)
+  return 'updated'
 }
 
 // The format to give a NEW record file in a collection: match the collection's
@@ -524,7 +568,8 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
         unplaceable = true
         continue
       }
-      out.push(rel)
+      // A list file holds several records and is one path — listed once.
+      if (!out.includes(rel)) out.push(rel)
     }
     return out
   }
@@ -616,13 +661,19 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // The file holding a record already, by its own id: the derived folder first, then any
   // other that reads as the same Model (`recordDirsReadingAs`).
   const readingAs = (model) => recordDirsReadingAs(recordsRoot, model, selfScope, { own, keyTypes })
-  const findRecordFile = (poolDir, model, ownId) =>
-    findRecordFileByUuid(poolDir, ownId) ||
-    readingAs(model)
-      .filter((dir) => dir !== poolDir)
-      .map((dir) => findRecordFileByUuid(dir, ownId))
-      .find(Boolean) ||
-    null
+  const findRecordFile = (poolDir, model, ownId) => {
+    const dirs = [poolDir, ...readingAs(model).filter((dir) => dir !== poolDir)]
+    // Single-record files first, as before; then an entry of a list file.
+    for (const find of [findRecordFileByUuid, findListEntryByUuid]) {
+      for (const dir of dirs) {
+        const hit = find(dir, ownId)
+        if (hit) return hit
+      }
+    }
+    return null
+  }
+  // BibTeX files holding a pulled record — never rewritten by a pull, and said once each.
+  const keptBib = new Set()
 
   for (const document of recordDocs) {
     const where = locate(document, folderIndex)
@@ -679,7 +730,15 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     const toWrite = ownId && ownId !== theirs ? { ...document, $uuid: ownId } : document
     let status
     try {
-      status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName })
+      if (existing?.list && existing.format === 'bib') {
+        // Kept as the author has it: a pull does not re-render BibTeX (said once per file, below).
+        keptBib.add(existing.path)
+        status = 'unchanged'
+      } else if (existing?.list) {
+        status = writeRecordIntoList({ list: existing, document: toWrite, declaration, sourceLocale, collector, freeformRelPath, refName })
+      } else {
+        status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName })
+      }
     } catch (err) {
       // ⛔ A record that could not be written was not placed, so it is a SKIP, not a
       // warning: a caller that counts what it placed (the CLI's pull) must see it.
@@ -707,6 +766,9 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // site's folder, keyed by the site-content uuid.
   const records = folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
   warnings.push(...records.warnings)
+  for (const path of keptBib) {
+    warnings.push(`${relative(siteRoot, path)}: a pull does not rewrite a BibTeX file — its records are kept as they are.`)
+  }
 
   // Flush localized record-field translations to locales/records/{locale}.json,
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
