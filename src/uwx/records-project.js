@@ -125,7 +125,7 @@ function defaultFormat(poolDir, declaration) {
 // are walked; the collection is the NEAREST enclosing branch segment (correct for
 // the default one-branch-per-collection org; a deeply nested virtual org may
 // differ — see the module header).
-function indexFolder(folderDoc) {
+export function indexFolder(folderDoc) {
   const byUuid = new Map()
   const walk = (nodes, folderPath) => {
     for (const node of nodes || []) {

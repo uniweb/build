@@ -71,7 +71,10 @@ export {
   declarationsToQueriesYml,
   folderToFolderYml,
   findRecordFileByUuid,
+  indexFolder,
 } from './records-project.js'
+// Which stored record each of a copy's records is, when its map lost the answer.
+export { matchStoredRecords } from './record-identity.js'
 // The scope a site's `@/x` refs resolve into — its foundation's. A pull resolves it
 // up front and hands it to the synchronous projections above.
 export { siteSelfScope } from './self-scope.js'
