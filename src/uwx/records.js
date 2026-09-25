@@ -25,10 +25,11 @@
 //
 // ⭐ A REFERENCE (`entity_ref`) NAMES ITS RECORD BY HANDLE in a file — `speaker: ada`,
 // the target's file name or its `slug:` — and is sent as the uuid THIS backend minted for
-// that record (`refResolver`). A target this backend has not minted yet (new in this
-// push) cannot be named on the wire, so its referrer WAITS: sent without that reference
-// and completed by the next pass, or held back when it cannot exist without it — see
-// `sync-package.js`, and the CLI's `pushInPasses`, which repeats the push.
+// that record (`refResolver`). A target this backend has not minted yet is new, so this
+// push creates it, and the reference names it by its `$id` in the package —
+// `speaker: { $ref: "speaker/ada" }` — which the backend resolves to the uuid it mints.
+// One push creates both. ⛔ Until 2026-09-25 such a referrer WAITED, sent without the
+// reference or held back, and the CLI pushed again to complete it.
 // ⚠️ item_ref and file fields are still sent as the file writes them.
 //
 // ⚠️ A record of a `many` section is sent without a `$uuid`, so a push that changes a
@@ -85,7 +86,7 @@ const RECORD_KEYS = new Set([
 
 // Recursively drop IDENTITY `$`-sigil keys (`$uuid`/`$id`/`$schema`/… — never
 // field data; the sigil-exclusivity invariant guarantees this) at every level,
-// so a back-filled `$uuid` doesn't change the hash. Two are exceptions, because
+// so a back-filled `$uuid` doesn't change the hash. Three are exceptions, because
 // they are content rather than identity:
 //   - `$children` is STRUCTURAL content (a self-nesting record's subtree, e.g.
 //     site-content's nested pages/sections), so it is KEPT and recursed into —
@@ -94,6 +95,11 @@ const RECORD_KEYS = new Set([
 //   - `$disabled` is a record's delivery STATE (`draft: true` on the file side). It
 //     is KEPT so that drafting or un-drafting a record with nothing else changed is
 //     still sent; stripped, "send only changed" would never send the toggle.
+//   - `$ref` is a REFERENCE to a record the same push creates (`speaker: { $ref:
+//     "speaker/ada" }`), and which record it names is content. Once the backend has
+//     minted that record the next push names it by uuid instead — so the CLI re-banks a
+//     record that sent a `$ref` after its push (`namesNew`, `sync-package.js`). The
+//     folder's ref leaf is not this case: see below.
 function stripSigils(value) {
   if (Array.isArray(value)) return value.map(stripSigils)
   if (value && typeof value === 'object') {
@@ -127,9 +133,10 @@ function stripSigils(value) {
     const out = {}
     for (const [k, v] of Object.entries(value)) {
       if (isFolderRefLeaf && k === 'entry') continue
-      // `$children` (a self-nesting subtree) and `$disabled` (a delivery state) are
-      // CONTENT, not identity sigils — kept, so a change to either stays visible.
-      if (k === '$children' || k === '$disabled') {
+      // `$children` (a self-nesting subtree), `$disabled` (a delivery state) and `$ref`
+      // (a reference to a record of the same push) are CONTENT, not identity sigils —
+      // kept, so a change to any of them stays visible.
+      if (k === '$children' || k === '$disabled' || k === '$ref') {
         out[k] = stripSigils(v)
         continue
       }
@@ -219,11 +226,10 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
  * @param {{ resolve: (model: string, value: *) => object }} [params.refs] - what a
  *        reference sends (`refResolver`). Without it a reference is sent as written.
  * @returns {{ entities: object[], warnings: string[], refusals: string[] }} each
- *   entity is `{ id, uuid, model, file, document, pending }` — `document` is the
- *   section-keyed body, and `pending` the references it WAITS on, left out of it:
- *   `{ path, model, name, required }`, one per reference whose record this backend has
- *   not minted yet. `refusals` names the records that cannot be sent as written, one
- *   line each; a caller that sends must not send while any is present.
+ *   entity is `{ id, uuid, slug, model, file, document, namesNew }` — `document` is the
+ *   section-keyed body, and `namesNew` how many of its references name a record this
+ *   push creates, by `$ref`. `refusals` names the records that cannot be sent as
+ *   written, one line each; a caller that sends must not send while any is present.
  */
 export function recordsToEntities({
   label,
@@ -325,10 +331,7 @@ export function recordsToEntities({
       )
     }
     if (!enc.misplaced.length && !enc.shape.length) {
-      // A required reference that waits for its record is owed, not missing: the push
-      // that completes the record sends it (see `pending` below).
-      const waiting = new Set(enc.pending.map((p) => `"${p.path}"`))
-      const missing = missingRequired(layout, sections).filter((m) => !waiting.has(m))
+      const missing = missingRequired(layout, sections)
       if (missing.length) {
         refusals.push(
           `${where}: ${declaration.name} requires ${listOf(missing)}, and this record ` +
@@ -365,7 +368,7 @@ export function recordsToEntities({
       // unique within its schema folder, and an authored `$id` need not be.
       file: `entities/${label}/${slug}.json`,
       document,
-      pending: enc.pending,
+      namesNew: enc.namesNew,
     })
   }
   return { entities, warnings, refusals }
@@ -375,7 +378,7 @@ export function recordsToEntities({
 // schema, the keys written flat in a schema written by section, and values of the
 // wrong shape for their section.
 function encoder(sourceLocale, translations, refs = null) {
-  return { sourceLocale, translations, refs, undeclared: [], misplaced: [], shape: [], pending: [], unresolved: [] }
+  return { sourceLocale, translations, refs, undeclared: [], misplaced: [], shape: [], unresolved: [], namesNew: 0 }
 }
 
 // A flat record: its keys, minus the record's own, are the one section's fields.
@@ -479,10 +482,10 @@ function encodeRecord(fields, value, enc, prefix, reserved) {
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 // A reference, as a push sends it: the uuid this backend minted for the record the file
-// names (`refResolver`). A list of them is each of those. One whose record this backend
-// has not minted yet is left out and noted as WAITING (`enc.pending`) — the push that
-// completes it sends it. Without a resolver, and for a reference open to several Models
-// (which our schemas do not author), the value is sent as written.
+// names (`refResolver`) — or, for a record it has not minted, which this push creates,
+// `{ $ref: <that record's $id> }`, the backend's name for a record of the same package.
+// A list of them is each of those. Without a resolver, and for a reference open to
+// several Models (which our schemas do not author), the value is sent as written.
 function encodeReference(value, field, enc, path) {
   if (!enc.refs || typeof field.model !== 'string') return value
   if (field.multiple === true) {
@@ -491,27 +494,23 @@ function encodeReference(value, field, enc, path) {
       return undefined
     }
     const sent = []
-    const waiting = []
     value.forEach((one, i) => {
-      const uuid = resolveReference(one, field, enc, `${path}[${i}]`, waiting)
-      if (uuid !== undefined) sent.push(uuid)
+      const ref = resolveReference(one, field, enc, `${path}[${i}]`)
+      if (ref !== undefined) sent.push(ref)
     })
-    // A required list with nothing to send yet waits whole; otherwise what is known goes now.
-    const required = field.required === true && sent.length === 0
-    for (const w of waiting) enc.pending.push({ ...w, required })
     return sent
   }
-  const waiting = []
-  const uuid = resolveReference(value, field, enc, path, waiting)
-  for (const w of waiting) enc.pending.push({ ...w, required: field.required === true })
-  return uuid
+  return resolveReference(value, field, enc, path)
 }
 
-function resolveReference(value, field, enc, path, waiting) {
+function resolveReference(value, field, enc, path) {
   const answer = enc.refs.resolve(field.model, value)
   if (answer.uuid) return answer.uuid
-  if (answer.pending) waiting.push({ path, model: field.model, name: value })
-  else enc.unresolved.push({ path, model: field.model, value, ...answer })
+  if (answer.ref) {
+    enc.namesNew++
+    return { $ref: answer.ref }
+  }
+  enc.unresolved.push({ path, model: field.model, value, ...answer })
   return undefined
 }
 
@@ -528,31 +527,34 @@ function describeUnresolved({ path, model, value, invalid, ambiguous }) {
 // own id (mapped like a handle's), or the backend's id of a record the project does not
 // hold, which is what a pull writes for one.
 //
-// ⛔ A record this backend has not minted yet — never pushed there — answers `pending`: a
-// uuid it did not mint is never sent (see `buildRecordEntities`), so its referrer waits.
+// ⭐ A record this backend has not minted yet — never pushed there — answers with its
+// `$id` (`ref`): it is new, so this push creates it, and the backend takes
+// `{ $ref: <$id> }` for a record of the same package. A uuid it did not mint is never
+// sent (see `buildRecordEntities`).
 const AMBIGUOUS = Symbol('ambiguous')
 function refResolver(readSchemas, recordMap) {
-  const byModel = new Map() // Model → handle → the record's own id (null before its first push)
-  const ownIds = new Set()
+  const byModel = new Map() // Model → handle → the record: its own id (null before its first push) and `$id`
+  const byOwnId = new Map() // the record's own id → the record
   for (const { declaration, flat } of readSchemas) {
     let names = byModel.get(declaration.name)
     if (!names) byModel.set(declaration.name, (names = new Map()))
     for (const rec of flat) {
       const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
-      names.set(rec.slug, names.has(rec.slug) ? AMBIGUOUS : own)
-      if (own) ownIds.add(own)
+      const record = { own, id: rec.$id }
+      names.set(rec.slug, names.has(rec.slug) ? AMBIGUOUS : record)
+      if (own) byOwnId.set(own, record)
     }
   }
-  const minted = (own) => (own && recordMap[own] ? { uuid: recordMap[own] } : { pending: true })
+  const sent = ({ own, id }) => (own && recordMap[own] ? { uuid: recordMap[own] } : { ref: id })
   return {
     resolve(model, value) {
       if (typeof value !== 'string' || value === '') return { invalid: true }
       const names = byModel.get(model)
       if (names?.has(value)) {
-        const own = names.get(value)
-        return own === AMBIGUOUS ? { ambiguous: true } : minted(own)
+        const record = names.get(value)
+        return record === AMBIGUOUS ? { ambiguous: true } : sent(record)
       }
-      if (isUuid(value)) return ownIds.has(value) ? minted(value) : { uuid: value }
+      if (isUuid(value)) return byOwnId.has(value) ? sent(byOwnId.get(value)) : { uuid: value }
       return { missing: true }
     },
   }
@@ -1009,7 +1011,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
 
   // ⭐ EVERY MODEL'S RECORDS ARE READ BEFORE ANY IS MAPPED: a reference names a record
   // of another Model by its handle (`speaker: ada`), and the push sends that record's
-  // uuid in its place (`refResolver`).
+  // uuid in its place — or its `$id`, while it is new (`refResolver`).
   const readSchemas = []
   for (const [schema, poolEntities] of poolBySchema) {
     const label = poolEntities[0].dirs.join('/')

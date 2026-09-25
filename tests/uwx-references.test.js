@@ -1,18 +1,21 @@
 /**
- * ⭐ A REFERENCE NAMES ITS RECORD BY HANDLE IN A FILE, AND TRAVELS AS A UUID.
+ * ⭐ A REFERENCE NAMES ITS RECORD BY HANDLE IN A FILE, AND TRAVELS AS A UUID — OR, FOR A
+ * RECORD THE SAME PUSH CREATES, AS `{ $ref: <its $id> }`.
  *
  * `speaker: ada` — the name of the speaker's record — is what an author writes and what a
- * pull writes back. A push sends the uuid THIS backend minted for that record, which is
- * the only thing the backend accepts (measured 2026-09-24: `speaker: ada` is refused,
- * "not a valid uuid"; a uuid it has not seen is refused too, "neither in the package nor
- * on the host"). A record whose reference names a record the backend has not minted yet
- * waits: sent without the reference, or held back, and completed by the next pass.
+ * pull writes back. A push sends the uuid THIS backend minted for that record (measured
+ * 2026-09-24: `speaker: ada` is refused, "not a valid uuid"; a uuid it has not seen is
+ * refused too, "neither in the package nor on the host"). A record it has not minted is
+ * new, so it rides in the same package, and the reference names it there by `$id` — the
+ * value form the backend resolves to the uuid it mints (2026-09-25). One push creates
+ * both. ⛔ Until then such a referrer waited — sent without the reference, or held back —
+ * and the CLI pushed again to complete it.
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { recordsToEntities } from '../src/uwx/records.js'
+import { recordsToEntities, entityContentHash } from '../src/uwx/records.js'
 import { renderEntityDocument } from '../src/uwx/backfill.js'
 import { emitSyncPackages, readZip, recordsToProject } from '../src/uwx/index.js'
 
@@ -49,30 +52,30 @@ describe('recordsToEntities — what a reference sends', () => {
     })
     expect(refusals).toEqual([])
     expect(entities[0].document.brief.speaker).toBe('U-ADA')
-    expect(entities[0].pending).toEqual([])
+    expect(entities[0].namesNew).toBe(0)
   })
 
-  it('WAITS on a record the backend has not minted yet — left out, and noted', () => {
+  it('names a record the backend has not minted by its $id — the record this push creates', () => {
     const { entities, refusals } = recordsToEntities({
       label: 'talk',
       records: [{ slug: 'opening', title: 'Opening', speaker: 'ada' }],
       declaration: talkDecl(),
-      refs: refs({ '@acme/speaker ada': { pending: true } }),
+      refs: refs({ '@acme/speaker ada': { ref: 'speaker/ada' } }),
     })
     expect(refusals).toEqual([])
-    expect(entities[0].document.brief).not.toHaveProperty('speaker')
-    expect(entities[0].pending).toEqual([{ path: 'speaker', model: '@acme/speaker', name: 'ada', required: false }])
+    expect(entities[0].document.brief.speaker).toEqual({ $ref: 'speaker/ada' })
+    expect(entities[0].namesNew).toBe(1)
   })
 
-  it('a REQUIRED reference that waits is owed, not missing — no refusal', () => {
+  it('a REQUIRED reference to a new record is sent, not missing — no refusal', () => {
     const { entities, refusals } = recordsToEntities({
       label: 'talk',
       records: [{ slug: 'opening', title: 'Opening', speaker: 'ada' }],
       declaration: talkDecl({ required: true }),
-      refs: refs({ '@acme/speaker ada': { pending: true } }),
+      refs: refs({ '@acme/speaker ada': { ref: 'speaker/ada' } }),
     })
     expect(refusals).toEqual([])
-    expect(entities[0].pending[0].required).toBe(true)
+    expect(entities[0].document.brief.speaker).toEqual({ $ref: 'speaker/ada' })
   })
 
   it('CONTROL — a required reference that is simply absent is still refused', () => {
@@ -98,15 +101,29 @@ describe('recordsToEntities — what a reference sends', () => {
     expect(run(42, { invalid: true })[0]).toMatch(/"speaker" is a reference — write the name/)
   })
 
-  it('a list of references sends what is known and waits on the rest', () => {
+  it('a list of references sends each one — a uuid, or $ref for a new record', () => {
     const { entities } = recordsToEntities({
       label: 'talk',
       records: [{ slug: 'panel', speaker: ['ada', 'grace'] }],
       declaration: talkDecl({ multiple: true }),
-      refs: refs({ '@acme/speaker ada': { uuid: 'U-ADA' }, '@acme/speaker grace': { pending: true } }),
+      refs: refs({ '@acme/speaker ada': { uuid: 'U-ADA' }, '@acme/speaker grace': { ref: 'speaker/grace' } }),
     })
-    expect(entities[0].document.brief.speaker).toEqual(['U-ADA'])
-    expect(entities[0].pending).toEqual([{ path: 'speaker[1]', model: '@acme/speaker', name: 'grace', required: false }])
+    expect(entities[0].document.brief.speaker).toEqual(['U-ADA', { $ref: 'speaker/grace' }])
+    expect(entities[0].namesNew).toBe(1)
+  })
+
+  it('which new record a reference names is content — its hash moves with it', () => {
+    const talk = (ref) =>
+      recordsToEntities({
+        label: 'talk',
+        records: [{ slug: 'opening', title: 'Opening', speaker: 'ada' }],
+        declaration: talkDecl(),
+        refs: refs({ '@acme/speaker ada': ref }),
+      }).entities[0].document
+    const toAda = entityContentHash(talk({ ref: 'speaker/ada' }))
+    expect(entityContentHash(talk({ ref: 'speaker/grace' }))).not.toBe(toAda)
+    // CONTROL — the same reference hashes the same.
+    expect(entityContentHash(talk({ ref: 'speaker/ada' }))).toBe(toAda)
   })
 
   it('without a resolver a reference is sent as written — a caller that only maps', () => {
@@ -119,7 +136,7 @@ describe('recordsToEntities — what a reference sends', () => {
   })
 })
 
-// ── The package: which records a push sends, holds back, and places ──────────────────
+// ── The package: one push carries a new record and every record naming it ─────────────
 
 let ROOT, SITE
 const ORIGIN = 'http://backend.test'
@@ -169,7 +186,21 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(ROOT, { recursive: true, force: true }))
 
-describe('emitSyncPackages — a record waiting on a reference', () => {
+// Every `$ref` in a package, wherever it sits — a record's field or the folder's entries.
+const refsIn = (node, out = []) => {
+  if (Array.isArray(node)) node.forEach((n) => refsIn(n, out))
+  else if (node && typeof node === 'object') {
+    if (typeof node.$ref === 'string') out.push(node.$ref)
+    for (const v of Object.values(node)) refsIn(v, out)
+  }
+  return out
+}
+const packaged = (pkg) =>
+  [...readZip(pkg.records.buffer)]
+    .filter(([name]) => name.startsWith('entities/'))
+    .map(([, buf]) => JSON.parse(buf.toString('utf8')))
+
+describe('emitSyncPackages — a reference to a record the same push creates', () => {
   it('sends the minted uuid once the backend has the record', async () => {
     site({ syncRecords: { 'OWN-ADA': 'MINT-ADA' } })
     w('records/speaker/ada.yml', '$uuid: OWN-ADA\nname: Ada\n')
@@ -177,43 +208,55 @@ describe('emitSyncPackages — a record waiting on a reference', () => {
     const pkg = await emitSyncPackages(SITE, { backend: ORIGIN })
     expect(pkg.refusals).toEqual([])
     expect(entityIn(pkg, 'talk/opening').brief.speaker).toBe('MINT-ADA')
-    expect(pkg.waiting).toEqual([])
+    expect(pkg.namesNew).toEqual([])
   })
 
-  it('first push of both: the talk is sent WITHOUT the reference, and is waiting', async () => {
+  it('first push of both: ONE package — the speaker, and the talk naming it by $ref', async () => {
     site()
     w('records/talk/opening.yml', 'title: Opening\nspeaker: ada\n')
     const pkg = await emitSyncPackages(SITE, { backend: ORIGIN })
     expect(entityIn(pkg, 'speaker/ada')).toBeTruthy()
-    const talk = entityIn(pkg, 'talk/opening')
-    expect(talk.brief).toEqual({ title: { en: 'Opening' } })
-    expect(pkg.waiting).toEqual([
-      { id: 'talk/opening', model: '@acme/talk', slug: 'opening', held: false, pending: [{ path: 'speaker', model: '@acme/speaker', name: 'ada', required: false }] },
-    ])
+    expect(entityIn(pkg, 'talk/opening').brief).toEqual({ title: { en: 'Opening' }, speaker: { $ref: 'speaker/ada' } })
+    // The talk's hash, banked as sent, is not the next push's — the caller re-banks it.
+    expect(pkg.namesNew).toEqual(['@acme/talk talk/opening'])
   })
 
-  it('a REQUIRED reference to a new record holds the talk back — not sent, not placed, not banked', async () => {
+  it('⭐ every $ref names an entity the same package carries', async () => {
+    site({ required: true })
+    w('records/speaker/grace.yml', 'name: Grace\n')
+    w('records/talk/opening.yml', 'title: Opening\nspeaker: ada\n')
+    w('records/talk/closing.yml', 'title: Closing\nspeaker: grace\n')
+    const pkg = await emitSyncPackages(SITE, { backend: ORIGIN })
+    const docs = packaged(pkg)
+    const ids = new Set(docs.map((d) => d.$id).filter(Boolean))
+    const named = refsIn(docs)
+    // CONTROL — the folder's two entries per record and the two talks' speakers.
+    expect(named.length).toBeGreaterThanOrEqual(6)
+    expect(named.filter((r) => !ids.has(r))).toEqual([])
+  })
+
+  it('a REQUIRED reference to a new record goes in the same package, and the talk is placed', async () => {
     site({ required: true })
     w('records/talk/opening.yml', 'title: Opening\nspeaker: ada\n')
     const pkg = await emitSyncPackages(SITE, { backend: ORIGIN })
-    expect(entityIn(pkg, 'talk/opening')).toBeNull()
-    expect(entityIn(pkg, 'speaker/ada')).toBeTruthy()
-    expect(JSON.stringify(folderOf(pkg))).not.toMatch(/talk\/opening/)
-    expect(pkg.waiting[0]).toMatchObject({ id: 'talk/opening', held: true })
-    expect(pkg.hashes).not.toHaveProperty(['@acme/talk talk/opening'])
+    expect(pkg.refusals).toEqual([])
+    expect(entityIn(pkg, 'talk/opening').brief.speaker).toEqual({ $ref: 'speaker/ada' })
+    expect(JSON.stringify(folderOf(pkg))).toMatch(/talk\/opening/)
+    expect(pkg.hashes).toHaveProperty(['@acme/talk talk/opening'])
   })
 
-  it('a talk already on the backend waits AS IT IS there — kept in the folder, not sent, hash unchanged', async () => {
+  it('a talk already on the backend that comes to name a new speaker is sent, $ref and all', async () => {
     site({ syncRecords: { 'OWN-TALK': 'MINT-TALK' } })
     w('records/talk/opening.yml', '$uuid: OWN-TALK\ntitle: Opening\nspeaker: ada\n')
     const pkg = await emitSyncPackages(SITE, {
       backend: ORIGIN,
       priorHashes: { '@acme/talk talk/opening': 'BANKED' },
     })
-    expect(entityIn(pkg, 'talk/opening')).toBeNull()
-    expect(JSON.stringify(folderOf(pkg))).toMatch(/MINT-TALK/)
-    expect(pkg.hashes['@acme/talk talk/opening']).toBe('BANKED')
-    expect(pkg.waiting[0]).toMatchObject({ id: 'talk/opening', held: true })
+    const talk = entityIn(pkg, 'talk/opening')
+    expect(talk.$uuid).toBe('MINT-TALK')
+    expect(talk.brief.speaker).toEqual({ $ref: 'speaker/ada' })
+    expect(entityIn(pkg, 'speaker/ada')).toBeTruthy()
+    expect(pkg.hashes['@acme/talk talk/opening']).not.toBe('BANKED')
   })
 
   it('a name no record answers to is refused before anything is sent', async () => {
