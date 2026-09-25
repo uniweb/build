@@ -1017,6 +1017,13 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // of another Model by its handle (`speaker: ada`), and the push sends that record's
   // uuid in its place — or its `$id`, while it is new (`refResolver`).
   const readSchemas = []
+  // ⛔ ONE RECORD IN TWO FILES — the same own id, its `$uuid`, twice — is refused, naming
+  // both. It is not two records, and sent, both would claim one entity. A pull could write
+  // one until 2026-09-25: under a foundation in `@std`, a standard `@std/person` record was
+  // written again into `records/person/`, beside the author's `records/std/person/`
+  // (`self-scope.js::unresolveSelfScope`), and a push then reported only a name two
+  // records share.
+  const fileByOwnId = new Map()
   for (const [schema, poolEntities] of poolBySchema) {
     const label = poolEntities[0].dirs.join('/')
     const modelName = modelFor(schema, `${pool.dir}/${label}/`)
@@ -1056,6 +1063,16 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         // ⚠️ A multi-record file (array YAML, BibTeX) contributes several records
         // from one path, so the slug — not the file stem — completes the id.
         rec.$id = rec.$id || [...pooled.dirs, r.slug].join('/')
+        const ownId = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
+        const firstFile = ownId ? fileByOwnId.get(ownId) : undefined
+        if (firstFile && firstFile !== pooled.relPath) {
+          refusals.push(
+            `${pooled.relPath}: holds the same record as ${firstFile} — both carry ` +
+              `\`$uuid: ${ownId}\` — so a push would send one record twice. Keep one of them.`
+          )
+        } else if (ownId) {
+          fileByOwnId.set(ownId, pooled.relPath)
+        }
         flat.push(rec)
         sourceBySlug.set(r.slug, r)
         produced.push({ id: rec.$id, slug: r.slug })

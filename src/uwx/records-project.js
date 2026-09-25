@@ -42,10 +42,10 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
-import { poolDirsForSchema, resolveRecordsDir } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
 import { contentBodyTarget } from './record-layout.js'
-import { unresolveSelfScope, refuseOrgOption } from './self-scope.js'
+import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption } from './self-scope.js'
 import { parseCatalogRef } from '../site/foundation-ref.js'
 import { unwrapLocalized } from './backfill.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
@@ -153,9 +153,46 @@ function indexFolder(folderDoc) {
 // `schemaForPoolDirs`, and deliberately not a second rule: if the two disagreed,
 // a pulled record would land somewhere the next build reads as a different
 // schema — silently, because both paths are well-formed.
-function recordDirFor(recordsRoot, model, scope) {
-  const dirs = poolDirsForSchema(unresolveSelfScope(model, scope))
+function recordDirFor(recordsRoot, model, scope, own) {
+  const dirs = poolDirsForSchema(unresolveSelfScope(model, scope, own))
   return dirs ? join(recordsRoot, ...dirs) : null
+}
+
+// ⭐ A PULLED RECORD GOES BACK INTO THE FILE THAT HOLDS IT — wherever under the records
+// directory that is, so long as its folder reads as the same Model. Two folders can:
+// under a foundation in `@std`, `records/person/` (`@/person`, qualified into `@std`) and
+// `records/std/person/` both read as `@std/person`. ⛔ Looked for in the one folder the
+// pull derived, as until 2026-09-25, a record the author kept in the other was written
+// again beside it — two files, one record — and the next push was refused.
+function recordDirsReadingAs(recordsRoot, model, scope) {
+  const dirs = []
+  if (!existsSync(recordsRoot)) return dirs
+  const visible = (dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+      .map((e) => e.name)
+  for (const first of visible(recordsRoot)) {
+    const at = [first]
+    if (resolveSelfScope(schemaForPoolDirs(at), scope) === model) dirs.push(join(recordsRoot, first))
+    for (const second of visible(join(recordsRoot, first))) {
+      if (resolveSelfScope(schemaForPoolDirs([first, second]), scope) === model) {
+        dirs.push(join(recordsRoot, first, second))
+      }
+    }
+  }
+  return dirs
+}
+
+// The site's foundation's own data-schema names, when its declarations are in this
+// project (`ownSchemaNames`); null otherwise.
+function siteOwnSchemas(siteRoot) {
+  let siteYml = null
+  try {
+    siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || null
+  } catch {
+    return null
+  }
+  return siteYml ? ownSchemaNames(foundationDataSchemas(siteRoot, siteYml)) : null
 }
 
 // ⚠️ Undoing the producer's self-scope resolution (`unresolveSelfScope`) lives in
@@ -231,7 +268,7 @@ function isDerivedDeferred(d, dataSchemas) {
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(wire, dataSchemas = null, scope = null) {
+function declToFileShape(wire, dataSchemas = null, scope = null, own = null) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
   // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
@@ -239,7 +276,7 @@ function declToFileShape(wire, dataSchemas = null, scope = null) {
   // explicit schema the author never had — and the derived-`deferred` lookup would
   // miss, persisting a derivation into their file (the 2026-08-29 defect).
   const d = scope && typeof wire.schema === 'string'
-    ? { ...wire, schema: unresolveSelfScope(wire.schema, scope) }
+    ? { ...wire, schema: unresolveSelfScope(wire.schema, scope, own) }
     : wire
   const name = d.name || d.$id
   const decl = {}
@@ -348,10 +385,13 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
   const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
   const selfScope =
     scope !== undefined ? scope : (parseCatalogRef(document?.info?.foundation)?.scope ?? null)
+  // Which of the scope's schemas are the foundation's own — the rest keep their scope
+  // (`unresolveSelfScope`).
+  const own = ownSchemaNames(dataSchemas)
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfScope)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own)
     if (!name) continue
     queries[name] = decl
   }
@@ -477,6 +517,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // `@scope/x` model is placed back where the author wrote it. ⛔ It was the site
   // owner's org, read from `sync.json`, until 2026-09-22 (`self-scope.js`).
   const selfScope = opts.scope ?? null
+  // Which of that scope's Models are the foundation's own — the rest keep their scope, so
+  // a standard `@std/person` under a foundation in `@std` is placed in `records/std/person/`
+  // (`unresolveSelfScope`).
+  const own = siteOwnSchemas(siteRoot)
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')
   }
@@ -514,7 +558,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   restoreAssetRefs(recordDocs, backendState.assets || {})
   // This backend's record map, inverted: its uuid → the record's own id.
   const recordMap = backendState.records || {}
-  const ownIdByTheirs = new Map(Object.entries(recordMap).map(([own, theirs]) => [theirs, own]))
+  const ownIdByTheirs = new Map(Object.entries(recordMap).map(([ownId, theirs]) => [theirs, ownId]))
   // own id → their uuid, for every record this pull wrote. Recorded at the end.
   const learned = {}
   // uuid → the path under `records/` the record landed at. Only this loop knows
@@ -522,6 +566,15 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // re-derived (a second rule could pick a different extension and the folder
   // would name a file that is not there).
   const poolPathByUuid = new Map()
+  // The file holding a record already, by its own id: the derived folder first, then any
+  // other that reads as the same Model (`recordDirsReadingAs`).
+  const findRecordFile = (poolDir, model, ownId) =>
+    findRecordFileByUuid(poolDir, ownId) ||
+    recordDirsReadingAs(recordsRoot, model, selfScope)
+      .filter((dir) => dir !== poolDir)
+      .map((dir) => findRecordFileByUuid(dir, ownId))
+      .find(Boolean) ||
+    null
 
   for (const document of recordDocs) {
     const where = locate(document, folderIndex)
@@ -536,7 +589,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       continue
     }
 
-    const poolDir = recordDirFor(recordsRoot, schema, selfScope)
+    const poolDir = recordDirFor(recordsRoot, schema, selfScope, own)
     if (!poolDir) {
       skipped.push({
         uuid: document.$uuid,
@@ -550,8 +603,8 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     // the first backend a record reaches minted the id it keeps — so the backend's
     // uuid is the own id, exactly as before identity was keyed by backend.
     const theirs = document.$uuid || null
-    const own = theirs ? ownIdByTheirs.get(theirs) || theirs : null
-    const existing = own ? findRecordFileByUuid(poolDir, own) : null
+    const ownId = theirs ? ownIdByTheirs.get(theirs) || theirs : null
+    const existing = ownId ? findRecordFile(poolDir, schema, ownId) : null
 
     let filePath
     let format
@@ -572,7 +625,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
 
     // ⛔ The file gets the record's OWN id, never this backend's — a pull from a second
     // backend must not overwrite the identity the record already has.
-    const toWrite = own && own !== theirs ? { ...document, $uuid: own } : document
+    const toWrite = ownId && ownId !== theirs ? { ...document, $uuid: ownId } : document
     let status
     try {
       status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName })
@@ -591,7 +644,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     // terms, so that is what `folderToFolderYml` will look them up by.
     if (theirs) {
       poolPathByUuid.set(theirs, relative(recordsRoot, filePath).split(sep).join('/'))
-      if (own) learned[own] = theirs
+      if (ownId) learned[ownId] = theirs
     }
   }
 

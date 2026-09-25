@@ -62,7 +62,7 @@ const MEMBER = validateAndNormalizeSchema(
 // `owner` is the org that owns the SITE, recorded in sync.json as a create records it.
 // Queries live in `queries.yml`, the one home a pull writes, so a round trip reads back
 // the file it wrote.
-function makeSite({ queriesYml, owner = null, foundationName = '@acme/fnd' }) {
+function makeSite({ queriesYml, owner = null, foundationName = '@acme/fnd', ownSchemas = ['member', 'people'] }) {
   w('site/site.yml', 'name: T\nfoundation: fnd\n')
   if (owner) w('site/sync.json', { version: 1, backends: { [BACKEND]: { site: { org: owner } } } })
   w('site/queries.yml', queriesYml)
@@ -73,7 +73,9 @@ function makeSite({ queriesYml, owner = null, foundationName = '@acme/fnd' }) {
   w('fdn/main.js', `export default {\n  name: '${foundationName}',\n}\n`)
   w('fdn/dist/meta/schema.json', {
     _self: { name: foundationName, version: '1.0.0', role: 'foundation' },
-    dataSchemas: { '@/member': MEMBER }
+    // The foundation's OWN schemas are what a pull writes back as `@/x` — a schema of its
+    // scope that it does not define keeps its scope (`unresolveSelfScope`).
+    dataSchemas: Object.fromEntries(ownSchemas.map((n) => [`@/${n}`, MEMBER]))
   })
 }
 

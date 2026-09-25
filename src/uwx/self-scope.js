@@ -33,6 +33,7 @@
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import yaml from 'js-yaml'
+import { isStandardSchema } from '@uniweb/schemas'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { detectFoundationType, parseCatalogRef } from '../site/foundation-ref.js'
 import { readFoundationName } from '../schema.js'
@@ -66,7 +67,8 @@ export function resolveSelfScope(ref, scope) {
 }
 
 /**
- * The inverse, for a pull: `@<scope>/x` → `@/x` for the site's foundation's scope.
+ * The inverse, for a pull: `@<scope>/x` → `@/x` — when `x` is one of the foundation's
+ * OWN data schemas.
  *
  * ⛔ WITHOUT THIS THE ROUND TRIP IS NOT A FIXED POINT, and the failure is silent
  * on both ends. A record authored under `records/article/` comes back as
@@ -76,17 +78,51 @@ export function resolveSelfScope(ref, scope) {
  * relied on the query-name default comes back with an explicit schema it never
  * had.
  *
+ * ⛔ AND NOT EVERY `@<scope>/x` WAS AN `@/x`: the forward rule is not one-to-one. A
+ * foundation in `@std` — every template's — whose site also uses the STANDARD
+ * `@std/person` ships both its own `@/specimen` and that `@std/person` as `@std/…`.
+ * Inverted whole, as it was until 2026-09-25, the standard schema came back as the
+ * foundation's own: a clone put `@std/person` records in `records/person/` and
+ * rewrote the query to `@/person`, and a pull into a working copy wrote them BESIDE
+ * the author's `records/std/person/`, after which every reference to a person named
+ * two records and the next push was refused. So `x` is written back as `@/x` only
+ * when it is the foundation's own: one of `own`, the names its declarations define
+ * (`ownSchemaNames`) — or, when those cannot be read here (its foundation is not in
+ * this project, as after a clone), any name that is not a standard schema of `@std`.
+ *
  * A model scoped to ANY OTHER scope is left alone: it genuinely is that org's, and
  * `@/` would be a lie.
  *
  * @param {unknown} ref
  * @param {unknown} scope - the scope the pulled records were qualified with
+ * @param {Set<string>|null} [own] - the names of the data schemas the foundation
+ *        defines, when known
  * @returns {unknown}
  */
-export function unresolveSelfScope(ref, scope) {
+export function unresolveSelfScope(ref, scope, own = null) {
   const handle = bareOrg(scope)
-  if (typeof ref !== 'string' || !handle) return ref
-  return ref.startsWith(`@${handle}/`) ? `@/${ref.slice(handle.length + 2)}` : ref
+  if (typeof ref !== 'string' || !handle || !ref.startsWith(`@${handle}/`)) return ref
+  const name = ref.slice(handle.length + 2)
+  const isOwn = own ? own.has(name) : !(handle === 'std' && isStandardSchema(name))
+  return isOwn ? `@/${name}` : ref
+}
+
+/**
+ * The names of the data schemas a foundation DEFINES — the `@/x` keys of its built
+ * declarations (`dist/meta/schema.json` → `dataSchemas`), which is what `register`
+ * registers. A schema it only references keeps its scope there (`@std/person`) and is
+ * not one of them. Null when there are no declarations to read.
+ *
+ * @param {object|null} dataSchemas - a foundation's `dataSchemas` map
+ * @returns {Set<string>|null}
+ */
+export function ownSchemaNames(dataSchemas) {
+  if (!dataSchemas || typeof dataSchemas !== 'object') return null
+  return new Set(
+    Object.keys(dataSchemas)
+      .filter((ref) => ref.startsWith('@/'))
+      .map((ref) => ref.slice(2))
+  )
 }
 
 /**
