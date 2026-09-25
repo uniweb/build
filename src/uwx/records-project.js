@@ -41,7 +41,8 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
-import { defaultSchema, deferredFromSchema, foundationDataSchemas } from './queries-config.js'
+import { defaultSchema, deferredFromSchema, foundationDataSchemas, foundationSchemaJson } from './queries-config.js'
+import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
 import { contentBodyTarget } from './record-layout.js'
@@ -164,7 +165,11 @@ function recordDirFor(recordsRoot, model, scope, own) {
 // `records/std/person/` both read as `@std/person`. ⛔ Looked for in the one folder the
 // pull derived, as until 2026-09-25, a record the author kept in the other was written
 // again beside it — two files, one record — and the next push was refused.
-function recordDirsReadingAs(recordsRoot, model, scope) {
+//
+// ⭐ And a folder named for a data key the foundation types, when no data schema has that name,
+// reads as that type — `records/team/` as `@std/member` for `data: { team: '@/member' }`
+// (`data-key-types.js`), the same rule a push reads it by.
+function recordDirsReadingAs(recordsRoot, model, scope, { own = null, keyTypes = null } = {}) {
   const dirs = []
   if (!existsSync(recordsRoot)) return dirs
   const visible = (dir) =>
@@ -173,7 +178,13 @@ function recordDirsReadingAs(recordsRoot, model, scope) {
       .map((e) => e.name)
   for (const first of visible(recordsRoot)) {
     const at = [first]
-    if (resolveSelfScope(schemaForPoolDirs(at), scope) === model) dirs.push(join(recordsRoot, first))
+    const keyType = !own?.has(first) ? keyTypes?.get(first) : null
+    if (
+      resolveSelfScope(schemaForPoolDirs(at), scope) === model ||
+      (keyType && resolveSelfScope(keyType, scope) === model)
+    ) {
+      dirs.push(join(recordsRoot, first))
+    }
     for (const second of visible(join(recordsRoot, first))) {
       if (resolveSelfScope(schemaForPoolDirs([first, second]), scope) === model) {
         dirs.push(join(recordsRoot, first, second))
@@ -183,16 +194,20 @@ function recordDirsReadingAs(recordsRoot, model, scope) {
   return dirs
 }
 
-// The site's foundation's own data-schema names, when its declarations are in this
-// project (`ownSchemaNames`); null otherwise.
-function siteOwnSchemas(siteRoot) {
+// What the site's foundation declares, when its declarations are in this project: its own
+// data-schema names (`ownSchemaNames`) and the types of its data keys (`dataKeyTypes`). Both
+// null otherwise — a clone's foundation is not in the project.
+function siteFoundationDeclarations(siteRoot) {
   let siteYml = null
   try {
     siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || null
   } catch {
-    return null
+    return { own: null, keyTypes: null }
   }
-  return siteYml ? ownSchemaNames(foundationDataSchemas(siteRoot, siteYml)) : null
+  const schema = siteYml ? foundationSchemaJson(siteRoot, siteYml) : null
+  return schema
+    ? { own: ownSchemaNames(schema.dataSchemas || {}), keyTypes: dataKeyTypes(schema) }
+    : { own: null, keyTypes: null }
 }
 
 // ⚠️ Undoing the producer's self-scope resolution (`unresolveSelfScope`) lives in
@@ -268,7 +283,7 @@ function isDerivedDeferred(d, dataSchemas) {
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(wire, dataSchemas = null, scope = null, own = null) {
+function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
   // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
@@ -299,7 +314,11 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null) {
     decl.source = source
   }
 
-  if (d.schema && d.schema !== defaultSchema(name)) decl.schema = d.schema
+  // The default is the query's name — or, when no data schema has that name, the type the
+  // foundation declares for the data key of that name (`data-key-types.js`), which is what a
+  // push sent in its place. Either one stays unwritten, so the terse file stays terse.
+  const keyDefault = name && !own?.has(name) ? keyTypes?.get(name) : null
+  if (d.schema && d.schema !== defaultSchema(name) && d.schema !== keyDefault) decl.schema = d.schema
   setIf(decl, 'sort', d.sort)
   setIf(decl, 'where', d.where)
   setIf(decl, 'limit', d.limit)
@@ -386,12 +405,13 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
   const selfScope =
     scope !== undefined ? scope : (parseCatalogRef(document?.info?.foundation)?.scope ?? null)
   // Which of the scope's schemas are the foundation's own — the rest keep their scope
-  // (`unresolveSelfScope`).
+  // (`unresolveSelfScope`) — and the types of its data keys.
   const own = ownSchemaNames(dataSchemas)
+  const keyTypes = siteYml ? dataKeyTypes(foundationSchemaJson(siteRoot, siteYml)) : null
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes)
     if (!name) continue
     queries[name] = decl
   }
@@ -520,7 +540,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // Which of that scope's Models are the foundation's own — the rest keep their scope, so
   // a standard `@std/person` under a foundation in `@std` is placed in `records/std/person/`
   // (`unresolveSelfScope`).
-  const own = siteOwnSchemas(siteRoot)
+  const { own, keyTypes } = siteFoundationDeclarations(siteRoot)
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')
   }
@@ -568,9 +588,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   const poolPathByUuid = new Map()
   // The file holding a record already, by its own id: the derived folder first, then any
   // other that reads as the same Model (`recordDirsReadingAs`).
+  const readingAs = (model) => recordDirsReadingAs(recordsRoot, model, selfScope, { own, keyTypes })
   const findRecordFile = (poolDir, model, ownId) =>
     findRecordFileByUuid(poolDir, ownId) ||
-    recordDirsReadingAs(recordsRoot, model, selfScope)
+    readingAs(model)
       .filter((dir) => dir !== poolDir)
       .map((dir) => findRecordFileByUuid(dir, ownId))
       .find(Boolean) ||
@@ -614,8 +635,11 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       format = existing.format
       isNew = false
     } else {
-      format = defaultFormat(poolDir, declaration)
-      filePath = join(poolDir, where.slug + EXT_FOR_FORMAT[format])
+      // A new record goes where the project already keeps records of its Model — its derived
+      // folder, else another that reads as the Model (`records/team/` for `@std/member`).
+      const home = existsSync(poolDir) ? poolDir : readingAs(schema)[0] || poolDir
+      format = defaultFormat(home, declaration)
+      filePath = join(home, where.slug + EXT_FOR_FORMAT[format])
       isNew = true
     }
 

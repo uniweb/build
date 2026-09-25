@@ -39,6 +39,7 @@
 // measured 2026-09-25 on an edit of a talk, before the bank existed.
 
 import { readBackendState } from './sync-store.js'
+import { dataKeyTypes, keyOfDefaultRef } from './data-key-types.js'
 import { readFileSync, existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -880,6 +881,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       recordsDirExists: pool.exists,
       sendFolder: sendsFolder(pool, []),
       declarations: new Map(),
+      keyTyped: new Map(),
     }
   }
 
@@ -977,6 +979,24 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     )
   }
 
+  // ⭐ A NAME THAT IS A DATA KEY, NOT A DATA SCHEMA [Diego, 2026-09-25] (`data-key-types.js`):
+  // a records folder or a query whose name-defaulted schema (`@/team`) resolves to nothing,
+  // while the foundation's section types type the data key of that name (`team: '@/member'`),
+  // holds records of that type. `keyTyped` records each such name for the `queries` Section,
+  // which must name the same data schema (`sync-package.js` hands it on). ⛔ Never for a schema
+  // a query asked for explicitly: that one is the author's, and fails loudly.
+  const keyTypes = dataKeyTypes(localSchema)
+  const keyTyped = new Map()
+  const typedFor = async (schema) => {
+    const key = keyOfDefaultRef(schema)
+    const type = key ? keyTypes.get(key) : null
+    if (!type || explicitBy.has(schema)) return null
+    const declaration = await declarationFor(modelFor(type, `data key "${key}"`))
+    if (!declaration) return null
+    keyTyped.set(schema, type)
+    return declaration
+  }
+
   const sourceLocale =
     opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
 
@@ -1027,7 +1047,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   for (const [schema, poolEntities] of poolBySchema) {
     const label = poolEntities[0].dirs.join('/')
     const modelName = modelFor(schema, `${pool.dir}/${label}/`)
-    const declaration = await declarationFor(modelName)
+    const declaration = (await declarationFor(modelName)) || (await typedFor(schema))
     if (!declaration) {
       // An explicit schema the author asked for is a hard error; one only the
       // folder's name supplied is a soft skip, reported below.
@@ -1163,7 +1183,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     const hasRecords = poolBySchema.has(schema)
     const resolved = hasRecords
       ? !unresolved.has(schema)
-      : Boolean(await declarationFor(modelFor(schema, `query "${name}"`)))
+      : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema)))
     if (!resolved) {
       if (decl.schemaExplicit) throw unresolvedExplicit(resolveSelfScope(schema, scope), name)
       schemaless.push({ name, model: resolveSelfScope(schema, scope) })
@@ -1204,6 +1224,9 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     // Each entity's declaration, by its Model — what walks a record's lists
     // (`record-items.js`).
     declarations: new Map(readSchemas.map(({ declaration }) => [declaration.name, declaration])),
+    // A name-defaulted schema that stands for the type of the data key of its name
+    // (`@/team` → `@/member`) — see `typedFor` above.
+    keyTyped,
   }
 }
 

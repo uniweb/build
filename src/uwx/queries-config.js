@@ -7,5 +7,6 @@ export {
   defaultSchema,
   deferredFromSchema,
   foundationDataSchemas,
+  foundationSchemaJson,
   QUERIES_YML_RELPATH,
 } from '../site/queries-config.js'

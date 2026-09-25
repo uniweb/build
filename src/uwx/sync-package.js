@@ -356,6 +356,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         // must name the Model its records are stored under, and both are qualified
         // from one `@/x` by one rule (`./self-scope.js`) — so they take one scope.
         scope,
+        // …and the same data schema, where a name stands for the type of its data key
+        // (`@/team` → `@/member`, `data-key-types.js`): decided once, by the records.
+        keyTyped: col.keyTyped,
         // Withhold the `$services`/`$secrets` Sections when the caller has
         // determined the file is not asking for anything new by them. Passed
         // through rather than decided here: the last-agreed state is project

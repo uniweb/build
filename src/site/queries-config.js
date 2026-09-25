@@ -361,7 +361,7 @@ async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
   )
   if (pending.length === 0) return
 
-  const dataSchemas = loadFoundationDataSchemas(siteRoot, siteYml)
+  const dataSchemas = foundationDataSchemas(siteRoot, siteYml)
   if (!dataSchemas) return
 
   for (const decl of pending) {
@@ -447,11 +447,15 @@ function localFoundationSrcDir(siteRoot, siteYml) {
 
 /** The data schemas a site's foundation declares, or null when unresolvable. */
 export function foundationDataSchemas(siteRoot, siteYml) {
-  return loadFoundationDataSchemas(siteRoot, siteYml)
+  return foundationSchemaJson(siteRoot, siteYml)?.dataSchemas || null
 }
 
-/** The foundation's built data-schema map, or null when there is nothing to read. */
-function loadFoundationDataSchemas(siteRoot, siteYml) {
+/**
+ * A site's foundation's built `schema.json` whole — its section types (each with its `data:`)
+ * beside `_self` and `dataSchemas` — or null when the foundation is not in the project or not
+ * built.
+ */
+export function foundationSchemaJson(siteRoot, siteYml) {
   if (!siteYml?.foundation) return null
   let info
   try {
@@ -463,7 +467,7 @@ function loadFoundationDataSchemas(siteRoot, siteYml) {
   const schemaPath = join(info.path, 'dist', 'meta', 'schema.json')
   if (!existsSync(schemaPath)) return null
   try {
-    return JSON.parse(readFileSync(schemaPath, 'utf8'))?.dataSchemas || null
+    return JSON.parse(readFileSync(schemaPath, 'utf8')) || null
   } catch {
     return null
   }

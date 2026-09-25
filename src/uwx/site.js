@@ -919,7 +919,7 @@ function externalSource(d) {
   return source
 }
 
-function queriesNested(declarations, uuids = null, scope = null) {
+function queriesNested(declarations, uuids = null, scope = null, keyTyped = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
@@ -936,7 +936,10 @@ function queriesNested(declarations, uuids = null, scope = null) {
     // stored under, so a verbatim `@/member` beside records stored as `@acme/member`
     // names nothing: the query resolves no Model and the page that binds it renders
     // empty. The pull puts the author's `@/` back (`records-project.js::declarationsToQueriesYml`).
-    setIf(data, 'schema', resolveSelfScope(d.schema, scope))
+    // A query whose name-defaulted schema stands for the type of the data key of its name
+    // names that type — the data schema its records are sent as (`data-key-types.js`).
+    const schema = (!d.schemaExplicit && keyTyped?.get(d.schema)) || d.schema
+    setIf(data, 'schema', resolveSelfScope(schema, scope))
     setIf(data, 'sort', d.sort)
     // Legacy `filter:` is not synced — it is translated to `where` upstream
     // (the canonical predicate). No legacy fields on the wire.
@@ -1545,7 +1548,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
   const scope = opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot)
-  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, scope)
+  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, scope, opts.keyTyped)
   // Emitted ONLY when the file declares the key — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.
