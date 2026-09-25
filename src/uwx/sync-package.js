@@ -20,6 +20,7 @@
 //     lane (the idempotent no-op).
 
 import { buildRecordEntities, entityContentHash } from './records.js'
+import { recordItemLists, hasListItems, stampRecordItems } from './record-items.js'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
@@ -217,6 +218,10 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  *        stamped onto the site-content document so the backend matches our items
  *        instead of re-minting them (which deletes and recreates every page and
  *        section row). Sourced from a pull or a push response, cached by the caller.
+ * @param {Object<string,Object<string,string>>} [opts.recordItemUuids] - record `$uuid` → the
+ *        identity of its list items, as a previous push or pull banked it
+ *        (`record-items.js`); stamped onto each record the backend holds, so a re-sent
+ *        record updates its items instead of replacing them.
  * @param {Object<string,string>} [opts.itemBaseVersions] - record `$uuid` → opaque
  *        per-ITEM `version`. Narrowed at emit to the records the package carries and
  *        sent as `entries[].item_base_versions`, so the backend can refuse only the
@@ -253,7 +258,11 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  *   records: { buffer, entityCount, index, models }|null,
  *   hashes: Object<string,string>, warnings: string[], refusals: string[],
  *   skipped: number, schemaless: Array<{name: string, model: string}>,
- *   localAssets: string[], applied: object, namesNew: string[] }>}
+ *   localAssets: string[], applied: object, namesNew: string[],
+ *   recordItemIdentity: { stamped: number, unknown: number, unbanked: string[] } }>}
+ *   Each record entry of `records.index` carries `lists`: the record's list items as
+ *   sent (`record-items.js::recordItemLists`), for the caller to bank against the
+ *   document the backend returns.
  *   `namesNew` lists the records this package sends whose references name a record it
  *   creates — by `$ref`, where the next push will send a uuid — as keys of `hashes`. A
  *   caller that banks `hashes` re-banks these once the push is applied.
@@ -452,6 +461,32 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   for (const e of col.entities) collectFrom(e.document)
   const localAssets = [...localAssetSet]
 
+  // ⭐ THE IDENTITY OF A RECORD'S LIST ITEMS (`record-items.js`), taken on each document as it
+  // will be sent — after every rewrite above. `opts.recordItemUuids` is the caller's bank: per
+  // record (its uuid on this backend), each list's items as a previous push or pull left them.
+  // A record this backend has not minted has only new items, and one it holds with no bank entry
+  // is named in `unbanked`, so the caller can recover its items' identity before sending it.
+  // Stamping does not move a content hash: `$uuid` is stripped from every one.
+  const recordItemBank =
+    opts.recordItemUuids && typeof opts.recordItemUuids === 'object' ? opts.recordItemUuids : null
+  const recordItemIdentity = { stamped: 0, unknown: 0, unbanked: [] }
+  const unbankedIds = new Set()
+  for (const e of col.entities) {
+    const declaration = col.declarations?.get(e.model)
+    if (!declaration) continue
+    e.lists = recordItemLists(e.document, declaration)
+    const uuid = e.document.$uuid
+    if (!uuid || !hasListItems(e.lists)) continue
+    const banked = recordItemBank?.[uuid]
+    if (!banked) {
+      unbankedIds.add(e.id)
+      continue
+    }
+    const n = stampRecordItems(e.document, declaration, banked)
+    recordItemIdentity.stamped += n.stamped
+    recordItemIdentity.unknown += n.unknown
+  }
+
   const siteEntity = siteDoc
     ? { id: siteDoc.$id, model: siteDoc.$schema, file: 'entities/site-content.json', document: siteDoc }
     : null
@@ -492,7 +527,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // leading `{ kind: 'folder' }` keeps submission position 0 aligned for record
     // back-fill (backfillEntityUuids skips it — the folder has no uuid to write).
     const entities = [folder, ...changedRecords.map((r) => r.entity)].map(stamp)
-    const index = [{ kind: 'folder' }, ...changedRecords.map((r) => r.index)]
+    // Each record's lists as sent ride on its index entry: the caller pairs them with the
+    // document the backend returns, to bank the items' identity (`record-items.js`).
+    const index = [{ kind: 'folder' }, ...changedRecords.map((r) => ({ ...r.index, lists: r.entity.lists || {} }))]
+    for (const r of changedRecords) {
+      if (unbankedIds.has(r.entity.id)) recordItemIdentity.unbanked.push(r.entity.document.$uuid)
+    }
     // The folder references every record's Model via `entry.model` — including records
     // filtered out here by send-only-changed. Declare them all (the backend rejects a
     // folder that references an undeclared Model).
@@ -545,5 +585,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed
     // before is the index-loss signature the backend refuses — the caller reports it.
     itemIdentity,
+    // The records' list items: how many took a banked uuid and how many go as new, and the
+    // records this package SENDS that the backend holds with list items and no bank entry
+    // (their uuids) — sent as they are, the backend refuses each one (`identity_required`).
+    recordItemIdentity,
   }
 }

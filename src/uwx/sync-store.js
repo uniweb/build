@@ -43,8 +43,12 @@ export const SYNC_STORE_FILE = 'sync.json'
 /** Current on-disk shape. Bumped only for a breaking layout change. */
 const VERSION = 1
 
-/** Map sections — merged entry by entry. Anything else in a patch replaces. */
-const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets'])
+/**
+ * Map sections — merged entry by entry. Anything else in a patch replaces.
+ * `recordItems` is keyed by a record's uuid here, each entry that record's list items
+ * (`record-items.js`) — replaced whole, one record at a time.
+ */
+const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems'])
 
 const storePath = (siteDir) => join(siteDir, SYNC_STORE_FILE)
 
@@ -207,7 +211,7 @@ export function updateBackendState(siteDir, origin, patch) {
  *
  * @param {string} siteDir
  * @param {string} origin
- * @param {string} section - one of `records` `items` `queries` `folders` `assets`
+ * @param {string} section - one of `records` `items` `queries` `folders` `assets` `recordItems`
  * @param {Record<string, *>} entries
  * @param {(next: *, prior: *) => *} [merge]
  * @returns {{ added: string[], changed: string[], written: boolean }}

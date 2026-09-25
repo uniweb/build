@@ -32,11 +32,11 @@
 // reference or held back, and the CLI pushed again to complete it.
 // ⚠️ item_ref and file fields are still sent as the file writes them.
 //
-// ⚠️ A record of a `many` section is sent without a `$uuid`, so a push that changes a
-// record whose section the backend already holds is REFUSED, whole (`identity_required`):
-// applied, it would re-identify every stored item. Measured 2026-09-25 — this said such a
-// push "replaces that section's records" until then. Its first push, which creates the
-// items, is not affected.
+// ⭐ A record of a `many` section — an ITEM of a record's list — carries the `$uuid` the backend
+// gave it once the backend holds it, from a bank the CLI keeps per record (`record-items.js`,
+// stamped in `sync-package.js`). Sent without it, a record whose list the backend holds is
+// REFUSED, whole (`identity_required`): applied, it would re-identify every stored item —
+// measured 2026-09-25 on an edit of a talk, before the bank existed.
 
 import { readBackendState } from './sync-store.js'
 import { readFileSync, existsSync } from 'node:fs'
@@ -879,6 +879,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       folder: { ...folder, nodes: [] },
       recordsDirExists: pool.exists,
       sendFolder: sendsFolder(pool, []),
+      declarations: new Map(),
     }
   }
 
@@ -1183,6 +1184,9 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     folder: { ...folder, nodes },
     recordsDirExists: pool.exists,
     sendFolder: sendsFolder(pool, entities),
+    // Each entity's declaration, by its Model — what walks a record's lists
+    // (`record-items.js`).
+    declarations: new Map(readSchemas.map(({ declaration }) => [declaration.name, declaration])),
   }
 }
 

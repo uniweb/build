@@ -57,6 +57,15 @@ export { buildFolderEntity,
   collectFolderItemUuids,
   stampFolderItemUuids
 } from './folder.js'
+// The identity of a record's list items — banked per record from what a push sent and
+// what came back, stamped on the next send.
+export {
+  recordItemLists,
+  harvestRecordItems,
+  storedRecordItems,
+  stampRecordItems,
+  reprintRecordItems
+} from './record-items.js'
 export {
   recordsToProject,
   declarationsToQueriesYml,
