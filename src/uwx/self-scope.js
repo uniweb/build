@@ -131,7 +131,8 @@ export function ownSchemaNames(dataSchemas) {
  *
  * - `foundation` given (a pull passes the pinned ref the pushed site carries) — a
  *   catalog ref's scope, or a local foundation's, resolved from that value.
- * - else `foundationDir` — that local foundation's.
+ * - else `foundationDir` — that local foundation's; when its name has none, the scope of
+ *   the release `site.yml::foundation` pins for it, if that names the same foundation.
  * - else `site.yml::foundation`, the same way.
  *
  * A local foundation's scope is the one in its name, read by the one rule
@@ -148,7 +149,10 @@ export function ownSchemaNames(dataSchemas) {
  * @returns {Promise<string|null>}
  */
 export async function siteSelfScope(siteRoot, { foundation, foundationDir } = {}) {
-  if (foundation === undefined && foundationDir) return localFoundationScope(resolve(foundationDir))
+  if (foundation === undefined && foundationDir) {
+    const dir = resolve(foundationDir)
+    return (await localFoundationScope(dir)) ?? (await pinnedReleaseScope(siteRoot, dir))
+  }
   const declared = foundation !== undefined ? foundation : readDeclaredFoundation(siteRoot)
   const value = declared && typeof declared === 'object' ? declared.name : declared
   if (typeof value !== 'string' || !value) return null
@@ -167,6 +171,26 @@ async function localFoundationScope(dir) {
   try {
     const { name } = await readFoundationName(dir)
     return splitFoundationName(name).scope
+  } catch {
+    return null
+  }
+}
+
+// ⭐ A LOCAL FOUNDATION WHOSE NAME CARRIES NO SCOPE, handed in as the source of the release
+// the site pins (`site.yml::foundation: '@std/lab@0.1.0'`, the same name): that release's
+// scope. The site's pin IS the foundation's name with its scope, and the local folder is its
+// source. It arises when a registration was written to a file (`register --scope @std -o`),
+// which writes nothing into the source — so a push given the source (`--foundation <dir>`)
+// found a bare name and shipped every `@/x` unresolved (measured 2026-09-25: records of `@/team`
+// shipped as static files). ⛔ Only for the same name: a pin of another foundation says
+// nothing about this one's scope.
+async function pinnedReleaseScope(siteRoot, dir) {
+  const declared = readDeclaredFoundation(siteRoot)
+  const ref = parseCatalogRef(declared && typeof declared === 'object' ? declared.name : declared)
+  if (!ref?.scope) return null
+  try {
+    const { name } = await readFoundationName(dir)
+    return splitFoundationName(name).bare === ref.name ? ref.scope : null
   } catch {
     return null
   }

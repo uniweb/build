@@ -162,6 +162,32 @@ describe('push — `@/x` resolves into the foundation’s scope', () => {
     expect(pkg.warnings.join('\n')).toMatch(/foundation-relative/)
   })
 
+  it('⭐ a bare foundation handed in as the source of the release the site pins takes that release’s scope', async () => {
+    // What an offline seed does: `register --scope @std -o` writes a package and nothing into
+    // main.js, the site pins the release (`@std/fnd@0.1.0`), and the push is given the source
+    // with `--foundation` to resolve its data schemas. Measured 2026-09-25: records of `@/team`
+    // shipped as static files, "foundation-relative and the foundation has no scope yet".
+    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', foundationName: 'fnd' })
+    w('site/site.yml', 'name: T\nfoundation: "@std/fnd@0.1.0"\n')
+
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND, foundationDir: join(ROOT, 'fdn') })
+
+    expect(recordModelsOf(pkg)).toEqual(['@std/member'])
+    expect(queryOf(siteDocOf(pkg), 'members').schema).toBe('@std/member')
+    expect(pkg.warnings.join('\n')).not.toMatch(/foundation-relative/)
+    expect(await siteSelfScope(SITE, { foundationDir: join(ROOT, 'fdn') })).toBe('@std')
+  })
+
+  it('⛔ CONTROL — a pin of ANOTHER foundation lends no scope; a scoped name keeps its own', async () => {
+    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', foundationName: 'fnd' })
+    w('site/site.yml', 'name: T\nfoundation: "@std/other@0.1.0"\n')
+    expect(await siteSelfScope(SITE, { foundationDir: join(ROOT, 'fdn') })).toBeNull()
+
+    makeSite({ queriesYml: 'members:\n  schema: "@/member"\n', foundationName: '@acme/fnd' })
+    w('site/site.yml', 'name: T\nfoundation: "@std/fnd@0.1.0"\n')
+    expect(await siteSelfScope(SITE, { foundationDir: join(ROOT, 'fdn') })).toBe('@acme')
+  })
+
   it('⛔ CONTROL — a ref already in a scope is NOT re-scoped', async () => {
     // Without this the suite cannot tell "qualifies `@/`" from "rewrites every ref to
     // the scope", and the second would silently re-home a shared or other-org Model.
