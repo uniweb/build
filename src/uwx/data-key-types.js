@@ -19,9 +19,10 @@
 import { declaredKeys } from '@uniweb/core/data-keys'
 
 /**
- * The type each data key of a foundation's section types names, where every declaration of the
- * key agrees on one — from its built `schema.json`, whose section types sit at the top level
- * beside `_self` and `dataSchemas`, each with its `data:`.
+ * The type each data key of a foundation names, where every declaration of the key agrees on
+ * one — from its built `schema.json`: each section type's `data:` (at the top level, beside
+ * `_self` and `dataSchemas`), each layout's (under `_layouts`), and the foundation's own, which
+ * reaches every section (`main.js` `data:`, under `_self`).
  *
  * @param {object|null} foundationSchema - a foundation's built `dist/meta/schema.json`
  * @returns {Map<string, string>} data key → its schema ref (`team` → `@/member`)
@@ -29,13 +30,18 @@ import { declaredKeys } from '@uniweb/core/data-keys'
 export function dataKeyTypes(foundationSchema) {
   const types = new Map()
   const conflicted = new Set()
-  for (const [name, entry] of Object.entries(foundationSchema || {})) {
-    if (name === '_self' || name === 'dataSchemas' || !entry || typeof entry !== 'object') continue
-    for (const [key, ref] of declaredKeys(entry.data)) {
+  const declare = (data) => {
+    for (const [key, ref] of declaredKeys(data)) {
       if (!ref) continue
       if (types.has(key) && types.get(key) !== ref) conflicted.add(key)
       else types.set(key, ref)
     }
+  }
+  for (const [name, entry] of Object.entries(foundationSchema || {})) {
+    if (!entry || typeof entry !== 'object' || name === 'dataSchemas') continue
+    if (name === '_self') declare(entry.data)
+    else if (name === '_layouts') for (const layout of Object.values(entry)) declare(layout?.data)
+    else if (!name.startsWith('_')) declare(entry.data)
   }
   for (const key of conflicted) types.delete(key)
   return types

@@ -41,6 +41,7 @@ import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-s
 export { validateItem, isStaticallyCheckable } from '@uniweb/schemas/conform'
 import { buildSchema } from './schema.js'
 import { resolveRecordsDir, readEntityPool, groupPoolBySchema } from './site/entity-pool.js'
+import { dataKeyTypes, keyOfDefaultRef } from './uwx/data-key-types.js'
 import { readEntityFile } from './uwx/entity-source.js'
 import { toFetchList } from './site/data-fetcher.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
@@ -86,6 +87,9 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   const srcDir = resolveFoundationSrcPath(foundationPath)
   const foundation = await buildSchema(srcDir)
   const dataSchemas = foundation.dataSchemas || {}
+  // The type each data key names — a records folder named for a typed key holds records of
+  // that type when no data schema has its name (`uwx/data-key-types.js`).
+  const keyTypes = dataKeyTypes(foundation)
 
   const site = await collectSiteContent(siteRoot, { foundationPath })
   const config = site.config || {}
@@ -275,7 +279,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   // its folder names. ⭐ The set a push sends: every file in the records directory is
   // a record and every record is pushed, whether or not a section reads it — and
   // until 2026-09-24 one that no section read was never checked here.
-  const files = await validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths: config.paths, checked: checkedRecords })
+  const files = await validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes, paths: config.paths, checked: checkedRecords })
   violations.push(...files.violations)
   setupErrors.push(...files.setupErrors)
   for (const ref of files.schemas) schemasSeen.add(ref)
@@ -321,22 +325,34 @@ function listViolation(finding, label, base) {
  * that names no record of its schema is reported under the rule `ref`, since a push
  * cannot send it.
  *
- * A folder whose schema resolves to nothing is left out in silence: its records are
- * schema-less, delivered as files, and the push says so itself.
+ * ⭐ A folder named for a data key the foundation types, when no data schema has its name,
+ * holds records of that type and is checked against it — `records/team/` against `@/member`
+ * for `data: { team: '@/member' }` — the way a push sends them [Diego, 2026-09-25]
+ * (`uwx/data-key-types.js`). A folder whose schema resolves to nothing even so is left out in
+ * silence: its records are schema-less, delivered as files, and the push says so itself.
  *
  * @returns {Promise<{ violations: object[], setupErrors: object[], schemas: Set<string>, checked: number }>}
  */
-async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, paths, checked }) {
+async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes = new Map(), paths, checked }) {
   const out = { violations: [], setupErrors: [], schemas: new Set(), checked: 0 }
   const pool = await readEntityPool(siteRoot, { dir: resolveRecordsDir(siteRoot, paths).rel })
   // Every record is read first: a reference names a record of another schema by its
   // name — its file's, or its `slug:` — or by the id its file carries.
   const read = []
   const names = new Map() // schema (as its folder names it) → the names and ids of its records
-  for (const [ref, entities] of groupPoolBySchema(pool.entities)) {
-    const schema = await schemaForRecords(ref, { srcDir, dataSchemas })
+  for (const [folderRef, entities] of groupPoolBySchema(pool.entities)) {
+    let ref = folderRef
+    let schema = await schemaForRecords(folderRef, { srcDir, dataSchemas })
+    const typed = schema ? null : keyTypes.get(keyOfDefaultRef(folderRef))
+    if (typed) {
+      schema = await schemaForRecords(typed, { srcDir, dataSchemas })
+      if (schema) ref = typed
+    }
+    // Records are named under what they ARE — a reference to `@/member` finds the ones kept
+    // in `records/team/` — and under the folder's own ref as well.
     const known = names.get(ref) ?? new Set()
     names.set(ref, known)
+    if (ref !== folderRef) names.set(folderRef, known)
     for (const pooled of entities) {
       let records
       try {

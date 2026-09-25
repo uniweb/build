@@ -68,6 +68,15 @@ describe('dataKeyTypes — what each data key of a foundation is typed as', () =
     })
     expect(Object.fromEntries(types)).toEqual({ team: '@/member', people: '@std/person' })
   })
+
+  it('reads the foundation’s own keys (`main.js` `data:`) and each layout’s too', () => {
+    const types = dataKeyTypes({
+      _self: { data: { invoices: '@/invoice', sows: {} } },
+      _layouts: { Default: { data: { nav: '@std/nav' } } },
+      Invoice: {},
+    })
+    expect(Object.fromEntries(types)).toEqual({ invoices: '@/invoice', nav: '@std/nav' })
+  })
 })
 
 describe('push — a query named for a typed data key sends records of the type', () => {
