@@ -129,6 +129,15 @@ describe('pull — the same rule, backwards', () => {
     expect(q.team).toEqual({ schema: '@/member', sort: 'name' })
   })
 
+  it('⭐ a schema its author wrote in the shorthand — `team: "@/member"` — is left as written', () => {
+    makeSite({ queriesYml: "team: '@/member'\n" })
+    declarationsToQueriesYml({
+      document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [{ name: 'team', schema: '@acme/member' }] },
+      siteRoot: SITE,
+    })
+    expect(readFileSync(join(SITE, 'queries.yml'), 'utf8')).toBe("team: '@/member'\n")
+  })
+
   it('a new member is placed where the project keeps them — `records/team/`', () => {
     makeSite()
     const report = recordsToProject({

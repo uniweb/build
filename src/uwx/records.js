@@ -44,6 +44,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { detectFoundationType } from '../site/foundation-ref.js'
+import { foundationSchemaJson } from '../site/queries-config.js'
 import { join, resolve } from 'node:path'
 
 import { resolveQueriesConfig } from './queries-config.js'
@@ -790,6 +791,17 @@ function resolveFoundationDir(siteRoot, opts) {
   }
 }
 
+// The site's foundation's schema as a project keeps it for a catalog ref (`foundationSchemaJson`,
+// `site/registered-foundation.js`) — its section types, which is all this is read for.
+function registeredFoundationSchema(siteRoot) {
+  try {
+    const siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
+    return foundationSchemaJson(siteRoot, siteYml)
+  } catch {
+    return null
+  }
+}
+
 // Load the local foundation's built schema.json (the source of locally-defined
 // Model declarations), or null when there's no local foundation. `required` (set
 // when no remote resolver is available) turns "missing" into a helpful error
@@ -1021,7 +1033,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // holds records of that type. `keyTyped` records each such name for the `queries` Section,
   // which must name the same data schema (`sync-package.js` hands it on). ⛔ Never for a schema
   // a query asked for explicitly: that one is the author's, and fails loudly.
-  const keyTypes = dataKeyTypes(localSchema)
+  // A clone has no local foundation: its section types come from the registered version it keeps.
+  const keyTypes = dataKeyTypes(localSchema || registeredFoundationSchema(siteRoot))
   const keyTyped = new Map()
   const typedFor = async (schema) => {
     const key = keyOfDefaultRef(schema)

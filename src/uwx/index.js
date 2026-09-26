@@ -179,3 +179,12 @@ export {
 // is the foundation-less variant (only data-schema entities) for a schemas-only package.
 export { buildRegistryPackage, buildSchemaOnlyPackage } from './registry-package.js'
 export { toDataSchemaDeclaration } from './data-schema.js'
+
+// A registered foundation a project names by catalog ref — a clone's — kept under `.uniweb/` as the
+// backend answered for it, so the build, the push and the pull can read its section types.
+export {
+  registeredFoundationPath,
+  readRegisteredFoundation,
+  writeRegisteredFoundation,
+} from '../site/registered-foundation.js'
+export { parseCatalogRef } from '../site/foundation-ref.js'

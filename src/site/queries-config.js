@@ -31,7 +31,8 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { recordLayout } from '@uniweb/schemas/conform'
-import { detectFoundationType } from './foundation-ref.js'
+import { detectFoundationType, parseCatalogRef } from './foundation-ref.js'
+import { readRegisteredFoundation } from './registered-foundation.js'
 import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { refuseQueryRoute, refuseLimit } from './data-fetcher.js'
@@ -457,6 +458,12 @@ export function foundationDataSchemas(siteRoot, siteYml) {
  */
 export function foundationSchemaJson(siteRoot, siteYml) {
   if (!siteYml?.foundation) return null
+  // ⭐ A foundation named by catalog ref — every clone's — is read from the registered version the
+  // project keeps (`registered-foundation.js`): its section types, with their `data:`, and no data
+  // schemas, which travel as Models. Null until a push or a pull has read it.
+  if (parseCatalogRef(siteYml.foundation)) {
+    return readRegisteredFoundation(siteRoot, siteYml.foundation)?.schema || null
+  }
   let info
   try {
     info = detectFoundationType(siteYml.foundation, siteRoot)

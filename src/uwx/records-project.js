@@ -350,7 +350,7 @@ function isDerivedDeferred(d, dataSchemas, pulledModel = null) {
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null, authored = null, models = null) {
+function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null, authored = null, models = null, markedOnly = false) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
   // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
@@ -387,8 +387,15 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null, key
   // ⛔ UNLESS THE AUTHOR WROTE IT: a `schema:` the local file already states for this query is
   // written back as it is. Until 2026-09-25 a pull into a working copy dropped international's
   // `articles: { schema: '@std/article' }`, because a section types `articles` as `@std/article`.
-  const keyDefault = name && !own?.has(name) ? keyTypes?.get(name) : null
+  // ⭐ A CLONE GOES BY THE MARK. Where the key's type comes only from the registered foundation a
+  // project keeps (`markedOnly`: its foundation is a catalog ref), a query is written terse only when
+  // the push marked it `typed_by_data_key` — the author wrote no schema — or when the author's own
+  // file declares it with none. Unmarked, the schema was the author's, and it is written.
   const written = name ? authored?.get(name) : undefined
+  const typedHere = !markedOnly || wire.typed_by_data_key === true || written === null
+  const keyType = name && !own?.has(name) && typedHere ? keyTypes?.get(name) : null
+  // In the author's form: the registered version names the type qualified (`@acme/member`).
+  const keyDefault = keyType ? unresolveSelfScope(keyType, scope, own) : null
   if (d.schema && (d.schema === written || (d.schema !== defaultSchema(name) && d.schema !== keyDefault))) {
     decl.schema = d.schema
   }
@@ -465,13 +472,37 @@ function authoredQuerySchemas(siteRoot, siteYml) {
   } catch {
     file = null
   }
+  // name → the schema the author's file states for it, or null for a query it declares with none.
+  // ⛔ The string shorthand (`team: '@/member'`) is a schema too: until 2026-09-26 it read as none,
+  // so a pull could write the author's `team: '@/member'` back as `team: {}`.
   const out = new Map()
   for (const decls of [siteYml?.queries, file]) {
     if (!decls || typeof decls !== 'object') continue
     for (const [name, decl] of Object.entries(decls)) {
-      if (typeof decl?.schema === 'string') out.set(name, decl.schema)
-      else if (out.has(name)) out.delete(name)
+      const schema = typeof decl === 'string' ? decl : typeof decl?.schema === 'string' ? decl.schema : null
+      out.set(name, schema)
     }
+  }
+  return out
+}
+
+// ⭐ WHERE A NEW RECORD OF A KEY'S TYPE GOES: the folder of a query the site declares with no schema
+// of its own, whose name is a data key typed as that Model — `records/team/` for `team:` typed
+// `@acme/member` — which is where a push reads it from (`uwx/data-key-types.js`). model → folder.
+function typedQueryFolders(siteRoot, recordsRoot, scope, own, keyTypes) {
+  const out = new Map()
+  if (!keyTypes?.size) return out
+  let siteYml = null
+  try {
+    siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || null
+  } catch {
+    siteYml = null
+  }
+  for (const [name, schema] of authoredQuerySchemas(siteRoot, siteYml)) {
+    if (schema !== null || own?.has(name)) continue
+    const type = keyTypes.get(name)
+    const model = type ? resolveSelfScope(type, scope) : null
+    if (model && !out.has(model)) out.set(model, join(recordsRoot, name))
   }
   return out
 }
@@ -502,10 +533,12 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, models = n
   const own = ownSchemaNames(dataSchemas)
   const keyTypes = siteYml ? dataKeyTypes(foundationSchemaJson(siteRoot, siteYml)) : null
   const authored = authoredQuerySchemas(siteRoot, siteYml)
+  // The key types a catalog-ref foundation has come from the registered version the project keeps.
+  const markedOnly = Boolean(parseCatalogRef(siteYml?.foundation))
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes, authored, models)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes, authored, models, markedOnly)
     if (!name) continue
     queries[name] = decl
   }
@@ -684,6 +717,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // The file holding a record already, by its own id: the derived folder first, then any
   // other that reads as the same Model (`recordDirsReadingAs`).
   const readingAs = (model) => recordDirsReadingAs(recordsRoot, model, selfScope, { own, keyTypes })
+  const keyFolders = typedQueryFolders(siteRoot, recordsRoot, selfScope, own, keyTypes)
   const findRecordFile = (poolDir, model, ownId) => {
     const dirs = [poolDir, ...readingAs(model).filter((dir) => dir !== poolDir)]
     // Single-record files first, as before; then an entry of a list file.
@@ -737,8 +771,9 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
       isNew = false
     } else {
       // A new record goes where the project already keeps records of its Model — its derived
-      // folder, else another that reads as the Model (`records/team/` for `@std/member`).
-      const home = existsSync(poolDir) ? poolDir : readingAs(schema)[0] || poolDir
+      // folder, else another that reads as the Model (`records/team/` for `@std/member`), else the
+      // folder of a query typed by its data key as the Model (`typedQueryFolders`) — a clone's.
+      const home = existsSync(poolDir) ? poolDir : readingAs(schema)[0] || keyFolders.get(schema) || poolDir
       format = defaultFormat(home, declaration)
       filePath = join(home, where.slug + EXT_FOR_FORMAT[format])
       isNew = true
