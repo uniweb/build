@@ -64,6 +64,8 @@ import {
   assertRouteFolder,
   mountEntriesOf,
   rootOrderConfig,
+  composeLocalizedRoute,
+  isValidSlugSegment,
 } from '../site/content-collector.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder } from '../site/layout-folder.js'
@@ -141,6 +143,68 @@ function stripCredentials(block, label) {
 // processMarkdownFile only destructures type/component/preset/input/props/
 // fetch/data/id out of frontmatter, so `background:` and `theme:` stay
 // inside section.params — lift them into the entity type's dedicated fields.
+const AUTHORED_SLUG = Symbol('authoredSlug')
+const isPlainRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+/**
+ * Post-pass: a page's localized URL segments ride in its localized `slug`, beside the source one —
+ * the slot the site-content Model declares for them. From the form the site keeps them in, read as
+ * the build reads it (`buildRouteTranslations`): the pages' own `slug: { <locale>: <segment> }` when
+ * any page declares one, else `site.yml`'s `i18n.routeTranslations`, a whole route per locale, taken
+ * apart into each page's segment. ⛔ Until 2026-09-26 only the source slug was sent, so a clone lost
+ * every localized URL — measured on the `international` template, whose `/acerca-de` came back as
+ * `/about`.
+ *
+ * A route whose localized form is not its parent's plus one segment cannot be said per page, and is
+ * named rather than dropped in silence. Mutates the records in place.
+ */
+function localizeRouteSlugs(pages, siteYml, sourceLocale) {
+  const languages = Array.isArray(siteYml?.languages) ? new Set(siteYml.languages) : null
+  const carried = (locale, segment) =>
+    locale !== sourceLocale && (!languages || languages.has(locale)) && isValidSlugSegment(segment)
+  // Each page with the canonical route the build gives it: an index page takes its parent's.
+  const visit = (records, parentRoute, fn) => {
+    for (const record of records || []) {
+      const slug = record?.slug?.[sourceLocale]
+      const route = record.is_index ? parentRoute : parentRoute === '/' ? `/${slug}` : `${parentRoute}/${slug}`
+      fn(record, route, parentRoute)
+      visit(record.$children, route, fn)
+    }
+  }
+  let ownForm = false
+  visit(pages, '/', (record) => { if (record[AUTHORED_SLUG]) ownForm = true })
+  if (ownForm) {
+    visit(pages, '/', (record) => {
+      for (const [locale, segment] of Object.entries(record[AUTHORED_SLUG] || {})) {
+        if (carried(locale, segment)) record.slug[locale] = segment
+      }
+    })
+    return
+  }
+  const map = siteYml?.i18n?.routeTranslations
+  if (!isPlainRecord(map)) return
+  const segments = new Map() // canonical route → { locale: segment }, as the build composes them
+  visit(pages, '/', (record, route, parentRoute) => {
+    if (record.is_dynamic || record.is_index) return
+    for (const [locale, table] of Object.entries(map)) {
+      const display = isPlainRecord(table) ? table[route] : undefined
+      if (typeof display !== 'string') continue
+      const parts = display.split('/').filter(Boolean)
+      const segment = parts.pop()
+      if (`/${parts.join('/')}` !== composeLocalizedRoute(parentRoute, locale, segments)) {
+        console.warn(
+          `uwx/site: \`i18n.routeTranslations\` gives ${route} the ${locale} URL ${display}, which is not ` +
+            `its parent's plus one segment — it is not sent. Give the page \`slug: { ${locale}: … }\` instead.`
+        )
+        continue
+      }
+      if (!carried(locale, segment)) continue
+      record.slug[locale] = segment
+      segments.set(route, { ...(segments.get(route) || {}), [locale]: segment })
+    }
+  })
+}
+
 // Post-pass: wrap every section's `content` (page sections + their `$children`,
 // recursing into child pages, plus layout sections) into per-locale form. Mutates
 // the records in place. Only called for multi-locale sites. Each target locale is
@@ -214,10 +278,10 @@ function buildPageData(config, ctx) {
   const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations, where } =
     ctx
   // The page `slug` is the localized route source — a `{lang: slug}` map (the
-  // site-content Model declares it localized; greenlit 2026-06-13). A single-locale
-  // site emits one entry (`{ en: "home" }`); per-locale slug overrides for
-  // multi-locale localized routes (from i18n.routeTranslations) are follow-on
-  // producer work. `mode` is the plain delivery mode.
+  // site-content Model declares it localized; greenlit 2026-06-13). The source
+  // entry is the folder name; the other locales' segments are added by
+  // `localizeRouteSlugs`, once the whole tree is known. `mode` is the plain
+  // delivery mode.
   const data = { slug: { [sourceLocale]: slug }, mode } // both required by the entity type
   setIf(data, 'stable_id', config.id)
   setIf(data, 'title', localizeScalar(config.title, sourceLocale, translations))
@@ -657,6 +721,9 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     // natural handle — spec default). The path is NEVER the identity.
     const id = data.stable_id || slug
     const record = withIdentity(id, data)
+    // A page's own localized URL segments, for `localizeRouteSlugs` — under a symbol, so they
+    // are never serialized as a field of the record.
+    if (!dyn && isPlainRecord(f.config?.slug)) record[AUTHORED_SLUG] = f.config.slug
 
     if (mode === 'page') {
       const sections = await collectPageSectionsNested(f.path, siteRoot, f.config)
@@ -1494,6 +1561,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     // — as the build does — pushed no homepage at all.
     const top = rootOrderConfig({ pages: siteYml.pages, index: siteYml.index }, rootConfig)
     pages = await walkPagesNested({ ...ctx, siteIndex: top.homepage }, pagesPath, '', rootMode, { pages: top.pages }, true)
+    localizeRouteSlugs(pages, siteYml, sourceLocale)
   }
 
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)

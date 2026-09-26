@@ -29,12 +29,19 @@ describe('producer-side lists cannot drift silently', () => {
       src.match(/const PAGE_YML_MANAGED_KEYS = new Set\(\[([\s\S]*?)\]\)/)[1]
         .match(/'([^']+)'/g).map((s) => s.slice(1, -1))
     )
+    // The declared exceptions: keys a pull writes and deliberately never removes, each with its
+    // reason beside the set (`PAGE_YML_KEPT_KEYS`). Named, so an exception is a decision, not drift.
+    const kept = new Set(
+      src.match(/const PAGE_YML_KEPT_KEYS = new Set\(\[([\s\S]*?)\]\)/)[1]
+        .match(/'([^']+)'/g).map((s) => s.slice(1, -1))
+    )
     const body = src.match(/function pageRecordToYml\([\s\S]*?\n}/)[0]
     const emitted = new Set([...body.matchAll(/\by\.([A-Za-z_]+)\s*=/g)].map((m) => m[1]))
 
     expect(emitted.size).toBeGreaterThan(5) // the regex actually found something
-    const unmanaged = [...emitted].filter((k) => !declared.has(k))
+    const unmanaged = [...emitted].filter((k) => !declared.has(k) && !kept.has(k))
     expect(unmanaged).toEqual([])
+    expect([...kept].filter((k) => declared.has(k))).toEqual([]) // one or the other, never both
   })
 
   it('every info field the producer emits is either mapped or deliberately special-cased', () => {

@@ -2977,6 +2977,8 @@ function orderFolders(folders, parentPages) {
 export {
   assertRouteFolder,
   buildRouteTranslations,
+  composeLocalizedRoute,
+  isValidSlugSegment,
   declaredHomepage,
   orderFolders,
   extractItemName,

@@ -48,7 +48,7 @@ import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteContentDirs } from './site-dirs.js'
-import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray } from '../site/content-collector.js'
+import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute } from '../site/content-collector.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
@@ -574,14 +574,23 @@ const PAGE_YML_MANAGED_KEYS = new Set([
   'query', 'fetch', 'data', 'sections',
 ])
 
+// Keys a pull WRITES and never removes — kept out of the managed set on purpose. ⭐ `slug`, a page's
+// localized URL segments: a document pushed by a CLI from before 2026-09-26 carries none, and reading
+// that as "none" would delete the author's (`pageSlugToYml`). The cost is that one removed in the
+// backend stays in the file.
+const PAGE_YML_KEPT_KEYS = new Set(['slug'])
+
 // Inverse of site.js buildPageData → the `page.yml` / `folder.yml` object.
-// `slug`/`mode`/`is_dynamic`/`param_name` are NOT keys here — they shape the
-// directory (name, page.yml vs folder.yml, `[param]/`), not the config body.
+// `mode`/`is_dynamic`/`param_name` are NOT keys here — they shape the directory
+// (name, page.yml vs folder.yml, `[param]/`), not the config body. `slug`'s source
+// entry names the directory; its other locales are the page's `slug:` map.
 // Identity (the backend uuid) is NOT written here — it lives in the gitignored
 // `.uniweb/` index so authored files stay clean.
-function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false } = {}) {
+function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false, slug = null } = {}) {
   const y = {}
   if (record.stable_id !== undefined) y.id = record.stable_id
+  // The page's localized URL segments, when the site keeps them here (`pageSlugToYml`).
+  if (slug) y.slug = slug
   const title = unwrapLocalized(record.title, sourceLocale)
   if (title !== undefined) y.title = title
   const description = unwrapLocalized(record.description, sourceLocale)
@@ -699,9 +708,11 @@ export function pageDirName(record, sourceLocale) {
 // section files, recursing into children. No deletes happen here. `routePrefix`
 // accumulates the slug-path route (for the free-form translation path; matches the
 // producer's slugPath, normalizeRouteForPath strips any leading slash on both).
-function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null) {
+function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null, canonParent = '/') {
   for (const record of pages || []) {
     const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
+    // The route the build gives the page — an index page takes its parent's.
+    const canon = record.is_index ? canonParent : canonParent === '/' ? `/${slug}` : `${canonParent}/${slug}`
     const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
     placeByUuid(ctx, record.$uuid, pageDir)
@@ -729,13 +740,62 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     const ymlPath = join(pageDir, ymlName)
     // Merge (not full-dump) so author-added keys survive a pull; the projector
     // owns only PAGE_YML_MANAGED_KEYS.
-    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, readAuthoredYaml(ymlPath), { isRoot: !routePrefix }), PAGE_YML_MANAGED_KEYS)
+    const existing = readAuthoredYaml(ymlPath)
+    const pageSlug = pageSlugToYml(record, canon, existing, sourceLocale, ctx)
+    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, existing, { isRoot: !routePrefix, slug: pageSlug }), PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
-    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath))
+    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)
   }
   reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage })
 }
+
+// ⭐ A PAGE'S LOCALIZED URL SEGMENTS — the other locales of its `slug` (`localizeRouteSlugs`, the push) —
+// go back where the site keeps them: the page's own `slug:` map, or `site.yml`'s `i18n.routeTranslations`
+// (`writeRouteTranslations`). A copy that keeps neither — a clone — gets the page's `slug:`, the form the
+// docs lead with. ⛔ Until 2026-09-26 they did not travel, and a clone lost every localized URL.
+//
+// ⚖️ A pull adds and changes these, and never removes one: a page pushed by a CLI from before carries
+// none, and reading that as "none" would delete what the author wrote.
+function pageSlugToYml(record, canon, existing, sourceLocale, ctx) {
+  if (record.is_dynamic) return null
+  const targets = localizedTargets(record.slug, sourceLocale)
+  const own = isPlainRecord(existing?.slug)
+  if (!own && ctx.routes?.siteMap && !record.is_index) {
+    if (Object.keys(targets).length) ctx.routes.slugs.set(canon, targets)
+    return null
+  }
+  if (!Object.keys(targets).length) return null
+  const next = { ...(own ? existing.slug : {}), ...targets }
+  return own && stableJson(next) === stableJson(existing.slug) ? null : next
+}
+
+// The locales of a pulled localized `slug` other than the source one.
+function localizedTargets(slug, sourceLocale) {
+  if (!isPlainRecord(slug)) return {}
+  return Object.fromEntries(
+    Object.entries(slug).filter(([l, v]) => l !== sourceLocale && l !== '@' && !l.startsWith('$') && typeof v === 'string' && v)
+  )
+}
+
+// `site.yml`'s `i18n.routeTranslations`, from the segments the pages carried — each route composed
+// as the build composes it. Written only when that changes it, since the write re-dumps `site.yml`.
+function writeRouteTranslations(siteRoot, routes) {
+  if (!routes?.siteMap || routes.slugs.size === 0) return
+  const authored = routes.siteMap
+  const next = JSON.parse(JSON.stringify(authored))
+  for (const [route, targets] of routes.slugs) {
+    for (const locale of Object.keys(targets)) {
+      if (!isPlainRecord(next[locale])) next[locale] = {}
+      next[locale][route] = composeLocalizedRoute(route, locale, routes.slugs)
+    }
+  }
+  if (stableJson(next) !== stableJson(authored)) writeSiteConfig(siteRoot, { i18n: { routeTranslations: next } })
+}
+
+const isPlainRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+const stableJson = (value) =>
+  JSON.stringify(value, (_, v) => (isPlainRecord(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v))
 
 // ⭐ A LEVEL'S ORDER IS THE BACKEND'S — the order the pulled document gives its pages, which is the
 // order a push read them in, or the one the app set since. A level whose own config already gives it
@@ -978,6 +1038,9 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
   const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale }
+  // Where the site keeps its localized URLs — `site.yml`'s map, when it has one (`pageSlugToYml`).
+  const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
+  ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }
 
   // Where the tree goes is what `site.yml` says NOW — `siteInfoToConfig` above has
   // written the document's `settings.paths` into it — because that is the file the
@@ -987,6 +1050,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   const home = (document?.pages || []).find((p) => p?.is_index)
   ctx.homepage = home ? pageDirName(home, sourceLocale) : null
   projectPages(document?.pages, pagesDir, sourceLocale, report, prune, ctx)
+  writeRouteTranslations(siteRoot, ctx.routes)
   // ⭐ THE HOMEPAGE IS THE ONE THE BACKEND MARKS, named where the site names it. ⛔ Until 2026-09-26 a
   // clone kept its scaffold's `index: home` whatever the site's homepage was — a page that may not
   // exist — and the homepage was marked on its own page.yml instead.
