@@ -70,9 +70,14 @@ export function servedFingerprint(url) {
  * that works, not a local path to a file that is not there. Filling those in is
  * the download's job, not this one.
  *
- * `assetId` itself is not removed: it is not a markdown attribute, so the
- * serializer drops it on the way to disk, and leaving it lets a caller project
- * the same document twice without the second pass losing identity.
+ * ⭐ **And the identity goes with the URL it stood beside.** A restored reference is
+ * the author's path again, and that path's id is kept in `sync.json`, which the next
+ * push stamps from (`rewriteEntityAssets`). ⛔ Until 2026-09-26 `assetId` was left in
+ * place, on the ground that the markdown serializer drops it — true of a body, and of
+ * nothing else: a pull into the copy that pushed wrote `assetId`/`assetExt` into the
+ * frontmatter of every section whose background it restored, and a body holding a
+ * pushed image never compared as unchanged, since the author's markdown parses with
+ * no id. An id the map does not know keeps its identity, with its URL.
  *
  * @param {object} document - the site-content document (mutated in place)
  * @param {Record<string, { id: string, ext: string }>} map - readAssetMap()
@@ -98,6 +103,8 @@ export function restoreAssetRefs(document, map) {
       if (!ref) { stats.unknown++; continue }
       const urlAttr = slot.urls.find((k) => typeof node[k] === 'string') || slot.urls[0]
       node[urlAttr] = ref
+      delete node[slot.id]
+      delete node[slot.ext]
       stats.restored++
     }
     for (const v of Object.values(node)) visit(v)
