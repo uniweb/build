@@ -268,6 +268,25 @@ export function recordsToEntities({
         `"${bodyTarget.section}.${bodyTarget.key}"`
     )
   }
+  // ⛔ A SITE'S FOLDER PLACES ONLY A RECORD SOMETHING CAN REFERENCE. A folder entry is a
+  // reference, and a Model with no brief is not linkable (`toDataSchemaDeclaration`), so a
+  // backend refuses to place its records — measured 2026-09-25 as a `409 … linkable: false`,
+  // and by design (backend, 2026-09-26). Refused here, once for the schema, before anything
+  // is sent — and saying why, which the backend's refusal names only by its design doc.
+  if (declaration.linkable === false) {
+    const slugs = (records || []).map((r) => r?.slug).filter(Boolean)
+    if (slugs.length) {
+      const named = slugs.slice(0, 3).join(', ') + (slugs.length > 3 ? ` and ${slugs.length - 3} more` : '')
+      refusals.push(
+        `${label}: ${declaration.name} has no brief, so a site's folder cannot place its records ` +
+          `(${named}) — a folder entry is a reference, and only a record of a schema with a brief ` +
+          'can be one. Give the schema a brief (`brief: true` on one of its sections), or keep this ' +
+          'data out of records/.'
+      )
+    }
+    return { entities, warnings, refusals }
+  }
+
   for (const record of records || []) {
     const slug = record.slug
     if (!slug) {

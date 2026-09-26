@@ -89,6 +89,35 @@ describe('emitEntityPackage — model-by-name', () => {
 
 // ── Step B: recordsToEntities → `$`-document (pure mapper) ──────────
 
+// A folder entry is a reference, and only a record of a schema with a brief can be one — so a
+// backend cannot place a record of a brief-less schema (by design, backend 2026-09-26).
+describe('recordsToEntities — a schema with no brief', () => {
+  const declaration = lower(
+    { name: 'taxon', sections: { ranks: { many: true, self_nesting: true, fields: { name: { type: 'string' } } } } },
+    '@/taxon',
+    '@acme/taxon'
+  )
+
+  it('⭐ its records are refused before a push, once for the schema, saying why', () => {
+    expect(declaration.linkable).toBe(false)
+    const { entities, refusals } = recordsToEntities({ label: 'taxon', records: [{ slug: 'tree', ranks: [{ name: 'Animalia' }] }], declaration })
+    expect(entities).toEqual([])
+    expect(refusals).toHaveLength(1)
+    expect(refusals[0]).toMatch(/@acme\/taxon has no brief, so a site's folder cannot place its records \(tree\)/)
+  })
+
+  it('CONTROL — the same records under a schema with a brief are sent', () => {
+    const briefed = lower(
+      { name: 'taxon', sections: { brief: { brief: true, fields: { title: { type: 'string' } } }, ranks: { many: true, fields: { name: { type: 'string' } } } } },
+      '@/taxon',
+      '@acme/taxon'
+    )
+    const { entities, refusals } = recordsToEntities({ label: 'taxon', records: [{ slug: 'tree', brief: { title: 'Tree' }, ranks: [{ name: 'Animalia' }] }], declaration: briefed })
+    expect(refusals).toEqual([])
+    expect(entities).toHaveLength(1)
+  })
+})
+
 describe('recordsToEntities — flat record → brief section `$`-document', () => {
   const declaration = lower(
     {
@@ -275,7 +304,10 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     expect(warnings.some((w) => w.includes('without a slug'))).toBe(true)
   })
 
-  it('a Model whose root is a list is written by section and sent — it has no brief', () => {
+  // ⛔ This said "written by section and sent" until 2026-09-26: a Model whose root is a list has no
+  // brief, so it is not linkable, and a site's folder cannot place its records — measured as a 409 on
+  // 2026-09-25, by design (backend, 2026-09-26). It is refused before a push instead.
+  it('a Model whose root is a list has no brief — its records are refused before a push', () => {
     const declNoBrief = lower(
       { name: 'log', sections: { entries: { kind: 'multi', fields: { msg: { type: 'string' } } } } },
       '@/log',
@@ -287,18 +319,11 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
       records: [{ slug: 'a', entries: [{ msg: 'hi' }, { msg: 'there' }] }],
       declaration: declNoBrief,
     })
-    expect(refusals).toEqual([])
-    expect(entities[0].document).toEqual({
-      $id: 'logs/a',
-      $schema: '@acme/log',
-      entries: [{ msg: { en: 'hi' } }, { msg: { en: 'there' } }],
-    })
-    // …and its fields are not written flat: a list has no flat form.
-    expect(
-      recordsToEntities({ label: 'logs', records: [{ slug: 'b', msg: 'hi' }], declaration: declNoBrief }).refusals
-    ).toEqual([
-      'logs/b: @acme/log is written by section, each section under its own name ("entries") — ' +
-        'move "msg" into a record of "entries:".',
+    expect(entities).toEqual([])
+    expect(refusals).toEqual([
+      "logs: @acme/log has no brief, so a site's folder cannot place its records (a) — a folder " +
+        'entry is a reference, and only a record of a schema with a brief can be one. Give the schema ' +
+        'a brief (`brief: true` on one of its sections), or keep this data out of records/.',
     ])
   })
 })
