@@ -20,7 +20,7 @@
  * })
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -34,6 +34,8 @@ import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
 import { detectFoundationType } from './foundation-ref.js'
+import { readPreview, PREVIEW_ENV } from './preview.js'
+import { previewMediaPlugin } from './preview-media.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -112,6 +114,25 @@ function unique(list) {
   return [...new Set(list)]
 }
 
+/**
+ * The site's `@uniweb/runtime`, as a path to resolve its dependencies from — its REAL
+ * directory, since under pnpm a package's dependencies sit beside its real location and
+ * not beside the link to it. Null when the site has none installed.
+ */
+function runtimeAnchor(siteRoot) {
+  for (let dir = siteRoot; ; dir = dirname(dir)) {
+    const candidate = join(dir, 'node_modules', '@uniweb', 'runtime')
+    if (existsSync(join(candidate, 'package.json'))) {
+      try {
+        return join(realpathSync(candidate), 'package.json')
+      } catch {
+        return null
+      }
+    }
+    if (dirname(dir) === dir) return null
+  }
+}
+
 export async function defineSiteConfig(options = {}) {
   const {
     plugins: extraPlugins = [],
@@ -147,8 +168,15 @@ export async function defineSiteConfig(options = {}) {
   const rawBase = baseOption || process.env.UNIWEB_BASE || siteConfig.base
   const base = rawBase ? normalizeBasePath(String(rawBase)) : undefined
 
-  // Detect foundation type
-  const foundationInfo = detectFoundationType(siteConfig.foundation, siteRoot)
+  // What `uniweb dev` read from the backend the site is on, for this dev server alone
+  // (`./preview.js`) — null unless it was handed one.
+  const preview = readPreview(process.env)
+
+  // Detect foundation type. A catalog ref resolves only for a preview, which is handed where
+  // the backend serves it.
+  const foundationInfo = detectFoundationType(siteConfig.foundation, siteRoot, {
+    served: preview?.foundation
+  })
 
   // Check for runtime mode (env variable or URL-based foundation).
   // Runtime mode means the foundation is loaded by URL at runtime; the
@@ -376,11 +404,37 @@ export async function defineSiteConfig(options = {}) {
     plugins.push(importMapPlugin({
       basePath: base || '/',
       // Under pnpm strict mode, the site may not have @uniweb/core in its own
-      // node_modules. Resolve from the foundation directory where it's a direct dep.
+      // node_modules. Resolve from the foundation directory where it's a direct dep —
+      // or, with no local foundation, as the site's runtime resolves it: the runtime is
+      // the host app whose instances a foundation must share.
       resolveFrom: foundationInfo.path
         ? resolve(foundationInfo.path, 'package.json')
-        : resolve(siteRoot, 'main.js'),
+        : runtimeAnchor(siteRoot) || resolve(siteRoot, 'main.js'),
+      // A foundation served from a URL imports its externals by bare name, and in dev
+      // nothing else resolves them: the foundation dev plugin rewrites a LOCAL
+      // foundation's imports, and a served one is not ours to rewrite. So the dev server
+      // answers the import map a build writes, bridging to the site's own copies.
+      serveInDev: foundationInfo.type === 'url'
     }))
+  }
+
+  if (preview) {
+    // ⛔ A PREVIEW'S ANSWER NEVER REACHES A BUILT ARTIFACT. Where the backend serves a
+    // version is decided at publish and read for one preview (`./preview.js`); written into
+    // `dist/` it would outlive the answer.
+    plugins.push({
+      name: 'uniweb:preview-only',
+      config(_config, env) {
+        if (env.command === 'build') {
+          throw new Error(
+            `[site] ${PREVIEW_ENV} is what \`uniweb dev\` read from ${preview.backend} for one ` +
+              `preview, and a build does not take it. Unset it to build.`
+          )
+        }
+      }
+    })
+    // A media URL the site keeps from its backend is fetched from that backend.
+    plugins.push(previewMediaPlugin({ backend: preview.backend, siteRoot }))
   }
 
   // Preload hints for runtime-loaded foundations and extensions.

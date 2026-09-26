@@ -85,6 +85,9 @@ export const bridgeFileName = (spec) => `${spec.replace(/\//g, '-')}.js`
  * @param {Object} [options.devBridges] - Map of specifier → dev-mode URL for import map injection in dev.
  *   When provided, the import map is injected in both dev and prod (with different URLs).
  *   When omitted, the import map is only injected in prod (dev uses other mechanisms like transformRequest).
+ * @param {boolean} [options.serveInDev] - In dev, point each external at a bridge the dev server serves
+ *   itself — the module a build would emit, through Vite's pipeline, so its bare imports become the very
+ *   URLs the host app imports. For a module loaded from a URL, which no dev plugin rewrites.
  * @returns {import('vite').Plugin}
  */
 export function importMapPlugin({
@@ -93,14 +96,17 @@ export function importMapPlugin({
   basePath = '/',
   resolveFrom,
   devBridges,
+  serveInDev = false,
 } = {}) {
   let isBuild = false
+  let devBase = '/'
 
   return {
     name,
 
     configResolved(config) {
       isBuild = config.command === 'build'
+      devBase = config.base || '/'
     },
 
     resolveId(id, importer) {
@@ -199,6 +205,13 @@ export function importMapPlugin({
           }
         } else if (devBridges) {
           Object.assign(imports, devBridges)
+        } else if (serveInDev) {
+          // Vite serves a virtual module at `/@id/`, its NUL written `__x00__` — the id `load`
+          // answers below, so dev and build bridge one module the same way.
+          for (const ext of externals) {
+            const spec = specOf(ext)
+            imports[spec] = `${devBase}@id/__x00__${IMPORT_MAP_PREFIX.slice(1)}${spec}`
+          }
         } else {
           // No dev injection — consumer handles dev mode separately
           return html

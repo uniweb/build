@@ -66,11 +66,15 @@ export function parseCatalogRef(value) {
  *
  * @param {string|Object} foundation - Foundation config from site.yml
  * @param {string} siteRoot - Path to site directory
- * @returns {{ type: 'local'|'url', name?: string, url?: string, cssUrl?: string, path?: string }}
+ * @param {Object} [options]
+ * @param {{ ref: string, url: string, cssUrl?: string|null }|null} [options.served] - where a
+ *   catalog ref is served, for a preview: the answer `uniweb dev` read from the backend the site
+ *   is on (`./preview.js`). Honored for the ref it names and no other.
+ * @returns {{ type: 'local'|'url', name?: string, url?: string, cssUrl?: string, path?: string, served?: string }}
  * @throws {Error} when the declaration shape is invalid (versionless registry
  *   ref, unknown name with no local match, etc.)
  */
-export function detectFoundationType(foundation, siteRoot) {
+export function detectFoundationType(foundation, siteRoot, { served = null } = {}) {
   // Object form with explicit URL
   if (foundation && typeof foundation === 'object') {
     if (foundation.url) {
@@ -119,10 +123,25 @@ export function detectFoundationType(foundation, siteRoot) {
   // --backend` and the documented env var all left it pinned — and the artifact
   // names were the pre-`entry.js` ones the build stopped emitting.
   if (parseCatalogRef(name)) {
+    // ⭐ A PREVIEW is handed the answer instead of guessing it: `uniweb dev` asks the backend
+    // the site is on where this version is served, for its one dev server. The answer names
+    // the ref it is for, so it resolves the DECLARED foundation and can substitute no other.
+    if (served?.url && served.ref === name) {
+      return { type: 'url', url: served.url, cssUrl: served.cssUrl || null, served: name }
+    }
+    if (served?.ref) {
+      throw new Error(
+        `This dev server was handed where "${served.ref}" is served, and site.yml names "${name}".\n` +
+          `Restart \`uniweb dev\`, which asks for the foundation site.yml names.`
+      )
+    }
     throw new Error(
       [
         `Foundation "${name}" is a catalog ref, and a build cannot resolve it to a URL.`,
         `Where a foundation is served is the host's to declare, so the build does not guess it.`,
+        ``,
+        `  • Previewing the site? Run \`uniweb dev\`, which asks the backend the site is on`,
+        `    where this version is served — and says so when that backend does not tell it.`,
         ``,
         `  • Deploying to another host (\`uniweb deploy --host=<adapter>\`), or taking`,
         `    the build anywhere (\`uniweb export\`)? Declare the served URL in site.yml —`,

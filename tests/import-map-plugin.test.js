@@ -137,3 +137,36 @@ describe('the foundation-facing contract', () => {
     ])
   })
 })
+
+describe('a dev server bridging a module loaded from a URL (`serveInDev`)', () => {
+  const importMap = (plugin) =>
+    JSON.parse(plugin.transformIndexHtml.handler('<head>\n</head>').match(/<script type="importmap">([\s\S]*?)<\/script>/)[1])
+
+  // A foundation served from a URL imports its externals by bare name, and in dev no plugin rewrites
+  // it — so the dev server answers the map a build writes, pointing each name at the bridge it serves
+  // through its own pipeline: the module `load` answers, at Vite's address for a virtual id.
+  it('maps each external to the bridge the dev server serves', () => {
+    const plugin = importMapPlugin({ externals: ['react', '@uniweb/core'], serveInDev: true })
+    plugin.configResolved({ command: 'serve', base: '/' })
+    expect(importMap(plugin).imports).toEqual({
+      react: '/@id/__x00__importmap:react',
+      '@uniweb/core': '/@id/__x00__importmap:@uniweb/core',
+    })
+  })
+
+  it('under the dev server’s base', () => {
+    const plugin = importMapPlugin({ externals: ['react'], serveInDev: true })
+    plugin.configResolved({ command: 'serve', base: '/sub/' })
+    expect(importMap(plugin).imports).toEqual({ react: '/sub/@id/__x00__importmap:react' })
+  })
+
+  it('CONTROL — a build writes its emitted bridges, and a dev server not asked writes no map', () => {
+    const built = importMapPlugin({ externals: ['react'], serveInDev: true })
+    built.configResolved({ command: 'build', base: '/' })
+    expect(importMap(built).imports).toEqual({ react: '/_importmap/react.js' })
+
+    const quiet = importMapPlugin({ externals: ['react'] })
+    quiet.configResolved({ command: 'serve', base: '/' })
+    expect(quiet.transformIndexHtml.handler('<head>\n</head>')).toBe('<head>\n</head>')
+  })
+})
