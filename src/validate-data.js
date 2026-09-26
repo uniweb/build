@@ -206,10 +206,19 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
         // (pass 2). A list root was deferred here until then, though the query's records
         // are exactly that list.
 
+        // ⭐ WHAT THE QUERY'S RECORDS ARE, for a key typed by a schema whose root is a list: the
+        // list's ITEMS when the query selects other records (`@/link` records feeding `@/menu`), but
+        // ENTITIES of the list schema — each holding a whole list — when the query names that schema
+        // itself (`menus: { schema: '@/menu' }`). ⛔ Until 2026-09-26 both were checked as items, so
+        // every query over a list schema failed ("missing required field '[0].label'") and a push,
+        // which gates on this check, stopped.
+        const decl = typeof input.query === 'string' ? config.queries?.[input.query] : null
+        const querySchema = decl ? decl.schema ?? keyTypes.get(input.query) ?? `@/${input.query}` : undefined
+
         const pairKey = `${input.path} ${ref}`
         let entry = work.get(pairKey)
         if (!entry) {
-          entry = { path: input.path, ref, schema, users: [] }
+          entry = { path: input.path, ref, schema, users: [], entities: querySchema === ref }
           work.set(pairKey, entry)
         }
         entry.users.push({ route: page.route, section: type, key })
@@ -234,10 +243,11 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
     schemasSeen.add(entry.ref)
     const items = Array.isArray(records) ? records : [records]
 
-    // A schema whose ROOT IS A LIST describes the whole value the key receives, and the
-    // query's records ARE that list — so they are checked once, as the list. Any other
-    // schema describes one record, checked per record.
-    if (rootListSection(entry.schema)) {
+    // A schema whose ROOT IS A LIST describes the whole value the key receives, and a query of
+    // other records delivers that list — so they are checked once, as the list. Any other
+    // schema describes one record, checked per record — and so are the entities of a list
+    // schema a query of that schema delivers, each holding its list (`validateItem`).
+    if (rootListSection(entry.schema) && !entry.entities) {
       recordCount += items.length
       const base = { file: entry.path, schema: entry.ref, users: entry.users }
       for (const finding of validateBound(entry.schema, items)) {
