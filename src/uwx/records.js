@@ -164,7 +164,10 @@ export function entityContentHash(document) {
   return sha256Hex(toJsonBuffer(stripSigils(document)))
 }
 
-function encodeFieldValue(value, field, sourceLocale, translations) {
+// ⭐ `context` is the record the value is in — `{ key: '<pool>/<handle>' }`, the identity its
+// translations are kept under (`i18n/records.js`) — so an entry that reads differently in some
+// records (`{ default, overrides }`) is sent as each one renders it.
+function encodeFieldValue(value, field, sourceLocale, translations, context = null) {
   if (value == null) return value
   if (isProseMirrorField(field)) {
     // markdown source → ProseMirror doc. When localized, wrap per-locale exactly
@@ -172,7 +175,7 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     // path, flushed to locales/records/{locale}.json by the caller.
     const doc = typeof value === 'string' ? markdownToProseMirror(value) : value
     if (!field.localized) return doc
-    const localized = localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations)
+    const localized = localizeContentDoc(doc, sourceLocale, Object.keys(translations || {}), translations, context)
     // localizeContentDoc returns a BARE doc when there are no target locales. A
     // localized field MUST ride as a `{ lang: value }` map on the wire — the
     // schema-driven projector drops a localized field whose value isn't a map — so
@@ -184,14 +187,14 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     // element — the shape page `keywords` already take. ⛔ It went up as a bare list
     // until 2026-09-24: `localizeScalar` passes any object through, arrays included.
     if (Array.isArray(value) && !isMarkupTextField(field)) {
-      return localizeScalarList(value, sourceLocale, translations)
+      return localizeScalarList(value, sourceLocale, translations, context)
     }
     // A markup `text` field (format markdown|html) rides as its RAW source, and its
     // translation is the one the build renders: the whole value, keyed by the value
     // (`i18n/records.js` extracts and translates it as one unit) — so it is wrapped
     // per string like any localized scalar. ⛔ Until 2026-09-26 it went up as its
     // source alone (`{ en }`), though the static build rendered its translation.
-    return localizeScalar(value, sourceLocale, translations)
+    return localizeScalar(value, sourceLocale, translations, context)
   }
   // A Date handed in by a caller. The backend validates `date` as `YYYY-MM-DD` and
   // `datetime` as RFC3339 — emitting full ISO for a `date` field is rejected before
@@ -290,14 +293,15 @@ export function recordsToEntities({
     const uuid = record.$uuid || null
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
-    const enc = encoder(sourceLocale, translations, refs)
+    const context = { key: `${label}/${slug}` } // as the build keys the record's translations
+    const enc = encoder(sourceLocale, translations, refs, context)
     const sections = layout.flat ? readFlat(layout, record, enc) : readBySection(layout, record, enc)
     // The markdown body fills the content body field, in whatever section declares it,
     // unless the file already sets that field.
     if (hasBody && bodyTarget) {
       const data = (sections[bodyTarget.section] ??= {})
       if (data[bodyTarget.key] == null) {
-        data[bodyTarget.key] = encodeFieldValue(record.$body, bodyTarget.field, sourceLocale, translations)
+        data[bodyTarget.key] = encodeFieldValue(record.$body, bodyTarget.field, sourceLocale, translations, context)
       }
     }
     // The brief is the card, and is always sent — an empty one included, so a required
@@ -380,8 +384,8 @@ export function recordsToEntities({
 // What one record's read collects beside the values: the keys with no place in the
 // schema, the keys written flat in a schema written by section, and values of the
 // wrong shape for their section.
-function encoder(sourceLocale, translations, refs = null) {
-  return { sourceLocale, translations, refs, undeclared: [], misplaced: [], shape: [], unresolved: [], namesNew: 0 }
+function encoder(sourceLocale, translations, refs = null, context = null) {
+  return { sourceLocale, translations, refs, context, undeclared: [], misplaced: [], shape: [], unresolved: [], namesNew: 0 }
 }
 
 // A flat record: its keys, minus the record's own, are the one section's fields.
@@ -472,7 +476,7 @@ function encodeRecord(fields, value, enc, prefix, reserved) {
         ? encodeSection(field, v, enc, `${prefix}${key}`)
         : field?.type === 'entity_ref'
           ? encodeReference(v, field, enc, `${prefix}${key}`)
-          : encodeFieldValue(v, field, enc.sourceLocale, enc.translations)
+          : encodeFieldValue(v, field, enc.sourceLocale, enc.translations, enc.context)
     if (encoded !== undefined) out[key] = encoded
   }
   for (const key of Object.keys(value)) {

@@ -254,7 +254,7 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
  *        it has no name for is written as the uuid.
  * @returns {string} the source-file text
  */
-export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName }) {
+export function renderEntityDocument({ document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName, context = null }) {
   const layout = recordFileLayout(declaration)
   if (layout.sections.length === 0) {
     throw new Error('uwx/render: the data schema declares no sections')
@@ -267,7 +267,7 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   }
   // Markdown: the content body field, wherever its single section is, becomes the body.
   const { target } = contentBodyTarget(declaration)
-  const dec = { sourceLocale, collector, freeformRelPath, refName, bodyAt: format === 'md' ? target : null, body: '' }
+  const dec = { sourceLocale, collector, freeformRelPath, refName, context, bodyAt: format === 'md' ? target : null, body: '' }
 
   const record = {}
   if (document?.$uuid) record.$uuid = document.$uuid
@@ -338,16 +338,16 @@ function decodeLeaf(raw, field, dec, isBody) {
   if (field?.type === 'entity_ref') return decodeReference(raw, field, dec)
   if (isProseMirrorField(field)) {
     const sourceDoc = field.localized
-      ? unwrapLocalizedContent(raw, dec.sourceLocale, dec.collector, isBody ? dec.freeformRelPath : undefined)
+      ? unwrapLocalizedContent(raw, dec.sourceLocale, dec.collector, isBody ? dec.freeformRelPath : undefined, null, dec.context)
       : raw
     return sourceDoc ? proseMirrorToMarkdown(sourceDoc) : ''
   }
   if (!field?.localized) return raw
   if (Array.isArray(raw)) {
-    if (!isBody) for (const item of raw) dec.collector?.add(item)
+    if (!isBody) for (const item of raw) dec.collector?.add(item, dec.context)
     return unwrapLocalizedList(raw, dec.sourceLocale)
   }
-  if (!isBody) dec.collector?.add(raw)
+  if (!isBody) dec.collector?.add(raw, dec.context)
   return unwrapLocalized(raw, dec.sourceLocale)
 }
 

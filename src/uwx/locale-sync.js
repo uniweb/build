@@ -195,18 +195,44 @@ export function localizeContentDoc(doc, sourceLocale, targetLocales, translation
  * @param {string} sourceLocale
  * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
  */
-export function localizeScalar(value, sourceLocale, translations) {
+export function localizeScalar(value, sourceLocale, translations, context = null) {
   if (value == null) return undefined
   if (typeof value === 'object') return value // already a { lang: value } map
   const out = { [sourceLocale]: value }
   if (translations && typeof value === 'string') {
     const hash = computeHash(value)
     for (const [locale, table] of Object.entries(translations)) {
-      const tgt = table?.[hash]
+      const tgt = translationFor(table?.[hash], context)
       if (typeof tgt === 'string') out[locale] = tgt
     }
   }
   return out
+}
+
+/**
+ * A translation entry's text in one place: a string as it is; `{ default, overrides }` — a
+ * string that reads differently in some places — by the place's key (`contextKey`), else its
+ * default. ⛔ Until 2026-09-26 a scalar's entry in that form was dropped whole, its default too:
+ * the build rendered it, and a push carried the source alone.
+ *
+ * @param {*} entry - a translation file's entry
+ * @param {{ key?: string, page?: string, section?: string }|null} context - where the value is
+ * @returns {string|undefined}
+ */
+export function translationFor(entry, context) {
+  if (typeof entry === 'string') return entry
+  if (!entry || typeof entry !== 'object') return undefined
+  const override = context ? entry.overrides?.[contextKey(context)] : undefined
+  return typeof override === 'string' ? override : typeof entry.default === 'string' ? entry.default : undefined
+}
+
+/**
+ * The key an override names a place by: a record's identity (`<pool>/<handle>`, as `key`), or
+ * a page section's `<route>:<id>` (`i18n/extract.js::translationContext`) — as `i18n/merge.js`
+ * reads it.
+ */
+export function contextKey(context) {
+  return context?.key ?? `${context?.page}:${context?.section}`
 }
 
 /**
@@ -220,10 +246,10 @@ export function localizeScalar(value, sourceLocale, translations) {
  * @param {string} sourceLocale
  * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
  */
-export function localizeScalarList(value, sourceLocale, translations) {
+export function localizeScalarList(value, sourceLocale, translations, context = null) {
   if (value == null) return undefined
-  if (!Array.isArray(value)) return localizeScalar(value, sourceLocale, translations)
-  return value.map((item) => localizeScalar(item, sourceLocale, translations))
+  if (!Array.isArray(value)) return localizeScalar(value, sourceLocale, translations, context)
+  return value.map((item) => localizeScalar(item, sourceLocale, translations, context))
 }
 
 // True for a ProseMirror document node (`{ type: 'doc', content: [...] }`).
@@ -252,8 +278,10 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
   const byLocale = {} // { locale: { hash: target } }
   const freeformPending = [] // [{ locale, content }] — target-locale free-form bodies
 
-  // Record a localized SCALAR field's target locales (hash of the source scalar).
-  function add(localizedValue) {
+  // Record a localized SCALAR field's target locales (hash of the source scalar). ⭐ With `context`
+  // — the record it was read in (`{ key: '<pool>/<handle>' }`) — a translation that differs from one
+  // record to another comes back as the author's `{ default, overrides }`, as a page section's does.
+  function add(localizedValue, context = null) {
     if (!isLocalizedMap(localizedValue)) return
     const source = localizedValue[sourceLocale]
     if (typeof source !== 'string' || source.length === 0) return
@@ -262,8 +290,14 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
       if (locale === sourceLocale) continue
       if (typeof value !== 'string') continue
       const table = (byLocale[locale] ||= {})
-      if (table[hash] instanceof SeenInContexts) table[hash].plain = value
-      else table[hash] = value
+      if (!context) {
+        if (table[hash] instanceof SeenInContexts) table[hash].plain = value
+        else table[hash] = value
+        continue
+      }
+      const seen = table[hash] instanceof SeenInContexts ? table[hash] : new SeenInContexts(table[hash])
+      seen.values[contextKey(context)] = value
+      table[hash] = seen
     }
   }
 
@@ -285,7 +319,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
         continue
       }
       const seen = table[hash] instanceof SeenInContexts ? table[hash] : new SeenInContexts(table[hash])
-      seen.values[`${context.page}:${context.section}`] = target
+      seen.values[contextKey(context)] = target
       table[hash] = seen
     }
   }
@@ -426,7 +460,7 @@ export function unwrapLocalizedContent(content, sourceLocale, collector, freefor
 class SeenInContexts {
   constructor(plain) {
     this.plain = typeof plain === 'string' ? plain : undefined
-    this.values = {} // "<page>:<section>" → translation
+    this.values = {} // a place's key (`contextKey`) → translation
   }
 }
 

@@ -426,10 +426,13 @@ export function writeThemeFile(siteRoot, theme) {
  *        body (so a target-locale full-doc body is captured for locales/freeform/)
  * @param {(model: string, uuid: string) => string|null} [opts.refName] - the name a
  *        referenced record goes by, so a reference is written as that name
+ * @param {{ key: string }} [opts.context] - the record's identity, `<pool>/<handle>`, which
+ *        its translations are kept under — an entry that differs from record to record
+ *        comes back as `{ default, overrides }`
  * @returns {'updated'|'unchanged'}
  */
-export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName }) {
-  const text = renderEntityDocument({ document, declaration, format, sourceLocale, collector, freeformRelPath, refName })
+export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName, context = null }) {
+  const text = renderEntityDocument({ document, declaration, format, sourceLocale, collector, freeformRelPath, refName, context })
   // ⭐ A record the pull did not change keeps the author's file — its key order, its blank lines, its
   // quoting. ⛔ Until 2026-09-26 each one was re-rendered (measured on the `international` template).
   let current = null

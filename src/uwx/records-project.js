@@ -36,7 +36,7 @@ import { readBackendState, updateBackendMap } from './sync-store.js'
 import { restoreAssetRefs } from './asset-map.js'
 import { documentSchema } from './entity-document.js'
 import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join, resolve, relative, extname, basename, sep } from 'node:path'
+import { join, resolve, relative, dirname, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
@@ -130,10 +130,10 @@ export function findListEntryByUuid(poolDir, uuid) {
 
 // A pulled record written back into its entry of a JSON or YAML list, every other entry untouched.
 // The entry keeps its `slug`, which names it where a single-record file's name would.
-function writeRecordIntoList({ list, document, declaration, sourceLocale, collector, freeformRelPath, refName }) {
+function writeRecordIntoList({ list, document, declaration, sourceLocale, collector, freeformRelPath, refName, context = null }) {
   const text = readFileSync(list.path, 'utf8')
   const entries = list.format === 'json' ? JSON.parse(text) : yaml.load(text, YAML_OPTIONS)
-  const rendered = renderEntityDocument({ document, declaration, format: list.format, sourceLocale, collector, freeformRelPath, refName })
+  const rendered = renderEntityDocument({ document, declaration, format: list.format, sourceLocale, collector, freeformRelPath, refName, context })
   const { $uuid, ...fields } = list.format === 'json' ? JSON.parse(rendered) : yaml.load(rendered, YAML_OPTIONS)
   const slug = entries[list.index]?.slug
   const entry = { ...($uuid ? { $uuid } : {}), ...(slug !== undefined ? { slug } : {}), ...fields }
@@ -749,6 +749,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     // ⛔ The file gets the record's OWN id, never this backend's — a pull from a second
     // backend must not overwrite the identity the record already has.
     const toWrite = ownId && ownId !== theirs ? { ...document, $uuid: ownId } : document
+    // The record's identity as the build keys its translations — the folder its file is in,
+    // under `records/`, and its handle — so a translation that differs from one record to
+    // another comes back as the author's `{ default, overrides }`.
+    const context = { key: [relative(recordsRoot, dirname(existing?.path ?? filePath)).split(sep).join('/'), where.slug].filter(Boolean).join('/') }
     let status
     try {
       if (existing?.list && existing.format === 'bib') {
@@ -756,9 +760,9 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
         keptBib.add(existing.path)
         status = 'unchanged'
       } else if (existing?.list) {
-        status = writeRecordIntoList({ list: existing, document: toWrite, declaration, sourceLocale, collector, freeformRelPath, refName })
+        status = writeRecordIntoList({ list: existing, document: toWrite, declaration, sourceLocale, collector, freeformRelPath, refName, context })
       } else {
-        status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName })
+        status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName, context })
       }
     } catch (err) {
       // ⛔ A record that could not be written was not placed, so it is a SKIP, not a
