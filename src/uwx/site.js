@@ -980,7 +980,9 @@ const DECL_EMITTED_ABOVE = new Set([
   'limit',
   'excerpt',
   'deferred',
-  'queryable'
+  'queryable',
+  // Derived by the rule above, never taken from a file.
+  'typed_by_data_key',
 ])
 
 const DECL_NOT_ON_WIRE = new Set([
@@ -1022,7 +1024,7 @@ function externalSource(d) {
   return source
 }
 
-function queriesNested(declarations, uuids = null, scope = null, keyTyped = null) {
+function queriesNested(declarations, uuids = null, scope = null, keyTyped = null, queryFields = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
@@ -1041,8 +1043,13 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     // empty. The pull puts the author's `@/` back (`records-project.js::declarationsToQueriesYml`).
     // A query whose name-defaulted schema stands for the type of the data key of its name
     // names that type — the data schema its records are sent as (`data-key-types.js`).
-    const schema = (!d.schemaExplicit && keyTyped?.get(d.schema)) || d.schema
+    const typed = (!d.schemaExplicit && keyTyped?.get(d.schema)) || null
+    const schema = typed || d.schema
     setIf(data, 'schema', resolveSelfScope(schema, scope))
+    // ⭐ …AND SAYS SO, so a pull can tell the author's form (`team:`, no schema) from an explicit
+    // one — sent only where the deployment's `queries` Section declares the key (`GET /dev/config`
+    // → `siteContent.queryFields`), since one that does not refuses a push carrying it.
+    if (typed && Array.isArray(queryFields) && queryFields.includes('typed_by_data_key')) data.typed_by_data_key = true
     setIf(data, 'sort', d.sort)
     // Legacy `filter:` is not synced — it is translated to `where` upstream
     // (the canonical predicate). No legacy fields on the wire.
@@ -1663,7 +1670,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
   const scope = opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot)
-  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, scope, opts.keyTyped)
+  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, scope, opts.keyTyped, opts.queryFields)
   // Emitted ONLY when the file declares the key — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.

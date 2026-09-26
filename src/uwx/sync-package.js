@@ -359,6 +359,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         // …and the same data schema, where a name stands for the type of its data key
         // (`@/team` → `@/member`, `data-key-types.js`): decided once, by the records.
         keyTyped: col.keyTyped,
+        // …and whether this deployment takes the key that says so (`siteContent.queryFields`).
+        ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),
         // Withhold the `$services`/`$secrets` Sections when the caller has
         // determined the file is not asking for anything new by them. Passed
         // through rather than decided here: the last-agreed state is project
@@ -587,6 +589,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // banked is then, by construction, what was hashed. A future injection is covered
   // by adding one line here — not by finding every reader.
   const applied = {
+    ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),
     ...(assetRewrite ? { assetRewrite } : {}),
     ...(assetIds ? { assetIds } : {}),
     ...(injectInfo ? { injectInfo } : {}),

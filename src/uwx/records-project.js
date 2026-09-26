@@ -318,7 +318,9 @@ const DECL_WIRE_CONSUMED = new Set([
   'deferred',
   'detail_url',
   'detail',
-  'queryable'
+  'queryable',
+  // Says the query names no schema of its own — how the file is written, never a key in it.
+  'typed_by_data_key',
 ])
 
 // A standard schema (`@std/<name>`), normalized as the build resolves one — known with no foundation

@@ -142,3 +142,60 @@ describe('pull — the same rule, backwards', () => {
     expect(existsSync(join(SITE, 'records/member'))).toBe(false)
   })
 })
+
+/**
+ * ⭐ …AND THE PUSH SAYS SO: `typed_by_data_key`, so the author's form is on record.
+ *
+ * The query above goes out naming `@acme/member`, which is also what an explicit
+ * `schema: '@/member'` sends — so without a mark the author's `team:` could never be
+ * written back by a copy that cannot type the key itself. Sent only to a deployment
+ * whose `queries` Section declares the key (`GET /dev/config` → `siteContent.queryFields`):
+ * one that does not refuses a push carrying it.
+ */
+describe('push — `typed_by_data_key`, where the deployment takes it', () => {
+  const FIELDS = ['name', 'schema', 'sort', 'where', 'typed_by_data_key']
+  const team = (pkg) => siteDocOf(pkg).queries.find((q) => q.name === 'team')
+
+  it('⭐ a query typed by its data key says so, and the push banks what it was told', async () => {
+    makeSite()
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND, queryFields: FIELDS })
+    expect(team(pkg)).toMatchObject({ schema: '@acme/member', typed_by_data_key: true })
+    // Banked with the hashes, so an offline re-emit (`status`) builds the same document.
+    expect(pkg.applied.queryFields).toEqual(FIELDS)
+  })
+
+  it('CONTROL — a deployment that does not declare the key is sent nothing new', async () => {
+    makeSite()
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND, queryFields: ['name', 'schema'] })
+    expect(team(pkg).typed_by_data_key).toBeUndefined()
+    const none = await emitSyncPackages(SITE, { backend: BACKEND })
+    expect(team(none).typed_by_data_key).toBeUndefined()
+    expect(none.applied.queryFields).toBeUndefined()
+  })
+
+  it('CONTROL — a schema the author wrote is theirs, and is not marked', async () => {
+    makeSite({ queriesYml: 'team:\n  schema: "@/member"\n' })
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND, queryFields: FIELDS })
+    expect(team(pkg).schema).toBe('@acme/member')
+    expect(team(pkg).typed_by_data_key).toBeUndefined()
+  })
+
+  it('⛔ it is derived, never read from a file', async () => {
+    makeSite({ queriesYml: 'team:\n  schema: "@/member"\n  typed_by_data_key: true\n' })
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND, queryFields: FIELDS })
+    expect(team(pkg).typed_by_data_key).toBeUndefined()
+  })
+
+  it('a pull never writes it into `queries.yml`', () => {
+    makeSite({ queriesYml: 'team:\n  sort: name\n' })
+    declarationsToQueriesYml({
+      document: {
+        info: { foundation: '@acme/fnd@1.0.0' },
+        queries: [{ name: 'team', schema: '@acme/member', sort: 'name', typed_by_data_key: true }],
+      },
+      siteRoot: SITE,
+    })
+    const q = yaml.load(readFileSync(join(SITE, 'queries.yml'), 'utf8'))
+    expect(q.team).toEqual({ sort: 'name' })
+  })
+})
