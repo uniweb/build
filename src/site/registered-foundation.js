@@ -11,8 +11,9 @@
  * trip, never a wrong answer: the next push or pull reads it again. That is what makes `.uniweb/`
  * (gitignored, per copy) the right home for it.
  *
- * The reply is kept whole, as the backend answered it — its `schema` is the foundation schema a
- * build would emit, less its data schemas, which travel as Models.
+ * Only its `schema` is kept — the foundation schema a build would emit, less its data schemas, which
+ * travel as Models. ⛔ The reply carries more than a project reads, a serve location among it; a serve
+ * location is decided at publish and read from the response that carries it, never kept here.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
