@@ -779,3 +779,13 @@ describe('rich form schemas (FormBlock + tagged-block unified)', () => {
     })
   })
 })
+
+describe('an enum of `{ value, label }` entries', () => {
+  it('reaches the runtime as its values — the label is an editor’s', () => {
+    const lean = extractRuntimeSchema({
+      data: { posts: { fields: { status: { type: 'string', default: 'draft', enum: [{ value: 'draft', label: 'Draft' }, { value: 'live', label: 'Live' }] } } } },
+    })
+    expect(JSON.stringify(lean)).toContain('"enum":["draft","live"]')
+    expect(JSON.stringify(lean)).not.toContain('Draft')
+  })
+})

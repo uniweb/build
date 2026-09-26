@@ -26,6 +26,7 @@
 
 import { isRichSchema } from '@uniweb/core'
 import { deliveredFields } from '@uniweb/schemas/conform'
+import { enumValues } from '@uniweb/schemas/format'
 
 /**
  * A `data:` entry's schema ref — a ref string, or `{ schema }` — or null for an inline
@@ -70,7 +71,8 @@ function extractSchemaField(field) {
   // inert at runtime but carried through.
   if (field.type) lean.type = field.type
   if (field.default !== undefined) lean.default = field.default
-  if (field.enum !== undefined) lean.enum = field.enum
+  // The values only: an entry's label (`{ value, label }`) is an editor's, and the runtime compares.
+  if (field.enum !== undefined) lean.enum = enumValues(field.enum)
   if (field.options) lean.options = field.options
 
   // Nested object → recurse into its field map.
