@@ -66,6 +66,15 @@ describe('pull — the list a push sent for a site that declares none', () => {
     expect(siteYml(clone).languages).toBeUndefined()
   })
 
+  it('a clone with `publishLanguages` gets the list — the build refuses one without a declared list', async () => {
+    const clone = tmp()
+    const document = await siteProjectToDocument(project())
+    document.settings.publish_languages = ['en', 'es']
+    siteContentDocumentToProject({ document, siteRoot: clone })
+    expect(siteYml(clone).languages).toEqual(['en', 'es', 'fr'])
+    expect(siteYml(clone).publishLanguages).toEqual(['en', 'es'])
+  })
+
   it('a language the files do not make is written — the list, whole', async () => {
     const clone = tmp()
     const document = await siteProjectToDocument(project())

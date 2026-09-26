@@ -1158,14 +1158,16 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
   report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
   // The site's languages, for a site.yml that declares none (`siteInfoToConfig`) — written only where
-  // the translation files, now written, would not make the same list.
+  // the translation files, now written, would not make the same list, or where `publishLanguages`
+  // needs a declared list to draw from: the build refuses one without it.
   if (report.config?.pendingLanguages !== undefined) {
     const pulled = report.config.pendingLanguages
     delete report.config.pendingLanguages
-    const source = readAuthoredYaml(join(siteRoot, 'site.yml'))?.defaultLanguage || sourceLocale
+    const site = readAuthoredYaml(join(siteRoot, 'site.yml')) || {}
+    const source = site.defaultLanguage || sourceLocale
     const made = new Set([source, ...resolveLocaleList(undefined, localesDir(siteRoot))])
     const same = Array.isArray(pulled) && pulled.length === made.size && pulled.every((l) => made.has(l))
-    if (!same) writeSiteConfig(siteRoot, { languages: pulled })
+    if (!same || site.publishLanguages !== undefined) writeSiteConfig(siteRoot, { languages: pulled })
   }
   writePullIndex(siteRoot, ctx.newIndex)
   return report
