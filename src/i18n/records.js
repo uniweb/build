@@ -23,7 +23,9 @@ import { loadFreeformRecord } from './freeform.js'
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
 import { resolveQueriesConfig, resolveRecordSchemas } from '../site/queries-config.js'
-import { toDeliveredRecord, contentBodyField, misplacedFields } from '@uniweb/schemas/conform'
+import { toDeliveredRecord, contentBodyField, misplacedFields, flatRecordFields } from '@uniweb/schemas/conform'
+import { resolveDocForLocale } from './merge.js'
+import { extractUnitsFromDoc } from './extract.js'
 import { flatFormRefusal } from '../site/query-processor.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import {
@@ -154,6 +156,34 @@ function isFieldTranslatable(fieldDef) {
 
   // Unknown types: skip
   return 'no'
+}
+
+// Kinds that are values, not prose — by their normalized names and their authoring aliases.
+const VALUE_KINDS = new Set(['int', 'decimal', 'bool', 'date', 'datetime', 'file', 'ref', 'entity_ref', ...NON_TRANSLATABLE_TYPES])
+
+/**
+ * The fields a record's data schema says are not prose — `translatable: false`, an enum, a value
+ * kind (a date, a number, a file, a reference, a URL), JSON that is not rich text — which neither
+ * extraction nor translation touches, wherever the walk below meets them. ⭐ The schema decides; the
+ * heuristic fills in only where it says nothing — a list section's items, say.
+ *
+ * ⛔ Until 2026-09-26 a section-model schema — every standard one, and a foundation's own — was never
+ * read here (`resolveSchema` wants `fields`): `@std/article`'s `tags`, `translatable: false` because they
+ * are a grouping key, were extracted and translated by the build, while a push, reading the schema,
+ * sent none — so a clone of the site, and the site as a backend serves it, showed them untranslated.
+ *
+ * @param {Object|null} dataSchema - the query's data schema (`recordQueries`)
+ * @returns {Set<string>}
+ */
+function untranslatableFields(dataSchema) {
+  const out = new Set()
+  for (const [name, def] of Object.entries(flatRecordFields(dataSchema) || {})) {
+    if (!def || typeof def !== 'object' || def.translatable === true) continue
+    const valueString = def.type === 'string' && (def.format === 'url' || def.format === 'email')
+    const plainJson = def.type === 'json' && def.format !== 'prosemirror'
+    if (def.translatable === false || def.enum || VALUE_KINDS.has(def.type) || valueString || plainJson) out.add(name)
+  }
+  return out
 }
 
 /**
@@ -296,10 +326,10 @@ function extractFromItemWithSchema(data, fields, pathPrefix, context, units) {
  * Extract translatable fields from an item using heuristics.
  * Recursively walks the data, extracting strings that look like human-readable text.
  */
-function extractHeuristic(item, recordDir, units) {
+function extractHeuristic(item, recordDir, units, veto = null) {
   const context = { record: `${recordDir}/${recordHandle(item)}` }
 
-  extractFromItemHeuristic(item, '', context, units, 0)
+  extractFromItemHeuristic(item, '', context, units, 0, veto)
 
   // Also extract the record's ProseMirror documents, wherever it holds them
   for (const { path, doc } of proseMirrorDocs(item)) extractFromProseMirrorDoc(doc, context, units, path)
@@ -308,7 +338,7 @@ function extractHeuristic(item, recordDir, units) {
 /**
  * Recursively extract strings that look translatable.
  */
-function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
+function extractFromItemHeuristic(data, pathPrefix, context, units, depth, veto = null) {
   if (!data || typeof data !== 'object' || depth > MAX_HEURISTIC_DEPTH) return
 
   const entries = Array.isArray(data)
@@ -323,6 +353,8 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
 
     if (value === undefined || value === null) continue
     if (!Array.isArray(data) && isRecordSystemField(key, depth === 0)) continue
+    // A field the schema says is not prose — at any depth, with everything under it.
+    if (!Array.isArray(data) && veto?.has(key)) continue
 
     // Skip a ProseMirror document (handled separately)
     if (isProseMirrorDoc(value)) continue
@@ -340,7 +372,7 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth) {
       addUnit(units, value, fieldPath, context)
     } else if (typeof value === 'object') {
       // Recurse into objects and arrays
-      extractFromItemHeuristic(value, fieldPath, context, units, depth + 1)
+      extractFromItemHeuristic(value, fieldPath, context, units, depth + 1, veto)
     }
     // Skip numbers, booleans
   }
@@ -405,16 +437,16 @@ function translateItemWithSchema(data, fields, context, translations, topLevel =
 /**
  * Translate item fields using heuristics.
  */
-function translateHeuristic(item, context, translations) {
+function translateHeuristic(item, context, translations, veto = null) {
   const translated = translateDocs(item, context, translations)
-  translateItemHeuristic(translated, context, translations, 0)
+  translateItemHeuristic(translated, context, translations, 0, veto)
   return translated
 }
 
 /**
  * Recursively translate strings that look translatable.
  */
-function translateItemHeuristic(data, context, translations, depth) {
+function translateItemHeuristic(data, context, translations, depth, veto = null) {
   if (!data || typeof data !== 'object' || depth > MAX_HEURISTIC_DEPTH) return
 
   const keys = Array.isArray(data)
@@ -425,6 +457,8 @@ function translateItemHeuristic(data, context, translations, depth) {
     const value = data[key]
     if (value === undefined || value === null) continue
     if (!Array.isArray(data) && isRecordSystemField(key, depth === 0)) continue
+    // As extraction: a field the schema says is not prose is not translated (`untranslatableFields`).
+    if (!Array.isArray(data) && veto?.has(key)) continue
 
     // Skip a ProseMirror document (translated separately)
     if (isProseMirrorDoc(value)) continue
@@ -436,7 +470,7 @@ function translateItemHeuristic(data, context, translations, depth) {
 
       data[key] = lookupTranslation(value, context, translations)
     } else if (typeof value === 'object') {
-      translateItemHeuristic(value, context, translations, depth + 1)
+      translateItemHeuristic(value, context, translations, depth + 1, veto)
     }
   }
 }
@@ -504,7 +538,8 @@ export async function extractRecordContent(siteRoot, options = {}) {
   }
 
   const units = {}
-  const poolDirs = await poolDirsByQuery(siteRoot)
+  // Each query's pool and data schema — the schema says which fields are not prose (`untranslatableFields`).
+  const { poolDirs, schemas: dataSchemas } = await recordQueries(siteRoot)
 
   let files
   try {
@@ -528,11 +563,12 @@ export async function extractRecordContent(siteRoot, options = {}) {
       // Resolve schema once per collection
       const schema = await resolveSchema(queryName, siteRoot)
       const recordDir = poolDirs.get(queryName) ?? queryName
+      const veto = untranslatableFields(dataSchemas.get(queryName) ?? null)
       const extract = (item) => {
         if (schema?.fields) {
           extractWithSchema(item, schema, recordDir, units)
         } else {
-          extractHeuristic(item, recordDir, units)
+          extractHeuristic(item, recordDir, units, veto)
         }
       }
 
@@ -614,61 +650,12 @@ async function pruneRecordFiles(recordsDir, dataDir, keep) {
  * (`content`, `article_body.content`), which each unit's `field` starts with.
  */
 function extractFromProseMirrorDoc(doc, context, units, field = 'content') {
-  if (!doc.content) return
-
-  let headingIndex = 0
-  let paragraphIndex = 0
-
-  for (const node of doc.content) {
-    if (node.type === 'heading') {
-      const text = extractTextFromNode(node)
-      if (text) {
-        addUnit(units, text, `${field}.heading.${headingIndex}`, context)
-        headingIndex++
-      }
-    } else if (node.type === 'paragraph') {
-      const text = extractTextFromNode(node)
-      if (text) {
-        addUnit(units, text, `${field}.paragraph.${paragraphIndex}`, context)
-        paragraphIndex++
-      }
-    } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-      extractFromList(node, context, units, field)
-    }
-  }
+  // The units a page section's body makes (`extract.js::extractUnitsFromDoc`) — the keys translation
+  // looks up — each under the field the record holds the body in.
+  for (const unit of Object.values(extractUnitsFromDoc(doc))) addUnit(units, unit.source, `${field}.${unit.field}`, context)
 }
 
-/**
- * Extract from list nodes
- */
-function extractFromList(listNode, context, units, field = 'content') {
-  if (!listNode.content) return
 
-  listNode.content.forEach((listItem, index) => {
-    if (listItem.type === 'listItem' && listItem.content) {
-      for (const child of listItem.content) {
-        if (child.type === 'paragraph') {
-          const text = extractTextFromNode(child)
-          if (text) {
-            addUnit(units, text, `${field}.list.${index}`, context)
-          }
-        }
-      }
-    }
-  })
-}
-
-/**
- * Extract text content from a node
- */
-function extractTextFromNode(node) {
-  if (!node.content) return ''
-  return node.content
-    .filter(n => n.type === 'text')
-    .map(n => n.text || '')
-    .join('')
-    .trim()
-}
 
 // ---------------------------------------------------------------------------
 // Unit accumulator
@@ -867,7 +854,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
  */
 async function translateItemAsync(item, recordDir, translations, schema, options = {}) {
   const { locale, localesDir, freeformEnabled, dataSchema = null } = options
-  const translated = translateItemSync(item, recordDir, translations, schema)
+  const translated = translateItemSync(item, recordDir, translations, schema, untranslatableFields(dataSchema))
   if (!freeformEnabled || !locale || !localesDir) return translated
 
   // ⛔ The loader takes the record's SCHEMA ref and derives the pool path from it
@@ -924,14 +911,14 @@ function isPlainObject(value) {
 /**
  * Apply translations to a collection item (sync, hash-based only)
  */
-function translateItemSync(item, recordDir, translations, schema) {
+function translateItemSync(item, recordDir, translations, schema, veto = null) {
   const translated = { ...item }
   const context = { record: `${recordDir}/${recordHandle(item)}` }
 
   if (schema?.fields) {
     return translateWithSchema(translated, schema, context, translations)
   }
-  return translateHeuristic(translated, context, translations)
+  return translateHeuristic(translated, context, translations, veto)
 }
 
 // ---------------------------------------------------------------------------
@@ -942,35 +929,11 @@ function translateItemSync(item, recordDir, translations, schema) {
  * Translate a ProseMirror document
  */
 function translateProseMirrorDoc(doc, context, translations) {
-  if (!doc.content) return doc
-
-  const translated = { ...doc, content: [] }
-
-  for (const node of doc.content) {
-    translated.content.push(translateNode(node, context, translations))
-  }
-
-  return translated
-}
-
-/**
- * Recursively translate a node
- */
-function translateNode(node, context, translations) {
-  if (!node.content) return node
-
-  const translated = { ...node, content: [] }
-
-  for (const child of node.content) {
-    if (child.type === 'text' && child.text) {
-      const translatedText = lookupTranslation(child.text, context, translations)
-      translated.content.push({ ...child, text: translatedText })
-    } else {
-      translated.content.push(translateNode(child, context, translations))
-    }
-  }
-
-  return translated
+  // ⭐ Element by element, by the rule a page section is translated by (`merge.js`) — keyed by the
+  // record's identity for an override. ⛔ Until 2026-09-26 a record's rich text was looked up text node
+  // by text node, so a paragraph holding a link or an emphasis — several text nodes — never matched its
+  // translation, which is keyed by the whole paragraph, and rendered untranslated.
+  return resolveDocForLocale(doc, translations, { key: context.record }) ?? doc
 }
 
 /**
@@ -1056,7 +1019,7 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
         )
       )
     : records.map(item =>
-        translateItemSync(item, recordDir, translations, schema)
+        translateItemSync(item, recordDir, translations, schema, untranslatableFields(dataSchemas.get(queryName)))
       )
 
   return one ? translated[0] : translated

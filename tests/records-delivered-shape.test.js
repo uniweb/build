@@ -218,7 +218,9 @@ describe('a delivered record is translated where it holds its body', () => {
     await setup()
     const { manifest } = await spanish()
     const heading = Object.values(manifest.units).find((u) => u.source === 'A heading')
-    expect(heading.field).toBe('details.content.heading.0')
+    // Under the path the record holds its body at; the rest is the page extractor's name for the
+    // element (`extractUnitsFromDoc`) — a record's body makes the units a page section's does.
+    expect(heading.field).toBe('details.content.subtitle')
     expect(heading.contexts).toEqual([{ record: 'post/hello' }])
   })
 

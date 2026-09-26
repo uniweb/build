@@ -528,6 +528,19 @@ describe('recordsToEntities — markdown body → content body field', () => {
     expect(data.body).toEqual({ en: '\n# Welcome\n' }) // raw markdown string
   })
 
+  it('⭐ carries its translation — the whole value, as the build translates it', () => {
+    // ⛔ Until 2026-09-26 a markdown field went up as its source alone, though the static build
+    // rendered its translation (extracted and translated as one unit, keyed by the whole value).
+    const { entities } = recordsToEntities({
+      label: 'articles',
+      records: [{ slug: 'hello', title: 'Hello', $body: '\n# Welcome\n' }],
+      declaration: decl,
+      sourceLocale: 'en',
+      translations: { es: { [computeHash('\n# Welcome\n')]: '\n# Bienvenidos\n' } },
+    })
+    expect(entities[0].document.brief.body).toEqual({ en: '\n# Welcome\n', es: '\n# Bienvenidos\n' })
+  })
+
   it('lets an explicit frontmatter value win over the body', () => {
     const { entities } = recordsToEntities({
       label: 'articles',

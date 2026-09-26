@@ -62,7 +62,7 @@ import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.j
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { isUuid } from './uuid.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
-import { LOCALIZED_FIELD_ASSUMPTION, localize } from './localize.js'
+import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
@@ -186,13 +186,12 @@ function encodeFieldValue(value, field, sourceLocale, translations) {
     if (Array.isArray(value) && !isMarkupTextField(field)) {
       return localizeScalarList(value, sourceLocale, translations)
     }
-    // A markup `text` BODY (format markdown|html) rides as a RAW string, wrapped
-    // per-locale wholesale (its per-string translations live in the i18n manifest /
-    // free-form, not the scalar map). Other localized scalars wrap per-string from
-    // locales/records/{locale}.json.
-    return isMarkupTextField(field)
-      ? localize(value, sourceLocale)
-      : localizeScalar(value, sourceLocale, translations)
+    // A markup `text` field (format markdown|html) rides as its RAW source, and its
+    // translation is the one the build renders: the whole value, keyed by the value
+    // (`i18n/records.js` extracts and translates it as one unit) — so it is wrapped
+    // per string like any localized scalar. ⛔ Until 2026-09-26 it went up as its
+    // source alone (`{ en }`), though the static build rendered its translation.
+    return localizeScalar(value, sourceLocale, translations)
   }
   // A Date handed in by a caller. The backend validates `date` as `YYYY-MM-DD` and
   // `datetime` as RFC3339 — emitting full ISO for a `date` field is rejected before

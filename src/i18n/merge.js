@@ -444,7 +444,8 @@ function lookupTranslation(source, context, translations, fallbackToSource) {
 
   // Handle translation with overrides
   if (typeof translation === 'object') {
-    const contextKey = `${context.page}:${context.section}`
+    // A record's context is its identity (`context.key`, `records.js`); a section's, its page and id.
+    const contextKey = context?.key ?? `${context.page}:${context.section}`
 
     // Check for context-specific override
     if (translation.overrides?.[contextKey]) {
