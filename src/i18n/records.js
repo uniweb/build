@@ -15,6 +15,8 @@ import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DATA_DIR } from '@uniweb/core'
+import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { computeHash } from './hash.js'
 import { loadFreeformRecord } from './freeform.js'
 // The heuristic judgement about which strings inside structured data are prose.
@@ -22,7 +24,8 @@ import { loadFreeformRecord } from './freeform.js'
 // answer for a tagged data block's payload — a `label` is prose and an `href`
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
-import { resolveQueriesConfig, resolveRecordSchemas } from '../site/queries-config.js'
+import { resolveQueriesConfig, resolveRecordSchemas, foundationSchemaJson } from '../site/queries-config.js'
+import { dataKeyTypes, keyOfDefaultRef } from '../uwx/data-key-types.js'
 import { toDeliveredRecord, contentBodyField, misplacedFields, flatRecordFields } from '@uniweb/schemas/conform'
 import { resolveDocForLocale } from './merge.js'
 import { extractUnitsFromDoc } from './extract.js'
@@ -497,30 +500,66 @@ async function poolDirsByQuery(siteRoot) {
 }
 
 /**
- * Each query's pool directory (`poolDirsByQuery`) and the data schema its records are
+ * Each query's pool directory (`poolDirsByQuery`), the data schema its records are
  * delivered in (`resolveRecordSchemas`, null for none) — what a free-form translation
- * needs to put a body and frontmatter where the delivered record holds them.
+ * needs to put a body and frontmatter where the delivered record holds them — and the
+ * fields that are not prose (`untranslatableFields`), which neither extraction nor
+ * translation touches.
  *
- * @returns {Promise<{ poolDirs: Map<string, string>, schemas: Map<string, Object|null> }>}
+ * ⭐ THE VETO IS READ FROM THE SCHEMA THE RECORDS ARE OF, which is not always the one they
+ * are delivered in. A query whose name-defaulted schema (`@/team`) no data schema answers,
+ * for a data key the foundation types (`data: { team: '@/member' }`), holds records of that
+ * type — a push sends them as its entities (`uwx/data-key-types.js`), with the fields it
+ * says are not prose left untranslated — while the build delivers them as they are written.
+ * ⛔ Until 2026-09-26 no schema was read for them here, so the build translated a field the
+ * type marks `translatable: false`, and a push carried it untranslated. The type is read
+ * from the foundation's built `schema.json`, the input a push reads it from.
+ *
+ * @returns {Promise<{ poolDirs: Map<string, string>, schemas: Map<string, Object|null>, vetoes: Map<string, Set<string>> }>}
  */
 async function recordQueries(siteRoot) {
   const poolDirs = new Map()
   const schemas = new Map()
+  const vetoes = new Map()
   try {
-    const { declarations } = await resolveQueriesConfig(siteRoot)
+    const siteYml = await readSiteYml(siteRoot)
+    const { declarations } = await resolveQueriesConfig(siteRoot, { siteYml })
     const entries = Object.entries(declarations || {})
     for (const [name, decl] of entries) {
       const dirs = decl.schema ? poolDirsForSchema(decl.schema) : null
       poolDirs.set(name, dirs ? dirs.join('/') : name)
     }
-    const refs = entries.filter(([, d]) => d.url === undefined && d.schema).map(([, d]) => d.schema)
-    const resolved = (await resolveRecordSchemas(siteRoot, refs)).schemas
+    const local = entries.filter(([, d]) => d.url === undefined && d.schema)
+    const resolved = (await resolveRecordSchemas(siteRoot, local.map(([, d]) => d.schema), { siteYml })).schemas
     for (const [name, decl] of entries) schemas.set(name, (decl.schema && resolved[decl.schema]) || null)
+
+    const keyTyped = new Map() // query name → the type of the data key it is named for
+    const untyped = local.filter(([, d]) => !d.schemaExplicit && !resolved[d.schema])
+    if (untyped.length) {
+      const keyTypes = dataKeyTypes(foundationSchemaJson(siteRoot, siteYml))
+      for (const [name, d] of untyped) {
+        const type = keyTypes.get(keyOfDefaultRef(d.schema))
+        if (type) keyTyped.set(name, type)
+      }
+    }
+    const types = keyTyped.size ? (await resolveRecordSchemas(siteRoot, keyTyped.values(), { siteYml })).schemas : {}
+    for (const [name] of entries) vetoes.set(name, untranslatableFields(schemas.get(name) || types[keyTyped.get(name)] || null))
   } catch {
     // No resolvable config — every record keys by its query name, which is what
     // the extractor did before records existed.
   }
-  return { poolDirs, schemas }
+  return { poolDirs, schemas, vetoes }
+}
+
+/** A site's `site.yml`, or `{}`. */
+async function readSiteYml(siteRoot) {
+  const path = join(siteRoot, 'site.yml')
+  if (!existsSync(path)) return {}
+  try {
+    return yaml.load(await readFile(path, 'utf-8'), YAML_OPTIONS) || {}
+  } catch {
+    return {}
+  }
 }
 
 
@@ -538,8 +577,8 @@ export async function extractRecordContent(siteRoot, options = {}) {
   }
 
   const units = {}
-  // Each query's pool and data schema — the schema says which fields are not prose (`untranslatableFields`).
-  const { poolDirs, schemas: dataSchemas } = await recordQueries(siteRoot)
+  // Each query's pool, and the fields its records' schema says are not prose.
+  const { poolDirs, vetoes } = await recordQueries(siteRoot)
 
   let files
   try {
@@ -563,7 +602,7 @@ export async function extractRecordContent(siteRoot, options = {}) {
       // Resolve schema once per collection
       const schema = await resolveSchema(queryName, siteRoot)
       const recordDir = poolDirs.get(queryName) ?? queryName
-      const veto = untranslatableFields(dataSchemas.get(queryName) ?? null)
+      const veto = vetoes.get(queryName) ?? null
       const extract = (item) => {
         if (schema?.fields) {
           extractWithSchema(item, schema, recordDir, units)
@@ -730,7 +769,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
   // simply miss and every string falls back to its source. (This was missing for
   // a while and the failure was swallowed by the per-file catch below — the build
   // stayed green while nothing was translated.)
-  const { poolDirs, schemas: dataSchemas } = await recordQueries(siteRoot)
+  const { poolDirs, schemas: dataSchemas, vetoes } = await recordQueries(siteRoot)
 
   const outputs = {}
   // Reported rather than only logged — see the catch below.
@@ -786,7 +825,8 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
               locale,
               localesDir,
               freeformEnabled: hasFreeform,
-              dataSchema
+              dataSchema,
+              veto: vetoes.get(queryName)
             })
           )
         )
@@ -851,10 +891,11 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
  *
  * @param {Object} [options.dataSchema] - the data schema the record is delivered in
  *   (`recordQueries`), which says where a free-form body and frontmatter go
+ * @param {Set<string>} [options.veto] - the fields that are not prose (`recordQueries`)
  */
 async function translateItemAsync(item, recordDir, translations, schema, options = {}) {
-  const { locale, localesDir, freeformEnabled, dataSchema = null } = options
-  const translated = translateItemSync(item, recordDir, translations, schema, untranslatableFields(dataSchema))
+  const { locale, localesDir, freeformEnabled, dataSchema = null, veto = null } = options
+  const translated = translateItemSync(item, recordDir, translations, schema, veto)
   if (!freeformEnabled || !locale || !localesDir) return translated
 
   // ⛔ The loader takes the record's SCHEMA ref and derives the pool path from it
@@ -1004,7 +1045,7 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
   const records = one ? [items] : items
 
   const schema = await resolveSchema(queryName, siteRoot)
-  const { poolDirs, schemas: dataSchemas } = await recordQueries(siteRoot)
+  const { poolDirs, schemas: dataSchemas, vetoes } = await recordQueries(siteRoot)
   const recordDir = poolDirs.get(queryName) ?? queryName
 
   const translated = freeformEnabled
@@ -1014,13 +1055,12 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
             locale,
             localesDir,
             freeformEnabled,
-            dataSchema: dataSchemas.get(queryName) ?? null
+            dataSchema: dataSchemas.get(queryName) ?? null,
+            veto: vetoes.get(queryName)
           })
         )
       )
-    : records.map(item =>
-        translateItemSync(item, recordDir, translations, schema, untranslatableFields(dataSchemas.get(queryName)))
-      )
+    : records.map(item => translateItemSync(item, recordDir, translations, schema, vetoes.get(queryName)))
 
   return one ? translated[0] : translated
 }

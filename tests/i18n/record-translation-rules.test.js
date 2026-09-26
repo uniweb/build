@@ -73,4 +73,26 @@ describe('a record’s data schema decides what is prose', () => {
     expect(record.title).toBe('Hola')
     expect(record.tags).toEqual(['research', 'climate'])
   })
+
+  // A query named for a data key the foundation types — `team:`, no `schema:`, and a section type
+  // declaring `data: { team: '@/member' }` — holds records of that type, and a push sends them as
+  // its entities (`uwx/data-key-types.js`). ⛔ Until 2026-09-26 no schema was read for them here.
+  it('⭐ so does the type of the data key a query is named for', async () => {
+    w('site.yml', 'name: T\nfoundation: fnd\n')
+    w('package.json', { name: 'site', dependencies: { fnd: 'file:./fdn' } })
+    w('queries.yml', 'team: {}\n')
+    w('public/data/team.json', [{ slug: 'wei', name: 'Wei Zhang', role: 'Director' }])
+    w('locales/records/es.json', { [computeHash('Wei Zhang')]: 'Wei Zhang (es)', [computeHash('Director')]: 'Directora' })
+    w('fdn/package.json', { name: 'fnd', type: 'module', main: './_entry.generated.js' })
+    w('fdn/main.js', "export default { name: '@acme/fnd' }\n")
+    w('fdn/schemas/member.yml', 'name: member\nfields:\n  name: { type: string, translatable: false }\n  role: { type: string }\n')
+    w('fdn/dist/meta/schema.json', { _self: { name: '@acme/fnd' }, Team: { data: { team: '@/member' } } })
+
+    const sources = Object.values((await extractRecordContent(ROOT)).units).map((u) => u.source)
+    expect(sources).toEqual(['Director'])
+
+    const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
+    const record = JSON.parse(readFileSync(outputs.es.team, 'utf8'))[0]
+    expect(record).toMatchObject({ name: 'Wei Zhang', role: 'Directora' })
+  })
 })
