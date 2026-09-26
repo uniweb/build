@@ -532,6 +532,30 @@ This is the second paragraph.
       expect(collections.posts[0].excerpt).toContain('first paragraph')
     })
 
+    // ⛔ Until 2026-09-26 blocks joined with nothing: "…the excerpt.This is the second…".
+    it('separates the body’s blocks with a space, and runs a paragraph’s marks on', async () => {
+      const contentDir = join(testDir, 'records', 'posts')
+      mkdirSync(contentDir, { recursive: true })
+
+      writeFileSync(join(contentDir, 'post.md'), `---
+title: Post
+---
+
+# Flood
+
+The river *rose*.
+It was night.
+
+- Everyone was safe.
+`)
+
+      const collections = await processQueries(testDir, {
+        posts: '@/posts'
+      })
+
+      expect(collections.posts[0].excerpt).toBe('Flood The river rose. It was night. Everyone was safe.')
+    })
+
     it('should prefer explicit excerpt from frontmatter', async () => {
       const contentDir = join(testDir, 'records', 'posts')
       mkdirSync(contentDir, { recursive: true })

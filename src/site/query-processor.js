@@ -186,13 +186,21 @@ function extractPlainText(node) {
   if (node.type === 'text') {
     return node.text || ''
   }
+  if (node.type === 'hardBreak' || node.type === 'hard_break') return ' '
 
   if (Array.isArray(node.content)) {
-    return node.content.map(extractPlainText).join('')
+    // A textblock's inline children join as written; blocks are separated by a space. ⛔ Until
+    // 2026-09-26 blocks joined with nothing too, so an excerpt ran one paragraph into the next
+    // ("…in 1816.The river…").
+    const inline = node.content.every((child) => child?.type === 'text' || INLINE_NODES.has(child?.type))
+    return node.content.map(extractPlainText).join(inline ? '' : ' ')
   }
 
   return ''
 }
+
+// The inline nodes a textblock holds beside text.
+const INLINE_NODES = new Set(['hardBreak', 'hard_break', 'image', 'inset_ref', 'inset_placeholder', 'icon'])
 
 /**
  * Extract excerpt from content
