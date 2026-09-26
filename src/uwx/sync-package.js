@@ -517,6 +517,21 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   }))
   const changedRecords = recordChanged.filter((r) => r.changed)
 
+  // ⛔ A RECORD THAT LOST ITS IDENTITY IS NOT UNCHANGED. Its hash was banked for this backend,
+  // so a push to it succeeded — and wrote the record's `$uuid` into its file — yet it goes with no
+  // `$uuid` now: the line is gone from the file. Skipped as unchanged, the folder still named it,
+  // by `$ref`, and the backend refused a reference to a record the package does not carry
+  // (measured 2026-09-26); sent, it would be a second record. A pull writes it back.
+  const refusals = [...(col.refusals || [])]
+  for (const r of recordChanged) {
+    if (r.changed || r.entity.document.$uuid) continue
+    refusals.push(
+      `${r.entity.id}: its \`$uuid\` is gone from its file, though it was pushed to this backend ` +
+        'before — sent as it is, it would be a second record. Run `uniweb pull`, which writes it ' +
+        'back, then push.'
+    )
+  }
+
   let records = null
   // ⭐ A RECORD THAT NAMES A RECORD THIS PUSH CREATES names it by `$ref`
   // (`records.js::encodeReference`), and the backend stores the uuid it mints for it. The
@@ -582,7 +597,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     siteContent, records, siteContentUuid, hashes, warnings, skipped,
     // Records that name a record this push creates — see `namesNew` above.
     namesNew,
-    refusals: col.refusals || [],
+    refusals,
     schemaless: col.schemaless, localAssets, applied,
     // { stamped, unknown } when identity was applied; null when the caller passed
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed
