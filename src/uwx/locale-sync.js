@@ -431,10 +431,19 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
       }
     }
 
-    const merged = { ...existing, ...entries }
-    const sorted = {}
-    for (const key of Object.keys(merged).sort()) sorted[key] = merged[key]
-    const next = JSON.stringify(sorted, null, 2) + '\n'
+    // ⭐ A FILE THE PULL ADDS NOTHING TO IS LEFT AS IT IS, and one it does keeps its order: an entry
+    // changes in its place, and new ones follow, sorted. ⛔ Until 2026-09-26 every pull re-sorted the
+    // whole file by hash — measured on the `international` template, whose `es.json` runs in page
+    // order: a pull that changed no translation rewrote all 77 lines.
+    const fresh = Object.keys(entries).filter((key) => !(key in existing)).sort()
+    if (fresh.length === 0 && Object.entries(entries).every(([key, value]) => existing[key] === value)) {
+      report[locale] = 'unchanged'
+      continue
+    }
+    const merged = {}
+    for (const key of Object.keys(existing)) merged[key] = key in entries ? entries[key] : existing[key]
+    for (const key of fresh) merged[key] = entries[key]
+    const next = JSON.stringify(merged, null, 2) + '\n'
 
     let current = null
     try {

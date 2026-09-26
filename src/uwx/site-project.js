@@ -48,7 +48,8 @@ import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteContentDirs } from './site-dirs.js'
-import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute } from '../site/content-collector.js'
+import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames } from '../site/content-collector.js'
+import { parseFrontmatter } from '../utils/frontmatter.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
@@ -418,7 +419,7 @@ function reinlineInsets(content, insets) {
  *        structural maps on a localized `content` field are captured into it
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true }) {
   const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
@@ -441,7 +442,8 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
     const { key, value } = authorableDeclaration(fetch)
     frontmatter[key] = value
   }
-  if (stable_id !== undefined) frontmatter.id = stable_id
+  // `id:` only where the file's name does not already give it (`writeId`, `pageSectionsToFiles`).
+  if (stable_id !== undefined && writeId) frontmatter.id = stable_id
 
   const body = insets ? reinlineInsets(sourceContent, insets) : sourceContent
   return writeSectionFile({ filePath, content: body, params: frontmatter })
@@ -530,7 +532,9 @@ export function sectionFileBase(record) {
  */
 export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext }) {
   const written = []
-  const buildEntries = (records) => {
+  const files = [] // the top level's file names, in the document's order
+  let nested = false
+  const buildEntries = (records, top) => {
     const entries = []
     for (const record of records || []) {
       // Filesystem-safe filename (= stableId when already safe; derived from `$uuid`
@@ -540,7 +544,9 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
       const fileBase = sectionFileBase(record)
       if (!fileBase) continue // no stable id AND no `$uuid` → nothing to name it by
       const stableId = recordStableId(record) || fileBase
-      const filePath = join(pageDir, `${fileBase}.md`)
+      // The file the author keeps it in, else a new `<fileBase>.md` (`existingSectionFile`).
+      const filePath = existingSectionFile(pageDir, fileBase, stableId, { child: !top }) || join(pageDir, `${fileBase}.md`)
+      if (top) files.push(basename(filePath))
       // If this uuid's section moved (an app-side stableId rename), relocate its
       // `.md` in place before writing; then record its current path in the index.
       placeByUuid(ctx, record.$uuid, filePath)
@@ -551,14 +557,52 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         : null
       // Every path the renderer would find it at, so one the author keeps is written back in place.
       const freeformCandidates = pageContext ? freeformPathsFor({ stableId }, pageContext) : null
-      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, freeformRelPath, freeformCandidates })
+      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, freeformRelPath, freeformCandidates, writeId: fileSectionName(filePath) !== stableId })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
-      entries.push(children.length > 0 ? { [fileBase]: buildEntries(children) } : fileBase)
+      if (children.length > 0) nested = true
+      entries.push(children.length > 0 ? { [fileBase]: buildEntries(children, false) } : fileBase)
     }
     return entries
   }
-  return { sections: buildEntries(pageSections), written }
+  const sections = buildEntries(pageSections, true)
+  // Kept for the prune, which must not take a file this pull wrote into for an orphan.
+  ctx?.sectionFiles?.set(pageDir, new Set(written.map((f) => basename(f, extname(f)))))
+  // ⭐ Whether the files give the document's order by themselves, as the build reads a page with no
+  // `sections:` list — by name, numeric prefixes first — so the page needs no list to say it.
+  const filesGiveOrder = !nested && files.every((f) => !f.startsWith('@')) && [...files].sort(compareFilenames).join('\n') === files.join('\n')
+  return { sections, written, filesGiveOrder }
+}
+
+// The name the build reads a section file's section by: its file name without the `@` child mark and
+// the numeric ordering prefix (`2-story.md` holds `story`) — unless its frontmatter names another.
+function fileSectionName(filePath) {
+  const base = stripAtPrefix(basename(filePath, extname(filePath)))
+  return parseNumericPrefix(base).name || base
+}
+
+// ⭐ THE FILE THE AUTHOR KEEPS A SECTION IN — found by the name the build reads it by (`1-hero.md` holds
+// `hero`), else by the `id:` in its frontmatter. ⛔ Until 2026-09-26 a pull wrote every section as
+// `<id>.md` and pruned the author's `1-hero.md` as an orphan: a pull into the copy that pushed renamed
+// every numbered section file, wrote its id into it, and added a `sections:` list to recover the order
+// the numbers had given (measured on the `international` template).
+//
+// ⛔ A top-level section never takes an `@` file: that is a child's name, and the build renders an
+// `@` file no `nest:` claims only as an orphan appended at the end — listed by name, it is not rendered.
+function existingSectionFile(pageDir, fileBase, stableId, { child = false } = {}) {
+  if (!existsSync(pageDir)) return null
+  const entries = readdirSync(pageDir).filter((e) => isMarkdownFile(e) && (child || !e.startsWith('@')))
+  const found =
+    entries.find((e) => basename(e, '.md') === fileBase) ||
+    entries.find((e) => fileSectionName(e) === fileBase) ||
+    entries.find((e) => {
+      try {
+        return parseFrontmatter(readFileSync(join(pageDir, e), 'utf8'), e).frontmatter?.id === stableId
+      } catch {
+        return false // unreadable — not this one
+      }
+    })
+  return found ? join(pageDir, found) : null
 }
 
 // Every key pageRecordToYml can emit — the keys the projector OWNS in a
@@ -586,7 +630,7 @@ const PAGE_YML_KEPT_KEYS = new Set(['slug'])
 // entry names the directory; its other locales are the page's `slug:` map.
 // Identity (the backend uuid) is NOT written here — it lives in the gitignored
 // `.uniweb/` index so authored files stay clean.
-function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false, slug = null } = {}) {
+function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false, slug = null, filesGiveOrder = false } = {}) {
   const y = {}
   if (record.stable_id !== undefined) y.id = record.stable_id
   // The page's localized URL segments, when the site keeps them here (`pageSlugToYml`).
@@ -631,10 +675,17 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, {
   // their nesting, and anything new is discovered and appended as it would be in a
   // page that was never pulled.
   // ⭐ The author's own list is kept when it gives the same order — its `...` stays where they put it.
+  // A page with no list gets none where its files' names give the order (`filesGiveOrder`).
   if (sectionsArray && sectionsArray.length > 0) {
     const authored = existing?.sections
-    const same = Array.isArray(authored) && JSON.stringify(authored.filter((e) => e !== '...')) === JSON.stringify(sectionsArray)
-    y.sections = same ? authored : [...sectionsArray, '...']
+    if (Array.isArray(authored)) {
+      const same = JSON.stringify(authored.filter((e) => e !== '...')) === JSON.stringify(sectionsArray)
+      y.sections = same ? authored : [...sectionsArray, '...']
+    } else if (!filesGiveOrder) {
+      y.sections = [...sectionsArray, '...']
+    } else if (authored !== undefined) {
+      y.sections = authored // `'*'`, which says what no list says
+    }
   }
   return y
 }
@@ -687,7 +738,7 @@ function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
 // wipe it).
 function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
   writePagesTree(pages, pagesDir, sourceLocale, report, ctx, '', rootOrderList(ctx.siteRoot, pagesDir))
-  if (prune) prunePagesTree(pages, pagesDir, sourceLocale, report)
+  if (prune) prunePagesTree(pages, pagesDir, sourceLocale, report, ctx)
 }
 
 // The directory name for a page record (slug, or `[param]/` for a dynamic page).
@@ -730,9 +781,11 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     const pageContext = { route, id: record.stable_id }
 
     let sectionsArray = []
+    let filesGiveOrder = false
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
       const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx, pageContext })
       sectionsArray = r.sections
+      filesGiveOrder = r.filesGiveOrder
       report.sections.push(...r.written)
     }
 
@@ -742,7 +795,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // owns only PAGE_YML_MANAGED_KEYS.
     const existing = readAuthoredYaml(ymlPath)
     const pageSlug = pageSlugToYml(record, canon, existing, sourceLocale, ctx)
-    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, existing, { isRoot: !routePrefix, slug: pageSlug }), PAGE_YML_MANAGED_KEYS)
+    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, existing, { isRoot: !routePrefix, slug: pageSlug, filesGiveOrder }), PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
     writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)
@@ -878,16 +931,17 @@ function collectSectionFileBases(pageSections) {
 
 // Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per
 // level), AFTER every relocation in pass 1. Guarded against wiping an empty level.
-function prunePagesTree(pages, pagesDir, sourceLocale, report) {
+function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null) {
   const incomingDirs = new Set()
   for (const record of pages || []) {
     incomingDirs.add(pageDirName(record, sourceLocale))
     const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
     if (record.mode === 'page') {
-      const keep = collectSectionFileBases(record.page_sections)
+      // The files pass 1 wrote into — the author's own names among them — else the names it would give.
+      const keep = ctx?.sectionFiles?.get(pageDir) || collectSectionFileBases(record.page_sections)
       if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
-    prunePagesTree(record.$children || [], pageDir, sourceLocale, report)
+    prunePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx)
   }
   if (incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }
@@ -977,7 +1031,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
     // A relocation into a new area folder needs the folder first.
     mkdirSync(dirname(filePath), { recursive: true })
     placeByUuid(ctx, record.$uuid, filePath)
-    sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector })
+    sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, writeId: fileSectionName(filePath) !== recordStableId(record) })
     report.layout.push(filePath)
     written.push(filePath)
   }
@@ -1037,7 +1091,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // rename detection, build a fresh one as we project, then persist it. Items not
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
-  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale }
+  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map() }
   // Where the site keeps its localized URLs — `site.yml`'s map, when it has one (`pageSlugToYml`).
   const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
   ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }

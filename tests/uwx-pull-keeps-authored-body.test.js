@@ -46,3 +46,23 @@ describe('pull — a section it did not change', () => {
     expect(text).not.toContain('Instant Deploys')
   })
 })
+
+describe('pull — a section holding an inset', () => {
+  it('⭐ is left as the author wrote it — the inset’s default kind does not make it differ', () => {
+    // The pull re-inlines an inset without `embedKind: 'visual'`, the parser's default for `@Name`.
+    // Two headings with no blank line between them — the writer's markdown would add one.
+    const body = '# Build the future\n# with confidence\n\n![Platform overview](@Diagram)'
+    const pulled = markdownToProseMirror(body)
+    const walk = (n) => {
+      if (n?.type === 'inset_ref') delete n.attrs.embedKind
+      n?.content?.forEach(walk)
+    }
+    walk(pulled)
+    DIR = mkdtempSync(join(tmpdir(), 'uwx-keeps-body-'))
+    const filePath = join(DIR, 'hero.md')
+    const authored = `---\ntype: Hero\nid: hero\n---\n\n${body}\n`
+    writeFileSync(filePath, authored)
+    expect(writeSectionFile({ filePath, content: pulled, params: { type: 'Hero', id: 'hero' } })).toBe('unchanged')
+    expect(readFileSync(filePath, 'utf8')).toBe(authored)
+  })
+})

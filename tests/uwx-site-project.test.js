@@ -210,13 +210,15 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     layout_sections: [{ $id: 'header', area: 'header', layout_name: 'default', type: 'Header', content: docOf('Nav') }],
   }
 
-  it('projects pages (with sections:), a folder, a dynamic [param] page, and layout', () => {
+  it('projects pages, a folder, a dynamic [param] page, and layout', () => {
     const report = siteContentDocumentToProject({ document, siteRoot: dir })
 
-    // home page (page mode): page.yml with sections, + the section file. The homepage is the
-    // SITE's to name (`site.yml::index`), not marked on the root page's own page.yml as well.
+    // home page (page mode): page.yml + the section file — no `sections:` list, since one file's name is
+    // its order. The homepage is the SITE's to name (`site.yml::index`), not marked on the root page's
+    // own page.yml as well.
     const homeYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
-    expect(homeYml).toMatchObject({ id: 'home', title: 'Home', sections: ['hero', '...'] })
+    expect(homeYml).toMatchObject({ id: 'home', title: 'Home' })
+    expect(homeYml.sections).toBeUndefined()
     expect(homeYml.index).toBeUndefined()
     expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8')).index).toBe('home')
     expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
@@ -544,7 +546,7 @@ describe('an app-created section (a $uuid, no stable id) survives pull → edit 
     ],
   })
 
-  it('is written under a name derived from its $uuid, listed in sections:, and kept on a pruning re-pull', () => {
+  it('is written under a name derived from its $uuid, in the page’s order, and kept on a pruning re-pull', () => {
     const site = join(dir, 'site')
     mkdirSync(site, { recursive: true })
     siteContentDocumentToProject({ document: remote(), siteRoot: site })
@@ -552,8 +554,9 @@ describe('an app-created section (a $uuid, no stable id) survives pull → edit 
     const file = join(site, 'pages', 'home', 'split-content-95993360.md')
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, 'utf8')).toContain('Added in the app')
+    // `hero.md`, then `split-content-95993360.md`: the names give the order, so no list says it.
     const pageYml = yaml.load(readFileSync(join(site, 'pages', 'home', 'page.yml'), 'utf8'))
-    expect(pageYml.sections).toEqual(['hero', 'split-content-95993360', '...'])
+    expect(pageYml.sections).toBeUndefined()
 
     // A second pull with prune must not treat the file as an orphan.
     siteContentDocumentToProject({ document: remote(), siteRoot: site, prune: true })
@@ -1289,14 +1292,18 @@ describe('siteContentDocumentToProject — unsafe stable_id filename safety (A8)
       pages: [
         {
           $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
-          page_sections: [{ $id: 'odd', stable_id: 'odd id/with spaces', type: 'Sec', content: docOf('X') }],
+          // `aaa` after it, so the page needs a `sections:` list to say the order.
+          page_sections: [
+            { $id: 'odd', stable_id: 'odd id/with spaces', type: 'Sec', content: docOf('X') },
+            { $id: 'aaa', stable_id: 'aaa', type: 'Sec', content: docOf('A') },
+          ],
         },
       ],
     }
     siteContentDocumentToProject({ document, siteRoot: dir })
 
-    // Exactly one section file, with a filesystem-safe name (no space, no slash).
-    const files = readdirSync(join(dir, 'pages/home')).filter((f) => f.endsWith('.md'))
+    // Exactly one section file for it, with a filesystem-safe name (no space, no slash).
+    const files = readdirSync(join(dir, 'pages/home')).filter((f) => f.endsWith('.md') && f !== 'aaa.md')
     expect(files.length).toBe(1)
     const fname = files[0]
     expect(fname).toMatch(/^[A-Za-z0-9._-]+\.md$/)
@@ -1597,20 +1604,24 @@ describe('pulled pages stay open to new sections', () => {
           $id: 'site-content', $model: '@uniweb/site-content', info: { name: 'S' },
           pages: [{
             $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
-            page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: pmDoc('Hi') }],
+            // `intro` before `about`: not the names' order, so the page gets a list.
+            page_sections: [
+              { $id: 'intro', stable_id: 'intro', type: 'Hero', content: pmDoc('Hi') },
+              { $id: 'about', stable_id: 'about', type: 'Section', content: pmDoc('About') },
+            ],
           }],
         },
         siteRoot: dir,
       })
       expect(yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8')).sections)
-        .toEqual(['hero', '...'])
+        .toEqual(['intro', 'about', '...'])
 
       // An author adds a section the way they always would.
       writeFileSync(join(dir, 'pages/home/2-extra.md'), '---\ntype: Section\n---\n# Extra\n')
       writeFileSync(join(dir, 'site.yml'), 'name: S\nfoundation: "@a/b"\n')
       const doc = await siteProjectToDocument(dir)
       const ids = doc.pages.find((p) => p.$id === 'home').page_sections.map((s) => s.$id)
-      expect(ids).toContain('hero')
+      expect(ids).toContain('intro')
       expect(ids).toContain('extra') // would be missing with a bare (strict) list
     } finally {
       rmSync(dir, { recursive: true, force: true })

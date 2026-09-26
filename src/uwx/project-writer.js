@@ -205,10 +205,21 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
 // Does this markdown parse to `doc`, the way a push parses a section (`content-collector.js`)?
 function sameDocument(markdown, doc) {
   try {
-    return canonicalJson(markdownToProseMirror(markdown)) === canonicalJson(doc)
+    return canonicalJson(withoutDefaults(markdownToProseMirror(markdown))) === canonicalJson(withoutDefaults(doc))
   } catch {
     return false
   }
+}
+
+// A document without the attributes that only restate a default: an inset's `embedKind: 'visual'`,
+// which the parser writes and the pull's re-inlining leaves out (`reinlineInsets`) — so a body holding
+// an inset never compared as unchanged (measured 2026-09-26 on the `marketing` template's hero).
+function withoutDefaults(doc) {
+  return JSON.parse(JSON.stringify(doc), (_, v) => {
+    if (v?.type !== 'inset_ref' || v.attrs?.embedKind !== 'visual') return v
+    const { embedKind: _visual, ...attrs } = v.attrs
+    return { ...v, attrs }
+  })
 }
 
 // Shallow-merge `changes` into a YAML config file and write idempotently. A key
@@ -219,12 +230,8 @@ function sameDocument(markdown, doc) {
 // config, but comment-preserving merges for hand-authored config files are a
 // quality bar to revisit.
 function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
-  let existing = {}
-  try {
-    existing = yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) || {}
-  } catch {
-    // missing / invalid → start fresh
-  }
+  const prior = loadYamlFile(filePath)
+  const existing = isPlainObject(prior.value) ? { ...prior.value } : {}
   for (const [key, value] of Object.entries(changes)) {
     if (value === null || value === undefined) {
       delete existing[key]
@@ -233,13 +240,32 @@ function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
       // pull wrote `events: '@/event'` back as `events: { '0': '@', '1': '/', …,
       // schema: '@/event' }` (measured 2026-09-23). Anything else that is not an
       // object has nothing to keep, so the incoming value replaces it.
-      const prior = existing[key]
-      existing[key] = isPlainObject(prior) ? { ...prior, ...value } : value
+      const current = existing[key]
+      existing[key] = isPlainObject(current) ? { ...current, ...value } : value
     } else {
       existing[key] = value
     }
   }
-  return writeIfChanged(filePath, yaml.dump(existing, YAML_DUMP_OPTS))
+  return writeYamlIfChanged(filePath, existing, prior)
+}
+
+// A YAML file, parsed — and whether there was one: a missing or unreadable file is never "unchanged".
+function loadYamlFile(filePath) {
+  try {
+    return { value: yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) ?? {}, read: true }
+  } catch {
+    return { value: {}, read: false }
+  }
+}
+
+// ⭐ A FILE WHOSE MEANING WOULD NOT CHANGE IS LEFT AS ITS AUTHOR WROTE IT. Every writer here re-dumps the
+// whole file — its comments dropped, its strings re-quoted, its lists reflowed — so a pull that restated
+// a file rewrote it all the same. ⛔ Until 2026-09-26 a pull into the copy that pushed it re-dumped
+// `site.yml`, `theme.yml` and every `page.yml` (measured on the `international` template: every comment
+// in its `site.yml` gone, and nothing had changed).
+function writeYamlIfChanged(filePath, value, prior) {
+  if (prior.read && canonicalJson(value) === canonicalJson(prior.value)) return 'unchanged'
+  return writeIfChanged(filePath, yaml.dump(value, YAML_DUMP_OPTS))
 }
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
@@ -266,7 +292,7 @@ export function writeSiteConfig(siteRoot, config) {
  * @returns {'updated'|'unchanged'}
  */
 export function writeYamlFile(filePath, obj) {
-  return writeIfChanged(filePath, yaml.dump(obj || {}, YAML_DUMP_OPTS))
+  return writeYamlIfChanged(filePath, obj || {}, loadYamlFile(filePath))
 }
 
 /**
@@ -286,17 +312,17 @@ export function writeYamlFile(filePath, obj) {
  * @returns {'updated'|'unchanged'}
  */
 export function writeMergedYaml(filePath, projected, managedKeys) {
-  let existing = {}
-  try {
-    existing = yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) || {}
-  } catch {
-    // missing / invalid → start fresh
+  const prior = loadYamlFile(filePath)
+  const existing = isPlainObject(prior.value) ? prior.value : {}
+  const managed = new Set(managedKeys)
+  // Each key where the file has it — a value the pull changes stays in its place — then the new ones.
+  const out = {}
+  for (const [key, value] of Object.entries(existing)) {
+    if (key in projected) out[key] = projected[key]
+    else if (!managed.has(key)) out[key] = value
   }
-  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) existing = {}
-  const out = { ...existing }
-  for (const key of managedKeys) delete out[key]
-  Object.assign(out, projected)
-  return writeIfChanged(filePath, yaml.dump(out, YAML_DUMP_OPTS))
+  for (const [key, value] of Object.entries(projected)) if (!(key in out)) out[key] = value
+  return writeYamlIfChanged(filePath, out, prior)
 }
 
 /**
@@ -422,5 +448,33 @@ export function writeThemeFile(siteRoot, theme) {
  */
 export function writeRecordFile({ filePath, document, declaration, format, sourceLocale = 'en', collector, freeformRelPath, refName }) {
   const text = renderEntityDocument({ document, declaration, format, sourceLocale, collector, freeformRelPath, refName })
+  // ⭐ A record the pull did not change keeps the author's file — its key order, its blank lines, its
+  // quoting. ⛔ Until 2026-09-26 each one was re-rendered (measured on the `international` template).
+  let current = null
+  try {
+    current = readFileSync(filePath, 'utf8')
+  } catch {
+    // new file
+  }
+  if (current !== null && sameRecordText(current, text, format, filePath)) return 'unchanged'
   return writeIfChanged(filePath, text)
+}
+
+// Do two renderings of a record file say the same thing — the same data, and a body that parses to
+// the same document?
+function sameRecordText(a, b, format, filePath) {
+  try {
+    if (format === 'md') {
+      const x = parseFrontmatter(a, filePath)
+      const y = parseFrontmatter(b, filePath)
+      if (canonicalJson(x.frontmatter) !== canonicalJson(y.frontmatter)) return false
+      const bx = (x.body || '').trim()
+      const by = (y.body || '').trim()
+      return bx === by || canonicalJson(markdownToProseMirror(bx)) === canonicalJson(markdownToProseMirror(by))
+    }
+    const parse = format === 'json' ? JSON.parse : (t) => yaml.load(t, YAML_OPTIONS)
+    return canonicalJson(parse(a)) === canonicalJson(parse(b))
+  } catch {
+    return false
+  }
 }
