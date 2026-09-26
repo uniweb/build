@@ -50,6 +50,8 @@ import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption }
 import { parseCatalogRef } from '../site/foundation-ref.js'
 import { unwrapLocalized, renderEntityDocument } from './backfill.js'
 import { parseBibtex } from '@citestyle/bibtex'
+import { getSchema as getStandardSchema, isStandardSchema } from '@uniweb/schemas'
+import { validateAndNormalizeSchema } from '../resolve-data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
@@ -315,13 +317,27 @@ const DECL_WIRE_CONSUMED = new Set([
   'queryable'
 ])
 
+// A standard schema (`@std/<name>`), normalized as the build resolves one — known with no foundation
+// on disk. ⛔ Until 2026-09-26 a clone, which has none, could not tell a derived `deferred:` from an
+// authored one and wrote it into the author's queries (`international`'s `articles`, over `@std/article`).
+function standardDataSchema(ref) {
+  const m = typeof ref === 'string' ? /^@std\/([^/]+)$/.exec(ref) : null
+  if (!m || !isStandardSchema(m[1])) return null
+  try {
+    return validateAndNormalizeSchema(getStandardSchema(m[1]), ref)
+  } catch {
+    return null
+  }
+}
+
 // Is this wire `deferred` exactly what the schema's brief would have derived? Compared
 // as an ORDER-INSENSITIVE set: the deriver walks the schema's sections, and a round trip
 // through YAML and the store is not obliged to preserve that order. Comparing as a list
 // would classify a reordered-but-identical value as authored, and persist it.
 function isDerivedDeferred(d, dataSchemas) {
-  if (!dataSchemas || !Array.isArray(d.deferred)) return false
-  const derived = deferredFromSchema(dataSchemas[d.schema])
+  if (!Array.isArray(d.deferred)) return false
+  // A standard schema is known without the foundation — a clone's case (`standardDataSchema`).
+  const derived = deferredFromSchema(dataSchemas?.[d.schema] ?? standardDataSchema(d.schema))
   if (!derived || derived.length !== d.deferred.length) return false
   const a = new Set(derived)
   return d.deferred.every((f) => a.has(f))

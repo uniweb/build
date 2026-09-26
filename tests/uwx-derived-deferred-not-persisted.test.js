@@ -53,9 +53,12 @@ function makeSite(declExtra = '') {
 
 const pulledDecl = (doc) => {
   declarationsToQueriesYml({ document: doc, siteRoot: SITE })
+  // The query as the build reads it: `queries.yml` over `site.yml`'s `queries:` block, where this
+  // site declares it — and where a pull now leaves it. A BARE map: `queries.yml` has no root key.
   const p = join(SITE, 'queries.yml')
-  // A BARE map — `queries.yml` has no root key, so the query is read directly.
-  return existsSync(p) ? (yaml.load(readFileSync(p, 'utf8'))?.articles ?? {}) : {}
+  const fromFile = existsSync(p) ? yaml.load(readFileSync(p, 'utf8'))?.articles : undefined
+  const fromSite = yaml.load(readFileSync(join(SITE, 'site.yml'), 'utf8'))?.queries?.articles
+  return fromFile ?? fromSite ?? {}
 }
 
 describe('a derived deferred does not become authored config', () => {
@@ -100,5 +103,55 @@ describe('a derived deferred does not become authored config', () => {
     const decl = doc.queries.find((c) => c.name === 'articles')
     decl.deferred = [...decl.deferred].reverse()
     expect(pulledDecl(doc).deferred).toBeUndefined()
+  })
+})
+
+// ⭐ A CLONE HAS NO FOUNDATION ON DISK — but a standard schema is known without one. Measured
+// 2026-09-25: a clone of the `international` template wrote `articles: { deferred: [article_body] }`,
+// the derivation from `@std/article`, into the author's queries.
+describe('a clone’s query over a standard schema', () => {
+  const pullInto = (deferred) => {
+    mkdirSync(SITE, { recursive: true })
+    writeFileSync(join(SITE, 'site.yml'), "name: Clone\nfoundation: '@acme/fnd@1.0.0'\n")
+    declarationsToQueriesYml({
+      document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [{ name: 'articles', schema: '@std/article', sort: 'date desc', deferred }] },
+      siteRoot: SITE,
+    })
+    return yaml.load(readFileSync(join(SITE, 'queries.yml'), 'utf8')).articles
+  }
+
+  it('⛔ does not get the derived `deferred:` written into it', () => {
+    expect(pullInto(['article_body'])).toEqual({ schema: '@std/article', sort: 'date desc' })
+  })
+
+  it('CONTROL — an authored `deferred:` that differs from the derivation survives', () => {
+    expect(pullInto(['article_body', 'article']).deferred).toEqual(['article_body', 'article'])
+  })
+})
+
+// ⭐ QUERIES DECLARED IN site.yml STAY THERE. Measured 2026-09-26: every pull of the `international`
+// template, whose queries live in `site.yml`, wrote a `queries.yml` repeating them in the long form —
+// its bare `team:` as `team: {}`.
+describe('a pull over queries declared in site.yml', () => {
+  const SITE_YML = "name: Site\nfoundation: '@acme/fnd@1.0.0'\nqueries:\n  articles:\n    schema: '@std/article'\n    sort: date desc\n  events:\n"
+  const pullInto = (articles) => {
+    mkdirSync(SITE, { recursive: true })
+    writeFileSync(join(SITE, 'site.yml'), SITE_YML)
+    declarationsToQueriesYml({
+      document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [articles, { name: 'events', schema: '@acme/events' }] },
+      siteRoot: SITE,
+    })
+  }
+
+  it('⭐ restating them writes nothing — no queries.yml, site.yml as it was', () => {
+    pullInto({ name: 'articles', schema: '@std/article', sort: 'date desc', deferred: ['article_body'] })
+    expect(existsSync(join(SITE, 'queries.yml'))).toBe(false)
+    expect(readFileSync(join(SITE, 'site.yml'), 'utf8')).toBe(SITE_YML)
+  })
+
+  it('a query that changed is written back where it lives', () => {
+    pullInto({ name: 'articles', schema: '@std/article', sort: 'date asc' })
+    expect(existsSync(join(SITE, 'queries.yml'))).toBe(false)
+    expect(yaml.load(readFileSync(join(SITE, 'site.yml'), 'utf8')).queries.articles).toEqual({ schema: '@std/article', sort: 'date asc' })
   })
 })

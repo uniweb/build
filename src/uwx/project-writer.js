@@ -326,12 +326,31 @@ export function writeQueriesConfig(siteRoot, queries) {
   // `events:` is `{}`), which a pull brings back in its long form. And a pull that
   // restates every query writes nothing: the file is re-dumped whole otherwise, which
   // rewrites a bare `events:` as `events: null` and flow style as block style.
+  //
+  // ⭐ WHEREVER THE AUTHOR DECLARED IT — `queries.yml`, or `site.yml`'s `queries:` block, which the
+  // build reads too, under it. ⛔ Until 2026-09-26 only `queries.yml` was consulted, so a site whose
+  // queries live in `site.yml` (the `international` template) got a `queries.yml` repeating every one
+  // of them on each pull, in the long form. A query that changed is written back where it lives.
+  let site = {}
+  try {
+    site = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
+  } catch {
+    // missing / invalid → nothing declared there
+  }
+  const inSite = isPlainObject(site.queries) ? site.queries : {}
   const changes = {}
+  const siteChanges = {}
   for (const [name, decl] of Object.entries(queries)) {
+    const inFile = isPlainObject(authored) && name in authored
+    if (!inFile && name in inSite) {
+      if (!restates(inSite[name], decl)) siteChanges[name] = decl
+      continue
+    }
     if (restates(authored?.[name], decl)) continue
     changes[name] = decl
   }
-  if (Object.keys(changes).length === 0) return 'unchanged'
+  if (Object.keys(siteChanges).length) writeSiteConfig(siteRoot, { queries: siteChanges })
+  if (Object.keys(changes).length === 0) return Object.keys(siteChanges).length ? 'updated' : 'unchanged'
   // ⛔ Each query WHOLE (`replace`), as this function's header always said. Merged into
   // the local one — what the call did until 2026-09-23 — a key the backend's
   // declaration no longer has survived every pull: the defect `writeSiteConfig`
