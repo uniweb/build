@@ -16,6 +16,7 @@ import { randomBytes } from 'node:crypto'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-writer'
+import { markdownToProseMirror } from '@uniweb/content-reader'
 import { parseFrontmatter } from './entity-source.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
@@ -190,8 +191,24 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
     }
   }
 
-  const body = content ? proseMirrorToMarkdown(content) : (existingBody || '').replace(/^\n+/, '').replace(/\s+$/, '')
+  // ⭐ AN UNCHANGED BODY KEEPS THE AUTHOR'S OWN TEXT. A body that parses to the document the pull brought
+  // is not re-serialized: the writer's markdown differs from an author's in blank lines and line breaks,
+  // and a pull that changed nothing reformatted every section it touched (measured 2026-09-26 on the
+  // `marketing` template). A file with nothing to change is not written at all.
+  const authoredBody = (existingBody || '').replace(/^\n+/, '').replace(/\s+$/, '')
+  const keepsBody = Boolean(content && authoredBody) && sameDocument(authoredBody, content)
+  if (keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
+  const body = content && !keepsBody ? proseMirrorToMarkdown(content) : authoredBody
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))
+}
+
+// Does this markdown parse to `doc`, the way a push parses a section (`content-collector.js`)?
+function sameDocument(markdown, doc) {
+  try {
+    return canonicalJson(markdownToProseMirror(markdown)) === canonicalJson(doc)
+  } catch {
+    return false
+  }
 }
 
 // Shallow-merge `changes` into a YAML config file and write idempotently. A key
