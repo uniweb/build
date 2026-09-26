@@ -55,7 +55,7 @@ import {
   poolPathReadings,
   poolDirsForSchema,
 } from '../site/entity-pool.js'
-import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField } from './data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isOpenMapSection, openMapEntries } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
@@ -448,6 +448,20 @@ function readBySection(layout, record, enc) {
 // are its child sections), a list of records for a `many` one.
 function encodeSection(def, value, enc, path) {
   if (def.multiple === true) {
+    // ⭐ AN OPEN MAP is the author's map in a file and rows on the wire (`isOpenMapSection`): each
+    // key becomes its row's `name`. ⛔ Until 2026-09-26 the map was refused as "a list of records",
+    // so no record holding one could be pushed. Rows written as a list are read as they are.
+    if (isOpenMapSection(def) && isPlainObject(value)) {
+      const rows = []
+      for (const { key, value: entry, row } of openMapEntries(value)) {
+        if (!isPlainObject(entry)) {
+          enc.shape.push(`"${path}.${key}" is one entry of a map — write it as a map of its fields.`)
+          continue
+        }
+        rows.push(encodeItem(def, row, enc, `${path}.${key}`))
+      }
+      return rows
+    }
     if (!Array.isArray(value)) {
       enc.shape.push(`"${path}" holds a list of records — write it as a list ("- …" under "${path}:").`)
       return undefined

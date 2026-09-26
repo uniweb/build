@@ -32,7 +32,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './entity-source.js'
-import { isProseMirrorField } from './data-schema.js'
+import { isProseMirrorField, isOpenMapSection, openMapFromRows } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
@@ -307,7 +307,7 @@ function decodeRecord(fields, value, dec, sectionName) {
     const raw = value[key]
     if (raw === undefined) continue
     if (field?.type === 'section') {
-      out[key] = field.multiple === true ? decodeList(field, raw, dec) : decodeRecord(field.fields, raw, dec, null)
+      out[key] = field.multiple === true ? decodeSectionList(field, raw, dec) : decodeRecord(field.fields, raw, dec, null)
       continue
     }
     const isBody = Boolean(dec.bodyAt) && sectionName === dec.bodyAt.section && key === dec.bodyAt.key
@@ -316,6 +316,14 @@ function decodeRecord(fields, value, dec, sectionName) {
     else out[key] = decoded
   }
   return out
+}
+
+// A `many` field's records — an OPEN MAP's written back as the author's map, keyed by each row's
+// `name` (`isOpenMapSection`), which is what the push reads a map from. Rows that cannot be a map
+// stay a list, which the push reads too.
+function decodeSectionList(def, value, dec) {
+  const list = decodeList(def, value, dec)
+  return (isOpenMapSection(def) && openMapFromRows(list)) || list
 }
 
 // The records of a `many` section; a self-nesting one's `$children` nest back under

@@ -38,6 +38,40 @@ const CONTENT_TEXT_FORMATS = new Set(['markdown', 'html'])
 const OPEN_MAP_KEY = 'name'
 
 /**
+ * ⭐ AN OPEN MAP'S LOWERED SECTION. `values:` lowers to rows (`lowerField`): a `multiple` section
+ * whose required string `name` — the map's key — is made each row's identity by a `unique_field`
+ * rule. A record FILE holds it as the author wrote it, a map from key to value; the WIRE holds the
+ * rows. This is the one test, read off the declaration alone, because a pull into a clone has
+ * nothing else: the push turns a file's map into rows by it, and the pull the rows back into a map.
+ */
+export function isOpenMapSection(def) {
+  if (def?.multiple !== true || def.self_nesting === true) return false
+  const key = def.fields?.[OPEN_MAP_KEY]
+  if (key?.type !== 'string' || key.required !== true || key.localized === true) return false
+  return (def.constraints || []).some((c) => c?.kind === 'unique_field' && c.field === OPEN_MAP_KEY && c.scope === 'section')
+}
+
+/** A file's open map as the rows it lowers to, in the map's key order: each key is its row's `name`. */
+export function openMapEntries(map) {
+  return Object.entries(map).map(([key, value]) => ({ key, value, row: { ...value, [OPEN_MAP_KEY]: key } }))
+}
+
+/**
+ * Rows back as the map a file holds, or null when they cannot be one — a row with no key, or a key
+ * two rows share — so a caller keeps them a list, which a push reads too, and nothing is lost.
+ */
+export function openMapFromRows(rows) {
+  const map = {}
+  for (const row of rows || []) {
+    const key = row?.[OPEN_MAP_KEY]
+    if (typeof key !== 'string' || key === '' || Object.hasOwn(map, key)) return null
+    const { [OPEN_MAP_KEY]: _key, ...value } = row
+    map[key] = value
+  }
+  return map
+}
+
+/**
  * A `text` field marked as rich content (`format: markdown` or `html`): the
  * file-based body target. Round-trips as the raw source string — what the retired
  * `richtext` kind used to be. See framework/CLAUDE.md gotcha #21 and uwx-format.md.

@@ -23,7 +23,7 @@ import { computeHash } from './hash.js'
 import { loadFreeformRecord } from './freeform.js'
 import { resolveQueriesConfig, resolveRecordSchemas, foundationSchemaJson } from '../site/queries-config.js'
 import { dataKeyTypes, keyOfDefaultRef } from '../uwx/data-key-types.js'
-import { toDataSchemaDeclaration, isProseMirrorField } from '../uwx/data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField, isOpenMapSection } from '../uwx/data-schema.js'
 import { toDeliveredRecord, contentBodyField, misplacedFields } from '@uniweb/schemas/conform'
 import { resolveDocForLocale } from './merge.js'
 import { extractUnitsFromDoc } from './extract.js'
@@ -224,6 +224,10 @@ function eachModelField(record, model, visit) {
 function eachSectionValue(value, section, path, visit) {
   if (!section?.multiple) return eachSectionField(value, section?.fields, path, visit)
   if (Array.isArray(value)) value.forEach((item, i) => eachSectionField(item, section.fields, `${path}[${i}]`, visit))
+  // An open map as its file holds it: each entry is one of the rows a push sends (`isOpenMapSection`).
+  else if (isOpenMapSection(section) && isPlainObject(value)) {
+    for (const [key, item] of Object.entries(value)) eachSectionField(item, section.fields, `${path}.${key}`, visit)
+  }
 }
 
 function eachSectionField(holder, fields, path, visit) {
