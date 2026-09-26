@@ -42,7 +42,8 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
-import { FILLED_SECTION_TYPE } from './site.js'
+import { FILLED_SECTION_TYPE, buildRouteOf } from './site.js'
+import { translationContext } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, localesDir } from './locale-sync.js'
 import { resolveLocaleList } from '../i18n/locales.js'
@@ -50,6 +51,7 @@ import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteContentDirs } from './site-dirs.js'
+import { layoutAreaRoute } from '../site/layout-folder.js'
 import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames } from '../site/content-collector.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
@@ -432,14 +434,14 @@ function reinlineInsets(content, insets) {
  *        structural maps on a localized `content` field are captured into it
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null }) {
   const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
   // free-form target body is captured with `freeformRelPath` for writing under
   // locales/freeform/. A bare doc (source-only / pre-localization) passes through.
-  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates)
+  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates, context)
 
   const frontmatter = {}
   if (type !== undefined) frontmatter.type = type
@@ -572,7 +574,16 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         : null
       // Every path the renderer would find it at, so one the author keeps is written back in place.
       const freeformCandidates = pageContext ? freeformPathsFor({ stableId }, pageContext) : null
-      sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, freeformRelPath, freeformCandidates, writeId: fileSectionName(filePath) !== stableId })
+      sectionRecordToFile({
+        filePath,
+        record,
+        sourceLocale: ctx?.sourceLocale,
+        collector: ctx?.collector,
+        freeformRelPath,
+        freeformCandidates,
+        writeId: fileSectionName(filePath) !== stableId,
+        context: pageContext ? translationContext({ stableId }, pageContext.route) : null,
+      })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
       if (children.length > 0) nested = true
@@ -791,8 +802,9 @@ export function pageDirName(record, sourceLocale) {
 function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null, canonParent = '/') {
   for (const record of pages || []) {
     const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
-    // The route the build gives the page — an index page takes its parent's.
-    const canon = record.is_index ? canonParent : canonParent === '/' ? `/${slug}` : `${canonParent}/${slug}`
+    // The route the build gives the page (`buildRouteOf`, the push's rule): an index page takes its
+    // parent's, a parametric one is `:<param>`.
+    const canon = buildRouteOf(record, canonParent, sourceLocale)
     const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
     placeByUuid(ctx, record.$uuid, pageDir)
@@ -807,7 +819,10 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     else ctx.collector?.add(record.keywords)
 
     const route = routePrefix ? `${routePrefix}/${slug}` : slug
-    const pageContext = { route, id: record.stable_id }
+    // Addressed as the push addresses it: its free-form translations and its translations' contexts
+    // are keyed by the build's route. ⛔ Until 2026-09-26 this was the slug path — `home` for a
+    // homepage the build reads at `/`.
+    const pageContext = { route: canon, id: record.stable_id }
 
     let sectionsArray = []
     let filesGiveOrder = false
@@ -1060,7 +1075,19 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
     // A relocation into a new area folder needs the folder first.
     mkdirSync(dirname(filePath), { recursive: true })
     placeByUuid(ctx, record.$uuid, filePath)
-    sectionRecordToFile({ filePath, record, sourceLocale: ctx?.sourceLocale, collector: ctx?.collector, writeId: fileSectionName(filePath) !== recordStableId(record) })
+    // Its free-form translation lives at the area's route, as the build reads it (`layoutAreaRoute`).
+    const stableId = recordStableId(record)
+    const page = { route: layoutAreaRoute(record.layout_name, record.area || stableId) }
+    sectionRecordToFile({
+      filePath,
+      record,
+      sourceLocale: ctx?.sourceLocale,
+      collector: ctx?.collector,
+      writeId: fileSectionName(filePath) !== stableId,
+      freeformRelPath: stableId ? buildFreeformPath({ stableId }, page) : null,
+      freeformCandidates: stableId ? freeformPathsFor({ stableId }, page) : null,
+      context: translationContext({ stableId }, page.route),
+    })
     report.layout.push(filePath)
     written.push(filePath)
   }

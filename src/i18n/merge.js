@@ -14,7 +14,7 @@
 
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
-import { elementText, blockElements } from './extract.js'
+import { elementText, blockElements, translationContext } from './extract.js'
 import { visitDataStrings } from './data-strings.js'
 
 // Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
@@ -268,8 +268,7 @@ function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
  * Translate a section's content (synchronous, hash-based only)
  */
 function translateSectionSync(section, pageRoute, translations, fallbackToSource) {
-  const sectionId = section.id || 'unknown'
-  const context = { page: pageRoute, section: sectionId }
+  const context = translationContext(section, pageRoute)
 
   if (section.content?.type === 'doc') {
     translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
@@ -292,8 +291,7 @@ function translateSectionSync(section, pageRoute, translations, fallbackToSource
 async function translateSectionAsync(section, page, translations, options) {
   const { fallbackToSource, locale, localesDir } = options
   const pageRoute = page.route || '/'
-  const sectionId = section.id || 'unknown'
-  const context = { page: pageRoute, section: sectionId }
+  const context = translationContext(section, pageRoute)
 
   // Check for free-form translation first
   const freeform = await loadFreeformTranslation(section, page, locale, localesDir)
@@ -355,23 +353,27 @@ function applyElementTranslation(node, context, translations, fallbackToSource) 
  * in place. The other half of the fix in `extract.js` — a manifest entry nobody
  * applies is worse than no entry, because a translator has already done the work.
  *
- * Called from the two BUILD-lane section walks only, deliberately, and NOT from
- * `resolveDocForLocale`. See `extractFromDataBlocks` for why: the sync wire's
- * structural map is derived by walking block elements, so a translated data
- * payload there would be neither captured nor flagged as divergent, and would be
- * dropped on the next pull. Losing a translation silently is worse than not
- * carrying one yet.
+ * Called from the build's two section walks and from `resolveDocForLocale`, the
+ * push's. ⛔ The push was left out deliberately until 2026-09-26, because the
+ * pull could not read a translated data block back and would have dropped it
+ * silently; it now does (`uwx/locale-sync.js::deriveStructuralMap`), so the two
+ * halves travel together.
+ *
+ * @returns {boolean} whether any value was translated
  */
 function translateDataBlocks(doc, context, translations, fallbackToSource) {
+  let changed = false
   const walk = (nodes) => {
     for (const node of nodes || []) {
       if (!node) continue
       if (node.type === 'dataBlock') {
         const data = node.attrs?.data
         if (data && typeof data === 'object') {
-          visitDataStrings(data, (value) =>
-            lookupTranslation(value, context, translations, fallbackToSource)
-          )
+          visitDataStrings(data, (value) => {
+            const translated = lookupTranslation(value, context, translations, fallbackToSource)
+            if (translated !== value) changed = true
+            return translated
+          })
         }
       } else if (Array.isArray(node.content)) {
         walk(node.content)
@@ -379,6 +381,7 @@ function translateDataBlocks(doc, context, translations, fallbackToSource) {
     }
   }
   walk(doc?.content)
+  return changed
 }
 
 /**
@@ -393,8 +396,9 @@ function translateDataBlocks(doc, context, translations, fallbackToSource) {
 export function resolveDocForLocale(sourceDoc, table, context = { page: '', section: '' }) {
   if (!sourceDoc || sourceDoc.type !== 'doc' || !table) return null
   const doc = JSON.parse(JSON.stringify(sourceDoc))
-  const changed = translateProseMirrorDoc(doc, context, table, true)
-  return changed ? doc : null
+  const elements = translateProseMirrorDoc(doc, context, table, true)
+  const data = translateDataBlocks(doc, context, table, true)
+  return elements || data ? doc : null
 }
 
 // Parse an inline-markdown translation value into a ProseMirror inline fragment.

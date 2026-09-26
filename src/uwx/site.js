@@ -68,7 +68,7 @@ import {
   isValidSlugSegment,
 } from '../site/content-collector.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
-import { readLayoutFolder } from '../site/layout-folder.js'
+import { readLayoutFolder, layoutAreaRoute } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
@@ -76,6 +76,7 @@ import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeCon
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
+import { translationContext } from '../i18n/extract.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
@@ -167,11 +168,10 @@ function localizeRouteSlugs(pages, siteYml, sourceLocale) {
   const languages = Array.isArray(siteYml?.languages) ? new Set(siteYml.languages) : null
   const carried = (locale, segment) =>
     locale !== sourceLocale && (!languages || languages.has(locale)) && isValidSlugSegment(segment)
-  // Each page with the canonical route the build gives it: an index page takes its parent's.
+  // Each page with the route the build gives it (`buildRouteOf`).
   const visit = (records, parentRoute, fn) => {
     for (const record of records || []) {
-      const slug = record?.slug?.[sourceLocale]
-      const route = record.is_index ? parentRoute : parentRoute === '/' ? `/${slug}` : `${parentRoute}/${slug}`
+      const route = buildRouteOf(record, parentRoute, sourceLocale)
       fn(record, route, parentRoute)
       visit(record.$children, route, fn)
     }
@@ -210,6 +210,23 @@ function localizeRouteSlugs(pages, siteYml, sourceLocale) {
   })
 }
 
+/**
+ * The route the build gives a page record: an index page takes its parent's, a parametric one is
+ * `:<param>` (`[...path]` is `:path*`), any other its slug under its parent. One rule, exported for the
+ * pull (`site-project.js`), which must address a page as the push does.
+ *
+ * @param {object} record - a page record (`slug`, `is_index`, `is_dynamic`)
+ * @param {string} parentRoute - its parent's route, `/` at the top
+ * @param {string} sourceLocale
+ * @returns {string}
+ */
+export function buildRouteOf(record, parentRoute, sourceLocale) {
+  if (record?.is_index) return parentRoute
+  const slug = unwrapLocalized(record?.slug, sourceLocale)
+  const segment = record?.is_dynamic ? (slug === CATCH_ALL_MARKER ? ':path*' : `:${slug}`) : slug
+  return parentRoute === '/' ? `/${segment}` : `${parentRoute}/${segment}`
+}
+
 // Post-pass: wrap every section's `content` (page sections + their `$children`,
 // recursing into child pages, plus layout sections) into per-locale form. Mutates
 // the records in place. Only called for multi-locale sites. Each target locale is
@@ -222,9 +239,13 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
 
   const localizeSection = async (record, page) => {
     if (!record.content) return
-    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations)
+    const stableId = record.stable_id || record.$id
+    // Resolved in the section's context, as the build resolves it (`translationContext`): a
+    // context-specific override applies here and nowhere else. ⛔ Until 2026-09-26 every section was
+    // resolved with none, so an override never reached a backend.
+    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, translationContext({ stableId }, page?.route))
     if (page) {
-      const section = { stableId: record.stable_id || record.$id }
+      const section = { stableId }
       for (const locale of targetLocales) {
         // loadFreeformTranslation returns { content, frontmatter, … } — the doc is `.content`.
         const body = (await loadFreeformTranslation(section, page, locale, freeformBase))?.content
@@ -244,19 +265,21 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
       if (Array.isArray(s.$children)) await visitSections(s.$children, page)
     }
   }
-  const visitPages = async (pgs, routePrefix) => {
+  // A page is addressed by the route the build gives it (`buildRouteOf`): a free-form translation is
+  // looked up by it, and a translation's context names it. ⛔ Until 2026-09-26 this was the slug path,
+  // so a homepage was `home` where the build reads `/`, and its sections' free-form files were never sent.
+  const visitPages = async (pgs, parentRoute) => {
     for (const p of pgs || []) {
-      // `slug` is a localized `{lang:value}` map; the free-form route is the
-      // canonical (source-locale) path, so unwrap before building it.
-      const slug = unwrapLocalized(p.slug, sourceLocale)
-      const route = routePrefix ? `${routePrefix}/${slug}` : slug
+      const route = buildRouteOf(p, parentRoute, sourceLocale)
       const page = { route, id: p.stable_id }
       if (Array.isArray(p.page_sections)) await visitSections(p.page_sections, page)
       if (Array.isArray(p.$children)) await visitPages(p.$children, route)
     }
   }
-  await visitPages(pages, '')
-  await visitSections(layoutSections, null) // layout sections have no free-form home
+  await visitPages(pages, '/')
+  // A layout area's section has its free-form home at the area's route, as the build reads it
+  // (`layoutAreaRoute`). ⛔ This said "layout sections have no free-form home" until 2026-09-26.
+  for (const s of layoutSections || []) await localizeSection(s, { route: layoutAreaRoute(s.layout_name, s.area || s.stable_id) })
 }
 
 function mapSectionData(section) {

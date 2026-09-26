@@ -128,14 +128,30 @@ function extractFromPageMeta(page, pageRoute, units) {
 }
 
 /**
+ * Where a translation applies — `{ page, section }`, the key a context-specific override is written
+ * under (`"<page>:<section>"`): the page's route and the section's STABLE id. One rule for the
+ * extractor, the build (`merge.js`), the push and the pull.
+ *
+ * ⛔ The section was its build `id` until 2026-09-26 — a numbered file's number (`/about:1` for
+ * `1-hero.md`) — so an override moved to another section when files were renumbered, and a clone,
+ * whose files are not numbered, could not key it at all.
+ *
+ * @param {Object} section - a section with `stableId` (and the build `id` as a fallback)
+ * @param {string} pageRoute - the route of the page (or layout area) it is on
+ * @returns {{ page: string, section: string }}
+ */
+export function translationContext(section, pageRoute) {
+  return { page: pageRoute, section: section?.stableId || section?.id || 'unknown' }
+}
+
+/**
  * Extract translatable content from a section
  * @param {Object} section - Section data
  * @param {string} pageRoute - Parent page route
  * @param {Object} units - Units accumulator
  */
 function extractFromSection(section, pageRoute, units) {
-  const sectionId = section.id || 'unknown'
-  const context = { page: pageRoute, section: sectionId }
+  const context = translationContext(section, pageRoute)
 
   // Extract from parsed semantic content if available
   // The section.content is ProseMirror doc, but we need parsed content
@@ -173,10 +189,11 @@ function extractFromSection(section, pageRoute, units) {
  * than tidy: `deriveStructuralMap` recovers a pulled translation by walking
  * block elements, so a data string translated on the sync wire would be
  * invisible to it — neither captured in the map nor counted as divergence — and
- * would be silently lost on the next pull. So this lane is the BUILD lane only
- * (the manifest, and `dist/{locale}/`), which is where the reported bug lives.
- * Carrying data-block translations across the sync wire needs a representation
- * that contract does not have yet.
+ * would be silently lost on the next pull. ⭐ Since 2026-09-26 both halves exist:
+ * the push translates data blocks (`merge.js::resolveDocForLocale`) and the pull
+ * reads their strings back pairwise (`uwx/locale-sync.js::deriveStructuralMap`),
+ * as the same per-string entries this lane writes — the block-element keying
+ * contract is untouched.
  */
 function extractFromDataBlocks(doc, context, units) {
   for (const node of dataBlockNodes(doc)) {
@@ -192,7 +209,7 @@ function extractFromDataBlocks(doc, context, units) {
 /**
  * Every tagged data block in a doc, including any nested inside a container.
  */
-function dataBlockNodes(doc) {
+export function dataBlockNodes(doc) {
   const out = []
   const walk = (nodes) => {
     for (const node of nodes || []) {

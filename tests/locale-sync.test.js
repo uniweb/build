@@ -3,8 +3,11 @@
 // map back from those docs, treats a reserved `@` key as opaque metadata, and
 // falls back to a free-form body when a target diverges structurally.
 
-import { localizeContentDoc, unwrapLocalizedContent, createTranslationCollector } from '../src/uwx/locale-sync.js'
+import { localizeContentDoc, unwrapLocalizedContent, createTranslationCollector, writeLocaleTranslations } from '../src/uwx/locale-sync.js'
 import { computeHash } from '../src/i18n/hash.js'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
 
@@ -164,27 +167,77 @@ describe('containers ride the sync lane too', () => {
   })
 })
 
-describe('data blocks deliberately do NOT ride the sync wire', () => {
-  it('a per-locale doc leaves a tagged data block untranslated', () => {
-    // Not an oversight — a scope boundary, and removing it would LOSE data.
-    // deriveStructuralMap recovers a pulled translation by walking block
-    // elements and comparing their inline content. A dataBlock's payload is
-    // neither a block element nor divergence, so a translated one on the wire
-    // would be invisible on pull: not captured in the map, not flagged as
-    // free-form, silently reverted. The build lane (the manifest and
-    // dist/{locale}/) does translate them — that is where the reported bug was.
-    // Carrying them across sync needs a representation this contract lacks.
-    const doc = {
-      type: 'doc',
-      content: [{ type: 'dataBlock', attrs: { tag: 'nav', language: 'yaml', data: [{ label: 'Home', href: '/' }] } }],
-    }
-    const out = localizeContentDoc(doc, 'en', ['fr'], {
-      fr: { [computeHash('Home')]: 'Accueil' },
-    })
+describe('data blocks ride the sync wire — both ways', () => {
+  // ⛔ Until 2026-09-26 they were kept off the wire deliberately: the pull could not read a
+  // translated data block back, so carrying one would have lost it silently on the next pull. The
+  // pull reads them now (`deriveStructuralMap`), so the two halves travel together.
+  const doc = {
+    type: 'doc',
+    content: [{ type: 'dataBlock', attrs: { tag: 'nav', language: 'yaml', data: [{ label: 'Home', href: '/' }] } }],
+  }
 
-    // Nothing translated → the target locale is omitted entirely and the site
-    // falls back to the source, rather than shipping a half-translated doc.
-    expect(Object.keys(out)).toEqual(['en'])
-    expect(out.en.content[0].attrs.data[0].label).toBe('Home')
+  it('⭐ a per-locale doc translates a data block’s prose, and a pull reads it back per string', () => {
+    const out = localizeContentDoc(doc, 'en', ['fr'], { fr: { [computeHash('Home')]: 'Accueil' } })
+    expect(out.fr.content[0].attrs.data[0]).toEqual({ label: 'Accueil', href: '/' })
+    expect(out.en.content[0].attrs.data[0].label).toBe('Home') // the source is untouched
+    const collector = createTranslationCollector('en')
+    unwrapLocalizedContent(out, 'en', collector)
+    expect(collector.byLocale.fr[computeHash('Home')]).toBe('Accueil')
+    expect(collector.freeformPending).toEqual([])
+  })
+
+  it('a target that changed more than its prose — another href — is a free-form translation', () => {
+    const target = JSON.parse(JSON.stringify(doc))
+    target.content[0].attrs.data[0] = { label: 'Accueil', href: '/fr' }
+    const collector = createTranslationCollector('en')
+    unwrapLocalizedContent({ en: doc, fr: target }, 'en', collector, 'pages/nav.md')
+    expect(collector.byLocale.fr).toBeUndefined()
+    expect(collector.freeformPending.map((e) => e.relpath)).toEqual(['pages/nav.md'])
+  })
+})
+
+describe('context-specific overrides come back as the author keeps them', () => {
+  const key = computeHash('Learn more.')
+  const AUTHORED = { default: 'Más información.', overrides: { '/about:more': 'Conoce nuestra historia.' } }
+  let root
+  afterEach(() => root && rmSync(root, { recursive: true, force: true }))
+
+  // A pull that read `Learn more.` on the homepage and on the About page, translated as given.
+  function pull(existing, onHome, onAbout) {
+    root = mkdtempSync(join(tmpdir(), 'overrides-'))
+    if (existing !== undefined) {
+      mkdirSync(join(root, 'locales'), { recursive: true })
+      writeFileSync(join(root, 'locales', 'es.json'), JSON.stringify({ [key]: existing }, null, 2) + '\n')
+    }
+    const collector = createTranslationCollector('en')
+    collector.addStructuralMap('es', { 'Learn more.': onHome }, { page: '/', section: 'more' })
+    collector.addStructuralMap('es', { 'Learn more.': onAbout }, { page: '/about', section: 'more' })
+    const report = writeLocaleTranslations(root, collector.byLocale)
+    return { report, entry: JSON.parse(readFileSync(join(root, 'locales', 'es.json'), 'utf8'))[key] }
+  }
+
+  it('⭐ unchanged: the file is left as it was', () => {
+    const { report, entry } = pull(AUTHORED, 'Más información.', 'Conoce nuestra historia.')
+    expect(report.es).toBe('unchanged')
+    expect(entry).toEqual(AUTHORED)
+  })
+
+  it('the default changed in the app: the default follows, the override stays', () => {
+    const { entry } = pull(AUTHORED, 'Descubre más.', 'Conoce nuestra historia.')
+    expect(entry).toEqual({ default: 'Descubre más.', overrides: { '/about:more': 'Conoce nuestra historia.' } })
+  })
+
+  it('an override that now says the default is dropped', () => {
+    const { entry } = pull(AUTHORED, 'Más información.', 'Más información.')
+    expect(entry).toBe('Más información.')
+  })
+
+  it('a clone: places that disagree become `{ default, overrides }`, the first read the default', () => {
+    const { entry } = pull(undefined, 'Más información.', 'Conoce nuestra historia.')
+    expect(entry).toEqual(AUTHORED)
+  })
+
+  it('CONTROL — places that agree stay one string', () => {
+    expect(pull(undefined, 'Más información.', 'Más información.').entry).toBe('Más información.')
   })
 })

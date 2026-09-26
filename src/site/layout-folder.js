@@ -41,6 +41,21 @@ import { layoutNameKey } from '@uniweb/core/layout-name'
 export const DEFAULT_LAYOUT = 'default'
 
 /**
+ * The route a layout area renders at — `/layout/<area>` in the default layout,
+ * `/layout/<layout>/<area>` in a named one. A layout area's free-form translations are
+ * addressed by it (`i18n/freeform.js`), so the build, the push and the pull must all use
+ * this one rule: the push said "layout sections have no free-form home" until 2026-09-26,
+ * and a translation the build rendered never left the author's machine.
+ *
+ * @param {string} [layoutName]
+ * @param {string} area
+ * @returns {string}
+ */
+export function layoutAreaRoute(layoutName, area) {
+  return !layoutName || layoutName === DEFAULT_LAYOUT ? `/layout/${area}` : `/layout/${layoutName}/${area}`
+}
+
+/**
  * Area names a layout folder is most likely to have been meant as. A folder under
  * `layout/` named like one of them was, before this convention, an area of the
  * default layout — and the public docs taught `layout/header/header.md` that way.

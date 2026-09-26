@@ -16,23 +16,52 @@
 // surface, used by the projector (pull → files) and, later, the producer
 // (files → push).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import yaml from 'js-yaml'
+import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown, serializeInlineContent } from '@uniweb/content-writer'
 import { computeHash } from '../i18n/hash.js'
-import { blockElements, elementText } from '../i18n/extract.js'
+import { blockElements, elementText, dataBlockNodes } from '../i18n/extract.js'
+import { visitDataStrings } from '../i18n/data-strings.js'
 import { resolveDocForLocale } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
-import { sameMarkdownDocument } from './same-content.js'
+import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 
 const FREEFORM_MANIFEST = '.manifest.json'
 
-// The `locales/` directory for a site (the i18n localesDir default; `paths` can
-// override it, but the default is `locales` — keep this the single place to change).
-// `subdir` scopes a lane: '' → site-content (locales/), 'records' → record
-// translations (locales/records/), matching the i18n manifest layout.
+// The directory a site keeps its translations in — `site.yml`'s `i18n.localesDir`, else `locales`,
+// the rule the build and `uniweb i18n` read it by — for the push and the pull alike. `subdir` scopes a
+// lane: '' → site-content (locales/), 'records' → record translations (locales/records/), matching the
+// i18n manifest layout.
+// ⛔ It was `locales/` whatever the site said until 2026-09-26: a site keeping its translations in
+// `translations/` pushed its source language alone, and a pull wrote into a directory it never read.
 export function localesDir(siteRoot, subdir = '') {
-  return subdir ? join(siteRoot, 'locales', subdir) : join(siteRoot, 'locales')
+  const base = join(siteRoot, localesDirName(siteRoot))
+  return subdir ? join(base, subdir) : base
+}
+
+// `i18n.localesDir`, read once per version of the file — every translation a pull writes asks for it.
+const localesDirCache = new Map() // siteRoot → { mtimeMs, name }
+function localesDirName(siteRoot) {
+  const file = join(siteRoot, 'site.yml')
+  let mtimeMs = null
+  try {
+    mtimeMs = statSync(file).mtimeMs
+  } catch {
+    return 'locales'
+  }
+  const cached = localesDirCache.get(siteRoot)
+  if (cached && cached.mtimeMs === mtimeMs) return cached.name
+  let name = 'locales'
+  try {
+    const dir = yaml.load(readFileSync(file, 'utf8'), YAML_OPTIONS)?.i18n?.localesDir
+    if (typeof dir === 'string' && dir.trim()) name = dir.trim()
+  } catch {
+    // unreadable — the default
+  }
+  localesDirCache.set(siteRoot, { mtimeMs, name })
+  return name
 }
 
 export function localeFilePath(siteRoot, locale, subdir = '') {
@@ -139,7 +168,7 @@ export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
  * @param {string[]} [targetLocales]
  * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
  */
-export function localizeContentDoc(doc, sourceLocale, targetLocales, translations) {
+export function localizeContentDoc(doc, sourceLocale, targetLocales, translations, context = undefined) {
   // Non-docs (null, an already-localized map) pass through untouched.
   if (!isProseMirrorDoc(doc)) return doc
 
@@ -148,7 +177,8 @@ export function localizeContentDoc(doc, sourceLocale, targetLocales, translation
     for (const locale of targetLocales) {
       const table = translations[locale]
       if (!table) continue
-      const resolved = resolveDocForLocale(doc, table)
+      // With the section's context, so a context-specific override resolves as the build resolves it.
+      const resolved = resolveDocForLocale(doc, table, context)
       if (resolved) result[locale] = resolved
     }
   }
@@ -231,17 +261,32 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
     for (const [locale, value] of Object.entries(localizedValue)) {
       if (locale === sourceLocale) continue
       if (typeof value !== 'string') continue
-      ;(byLocale[locale] ||= {})[hash] = value
+      const table = (byLocale[locale] ||= {})
+      if (table[hash] instanceof SeenInContexts) table[hash].plain = value
+      else table[hash] = value
     }
   }
 
   // Record a structural translation MAP for one target locale: `{ src-text: target }`
   // keyed by the source text exactly as `i18n extract` keys it (hash of the source).
-  function addStructuralMap(locale, map) {
+  // ⭐ With `context` — where the map was read (`translationContext`) — a translation that differs
+  // from one section to another is kept per section, and comes back as the author's
+  // context-specific overrides (`writeLocaleTranslations`). ⛔ Until 2026-09-26 the last section
+  // read won, and a pull wrote that one string over the author's `{ default, overrides }`.
+  function addStructuralMap(locale, map, context = null) {
     if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map)) return
+    const table = (byLocale[locale] ||= {})
     for (const [src, target] of Object.entries(map)) {
       if (typeof src !== 'string' || typeof target !== 'string') continue
-      ;(byLocale[locale] ||= {})[computeHash(src)] = target
+      const hash = computeHash(src)
+      if (!context) {
+        if (table[hash] instanceof SeenInContexts) table[hash].plain = target
+        else table[hash] = target
+        continue
+      }
+      const seen = table[hash] instanceof SeenInContexts ? table[hash] : new SeenInContexts(table[hash])
+      seen.values[`${context.page}:${context.section}`] = target
+      table[hash] = seen
     }
   }
 
@@ -304,6 +349,45 @@ function deriveStructuralMap(sourceDoc, targetDoc) {
     // a mark we can't serialize → don't risk a lossy map; store as free-form
     return null
   }
+  return addDataBlockStrings(map, sourceDoc, targetDoc)
+}
+
+// ⭐ A TAGGED DATA BLOCK's translated strings, read pairwise — the strings the build translates
+// (`visitDataStrings`, the extractor's judgement), keyed by their source text as the build keys them.
+// A target that is not the source with only those strings changed — another shape, another `href` —
+// cannot be said per string, and the whole translation is free-form. ⛔ Until 2026-09-26 a data block
+// was not read here at all, and its translations were not sent (`merge.js::translateDataBlocks`).
+function addDataBlockStrings(map, sourceDoc, targetDoc) {
+  const srcBlocks = dataBlockNodes(sourceDoc)
+  const tgtBlocks = dataBlockNodes(targetDoc)
+  if (srcBlocks.length !== tgtBlocks.length) return null
+  for (let i = 0; i < srcBlocks.length; i++) {
+    const s = srcBlocks[i].attrs || {}
+    const t = tgtBlocks[i].attrs || {}
+    if (s.tag !== t.tag) return null
+    if (!s.data || typeof s.data !== 'object') {
+      if (canonicalJson(s.data) !== canonicalJson(t.data)) return null
+      continue
+    }
+    const strings = (data) => {
+      const out = []
+      visitDataStrings(JSON.parse(JSON.stringify(data ?? null)), (value) => void out.push(value))
+      return out
+    }
+    const from = strings(s.data)
+    const to = strings(t.data)
+    if (from.length !== to.length) return null
+    const pairs = new Map()
+    for (let j = 0; j < from.length; j++) {
+      if (from[j] === to[j]) continue
+      if (pairs.has(from[j]) && pairs.get(from[j]) !== to[j]) return null // one string, two translations
+      pairs.set(from[j], to[j])
+    }
+    const rebuilt = JSON.parse(JSON.stringify(s.data))
+    visitDataStrings(rebuilt, (value) => pairs.get(value) ?? value)
+    if (canonicalJson(rebuilt) !== canonicalJson(t.data)) return null
+    for (const [from, to] of pairs) map[from.trim()] = to
+  }
   return map
 }
 
@@ -318,7 +402,7 @@ function deriveStructuralMap(sourceDoc, targetDoc) {
  * reserved `@` (and `$`-prefixed) key is opaque metadata — NEVER a locale. A bare
  * doc (no locale wrap) is returned unchanged.
  */
-export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null) {
+export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null, context = null) {
   if (!isLocalizedContent(content)) return content
   const source = content[sourceLocale]
   for (const [locale, value] of Object.entries(content)) {
@@ -328,13 +412,50 @@ export function unwrapLocalizedContent(content, sourceLocale, collector, freefor
       // A translation the site keeps as a free-form file stays one, even when it lines up.
       const kept = collector?.keptFreeform?.(locale, freeformCandidates || freeformRelPath) || null
       const map = kept ? null : deriveStructuralMap(source, value)
-      if (map) collector?.addStructuralMap?.(locale, map)
+      if (map) collector?.addStructuralMap?.(locale, map, context)
       else collector?.noteFreeform?.(locale, value, source, kept || freeformRelPath)
     } else {
-      collector?.addStructuralMap?.(locale, value)
+      collector?.addStructuralMap?.(locale, value, context)
     }
   }
   return source
+}
+
+// A translation read in several sections: what each section's context says, and what a place with
+// no context (a page title) says. Reconciled with the author's entry when the file is written.
+class SeenInContexts {
+  constructor(plain) {
+    this.plain = typeof plain === 'string' ? plain : undefined
+    this.values = {} // "<page>:<section>" → translation
+  }
+}
+
+// ⭐ A translation seen in several places comes back as the author keeps it: one string where every
+// place agrees, else `{ default, overrides }` — their default and their overrides kept wherever they
+// still hold. The default is what the places without an override of their own say (the most of
+// them; the author's default when tied, else the first read). An override for a place this pull did
+// not see is kept, and one that now says the default is dropped.
+function reconcileTranslation(existing, seen) {
+  const own = existing && typeof existing === 'object' && existing.overrides && typeof existing.overrides === 'object' ? existing.overrides : {}
+  const authoredDefault = typeof existing === 'string' ? existing : existing && typeof existing === 'object' ? existing.default : undefined
+  const contexts = Object.entries(seen.values)
+  const candidates = [...(seen.plain !== undefined ? [seen.plain] : []), ...contexts.filter(([k]) => !(k in own)).map(([, v]) => v)]
+  let def = authoredDefault
+  if (candidates.length) {
+    const counts = new Map()
+    for (const v of candidates) counts.set(v, (counts.get(v) || 0) + 1)
+    const most = Math.max(...counts.values())
+    const top = [...counts].filter(([, n]) => n === most).map(([v]) => v)
+    def = top.includes(authoredDefault) ? authoredDefault : top[0]
+  } else if (def === undefined) {
+    def = contexts[0]?.[1]
+  }
+  const overrides = { ...own }
+  for (const [k, v] of contexts) {
+    if (v === def) delete overrides[k]
+    else overrides[k] = v
+  }
+  return Object.keys(overrides).length ? { default: def, overrides } : def
 }
 
 /**
@@ -420,7 +541,7 @@ export function writeFreeformTranslations(siteRoot, freeformPending) {
  */
 export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
   const report = {}
-  for (const [locale, entries] of Object.entries(byLocale || {})) {
+  for (let [locale, entries] of Object.entries(byLocale || {})) {
     if (!entries || Object.keys(entries).length === 0) continue
     const filePath = localeFilePath(siteRoot, locale, subdir)
 
@@ -438,13 +559,21 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
     // changes in its place, and new ones follow, sorted. ⛔ Until 2026-09-26 every pull re-sorted the
     // whole file by hash — measured on the `international` template, whose `es.json` runs in page
     // order: a pull that changed no translation rewrote all 77 lines.
+    // A translation read in several sections becomes the string or the `{ default, overrides }` the
+    // author keeps (`reconcileTranslation`).
+    entries = Object.fromEntries(
+      Object.entries(entries).map(([key, value]) => [key, value instanceof SeenInContexts ? reconcileTranslation(existing[key], value) : value])
+    )
     const fresh = Object.keys(entries).filter((key) => !(key in existing)).sort()
-    if (fresh.length === 0 && Object.entries(entries).every(([key, value]) => existing[key] === value)) {
+    if (fresh.length === 0 && Object.entries(entries).every(([key, value]) => canonicalJson(existing[key]) === canonicalJson(value))) {
       report[locale] = 'unchanged'
       continue
     }
     const merged = {}
-    for (const key of Object.keys(existing)) merged[key] = key in entries ? entries[key] : existing[key]
+    // An entry the pull did not change keeps its value as written — key order included.
+    for (const key of Object.keys(existing)) {
+      merged[key] = key in entries && canonicalJson(entries[key]) !== canonicalJson(existing[key]) ? entries[key] : existing[key]
+    }
     for (const key of fresh) merged[key] = entries[key]
     const next = JSON.stringify(merged, null, 2) + '\n'
 

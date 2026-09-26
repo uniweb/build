@@ -26,7 +26,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { resolveQueriesConfig, toConfigQueries } from './queries-config.js'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
-import { readLayoutFolder, DEFAULT_LAYOUT } from './layout-folder.js'
+import { readLayoutFolder, DEFAULT_LAYOUT, layoutAreaRoute } from './layout-folder.js'
 import { join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
@@ -2419,7 +2419,7 @@ async function collectLayouts(layoutDir, siteRoot) {
       assetCollection = mergeAssetCollections(assetCollection, result.assetCollection)
       iconCollection = mergeIconCollections(iconCollection, result.iconCollection)
     }
-    const route = area.layout === DEFAULT_LAYOUT ? `/layout/${area.area}` : `/layout/${area.layout}/${area.area}`
+    const route = layoutAreaRoute(area.layout, area.area)
     layouts[area.layout] ??= {}
     layouts[area.layout][area.area] = {
       route,
@@ -2692,6 +2692,11 @@ export async function collectSiteContent(sitePath, options = {}) {
   const langValidation = validateLanguageConfig(siteConfig)
   for (const { message } of langValidation.warnings) {
     console.warn(`[content-collector] ${message}`)
+  }
+  // Errors stop a publish build (below); in dev they are said, so the author meets them here
+  // rather than first at a push.
+  if (!dropUnpublished) {
+    for (const { message } of langValidation.errors) console.warn(`[content-collector] ${message}`)
   }
   // Publish filter (the sync format's "Per-locale publish
   // readiness"): on published build paths, only the publishable intersection

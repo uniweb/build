@@ -25,6 +25,7 @@ import yaml from 'js-yaml'
 import { poolDirsForSchema, schemaForPoolDirs, RECORDS_DIR } from '../site/entity-pool.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { computeSourceHash } from './freeform-manifest.js'
+import { layoutAreaRoute } from '../site/layout-folder.js'
 
 // Try to import content-reader for markdown → ProseMirror conversion
 let markdownToProseMirror
@@ -327,7 +328,7 @@ function freeformSections(siteContent) {
     if (!areas || typeof areas !== 'object') continue
     for (const [areaKey, layoutPage] of Object.entries(areas)) {
       if (!layoutPage?.sections) continue
-      const route = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
+      const route = layoutPage.route || layoutAreaRoute(layoutName, areaKey)
       visit(layoutPage.sections, { ...layoutPage, route })
     }
   }
