@@ -743,6 +743,11 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
 // or else `order:` on each page. ⛔ Until 2026-09-26 a pull wrote neither: a clone's menus came back in
 // filename order (measured on the `international` and `marketing` templates), and an order changed in
 // the app was undone by the next push.
+//
+// ⭐ `order:` goes on the fewest pages that give the order. The build puts the numbered pages first and
+// the rest after them by filename (`orderFolders`), so the pages at the END that are already in
+// filename order, and carry no `order:`, need none — the way `international` numbers four pages and
+// leaves `404` and `home` to follow. ⛔ The first version of this numbered every page of the level.
 function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = null }) {
   const level = (pages || []).map((r) => {
     const dirName = pageDirName(r, sourceLocale)
@@ -764,7 +769,17 @@ function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = n
     else list.write(parsed.mode === 'strict' ? names : [...names, '...'])
     return
   }
-  level.forEach(({ yml }, i) => writeMergedYaml(yml, { order: i + 1 }, ['order']))
+  // The unnumbered tail: the longest run at the end in filename order, none of it numbered.
+  const inWire = level.map(({ dirName }) => folders.find((f) => f.dirName === dirName))
+  let tail = inWire.length
+  while (tail > 0) {
+    const candidate = inWire.slice(tail - 1)
+    if (candidate[0].order !== undefined) break
+    const byName = orderFolders(candidate, null).map((f) => f.dirName)
+    if (byName.join('\n') !== candidate.map((f) => f.dirName).join('\n')) break
+    tail--
+  }
+  level.slice(0, tail).forEach(({ yml }, i) => writeMergedYaml(yml, { order: i + 1 }, ['order']))
 }
 
 // The `pages:` list a level is ordered by, and how to rewrite it. The root's is the site config's,
