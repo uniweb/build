@@ -56,8 +56,7 @@ import {
   isIgnoredFolder,
   parseNumericPrefix,
   compareFilenames,
-  parseWildcardArray,
-  applyWildcardOrder,
+  orderFolders,
   processMarkdownFile,
   declaredFetch,
   checkDeclaration,
@@ -351,21 +350,10 @@ async function orderedSubfolders(dirPath, inheritedMode, parentConfig) {
       order: typeof config.order === 'number' ? config.order : undefined,
     })
   }
-  // Mirror content-collector's pageFolders sort: explicit order, then
-  // numeric-prefix filename order.
-  folders.sort(
-    (a, b) =>
-      (a.order ?? Infinity) - (b.order ?? Infinity) ||
-      compareFilenames(a.dirName, b.dirName)
-  )
-  // Then the parent's `pages:` wildcard, exactly as a normal build applies it.
-  if (Array.isArray(parentConfig?.pages)) {
-    const parsed = parseWildcardArray(parentConfig.pages)
-    if (parsed && parsed.mode !== 'all') {
-      return applyWildcardOrder(folders, parsed)
-    }
-  }
-  return folders
+  // Mirror content-collector's pageFolders sort: explicit order, then numeric-prefix
+  // filename order, then the parent's `pages:` wildcard — one function, which the pull
+  // reproduces a level's order with too (`site-project.js`).
+  return orderFolders(folders, parentConfig?.pages)
 }
 
 const DYNAMIC_RE = /^\[(.+)\]$/

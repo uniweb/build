@@ -48,6 +48,8 @@ import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteContentDirs } from './site-dirs.js'
+import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray } from '../site/content-collector.js'
+import { upsertYamlScalar } from './yaml-upsert.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
 // map under `.uniweb/`, the home for the backend's per-item identity so that
@@ -577,7 +579,7 @@ const PAGE_YML_MANAGED_KEYS = new Set([
 // directory (name, page.yml vs folder.yml, `[param]/`), not the config body.
 // Identity (the backend uuid) is NOT written here — it lives in the gitignored
 // `.uniweb/` index so authored files stay clean.
-function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null) {
+function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false } = {}) {
   const y = {}
   if (record.stable_id !== undefined) y.id = record.stable_id
   const title = unwrapLocalized(record.title, sourceLocale)
@@ -587,7 +589,9 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null) {
   const label = unwrapLocalized(record.label, sourceLocale)
   if (label !== undefined) y.label = label
   if (record.keywords !== undefined) y.keywords = unwrapLocalizedList(record.keywords, sourceLocale)
-  if (record.is_index) y.index = true
+  // A ROOT page's homepage mark is the site's to carry (`site.yml`, below); on its own page.yml only
+  // where the author wrote it. ⛔ Until 2026-09-26 every pull added `index: true` to it, beside the site's.
+  if (record.is_index && (!isRoot || existing?.index === true)) y.index = true
   if (record.hidden !== undefined) y.hidden = record.hidden
   if (record.hide_in !== undefined) y.hideIn = record.hide_in
   if (record.knowledge !== undefined) y.knowledge = record.knowledge
@@ -617,7 +621,12 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null) {
   // The trailing `...` makes it inclusive: listed sections keep their order and
   // their nesting, and anything new is discovered and appended as it would be in a
   // page that was never pulled.
-  if (sectionsArray && sectionsArray.length > 0) y.sections = [...sectionsArray, '...']
+  // ⭐ The author's own list is kept when it gives the same order — its `...` stays where they put it.
+  if (sectionsArray && sectionsArray.length > 0) {
+    const authored = existing?.sections
+    const same = Array.isArray(authored) && JSON.stringify(authored.filter((e) => e !== '...')) === JSON.stringify(sectionsArray)
+    y.sections = same ? authored : [...sectionsArray, '...']
+  }
   return y
 }
 
@@ -668,7 +677,7 @@ function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
 // incoming level never nukes an existing one (a malformed/partial payload can't
 // wipe it).
 function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
-  writePagesTree(pages, pagesDir, sourceLocale, report, ctx)
+  writePagesTree(pages, pagesDir, sourceLocale, report, ctx, '', rootOrderList(ctx.siteRoot, pagesDir))
   if (prune) prunePagesTree(pages, pagesDir, sourceLocale, report)
 }
 
@@ -690,7 +699,7 @@ export function pageDirName(record, sourceLocale) {
 // section files, recursing into children. No deletes happen here. `routePrefix`
 // accumulates the slug-path route (for the free-form translation path; matches the
 // producer's slugPath, normalizeRouteForPath strips any leading slash on both).
-function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '') {
+function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null) {
   for (const record of pages || []) {
     const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
     const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
@@ -720,11 +729,60 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     const ymlPath = join(pageDir, ymlName)
     // Merge (not full-dump) so author-added keys survive a pull; the projector
     // owns only PAGE_YML_MANAGED_KEYS.
-    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, readAuthoredYaml(ymlPath)), PAGE_YML_MANAGED_KEYS)
+    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, readAuthoredYaml(ymlPath), { isRoot: !routePrefix }), PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
-    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route)
+    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath))
   }
+  reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage })
+}
+
+// ⭐ A LEVEL'S ORDER IS THE BACKEND'S — the order the pulled document gives its pages, which is the
+// order a push read them in, or the one the app set since. A level whose own config already gives it
+// is left as it is; otherwise it is said the way the level says it: its `pages:` list, in that order,
+// or else `order:` on each page. ⛔ Until 2026-09-26 a pull wrote neither: a clone's menus came back in
+// filename order (measured on the `international` and `marketing` templates), and an order changed in
+// the app was undone by the next push.
+function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = null }) {
+  const level = (pages || []).map((r) => {
+    const dirName = pageDirName(r, sourceLocale)
+    return { dirName, yml: join(pagesDir, dirName, r.mode === 'folder' ? 'folder.yml' : 'page.yml') }
+  })
+  if (level.length < 2) return
+  const folders = level.map(({ dirName, yml }) => {
+    const order = readAuthoredYaml(yml)?.order
+    return { dirName, name: parseNumericPrefix(dirName).name, order: typeof order === 'number' ? order : undefined }
+  })
+  const ordered = orderFolders(folders, list?.pages).map((f) => f.dirName)
+  if (ordered.join('\n') === level.map((l) => l.dirName).join('\n')) return
+  const parsed = Array.isArray(list?.pages) ? parseWildcardArray(list.pages) : null
+  if (parsed && parsed.mode !== 'all') {
+    const names = folders.map((f) => f.name)
+    // A root list's first entry is the homepage; when the backend's order does not open with it, the
+    // list opens with `...`, and `index:` names it (`siteContentDocumentToProject`).
+    if (homepage && names[0] !== homepage) list.write(['...', ...names])
+    else list.write(parsed.mode === 'strict' ? names : [...names, '...'])
+    return
+  }
+  level.forEach(({ yml }, i) => writeMergedYaml(yml, { order: i + 1 }, ['order']))
+}
+
+// The `pages:` list a level is ordered by, and how to rewrite it. The root's is the site config's,
+// else the pages directory's own (`rootOrderConfig`, the build's rule); any other level's is its
+// parent page's.
+function rootOrderList(siteRoot, pagesDir) {
+  const site = readAuthoredYaml(join(siteRoot, 'site.yml')) || {}
+  const dirConfig = ['folder.yml', 'page.yml'].map((f) => join(pagesDir, f)).find((f) => existsSync(f)) || null
+  const { pages, homepage } = rootOrderConfig({ pages: site.pages, index: site.index }, (dirConfig && readAuthoredYaml(dirConfig)) || {})
+  const inSite = Array.isArray(site.pages) && site.pages.length > 0
+  return {
+    pages,
+    homepage,
+    write: (next) => (inSite || !dirConfig ? writeSiteConfig(siteRoot, { pages: next }) : writeMergedYaml(dirConfig, { pages: next }, ['pages'])),
+  }
+}
+function parentOrderList(ymlPath) {
+  return { pages: readAuthoredYaml(ymlPath)?.pages, write: (next) => writeMergedYaml(ymlPath, { pages: next }, ['pages']) }
 }
 
 // Every section FILE base in a page's section tree. Nested children are written as
@@ -910,7 +968,22 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // written the document's `settings.paths` into it — because that is the file the
   // next push and the build read. See `siteContentDirs`.
   const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, readAuthoredYaml(join(siteRoot, 'site.yml')))
+  // The root page the backend marks as the homepage, by the directory it is written to.
+  const home = (document?.pages || []).find((p) => p?.is_index)
+  ctx.homepage = home ? pageDirName(home, sourceLocale) : null
   projectPages(document?.pages, pagesDir, sourceLocale, report, prune, ctx)
+  // ⭐ THE HOMEPAGE IS THE ONE THE BACKEND MARKS, named where the site names it. ⛔ Until 2026-09-26 a
+  // clone kept its scaffold's `index: home` whatever the site's homepage was — a page that may not
+  // exist — and the homepage was marked on its own page.yml instead.
+  if (ctx.homepage) {
+    const root = rootOrderList(siteRoot, pagesDir)
+    if (root.homepage !== ctx.homepage) {
+      const listed = Array.isArray(root.pages) ? parseWildcardArray(root.pages) : null
+      // A list that names the homepage first beats `index:`, so it opens with `...` instead.
+      if (listed && listed.before.length > 0) root.write(['...', ...root.pages.filter((e) => e !== '...')])
+      upsertYamlScalar(join(siteRoot, 'site.yml'), 'index', ctx.homepage)
+    }
+  }
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)

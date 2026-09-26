@@ -2956,9 +2956,29 @@ function buildRouteTranslations(pages, { defaultLocale = 'en', languages = null 
   return Object.keys(result).length > 0 ? result : null
 }
 
+/**
+ * One level's pages in the order a push walks them, and a pull reproduces: explicit `order:`, then
+ * numeric-prefix filename order, then the parent config's `pages:` list. Shared by the push's walk
+ * (`uwx/site.js::orderedSubfolders`) and the pull (`uwx/site-project.js`), so the two cannot
+ * disagree on what a level's order is.
+ *
+ * @param {Array<{ dirName: string, name: string, order?: number }>} folders
+ * @param {Array} [parentPages] - the parent config's `pages:`
+ * @returns {Array} the folders, ordered
+ */
+function orderFolders(folders, parentPages) {
+  const sorted = [...folders].sort(
+    (a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || compareFilenames(a.dirName, b.dirName)
+  )
+  const parsed = Array.isArray(parentPages) ? parseWildcardArray(parentPages) : null
+  return parsed && parsed.mode !== 'all' ? applyWildcardOrder(sorted, parsed) : sorted
+}
+
 export {
   assertRouteFolder,
   buildRouteTranslations,
+  declaredHomepage,
+  orderFolders,
   extractItemName,
   parseWildcardArray,
   applyWildcardOrder,

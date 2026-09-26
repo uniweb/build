@@ -213,9 +213,12 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
   it('projects pages (with sections:), a folder, a dynamic [param] page, and layout', () => {
     const report = siteContentDocumentToProject({ document, siteRoot: dir })
 
-    // home page (page mode): page.yml with index + sections, + the section file
+    // home page (page mode): page.yml with sections, + the section file. The homepage is the
+    // SITE's to name (`site.yml::index`), not marked on the root page's own page.yml as well.
     const homeYml = yaml.load(readFileSync(join(dir, 'pages/home/page.yml'), 'utf8'))
-    expect(homeYml).toMatchObject({ id: 'home', index: true, title: 'Home', sections: ['hero', '...'] })
+    expect(homeYml).toMatchObject({ id: 'home', title: 'Home', sections: ['hero', '...'] })
+    expect(homeYml.index).toBeUndefined()
+    expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8')).index).toBe('home')
     expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
 
     // blog (folder mode): folder.yml, no page.yml
