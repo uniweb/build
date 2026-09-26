@@ -143,6 +143,11 @@ function stripCredentials(block, label) {
 // processMarkdownFile only destructures type/component/preset/input/props/
 // fetch/data/id out of frontmatter, so `background:` and `theme:` stay
 // inside section.params — lift them into the entity type's dedicated fields.
+// The `type` a push sends for a section whose file names none — the Model requires one. A pull does
+// not write it back into a file that names none (`sectionRecordToFile`): absent, the foundation's
+// `defaultSection` renders it, which is not always `Content`.
+export const FILLED_SECTION_TYPE = 'Content'
+
 const AUTHORED_SLUG = Symbol('authoredSlug')
 const isPlainRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
@@ -261,7 +266,7 @@ function mapSectionData(section) {
   delete params.background
   delete params.theme
 
-  const data = { type: section.type || 'Content' } // entity type requires `type`
+  const data = { type: section.type || FILLED_SECTION_TYPE } // entity type requires `type`
   setIf(data, 'stable_id', section.stableId ?? undefined)
   setIf(data, 'preset', section.preset ?? undefined)
   setIf(data, 'input', section.input ?? undefined)

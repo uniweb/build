@@ -43,6 +43,8 @@ const FILES = {
   'pages/about/2-story.md': '---\ntype: Section\n---\n\n## Our story\nIt began in 2008.\n',
   'pages/home/1-hero.md': '---\ntype: Hero\n---\n\n# Welcome\n',
   'layout/header.md': '---\ntype: Header\n---\n\n# Site\n',
+  // No `type:` — the push sends `Content` for it, and the foundation's `defaultSection` renders it.
+  'pages/home/2-notes.md': '# Notes\n\nNothing typed here.\n',
   // Page order, not hash order — the way the template keeps it.
   'locales/es.json': JSON.stringify({ [computeHash('Welcome')]: 'Bienvenidos', [computeHash('About us')]: 'Sobre nosotros' }, null, 2) + '\n',
 }

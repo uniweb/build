@@ -42,6 +42,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
+import { FILLED_SECTION_TYPE } from './site.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
@@ -446,7 +447,9 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   if (stable_id !== undefined && writeId) frontmatter.id = stable_id
 
   const body = insets ? reinlineInsets(sourceContent, insets) : sourceContent
-  return writeSectionFile({ filePath, content: body, params: frontmatter })
+  // ⛔ Not `type: Content` into a file that names no type: it is what the push sent for it, and
+  // absent, the foundation's `defaultSection` renders it. Until 2026-09-26 a pull wrote it back.
+  return writeSectionFile({ filePath, content: body, params: frontmatter, implied: { type: FILLED_SECTION_TYPE } })
 }
 
 // ---------------------------------------------------------------------------

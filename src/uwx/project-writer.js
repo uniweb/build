@@ -165,9 +165,11 @@ function assembleSection(frontmatter, body) {
  * @param {object} [opts.content] - ProseMirror document for the body
  * @param {object} [opts.params] - incoming frontmatter params to merge
  * @param {Set<string>} [opts.reserved] - keys preserved when already present
+ * @param {object} [opts.implied] - `{ key: value }` a file means by leaving `key` out; an incoming
+ *        value equal to it is not written into an existing file that leaves the key out
  * @returns {'updated'|'unchanged'}
  */
-export function writeSectionFile({ filePath, content, params, reserved = DEFAULT_RESERVED_FRONTMATTER }) {
+export function writeSectionFile({ filePath, content, params, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null }) {
   let existing = ''
   try {
     existing = readFileSync(filePath, 'utf8')
@@ -186,6 +188,9 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
       // how a newly-projected section gets its `type`/`nest`/etc.
       if (reserved.has(key) && key in frontmatter) continue
       if (reserved.has(key) && DECLARATION_KEYS.includes(key) && declaresLocally) continue
+      // A value the file implies by leaving the key out (`implied`) is not written into a file that
+      // exists — a new file has nothing to imply it with.
+      if (implied && existing && !(key in frontmatter) && implied[key] === value) continue
       if (value === null || value === undefined) delete nextFrontmatter[key]
       else nextFrontmatter[key] = value
     }
