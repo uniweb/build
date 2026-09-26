@@ -532,10 +532,45 @@ export function writeFreeformTranslations(siteRoot, freeformPending) {
 }
 
 /**
+ * The keys of a JSON object's top level, in the order its text writes them.
+ *
+ * ⛔ NOT `Object.keys(JSON.parse(text))`: a JavaScript object puts every integer-like key
+ * first, and a translation's key is a hash — `19544096` is one, as about one in fifty are.
+ * Until 2026-09-26 a pull that changed one translation also moved each such entry to the top
+ * of the author's file.
+ *
+ * @param {string} text - a JSON object
+ * @returns {string[]}
+ */
+function topLevelKeyOrder(text) {
+  const keys = []
+  let depth = 0
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (c === '"') {
+      let end = i + 1
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1
+      if (depth === 1 && /^\s*:/.test(text.slice(end + 1, end + 64))) keys.push(JSON.parse(text.slice(i, end + 1)))
+      i = end
+    } else if (c === '{' || c === '[') depth++
+    else if (c === '}' || c === ']') depth--
+  }
+  return keys
+}
+
+/** `JSON.stringify(object, null, 2)` of these entries, in their order — see `topLevelKeyOrder`. */
+function jsonObjectText(entries) {
+  if (entries.length === 0) return '{}\n'
+  const lines = entries.map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value, null, 2).replace(/\n/g, '\n  ')}`)
+  return `{\n${lines.join(',\n')}\n}\n`
+}
+
+/**
  * Merge `{ locale: { hash: target } }` into each `locales/{locale}.json`,
  * preserving existing entries (translations for strings not in this projection are
- * kept — `uniweb i18n audit --clean` removes genuine orphans). Keys are sorted so
- * the output is byte-stable / idempotent. Creates `locales/` if absent.
+ * kept — `uniweb i18n audit --clean` removes genuine orphans). An entry keeps its place
+ * in the file, and new ones follow it, sorted, so a pull that changes nothing writes
+ * nothing. Creates `locales/` if absent.
  *
  * @returns {{ [locale: string]: 'updated' | 'unchanged' }}
  */
@@ -546,10 +581,15 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
     const filePath = localeFilePath(siteRoot, locale, subdir)
 
     let existing = {}
+    let order = []
     if (existsSync(filePath)) {
       try {
-        const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = parsed
+        const text = readFileSync(filePath, 'utf8')
+        const parsed = JSON.parse(text)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          existing = parsed
+          order = topLevelKeyOrder(text).filter((key) => key in parsed)
+        }
       } catch {
         // unreadable / invalid → start fresh
       }
@@ -569,13 +609,13 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
       report[locale] = 'unchanged'
       continue
     }
-    const merged = {}
     // An entry the pull did not change keeps its value as written — key order included.
-    for (const key of Object.keys(existing)) {
-      merged[key] = key in entries && canonicalJson(entries[key]) !== canonicalJson(existing[key]) ? entries[key] : existing[key]
-    }
-    for (const key of fresh) merged[key] = entries[key]
-    const next = JSON.stringify(merged, null, 2) + '\n'
+    const merged = [...new Set([...order, ...Object.keys(existing)])].map((key) => [
+      key,
+      key in entries && canonicalJson(entries[key]) !== canonicalJson(existing[key]) ? entries[key] : existing[key],
+    ])
+    for (const key of fresh) merged.push([key, entries[key]])
+    const next = jsonObjectText(merged)
 
     let current = null
     try {

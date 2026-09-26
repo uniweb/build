@@ -241,3 +241,21 @@ describe('context-specific overrides come back as the author keeps them', () => 
     expect(pull(undefined, 'Más información.', 'Más información.').entry).toBe('Más información.')
   })
 })
+
+describe('a pull that changes one translation changes that line alone', () => {
+  let root
+  afterEach(() => root && rmSync(root, { recursive: true, force: true }))
+
+  // ⛔ A hash of digits alone (`19544096`, about one in fifty) is an integer-like key, which a
+  // JavaScript object puts first — so until 2026-09-26 such an entry moved to the top of the file.
+  it('⭐ an entry whose hash is all digits keeps its place', () => {
+    root = mkdtempSync(join(tmpdir(), 'order-'))
+    mkdirSync(join(root, 'locales'))
+    const file = join(root, 'locales', 'es.json')
+    const before = '{\n  "620d9c54": "Protegiendo",\n  "19544096": "El Modelo",\n  "e578c36b": "El Desafio"\n}\n'
+    writeFileSync(file, before)
+
+    expect(writeLocaleTranslations(root, { es: { e578c36b: 'El Reto', '30000000': 'Nuevo' } }).es).toBe('updated')
+    expect(readFileSync(file, 'utf8')).toBe(before.replace('"El Desafio"\n', '"El Reto",\n  "30000000": "Nuevo"\n'))
+  })
+})
