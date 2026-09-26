@@ -205,12 +205,15 @@ const INLINE_NODES = new Set(['hardBreak', 'hard_break', 'image', 'inset_ref', '
 /**
  * Extract excerpt from content
  *
+ * Exported for the localized build (`i18n/records.js`), which derives each locale's
+ * excerpt from that locale's body by this same rule.
+ *
  * @param {Object} frontmatter - Parsed frontmatter
  * @param {Object} content - ProseMirror content
  * @param {Object} excerptConfig - Excerpt configuration
  * @returns {string} Excerpt text
  */
-function extractExcerpt(frontmatter, content, excerptConfig) {
+export function extractExcerpt(frontmatter, content, excerptConfig) {
   const { maxLength = 160, field = null } = excerptConfig || {}
 
   // Check for explicit excerpt in frontmatter
