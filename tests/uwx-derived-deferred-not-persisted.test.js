@@ -155,3 +155,27 @@ describe('a pull over queries declared in site.yml', () => {
     expect(yaml.load(readFileSync(join(SITE, 'site.yml'), 'utf8')).queries.articles).toEqual({ schema: '@std/article', sort: 'date asc' })
   })
 })
+
+// ⭐ AND OVER THE FOUNDATION'S OWN SCHEMA — which a clone can only know from the backend. Measured
+// 2026-09-25 on a clone of a site whose foundation defines its own schemas: its queries gained
+// `deferred: [body, record, history, parts]`.
+describe('a clone’s query over its foundation’s own schema', () => {
+  const pullInto = (models) => {
+    mkdirSync(SITE, { recursive: true })
+    writeFileSync(join(SITE, 'site.yml'), "name: Clone\nfoundation: '@acme/fnd@1.0.0'\n")
+    declarationsToQueriesYml({
+      document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [{ name: 'articles', schema: '@acme/article', deferred: ['body', 'notes'] }] },
+      siteRoot: SITE,
+      models,
+    })
+    return yaml.load(readFileSync(join(SITE, 'queries.yml'), 'utf8')).articles
+  }
+
+  it('⛔ judged by the Model the pull read, the derived `deferred:` is not written', () => {
+    expect(pullInto({ '@acme/article': SCHEMA }).deferred).toBeUndefined()
+  })
+
+  it('CONTROL — with no Model to judge by, it is kept: the safe direction', () => {
+    expect(pullInto(null).deferred).toEqual(['body', 'notes'])
+  })
+})

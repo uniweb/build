@@ -334,16 +334,17 @@ function standardDataSchema(ref) {
 // as an ORDER-INSENSITIVE set: the deriver walks the schema's sections, and a round trip
 // through YAML and the store is not obliged to preserve that order. Comparing as a list
 // would classify a reordered-but-identical value as authored, and persist it.
-function isDerivedDeferred(d, dataSchemas) {
+function isDerivedDeferred(d, dataSchemas, pulledModel = null) {
   if (!Array.isArray(d.deferred)) return false
-  // A standard schema is known without the foundation — a clone's case (`standardDataSchema`).
-  const derived = deferredFromSchema(dataSchemas?.[d.schema] ?? standardDataSchema(d.schema))
+  // A clone has no foundation to read a schema from: it judges by the Model the pull read from the
+  // backend (`pulledModel`), and a standard schema is known in any case (`standardDataSchema`).
+  const derived = deferredFromSchema(dataSchemas?.[d.schema] ?? pulledModel ?? standardDataSchema(d.schema))
   if (!derived || derived.length !== d.deferred.length) return false
   const a = new Set(derived)
   return d.deferred.every((f) => a.has(f))
 }
 
-function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null, authored = null) {
+function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null, authored = null, models = null) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
   // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
@@ -406,7 +407,7 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null, key
   //
   // ⚖️ Only an EQUAL value is dropped. An author who deliberately writes a narrower or
   // wider `deferred:` than the brief implies has expressed intent, and that survives.
-  if (d.deferred !== undefined && !isDerivedDeferred(d, dataSchemas)) {
+  if (d.deferred !== undefined && !isDerivedDeferred(d, dataSchemas, models?.[wire.schema] ?? null)) {
     decl.deferred = d.deferred
   }
   // ⛔ A stored `detail_url` is not written back: `detailUrl:` is retired (2026-09-13)
@@ -469,7 +470,7 @@ function authoredQuerySchemas(siteRoot, siteYml) {
   return out
 }
 
-export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest }) {
+export function declarationsToQueriesYml({ document, siteRoot, scope, models = null, ...rest }) {
   refuseOrgOption(rest, 'declarationsToQueriesYml')
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
@@ -498,7 +499,7 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes, authored)
+    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes, authored, models)
     if (!name) continue
     queries[name] = decl
   }
