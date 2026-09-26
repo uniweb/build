@@ -332,8 +332,11 @@ function decodeList(def, value, dec) {
 }
 
 // A leaf's authored value. A localized SCALAR's target locales are captured into the
-// collector (the content body's are captured by `unwrapLocalizedContent`, with its
-// free-form path); a list of localized values is unwrapped element by element.
+// collector — a markdown body's too, keyed by its whole text as the records extractor keys it
+// (a ProseMirror body's are captured by `unwrapLocalizedContent`, with its free-form path); a
+// list of localized values is unwrapped element by element. ⛔ Until 2026-09-26 a body was
+// taken to be ProseMirror, so a markdown one's translations were captured nowhere and a
+// clone rendered it in the source language.
 function decodeLeaf(raw, field, dec, isBody) {
   if (field?.type === 'entity_ref') return decodeReference(raw, field, dec)
   if (isProseMirrorField(field)) {
@@ -344,10 +347,10 @@ function decodeLeaf(raw, field, dec, isBody) {
   }
   if (!field?.localized) return raw
   if (Array.isArray(raw)) {
-    if (!isBody) for (const item of raw) dec.collector?.add(item, dec.context)
+    for (const item of raw) dec.collector?.add(item, dec.context)
     return unwrapLocalizedList(raw, dec.sourceLocale)
   }
-  if (!isBody) dec.collector?.add(raw, dec.context)
+  dec.collector?.add(raw, dec.context)
   return unwrapLocalized(raw, dec.sourceLocale)
 }
 
