@@ -255,8 +255,12 @@ function siteFoundationDeclarations(siteRoot) {
     return { own: null, keyTypes: null }
   }
   const schema = siteYml ? foundationSchemaJson(siteRoot, siteYml) : null
+  // ⛔ Own names only from a schema that carries its data schemas. The registered version a clone
+  // keeps carries none (they travel as Models), and read as an empty set it said "owns nothing", so a
+  // clone placed a foundation's own `@std/exhibit` in `records/std/exhibit/`; unknown (null), the
+  // standard-schema rule decides (`unresolveSelfScope`), as it did before the kept version existed.
   return schema
-    ? { own: ownSchemaNames(schema.dataSchemas || {}), keyTypes: dataKeyTypes(schema) }
+    ? { own: ownSchemaNames(schema.dataSchemas), keyTypes: dataKeyTypes(schema) }
     : { own: null, keyTypes: null }
 }
 

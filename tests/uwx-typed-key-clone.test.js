@@ -117,3 +117,37 @@ describe('the clone’s own push', () => {
     expect(doc.queries.find((q) => q.name === 'team')).toMatchObject({ schema: '@acme/member', typed_by_data_key: true })
   })
 })
+
+describe('a clone of a foundation in `@std`, keeping its registered version', () => {
+  it('⭐ places a record of the foundation’s own schema by its name, and a standard one by its scope', () => {
+    w('site.yml', "name: T\nfoundation: '@std/lab@1.0.0'\n")
+    writeRegisteredFoundation(CLONE, '@std/lab@1.0.0', { schema: { _self: {}, Grid: { data: {} } } })
+    const EXHIBIT = toDataSchemaDeclaration(
+      validateAndNormalizeSchema({ name: 'exhibit', fields: { title: { type: 'string' } } }, '@/exhibit'),
+      { name: '@std/exhibit' }
+    )
+    const PERSON = toDataSchemaDeclaration(
+      validateAndNormalizeSchema({ name: 'person', fields: { name: { type: 'string' } } }, '@/person'),
+      { name: '@std/person' }
+    )
+    const report = recordsToProject({
+      folderDoc: {
+        contents: [
+          { kind: 'ref', name: 'deep-time', entry: { schema: '@std/exhibit', entity: 'U-1' } },
+          { kind: 'ref', name: 'ines', entry: { schema: '@std/person', entity: 'U-2' } },
+        ],
+      },
+      recordDocs: [
+        { $uuid: 'U-1', $schema: '@std/exhibit', brief: { title: 'Deep time' } },
+        { $uuid: 'U-2', $schema: '@std/person', brief: { name: 'Ines' } },
+      ],
+      siteRoot: CLONE,
+      opts: { backend: BACKEND, resolveDeclaration: (n) => (n === '@std/exhibit' ? EXHIBIT : PERSON), scope: '@std' },
+    })
+    expect(report.skipped).toEqual([])
+    expect(report.placed.map((p) => p.slice(CLONE.length + 1)).sort()).toEqual([
+      'records/exhibit/deep-time.yml',
+      'records/std/person/ines.yml',
+    ])
+  })
+})
