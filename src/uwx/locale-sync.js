@@ -23,6 +23,7 @@ import { computeHash } from '../i18n/hash.js'
 import { blockElements, elementText } from '../i18n/extract.js'
 import { resolveDocForLocale } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
+import { sameMarkdownDocument } from './same-content.js'
 
 const FREEFORM_MANIFEST = '.manifest.json'
 
@@ -384,7 +385,9 @@ export function writeFreeformTranslations(siteRoot, freeformPending) {
       } catch {
         // absent
       }
-      if (current !== text) {
+      // ⭐ A file whose markdown already says this is left as the author wrote it — the writer's
+      // markdown is not theirs (blank lines, line breaks), as for a section body (`writeSectionFile`).
+      if (current !== text && !(current !== null && sameMarkdownDocument(current.trim(), target))) {
         mkdirSync(dirname(filePath), { recursive: true })
         writeFileSync(filePath, text)
         report.written.push(filePath)

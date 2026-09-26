@@ -40,7 +40,8 @@ import { join, resolve, relative, extname, basename, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
-import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
+import { writeRecordFile, writeQueriesConfig, writeRecordsConfig, YAML_DUMP_OPTS } from './project-writer.js'
+import { canonicalJson } from './same-content.js'
 import { defaultSchema, deferredFromSchema, foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
@@ -136,8 +137,11 @@ function writeRecordIntoList({ list, document, declaration, sourceLocale, collec
   const { $uuid, ...fields } = list.format === 'json' ? JSON.parse(rendered) : yaml.load(rendered, YAML_OPTIONS)
   const slug = entries[list.index]?.slug
   const entry = { ...($uuid ? { $uuid } : {}), ...(slug !== undefined ? { slug } : {}), ...fields }
+  // ⭐ An entry the pull did not change leaves the file as the author wrote it — its key order, its
+  // spacing, and a YAML file's comments. ⛔ Until 2026-09-26 the file was compared as text and re-dumped.
+  if (canonicalJson(entries[list.index]) === canonicalJson(entry)) return 'unchanged'
   const next = entries.map((e, i) => (i === list.index ? entry : e))
-  const out = list.format === 'json' ? JSON.stringify(next, null, 2) + '\n' : yaml.dump(next)
+  const out = list.format === 'json' ? JSON.stringify(next, null, 2) + '\n' : yaml.dump(next, YAML_DUMP_OPTS)
   if (out === text) return 'unchanged'
   writeFileSync(list.path, out)
   return 'updated'

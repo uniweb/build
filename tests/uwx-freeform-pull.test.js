@@ -66,3 +66,31 @@ describe('pull — a free-form translation the site keeps', () => {
     expect(freeform).toBe(null)
   })
 })
+
+describe('pull — a free-form translation it did not change', () => {
+  it('⭐ is left as the author wrote it, though the writer’s markdown would differ', async () => {
+    const { markdownToProseMirror } = await import('@uniweb/content-reader')
+    // Two headings with no blank line between them: the writer's markdown adds one.
+    const authored = '# Nuestra historia\n## Desde 2008\n\nHola mundo.\n'
+    ROOT = mkdtempSync(join(tmpdir(), 'uwx-freeform-pull-'))
+    const w = (rel, body) => {
+      const p = join(ROOT, ...rel)
+      mkdirSync(join(p, '..'), { recursive: true })
+      writeFileSync(p, body)
+    }
+    w(['site.yml'], 'name: Site\ndefaultLanguage: en\nfoundation: "@acme/fnd@1.0.0"\n')
+    w(FREEFORM, authored)
+    const source = markdownToProseMirror('# Our story\n## Since 2008\n\nHello world.')
+    siteContentDocumentToProject({
+      siteRoot: ROOT,
+      document: {
+        info: { name: 'Site' },
+        pages: [{
+          stable_id: 'about', mode: 'page', slug: { en: 'about' }, title: { en: 'About' },
+          page_sections: [{ stable_id: 'story', type: 'Section', content: { en: source, es: markdownToProseMirror(authored) } }],
+        }],
+      },
+    })
+    expect(readFileSync(join(ROOT, ...FREEFORM), 'utf8')).toBe(authored)
+  })
+})

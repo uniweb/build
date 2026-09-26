@@ -18,6 +18,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-writer'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { parseFrontmatter } from './entity-source.js'
+import { canonicalJson, sameMarkdownDocument } from './same-content.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -44,7 +45,7 @@ export const DEFAULT_RESERVED_FRONTMATTER = new Set([
 ])
 
 // js-yaml dump options shared by every config write, so output is byte-stable.
-const YAML_DUMP_OPTS = { lineWidth: -1, quotingType: "'", forceQuotes: false, noRefs: true }
+export const YAML_DUMP_OPTS = { lineWidth: -1, quotingType: "'", forceQuotes: false, noRefs: true }
 
 /**
  * Write `text` to `filePath` only when it differs from what's on disk, using a
@@ -201,31 +202,12 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
   // and a pull that changed nothing reformatted every section it touched (measured 2026-09-26 on the
   // `marketing` template). A file with nothing to change is not written at all.
   const authoredBody = (existingBody || '').replace(/^\n+/, '').replace(/\s+$/, '')
-  const keepsBody = Boolean(content && authoredBody) && sameDocument(authoredBody, content)
+  const keepsBody = Boolean(content && authoredBody) && sameMarkdownDocument(authoredBody, content)
   if (keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
   const body = content && !keepsBody ? proseMirrorToMarkdown(content) : authoredBody
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))
 }
 
-// Does this markdown parse to `doc`, the way a push parses a section (`content-collector.js`)?
-function sameDocument(markdown, doc) {
-  try {
-    return canonicalJson(withoutDefaults(markdownToProseMirror(markdown))) === canonicalJson(withoutDefaults(doc))
-  } catch {
-    return false
-  }
-}
-
-// A document without the attributes that only restate a default: an inset's `embedKind: 'visual'`,
-// which the parser writes and the pull's re-inlining leaves out (`reinlineInsets`) — so a body holding
-// an inset never compared as unchanged (measured 2026-09-26 on the `marketing` template's hero).
-function withoutDefaults(doc) {
-  return JSON.parse(JSON.stringify(doc), (_, v) => {
-    if (v?.type !== 'inset_ref' || v.attrs?.embedKind !== 'visual') return v
-    const { embedKind: _visual, ...attrs } = v.attrs
-    return { ...v, attrs }
-  })
-}
 
 // Shallow-merge `changes` into a YAML config file and write idempotently. A key
 // whose value is null/undefined is deleted; an object value is shallow-merged one
@@ -397,11 +379,6 @@ function restates(authored, decl) {
   return isPlainObject(authored) && canonicalJson(authored) === canonicalJson(decl)
 }
 
-// JSON with every object's keys sorted — equal for equal values, whatever the order.
-const canonicalJson = (value) =>
-  JSON.stringify(value, (_, v) =>
-    isPlainObject(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v
-  )
 
 /**
  * Write the records folder's organization — `folder.yml` in the records directory
@@ -475,7 +452,7 @@ function sameRecordText(a, b, format, filePath) {
       if (canonicalJson(x.frontmatter) !== canonicalJson(y.frontmatter)) return false
       const bx = (x.body || '').trim()
       const by = (y.body || '').trim()
-      return bx === by || canonicalJson(markdownToProseMirror(bx)) === canonicalJson(markdownToProseMirror(by))
+      return bx === by || sameMarkdownDocument(bx, markdownToProseMirror(by))
     }
     const parse = format === 'json' ? JSON.parse : (t) => yaml.load(t, YAML_OPTIONS)
     return canonicalJson(parse(a)) === canonicalJson(parse(b))

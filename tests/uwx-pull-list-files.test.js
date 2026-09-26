@@ -85,3 +85,24 @@ describe('pull — a record kept in a list file', () => {
     expect(report.placed).toHaveLength(1)
   })
 })
+
+describe('pull — a list file whose records it did not change', () => {
+  it('⭐ is left as the author wrote it — comments, flow style, key order', () => {
+    const authored = '# Our team\n- $uuid: U1\n  slug: wei\n  role: Lead   # since 2008\n  name: Wei\n- {$uuid: U2, slug: lin, name: Lin, role: Field}\n'
+    site({ 'records/member/members.yml': authored })
+    pull(
+      [
+        { $uuid: 'U1', $schema: '@acme/member', member: { name: 'Wei', role: 'Lead' } },
+        { $uuid: 'U2', $schema: '@acme/member', member: { name: 'Lin', role: 'Field' } },
+      ],
+      [['wei', 'U1'], ['lin', 'U2']]
+    )
+    expect(readFileSync(join(SITE, 'records/member/members.yml'), 'utf8')).toBe(authored)
+  })
+
+  it('CONTROL — one that changed is written into its entry', () => {
+    site({ 'records/member/members.yml': '- $uuid: U1\n  slug: wei\n  name: Wei\n  role: Lead\n' })
+    pull([{ $uuid: 'U1', $schema: '@acme/member', member: { name: 'Wei Zhang', role: 'Lead' } }], [['wei', 'U1']])
+    expect(readFileSync(join(SITE, 'records/member/members.yml'), 'utf8')).toContain('name: Wei Zhang')
+  })
+})
