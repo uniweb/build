@@ -419,9 +419,13 @@ async function orderedSubfolders(dirPath, inheritedMode, parentConfig) {
       order: typeof config.order === 'number' ? config.order : undefined,
     })
   }
-  // Mirror content-collector's pageFolders sort: explicit order, then numeric-prefix
-  // filename order, then the parent's `pages:` wildcard — one function, which the pull
-  // reproduces a level's order with too (`site-project.js`).
+  // Explicit order, then numeric-prefix filename order, then the parent's `pages:` wildcard —
+  // one function, which the pull reproduces a level's order with too (`site-project.js`).
+  // ⚠️ It does NOT match the build's own page-folder sort in one case, and the note that said
+  // "mirror content-collector's pageFolders sort" here read as if it did: the collector compares
+  // a level's folder names whole, as strings, and matches `pages:` against them whole, where
+  // this strips a numeric prefix (`2-about` is `about`, and `10-` sorts after `2-`). Only a level
+  // with numbered page folders can tell them apart, and which rule is right for them is open.
   return orderFolders(folders, parentConfig?.pages)
 }
 

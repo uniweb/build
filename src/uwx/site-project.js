@@ -564,7 +564,9 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
       written.push(filePath)
       const children = Array.isArray(record.$children) ? record.$children : []
       if (children.length > 0) nested = true
-      entries.push(children.length > 0 ? { [fileBase]: buildEntries(children, false) } : fileBase)
+      // Listed by the name the build finds the file by — which is not the id for a file found by its `id:`.
+      const listed = fileSectionName(filePath)
+      entries.push(children.length > 0 ? { [listed]: buildEntries(children, false) } : listed)
     }
     return entries
   }
@@ -582,6 +584,17 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
 function fileSectionName(filePath) {
   const base = stripAtPrefix(basename(filePath, extname(filePath)))
   return parseNumericPrefix(base).name || base
+}
+
+// A `sections:` list with each entry as that name — `1-hero` and `hero` find the same file.
+function listedNames(list) {
+  return list.map((entry) =>
+    typeof entry === 'string'
+      ? fileSectionName(entry)
+      : entry && typeof entry === 'object'
+        ? Object.fromEntries(Object.entries(entry).map(([k, v]) => [fileSectionName(k), Array.isArray(v) ? listedNames(v) : v]))
+        : entry
+  )
 }
 
 // ⭐ THE FILE THE AUTHOR KEEPS A SECTION IN — found by the name the build reads it by (`1-hero.md` holds
@@ -682,7 +695,8 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, {
   if (sectionsArray && sectionsArray.length > 0) {
     const authored = existing?.sections
     if (Array.isArray(authored)) {
-      const same = JSON.stringify(authored.filter((e) => e !== '...')) === JSON.stringify(sectionsArray)
+      // Compared by the names the files are found by, so a list naming `1-hero` keeps naming it.
+      const same = JSON.stringify(listedNames(authored.filter((e) => e !== '...'))) === JSON.stringify(sectionsArray)
       y.sections = same ? authored : [...sectionsArray, '...']
     } else if (!filesGiveOrder) {
       y.sections = [...sectionsArray, '...']
@@ -1116,7 +1130,10 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // exist — and the homepage was marked on its own page.yml instead.
   if (ctx.homepage) {
     const root = rootOrderList(siteRoot, pagesDir)
-    if (root.homepage !== ctx.homepage) {
+    // A homepage marked `index: true` in its own config — where the push read it (`buildPageData`) —
+    // is left marked there alone: a site.yml that names none is not given an `index:` it never had.
+    const marksItself = readAuthoredYaml(join(pagesDir, ctx.homepage, home.mode === 'folder' ? 'folder.yml' : 'page.yml'))?.index === true
+    if (root.homepage !== ctx.homepage && !(marksItself && root.homepage === undefined)) {
       const listed = Array.isArray(root.pages) ? parseWildcardArray(root.pages) : null
       // A list that names the homepage first beats `index:`, so it opens with `...` instead.
       if (listed && listed.before.length > 0) root.write(['...', ...root.pages.filter((e) => e !== '...')])

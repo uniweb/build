@@ -2962,6 +2962,10 @@ function buildRouteTranslations(pages, { defaultLocale = 'en', languages = null 
  * (`uwx/site.js::orderedSubfolders`) and the pull (`uwx/site-project.js`), so the two cannot
  * disagree on what a level's order is.
  *
+ * ⚠️ The build's own page-folder sort (`collectPagesRecursive`) is not this function: it compares
+ * folder names whole, as strings. The two differ only for numbered page folders — see the note at
+ * `orderedSubfolders`.
+ *
  * @param {Array<{ dirName: string, name: string, order?: number }>} folders
  * @param {Array} [parentPages] - the parent config's `pages:`
  * @returns {Array} the folders, ordered

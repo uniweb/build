@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { siteContentDocumentToProject } from '../src/uwx/index.js'
-import { orderFolders } from '../src/site/content-collector.js'
+import { collectSiteContent } from '../src/site/content-collector.js'
 
 let SITE
 afterEach(() => SITE && rmSync(SITE, { recursive: true, force: true }))
@@ -38,25 +38,39 @@ function pull(pages, files = {}) {
 }
 const yml = (rel) => yaml.load(readFileSync(join(SITE, rel), 'utf8')) || {}
 const orders = (names) => names.map((n) => yml(`pages/${n}/page.yml`).order)
-// The level as the build orders it from the files the pull wrote — the rule a push walks by.
-const builtOrder = (names) =>
-  orderFolders(names.map((n) => ({ dirName: n, name: n, order: yml(`pages/${n}/page.yml`).order })), yml('site.yml').pages).map((f) => f.dirName)
+// The top level as the build renders it from the files the pull wrote — the collector itself, not the
+// push walk's `orderFolders`, which differs from it for numbered page folders.
+const builtOrder = async () =>
+  (await collectSiteContent(SITE)).pages
+    .map((p) => (p.sourcePath || p.route).split('/').filter(Boolean))
+    .filter((parts) => parts.length === 1)
+    .map(([name]) => name)
 
 describe('pull — a clone gets the backend’s order and homepage', () => {
-  it('⭐ a level out of filename order is numbered in the backend’s order — only as far as it must be', () => {
+  it('⭐ a level out of filename order is numbered in the backend’s order — only as far as it must be', async () => {
     // `features` and `pricing` follow `home` by filename, as the build places pages with no `order:`.
     pull([page('home', { is_index: true }), page('features'), page('pricing')], { 'site.yml': 'name: Site\nindex: home\n' })
     expect(orders(['home', 'features', 'pricing'])).toEqual([1, undefined, undefined])
-    expect(builtOrder(['home', 'features', 'pricing'])).toEqual(['home', 'features', 'pricing'])
+    expect(await builtOrder()).toEqual(['home', 'features', 'pricing'])
     expect(yml('pages/home/page.yml').index).toBeUndefined()
     expect(yml('site.yml').index).toBe('home')
   })
 
-  it('⭐ the pages at the end that follow by filename get no number — `international`’s shape', () => {
+  it('⭐ the pages at the end that follow by filename get no number — `international`’s shape', async () => {
     const names = ['about', 'research', 'blog', 'contact', '404', 'home']
     pull(names.map((n) => page(n, n === 'home' ? { is_index: true } : {})), { 'site.yml': 'name: Site\nindex: home\n' })
     expect(orders(names)).toEqual([1, 2, 3, 4, undefined, undefined])
-    expect(builtOrder(names)).toEqual(names)
+    // `404` is the build's not-found slot, lifted out of the pages it orders.
+    expect(await builtOrder()).toEqual(names.filter((n) => n !== '404'))
+  })
+
+  it('a homepage marked in its own page.yml stays marked there alone — site.yml gets no `index:`', () => {
+    pull([page('home', { is_index: true }), page('about')], {
+      'site.yml': 'name: Site\n',
+      'pages/home/page.yml': 'title: home\nindex: true\n',
+    })
+    expect(yml('site.yml').index).toBeUndefined()
+    expect(yml('pages/home/page.yml').index).toBe(true)
   })
 
   it('⭐ the homepage the backend marks replaces a scaffold’s `index: home`', () => {
@@ -93,7 +107,7 @@ describe('pull — an existing copy keeps the order it says its own way', () => 
     expect(orders(['home', 'features', 'pricing'])).toEqual([undefined, undefined, undefined])
   })
 
-  it('an order changed in the app is written the way the copy says it — `order:` values', () => {
+  it('an order changed in the app is written the way the copy says it — `order:` values', async () => {
     pull([page('research'), page('about'), page('blog'), page('home', { is_index: true })], {
       'site.yml': 'name: Site\nindex: home\n',
       'pages/about/page.yml': 'order: 1\n',
@@ -102,7 +116,7 @@ describe('pull — an existing copy keeps the order it says its own way', () => 
     })
     // `home` had none and follows by filename, so it is left without one.
     expect(orders(['research', 'about', 'blog', 'home'])).toEqual([1, 2, 3, undefined])
-    expect(builtOrder(['research', 'about', 'blog', 'home'])).toEqual(['research', 'about', 'blog', 'home'])
+    expect(await builtOrder()).toEqual(['research', 'about', 'blog', 'home'])
   })
 
   it('an order changed in the app is written the way the copy says it — its `pages:` list', () => {
