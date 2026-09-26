@@ -166,6 +166,17 @@ describe('i18n through sync — every language renders the same after a round tr
     })
   })
 
+  it('a page title’s override — the page’s `<route>:_meta`, as the build keys page metadata', async () => {
+    const src = site({
+      files: { 'pages/story/page.yml': 'title: About\n', 'pages/story/1-text.md': '---\ntype: Section\n---\n\nIt began in 2008.\n' },
+      es: { [h('About')]: { default: 'Acerca de', overrides: { '/about:_meta': 'Quiénes somos' } } },
+    })
+    await expectRoundTrip(src, (r) => {
+      expect(r.es.pages['/about'].title).toBe('Quiénes somos')
+      expect(r.es.pages['/story'].title).toBe('Acerca de')
+    })
+  })
+
   it('T5 — the values of a tagged data block', async () => {
     const src = site({
       files: { 'pages/home/2-links.md': '---\ntype: Section\n---\n\n```yaml:links\n- label: Read our report\n  href: /about\n```\n' },

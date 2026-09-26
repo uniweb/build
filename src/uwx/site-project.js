@@ -810,13 +810,15 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     placeByUuid(ctx, record.$uuid, pageDir)
 
     // Capture target-locale translations of the page's localized scalars; the
-    // source value goes inline into page.yml below (pageRecordToYml unwraps it).
-    ctx.collector?.add(record.title)
-    ctx.collector?.add(record.label)
-    ctx.collector?.add(record.description)
+    // source value goes inline into page.yml below (pageRecordToYml unwraps it). In the page's
+    // context, as the build translates them (`<route>:_meta`), so an override for one page comes back.
+    const meta = { page: canon, section: '_meta' }
+    ctx.collector?.add(record.title, meta)
+    ctx.collector?.add(record.label, meta)
+    ctx.collector?.add(record.description, meta)
     // keywords is a localized ARRAY — capture each element's target locales.
-    if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw))
-    else ctx.collector?.add(record.keywords)
+    if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw, meta))
+    else ctx.collector?.add(record.keywords, meta)
 
     const route = routePrefix ? `${routePrefix}/${slug}` : slug
     // Addressed as the push addresses it: its free-form translations and its translations' contexts

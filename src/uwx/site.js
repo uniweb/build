@@ -272,6 +272,7 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
     for (const p of pgs || []) {
       const route = buildRouteOf(p, parentRoute, sourceLocale)
       const page = { route, id: p.stable_id }
+      localizePageMeta(p, route, sourceLocale, translations)
       if (Array.isArray(p.page_sections)) await visitSections(p.page_sections, page)
       if (Array.isArray(p.$children)) await visitPages(p.$children, route)
     }
@@ -280,6 +281,20 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
   // A layout area's section has its free-form home at the area's route, as the build reads it
   // (`layoutAreaRoute`). ⛔ This said "layout sections have no free-form home" until 2026-09-26.
   for (const s of layoutSections || []) await localizeSection(s, { route: layoutAreaRoute(s.layout_name, s.area || s.stable_id) })
+}
+
+// ⭐ A page's title, label, description and keywords are resolved in the page's context, as the
+// build translates them (`i18n/merge.js::translatePageMeta`, `<route>:_meta`): an override for one
+// page applies there and nowhere else. ⛔ Until 2026-09-26 they were resolved with no page, so an
+// override never reached a backend — nor, until the same day, an entry's default.
+function localizePageMeta(page, route, sourceLocale, translations) {
+  const context = { page: route, section: '_meta' }
+  const again = (value) =>
+    value && typeof value === 'object' && typeof value[sourceLocale] === 'string'
+      ? localizeScalar(value[sourceLocale], sourceLocale, translations, context)
+      : value
+  for (const key of ['title', 'label', 'description']) if (page[key] !== undefined) page[key] = again(page[key])
+  if (Array.isArray(page.keywords)) page.keywords = page.keywords.map(again)
 }
 
 function mapSectionData(section) {
