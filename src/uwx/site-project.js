@@ -32,6 +32,7 @@
 // we unwrap to the source locale for the file surface (other locales stay in
 // the i18n pipeline). Absent `info` keys are left untouched on disk.
 
+import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
@@ -43,7 +44,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { FILLED_SECTION_TYPE, buildRouteOf } from './site.js'
-import { translationContext } from '../i18n/extract.js'
+import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, localesDir } from './locale-sync.js'
 import { resolveLocaleList } from '../i18n/locales.js'
@@ -282,6 +283,11 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   for (const [settingsKey, ymlKey] of Object.entries(SETTINGS_TO_SITE_YML)) {
     if (settingsSection[settingsKey] !== undefined) siteChanges[ymlKey] = settingsSection[settingsKey]
   }
+  // ⭐ The site's Open Graph title and description, sent per language as `og_title` /
+  // `og_description` where the deployment takes them: back inside `seo`, the source language's,
+  // the others to the collector in the site's context (`uwx/open-graph.js`).
+  const siteSeo = foldOpenGraph(settingsSection, siteChanges.seo, sourceLocale, collector, SITE_META_CONTEXT)
+  if (siteSeo !== undefined) siteChanges.seo = siteSeo
 
   // `settings.keywords` is a LOCALIZED list (it renders into `<meta name="keywords">`)
   // → unwrap to the source locale; the target locales go to the collector.
@@ -696,7 +702,10 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, {
   if (record.redirect !== undefined) y.redirect = record.redirect
   if (record.rewrite !== undefined) y.rewrite = record.rewrite
   if (record.layout !== undefined) y.layout = record.layout
-  if (record.seo !== undefined) y.seo = record.seo
+  // Its Open Graph title and description, per language on the wire, back inside `seo`
+  // (`uwx/open-graph.js`); their other languages are collected with the page's metadata.
+  const seo = foldOpenGraph(record, record.seo, sourceLocale)
+  if (seo !== undefined) y.seo = seo
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. Under
   // the key the file already uses (`existing`), else `query:` for names alone.
   if (record.fetch !== undefined) {
@@ -816,6 +825,8 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     ctx.collector?.add(record.title, meta)
     ctx.collector?.add(record.label, meta)
     ctx.collector?.add(record.description, meta)
+    ctx.collector?.add(record.og_title, meta)
+    ctx.collector?.add(record.og_description, meta)
     // keywords is a localized ARRAY — capture each element's target locales.
     if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw, meta))
     else ctx.collector?.add(record.keywords, meta)

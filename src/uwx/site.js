@@ -76,7 +76,8 @@ import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeCon
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
-import { translationContext } from '../i18n/extract.js'
+import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
+import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
@@ -293,7 +294,9 @@ function localizePageMeta(page, route, sourceLocale, translations) {
     value && typeof value === 'object' && typeof value[sourceLocale] === 'string'
       ? localizeScalar(value[sourceLocale], sourceLocale, translations, context)
       : value
-  for (const key of ['title', 'label', 'description']) if (page[key] !== undefined) page[key] = again(page[key])
+  for (const key of ['title', 'label', 'description', 'og_title', 'og_description']) {
+    if (page[key] !== undefined) page[key] = again(page[key])
+  }
   if (Array.isArray(page.keywords)) page.keywords = page.keywords.map(again)
 }
 
@@ -318,7 +321,7 @@ function mapSectionData(section) {
 }
 
 function buildPageData(config, ctx) {
-  const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations, where } =
+  const { slug, mode, isDynamic, paramName, isRoot, siteIndex, sourceLocale, translations, where, pageFields } =
     ctx
   // The page `slug` is the localized route source — a `{lang: slug}` map (the
   // site-content Model declares it localized; greenlit 2026-06-13). The source
@@ -355,7 +358,13 @@ function buildPageData(config, ctx) {
   setIf(data, 'redirect', config.redirect)
   setIf(data, 'rewrite', config.rewrite)
   setIf(data, 'layout', config.layout)
-  setIf(data, 'seo', config.seo)
+  // ⭐ Its Open Graph title and description per language, where the deployment's page takes them
+  // (`uwx/open-graph.js`) — out of `seo`, which travels as one object. ⛔ Until 2026-09-26 they rode
+  // inside `seo` only, in the source language, though the build translates them.
+  const og = splitOpenGraph(config.seo, pageFields, sourceLocale, translations)
+  setIf(data, 'og_title', og.og_title)
+  setIf(data, 'og_description', og.og_description)
+  setIf(data, 'seo', og.seo)
   // ⭐ A `query:` or `fetch:` LIST means "fetch each" — one declaration per entry. Before
   // 2026-09-02 this kept `[0]` and dropped the rest silently, so the wire
   // carried one dataset for a page that asked for several.
@@ -729,7 +738,7 @@ const REPUBLISH_CLAUSE =
 // Recursively build the `pages` tree: each record carries its fields, its inline
 // `page_sections` (page mode only), and its child pages under `$children`.
 async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot) {
-  const { siteRoot, siteIndex, sourceLocale, translations } = ctx
+  const { siteRoot, siteIndex, sourceLocale, translations, pageFields } = ctx
   const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig)
   const out = []
   // A folder inside a `[...path]` folder can never be reached, and `[dir]` /
@@ -763,6 +772,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
       siteIndex,
       sourceLocale,
       translations,
+      pageFields,
     })
     // `$id` is the stableId when authored (rename-stable), else the slug (the
     // natural handle — spec default). The path is NEVER the identity.
@@ -1245,7 +1255,7 @@ function secretsNested(provisioned) {
 // ROUND-TRIP LAW). `site-project.js::SETTINGS_TO_SITE_YML` plus its explicit
 // branches is the other half, and `producer-list-drift.test.js` fails if a key
 // emitted here has neither.
-function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations, languages = null } = {}) {
+function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations, languages = null, settingsFields = null } = {}) {
   const settings = {}
 
   // Site-wide values an author declares once and references from page content as
@@ -1294,7 +1304,12 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // (`core/src/seo.js`). Two of those are literally sitemap.xml columns. It only
   // ever passed the card test because `image` was inside it; the card's picture is
   // `info.preview` now.
-  setIf(settings, 'seo', siteYml.seo)
+  // The site's Open Graph title and description per language, where the deployment's `settings`
+  // takes them (`uwx/open-graph.js`), in the site's context (`SITE_META_CONTEXT`).
+  // (Each read inline from `siteYml.seo`, so the emit surface names its source.)
+  setIf(settings, 'og_title', openGraphValue(siteYml.seo, 'og_title', settingsFields, sourceLocale, translations, SITE_META_CONTEXT))
+  setIf(settings, 'og_description', openGraphValue(siteYml.seo, 'og_description', settingsFields, sourceLocale, translations, SITE_META_CONTEXT))
+  setIf(settings, 'seo', seoBesideOpenGraph(siteYml.seo, settingsFields))
   // ⭐ `keywords` IS seo by function — it renders into `<meta name="keywords">`
   // (`runtime/src/ssr-renderer.js`). It is top-level in site.yml for authoring
   // convenience, not because it is a different kind of thing. Localized, so it
@@ -1576,7 +1591,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // (uwx-format.md → info.url.)
 
   // `siteIndex` — the homepage — joins below, once the pages directory's own config is read.
-  const ctx = { siteRoot, sourceLocale, translations }
+  // …and the keys this deployment's page takes (`siteContent.pageFields`), for its Open Graph texts.
+  const ctx = { siteRoot, sourceLocale, translations, pageFields: opts.pageFields }
   // ⛔ ONE `paths:` CONVENTION, TWO READERS, AND THIS ONE IS A STRICT SUBSET.
   // The build honours sub-mounts — `paths: { pages/<segment>: <dir> }`, through
   // `resolveMounts`/`mountEntriesOf` in `site/content-collector.js` — and this
@@ -1657,7 +1673,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // Emitted only when the file declares something — see `settingsNested`.
   // The languages the site's translation files make, for a site that declares none (`settingsNested`).
   const languages = targetLocales.length > 0 ? [sourceLocale, ...targetLocales] : null
-  const settings = settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations, languages })
+  const settings = settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations, languages, settingsFields: opts.settingsFields })
   if (settings) doc.settings = settings
   doc.pages = pages
   doc.layout_sections = layoutSections

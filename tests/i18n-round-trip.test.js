@@ -73,12 +73,17 @@ function texts(node, out = []) {
   }
   return out
 }
-const page = (p) => ({ title: p.title ?? null, sections: Object.fromEntries((p.sections || []).map((s) => [s.stableId, texts(s.content).join(' | ')])) })
+const page = (p) => ({
+  title: p.title ?? null,
+  og: [p.seo?.ogTitle ?? null, p.seo?.ogDescription ?? null],
+  sections: Object.fromEntries((p.sections || []).map((s) => [s.stableId, texts(s.content).join(' | ')])),
+})
 function summary(file) {
   const c = JSON.parse(readFileSync(file, 'utf8'))
   return {
     languages: (c.config?.languages || []).map((l) => (typeof l === 'string' ? l : l.code)),
     routes: c.config?.i18n?.routeTranslations ?? null,
+    siteOg: [c.config?.seo?.ogTitle ?? null, c.config?.seo?.ogDescription ?? null],
     pages: Object.fromEntries((c.pages || []).map((p) => [p.route, page(p)])),
     layouts: Object.fromEntries(Object.entries(c.layouts || {}).flatMap(([n, areas]) => Object.entries(areas || {}).map(([a, p]) => [`${n}/${a}`, page(p)]))),
   }
@@ -106,8 +111,9 @@ async function rendered(siteRoot) {
 }
 
 // A push, then a pull into the author's copy and into an empty directory.
-async function roundTrip(src) {
-  const wire = JSON.stringify(await siteProjectToDocument(src))
+// `push` — what the deployment takes, as `GET /dev/config` says (`pageFields`, `settingsFields`).
+async function roundTrip(src, push = {}) {
+  const wire = JSON.stringify(await siteProjectToDocument(src, push))
   const copy = join(tmp(), 'site')
   cpSync(src, copy, { recursive: true })
   siteContentDocumentToProject({ document: JSON.parse(wire), siteRoot: copy, prune: true })
@@ -116,10 +122,10 @@ async function roundTrip(src) {
   return { copy, clone }
 }
 
-async function expectRoundTrip(src, check) {
+async function expectRoundTrip(src, check, push = {}) {
   const before = await rendered(src)
   check?.(before) // the feature is there to lose
-  const { copy, clone } = await roundTrip(src)
+  const { copy, clone } = await roundTrip(src, push)
   expect(await rendered(copy), 'the author’s copy after a pull').toEqual(before)
   expect(await rendered(clone), 'a clone').toEqual(before)
 }
@@ -183,5 +189,33 @@ describe('i18n through sync — every language renders the same after a round tr
       es: { [h('Read our report')]: 'Lee nuestro informe' },
     })
     await expectRoundTrip(src, (r) => expect(r.es.pages['/'].sections.links).toContain('Lee nuestro informe'))
+  })
+
+  // ⭐ A page's and the site's Open Graph title and description travel per language where the
+  // deployment takes `og_title` / `og_description`. ⛔ Until 2026-09-26 they rode inside `seo` in the
+  // source language only, so a clone and a hosted page showed them untranslated.
+  const OG = ['og_title', 'og_description']
+  const ogSite = () =>
+    site({
+      siteYml: 'seo:\n  ogTitle: Pandas worldwide\n  image: /card.png\n',
+      files: { 'pages/about/page.yml': 'title: About\nseo:\n  ogTitle: About the pandas\n  ogDescription: Who we are.\n  noindex: false\n' },
+      es: { [h('About the pandas')]: 'Sobre los pandas', [h('Who we are.')]: 'Quiénes somos.', [h('Pandas worldwide')]: 'Pandas del mundo' },
+    })
+
+  it('⭐ a page’s and the site’s Open Graph texts, where the deployment takes them', async () => {
+    await expectRoundTrip(
+      ogSite(),
+      (r) => {
+        expect(r.es.pages['/about'].og).toEqual(['Sobre los pandas', 'Quiénes somos.'])
+        expect(r.es.siteOg).toEqual(['Pandas del mundo', null])
+      },
+      { pageFields: ['title', ...OG, 'seo'], settingsFields: [...OG, 'seo'] }
+    )
+  })
+
+  it('CONTROL — where the deployment does not take them, a clone has them in the source language only', async () => {
+    const { clone } = await roundTrip(ogSite())
+    const r = await rendered(clone)
+    expect(r.es.pages['/about'].og).toEqual(['About the pandas', 'Who we are.'])
   })
 })

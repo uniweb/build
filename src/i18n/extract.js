@@ -30,6 +30,9 @@ try {
 export function extractTranslatableContent(siteContent) {
   const units = {}
 
+  // The site's own Open Graph title and description (`site.yml` `seo:`), in the site's context.
+  extractFromSiteMeta(siteContent.config, units)
+
   for (const page of siteContent.pages || []) {
     const pageRoute = page.route || '/'
 
@@ -82,6 +85,22 @@ export function extractTranslatableContent(siteContent) {
  * @param {string} pageRoute - Page route
  * @param {Object} units - Units accumulator
  */
+/**
+ * The context of the site's own metadata — its Open Graph title and description (`site.yml` `seo:`),
+ * which a push sends per language as `settings.og_title` / `og_description` (`uwx/open-graph.js`).
+ * A page's is `<route>:_meta`; the site's is this one.
+ */
+export const SITE_META_CONTEXT = Object.freeze({ page: '/', section: '_site' })
+
+function extractFromSiteMeta(config, units) {
+  const seo = config?.seo
+  if (!seo || typeof seo !== 'object') return
+  if (typeof seo.ogTitle === 'string' && seo.ogTitle) addUnit(units, seo.ogTitle, 'site.seo.ogTitle', SITE_META_CONTEXT)
+  if (typeof seo.ogDescription === 'string' && seo.ogDescription) {
+    addUnit(units, seo.ogDescription, 'site.seo.ogDescription', SITE_META_CONTEXT)
+  }
+}
+
 function extractFromPageMeta(page, pageRoute, units) {
   // Use special section identifier for page-level metadata
   const context = { page: pageRoute, section: '_meta' }

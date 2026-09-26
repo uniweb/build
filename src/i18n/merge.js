@@ -14,7 +14,7 @@
 
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
-import { elementText, blockElements, translationContext } from './extract.js'
+import { elementText, blockElements, translationContext, SITE_META_CONTEXT } from './extract.js'
 import { visitDataStrings } from './data-strings.js'
 
 // Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
@@ -71,6 +71,7 @@ export function mergeTranslations(siteContent, translations, options = {}) {
 function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
+  translateSiteMeta(translated.config, translations, fallbackToSource)
 
   for (const page of translated.pages || []) {
     const pageRoute = page.route || '/'
@@ -120,6 +121,7 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
 
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
+  translateSiteMeta(translated.config, translations, fallbackToSource)
 
   for (const page of translated.pages || []) {
     const pageRoute = page.route || '/'
@@ -222,6 +224,18 @@ function toPlainText(value) {
  * Every field here is a PLAIN-TEXT slot — `<title>`, a nav label, a meta
  * description — so each value is flattened. See `toPlainText`.
  */
+// The site's own Open Graph title and description (`config.seo`), in the site's context — as a page's
+// are in its own (`translatePageMeta`).
+function translateSiteMeta(config, translations, fallbackToSource) {
+  const seo = config?.seo
+  if (!seo || typeof seo !== 'object') return
+  for (const key of ['ogTitle', 'ogDescription']) {
+    if (typeof seo[key] === 'string' && seo[key]) {
+      seo[key] = lookupTranslation(seo[key], SITE_META_CONTEXT, translations, fallbackToSource)
+    }
+  }
+}
+
 function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
   const context = { page: pageRoute, section: '_meta' }
   const translate = (value) =>

@@ -101,6 +101,8 @@ describe('producer-side lists cannot drift silently', () => {
       'head_html',  // → head.html
       'keywords',   // localized list + the translation collector
       'fetch',      // → site.yml::fetch, via the shorthand-normalizing branch
+      'og_title',       // → site.yml::seo.ogTitle, folded back per language (`uwx/open-graph.js`)
+      'og_description', // → site.yml::seo.ogDescription, likewise
     ])
 
     expect(emitted.size).toBeGreaterThan(0) // the regex actually found something

@@ -74,6 +74,12 @@
         "layout": [
           "site.yml::layout"
         ],
+        "og_description": [
+          "site.yml::seo"
+        ],
+        "og_title": [
+          "site.yml::seo"
+        ],
         "paths": [
           "site.yml::paths"
         ],
