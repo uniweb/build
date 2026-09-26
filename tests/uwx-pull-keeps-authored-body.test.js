@@ -66,3 +66,42 @@ describe('pull — a section holding an inset', () => {
     expect(readFileSync(filePath, 'utf8')).toBe(authored)
   })
 })
+
+describe('pull — a section with no body', () => {
+  // A parametric page's section: frontmatter only, commented.
+  const ONLY_FRONTMATTER =
+    '---\ntype: Detail\nfetch:\n  # Every book, to link `related`.\n  - query: books\n    as: catalog\n---\n'
+  const PARAMS = { type: 'Detail', fetch: [{ query: 'books', as: 'catalog' }] }
+
+  function writeOnly(content, params = PARAMS) {
+    DIR = mkdtempSync(join(tmpdir(), 'uwx-keeps-body-'))
+    const filePath = join(DIR, 'detail.md')
+    writeFileSync(filePath, ONLY_FRONTMATTER)
+    const status = writeSectionFile({ filePath, content, params })
+    return { status, text: readFileSync(filePath, 'utf8') }
+  }
+
+  it('⭐ is left as the author wrote it, comments and all', () => {
+    const { status, text } = writeOnly(markdownToProseMirror(''))
+    expect(status).toBe('unchanged')
+    expect(text).toBe(ONLY_FRONTMATTER)
+  })
+
+  it('…and so is one the pull sends no document for', () => {
+    const { status, text } = writeOnly(undefined)
+    expect(status).toBe('unchanged')
+    expect(text).toBe(ONLY_FRONTMATTER)
+  })
+
+  it('CONTROL — a frontmatter change is written', () => {
+    const { status, text } = writeOnly(markdownToProseMirror(''), { ...PARAMS, theme: 'dark' })
+    expect(status).toBe('updated')
+    expect(text).toContain('theme: dark')
+  })
+
+  it('CONTROL — a body the pull brought is written into it', () => {
+    const { status, text } = writeOnly(markdownToProseMirror('A new paragraph.'))
+    expect(status).toBe('updated')
+    expect(text).toContain('A new paragraph.')
+  })
+})

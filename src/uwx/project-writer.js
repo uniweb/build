@@ -201,10 +201,13 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
   // is not re-serialized: the writer's markdown differs from an author's in blank lines and line breaks,
   // and a pull that changed nothing reformatted every section it touched (measured 2026-09-26 on the
   // `marketing` template). A file with nothing to change is not written at all.
+  // ⛔ An EMPTY body is one too: until 2026-09-26 it never compared as unchanged, so a section holding
+  // only frontmatter — a parametric page's `type:` and `fetch:` — was re-serialized, and lost its
+  // comments, on a pull that changed nothing. So is no document at all (a params-only update).
   const authoredBody = (existingBody || '').replace(/^\n+/, '').replace(/\s+$/, '')
-  const keepsBody = Boolean(content && authoredBody) && sameMarkdownDocument(authoredBody, content)
-  if (keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
-  const body = content && !keepsBody ? proseMirrorToMarkdown(content) : authoredBody
+  const keepsBody = !content || sameMarkdownDocument(authoredBody, content)
+  if (existing && keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
+  const body = keepsBody ? authoredBody : proseMirrorToMarkdown(content)
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))
 }
 
