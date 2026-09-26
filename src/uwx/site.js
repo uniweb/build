@@ -1200,7 +1200,7 @@ function secretsNested(provisioned) {
 // ROUND-TRIP LAW). `site-project.js::SETTINGS_TO_SITE_YML` plus its explicit
 // branches is the other half, and `producer-list-drift.test.js` fails if a key
 // emitted here has neither.
-function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations } = {}) {
+function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations, languages = null } = {}) {
   const settings = {}
 
   // Site-wide values an author declares once and references from page content as
@@ -1234,7 +1234,13 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // ⇒ `settings` is where they live. `publish_languages` rides VERBATIM, dangling
   // codes included: sync carries the full working set and only *publish* filters,
   // which preserves a locale's publish intent across a remove + re-add in `languages:`.
-  setIf(settings, 'languages', siteYml.languages)
+  // ⭐ A site that declares no `languages:` has the languages its translation files make — the build's
+  // rule (`i18n/locales.js`) — and sends that list (`languages`, below), as it sends a derived
+  // `deferred:`: a host may serve a site in the languages it declares and no others, and the site's
+  // localized URLs with them. The pull does not write it back where the files already say it
+  // (`siteContentDocumentToProject`). ⛔ Until 2026-09-26 only a declared list was sent, so the
+  // `international` template, which declares none, sent no language but its source.
+  setIf(settings, 'languages', siteYml.languages ?? languages ?? undefined)
   setIf(settings, 'default_language', siteYml.defaultLanguage)
   setIf(settings, 'publish_languages', siteYml.publishLanguages)
 
@@ -1604,7 +1610,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   doc.$schema = SITE_MODEL_NAME
   doc.info = info
   // Emitted only when the file declares something — see `settingsNested`.
-  const settings = settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations })
+  // The languages the site's translation files make, for a site that declares none (`settingsNested`).
+  const languages = targetLocales.length > 0 ? [sourceLocale, ...targetLocales] : null
+  const settings = settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translations, languages })
   if (settings) doc.settings = settings
   doc.pages = pages
   doc.layout_sections = layoutSections

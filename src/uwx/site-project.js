@@ -44,7 +44,8 @@ import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writ
 import { declarationsToQueriesYml } from './records-project.js'
 import { FILLED_SECTION_TYPE } from './site.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
-import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, localesDir } from './locale-sync.js'
+import { resolveLocaleList } from '../i18n/locales.js'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
@@ -230,7 +231,7 @@ function readAuthoredYaml(filePath) {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false, deferLanguages = false }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -336,7 +337,18 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
     }
   }
 
+  // ⭐ `languages` for a site whose `site.yml` declares none is judged once the pull has written the
+  // translation files (`deferLanguages`, `siteContentDocumentToProject`): a push sends the list those
+  // files make (`uwx/site.js::settingsNested`), and writing it back would turn "every translation
+  // file" into a fixed list.
+  let pendingLanguages
+  if (deferLanguages && siteChanges.languages !== undefined && !('languages' in (readAuthoredYaml(join(siteRoot, 'site.yml')) || {}))) {
+    pendingLanguages = siteChanges.languages
+    delete siteChanges.languages
+  }
+
   const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
+  if (pendingLanguages !== undefined) result.pendingLanguages = pendingLanguages
 
   // theme (whole object) → theme.yml.
   if (settingsSection.theme && typeof settingsSection.theme === 'object') {
@@ -1104,7 +1116,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
     backend ? readBackendState(siteRoot, backend).assets || {} : {}
   )
 
-  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
+  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, deferLanguages: true })
   report.queries = declarationsToQueriesYml({ document, siteRoot, scope, models })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
@@ -1145,6 +1157,16 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)
   // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
   report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
+  // The site's languages, for a site.yml that declares none (`siteInfoToConfig`) — written only where
+  // the translation files, now written, would not make the same list.
+  if (report.config?.pendingLanguages !== undefined) {
+    const pulled = report.config.pendingLanguages
+    delete report.config.pendingLanguages
+    const source = readAuthoredYaml(join(siteRoot, 'site.yml'))?.defaultLanguage || sourceLocale
+    const made = new Set([source, ...resolveLocaleList(undefined, localesDir(siteRoot))])
+    const same = Array.isArray(pulled) && pulled.length === made.size && pulled.every((l) => made.has(l))
+    if (!same) writeSiteConfig(siteRoot, { languages: pulled })
+  }
   writePullIndex(siteRoot, ctx.newIndex)
   return report
 }
