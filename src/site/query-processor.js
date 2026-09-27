@@ -606,10 +606,12 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
  * (`@uniweb/schemas/conform`'s `toDeliveredRecord`), with a markdown body in the
  * schema's content body field — the ProseMirror document for a `format: prosemirror`
  * field (`article_body.content`, for `@std/article`), the markdown source for a markup
- * `text` one. A component is written against one shape, so a static site hands it that
- * one (ruled 2026-09-24 [Diego]: the same as hosted). ⛔ Until then a record reached a
- * component as its file held it, its body in `content` at the top — a shape no host
- * delivers.
+ * `text` one. A component is written against one shape, so both lanes deliver the same
+ * one — ruled 2026-09-24 [Diego] as a requirement that the shape be one AND a good one,
+ * not as an instruction to adopt the host's. ⚠️ It was built by adopting the host's as it
+ * was (read until 2026-09-26 as "the same as hosted"), and that shape puts two namespaces
+ * in one object (`@uniweb/schemas/conform`, above `toDeliveredRecord`). ⛔ Until 2026-09-24
+ * a record reached a component as its file held it, its body in `content` at the top.
  *
  * `$name` is the record's handle, taken BEFORE the lift: a brief may declare a `slug`
  * field of its own (`@std/article`'s does), and the lift puts that one over the file's.
