@@ -1005,6 +1005,7 @@ const DECL_NOT_ON_WIRE = new Set([
   'body',
   'transform',
   'record',
+  'name_field',
   // Folded into `schema` above (the migration synonym).
   'model',
   // Build state: whether the AUTHOR asked for the schema or the subfolder-name

@@ -83,7 +83,10 @@ describe('what an external query may declare', () => {
       writeFileSync(join(root, 'site.yml'), 'name: T\nfoundation: "@acme/base@1.0.0"\n')
       writeFileSync(join(root, 'queries.yml'), 'items:\n  url: https://api.test/items\n  name_field: slug\n')
       const doc = await siteProjectToDocument(root)
-      expect(doc.queries.find((q) => q.name === 'items').source).toEqual({ url: 'https://api.test/items', name_field: 'slug' })
+      const pushed = doc.queries.find((q) => q.name === 'items')
+      expect(pushed.source).toEqual({ url: 'https://api.test/items', name_field: 'slug' })
+      // in `source` alone — a key the queries Section does not declare would be refused
+      expect(pushed).not.toHaveProperty('name_field')
       rmSync(join(root, 'queries.yml'))
       declarationsToQueriesYml({ document: { queries: [{ name: 'items', source: { url: 'https://api.test/items', name_field: 'slug' } }] }, siteRoot: root })
       expect(yaml.load(readFileSync(join(root, 'queries.yml'), 'utf8')).items).toEqual({ url: 'https://api.test/items', name_field: 'slug' })
