@@ -141,31 +141,15 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   // ⛔ No `creatable_by`: retired 2026-09-23 — Models are open, and `@uniweb/schemas`
   // refuses the key. (It was emitted here when authored.)
 
-  // `linkable` — DERIVED AND AUTHORED, and the two compose in one direction only.
+  // `linkable` — AUTHORED ONLY (2026-09-27 [Diego]). A model is linkable unless it says
+  // `linkable: false` (omitted ⇒ true), with or without a brief: only `linkable: false`
+  // keeps its entries out of references and out of a site's folder. A reference to a
+  // model with no brief carries no card, and that is not a reason to refuse one.
   //
-  // A brief-less model has no card to hydrate as an `entity_ref` target, so it
-  // cannot be linkable whatever it says; a model with a brief is linkable by
-  // default (omit ⇒ true). ⇒ **The derivation is a ceiling and the authored value
-  // may only lower it.** An author may say `linkable: false` on a model with a
-  // brief — a real choice, "do not let other models point at this" — and that is
-  // honoured.
-  //
-  // ⛔ The contradiction is refused rather than silently resolved: `linkable: true`
-  // on a brief-less model asks for something that cannot exist, and quietly
-  // ignoring it is how an author comes to believe a ref target works. Naming it
-  // costs one line and the message says which half to change.
-  if (!brief) {
-    if (normalized.linkable === true) {
-      throw new Error(
-        `Data schema '${name}': 'linkable: true' needs a brief section — a model with no brief ` +
-          `has no card to hydrate when another model references it. Mark a section 'brief: true', ` +
-          `or drop 'linkable'.`
-      )
-    }
-    decl.linkable = false
-  } else if (normalized.linkable === false) {
-    decl.linkable = false
-  }
+  // ⛔ Until then a brief-less model was emitted `linkable: false` and `linkable: true`
+  // on one was refused, on the reasoning that a reference would have no card to show —
+  // which kept its records out of every site's folder.
+  if (normalized.linkable === false) decl.linkable = false
 
   decl.sections = sections
   return decl

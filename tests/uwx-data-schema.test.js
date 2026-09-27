@@ -482,14 +482,14 @@ describe('toDataSchemaDeclaration — brief & linkable', () => {
     expect(d).not.toHaveProperty('linkable')
   })
 
-  it('emits linkable:false for a brief-less model (no single section)', () => {
+  it('a brief-less model is linkable — `linkable` is only what the author writes', () => {
     const d = lower(
       { sections: { items: { kind: 'multi', nestable: true, fields: { label: { type: 'string' } } } } },
       '@/nav',
       '@std/nav'
     )
     expect(briefName(d)).toBeUndefined()
-    expect(d.linkable).toBe(false)
+    expect(d).not.toHaveProperty('linkable')
     expect(d.sections.items).toMatchObject({ multiple: true, self_nesting: true })
   })
 })
@@ -739,38 +739,31 @@ describe('model-level keys on the declaration', () => {
   })
 
   it('honours an authored `linkable: false` on a model that has a brief', () => {
-    // A real choice — "do not let other models point at this" — and distinct from
-    // the derived case below.
+    // A real choice — "do not let other models point at this".
     const decl = toDataSchemaDeclaration(normalize({ linkable: false }), { name: '@demo/session' })
     expect(decl.linkable).toBe(false)
   })
 
-  it('derives linkable:false for a brief-less model, with nothing authored', () => {
-    const decl = toDataSchemaDeclaration(
+  // ⛔ Until 2026-09-27 a brief-less model was emitted `linkable: false`, and `linkable: true`
+  // on one was refused. Only an authored `linkable: false` makes a model unlinkable [Diego].
+  const briefless = (extra) =>
+    toDataSchemaDeclaration(
       validateAndNormalizeSchema(
-        { name: '@demo/log', sections: { entries: { many: true, fields: { at: { type: 'string' } } } } },
+        { name: '@demo/log', ...extra, sections: { entries: { many: true, fields: { at: { type: 'string' } } } } },
         '@demo/log'
       ),
       { name: '@demo/log' }
     )
-    expect(decl.linkable).toBe(false)
+
+  it('a brief-less model is linkable, with nothing authored', () => {
+    expect('linkable' in briefless()).toBe(false)
   })
 
-  it('refuses `linkable: true` on a brief-less model instead of ignoring it', () => {
-    // ⛔ The contradiction is named rather than silently resolved: quietly dropping
-    // it is how an author comes to believe a ref target works when it cannot.
-    expect(() =>
-      toDataSchemaDeclaration(
-        validateAndNormalizeSchema(
-          {
-            name: '@demo/log',
-            linkable: true,
-            sections: { entries: { many: true, fields: { at: { type: 'string' } } } }
-          },
-          '@demo/log'
-        ),
-        { name: '@demo/log' }
-      )
-    ).toThrow(/needs a brief section/)
+  it('takes `linkable: true` on a brief-less model — it is the default', () => {
+    expect('linkable' in briefless({ linkable: true })).toBe(false)
+  })
+
+  it('honours an authored `linkable: false` on a brief-less model', () => {
+    expect(briefless({ linkable: false }).linkable).toBe(false)
   })
 })
