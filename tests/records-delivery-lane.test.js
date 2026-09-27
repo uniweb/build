@@ -57,7 +57,7 @@ describe('placement reaches the records a query returns', () => {
     w('records/folder.yml', ARCHIVE)
 
     const { pubs } = await deliver()
-    const byslug = Object.fromEntries(pubs.map((r) => [r.slug, r.path]))
+    const byslug = Object.fromEntries(pubs.map((r) => [r.$name, r.path]))
     expect(byslug['2026-a']).toBe('')
     expect(byslug['2025-b']).toBe('archive')
   })
@@ -71,7 +71,7 @@ describe('placement reaches the records a query returns', () => {
 
     const { pubs } = await deliver()
     // a folder branch is `scope:` (ruled 2026-09-11; `where: { path: { under } }` is retired)
-    expect(applyScope(pubs, 'archive').map((r) => r.slug)).toEqual(['2025-b'])
+    expect(applyScope(pubs, 'archive').map((r) => r.$name)).toEqual(['2025-b'])
     // CONTROL — the scope is not simply matching everything
     expect(applyScope(pubs, 'nowhere')).toEqual([])
   })
@@ -92,7 +92,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
     w('records/publication/b.md', entity('B'))
 
     const { pubs } = await deliver()
-    expect(pubs.map((r) => r.slug).sort()).toEqual(['a', 'b'])
+    expect(pubs.map((r) => r.$name).sort()).toEqual(['a', 'b'])
     expect(pubs.every((r) => r.path === '')).toBe(true)
   })
 
@@ -102,7 +102,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
     w('records/folder.yml', '')
 
     const { pubs } = await deliver()
-    expect(pubs.map((r) => r.slug)).toEqual(['a'])
+    expect(pubs.map((r) => r.$name)).toEqual(['a'])
   })
 
   it('a file whose name starts with `_` is not a record, so it is not delivered', async () => {
@@ -112,7 +112,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
     const { pubs } = await deliver()
     // the subject, and ⛔ CONTROL — its sibling IS delivered, so the absence is the
     // rule working rather than the lane delivering nothing.
-    expect(pubs.map((r) => r.slug)).toEqual(['published'])
+    expect(pubs.map((r) => r.$name)).toEqual(['published'])
   })
 
   it('⛔ a path at the top of folder.yml is refused loudly — and every record is still delivered', async () => {
@@ -121,7 +121,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
     w('records/folder.yml', '- publication/a.md\n')
 
     const { pubs } = await deliver()
-    expect(pubs.map((r) => r.slug).sort()).toEqual(['a', 'b'])
+    expect(pubs.map((r) => r.$name).sort()).toEqual(['a', 'b'])
     expect(err.mock.calls.map((c) => String(c[0])).some((m) => m.includes('lists records at the top level'))).toBe(true)
   })
 
@@ -153,7 +153,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
     it('CONTROL — the same record placed through a list builds, in its folder', async () => {
       w('records/folder.yml', '- folder: archive\n  records:\n    - publication/published.md\n')
       const { pubs } = await deliver()
-      expect(pubs.map((r) => [r.slug, r.path])).toEqual([['published', 'archive']])
+      expect(pubs.map((r) => [r.$name, r.path])).toEqual([['published', 'archive']])
     })
   })
 })
@@ -249,7 +249,7 @@ describe('a record asset keeps its path under the records directory', () => {
     w('records/article/b/pic.png', 'PIC-B')
 
     const { articles } = await processQueries(ROOT, { articles: { name: 'articles', schema: '@/article' } }, undefined, '/')
-    const bySlug = Object.fromEntries(articles.map((r) => [r.slug, r.image]))
+    const bySlug = Object.fromEntries(articles.map((r) => [r.$name, r.image]))
     expect(bySlug).toEqual({ a: '/records/article/a/pic.png', b: '/records/article/b/pic.png' })
     expect(read('public/records/article/a/pic.png')).toBe('PIC-A')
     expect(read('public/records/article/b/pic.png')).toBe('PIC-B')

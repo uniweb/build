@@ -79,7 +79,8 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     w('site/records/post/hello.md', '---\ncard:\n  title: Hello\n  date: 2026-01-02\ndetails:\n  author: Ada\n---\n\nThe body.\n')
     const { posts } = await compile({ posts: { schema: '@/post' } })
     const [post] = posts
-    expect(post).toMatchObject({ title: 'Hello', date: '2026-01-02', slug: 'hello', $name: 'hello' })
+    expect(post).toMatchObject({ title: 'Hello', date: '2026-01-02', $name: 'hello' })
+    expect(post).not.toHaveProperty('slug')
     expect(post.details.author).toBe('Ada')
     expect(textOf(post.details.content)).toEqual(['The body.'])
     // Nothing of the file's shape, and no body at the top.

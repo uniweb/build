@@ -48,7 +48,7 @@ describe('Collection Processor', () => {
       writeRecord(root, 'notes.md', 'From markdown')
       writeFileSync(join(root, 'notes.yml'), 'title: From yaml\n')
       await processQueries(testDir, { notes: { name: 'notes', schema: '@/note' } }, undefined, '/')
-      const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('slug "notes"'))
+      const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('named "notes"'))
       expect(msg).toBeTruthy()
       warn.mockRestore()
     })
@@ -75,7 +75,7 @@ describe('Collection Processor', () => {
         undefined,
         '/'
       )
-      expect(out.flat.map((i) => i.slug).sort()).toEqual(['a', 'b'])
+      expect(out.flat.map((i) => i.$name).sort()).toEqual(['a', 'b'])
       expect(out.flat.every((i) => i.path === '')).toBe(true)
     })
   })
@@ -110,7 +110,8 @@ This is a test article.
       expect(collections.articles).toHaveLength(1)
 
       const article = collections.articles[0]
-      expect(article.slug).toBe('test-article')
+      expect(article.$name).toBe('test-article')
+      expect(article).not.toHaveProperty('slug')
       expect(article.title).toBe('Test Article')
       // The date as written — the build's YAML resolves no timestamps (it was a Date
       // until 2026-09-14, and `2025-01-15T00:00:00.000Z` once compiled)
@@ -291,7 +292,7 @@ Content.
     it('should write JSON files to public/data/', async () => {
       const collections = {
         articles: [
-          { slug: 'test', title: 'Test Article' }
+          { $name: 'test', title: 'Test Article' }
         ]
       }
 
@@ -302,7 +303,7 @@ Content.
 
       const content = JSON.parse(readFileSync(outputPath, 'utf-8'))
       expect(content).toHaveLength(1)
-      expect(content[0].slug).toBe('test')
+      expect(content[0].$name).toBe('test')
     })
 
     it('should handle empty collections', async () => {
@@ -332,7 +333,7 @@ Content.
       })
 
       expect(collections.team).toHaveLength(3)
-      expect(collections.team.map(i => i.slug)).toEqual(['alice', 'bob', 'carol'])
+      expect(collections.team.map(i => i.$name)).toEqual(['alice', 'bob', 'carol'])
       expect(collections.team[0].name).toBe('Alice')
       expect(collections.team[1].role).toBe('designer')
     })
@@ -356,9 +357,9 @@ role: writer
       })
 
       expect(collections.team).toHaveLength(3)
-      const slugs = collections.team.map(i => i.slug).sort()
+      const slugs = collections.team.map(i => i.$name).sort()
       expect(slugs).toEqual(['alice', 'bob', 'carol'])
-      expect(collections.team.find(i => i.slug === 'carol').role).toBe('writer')
+      expect(collections.team.find(i => i.$name === 'carol').role).toBe('writer')
     })
 
     it('should preserve mapping-form YAML behavior (slug from filename)', async () => {
@@ -374,7 +375,7 @@ role: engineer
       })
 
       expect(collections.team).toHaveLength(1)
-      expect(collections.team[0].slug).toBe('alice')
+      expect(collections.team[0].$name).toBe('alice')
       expect(collections.team[0].name).toBe('Alice')
     })
   })
@@ -407,13 +408,13 @@ role: engineer
 
       const byId = Object.fromEntries(collections.bibliography.map(i => [i.id, i]))
 
-      expect(byId.darwin1859.slug).toBe('darwin1859')
+      expect(byId.darwin1859.$name).toBe('darwin1859')
       expect(byId.darwin1859.type).toBe('book')
       expect(byId.darwin1859.title).toBe('On the Origin of Species')
       expect(byId.darwin1859.publisher).toBe('John Murray')
       expect(byId.darwin1859.author[0]).toEqual({ family: 'Darwin', given: 'Charles' })
 
-      expect(byId.mendel1866.slug).toBe('mendel1866')
+      expect(byId.mendel1866.$name).toBe('mendel1866')
       expect(byId.mendel1866.type).toBe('article-journal')
       expect(byId.mendel1866.title).toContain('über')
     })
@@ -440,7 +441,7 @@ year: 1858
         bibliography: '@/bibliography'
       })
 
-      const slugs = collections.bibliography.map(i => i.slug).sort()
+      const slugs = collections.bibliography.map(i => i.$name).sort()
       expect(slugs).toEqual(['darwin1859', 'wallace1858'])
     })
 
@@ -474,7 +475,7 @@ year: 1858
       })
 
       expect(collections.bibliography).toHaveLength(3)
-      const slugs = collections.bibliography.map(i => i.slug).sort()
+      const slugs = collections.bibliography.map(i => i.$name).sort()
       expect(slugs).toEqual(['darwin1859', 'lyell1830', 'wallace1858'])
     })
 

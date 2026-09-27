@@ -527,8 +527,8 @@ async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath, c
  * Process a single BibTeX file into an array of CSL-JSON bibliography items.
  *
  * Each `@entry{key, ...}` becomes one item. The BibTeX cite key is preserved
- * as `id` (CSL-JSON convention) and copied to `slug` so per-record file
- * emission and runtime lookups behave the same as for other formats.
+ * as `id` (CSL-JSON convention) and names the record — its `$name` — as a file's
+ * name does for other formats.
  *
  * No asset processing — bibliography records reference URLs and DOIs, not
  * local files.
@@ -537,7 +537,7 @@ async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath, c
  * @param {string} filename - BibTeX filename (.bib)
  * @param {string} siteRoot - Site root, for messages
  * @param {boolean} [includeDrafts] - keep `draft: true` records (a preview)
- * @returns {Promise<Array<Object>>} Array of CSL-JSON items, each with `slug`
+ * @returns {Promise<Array<Object>>} Array of CSL-JSON items, each with `$name`
  */
 async function processBibtexItem(dir, filename, siteRoot, includeDrafts = false) {
   const filepath = join(dir, filename)
@@ -546,7 +546,7 @@ async function processBibtexItem(dir, filename, siteRoot, includeDrafts = false)
   const entries = parseBibtex(raw)
   return entries
     .filter(entry => entry && entry.id && !withheld(entry, `${where} @${entry.id}`, includeDrafts))
-    .map(entry => ({ slug: entry.id, ...entry }))
+    .map(entry => ({ ...entry, $name: String(entry.id) }))
 }
 
 /**
@@ -642,8 +642,13 @@ export const WHOLE_RECORD = Symbol.for('uniweb.query.whole')
  * @param {{ doc: Object, markdown: string }|null} [body] - a markdown record's body
  * @returns {*} the delivered record (anything but a record, as it came)
  */
-function deliverRecord(record, config, where, body = null) {
-  if (!record || typeof record !== 'object' || Array.isArray(record)) return record
+function deliverRecord(file, config, where, body = null) {
+  if (!file || typeof file !== 'object' || Array.isArray(file)) return file
+  // ⭐ The record's NAME rides as `$name`, and nowhere else. `slug` is how its file names it —
+  // the file's stem, or a `slug:` the file states — and never a key of what a component
+  // receives: a records service serves no `slug`, and a field of that name has no meaning to
+  // the framework [Diego, 2026-09-27]. ⛔ Until then the delivered record carried `slug` too.
+  const { slug: handle, ...record } = file
   const schema = config.dataSchema || null
   let out
   if (!schema) {
@@ -668,7 +673,6 @@ function deliverRecord(record, config, where, body = null) {
     if (config.references) out = config.references.deliver(schema, out, where)
     out[WHOLE_RECORD] = storedRecord(record, schema, config, where, body, out)
   }
-  const handle = record.slug
   if (handle !== undefined && handle !== null && handle !== '') {
     out.$name = String(handle)
     if (out[WHOLE_RECORD]) {
@@ -818,18 +822,18 @@ async function collectSourceFiles(dir, rel = '') {
 function warnDuplicateSlugs(items, queryName) {
   const seen = new Map()
   for (const item of items) {
-    if (!item || item.slug === undefined) continue
-    const slug = String(item.slug)
+    if (!item || item.$name === undefined) continue
+    const name = String(item.$name)
     const where = item.path ? `${item.path}/` : ''
-    if (seen.has(slug)) {
+    if (seen.has(name)) {
       console.warn(
-        `[query-processor] Query "${queryName}" has more than one record with ` +
-          `slug "${slug}" (${seen.get(slug)}${slug}, ${where}${slug}). Its detail route and ` +
-          `per-record file resolve to only one of them — give them distinct slugs.`
+        `[query-processor] Query "${queryName}" has more than one record named ` +
+          `"${name}" (${seen.get(name)}${name}, ${where}${name}). Its detail route and ` +
+          `per-record file resolve to only one of them — give them distinct names.`
       )
       continue
     }
-    seen.set(slug, where)
+    seen.set(name, where)
   }
 }
 
@@ -1013,19 +1017,11 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
 
   // ⭐ `$name` IS THE RECORD HANDLE ON EVERY SITE (ruled 2026-09-11 [Diego]) — the
   // field a `[slug]` or `[...path]` page matches, and the one the records service
-  // serves. It is the record's FINAL slug — a frontmatter `slug:` (which wins over the
-  // filename), a BibTeX cite key and an array-form file's own `slug` all count — exactly
-  // what our sync sends as the entry's name (`uwx/entity-source.js`). `deliverRecord`
-  // sets it for a markdown, YAML or JSON record, before the brief is lifted (a brief's
-  // own `slug` FIELD must not become the handle); a BibTeX entry gets it here. `slug`
-  // stays: foundations and templates read it.
-  items = items.map((item) => (
-    item && typeof item === 'object' && item.$name === undefined &&
-    item.slug !== undefined && item.slug !== null && item.slug !== ''
-      ? { ...item, $name: String(item.slug) }
-      : item
-  ))
-
+  // serves: the name its file gives it — the file's stem, a `slug:` the file states, an
+  // array-form file's entry's own `slug`, a BibTeX cite key — exactly what our sync
+  // sends as the entry's name (`uwx/entity-source.js`). `deliverRecord` and
+  // `processBibtexItem` set it. ⛔ Until 2026-09-27 the delivered record carried `slug`
+  // beside it, and this filled `$name` from it; no record carries `slug` now.
   warnDuplicateSlugs(items, config.name)
 
   // ⛔ ORDER MATCHES `data-fetcher.js::applyPostProcessing` — where, then sort. Two

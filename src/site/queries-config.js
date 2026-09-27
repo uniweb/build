@@ -205,8 +205,9 @@ const RECORD_KEYS = ['url', 'method', 'body', 'transform']
  * ⭐ AN EXTERNAL QUERY is a query with `url:` (ruled 2026-09-13 [Diego]: *"Setting
  * `url` would classify it as external"*): an address, `method` and `body` for a POST,
  * `transform` (a dot-path to its records), `where` / `sort` / `limit` evaluated over
- * them, and `record:` — `{ url, method, body, transform }` — for one record on a
- * parametric page. What describes the site's records — `schema`, `scope`,
+ * them, `record:` — `{ url, method, body, transform }` — for one record on a
+ * parametric page, and `name_field:`, the field each record is named by (`$name`, which
+ * a `[slug]` page matches). What describes the site's records — `schema`, `scope`,
  * `deferred`, `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` and `detail:` are
  * retired everywhere: their one real case is `record.url`. ⛔ And `limit:` is a whole
  * number, 0 or more (`refuseLimit`).
@@ -249,7 +250,7 @@ export function refuseQueryDeclaration(decl) {
   }
   const external = decl.url !== undefined
   if (!external) {
-    for (const key of ['method', 'body', 'transform', 'record']) {
+    for (const key of ['method', 'body', 'transform', 'record', 'name_field']) {
       if (decl[key] === undefined) continue
       throw new Error(
         `[uniweb] ${where}: \`${key}:\` belongs on an external query — one with \`url:\`. A query over the site's ` +
@@ -269,6 +270,12 @@ export function refuseQueryDeclaration(decl) {
     )
   }
   refuseMethod(decl.method, where)
+  if (decl.name_field !== undefined && (typeof decl.name_field !== 'string' || decl.name_field.trim() === '')) {
+    throw new Error(
+      `[uniweb] ${where}: \`name_field:\` names the field each record is named by — its \`$name\`, which a ` +
+        `\`[slug]\` page matches — e.g. \`name_field: slug\`.`
+    )
+  }
   if (decl.transform !== undefined && typeof decl.transform !== 'string') {
     throw new Error(`[uniweb] ${where}: \`transform:\` is a dot-path to the records in the response, e.g. \`data.items\`.`)
   }

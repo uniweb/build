@@ -257,13 +257,16 @@ describe('$name on compiled records — the record\'s final slug (ruled 2026-09-
     }
   }
 
-  it('from the filename, and from a frontmatter `slug:` that overrides it — what sync sends as the name', async () => {
+  it('from the filename, and from a frontmatter `slug:` that overrides it — what sync sends as the name, and the only one delivered', async () => {
     w('records/article/hello.md', '---\ntitle: Hello\n---\nBody\n')
     w('records/article/renamed.md', '---\ntitle: Renamed\nslug: custom\n---\nBody\n')
     const { articles } = await run({ articles: { schema: '@/article' } })
     const byTitle = Object.fromEntries(articles.map((r) => [r.title, r]))
-    expect(byTitle.Hello).toMatchObject({ slug: 'hello', $name: 'hello' })
-    expect(byTitle.Renamed).toMatchObject({ slug: 'custom', $name: 'custom' })
+    expect(byTitle.Hello).toMatchObject({ $name: 'hello' })
+    expect(byTitle.Renamed).toMatchObject({ $name: 'custom' })
+    // ⛔ `slug` rode the delivered record beside `$name` until 2026-09-27.
+    expect(byTitle.Hello).not.toHaveProperty('slug')
+    expect(byTitle.Renamed).not.toHaveProperty('slug')
   })
 
   it('on every format — an array-form file\'s own slugs', async () => {
@@ -294,12 +297,12 @@ describe('a named query\'s narrowing at build — only what is fixed for every p
     // Baked, a page's own `scope:` could only narrow inside the query's branch on
     // a static site, and would replace it on a hosted one.
     const { q } = await run({ q: { schema: '@/entry', scope: 'field' } })
-    expect(q.map((r) => [r.slug, r.path]).sort()).toEqual([['a', 'field'], ['b', 'lab']])
+    expect(q.map((r) => [r.$name, r.path]).sort()).toEqual([['a', 'field'], ['b', 'lab']])
   })
 
   it('CONTROL — a fixed where is applied at build', async () => {
     const { q } = await run({ q: { schema: '@/entry', where: { title: 'A' } } })
-    expect(q.map((r) => r.slug)).toEqual(['a'])
+    expect(q.map((r) => r.$name)).toEqual(['a'])
   })
 
   it('a routed scope and a routed where are left for the runtime — every record compiles', async () => {
@@ -309,8 +312,8 @@ describe('a named query\'s narrowing at build — only what is fixed for every p
       routedScope: { schema: '@/entry', scope: ':dir' },
       routedWhere: { schema: '@/entry', where: { path: ':dir' } },
     })
-    expect(routedScope.map((r) => r.slug).sort()).toEqual(['a', 'b'])
-    expect(routedWhere.map((r) => r.slug).sort()).toEqual(['a', 'b'])
+    expect(routedScope.map((r) => r.$name).sort()).toEqual(['a', 'b'])
+    expect(routedWhere.map((r) => r.$name).sort()).toEqual(['a', 'b'])
   })
 
   it('refuses `where: { path: { under } }`, naming scope', async () => {

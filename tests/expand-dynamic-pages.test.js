@@ -22,7 +22,7 @@ describe('expandDynamicPages', () => {
   const template = { route: '/blog/:slug', isDynamic: true, paramName: 'slug' }
 
   it('expands one concrete page per record', () => {
-    const out = expandDynamicPages([blog(), template], parentData([{ slug: 'post-1' }, { slug: 'post-2' }]), noop)
+    const out = expandDynamicPages([blog(), template], parentData([{ $name: 'post-1' }, { $name: 'post-2' }]), noop)
     const routes = out.map((p) => p.route)
     expect(routes).toContain('/blog/post-1')
     expect(routes).toContain('/blog/post-2')
@@ -34,7 +34,7 @@ describe('expandDynamicPages', () => {
     // that also carries slug:'about'. The static page must survive; the record
     // is skipped rather than clobbering it.
     const staticAbout = { route: '/blog/about', isDynamic: false }
-    const out = expandDynamicPages([blog(), staticAbout, template], parentData([{ slug: 'about' }, { slug: 'post-1' }]), noop)
+    const out = expandDynamicPages([blog(), staticAbout, template], parentData([{ $name: 'about' }, { $name: 'post-1' }]), noop)
 
     // Exactly one page claims /blog/about, and it's the static one.
     const aboutPages = out.filter((p) => p.route === '/blog/about')
@@ -52,8 +52,8 @@ describe('expandDynamicPages', () => {
     // from the fetched collection, so only the routing keys are needed — and the
     // key the URL narrows is worked out where it is read (`schema` deleted 2026-09-11).
     const items = [
-      { slug: 'post-1', title: 'One', body: 'x'.repeat(5000) },
-      { slug: 'post-2', title: 'Two', body: 'y'.repeat(5000) },
+      { $name: 'post-1', title: 'One', body: 'x'.repeat(5000) },
+      { $name: 'post-2', title: 'Two', body: 'y'.repeat(5000) },
     ]
     const out = expandDynamicPages([blog(), template], parentData(items), noop)
     const post1 = out.find((p) => p.route === '/blog/post-1')
@@ -69,7 +69,7 @@ describe('expandDynamicPages', () => {
   })
 
   it('skips records without a param value', () => {
-    const out = expandDynamicPages([blog(), template], parentData([{ slug: 'post-1' }, { title: 'no slug' }]), noop)
+    const out = expandDynamicPages([blog(), template], parentData([{ $name: 'post-1' }, { title: 'no slug' }]), noop)
     expect(out.filter((p) => p.route?.startsWith('/blog/'))).toHaveLength(1)
   })
 
@@ -81,7 +81,7 @@ describe('expandDynamicPages', () => {
 
   it('keeps the template inline when nothing names a query for its URL to narrow', () => {
     const lines = []
-    const out = expandDynamicPages([{ route: '/blog', isDynamic: false }, template], parentData([{ slug: 'x' }]), (l) => lines.push(l))
+    const out = expandDynamicPages([{ route: '/blog', isDynamic: false }, template], parentData([{ $name: 'x' }]), (l) => lines.push(l))
     expect(out).toContain(template)
     expect(lines.some((l) => l.includes('no query for its URL to narrow'))).toBe(true)
   })
@@ -91,9 +91,9 @@ describe('expandDynamicPages', () => {
     // `title` — kept the template's own title, which a bracket folder fills with its name.
     const titled = { ...template, title: '[slug]' }
     const out = expandDynamicPages([blog(), titled], parentData([
-      { slug: 'ada', name: 'Ada Lovelace' },
-      { slug: 'bare' },
-      { slug: 'post', title: 'A Post', name: 'Not this' },
+      { $name: 'ada', name: 'Ada Lovelace' },
+      { $name: 'bare' },
+      { $name: 'post', title: 'A Post', name: 'Not this' },
     ]), noop)
     const title = (route) => out.find((p) => p.route === route).title
     expect(title('/blog/ada')).toBe('Ada Lovelace')
@@ -107,7 +107,7 @@ describe('the route query decides what a parametric page expands over (ruled 202
     const own = { route: '/team/:slug', isDynamic: true, paramName: 'slug', fetch: { query: 'people', path: '/data/people.json', as: 'people' } }
     const out = expandDynamicPages(
       [{ route: '/team', isDynamic: false }, own],
-      { pages: new Map([['/team/:slug', new Map([['people', [{ slug: 'ada' }]]])]]) },
+      { pages: new Map([['/team/:slug', new Map([['people', [{ $name: 'ada' }]]])]]) },
       noop,
     )
     expect(out.map((p) => p.route)).toContain('/team/ada')
@@ -117,7 +117,7 @@ describe('the route query decides what a parametric page expands over (ruled 202
     const t = { route: '/:slug', isDynamic: true, paramName: 'slug' }
     const out = expandDynamicPages(
       [{ route: '/', isDynamic: false }, t],
-      { site: new Map([['people', [{ slug: 'ada' }]]]) },
+      { site: new Map([['people', [{ $name: 'ada' }]]]) },
       noop,
       undefined,
       { siteFetch: { query: 'people', path: '/data/people.json', as: 'people' } },
@@ -129,7 +129,7 @@ describe('the route query decides what a parametric page expands over (ruled 202
     const t = { route: '/team/:slug', parent: '/team', isDynamic: true, paramName: 'slug' }
     const out = expandDynamicPages(
       [{ route: '/team', isDynamic: false }, t],
-      { site: new Map([['people', [{ slug: 'ada' }]]]) },
+      { site: new Map([['people', [{ $name: 'ada' }]]]) },
       noop,
       undefined,
       { siteFetch: { query: 'people', path: '/data/people.json', as: 'people' } },
@@ -146,14 +146,14 @@ describe('the route query decides what a parametric page expands over (ruled 202
       { query: 'authors', path: '/data/authors.json', as: 'authors' },
     ] }
     const t = { route: '/blog/:slug', isDynamic: true, paramName: 'slug' }
-    const out = expandDynamicPages([parent, t], parentData([{ slug: 'jane' }], 'authors'), noop)
+    const out = expandDynamicPages([parent, t], parentData([{ $name: 'jane' }], 'authors'), noop)
     expect(out).toContain(t)
     expect(out.map((p) => p.route)).not.toContain('/blog/jane')
   })
 
   it('[uuid] expands by the record\'s identity, $uuid, else a plain uuid field', () => {
     const t = { route: '/blog/:uuid', isDynamic: true, paramName: 'uuid' }
-    const out = expandDynamicPages([blog(), t], parentData([{ $uuid: '019e', slug: 'a' }, { uuid: 'abc' }]), noop)
+    const out = expandDynamicPages([blog(), t], parentData([{ $uuid: '019e', $name: 'a' }, { uuid: 'abc' }]), noop)
     expect(out.map((p) => p.route)).toEqual(expect.arrayContaining(['/blog/019e', '/blog/abc']))
   })
 
@@ -169,7 +169,7 @@ describe('the route query decides what a parametric page expands over (ruled 202
     const cv = { route: '/blog/:slug/cv', parent: '/blog/:slug', isDynamic: true, paramName: 'slug' }
     const out = expandDynamicPages(
       [blog(), slugPage, cv],
-      { pages: new Map([['/blog', new Map([['articles', [{ slug: 'post-1' }]]])], ['/blog/:slug', new Map([['articles', [{ slug: 'post-1' }]]])]]) },
+      { pages: new Map([['/blog', new Map([['articles', [{ $name: 'post-1' }]]])], ['/blog/:slug', new Map([['articles', [{ $name: 'post-1' }]]])]]) },
       noop,
     )
     expect(out.map((p) => p.route)).toEqual(expect.arrayContaining(['/blog/post-1', '/blog/post-1/cv']))
@@ -179,14 +179,14 @@ describe('the route query decides what a parametric page expands over (ruled 202
     // ⛔ Until then it looked one parent up, found nothing on the `[slug]` page, and stayed for runtime
     const slugPage = { route: '/blog/:slug', parent: '/blog', isDynamic: true, paramName: 'slug' }
     const cv = { route: '/blog/:slug/cv', parent: '/blog/:slug', isDynamic: true, paramName: 'slug', fetch: { query: 'cvs', path: '/data/cvs.json', as: 'cvs' } }
-    const out = expandDynamicPages([blog(), slugPage, cv], parentData([{ slug: 'post-1' }, { slug: 'post-2' }]), noop)
+    const out = expandDynamicPages([blog(), slugPage, cv], parentData([{ $name: 'post-1' }, { $name: 'post-2' }]), noop)
     expect(out.map((p) => p.route)).toEqual(expect.arrayContaining(['/blog/post-1', '/blog/post-1/cv', '/blog/post-2/cv']))
     expect(out.find((p) => p.route === '/blog/post-2/cv').dynamicContext).toMatchObject({ templateRoute: '/blog/:slug/cv', paramValue: 'post-2' })
   })
 
   it('a route with a parameter the records cannot fill stays for the runtime', () => {
     const t = { route: '/orgs/:org/members/:slug', isDynamic: true, paramName: 'slug', fetch: { query: 'members', path: '/data/members.json', as: 'members' } }
-    const out = expandDynamicPages([t], { pages: new Map([['/orgs/:org/members/:slug', new Map([['members', [{ slug: 'ada' }]]])]]) }, noop)
+    const out = expandDynamicPages([t], { pages: new Map([['/orgs/:org/members/:slug', new Map([['members', [{ $name: 'ada' }]]])]]) }, noop)
     expect(out).toContain(t)
   })
 })
@@ -198,7 +198,7 @@ describe('records with no value for the route param are COUNTED, not only logged
     const lines = []
     expandDynamicPages(
       [blog(), template],
-      parentData([{ slug: 'a' }, { title: 'one' }, { title: 'two' }, { slug: 'b' }, { title: 'three' }]),
+      parentData([{ $name: 'a' }, { title: 'one' }, { title: 'two' }, { $name: 'b' }, { title: 'three' }]),
       (l) => lines.push(l)
     )
     const summary = lines.filter((l) => l.includes('no page was generated'))
@@ -212,14 +212,14 @@ describe('records with no value for the route param are COUNTED, not only logged
 
   it('hands the count back on `stats` so a caller can assert or refuse on it', () => {
     const stats = {}
-    expandDynamicPages([blog(), template], parentData([{ slug: 'a' }, { title: 'unnamed' }]), noop, stats)
+    expandDynamicPages([blog(), template], parentData([{ $name: 'a' }, { title: 'unnamed' }]), noop, stats)
     expect(stats.unrouted).toEqual({ '/blog/:slug': 1 })
   })
 
   it('CONTROL — says nothing when every record has the param', () => {
     const lines = []
     const stats = {}
-    expandDynamicPages([blog(), template], parentData([{ slug: 'a' }]), (l) => lines.push(l), stats)
+    expandDynamicPages([blog(), template], parentData([{ $name: 'a' }]), (l) => lines.push(l), stats)
     expect(lines.some((l) => l.includes('no page was generated'))).toBe(false)
     expect(stats.unrouted).toEqual({})
   })
@@ -231,7 +231,7 @@ describe('a [...path] template expands over placement + handle', () => {
   it('emits one page per record at <placement>/<slug>, with the three variables baked', () => {
     const out = expandDynamicPages(
       [blog('posts'), template],
-      parentData([{ slug: 'my-post', path: 'rust/2025' }, { slug: 'top', path: '' }], 'posts'),
+      parentData([{ $name: 'my-post', path: 'rust/2025' }, { $name: 'top', path: '' }], 'posts'),
       noop
     )
     const routes = out.map((p) => p.route)
@@ -266,16 +266,16 @@ describe('a `multi` route field expands member-wise (ruled 2026-09-12 [Diego])',
 
   it('one page per member, and a `multi` holding one value gets exactly one', () => {
     const out = expandDynamicPages([list, template], data([
-      { slug: 'a', tag: ['x', 'y'] },
-      { slug: 'b', tag: ['z'] },
-      { slug: 'c', tag: 'plain' },
+      { $name: 'a', tag: ['x', 'y'] },
+      { $name: 'b', tag: ['z'] },
+      { $name: 'c', tag: 'plain' },
     ]), noop)
     const routes = out.map((p) => p.route).filter((r) => r.startsWith('/tags/'))
     expect(routes.sort()).toEqual(['/tags/plain', '/tags/x', '/tags/y', '/tags/z'])
   })
 
   it('each page binds the member it was expanded for', () => {
-    const out = expandDynamicPages([list, template], data([{ slug: 'a', tag: ['x', 'y'] }]), noop)
+    const out = expandDynamicPages([list, template], data([{ $name: 'a', tag: ['x', 'y'] }]), noop)
     expect(out.find((p) => p.route === '/tags/y').dynamicContext).toMatchObject({
       templateRoute: '/tags/:tag',
       paramName: 'tag',
@@ -289,8 +289,8 @@ describe('a `multi` route field expands member-wise (ruled 2026-09-12 [Diego])',
     // loud rather than discovered as a different record on the same URL.
     const said = []
     const out = expandDynamicPages([list, template], data([
-      { slug: 'a', tag: ['x'] },
-      { slug: 'b', tag: ['x'] },
+      { $name: 'a', tag: ['x'] },
+      { $name: 'b', tag: ['x'] },
     ]), (m) => said.push(m))
     expect(out.filter((p) => p.route === '/tags/x')).toHaveLength(1)
     // the FIRST record titles it — by its handle, having no `title` or `name` (`recordTitle`)
@@ -301,9 +301,9 @@ describe('a `multi` route field expands member-wise (ruled 2026-09-12 [Diego])',
   it('empty and duplicate members drop; a record with none is counted unrouted', () => {
     const stats = { unrouted: {} }
     const out = expandDynamicPages([list, template], data([
-      { slug: 'a', tag: ['x', '', 'x', null] },
-      { slug: 'b' },
-      { slug: 'c', tag: [] },
+      { $name: 'a', tag: ['x', '', 'x', null] },
+      { $name: 'b' },
+      { $name: 'c', tag: [] },
     ]), noop, stats)
     expect(out.map((p) => p.route).filter((r) => r.startsWith('/tags/'))).toEqual(['/tags/x'])
     expect(stats.unrouted['/tags/:tag']).toBe(2)

@@ -102,7 +102,7 @@ describe('collection records without frontmatter', () => {
     const items = collections.articles
 
     expect(items).toHaveLength(1)
-    expect(items[0].slug).toBe('plain')
+    expect(items[0].$name).toBe('plain')
   })
 
   it('an unterminated block is treated as no frontmatter, not as an error', async () => {

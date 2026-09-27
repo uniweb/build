@@ -375,6 +375,7 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null, key
     setIf(decl, 'body', source.body)
     setIf(decl, 'transform', source.transform)
     setIf(decl, 'record', source.record)
+    setIf(decl, 'name_field', source.name_field)
   } else if (typeof source.path === 'string') {
     // ⛔ A FILE-BASED QUERY HAS NO PATH TO WRITE BACK. `records/{schema}/` holds its
     // records and `schema:` addresses them, so a `path` arriving on the wire is either

@@ -1031,6 +1031,7 @@ function externalSource(d) {
   setIf(source, 'body', d.body)
   setIf(source, 'transform', d.transform)
   setIf(source, 'record', d.record)
+  setIf(source, 'name_field', d.name_field)
   return source
 }
 
@@ -1040,8 +1041,8 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     refuseUnder(d.where, `queries.${name}`)
     refuseOutsideLanguage(d.where, `queries.${name}`)
     const data = {}
-    // ⭐ AN EXTERNAL QUERY'S SOURCE, WHOLE — `url`, `method`, `body`, `transform` and
-    // `record` — so a host can put it on the payload's `config.queries[<name>]`, where
+    // ⭐ AN EXTERNAL QUERY'S SOURCE, WHOLE — `url`, `method`, `body`, `transform`, `record`
+    // and `name_field` — so a host can put it on the payload's `config.queries[<name>]`, where
     // the runtime fetches it from (never the records service).
     const source = d.path ? { path: d.path } : d.url !== undefined ? externalSource(d) : d.source
     setIf(data, 'source', source)

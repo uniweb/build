@@ -258,7 +258,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
 
     items.forEach((item, idx) => {
       recordCount++
-      if (item && typeof item.slug === 'string') checkedRecords.add(recordKey(entry.ref, item.slug))
+      // A delivered record is named by `$name` — the handle its file's pool entry is keyed by.
+      if (item && typeof item.$name === 'string') checkedRecords.add(recordKey(entry.ref, item.$name))
       for (const finding of validateItem(entry.schema, item)) {
         violations.push({
           file: entry.path,
@@ -620,7 +621,7 @@ function toShippedShape(value) {
 
 function itemLabel(item, idx) {
   if (item && typeof item === 'object') {
-    if (typeof item.slug === 'string' && item.slug) return item.slug
+    if (typeof item.$name === 'string' && item.$name) return item.$name
     if (typeof item.id === 'string' && item.id) return item.id
   }
   return String(idx)

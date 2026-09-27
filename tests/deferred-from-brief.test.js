@@ -127,14 +127,15 @@ describe('what the derived split actually emits', () => {
   })
 
   it('keeps the build-derived keys, with no reserved list to maintain', async () => {
-    // The split is computed from the SCHEMA, never from a record — so `slug`,
-    // `path`, `excerpt`, `image` and `$name` are not sections, and are never
-    // stripped. Nothing has to enumerate them.
+    // The split is computed from the SCHEMA, never from a record — so `path`,
+    // `excerpt`, `image` and `$name` are not sections, and are never stripped.
+    // Nothing has to enumerate them. `slug` is not delivered at all (2026-09-27).
     setup({ siteCollections: WITH_SCHEMA })
     const { cascade } = await build()
-    for (const key of ['slug', 'excerpt', 'image', 'path', '$name']) {
+    for (const key of ['excerpt', 'image', 'path', '$name']) {
       expect(key in cascade[0]).toBe(true)
     }
+    expect('slug' in cascade[0]).toBe(false)
     // The brief's fields at the top, as delivered.
     expect(cascade[0].title).toBe('Hi')
     expect('card' in cascade[0]).toBe(false)

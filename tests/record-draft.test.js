@@ -16,7 +16,7 @@ const w = (rel, body) => {
 }
 const compile = (opts) =>
   processQueries(ROOT, { posts: { name: 'posts', schema: '@/post' } }, undefined, '/', opts)
-const slugs = async (opts) => (await compile(opts)).posts.map((r) => r.slug).sort()
+const slugs = async (opts) => (await compile(opts)).posts.map((r) => r.$name).sort()
 
 let warn, log
 beforeEach(() => {
