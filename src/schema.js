@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto'
 import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { inferTitle, describeChildren, describeVisuals } from '@uniweb/schemas/component'
+import { describeChildren, describeVisuals } from '@uniweb/schemas/component'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -547,45 +547,35 @@ function hasEntryFile(dirPath, dirName) {
 /**
  * Create an implicit empty meta for a section type discovered without meta.js
  */
-function createImplicitMeta(name) {
-  return { title: inferTitle(name), titleInferred: true }
+function createImplicitMeta() {
+  return {}
 }
 
 /**
- * Build a component entry with title inference applied.
+ * Build a component entry: the `meta.js` default export, plus the build's `name`
+ * and `path`.
  *
- * ⭐ `titleInferred` SAYS THE TITLE IS OURS, NOT THE AUTHOR'S, and without it a
- * consumer cannot tell. We fill `title` from the component name whenever
- * `meta.js` declares none, so `title` is ALWAYS present — which means an editor
- * showing section names has no way to know that `"Hero"` is a string the build
- * invented rather than one a developer chose.
+ * ⭐ `title` IS THERE ONLY WHEN THE DEVELOPER WROTE ONE, so its absence says the
+ * component is unnamed. That difference decides whether a name can be translated:
+ * an authored title is the foundation's own words and is shown verbatim in every UI
+ * language, while for an unnamed component a consumer has better strings — its
+ * `family`'s translated label, else `inferTitle(name)` from `@uniweb/schemas/component`,
+ * the words this build used to write in.
  *
- * ⛔ THAT DIFFERENCE DECIDES WHETHER THE NAME CAN BE TRANSLATED. An authored
- * title is the foundation's own words and must be shown verbatim in every UI
- * language. An inferred one is a placeholder, and a consumer that knows the
- * section's `family` has a better string available — one it can localize. A
- * foundation that never named its Hero would otherwise ship the English
- * `"Hero"` to every author in the world.
- *
- * ⚖️ The build itself reads neither field. This is a statement ABOUT the title,
- * for whoever renders it.
+ * ⛔ Until 2026-09-27 the build filled `title` from the name whenever `meta.js`
+ * declared none, and added `titleInferred: true` to restore the fact the filling-in
+ * erased. Consumers derive the title where they use it instead [Diego, 2026-09-27].
  */
 function buildComponentEntry(name, relativePath, meta) {
   // ⭐ `name` and `path` are the build's facts, so they are set AFTER the spread: a
   // `meta.js` declaring either cannot change them. ⛔ Until 2026-09-27 they came first,
   // and a `meta.js` `name` became the entry's `name` — which an editor reads as the
   // section type — while the schema stayed keyed by the folder's name.
-  const entry = {
+  return {
     ...meta,
     name,
     path: relativePath,
   }
-  // Apply title inference if meta has no explicit title
-  if (!entry.title) {
-    entry.title = inferTitle(name)
-    entry.titleInferred = true
-  }
-  return entry
 }
 
 /**
@@ -641,7 +631,7 @@ async function discoverSectionsInPath(srcDir, sectionsRelPath) {
     const name = basename(entry.name, ext)
     if (!isComponentFileName(name)) continue
 
-    const meta = createImplicitMeta(name)
+    const meta = createImplicitMeta()
     components[name] = {
       ...buildComponentEntry(name, sectionsRelPath, meta),
       // Bare file: the entry file IS the file itself (not inside a subdirectory)
@@ -666,7 +656,7 @@ async function discoverSectionsInPath(srcDir, sectionsRelPath) {
         components[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
       } else if (hasEntryFile(dirPath, entry.name)) {
         // No meta.js but has entry file — implicit section type at root
-        components[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
+        components[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta())
       }
     }
 
@@ -734,7 +724,7 @@ export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PAT
     const name = basename(entry.name, ext)
     if (!isLayoutName(name)) continue
 
-    const meta = createImplicitMeta(name)
+    const meta = createImplicitMeta()
     layouts[name] = {
       ...buildComponentEntry(name, layoutsRelPath, meta),
       entryFile: entry.name,
@@ -754,7 +744,7 @@ export async function discoverLayoutsInPath(srcDir, layoutsRelPath = LAYOUTS_PAT
       if (result.meta.hidden) continue
       layouts[entry.name] = buildComponentEntry(entry.name, relativePath, result.meta)
     } else if (hasEntryFile(dirPath, entry.name)) {
-      layouts[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta(entry.name))
+      layouts[entry.name] = buildComponentEntry(entry.name, relativePath, createImplicitMeta())
     }
   }
 

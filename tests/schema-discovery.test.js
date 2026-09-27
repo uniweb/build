@@ -70,7 +70,7 @@ describe('sections/ discovery', () => {
     const result = await discoverComponents(tmpRoot, ['sections'])
     expect(result.CTA).toBeDefined()
     expect(result.CTA.name).toBe('CTA')
-    expect(result.CTA.title).toBe('CTA')
+    expect(result.CTA.title).toBeUndefined()
     expect(result.CTA.entryFile).toBe('CTA.jsx')
     expect(result.CTA.path).toBe('sections')
   })
@@ -82,7 +82,7 @@ describe('sections/ discovery', () => {
     const result = await discoverComponents(tmpRoot, ['sections'])
     expect(result.Hero).toBeDefined()
     expect(result.Hero.name).toBe('Hero')
-    expect(result.Hero.title).toBe('Hero')
+    expect(result.Hero.title).toBeUndefined()
     expect(result.Hero.path).toBe(join('sections', 'Hero'))
   })
 
@@ -105,17 +105,17 @@ describe('sections/ discovery', () => {
     expect(result.Features.category).toBe('content')
   })
 
-  it('infers title when meta.js has no title field', async () => {
+  it('carries no title when meta.js declares none', async () => {
     fresh()
     touch('sections/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
     writeMeta('sections/TeamRoster/meta.js', { category: 'about' })
 
     const result = await discoverComponents(tmpRoot, ['sections'])
-    expect(result.TeamRoster.title).toBe('Team Roster')
+    expect(result.TeamRoster.title).toBeUndefined()
     expect(result.TeamRoster.category).toBe('about')
   })
 
-  it('uses explicit title from meta.js over inferred title', async () => {
+  it('carries the title meta.js declares', async () => {
     fresh()
     touch('sections/CTA/CTA.jsx', 'export default function CTA() {}')
     writeMeta('sections/CTA/meta.js', { title: 'Call to Action' })
@@ -260,13 +260,13 @@ describe('extra section paths (strict)', () => {
     expect(result.Hero.title).toBe('Hero Banner')
   })
 
-  it('infers title when meta.js has no title field', async () => {
+  it('carries no title when meta.js declares none', async () => {
     fresh()
     touch('widgets/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
     writeMeta('widgets/TeamRoster/meta.js', { category: 'about' })
 
     const result = await discoverComponents(tmpRoot, ['widgets'])
-    expect(result.TeamRoster.title).toBe('Team Roster')
+    expect(result.TeamRoster.title).toBeUndefined()
   })
 
   it('does NOT discover bare files', async () => {
@@ -290,9 +290,9 @@ describe('multi-path discovery', () => {
     writeMeta('widgets/Hero/meta.js', { title: 'Widget Hero' })
 
     const result = await discoverComponents(tmpRoot, ['sections', 'widgets'])
-    // sections/ found it first as a bare file
+    // sections/ found it first as a bare file — the widget's title is not on it
     expect(result.Hero.path).toBe('sections')
-    expect(result.Hero.title).toBe('Hero')
+    expect(result.Hero.title).toBeUndefined()
   })
 
   it('falls through to extra path when not in sections', async () => {
@@ -352,42 +352,40 @@ describe('font-var type inference (loadFoundationConfig)', () => {
   })
 })
 
-describe('titleInferred', () => {
+describe('title — carried only when meta.js declares one', () => {
   afterEach(cleanup)
 
-  // ⭐ The build fills `title` from the component name whenever meta.js declares
-  // none, so `title` is ALWAYS present and a consumer cannot tell an authored
-  // name from a generated one. That difference decides whether the string can be
-  // translated: an authored title is the foundation's own words and is shown
-  // verbatim in every UI language; an inferred one is a placeholder a consumer
-  // may replace with a localized label. Without the flag, a foundation that
-  // never named its Hero ships the English "Hero" to every author in the world.
-  it('marks a title the build invented from the component name', async () => {
+  // ⭐ An absent `title` says the component is unnamed, and that decides whether a
+  // name can be translated: an authored title is the foundation's own words, shown
+  // verbatim in every UI language; for an unnamed one a consumer uses its family's
+  // translated label, else `inferTitle(name)`. ⛔ Until 2026-09-27 the build filled
+  // `title` from the name and added `titleInferred: true` to say it had.
+  it('an unnamed component has no title and no titleInferred', async () => {
     fresh()
     touch('sections/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
     writeMeta('sections/TeamRoster/meta.js', { description: 'People' })
 
     const result = await discoverComponents(tmpRoot, ['sections'])
-    expect(result.TeamRoster.title).toBe('Team Roster')
-    expect(result.TeamRoster.titleInferred).toBe(true)
+    expect(result.TeamRoster).not.toHaveProperty('title')
+    expect(result.TeamRoster).not.toHaveProperty('titleInferred')
   })
 
-  it('marks it for a section discovered with no meta.js at all', async () => {
+  it('nor does a section discovered with no meta.js at all', async () => {
     fresh()
     touch('sections/Hero/Hero.jsx', 'export default function Hero() {}')
 
     const result = await discoverComponents(tmpRoot, ['sections'])
-    expect(result.Hero.titleInferred).toBe(true)
+    expect(result.Hero).toEqual({ name: 'Hero', path: join('sections', 'Hero') })
   })
 
-  it('leaves an authored title unmarked', async () => {
+  it('an authored title is carried as written', async () => {
     fresh()
     touch('sections/TeamRoster/TeamRoster.jsx', 'export default function TeamRoster() {}')
     writeMeta('sections/TeamRoster/meta.js', { title: 'Who We Are' })
 
     const result = await discoverComponents(tmpRoot, ['sections'])
     expect(result.TeamRoster.title).toBe('Who We Are')
-    expect(result.TeamRoster.titleInferred).toBeUndefined()
+    expect(result.TeamRoster).not.toHaveProperty('titleInferred')
   })
 })
 
