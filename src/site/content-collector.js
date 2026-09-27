@@ -457,63 +457,6 @@ async function readYamlFile(filePath) {
 }
 
 /**
- * Extract inset references from a ProseMirror document.
- *
- * Walks the document recursively for `inset_ref` nodes (produced by
- * content-reader for the `![alt](@ComponentName){params}` /
- * `[text](@ComponentName){params}` / `[@key]{params}` forms). Each ref
- * is removed and replaced in-place with an `inset_placeholder` node
- * carrying a unique refId. The extracted refs are returned as an array.
- *
- * Inline insets (mid-paragraph) are kept as inline placeholders so the
- * paragraph's text flow is preserved; block-level insets (own line)
- * stay at the document root. Both share the same refId/getInset(refId)
- * lookup machinery — only the position differs.
- *
- * RefIds count from `inset_0` per section, in document order. `title` is the
- * reference's `[...]` text, which the inset's Block receives as `content.title`.
- *
- * @param {Object} doc - ProseMirror document (mutated in place)
- * @returns {Array} Array of { refId, type, embedKind, params, title }
- */
-function extractInsets(doc) {
-  if (!doc?.content || !Array.isArray(doc.content)) return []
-
-  const insets = []
-  let refIndex = 0
-
-  function visit(nodes) {
-    if (!Array.isArray(nodes)) return
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i]
-      if (!node) continue
-      if (node.type === 'inset_ref') {
-        const { component, alt, embedKind, ...params } = node.attrs || {}
-        const refId = `inset_${refIndex++}`
-        insets.push({
-          refId,
-          type: component,
-          embedKind: embedKind || 'visual',
-          params: Object.keys(params).length > 0 ? params : {},
-          title: alt || null,
-        })
-        nodes[i] = {
-          type: 'inset_placeholder',
-          attrs: { refId, embedKind: embedKind || 'visual' },
-        }
-        continue
-      }
-      if (Array.isArray(node.content)) {
-        visit(node.content)
-      }
-    }
-  }
-
-  visit(doc.content)
-  return insets
-}
-
-/**
  * Check if a filename uses the @ prefix (child section convention).
  * @-prefixed files are excluded from auto-discovered top-level sections —
  * they exist to be nested under a parent via `nest:` in page.yml.
@@ -1069,11 +1012,14 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // section's own data, and a leftover `data:` is refused (`declaredFetch`).
   const { type, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
 
-  // Convert markdown to ProseMirror
+  // Convert markdown to ProseMirror. ⭐ Insets stay as the author wrote them —
+  // `inset_ref`, `inset_block` — and `@uniweb/core` lifts both when it builds the
+  // section's Block. ⛔ Until 2026-09-27 this extracted each leaf `inset_ref` into a
+  // section-level `insets[]` and left a placeholder, so any document that did not
+  // come through here (a free-form translation, a record body) kept raw references
+  // nothing resolved, and the same section's content differed between a build and a
+  // document stored as written.
   const proseMirrorContent = markdownToProseMirror(markdown)
-
-  // Extract @ component references → insets (mutates doc)
-  const insets = extractInsets(proseMirrorContent)
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's
@@ -1095,7 +1041,6 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     params: { ...params, ...props },
     content: proseMirrorContent,
     fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath), { level: 'section' }),
-    ...(insets.length > 0 ? { insets } : {}),
     subsections: []
   }
 
@@ -2997,7 +2942,6 @@ export {
   parseWildcardArray,
   applyWildcardOrder,
   getDirectChildName,
-  extractInsets,
   readYamlFile,
   readFolderConfig,
   isMarkdownFile,

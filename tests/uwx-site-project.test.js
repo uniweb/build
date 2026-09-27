@@ -1459,14 +1459,15 @@ describe('whole-site framework-dialect round-trip is a producer fixed point (A10
 
     expect(doc2).toEqual(doc1)
 
-    // And the inline cite survived: the producer extracts it to an inline
-    // inset_placeholder + an insets[] entry; projection re-inlines it and the
-    // (A1) inline-inset serializer writes `[@darwin]` — recovered identically.
+    // And the inline cite survived: the producer keeps it in the content as the
+    // `inset_ref` the author wrote (core lifts it at render — since 2026-09-27; until
+    // then it was extracted to a placeholder + an insets[] entry), and the (A1)
+    // inline-inset serializer writes `[@darwin]` — recovered identically.
     const home = doc1.pages.find((p) => p.$id === 'home')
     const hero = home.page_sections.find((s) => s.stable_id === 'hero')
-    const placeholder = hero.content.en.content[0].content.find((n) => n.type === 'inset_placeholder')
-    expect(placeholder).toBeDefined()
-    expect(hero.insets).toContainEqual(expect.objectContaining({ type: 'Cite', embedKind: 'text', params: { key: '@darwin' } }))
+    const cite = hero.content.en.content[0].content.find((n) => n.type === 'inset_ref')
+    expect(cite.attrs).toMatchObject({ component: 'Cite', embedKind: 'text', key: '@darwin' })
+    expect(hero).not.toHaveProperty('insets')
     // the projected source markdown carries the inline cite, not a dropped inset
     expect(readFileSync(join(dest, 'pages/home/hero.md'), 'utf8')).toContain('As shown [@darwin] in the literature.')
   })

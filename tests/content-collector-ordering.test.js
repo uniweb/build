@@ -2,8 +2,7 @@ import {
   extractItemName,
   parseWildcardArray,
   applyWildcardOrder,
-  getDirectChildName,
-  extractInsets
+  getDirectChildName
 } from '../src/site/content-collector.js'
 
 describe('extractItemName', () => {
@@ -161,89 +160,3 @@ describe('getDirectChildName', () => {
   })
 })
 
-describe('extractInsets', () => {
-  it('extracts inset_ref nodes and replaces with placeholders', () => {
-    const doc = {
-      type: 'doc',
-      content: [
-        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Title' }] },
-        { type: 'inset_ref', attrs: { component: 'NetworkDiagram', alt: 'diagram', variant: 'compact' } },
-        { type: 'paragraph', content: [{ type: 'text', text: 'After' }] },
-      ]
-    }
-
-    const result = extractInsets(doc)
-
-    // Should extract one inset
-    expect(result).toHaveLength(1)
-    expect(result[0]).toEqual({
-      refId: 'inset_0',
-      type: 'NetworkDiagram',
-      params: { variant: 'compact' },
-      title: 'diagram',
-      embedKind: 'visual',
-    })
-
-    // Doc should be mutated: inset_ref → inset_placeholder. The
-    // placeholder carries `embedKind` alongside `refId` so the runtime
-    // can route inline vs block rendering without re-reading the inset
-    // record.
-    expect(doc.content[1]).toEqual({
-      type: 'inset_placeholder',
-      attrs: { refId: 'inset_0', embedKind: 'visual' },
-    })
-    // Other nodes untouched
-    expect(doc.content[0].type).toBe('heading')
-    expect(doc.content[2].type).toBe('paragraph')
-  })
-
-  it('handles multiple @ refs with unique refIds', () => {
-    const doc = {
-      type: 'doc',
-      content: [
-        { type: 'inset_ref', attrs: { component: 'Widget', alt: null } },
-        { type: 'inset_ref', attrs: { component: 'Chart', alt: 'chart' } },
-      ]
-    }
-
-    const result = extractInsets(doc)
-
-    expect(result).toHaveLength(2)
-    expect(result[0].refId).toBe('inset_0')
-    expect(result[0].type).toBe('Widget')
-    expect(result[1].refId).toBe('inset_1')
-    expect(result[1].type).toBe('Chart')
-  })
-
-  it('returns empty array when no @ refs exist', () => {
-    const doc = {
-      type: 'doc',
-      content: [
-        { type: 'paragraph', content: [{ type: 'text', text: 'Normal content' }] },
-      ]
-    }
-
-    const result = extractInsets(doc)
-    expect(result).toHaveLength(0)
-    // Doc unchanged
-    expect(doc.content[0].type).toBe('paragraph')
-  })
-
-  it('returns empty array for null/missing content', () => {
-    expect(extractInsets(null)).toHaveLength(0)
-    expect(extractInsets({})).toHaveLength(0)
-    expect(extractInsets({ content: null })).toHaveLength(0)
-  })
-
-  it('params is empty object when no attributes besides component/alt', () => {
-    const doc = {
-      type: 'doc',
-      content: [
-        { type: 'inset_ref', attrs: { component: 'Hero', alt: null } },
-      ]
-    }
-
-    const result = extractInsets(doc)
-    expect(result[0].params).toEqual({})
-  })
-})
