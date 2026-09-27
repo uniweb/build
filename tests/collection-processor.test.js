@@ -76,7 +76,7 @@ describe('Collection Processor', () => {
         '/'
       )
       expect(out.flat.map((i) => i.$name).sort()).toEqual(['a', 'b'])
-      expect(out.flat.every((i) => i.path === '')).toBe(true)
+      expect(out.flat.every((i) => i.$branch === '')).toBe(true)
     })
   })
 
@@ -582,7 +582,7 @@ This is the body content.
       write()
       const { notes } = await processQueries(testDir, { notes: { schema: '@/note' } }, undefined, '/')
       expect(notes.map((r) => r.$name)).toEqual(['c', 'a', 'd', 'b'])
-      expect(notes.map((r) => r.path)).toEqual(['people/math', 'people', 'archive', ''])
+      expect(notes.map((r) => r.$branch)).toEqual(['people/math', 'people', 'archive', ''])
     })
 
     it('a sort re-orders it; a limit is not baked, so the file keeps the tree order whole', async () => {

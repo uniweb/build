@@ -14,7 +14,6 @@ import { pathToFileURL } from 'node:url'
 import {
   resolveDefaultLocale,
   resolveFetchConfigs,
-  joinPathCapture,
   pageRouteQuery,
   routeSelection,
   routeParamValues,
@@ -410,13 +409,14 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
       }
       for (const paramValue of values) {
 
-        // Create concrete route: /blog/:slug → /blog/my-post. Under `[...path]` the
-        // record's URL is its placement (the folder `folder.yml` put it in, carried
-        // as `path`) plus its handle — the split rule in reverse. ⛔ A FILE PATH, so
-        // decoded: the server decodes the request before looking the file up.
-        const capture = catchAll ? joinPathCapture({ dir: item.path, slug: paramValue }) : null
+        // Create concrete route: /blog/:slug → /blog/my-post, and the same under
+        // `[...path]`: a record carries no branch, so its own URL is its handle alone
+        // (ruled 2026-09-27 [Diego]), the URL its `$route` names (`fillRoutePattern`).
+        // ⛔ Until then this prefixed the record's `path`. ⛔ A FILE PATH, so decoded: the
+        // server decodes the request before looking the file up.
+        const capture = catchAll ? String(paramValue) : null
         const concreteRoute = catchAll
-          ? page.route.replace(new RegExp(`:${catchAll}\\*$`), capture)
+          ? page.route.replace(new RegExp(`:${catchAll}\\*$`), () => capture)
           : page.route.replace(`:${paramName}`, paramValue)
 
         // ⛔ TWO RECORDS, ONE ROUTE — normal the moment the route field is not

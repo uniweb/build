@@ -88,7 +88,7 @@ export function applyWhere(items, where) {
  * `@uniweb/core`'s `evaluateQuery`, the one order of work the runtime's default
  * fetcher uses too:
  *
- *   1. the query's set — `scope` over each record's placement (`path`), `where`,
+ *   1. the query's set — `scope` over the branch each record is held with (`$branch`), `where`,
  *      `sort`, `limit`;
  *   2. the fetch's `narrow` of it — `where` (and `match`), `sort`, `limit`.
  *

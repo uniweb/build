@@ -58,7 +58,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseBibtex } from '@citestyle/bibtex'
-import { DATA_DIR, withoutRouteVariables, mapQueryPaths } from '@uniweb/core'
+import { DATA_DIR, withoutRouteVariables, mapQueryPaths, BRANCH_KEY } from '@uniweb/core'
 import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
@@ -760,8 +760,8 @@ export function flatFormRefusal(where, ref, schema, misplaced) {
  * Every source file in a collection, as paths relative to the collection root —
  * `hello.md`, `2024/spring.md`, `2024/q1/notes.yml`.
  *
- * Nesting is how an author gives a collection an internal structure, and it is
- * what the `path` field and the `under` predicate address. Before this walk the
+ * Nesting is how an author organizes the files; the folder branch a record sits in, which a
+ * query's `scope:` reads, is `records/folder.yml`'s to say (`records-config.js`). Before this walk the
  * scan was a flat `readdir`, so a record in a subdirectory was not ignored with
  * a warning — it was invisible, and the site simply rendered without it.
  *
@@ -800,7 +800,7 @@ function warnDuplicateSlugs(items, queryName) {
   for (const item of items) {
     if (!item || item.$name === undefined) continue
     const name = String(item.$name)
-    const where = item.path ? `${item.path}/` : ''
+    const where = item[BRANCH_KEY] ? `${item[BRANCH_KEY]}/` : ''
     if (seen.has(name)) {
       console.warn(
         `[query-processor] Query "${queryName}" has more than one record named ` +
@@ -927,7 +927,7 @@ function pickBrief(record, keys) {
     return out
   }
   for (const [key, value] of Object.entries(record)) {
-    if (!key.startsWith('$') && !['slug', 'path', 'excerpt', 'image', 'draft'].includes(key)) out[key] = value
+    if (!key.startsWith('$') && !['slug', 'excerpt', 'image', 'draft'].includes(key)) out[key] = value
   }
   return out
 }
@@ -966,9 +966,16 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // BibTeX → CSL-JSON bibliography items).
   let items = await readPooledRecords(pooled, config, siteDir, recordsRoot, basePath)
 
-  // ⭐ `path` IS THE FOLDER `folder.yml` PLACED THE RECORD IN — `''` at the top —
+  // ⭐ `$branch` IS THE FOLDER `folder.yml` PLACED THE RECORD IN — `''` at the top —
   // and it is the whole reason folders exist: `scope: archive` is how a query asks
   // for a slice. Structure is query scope, not navigation.
+  //
+  // ⛔ THE COMPILED FILE'S OWN KEY, NOT THE RECORD'S (ruled 2026-09-27 [Diego]): the
+  // browser evaluates `scope` over this file, so the file holds each record's branch, and
+  // no answer carries it — `@uniweb/core`'s `evaluateQuery` reads it and drops it, as a
+  // records service answers no branch. ⛔ Until then it was `path`: it reached every
+  // component, wrote over an authored field named `path`, and made a `[...path]` record's
+  // link `<branch>/<name>`.
   //
   // ⛔ THIS WAS HARDCODED TO `''` FOR A WHILE, AND THE COMMENT SAID "until the
   // folder producer lands". It landed, and this was not revisited — so every
@@ -979,9 +986,9 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // ⚠️ It stays a SCALAR. `@uniweb/core`'s `withinScope` matches strings only, so
   // an array would match nothing — one placement per record is the ruling.
   items = items.map((result, i) => {
-    const path = pooled[i] ? (config.placements?.get(pooled[i].id)?.path ?? '') : ''
-    if (Array.isArray(result)) return result.map((item) => item && { ...item, path })
-    return result && { ...result, path }
+    const branch = pooled[i] ? (config.placements?.get(pooled[i].id)?.path ?? '') : ''
+    if (Array.isArray(result)) return result.map((item) => item && { ...item, [BRANCH_KEY]: branch })
+    return result && { ...result, [BRANCH_KEY]: branch }
   })
 
   // Flatten one level: a .bib file contributes its entries individually. Every other
@@ -1053,7 +1060,8 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // since 2026-09-11, could select anything from it.
 
   // ⭐ EACH RECORD'S BRIEF — what its list holds: the brief's fields at the top, beside the record's
-  // own keys and what the build derives (`excerpt`, `image`, `path`). A record of a schema with no
+  // own keys, what the build derives (`excerpt`, `image`), and the branch the list holds for `scope`
+  // (`$branch`, which no answer carries). A record of a schema with no
   // brief, or of one with a single section, is its brief as it is.
   const briefOf = briefBuilder(config.dataSchema)
   if (briefOf) {
@@ -1127,7 +1135,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   }
 
   // ⭐ EVERY FILE IN `records/` IS A RECORD (ruled 2026-09-21 [Diego]), so every one
-  // is compiled; `records/folder.yml` only says which folder each sits in (`path`),
+  // is compiled; `records/folder.yml` only says which folder each sits in (`$branch`),
   // which is what a query's `scope` reads. ⛔ Until 2026-09-21 `records.yml`, at the
   // site root, listed the records, and an unlisted file was left out of
   // `/data/<name>.json` here.
@@ -1347,7 +1355,9 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
       const handle = item.$name
       if (handle === undefined || handle === null || handle === '') continue
       const filename = `${handle}.json`
-      await writeFile(join(recordsDir, filename), JSON.stringify(item[WHOLE_RECORD] ?? item, null, 2))
+      // The record's own file answers it whole, so it holds no branch (the list does, for `scope`).
+      const { [BRANCH_KEY]: _branch, ...own } = item
+      await writeFile(join(recordsDir, filename), JSON.stringify(item[WHOLE_RECORD] ?? own, null, 2))
       written.add(filename)
     }
     const pruned = await pruneOrphanedRecords(dataDir, name, written)

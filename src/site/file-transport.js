@@ -72,8 +72,9 @@ export function createFileTransport({ siteRoot, distDir = null, publicDir = 'pub
       const body = await readFile(file, 'utf8')
       return response(body, path.endsWith('.json') ? 'application/json' : 'text/plain')
     }
-    // ⚖️ Not an error here. A page can ask for a per-record file a `deferred:` query never wrote,
-    // and the step reports the outcome so the caller can see it rather than crash a build.
+    // ⚖️ Not an error here. A page can ask for a per-record file that was never written — a
+    // record this run withholds as a draft, say — and the step reports the outcome so the caller
+    // can see it rather than crash a build.
     return missing(path)
   }
 }

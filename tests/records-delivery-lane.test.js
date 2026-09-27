@@ -19,9 +19,9 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { processQueries } from '../src/site/query-processor.js'
+import { processQueries, writeQueryFiles } from '../src/site/query-processor.js'
 import { buildRecordEntities } from '../src/uwx/records.js'
-import { applyScope } from '@uniweb/core'
+import { applyScope, evaluateQuery } from '@uniweb/core'
 
 let ROOT
 const w = (rel, body) => {
@@ -57,7 +57,7 @@ describe('placement reaches the records a query returns', () => {
     w('records/folder.yml', ARCHIVE)
 
     const { pubs } = await deliver()
-    const byslug = Object.fromEntries(pubs.map((r) => [r.$name, r.path]))
+    const byslug = Object.fromEntries(pubs.map((r) => [r.$name, r.$branch]))
     expect(byslug['2026-a']).toBe('')
     expect(byslug['2025-b']).toBe('archive')
   })
@@ -81,7 +81,7 @@ describe('placement reaches the records a query returns', () => {
     w('records/folder.yml', ['- folder: archive', '  records:', '    - folder: 2023', '      records:', '        - publication/deep.md', ''].join('\n'))
 
     const { pubs } = await deliver()
-    expect(pubs[0].path).toBe('archive/2023')
+    expect(pubs[0].$branch).toBe('archive/2023')
     expect(applyScope(pubs, 'archive')).toHaveLength(1)
   })
 })
@@ -93,7 +93,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
 
     const { pubs } = await deliver()
     expect(pubs.map((r) => r.$name).sort()).toEqual(['a', 'b'])
-    expect(pubs.every((r) => r.path === '')).toBe(true)
+    expect(pubs.every((r) => r.$branch === '')).toBe(true)
   })
 
   it('an EMPTY folder.yml delivers every record too — it removes nothing', async () => {
@@ -153,7 +153,7 @@ describe('⭐ every record in the directory is delivered — folder.yml only org
     it('CONTROL — the same record placed through a list builds, in its folder', async () => {
       w('records/folder.yml', '- folder: archive\n  records:\n    - publication/published.md\n')
       const { pubs } = await deliver()
-      expect(pubs.map((r) => [r.$name, r.path])).toEqual([['published', 'archive']])
+      expect(pubs.map((r) => [r.$name, r.$branch])).toEqual([['published', 'archive']])
     })
   })
 })
@@ -291,5 +291,33 @@ describe('a record asset keeps its path under the records directory', () => {
     // deterministic — the same file gets the same URL on the next build
     const [second] = (await compile()).articles
     expect(second.logo).toBe(first.logo)
+  })
+})
+
+// ⛔ A RECORD DOES NOT CARRY ITS BRANCH (ruled 2026-09-27 [Diego]). The list holds it, for the
+// browser to evaluate `scope` over; the answer, and a record's own file, carry none — as a records
+// service answers none. Until then it rode every record as `path`, which wrote over an authored
+// field of that name (measured: `path: beginner` compiled as `path: ''`).
+describe('the branch is the compiled list\'s, never the record\'s', () => {
+  it('an authored `path` survives; the list holds the branch as `$branch`, the record\'s file none', async () => {
+    w('records/publication/a.md', '---\ntitle: A\npath: my/own/value\n---\n\nBody.\n')
+    w('records/publication/b.md', entity('B'))
+    w('records/folder.yml', ['- folder: archive', '  records:', '    - publication/a.md', ''].join('\n'))
+    const queries = { pubs: { name: 'pubs', schema: '@/publication' } }
+    await writeQueryFiles(ROOT, await processQueries(ROOT, queries, undefined, '/'), queries)
+
+    const list = JSON.parse(readFileSync(join(ROOT, 'public', 'data', 'pubs.json'), 'utf8'))
+    const a = list.find((r) => r.$name === 'a')
+    expect(a.path).toBe('my/own/value')
+    expect(a.$branch).toBe('archive')
+
+    const own = JSON.parse(readFileSync(join(ROOT, 'public', 'data', 'pubs', 'a.json'), 'utf8'))
+    expect(own.path).toBe('my/own/value')
+    expect('$branch' in own).toBe(false)
+
+    // What a query answers from that list: scoped by the branch, and carrying none.
+    const answer = evaluateQuery(list, { scope: 'archive' })
+    expect(answer.map((r) => [r.$name, r.path])).toEqual([['a', 'my/own/value']])
+    expect(answer.some((r) => '$branch' in r)).toBe(false)
   })
 })

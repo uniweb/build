@@ -294,7 +294,7 @@ describe('a named query\'s narrowing at build — only what is fixed for every p
     // Baked, a page's own `scope:` could only narrow inside the query's branch on
     // a static site, and would replace it on a hosted one.
     const { q } = await run({ q: { schema: '@/entry', scope: 'field' } })
-    expect(q.map((r) => [r.$name, r.path]).sort()).toEqual([['a', 'field'], ['b', 'lab']])
+    expect(q.map((r) => [r.$name, r.$branch]).sort()).toEqual([['a', 'field'], ['b', 'lab']])
   })
 
   it('CONTROL — a fixed where is applied at build', async () => {
@@ -336,7 +336,7 @@ describe('a page\'s fetch — `scope` is the query\'s, `under` is refused', () =
   })
 
   it('applyPostProcessing applies scope before where, sort and limit', () => {
-    const rows = [{ slug: 'a', path: 'field' }, { slug: 'b', path: 'lab' }, { slug: 'c', path: 'field/x' }]
+    const rows = [{ slug: 'a', $branch: 'field' }, { slug: 'b', $branch: 'lab' }, { slug: 'c', $branch: 'field/x' }]
     expect(applyPostProcessing(rows, { scope: 'field', limit: 1 }).map((r) => r.slug)).toEqual(['a'])
     expect(applyPostProcessing(rows, { scope: 'field' }).map((r) => r.slug)).toEqual(['a', 'c'])
   })

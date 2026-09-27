@@ -361,10 +361,12 @@ function derivesExcerpt(record, whole, dataSchema, config) {
 /**
  * ⛔ A RECORD'S SYSTEM FIELDS ARE NEVER PROSE — never extracted, never translated, by
  * either path. A `$`-prefixed key at any depth is the system's (`$name`, the handle a
- * parametric page's URL names; `$uuid`), and a record's top-level `slug` and `path`
- * are its handle and its placement in `folder.yml`. Until 2026-09-14 they became
- * translation units, and a translation whose source happened to equal one rewrote it,
- * so a record's page stopped matching its URL.
+ * parametric page's URL names; `$uuid`; `$branch`, the folder a compiled list holds a
+ * record under), and a top-level `slug` is how a record's reader hands the file's name
+ * on. Until 2026-09-14 they became translation units, and a translation whose source
+ * happened to equal one rewrote it, so a record's page stopped matching its URL.
+ * ⛔ A top-level `path` was one too until 2026-09-27, when the placement it named moved to
+ * `$branch` [Diego]: a field an author names `path` is theirs, and translated as its schema says.
  *
  * @param {string|number} key - a field name (an array index is never one)
  * @param {boolean} topLevel - whether the key sits at the record's own level
@@ -372,7 +374,7 @@ function derivesExcerpt(record, whole, dataSchema, config) {
  */
 function isRecordSystemField(key, topLevel) {
   if (typeof key !== 'string') return false
-  return key.startsWith('$') || (topLevel && (key === 'slug' || key === 'path'))
+  return key.startsWith('$') || (topLevel && key === 'slug')
 }
 
 /**

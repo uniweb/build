@@ -190,16 +190,17 @@ describe('free-form and hash-based record translation agree on the record, in de
 })
 
 // ⛔ A RECORD'S SYSTEM FIELDS ARE NOT PROSE. A compiled record carries `$name` (the handle
-// a parametric page's URL names) and `path` (its placement in folder.yml) beside its
-// data, and both were extracted as translatable text — and translated, so a Spanish
-// build could rewrite a handle and the record's page stopped matching its URL.
+// a parametric page's URL names) and `$branch` (the folder a compiled list holds it under)
+// beside its data, and they were extracted as translatable text — and translated, so a Spanish
+// build could rewrite a handle and the record's page stopped matching its URL. (The branch was
+// `path` until 2026-09-27; a field an author names `path` is theirs now.)
 describe('system fields are never extracted, nor translated', () => {
   const units = (manifest) => Object.values(manifest.units).map((u) => u.source)
 
-  it('heuristic: `$`-prefixed keys at any depth, and the top-level `slug` and `path`', async () => {
+  it('heuristic: `$`-prefixed keys at any depth, and the top-level `slug`', async () => {
     site()
     w('public/data/recent.json', [
-      { slug: 'hello-post', $name: 'hello-post', path: 'archive', title: 'Hello there', credit: { $id: 'credit-1', label: 'Photo by Ada' } },
+      { slug: 'hello-post', $name: 'hello-post', $branch: 'archive', title: 'Hello there', credit: { $id: 'credit-1', label: 'Photo by Ada' } },
     ])
     const sources = units(await extractRecordContent(ROOT))
     expect(sources).not.toContain('hello-post')
@@ -209,10 +210,16 @@ describe('system fields are never extracted, nor translated', () => {
     expect(sources).toEqual(expect.arrayContaining(['Hello there', 'Photo by Ada']))
   })
 
+  it('an authored top-level `path` is the record\'s own data, and translated like any other', async () => {
+    site()
+    w('public/data/recent.json', [{ $name: 'hello-post', title: 'Hello there', path: 'Along the river' }])
+    expect(units(await extractRecordContent(ROOT))).toEqual(expect.arrayContaining(['Hello there', 'Along the river']))
+  })
+
   it('schema-guided: a schema that declares `slug` a plain string does not make the handle prose', async () => {
     // `events` resolves `@uniweb/schemas`' flat `event` schema, whose `slug` is `type: string`
     w('site.yml', 'name: T\n')
-    w('public/data/events.json', [{ slug: 'launch-day', $name: 'launch-day', path: 'archive', title: 'Launch Day' }])
+    w('public/data/events.json', [{ slug: 'launch-day', $name: 'launch-day', $branch: 'archive', title: 'Launch Day' }])
     const sources = units(await extractRecordContent(ROOT))
     expect(sources).not.toContain('launch-day')
     expect(sources).not.toContain('archive')
@@ -222,7 +229,7 @@ describe('system fields are never extracted, nor translated', () => {
   it('a translation whose source equals a handle rewrites the prose and leaves the handle', async () => {
     w('site.yml', 'name: T\n')
     w('queries.yml', "recent:\n  schema: '@/article'\n")
-    w('public/data/recent.json', [{ slug: 'welcome', $name: 'welcome', path: 'welcome', title: 'welcome' }])
+    w('public/data/recent.json', [{ slug: 'welcome', $name: 'welcome', $branch: 'welcome', title: 'welcome' }])
     w('public/data/events.json', [{ slug: 'welcome', $name: 'welcome', title: 'welcome' }])
     const manifest = await extractRecordContent(ROOT)
     const [hash] = Object.entries(manifest.units).find(([, u]) => u.source === 'welcome')
@@ -230,7 +237,7 @@ describe('system fields are never extracted, nor translated', () => {
 
     const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     const [article] = JSON.parse(readFileSync(outputs.es.recent, 'utf8'))
-    expect(article).toMatchObject({ title: 'bienvenida', slug: 'welcome', $name: 'welcome', path: 'welcome' })
+    expect(article).toMatchObject({ title: 'bienvenida', slug: 'welcome', $name: 'welcome', $branch: 'welcome' })
     const [event] = JSON.parse(readFileSync(outputs.es.events, 'utf8'))
     expect(event).toMatchObject({ title: 'bienvenida', slug: 'welcome', $name: 'welcome' })
   })

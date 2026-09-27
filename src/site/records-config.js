@@ -153,7 +153,7 @@ export async function readRecordsConfig(siteRoot, { dir } = {}) {
  *
  * ⛔ ONE PLACEMENT PER RECORD. Two entries matching one file is a hard error, not
  * a second placement. The wire could carry many-to-many — `folder.js` nests, and
- * a placement is banked by the record it references — but a record's `path` is one string:
+ * a placement is banked by the record it references — but a record's branch is one string:
  * `@uniweb/core`'s `withinScope` matches nothing that is not a string, so a record
  * with two paths would fall outside every `scope:`, silently. The records service
  * evaluates `scope` natively, so widening it is a cross-lane change to agree first,

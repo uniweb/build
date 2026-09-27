@@ -239,26 +239,36 @@ describe('records with no value for the route param are COUNTED, not only logged
   })
 })
 
-describe('a [...path] template expands over placement + handle', () => {
+// ⛔ Ruled 2026-09-27 [Diego]: a record does not carry its branch, so its page under `[...path]`
+// is written where its `$route` points — its handle alone, as under `[slug]`. Until then the
+// expansion prefixed the record's `path`: `/blog/rust/2025/my-post`.
+describe('a [...path] template expands over the handle', () => {
   const template = { route: '/blog/:path*', isDynamic: true, paramName: 'slug' }
 
-  it('emits one page per record at <placement>/<slug>, with the three variables baked', () => {
+  it('emits one page per record at its handle, with the three variables baked', () => {
     const out = expandDynamicPages(
       [blog('posts'), template],
-      parentData([{ $name: 'my-post', path: 'rust/2025' }, { $name: 'top', path: '' }], 'posts'),
+      // an authored `path` is the record's data, never a directory of its URL
+      parentData([{ $name: 'my-post', path: 'rust/2025' }, { $name: 'top' }], 'posts'),
       noop
     )
     const routes = out.map((p) => p.route)
-    expect(routes).toContain('/blog/rust/2025/my-post')
+    expect(routes).toContain('/blog/my-post')
     expect(routes).toContain('/blog/top')
-    const deep = out.find((p) => p.route === '/blog/rust/2025/my-post')
-    expect(deep.dynamicContext).toEqual({
+    expect(routes.some((r) => r.includes('rust'))).toBe(false)
+    const page = out.find((p) => p.route === '/blog/my-post')
+    expect(page.dynamicContext).toEqual({
       templateRoute: '/blog/:path*',
-      params: { path: 'rust/2025/my-post', dir: 'rust/2025', slug: 'my-post' },
+      params: { path: 'my-post', dir: '', slug: 'my-post' },
       paramName: 'slug',
       paramValue: 'my-post',
     })
     expect(out.find((p) => p.route === '/blog/top').dynamicContext.params).toEqual({ path: 'top', dir: '', slug: 'top' })
+  })
+
+  it('a `$` in the handle is written as it is, never read as a replacement pattern', () => {
+    const out = expandDynamicPages([blog('posts'), template], parentData([{ $name: 'a$&b' }], 'posts'), noop)
+    expect(out.map((p) => p.route)).toContain('/blog/a$&b')
   })
 
   it('a record with no slug is counted as unrouted, as under [slug]', () => {

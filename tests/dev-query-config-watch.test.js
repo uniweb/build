@@ -33,7 +33,7 @@ const titles = (name) => {
 // The folder each compiled record sits in, by title — what `records/folder.yml` decides.
 const paths = (name) => {
   const file = join(ROOT, 'public/data', `${name}.json`)
-  return existsSync(file) ? Object.fromEntries(JSON.parse(readFileSync(file, 'utf8')).map((r) => [r.title, r.path])) : null
+  return existsSync(file) ? Object.fromEntries(JSON.parse(readFileSync(file, 'utf8')).map((r) => [r.title, r.$branch])) : null
 }
 const settle = (ms) => new Promise((done) => setTimeout(done, ms))
 
