@@ -428,8 +428,9 @@ function reinlineInsets(content, insets) {
  * `preset` / `input` / `fetch` / `id` (`stable_id`); the body is the section's
  * content (insets re-inlined) serialized to markdown. Idempotent.
  *
- * Note: `$children` (the `@`-nested child sections) are NOT written here — the
- * page walk places them as `@`-files plus a `nest:` map. This writes one section.
+ * Note: `$children` (a section's child sections) are NOT written here — the page
+ * walk (`pageSectionsToFiles`) writes each to its own file and nests it under its
+ * parent in `page.yml::sections:`, in stored order. This writes one section.
  *
  * @param {object} params
  * @param {string} params.filePath
