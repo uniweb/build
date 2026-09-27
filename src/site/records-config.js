@@ -352,3 +352,24 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
 
   return { nodes: [...branches, ...top], placements, errors, warnings }
 }
+
+/**
+ * The records of a folder tree in FOLDER-TREE ORDER — depth-first, each folder's records and
+ * folders in the order they sit, a folder's records where the folder sits. It is the order a
+ * question with no `sort` answers in, on both lanes (ruled 2026-09-27 [Diego]): the static lane
+ * reads the tree `resolveFolder` builds, which is the tree a push places in a backend's folder.
+ *
+ * @param {Array} nodes - a folder tree: `{ kind: 'ref', $entityId }` and `{ kind: 'branch', $children }`
+ * @returns {string[]} the records' ids, in folder-tree order
+ */
+export function folderTreeOrder(nodes) {
+  const out = []
+  const walk = (list) => {
+    for (const node of list || []) {
+      if (node?.kind === 'ref') out.push(node.$entityId)
+      else if (node?.kind === 'branch') walk(node.$children)
+    }
+  }
+  walk(nodes)
+  return out
+}

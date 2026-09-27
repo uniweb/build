@@ -575,4 +575,49 @@ This is the body content.
       expect(collections.posts[0].excerpt).toBe('Custom excerpt here')
     })
   })
+
+  // ⭐ A question with no `sort` answers in FOLDER-TREE ORDER (ruled 2026-09-27 [Diego]) —
+  // depth-first over the tree `records/folder.yml` builds, which is the tree a push places in a
+  // backend's folder: each folder's records and folders as they sit, every unplaced record at the
+  // top after the folders. ⛔ Until then this lane answered in directory-walk order.
+  describe('folder-tree order', () => {
+    const write = () => {
+      const notes = join(testDir, 'records', 'note')
+      mkdirSync(notes, { recursive: true })
+      for (const n of ['a', 'b', 'c', 'd']) writeFileSync(join(notes, `${n}.yml`), `title: ${n.toUpperCase()}\n`)
+      writeFileSync(
+        join(testDir, 'records', 'folder.yml'),
+        [
+          '- folder: people',
+          '  records:',
+          '    - folder: math',
+          '      records:',
+          '        - note/c.yml',
+          '    - note/a.yml',
+          '- folder: archive',
+          '  records:',
+          '    - note/d.yml',
+        ].join('\n') + '\n'
+      )
+    }
+
+    it('answers depth-first, a folder\'s records where the folder sits, unplaced records last', async () => {
+      write()
+      const { notes } = await processQueries(testDir, { notes: { schema: '@/note' } }, undefined, '/')
+      expect(notes.map((r) => r.$name)).toEqual(['c', 'a', 'd', 'b'])
+      expect(notes.map((r) => r.path)).toEqual(['people/math', 'people', 'archive', ''])
+    })
+
+    it('a sort re-orders it; a limit is not baked, so the file keeps the tree order whole', async () => {
+      write()
+      const { first, sorted } = await processQueries(
+        testDir,
+        { first: { schema: '@/note', limit: 2 }, sorted: { schema: '@/note', sort: 'title' } },
+        undefined,
+        '/'
+      )
+      expect(first.map((r) => r.$name)).toEqual(['c', 'a', 'd', 'b'])
+      expect(sorted.map((r) => r.$name)).toEqual(['a', 'b', 'c', 'd'])
+    })
+  })
 })

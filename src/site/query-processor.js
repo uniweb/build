@@ -62,7 +62,7 @@ import { DATA_DIR, withoutRouteVariables } from '@uniweb/core'
 import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
-import { readRecordsConfig, resolveFolder } from './records-config.js'
+import { readRecordsConfig, resolveFolder, folderTreeOrder } from './records-config.js'
 import { isDraftRecord } from './record-draft.js'
 import { resolveRecordSchemas } from './queries-config.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
@@ -896,6 +896,14 @@ function pickBrief(record, keys) {
   return out
 }
 
+// A query's records in folder-tree order (`folderTreeOrder`), before anything reads them — so
+// `where`, `sort` (stable) and `limit` start from the order a records service answers in.
+function inFolderOrder(pooled, rank) {
+  if (!rank || pooled.length < 2) return pooled
+  const at = (e) => rank.get(e.id) ?? Number.POSITIVE_INFINITY
+  return [...pooled].sort((a, b) => at(a) - at(b))
+}
+
 /**
  * Collect and process all of a query's records
  *
@@ -909,7 +917,7 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // sync lane makes, from the same reader, so the two lanes cannot disagree
   // about which files are a query's records. They used to: this one recursed
   // into a collection directory and sync did not.
-  const pooled = config.poolEntities || []
+  const pooled = inFolderOrder(config.poolEntities || [], config.folderRank)
   if (pooled.length === 0) return []
 
   // The records this query's references name, read before its own — delivering one
@@ -1063,6 +1071,10 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   const folder = resolveFolder(recordsCfg.entries, pool.entities, { dir: pool.dir })
   for (const e of folder.errors) console.error(`[query-processor] ${e}`)
   for (const w of folder.warnings) console.warn(`[query-processor] ${w}`)
+  // ⭐ A QUESTION WITH NO `sort` ANSWERS IN FOLDER-TREE ORDER (ruled 2026-09-27 [Diego]) — the
+  // order a backend's records service answers in, over the tree a push places there. ⛔ Until then
+  // this lane answered in the order the directory walk found the files.
+  const folderRank = new Map(folderTreeOrder(folder.nodes).map((id, i) => [id, i]))
 
   const poolBySchema = groupPoolBySchema(pool.entities)
   const recordsRoot = resolve(siteDir, pool.dir)
@@ -1083,6 +1095,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     const parsed = parseQueryConfig(name, config)
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
     parsed.placements = folder.placements
+    parsed.folderRank = folderRank
     parsed.includeDrafts = includeDrafts
     parsed.dataSchema = (parsed.schema && dataSchemas[parsed.schema]) || null
     parsed.references = references
