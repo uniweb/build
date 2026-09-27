@@ -957,6 +957,15 @@ export function reportPlacementDeclarations(components) {
           `provides renders "Component not found".`
       )
     }
+    // `grid` is a section key framework reserves for the layout of a section's children,
+    // so a param by that name never receives what an author writes as `grid:`.
+    if (entry.params && typeof entry.params === 'object' && Object.hasOwn(entry.params, 'grid')) {
+      console.warn(
+        `Warning: ${name} (meta.js): a param named "grid" never receives the author's grid: — it is a section ` +
+          `key reserved for the layout of child sections. Offer layouts with children: { grid: [...] } and ` +
+          `lay the children out with kit's ChildGrid, or rename the param.`
+      )
+    }
   }
 }
 

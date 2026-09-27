@@ -39,6 +39,7 @@ import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig, pageRouteQuery, currentFor } from '@uniweb/core'
 import { parseFrontmatter } from '../utils/frontmatter.js'
+import { parseGrid } from '@uniweb/schemas/grid'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -1010,7 +1011,17 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
 
   // `query`, `fetch` and `data` are never params: `query:` / `fetch:` declare the
   // section's own data, and a leftover `data:` is refused (`declaredFetch`).
-  const { type, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
+  // ⭐ Nor is `grid`: a section key framework reserves for the layout of the section's
+  // child sections — `3` or `'40/60'` [Diego, 2026-09-27] — laid out by kit's
+  // `ChildGrid` from `block.grid`. A component offers layouts in `meta.js`
+  // `children.grid`; it never receives the choice as a param.
+  const { type, preset, input, props, fetch, query, data, grid, id: frontmatterId, ...params } = frontMatter
+  if (grid !== undefined && !parseGrid(grid)) {
+    console.warn(
+      `[content-collector] ${relative(siteRoot, filePath)}: grid: ${JSON.stringify(grid)} is not a layout — ` +
+        `write a column count (grid: 3) or relative widths (grid: '40/60'). The component's own layout applies.`
+    )
+  }
 
   // Convert markdown to ProseMirror. ⭐ Insets stay as the author wrote them —
   // `inset_ref`, `inset_block` — and `@uniweb/core` lifts both when it builds the
@@ -1041,6 +1052,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     params: { ...params, ...props },
     content: proseMirrorContent,
     fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath), { level: 'section' }),
+    ...(grid !== undefined ? { grid } : {}),
     subsections: []
   }
 

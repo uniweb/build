@@ -312,11 +312,20 @@ function mapSectionData(section) {
   setIf(data, 'preset', section.preset ?? undefined)
   setIf(data, 'input', section.input ?? undefined)
   if (Object.keys(params).length > 0) data.params = params
-  data.content = section.content
-  if (section.insets && section.insets.length > 0) data.insets = section.insets
+  data.content = section.content // leaf insets in it as written — no `insets` field since 2026-09-27
   setIf(data, 'fetch', section.fetch ?? undefined)
   setIf(data, 'background', background)
   setIf(data, 'theme_override', themeOverride)
+  // ⛔ `grid` — the section's layout for its children — is NOT SENT YET: it is a new
+  // field, and the store refuses a whole push carrying a key it has not declared
+  // (kb/framework/build/uwx-format.md § A page section's fields). It goes on the wire
+  // once backend declares it; until then a static build renders it and the file keeps it.
+  if (section.grid !== undefined) {
+    console.warn(
+      `[uwx] section ${section.stableId ?? section.id}: grid: ${JSON.stringify(section.grid)} is not sent — ` +
+        `the backend does not store a section's grid yet. It renders on a static build; the file keeps it.`
+    )
+  }
   return data
 }
 
