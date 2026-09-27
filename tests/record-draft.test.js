@@ -42,10 +42,10 @@ describe('a draft is left out of what the site delivers', () => {
     expect(existsSync(join(ROOT, 'public/records/post/soon.png'))).toBe(false)
   })
 
-  it('in every format — a YAML mapping, a JSON object, and an entry of an array', async () => {
+  it('in every format — a YAML mapping and a JSON object', async () => {
     w('records/post/a.yml', 'title: A\ndraft: true\n')
     w('records/post/b.json', '{ "title": "B", "draft": true }')
-    w('records/post/list.yml', '- slug: c\n  title: C\n  draft: true\n- slug: d\n  title: D\n')
+    w('records/post/d.yml', 'title: D\n')
     expect(await slugs()).toEqual(['d'])
   })
 

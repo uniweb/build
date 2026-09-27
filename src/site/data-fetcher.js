@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
-import { matchWhere, sortRecords, queryDataUrl, evaluateQuery, whereOutsideLanguage, CURRENT_MODES, nameRecords } from '@uniweb/core'
+import { matchWhere, sortRecords, queryDataUrl, evaluateQuery, whereOutsideLanguage, CURRENT_MODES } from '@uniweb/core'
 
 /**
  * Get a nested value from an object using dot notation
@@ -749,8 +749,6 @@ export async function executeFetch(config, options = {}) {
     if (transform && data) {
       data = getNestedValue(data, transform)
     }
-    // An external query's records named by the field its `name_field:` says — `$name`.
-    data = nameRecords(data, config.nameField)
 
     // Apply post-processing (where, sort, limit)
     data = applyPostProcessing(data, config, { locale: options.locale ?? null })

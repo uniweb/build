@@ -60,8 +60,9 @@ describe('a record\'s unquoted date reaches the compiled record as written', () 
     expect(events[0].at).toBe('2025-06-01T10:20:30Z')
   })
 
-  it('in an array-form .yml file', async () => {
-    w('records/event/all.yml', '- slug: a\n  date: 2025-06-01\n- slug: b\n  date: 2024-01-02\n')
+  it('in a .yml file', async () => {
+    w('records/event/a.yml', 'date: 2025-06-01\n')
+    w('records/event/b.yml', 'date: 2024-01-02\n')
     const { events } = await compile({ events: { schema: '@/event' } })
     expect(events.map((e) => e.date)).toEqual(['2025-06-01', '2024-01-02'])
   })

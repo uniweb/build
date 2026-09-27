@@ -29,6 +29,19 @@ describe('expandDynamicPages', () => {
     expect(out.every((p) => !p.isDynamic)).toBe(true)
   })
 
+  // ⭐ A route query that binds the URL's last segment to a field (`where: { slug: ':slug' }`, 2026-09-27)
+  // expands over that field — the way an external API's records, which have no `$name`, get pages.
+  it('expands by the field the route query binds `:slug` to', () => {
+    const queries = { articles: { url: 'https://api.test/articles', where: { slug: ':slug' } } }
+    const out = expandDynamicPages([blog(), template], parentData([{ slug: 'first' }, { slug: 'second' }]), noop, undefined, { queries })
+    const routes = out.map((p) => p.route)
+    expect(routes).toContain('/blog/first')
+    expect(routes).toContain('/blog/second')
+    // CONTROL — unbound, the same records have no `$name` and get no page
+    const unbound = expandDynamicPages([blog(), template], parentData([{ slug: 'first' }]), noop)
+    expect(unbound.map((p) => p.route)).not.toContain('/blog/first')
+  })
+
   it('skips a record whose route collides with a static sibling (static wins)', () => {
     // A static /blog/about authored alongside the [slug] template, and a record
     // that also carries slug:'about'. The static page must survive; the record
@@ -204,7 +217,8 @@ describe('records with no value for the route param are COUNTED, not only logged
     const summary = lines.filter((l) => l.includes('no page was generated'))
     expect(summary).toHaveLength(1)
     expect(summary[0]).toContain('3 of 5')
-    expect(summary[0]).toContain('"slug"')
+    // a `[slug]` page names a record by `$name` unless its route query binds `:slug` to a field
+    expect(summary[0]).toContain('"$name"')
     expect(summary[0]).toContain('/blog/:slug')
     // and no longer one line per record
     expect(lines.filter((l) => l.includes('Skipping item without'))).toHaveLength(0)

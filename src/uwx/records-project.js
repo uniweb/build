@@ -40,8 +40,7 @@ import { join, resolve, relative, dirname, extname, basename, sep } from 'node:p
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
-import { writeRecordFile, writeQueriesConfig, writeRecordsConfig, YAML_DUMP_OPTS } from './project-writer.js'
-import { canonicalJson } from './same-content.js'
+import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { defaultSchema, foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
@@ -99,23 +98,20 @@ export function findRecordFileByUuid(poolDir, uuid) {
   return null
 }
 
-// ⭐ A RECORD KEPT IN A LIST FILE — a JSON or YAML array, or a BibTeX file: several records in one —
-// is found by its entry's `$uuid`, which the push's back-fill writes into each entry. ⛔ Until
-// 2026-09-25 a pull looked in single-record files alone, wrote each such record again as a file of
-// its own beside the list, and the next push held it twice — measured on the `international`
-// template's `records/team/team.json`.
+// ⭐ A RECORD KEPT IN A BIBTEX FILE — several entries in one — is found by its entry's `$uuid`, so
+// a pull does not write it again as a file of its own beside the list. ⛔ Until 2026-09-27 a JSON or
+// YAML array was such a list too; a file holds one record now (`site/record-file.js`).
 export function findListEntryByUuid(poolDir, uuid) {
   if (!uuid || !existsSync(poolDir)) return null
   for (const name of readdirSync(poolDir)) {
     if (name.startsWith('_')) continue
     const ext = extname(name).toLowerCase()
-    const format = ext === '.bib' ? 'bib' : formatForExt(ext)
-    if (format !== 'json' && format !== 'yaml' && format !== 'bib') continue
+    if (ext !== '.bib') continue
+    const format = 'bib'
     const path = join(poolDir, name)
     let entries
     try {
-      const text = readFileSync(path, 'utf8')
-      entries = format === 'json' ? JSON.parse(text) : format === 'yaml' ? yaml.load(text, YAML_OPTIONS) : parseBibtex(text)
+      entries = parseBibtex(readFileSync(path, 'utf8'))
     } catch {
       continue
     }
@@ -124,25 +120,6 @@ export function findListEntryByUuid(poolDir, uuid) {
     if (index >= 0) return { path, format, index, list: true }
   }
   return null
-}
-
-// A pulled record written back into its entry of a JSON or YAML list, every other entry untouched.
-// The entry keeps its `slug`, which names it where a single-record file's name would.
-function writeRecordIntoList({ list, document, declaration, sourceLocale, collector, freeformRelPath, refName, context = null }) {
-  const text = readFileSync(list.path, 'utf8')
-  const entries = list.format === 'json' ? JSON.parse(text) : yaml.load(text, YAML_OPTIONS)
-  const rendered = renderEntityDocument({ document, declaration, format: list.format, sourceLocale, collector, freeformRelPath, refName, context })
-  const { $uuid, ...fields } = list.format === 'json' ? JSON.parse(rendered) : yaml.load(rendered, YAML_OPTIONS)
-  const slug = entries[list.index]?.slug
-  const entry = { ...($uuid ? { $uuid } : {}), ...(slug !== undefined ? { slug } : {}), ...fields }
-  // ⭐ An entry the pull did not change leaves the file as the author wrote it — its key order, its
-  // spacing, and a YAML file's comments. ⛔ Until 2026-09-26 the file was compared as text and re-dumped.
-  if (canonicalJson(entries[list.index]) === canonicalJson(entry)) return 'unchanged'
-  const next = entries.map((e, i) => (i === list.index ? entry : e))
-  const out = list.format === 'json' ? JSON.stringify(next, null, 2) + '\n' : yaml.dump(next, YAML_DUMP_OPTS)
-  if (out === text) return 'unchanged'
-  writeFileSync(list.path, out)
-  return 'updated'
 }
 
 // The format to give a NEW record file in a collection: match the collection's
@@ -345,7 +322,6 @@ function declToFileShape(wire, scope = null, own = null, keyTypes = null, author
     setIf(decl, 'body', source.body)
     setIf(decl, 'transform', source.transform)
     setIf(decl, 'record', source.record)
-    setIf(decl, 'name_field', source.name_field)
   } else if (typeof source.path === 'string') {
     // ⛔ A FILE-BASED QUERY HAS NO PATH TO WRITE BACK. `records/{schema}/` holds its
     // records and `schema:` addresses them, so a `path` arriving on the wire is either
@@ -745,12 +721,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     const context = { key: [relative(recordsRoot, dirname(existing?.path ?? filePath)).split(sep).join('/'), where.slug].filter(Boolean).join('/') }
     let status
     try {
-      if (existing?.list && existing.format === 'bib') {
+      if (existing?.list) {
         // Kept as the author has it: a pull does not re-render BibTeX (said once per file, below).
         keptBib.add(existing.path)
         status = 'unchanged'
-      } else if (existing?.list) {
-        status = writeRecordIntoList({ list: existing, document: toWrite, declaration, sourceLocale, collector, freeformRelPath, refName, context })
       } else {
         status = writeRecordFile({ filePath, document: toWrite, declaration, format, sourceLocale, collector, freeformRelPath, refName, context })
       }

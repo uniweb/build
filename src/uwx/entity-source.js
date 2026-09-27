@@ -39,6 +39,7 @@ const SOURCE_EXTENSIONS = new Set(['.md', '.yml', '.yaml', '.json', '.bib'])
 // (below), and a bare `export … from` creates NO local binding — the same
 // trap `core/src/index.js` carries a note about. It fails at runtime, not at
 // import time, so the suite is what catches it.
+import { refuseNotOneRecord } from '../site/record-file.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 export { parseFrontmatter }
 
@@ -58,8 +59,9 @@ function formatFor(ext) {
  * ⭐ THE FILE IS THE UNIT NOW. `records/{schema}/` supplies the model, so
  * nothing above this needs a directory scan to know what a file is — the pool
  * reader (`site/entity-pool.js`) already walked the tree and paired each file
- * with its schema. A single-record file yields one record; array-form YAML/JSON
- * and BibTeX yield several, each carrying its own slug.
+ * with its schema. A record file yields one record, named by the file; a BibTeX file
+ * yields its entries, each named by its cite key. ⛔ A list in a YAML or JSON file, and a
+ * `slug:` naming a record, are refused (`site/record-file.js`, 2026-09-27).
  *
  * @param {string} filepath - absolute path to one entity source file
  * @returns {Promise<Array<{ slug, format, data, body, sourceFile, multiRecord }>>}
@@ -76,8 +78,8 @@ async function readOneFile(filepath) {
 
   if (format === 'md') {
     const { frontmatter, body } = parseFrontmatter(raw, filepath)
-    const slug = frontmatter.slug || slugFromName
-    return [{ slug, format, data: frontmatter, body, sourceFile: filepath, multiRecord: false }]
+    refuseNotOneRecord(frontmatter, filepath, slugFromName)
+    return [{ slug: slugFromName, format, data: frontmatter, body, sourceFile: filepath, multiRecord: false }]
   }
 
   if (format === 'bib') {
@@ -89,23 +91,10 @@ async function readOneFile(filepath) {
       .map((e) => ({ slug: e.id, format, data: e, body: undefined, sourceFile: filepath, multiRecord: true }))
   }
 
-  // yaml / json
+  // yaml / json — one record, named by the file (`site/record-file.js`)
   const data = format === 'json' ? JSON.parse(raw) : yaml.load(raw, YAML_OPTIONS)
-  if (Array.isArray(data)) {
-    // Many records in one file — each carries its own slug. Write-back deferred.
-    return data
-      .filter((item) => item && typeof item === 'object')
-      .map((item) => ({
-        slug: item.slug,
-        format,
-        data: item,
-        body: undefined,
-        sourceFile: filepath,
-        multiRecord: true,
-      }))
-  }
+  refuseNotOneRecord(data, filepath, slugFromName)
   const mapping = data && typeof data === 'object' ? data : {}
-  const slug = mapping.slug || slugFromName
-  return [{ slug, format, data: mapping, body: undefined, sourceFile: filepath, multiRecord: false }]
+  return [{ slug: slugFromName, format, data: mapping, body: undefined, sourceFile: filepath, multiRecord: false }]
 }
 

@@ -64,6 +64,7 @@ import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, folderTreeOrder } from './records-config.js'
 import { isDraftRecord } from './record-draft.js'
+import { refuseNotOneRecord } from './record-file.js'
 import { resolveRecordSchemas, resolveQueriesConfig, foundationSections } from './queries-config.js'
 import { dataKeyTypes } from '../uwx/data-key-types.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
@@ -474,21 +475,8 @@ async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, c
  * file's name unless it states one.
  */
 async function processDataRecords(data, fileSlug, filepath, where, siteRoot, recordsRoot, basePath, config) {
-  // Array → multiple items (single-file collection). A draft entry is dropped
-  // BEFORE its assets are copied, so nothing of it ships.
-  if (Array.isArray(data)) {
-    const out = []
-    for (const [i, item] of data.entries()) {
-      if (withheld(item, `${where} [${i}]`, config.includeDrafts)) continue
-      if (item && typeof item === 'object') {
-        await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
-      }
-      out.push(deliverRecord(item, config, `${where} [${i}]`))
-    }
-    return out
-  }
-
-  // Mapping → single item
+  // ONE record per file, named by the file (`record-file.js`).
+  refuseNotOneRecord(data, where, fileSlug)
   if (withheld(data, where, config.includeDrafts)) return null
   const item = { slug: fileSlug, ...data }
   await processDataItemAssets(item, filepath, siteRoot, recordsRoot, basePath)
@@ -567,6 +555,7 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
 
   // Parse frontmatter and body
   const { frontmatter, body } = parseFrontmatter(raw, filepath)
+  refuseNotOneRecord(frontmatter, relative(siteRoot, filepath), slug)
 
   // A draft is left out — before its assets are copied, so nothing of it ships.
   if (withheld(frontmatter, relative(siteRoot, filepath), config.includeDrafts)) {

@@ -204,9 +204,8 @@ const RECORD_KEYS = ['url', 'method', 'body', 'transform']
  * ⭐ AN EXTERNAL QUERY is a query with `url:` (ruled 2026-09-13 [Diego]: *"Setting
  * `url` would classify it as external"*): an address, `method` and `body` for a POST,
  * `transform` (a dot-path to its records), `where` / `sort` / `limit` evaluated over
- * them, `record:` — `{ url, method, body, transform }` — for one record on a
- * parametric page, and `name_field:`, the field each record is named by (`$name`, which
- * a `[slug]` page matches). What describes the site's records — `schema`, `scope`,
+ * them, and `record:` — `{ url, method, body, transform }` — for one record on a
+ * parametric page. What describes the site's records — `schema`, `scope`,
  * `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` and `detail:` are
  * retired everywhere: their one real case is `record.url`. ⛔ And `limit:` is a whole
  * number, 0 or more (`refuseLimit`).
@@ -260,7 +259,7 @@ export function refuseQueryDeclaration(decl) {
   }
   const external = decl.url !== undefined
   if (!external) {
-    for (const key of ['method', 'body', 'transform', 'record', 'name_field']) {
+    for (const key of ['method', 'body', 'transform', 'record']) {
       if (decl[key] === undefined) continue
       throw new Error(
         `[uniweb] ${where}: \`${key}:\` belongs on an external query — one with \`url:\`. A query over the site's ` +
@@ -280,12 +279,6 @@ export function refuseQueryDeclaration(decl) {
     )
   }
   refuseMethod(decl.method, where)
-  if (decl.name_field !== undefined && (typeof decl.name_field !== 'string' || decl.name_field.trim() === '')) {
-    throw new Error(
-      `[uniweb] ${where}: \`name_field:\` names the field each record is named by — its \`$name\`, which a ` +
-        `\`[slug]\` page matches — e.g. \`name_field: slug\`.`
-    )
-  }
   if (decl.transform !== undefined && typeof decl.transform !== 'string') {
     throw new Error(`[uniweb] ${where}: \`transform:\` is a dot-path to the records in the response, e.g. \`data.items\`.`)
   }
@@ -320,6 +313,11 @@ function refuseMethod(method, where) {
  * downstream. It is stripped here rather than at each consumer, so the payload
  * has one shape and no consumer has to know the field existed.
  *
+ * ⛔ `name` too: a declaration carries its query's name for the build's own messages, and
+ * `config.queries` is keyed by it — repeated inside, it was a second copy nothing read, and it
+ * held a key a declaration may want for something else [Diego, 2026-09-27]. Until then every
+ * query on the payload read `{ name: 'articles', … }` under `articles`.
+ *
  * Returns undefined for a site with no queries, so `config.queries`
  * stays absent rather than becoming an empty object — an empty object reads as
  * "declared, and empty" to anything checking for presence.
@@ -328,9 +326,9 @@ export function toConfigQueries(declarations) {
   const names = Object.keys(declarations || {})
   if (names.length === 0) return undefined
   const out = {}
-  for (const name of names) {
-    const { schemaExplicit, ...rest } = declarations[name]
-    out[name] = rest
+  for (const key of names) {
+    const { schemaExplicit, name, ...rest } = declarations[key]
+    out[key] = rest
   }
   return out
 }

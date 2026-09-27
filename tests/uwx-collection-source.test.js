@@ -34,10 +34,9 @@ describe('readEntityFile — reads source, NOT processed delivery data', () => {
     expect(rec.data).not.toHaveProperty('content')
   })
 
-  it('honors an explicit frontmatter slug over the filename', async () => {
+  it('⛔ refuses a frontmatter `slug:` — a record is named by its file (2026-09-27)', async () => {
     writeFileSync(join(dir, 'file-name.md'), '---\nslug: real-slug\ntitle: X\n---\nbody\n')
-    const [rec] = await readEntityFile(join(dir, 'file-name.md'))
-    expect(rec.slug).toBe('real-slug')
+    await expect(readEntityFile(join(dir, 'file-name.md'))).rejects.toThrow(/`slug:` names nothing — a record's name is its file's name \("file-name"\)/)
   })
 
   it('reads a single-record YAML mapping untouched, slug from filename', async () => {
@@ -58,12 +57,9 @@ describe('readEntityFile — reads source, NOT processed delivery data', () => {
     expect(rec.data).toEqual({ title: 'G' })
   })
 
-  it('reads an array-form YAML file as many multiRecord records, each its own slug', async () => {
-    writeFileSync(join(dir, 'all.yml'), '- slug: a\n  title: A\n- slug: b\n  title: B\n')
-    const recs = await readEntityFile(join(dir, 'all.yml'))
-    expect(recs).toHaveLength(2)
-    expect(recs.map((r) => r.slug)).toEqual(['a', 'b'])
-    expect(recs.every((r) => r.multiRecord === true)).toBe(true)
+  it('⛔ refuses a YAML file holding a list — a file holds one record (2026-09-27)', async () => {
+    writeFileSync(join(dir, 'all.yml'), '- title: A\n- title: B\n')
+    await expect(readEntityFile(join(dir, 'all.yml'))).rejects.toThrow(/all\.yml holds a list of records/)
   })
 
   it('reads BibTeX entries with the cite key as slug (multiRecord)', async () => {

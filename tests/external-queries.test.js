@@ -23,9 +23,9 @@ import { siteProjectToDocument, declarationsToQueriesYml } from '../src/uwx/inde
 const refuse = (decl) => () => refuseQueryDeclaration({ name: 'items', ...decl })
 
 describe('what an external query may declare', () => {
-  it('accepts url, method, body, transform, name_field, where, sort, limit, record and queryable', () => {
+  it('accepts url, method, body, transform, where, sort, limit, record and queryable', () => {
     expect(refuse({
-      url: 'https://api.test/items', method: 'post', body: { q: 1 }, transform: 'data.items', name_field: 'slug',
+      url: 'https://api.test/items', method: 'post', body: { q: 1 }, transform: 'data.items',
       where: { a: 1 }, sort: 'date desc', limit: 3,
       record: { url: 'https://api.test/items/{slug}', method: 'GET', body: { id: '{slug}' }, transform: 'data' },
       queryable: { a: { type: 'boolean' } },
@@ -62,39 +62,29 @@ describe('what an external query may declare', () => {
   })
 
   it('⛔ an external source\'s keys on a query with no `url:`', () => {
-    for (const key of ['method', 'body', 'transform', 'record', 'name_field']) {
+    for (const key of ['method', 'body', 'transform', 'record']) {
       expect(refuse({ schema: '@/item', [key]: 'x' })).toThrow(new RegExp(`\`${key}:\` belongs on an external query — one with \`url:\``))
     }
   })
 
-  // ⭐ `name_field:` names the field each record is named by — its `$name` (2026-09-27). A record of
-  // the site's own is named by its file, so the key belongs on an external query alone.
-  it('⛔ `name_field:` is a field name', () => {
-    expect(refuse({ url: 'https://api.test/items', name_field: '' })).toThrow(/`name_field:` names the field each record is named by/)
-    expect(refuse({ url: 'https://api.test/items', name_field: ['slug'] })).toThrow(/`name_field:` names the field/)
-  })
-
-  it('`name_field:` reaches the resolved fetch, the record request, and the sync wire\'s source', async () => {
-    const queries = { items: { url: 'https://api.test/items', name_field: 'slug', record: { url: 'https://api.test/items/{slug}' } } }
-    const cfg = resolveFetchConfigs([{ query: 'items', as: 'items' }], { queries }).get('items')
-    expect(cfg.nameField).toBe('slug')
-    // CONTROL — a binding cannot supply it
-    const bound = resolveFetchConfigs([{ query: 'items', as: 'items', nameField: 'id' }], { queries }).get('items')
-    expect(bound.nameField).toBe('slug')
-
-    // the sync wire carries it in the query's source, and a pull writes it back
-    const root = mkdtempSync(join(tmpdir(), 'external-name-field-'))
+  // ⭐ An external API's records are entries in no folder, so they have no `$name`: the query binds
+  // the URL's last segment to one of their fields, and its parametric page matches that (2026-09-27).
+  it('a query that binds `:slug` in its `where` gives its fetches the field — and a binding cannot', async () => {
+    const queries = { items: { url: 'https://api.test/items', where: { slug: ':slug' }, record: { url: 'https://api.test/items/{slug}' } } }
+    expect(resolveFetchConfigs([{ query: 'items', as: 'items' }], { queries }).get('items').routeField).toBe('slug')
+    // CONTROL — a binding's own `routeField` is not the query's
+    expect(resolveFetchConfigs([{ query: 'items', as: 'items', routeField: 'id' }], { queries }).get('items').routeField).toBe('slug')
+    // …and the binding rides the sync wire as the `where` it is, and comes back as written
+    const root = mkdtempSync(join(tmpdir(), 'external-route-field-'))
     try {
       writeFileSync(join(root, 'site.yml'), 'name: T\nfoundation: "@acme/base@1.0.0"\n')
-      writeFileSync(join(root, 'queries.yml'), 'items:\n  url: https://api.test/items\n  name_field: slug\n')
+      writeFileSync(join(root, 'queries.yml'), "items:\n  url: https://api.test/items\n  where: { slug: ':slug' }\n")
       const doc = await siteProjectToDocument(root)
       const pushed = doc.queries.find((q) => q.name === 'items')
-      expect(pushed.source).toEqual({ url: 'https://api.test/items', name_field: 'slug' })
-      // in `source` alone — a key the queries Section does not declare would be refused
-      expect(pushed).not.toHaveProperty('name_field')
+      expect(pushed.where).toEqual({ slug: ':slug' })
       rmSync(join(root, 'queries.yml'))
-      declarationsToQueriesYml({ document: { queries: [{ name: 'items', source: { url: 'https://api.test/items', name_field: 'slug' } }] }, siteRoot: root })
-      expect(yaml.load(readFileSync(join(root, 'queries.yml'), 'utf8')).items).toEqual({ url: 'https://api.test/items', name_field: 'slug' })
+      declarationsToQueriesYml({ document: doc, siteRoot: root })
+      expect(yaml.load(readFileSync(join(root, 'queries.yml'), 'utf8')).items.where).toEqual({ slug: ':slug' })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

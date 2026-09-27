@@ -24,7 +24,7 @@ import {
   deriveCacheKey,
   evaluateQuery,
 } from '@uniweb/core'
-import { recordTitle, routePatternToRegex } from '@uniweb/core/route-match'
+import { recordTitle, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
 import DataStore from '@uniweb/core/datastore'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { createFileTransport } from './site/file-transport.js'
@@ -258,6 +258,8 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
  * @param {Object} [stats] - receives `unrouted[route]`, the records with no param value
  * @param {Object} [options]
  * @param {Object|Array|null} [options.siteFetch] - the site's `fetch`, the last level of a route query
+ * @param {Object|null} [options.queries] - the site's `config.queries`: a route query that binds the
+ *   URL's last segment to a field (`where: { slug: ':slug' }`, `routeFieldOf`) is expanded by that field
  * @returns {Array} Expanded pages array with dynamic pages replaced by concrete instances
  */
 /**
@@ -295,7 +297,7 @@ export function localizeRedirectTarget(target, { website, locale, isDefault, rou
   return (website.basePath || '') + withSlash
 }
 
-export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats = { unrouted: {} }, { siteFetch = null } = {}) {
+export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats = { unrouted: {} }, { siteFetch = null, queries = null } = {}) {
   if (!stats.unrouted) stats.unrouted = {}
   const expandedPages = []
 
@@ -378,6 +380,8 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
 
     const items = data
     const key = route.key
+    // The field the route query binds the URL's last segment to, if any — else `[slug]` names `$name`.
+    const field = routeFieldOf(queries?.[route.config?.query ?? key])
 
     onProgress(`  Expanding ${page.route} → ${items.length} pages from ${key}`)
 
@@ -399,7 +403,7 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
       // value — the case the rule is for — gets exactly one page. Ruled 2026-09-12
       // [Diego]. ⛔ This read `item[paramName]` until 2026-09-11 and the whole array
       // until 2026-09-12, which baked `/tags/a%2Cb`, a URL no lane matches.
-      const values = routeParamValues(item, paramName)
+      const values = routeParamValues(item, paramName, field)
       if (values.length === 0) {
         unrouted += 1
         continue
@@ -470,7 +474,7 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
     if (unrouted > 0) {
       stats.unrouted[page.route] = unrouted
       onProgress(
-        `  ⚠️ ${unrouted} of ${items.length} ${key} records have no "${paramName}" — no page was ` +
+        `  ⚠️ ${unrouted} of ${items.length} ${key} records have no "${paramName === 'slug' ? field || '$name' : paramName}" — no page was ` +
           `generated for them under ${page.route}`
       )
     }
@@ -893,6 +897,7 @@ export async function prerenderSite(siteDir, options = {}) {
       onProgress('Expanding dynamic routes...')
       siteContent.pages = expandDynamicPages(siteContent.pages, fetched, onProgress, undefined, {
         siteFetch: siteContent.config?.fetch ?? null,
+        queries: siteContent.config?.queries ?? null,
       })
 
       // ⭐ AN EXPANDED PAGE ASKS FOR WHAT ITS ROUTE BINDS — its branch's view, a `deferred:`

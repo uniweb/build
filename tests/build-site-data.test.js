@@ -148,7 +148,6 @@ queries:
     mkdirSync(poolDir, { recursive: true })
     writeFileSync(join(poolDir, 'first.md'), `---
 title: First Article
-slug: first
 ---
 Body text.
 `)

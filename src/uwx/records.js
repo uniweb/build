@@ -396,12 +396,6 @@ function readFlat(layout, record, enc) {
   for (const [key, value] of Object.entries(record)) {
     if (!RECORD_KEYS.has(key)) values[key] = value
   }
-  // The record's handle fills a `slug` field the section declares, as the flat form
-  // always has (`@std/article`'s brief has one). Written by section, the field is
-  // written under its section like any other.
-  if (record.slug !== undefined && Object.hasOwn(def.fields || {}, 'slug') && values.slug === undefined) {
-    values.slug = record.slug
-  }
   return { [name]: encodeRecord(def.fields, values, enc, '', null) }
 }
 

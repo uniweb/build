@@ -312,54 +312,32 @@ Content.
     })
   })
 
-  describe('YAML array-form items', () => {
-    it('should parse a top-level YAML array as multiple items', async () => {
+  // ⛔ A file holds ONE record, named by the file (ruled 2026-09-27 [Diego]); a list in a YAML or
+  // JSON file, and a `slug:` naming a record, stop the build. Until then a list was one record per entry.
+  describe('one record per file', () => {
+    it('⛔ a top-level YAML list stops the build, naming the file and what to do', async () => {
       const contentDir = join(testDir, 'records', 'team')
       mkdirSync(contentDir, { recursive: true })
-
-      writeFileSync(join(contentDir, 'all.yml'), `- slug: alice
-  name: Alice
-  role: engineer
-- slug: bob
-  name: Bob
-  role: designer
-- slug: carol
-  name: Carol
-  role: writer
-`)
-
-      const collections = await processQueries(testDir, {
-        team: '@/team'
-      })
-
-      expect(collections.team).toHaveLength(3)
-      expect(collections.team.map(i => i.$name)).toEqual(['alice', 'bob', 'carol'])
-      expect(collections.team[0].name).toBe('Alice')
-      expect(collections.team[1].role).toBe('designer')
+      writeFileSync(join(contentDir, 'all.yml'), '- name: Alice\n- name: Bob\n')
+      await expect(processQueries(testDir, { team: '@/team' })).rejects.toThrow(
+        /records\/team\/all\.yml holds a list of records\. A file holds one record, named by the file/
+      )
     })
 
-    it('should mix array-form and mapping-form YAML in the same folder', async () => {
+    it('⛔ a JSON list too', async () => {
       const contentDir = join(testDir, 'records', 'team')
       mkdirSync(contentDir, { recursive: true })
+      writeFileSync(join(contentDir, 'all.json'), JSON.stringify([{ name: 'Alice' }]))
+      await expect(processQueries(testDir, { team: '@/team' })).rejects.toThrow(/all\.json holds a list of records/)
+    })
 
-      writeFileSync(join(contentDir, 'core.yml'), `- slug: alice
-  name: Alice
-- slug: bob
-  name: Bob
-`)
-
-      writeFileSync(join(contentDir, 'carol.yml'), `name: Carol
-role: writer
-`)
-
-      const collections = await processQueries(testDir, {
-        team: '@/team'
-      })
-
-      expect(collections.team).toHaveLength(3)
-      const slugs = collections.team.map(i => i.$name).sort()
-      expect(slugs).toEqual(['alice', 'bob', 'carol'])
-      expect(collections.team.find(i => i.$name === 'carol').role).toBe('writer')
+    it('⛔ a `slug:` that would name the record stops the build — its name is its file\'s', async () => {
+      const contentDir = join(testDir, 'records', 'team')
+      mkdirSync(contentDir, { recursive: true })
+      writeFileSync(join(contentDir, 'alice.yml'), 'slug: alice-b\nname: Alice\n')
+      await expect(processQueries(testDir, { team: '@/team' })).rejects.toThrow(
+        /records\/team\/alice\.yml: `slug:` names nothing — a record's name is its file's name \("alice"\)/
+      )
     })
 
     it('should preserve mapping-form YAML behavior (slug from filename)', async () => {

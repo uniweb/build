@@ -29,8 +29,8 @@ beforeAll(async () => {
   write(join(siteRoot, 'theme.yml'), '')
   write(join(siteRoot, 'pages', 'home', 'page.yml'), 'title: Home\n')
   write(join(siteRoot, 'records', 'speaker', 'ada.yml'), 'name: Ada\n')
-  // Named by its `slug:`, not its file's name.
-  write(join(siteRoot, 'records', 'speaker', 'g.md'), '---\nslug: grace\nname: Grace\n---\n')
+  // Named by its file's name — a `slug:` names nothing since 2026-09-27.
+  write(join(siteRoot, 'records', 'speaker', 'grace.md'), '---\nname: Grace\n---\n')
   write(join(siteRoot, 'records', 'talk', 'good.yml'), 'title: Good\nspeaker: ada\npanel: [ada, grace]\n')
   write(join(siteRoot, 'records', 'talk', 'bad.yml'), 'title: Bad\nspeaker: adaa\npanel: [ada, nobody]\n')
   write(join(siteRoot, 'records', 'talk', 'remote.yml'), 'title: Remote\nspeaker: 01a0d4fb-b326-7241-933b-cf05db69731d\n')

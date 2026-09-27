@@ -267,7 +267,8 @@ describe('a record asset keeps its path under the records directory', () => {
   })
 
   it('in a YAML record\'s fields, by the same rule', async () => {
-    w('records/person/team.yml', '- slug: ada\n  photo: ./img/ada.png\n- slug: lin\n  photo: ./other/ada.png\n')
+    w('records/person/ada.yml', 'photo: ./img/ada.png\n')
+    w('records/person/lin.yml', 'photo: ./other/ada.png\n')
     w('records/person/img/ada.png', 'ADA')
     w('records/person/other/ada.png', 'LIN')
     const { people } = await processQueries(ROOT, { people: { name: 'people', schema: '@/person' } }, undefined, '/')

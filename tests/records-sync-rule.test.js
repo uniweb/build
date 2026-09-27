@@ -208,14 +208,11 @@ describe('two records with one name in one folder', () => {
 // ⭐ A FILE IS NOT ALWAYS ONE RECORD, and a record's id is not always its file's
 // stem — the folder places the records a file PRODUCED.
 describe('the folder references the records files produce', () => {
-  it('a frontmatter slug is placed under that slug', async () => {
-    // ⛔ Until 2026-09-21 the leaf named the FILE (`article/renamed`) while the
-    // record was `article/custom`, and the placement was dropped with a warning.
+  it('⛔ a frontmatter `slug:` names nothing — the push stops on it, as the build does (2026-09-27)', async () => {
+    // A record is placed under its file's name; until 2026-09-27 a `slug:` renamed it.
     const root = site()
     w('site/records/article/renamed.md', '---\ntitle: R\nslug: custom\n---\n')
-    const pkg = await emitSyncPackages(root)
-    expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toContain('article/custom')
-    expect(pkg.warnings.some((x) => x.includes('no record entity was produced'))).toBe(false)
+    await expect(emitSyncPackages(root)).rejects.toThrow(/renamed\.md: `slug:` names nothing — a record's name is its file's name \("renamed"\)/)
   })
 })
 
@@ -286,12 +283,10 @@ describe('a draft record is pushed as a disabled entity', () => {
     expect(entityContentHash(docOf(await emitSyncPackages(root), 'article/hello'))).toBe(before)
   })
 
-  it('a draft inside a many-record file is disabled alone', async () => {
+  it('⛔ a file holding a list of records stops the push — a file holds one record (2026-09-27)', async () => {
     const root = site()
-    w('site/records/article/batch.yml', '- slug: one\n  title: One\n  draft: true\n- slug: two\n  title: Two\n')
-    const pkg = await emitSyncPackages(root)
-    expect(docOf(pkg, 'article/one').$disabled).toBe(true)
-    expect(docOf(pkg, 'article/two')).not.toHaveProperty('$disabled')
+    w('site/records/article/batch.yml', '- title: One\n  draft: true\n- title: Two\n')
+    await expect(emitSyncPackages(root)).rejects.toThrow(/batch\.yml holds a list of records/)
   })
 
   // ⭐ One reason the push used to REFUSE rather than skip: a site whose records were all

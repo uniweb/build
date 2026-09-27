@@ -247,7 +247,7 @@ describe('`current:` — refused off a section, warned where nothing reads it (r
   })
 })
 
-describe('$name on compiled records — the record\'s final slug (ruled 2026-09-11)', () => {
+describe('$name on compiled records — the record\'s file\'s name (ruled 2026-09-11; its only source since 2026-09-27)', () => {
   const run = async (queries) => {
     const restore = quiet()
     try {
@@ -257,22 +257,19 @@ describe('$name on compiled records — the record\'s final slug (ruled 2026-09-
     }
   }
 
-  it('from the filename, and from a frontmatter `slug:` that overrides it — what sync sends as the name, and the only one delivered', async () => {
+  it('is the filename — what sync sends as the name, and the only name delivered', async () => {
     w('records/article/hello.md', '---\ntitle: Hello\n---\nBody\n')
-    w('records/article/renamed.md', '---\ntitle: Renamed\nslug: custom\n---\nBody\n')
-    const { articles } = await run({ articles: { schema: '@/article' } })
-    const byTitle = Object.fromEntries(articles.map((r) => [r.title, r]))
-    expect(byTitle.Hello).toMatchObject({ $name: 'hello' })
-    expect(byTitle.Renamed).toMatchObject({ $name: 'custom' })
+    w('records/person/ada.yml', 'name: Ada\n')
+    const { articles, people } = await run({ articles: { schema: '@/article' }, people: { schema: '@/person' } })
+    expect(articles[0]).toMatchObject({ $name: 'hello', title: 'Hello' })
+    expect(people[0]).toMatchObject({ $name: 'ada', name: 'Ada' })
     // ⛔ `slug` rode the delivered record beside `$name` until 2026-09-27.
-    expect(byTitle.Hello).not.toHaveProperty('slug')
-    expect(byTitle.Renamed).not.toHaveProperty('slug')
+    expect(articles[0]).not.toHaveProperty('slug')
   })
 
-  it('on every format — an array-form file\'s own slugs', async () => {
-    w('records/person/team.yml', '- slug: ada\n  name: Ada\n- slug: lin\n  name: Lin\n')
-    const { people } = await run({ people: { schema: '@/person' } })
-    expect(people.map((r) => r.$name).sort()).toEqual(['ada', 'lin'])
+  it('⛔ a frontmatter `slug:` names nothing — it stops the build (2026-09-27 [Diego])', async () => {
+    w('records/article/renamed.md', '---\ntitle: Renamed\nslug: custom\n---\nBody\n')
+    await expect(run({ articles: { schema: '@/article' } })).rejects.toThrow(/records\/article\/renamed\.md: `slug:` names nothing/)
   })
 })
 
