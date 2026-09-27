@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto'
 import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { inferTitle } from './utils/infer-title.js'
+import { inferTitle, describeChildren, describeVisuals } from '@uniweb/schemas/component'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -571,10 +571,14 @@ function createImplicitMeta(name) {
  * for whoever renders it.
  */
 function buildComponentEntry(name, relativePath, meta) {
+  // ⭐ `name` and `path` are the build's facts, so they are set AFTER the spread: a
+  // `meta.js` declaring either cannot change them. ⛔ Until 2026-09-27 they came first,
+  // and a `meta.js` `name` became the entry's `name` — which an editor reads as the
+  // section type — while the schema stayed keyed by the folder's name.
   const entry = {
+    ...meta,
     name,
     path: relativePath,
-    ...meta,
   }
   // Apply title inference if meta has no explicit title
   if (!entry.title) {
@@ -937,6 +941,36 @@ function reportSupports(srcDir, authored, derived, emitted) {
 }
 
 /**
+ * Warn about `children` and `visuals` declarations an editor cannot use — read with
+ * `@uniweb/schemas`, the grammar the editor reads them with. The entry is emitted as
+ * written either way; these are warnings, never refusals.
+ *
+ * ⭐ A `children.types` entry must name one of this foundation's section types. A hidden
+ * one is not a section type at all, and a child of a type nothing provides renders
+ * "Component not found". The one false alarm is a type an extension provides, which
+ * this foundation cannot see — the message says so.
+ *
+ * @param {Object} components - discovered section types, by name
+ */
+export function reportPlacementDeclarations(components) {
+  for (const [name, entry] of Object.entries(components)) {
+    const children = describeChildren(entry)
+    const visuals = describeVisuals(entry)
+    for (const problem of [...children.problems, ...visuals.problems]) {
+      console.warn(`Warning: ${name} (meta.js): ${problem}`)
+    }
+    for (const type of children.types || []) {
+      if (components[type]) continue
+      console.warn(
+        `Warning: ${name} (meta.js): children.types names "${type}", which is not a section type of this ` +
+          `foundation — hidden, misspelled, or provided by an extension. A child section of a type nothing ` +
+          `provides renders "Component not found".`
+      )
+    }
+  }
+}
+
+/**
  * Build complete schema for a foundation
  * Returns { _self: { identity + config }, ComponentName: componentMeta, ... }
  *
@@ -959,6 +993,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Discover section types
   const components = await discoverComponents(srcDir, sectionPaths)
+  reportPlacementDeclarations(components)
 
   // Resolve the data schemas the foundation DEFINES — every file in its `schemas/`
   // folder (`ownSchemaRefs`) — and the ones its section bindings reference, carried

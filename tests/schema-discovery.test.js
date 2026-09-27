@@ -1,8 +1,9 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { discoverComponents, loadFoundationConfig } from '../src/schema.js'
-import { inferTitle } from '../src/utils/infer-title.js'
+import { discoverComponents, loadFoundationConfig, reportPlacementDeclarations } from '../src/schema.js'
+// The build's titles come from the package editors read them with — one copy.
+import { inferTitle } from '@uniweb/schemas/component'
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -387,5 +388,57 @@ describe('titleInferred', () => {
     const result = await discoverComponents(tmpRoot, ['sections'])
     expect(result.TeamRoster.title).toBe('Who We Are')
     expect(result.TeamRoster.titleInferred).toBeUndefined()
+  })
+})
+
+describe('name and path are the build\'s', () => {
+  afterEach(cleanup)
+
+  // An editor reads an entry's `name` as its section type. A `meta.js` that declared
+  // `name` used to replace it, while the schema stayed keyed by the folder.
+  it('a meta.js `name` or `path` does not replace them', async () => {
+    fresh()
+    touch('sections/Hero/Hero.jsx', 'export default function Hero() {}')
+    writeMeta('sections/Hero/meta.js', { name: 'Big Banner', path: 'elsewhere' })
+
+    const result = await discoverComponents(tmpRoot, ['sections'])
+    expect(result.Hero.name).toBe('Hero')
+    expect(result.Hero.path).toBe('sections/Hero')
+  })
+})
+
+describe('reportPlacementDeclarations', () => {
+  let warnings
+  beforeEach(() => {
+    warnings = []
+    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('warns when children.types names a type the foundation does not provide', () => {
+    reportPlacementDeclarations({
+      Tabs: { name: 'Tabs', children: { types: ['TabPanel', 'Card'] } },
+      Card: { name: 'Card' },
+    })
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toMatch(/Tabs.*"TabPanel".*not a section type/)
+  })
+
+  it('warns about a children or visuals declaration it cannot read', () => {
+    reportPlacementDeclarations({
+      Grid: { name: 'Grid', children: { grid: ['40/'], colums: 2 } },
+      Split: { name: 'Split', visuals: 'chart' },
+    })
+    expect(warnings.join('\n')).toMatch(/Grid.*children\.grid.*"40\/"/)
+    expect(warnings.join('\n')).toMatch(/Grid.*children\.colums/)
+    expect(warnings.join('\n')).toMatch(/Split.*chart/)
+  })
+
+  it('says nothing about declarations it can read', () => {
+    reportPlacementDeclarations({
+      Grid: { name: 'Grid', children: { label: 'Items', grid: [2, '40/60'], types: ['Card'] }, visuals: 1 },
+      Card: { name: 'Card', inset: true, section: true },
+    })
+    expect(warnings).toEqual([])
   })
 })
