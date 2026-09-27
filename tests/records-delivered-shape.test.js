@@ -156,10 +156,10 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     )
   })
 
-  it('a `deferred:` split strips the non-brief sections from the list, not the brief', async () => {
-    site('posts:\n  schema: "@/post"\n  deferred: [details]\n')
+  it('a list carries briefs — the other sections are left out of it, and the record\'s file holds them', async () => {
+    site('posts:\n  schema: "@/post"\n')
     w('site/records/post/hello.md', '---\ncard:\n  title: Hello\n---\n\nThe body.\n')
-    await compile({ posts: { schema: '@/post', deferred: ['details'] } })
+    await compile({ posts: { schema: '@/post' } })
     expect(read('public/data/posts.json')[0]).toMatchObject({ title: 'Hello' })
     expect(read('public/data/posts.json')[0]).not.toHaveProperty('details')
     expect(textOf(read('public/data/posts/hello.json').details.content)).toEqual(['The body.'])
@@ -167,15 +167,14 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
 
   it('⭐ a brief field that shares a section\'s name — the list keeps it, the record\'s file holds both', async () => {
     // Sections are field namespaces (ruled 2026-09-26 [Diego]): `details` is a brief field AND a
-    // section. The brief implies `deferred: [details]` — the section — which must not take the
-    // brief's field of that name out of the list.
+    // section. The list's brief keeps the field, and holds no section.
     site('books:\n  schema: "@/book"\n')
     w(
       'fdn/schemas/book.yml',
       'name: book\nsections:\n  brief:\n    brief: true\n    fields: { title: string, details: string }\n  details:\n    fields: { pages: integer }\n'
     )
     w('site/records/book/frankenstein.yml', 'brief:\n  title: Frankenstein\n  details: A gothic novel\ndetails:\n  pages: 280\n')
-    await compile({ books: { schema: '@/book', deferred: ['details'] } })
+    await compile({ books: { schema: '@/book' } })
     expect(read('public/data/books.json')[0]).toMatchObject({ $name: 'frankenstein', title: 'Frankenstein', details: 'A gothic novel' })
     expect(read('public/data/books/frankenstein.json')).toEqual({
       $name: 'frankenstein',
@@ -259,9 +258,9 @@ describe('a reference is delivered as a host delivers it — { entity, brief }',
 })
 
 describe('a delivered record is translated where it holds its body', () => {
-  const queries = { posts: { schema: '@/post', deferred: ['details'] } }
+  const queries = { posts: { schema: '@/post' } }
   const setup = async () => {
-    site('posts:\n  schema: "@/post"\n  deferred: [details]\n')
+    site('posts:\n  schema: "@/post"\n')
     w('site/records/post/hello.md', '---\ncard:\n  title: Hello\n---\n\n## A heading\n\nThe body.\n')
     await compile(queries)
   }

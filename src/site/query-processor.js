@@ -126,7 +126,6 @@ function parseQueryConfig(name, config) {
       filter: null,
       limit: 0,
       excerpt: { maxLength: 160 },
-      deferred: null,
     }
   }
 
@@ -154,14 +153,6 @@ function parseQueryConfig(name, config) {
       maxLength: config.excerpt?.maxLength || 160,
       field: config.excerpt?.field || null
     },
-    // `deferred:` lists fields that are heavy (article body, full nested
-    // arrays). Those fields are stripped from the cascade payload that
-    // ships with `query: <name>` declarations, and per-record full files
-    // are emitted at public/data/<name>/<slug>.json. Components that
-    // need the full record fetch the per-record file on demand, either
-    // automatically on dynamic-route pages (entity-store routes the
-    // singular detail there) or via kit's useWholeRecord hook.
-    deferred: Array.isArray(config.deferred) ? config.deferred.slice() : null,
     // `queryable:` declares the queryable surface — which fields a
     // foundation can offer for filtering UI, with their type and
     // type-specific metadata (enum options, range bounds). Foundations
@@ -1277,9 +1268,8 @@ async function typeByDataKey(siteDir, queriesConfig, schemas) {
 }
 
 /**
- * Reconcile a deferred collection's per-record directory with the records it
- * should hold this run — delete the `<slug>.json` files that are no longer
- * backed by a record.
+ * Reconcile a query's per-record directory with the records it should hold this
+ * run — delete the `<$name>.json` files that are no longer backed by a record.
  *
  * Why this is not optional. `public/data/` is a persistent, normally-committed
  * directory, so anything written there survives until something removes it.
@@ -1291,11 +1281,9 @@ async function typeByDataKey(siteDir, queriesConfig, schemas) {
  * that was public a moment ago.
  *
  * `public/data/` is the build's output directory and nothing else — authors
- * provide structured data through `collections/`, which is the only supported
+ * provide structured data through `records/`, which is the only supported
  * way. So `<name>/` is entirely ours and the reconciliation is total: anything
- * in it that this run did not write is stale by definition. `expected` is
- * empty when a collection stops declaring `deferred:`, which correctly clears
- * a directory that will otherwise never be written again.
+ * in it that this run did not write is stale by definition.
  *
  * NOT covered: a collection removed from `site.yml` entirely. There is no
  * declaration left to reconcile against, so pruning it would mean the build
@@ -1356,14 +1344,14 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
   for (const [name, items] of Object.entries(byQuery)) {
     const rawConfig = queriesConfig?.[name]
     const parsed = rawConfig ? parseQueryConfig(name, rawConfig) : null
-    const deferred = parsed?.deferred || []
 
     // ⭐ TWO PAYLOADS FOR EVERY QUERY (ruled 2026-09-27 [Diego]):
     //   1. Each record WHOLE, as stored, at /data/<name>/<$name>.json — a key per section, the
     //      brief's included — what a whole question answers: a parametric page's record for a
     //      component that declares `'@x/y/*'`, and kit's `useWholeRecord`.
-    //   2. The list at /data/<name>.json — each record's BRIEF, the brief's fields at the top,
-    //      less any `deferred:` field — what `query: <name>` delivers everywhere else.
+    //   2. The list at /data/<name>.json — each record's BRIEF, the brief's fields at the top —
+    //      what `query: <name>` delivers everywhere else. ⛔ `deferred:`, which left fields of the
+    //      brief out of it, was retired the same day [Diego].
     // ⛔ Until then only a `deferred:` query had per-record files, and they held the merged view:
     // the brief's fields at the top beside the other sections' names.
     const recordsDir = join(dataDir, name)
@@ -1379,21 +1367,13 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
     }
     const pruned = await pruneOrphanedRecords(dataDir, name, written)
 
-    const list = items.map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return item
-      const out = { ...(item[BRIEF_RECORD] ?? item) }
-      // A brief holds no section, so a `deferred:` name that is one of the record's sections —
-      // what a schema's brief implies (`deferredFromSchema`) — is already absent, and stripping
-      // it would take a brief field of the same name with it (sections are namespaces).
-      const sections = item[BRIEF_RECORD] ? item[WHOLE_RECORD] || {} : null
-      for (const field of deferred) if (!sections || !(field in sections)) delete out[field]
-      return out
-    })
+    const list = items.map((item) =>
+      item && typeof item === 'object' && !Array.isArray(item) ? { ...(item[BRIEF_RECORD] ?? item) } : item
+    )
     const cascadePath = join(dataDir, `${name}.json`)
     await writeFile(cascadePath, JSON.stringify(list, null, 2))
     console.log(
-      `[query-processor] Generated ${cascadePath} (${items.length} items` +
-      (deferred.length ? `, deferred: [${deferred.join(', ')}]` : '') + `) + ${written.size} per-record files`
+      `[query-processor] Generated ${cascadePath} (${items.length} items) + ${written.size} per-record files`
     )
     if (pruned.length > 0) {
       // A deletion is always worth naming. These files were public a moment

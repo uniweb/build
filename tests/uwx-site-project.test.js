@@ -690,8 +690,6 @@ describe('collection declarations — round-trip against the real producer', () 
     '  where:\n' +
     '    published: true\n' +
     '  sort: -date\n' +
-    '  deferred:\n' +
-    '    - body\n' +
     'products:\n' +
     "  url: https://api.example.com/products\n" +
     '  transform: data\n' +

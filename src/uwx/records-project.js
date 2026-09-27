@@ -42,7 +42,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig, YAML_DUMP_OPTS } from './project-writer.js'
 import { canonicalJson } from './same-content.js'
-import { defaultSchema, deferredFromSchema, foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
+import { defaultSchema, foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -51,8 +51,6 @@ import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption }
 import { parseCatalogRef } from '../site/foundation-ref.js'
 import { unwrapLocalized, renderEntityDocument } from './backfill.js'
 import { parseBibtex } from '@citestyle/bibtex'
-import { getSchema as getStandardSchema, isStandardSchema } from '@uniweb/schemas'
-import { validateAndNormalizeSchema } from '../resolve-data-schema.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
@@ -327,40 +325,12 @@ const DECL_WIRE_CONSUMED = new Set([
   'typed_by_data_key',
 ])
 
-// A standard schema (`@std/<name>`), normalized as the build resolves one — known with no foundation
-// on disk. ⛔ Until 2026-09-26 a clone, which has none, could not tell a derived `deferred:` from an
-// authored one and wrote it into the author's queries (`international`'s `articles`, over `@std/article`).
-function standardDataSchema(ref) {
-  const m = typeof ref === 'string' ? /^@std\/([^/]+)$/.exec(ref) : null
-  if (!m || !isStandardSchema(m[1])) return null
-  try {
-    return validateAndNormalizeSchema(getStandardSchema(m[1]), ref)
-  } catch {
-    return null
-  }
-}
-
-// Is this wire `deferred` exactly what the schema's brief would have derived? Compared
-// as an ORDER-INSENSITIVE set: the deriver walks the schema's sections, and a round trip
-// through YAML and the store is not obliged to preserve that order. Comparing as a list
-// would classify a reordered-but-identical value as authored, and persist it.
-function isDerivedDeferred(d, dataSchemas, pulledModel = null) {
-  if (!Array.isArray(d.deferred)) return false
-  // A clone has no foundation to read a schema from: it judges by the Model the pull read from the
-  // backend (`pulledModel`), and a standard schema is known in any case (`standardDataSchema`).
-  const derived = deferredFromSchema(dataSchemas?.[d.schema] ?? pulledModel ?? standardDataSchema(d.schema))
-  if (!derived || derived.length !== d.deferred.length) return false
-  const a = new Set(derived)
-  return d.deferred.every((f) => a.has(f))
-}
-
-function declToFileShape(wire, dataSchemas = null, scope = null, own = null, keyTypes = null, authored = null, models = null, markedOnly = false) {
+function declToFileShape(wire, scope = null, own = null, keyTypes = null, authored = null, markedOnly = false) {
   // ⛔ UNDO THE PRODUCER'S QUALIFICATION FIRST, before anything compares against
   // `schema`. The push qualifies a foundation-relative `@/x` to `@scope/x`
   // (`site.js::queriesNested`), and both checks below are keyed by the author's
   // `@/x`: against `@scope/x` the query-name default would never match — writing an
-  // explicit schema the author never had — and the derived-`deferred` lookup would
-  // miss, persisting a derivation into their file (the 2026-08-29 defect).
+  // explicit schema the author never had.
   const d = scope && typeof wire.schema === 'string'
     ? { ...wire, schema: unresolveSelfScope(wire.schema, scope, own) }
     : wire
@@ -408,26 +378,8 @@ function declToFileShape(wire, dataSchemas = null, scope = null, own = null, key
   setIf(decl, 'where', d.where)
   setIf(decl, 'limit', d.limit)
   setIf(decl, 'excerpt', d.excerpt)
-  // ⛔ DO NOT WRITE A DERIVATION INTO THE AUTHOR'S FILE. `deferred:` is derived from
-  // the schema's brief when unstated (`collections-config.js::deriveDeferredFromSchemas`)
-  // — framework's own test opens with "derived from a collection's data schema, NOT
-  // written by hand". But the deriver mutates the declaration in place, so by the time
-  // it reaches the wire an emitted `deferred` is indistinguishable from an authored one.
-  //
-  // ⚠️ Measured 2026-08-29: one push + one pull turned an unstated `deferred:` into a
-  // hardcoded list in `collections.yml` — a DIFFERENT file, at HIGHER precedence than
-  // the `site.yml` the collection was declared in. The collection then stopped tracking
-  // its schema's brief permanently, and nothing reported it.
-  //
-  // ⭐ This is exactly what the `schema` line above already does: emit on push (the
-  // backend needs the effective value), drop on pull when it merely restates what would
-  // be derived, so a terse author file stays terse and keeps tracking its schema.
-  //
-  // ⚖️ Only an EQUAL value is dropped. An author who deliberately writes a narrower or
-  // wider `deferred:` than the brief implies has expressed intent, and that survives.
-  if (d.deferred !== undefined && !isDerivedDeferred(d, dataSchemas, models?.[wire.schema] ?? null)) {
-    decl.deferred = d.deferred
-  }
+  // ⛔ A stored `deferred` is not written back: `deferred:` is retired (2026-09-27) and the build
+  // refuses it — a list carries each record's brief. A store may still hold one from an older push.
   // ⛔ A stored `detail_url` is not written back: `detailUrl:` is retired (2026-09-13)
   // and the build refuses it — its case is `record.url` on an external query.
   setIf(decl, 'queryable', d.queryable)
@@ -512,18 +464,14 @@ function typedQueryFolders(siteRoot, recordsRoot, scope, own, keyTypes) {
   return out
 }
 
-export function declarationsToQueriesYml({ document, siteRoot, scope, models = null, ...rest }) {
+export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest }) {
   refuseOrgOption(rest, 'declarationsToQueriesYml')
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
   if (decls.length === 0) return report
 
-  // The foundation's data schemas, loaded ONCE for the whole projection — they are what
-  // lets `declToFileShape` tell a derived `deferred:` from an authored one. Absent (no
-  // foundation on disk, unbuilt, unresolvable) the inverter simply never fires and every
-  // `deferred` is treated as authored: the pre-2026-08-29 behaviour, which is the safe
-  // direction to fail — persisting a value that did not need persisting loses nothing,
-  // where dropping an AUTHORED one would.
+  // The foundation's data schemas and section types, loaded ONCE for the whole projection — which
+  // of the scope's schemas are its own, and the types of its data keys.
   let siteYml = null
   try {
     siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || null
@@ -543,7 +491,7 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, models = n
 
   const queries = {}
   for (const d of decls) {
-    const { name, decl } = declToFileShape(d, dataSchemas, selfScope, own, keyTypes, authored, models, markedOnly)
+    const { name, decl } = declToFileShape(d, selfScope, own, keyTypes, authored, markedOnly)
     if (!name) continue
     queries[name] = decl
   }

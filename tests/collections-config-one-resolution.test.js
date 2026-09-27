@@ -43,13 +43,13 @@ describe('the site build sees queries.yml', () => {
   it('lets queries.yml win per key over site.yml', async () => {
     setup(
       'name: T\nfoundation: "@a/x"\nqueries:\n  news:\n    path: collections/news\n    sort: date asc\n',
-      'news:\n  sort: date desc\n  deferred: [body]\n'
+      'news:\n  sort: date desc\n  limit: 5\n'
     )
     const news = (await collections()).news
     // The measured regression: the author wrote `date desc` and the build baked
     // `date asc` into the static file.
     expect(news.sort).toBe('date desc')
-    expect(news.deferred).toEqual(['body'])
+    expect(news.limit).toBe(5)
   })
 
   it('leaves a site.yml-only declaration exactly as it was', async () => {

@@ -42,7 +42,6 @@ const EXPECTED = {
     name: 'articles',
     sort: 'date desc',
     excerpt: { maxLength: 200 },
-    deferred: ['content'],
     queryable: { tags: { type: 'enum' } },
     schema: '@/articles',
     schemaExplicit: false,
@@ -61,7 +60,6 @@ const QUERIES_YML = [
   'articles:',
   '  sort: date desc',
   '  excerpt: { maxLength: 200 }',
-  '  deferred: [content]',
   '  queryable: { tags: { type: enum } }',
   '',
 ].join('\n')

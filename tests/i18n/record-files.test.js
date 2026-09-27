@@ -1,14 +1,12 @@
 /**
- * A query with `deferred:` fields writes each record whole to `/data/<query>/<slug>.json`
- * beside its lean list — and a localized build translates those files with the same
- * record translations the list gets.
+ * A query writes each record whole to `/data/<query>/<$name>.json` beside its list — and a
+ * localized build translates those files with the same record translations the list gets.
  *
  * ⛔ Until 2026-09-14 `buildLocalizedRecords` translated the list files alone, and
- * `extractRecordContent` read the list files alone. The list is where a deferred field
- * is NOT — it is stripped there — so an article's body was neither extracted from a
- * site whose `deferred:` was derived, nor translated from a manifest that held it:
+ * `extractRecordContent` read the list files alone. A field the list does not carry — then
+ * a `deferred:` one, now any field outside the brief — was neither extracted nor translated:
  * measured on the `international` template, Spanish article pages showed English bodies
- * under a Spanish list.
+ * under a Spanish list. (`deferred:` itself was retired 2026-09-27.)
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -27,11 +25,11 @@ const w = (rel, body) => {
 const read = (rel) => JSON.parse(readFileSync(join(ROOT, rel), 'utf8'))
 const textOf = (doc) => [...JSON.stringify(doc).matchAll(/"text":"([^"]*)"/g)].map((m) => m[1])
 
-/** A site whose `recent` query defers its records' bodies, compiled as a build compiles it. */
+/** A site with a `recent` query over records with no data schema, compiled as a build compiles it. */
 async function compiledSite() {
   w('site.yml', 'name: T\n')
-  const queries = { recent: { schema: '@/article', deferred: ['content'] } }
-  w('queries.yml', "recent:\n  schema: '@/article'\n  deferred: [content]\n")
+  const queries = { recent: { schema: '@/article' } }
+  w('queries.yml', "recent:\n  schema: '@/article'\n")
   // A heading, so the body holds a string the list's auto-excerpt does not
   w('records/article/hello.md', '---\ntitle: Hello there\n---\n\n## A heading\n\nThe body of the article.\n')
   const byQuery = await processQueries(ROOT, queries, undefined, '/')
@@ -50,7 +48,7 @@ async function spanish() {
 }
 
 beforeEach(() => {
-  ROOT = mkdtempSync(join(tmpdir(), 'deferred-record-files-'))
+  ROOT = mkdtempSync(join(tmpdir(), 'record-files-'))
   saved = [console.log, console.warn]
   console.log = () => {}
   console.warn = () => {}
@@ -60,14 +58,14 @@ afterEach(() => {
   rmSync(ROOT, { recursive: true, force: true })
 })
 
-describe('a deferred query\'s per-record files', () => {
-  it('CONTROL — the build writes a lean list and a whole record', async () => {
+describe('a query\'s per-record files', () => {
+  it('CONTROL — the build writes the list and a file per record', async () => {
     await compiledSite()
-    expect(read('public/data/recent.json')[0]).not.toHaveProperty('content')
+    expect(read('public/data/recent.json')[0]).toMatchObject({ $name: 'hello', title: 'Hello there' })
     expect(textOf(read('public/data/recent/hello.json').content)).toEqual(['A heading', 'The body of the article.'])
   })
 
-  it('extraction reads them — a deferred field\'s strings reach the manifest', async () => {
+  it('extraction reads them — a record\'s strings reach the manifest', async () => {
     await compiledSite()
     const manifest = await extractRecordContent(ROOT)
     // (the paragraph would also arrive through the list's auto-excerpt; the heading only from the body)
@@ -103,7 +101,7 @@ describe('a deferred query\'s per-record files', () => {
 
   it('a record file removed from the source is not left translated in the locale', async () => {
     await compiledSite()
-    w('dist/es/data/recent/gone.json', { slug: 'gone', title: 'Stale' })
+    w('dist/es/data/recent/gone.json', { $name: 'gone', title: 'Stale' })
     await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(existsSync(join(ROOT, 'dist/es/data/recent/gone.json'))).toBe(false)
     expect(existsSync(join(ROOT, 'dist/es/data/recent/hello.json'))).toBe(true)

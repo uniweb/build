@@ -34,10 +34,15 @@ describe('what an external query may declare', () => {
 
   it('⛔ refuses what describes the site\'s records beside `url:`', () => {
     expect(refuse({ url: 'https://api.test/items', schema: '@/item' })).toThrow(/query "items": `schema:` describes the site's records, and this query has `url:`/)
-    expect(refuse({ url: 'https://api.test/items', scope: 'a', deferred: ['body'] })).toThrow(/`scope:`, `deferred:` describe the site's records/)
+    expect(refuse({ url: 'https://api.test/items', scope: 'a', excerpt: { maxLength: 80 } })).toThrow(/`scope:`, `excerpt:` describe the site's records/)
     for (const key of ['excerpt', 'path']) {
       expect(refuse({ url: 'https://api.test/items', [key]: 'x' })).toThrow(/describes the site's records/)
     }
+  })
+
+  it('⛔ `deferred:` is retired on every query — a list carries each record\'s brief (2026-09-27)', () => {
+    expect(refuse({ schema: '@/item', deferred: ['body'] })).toThrow(/query "items": `deferred:` is retired\. A list carries each record's brief/)
+    expect(refuse({ url: 'https://api.test/items', deferred: ['body'] })).toThrow(/`deferred:` is retired/)
   })
 
   it('⛔ `route:` is retired on every query — a record links to its query\'s page as `$route`', () => {

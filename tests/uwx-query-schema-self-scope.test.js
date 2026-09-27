@@ -22,8 +22,7 @@
 // ⭐ The push half pins the PAIR and the SCOPE: the query's `schema` is compared with
 // the `$schema` the same emit produced, and both with the foundation's name. The pull
 // half pins the inverse, because a qualified value written back verbatim would change
-// the author's file on every round trip — and, through the derived-`deferred` lookup,
-// reintroduce the 2026-08-29 defect.
+// the author's file on every round trip.
 
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -270,11 +269,9 @@ describe('pull — the author’s `@/` comes back', () => {
     expect(pulledQueries().members.schema).toBe('@acme/member')
   })
 
-  it('⛔ a qualified wire does not smuggle a DERIVED `deferred:` into the author file', async () => {
-    // The derived-`deferred` check looks the schema up in the foundation's
-    // `@/`-keyed data schemas. Handed `@acme/article` it would miss, call the
-    // derivation authored, and persist it — the 2026-08-29 defect, reintroduced
-    // through the qualifying. Same fixture as `uwx-derived-deferred-not-persisted`.
+  it('a qualified wire comes back as the author wrote it — and carries no `deferred` either way', async () => {
+    // `deferred:` is retired (2026-09-27): nothing derives one to push, and a pull writes none back.
+    // Until then this pinned that a DERIVED one was not persisted through the qualifying.
     w('site/site.yml', 'name: T\nfoundation: "@acme/base"\n')
     w('site/queries.yml', 'articles:\n  path: collections/articles\n  schema: "@/article"\n')
     w('site/package.json', { name: 'site', dependencies: { '@acme/base': 'file:../fdn' } })
@@ -292,9 +289,9 @@ describe('pull — the author’s `@/` comes back', () => {
 
     const doc = await siteProjectToDocument(SITE, { scope: '@acme' })
     const decl = queryOf(doc, 'articles')
-    // CONTROL — the wire really carries both the qualified name and a derivation.
+    // CONTROL — the wire really carries the qualified name.
     expect(decl.schema).toBe('@acme/article')
-    expect(decl.deferred).toEqual(['body'])
+    expect(decl).not.toHaveProperty('deferred')
 
     declarationsToQueriesYml({ document: doc, siteRoot: SITE, scope: '@acme' })
     const written = pulledQueries().articles

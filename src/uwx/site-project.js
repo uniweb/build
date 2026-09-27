@@ -1129,12 +1129,9 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  * @param {string|null} [params.scope] - the scope the push qualified a query's
  *        `@/x` schema with, so it is written back as `@/x` — see
  *        `declarationsToQueriesYml`, whose default it overrides.
- * @param {Object<string,object>|null} [params.models] - the Models the site's queries name, as the
- *        pull read them from the backend, keyed by the ref on the wire — what a clone, with no
- *        foundation on disk, judges a query's derived `deferred:` by.
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope, models = null }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope }) {
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
@@ -1157,7 +1154,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   )
 
   report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, deferLanguages: true })
-  report.queries = declarationsToQueriesYml({ document, siteRoot, scope, models })
+  report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

@@ -55,7 +55,7 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     { $name: 'design-tips', slug: 'design-tips', title: 'Design Tips', body: 'long body A' },
     { $name: 'getting-started', slug: 'getting-started', title: 'Getting Started', body: 'long body B' }
   ]
-  const queriesConfig = { articles: { schema: '@/article', deferred: ['body'] } }
+  const queriesConfig = { articles: { schema: '@/article' } }
 
   beforeAll(async () => {
     siteDir = mkdtempSync(join(tmpdir(), 'data-path-agreement-'))
@@ -106,7 +106,7 @@ describe('compiled collection data: emit ↔ request agreement', () => {
     expect(emittedUrls.has(queryDataUrl('articles'))).toBe(true)
   })
 
-  it('the emitted cascade drops deferred fields and the per-record file keeps them', () => {
+  it('the list and the record\'s own file are both emitted', () => {
     // Not a path assertion, but it is what makes the two URLs meaningful:
     // if both carried the same payload the per-record lane would be dead
     // weight and its path could rot unnoticed — which is how it did.

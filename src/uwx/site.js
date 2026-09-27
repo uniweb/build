@@ -939,7 +939,7 @@ export function isSiteRelativeExtensionUrl(decl) {
  *
  * The backend destructures exactly two — `name` and `schema` — and projects none of
  * this Section into a published payload, so the rest read as dead weight. ⛔ THEY ARE
- * OURS, AND THAT IS REASON ENOUGH: `excerpt`, `deferred`, `detailUrl` and `queryable`
+ * OURS, AND THAT IS REASON ENOUGH: `excerpt` and `queryable`
  * are read across FRAMEWORK's own runtime, build and kit — `useQueryable`
  * is a public hook a foundation calls to render a filter UI. They drive the file
  * lane, where they work. "The backend does not read it" was never an argument that
@@ -989,7 +989,6 @@ const DECL_EMITTED_ABOVE = new Set([
   'where',
   'limit',
   'excerpt',
-  'deferred',
   'queryable',
   // Derived by the rule above, never taken from a file.
   'typed_by_data_key',
@@ -1022,7 +1021,9 @@ const DECL_NOT_ON_WIRE = new Set([
   'route',
   // Legacy predicate, translated to the canonical `where` upstream. No legacy
   // fields on the wire.
-  'filter'
+  'filter',
+  // ⛔ RETIRED 2026-09-27 — the build refuses it (`refuseQueryDeclaration`), so it is never sent.
+  'deferred',
 ])
 
 /** An external query's source, as it rides in the `queries` Section's `source`. */
@@ -1068,7 +1069,6 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     setIf(data, 'where', d.where)
     setIf(data, 'limit', d.limit)
     setIf(data, 'excerpt', d.excerpt)
-    setIf(data, 'deferred', d.deferred)
     setIf(data, 'queryable', d.queryable)
     // ⛔ EMIT WHAT WE DO NOT MODEL. The decl's field set is the BACKEND's Model
     // (this document mirrors `@uniweb/site-content` — see the lane header), and
@@ -1292,8 +1292,8 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // codes included: sync carries the full working set and only *publish* filters,
   // which preserves a locale's publish intent across a remove + re-add in `languages:`.
   // ⭐ A site that declares no `languages:` has the languages its translation files make — the build's
-  // rule (`i18n/locales.js`) — and sends that list (`languages`, below), as it sends a derived
-  // `deferred:`: a host may serve a site in the languages it declares and no others, and the site's
+  // rule (`i18n/locales.js`) — and sends that list (`languages`, below): a host may serve a site in
+  // the languages it declares and no others, and the site's
   // localized URLs with them. The pull does not write it back where the files already say it
   // (`siteContentDocumentToProject`). ⛔ Until 2026-09-26 only a declared list was sent, so the
   // `international` template, which declares none, sent no language but its source.

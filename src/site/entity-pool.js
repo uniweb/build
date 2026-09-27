@@ -192,8 +192,8 @@ export function schemaForPoolDirs(dirs) {
  * ⛔ ONE IMPLEMENTATION AND ITS INVERSE, IN ONE PLACE, for the reason this file
  * exists at all: the reader derives a model from a path and the pull side derives
  * a path from a model, and if those two ever disagree a pulled record lands
- * somewhere the next build reads as a different schema. Same rule as
- * `deferredFromSchema` — a deriver and its recognizer must not be two copies.
+ * somewhere the next build reads as a different schema. A deriver and its
+ * recognizer must not be two copies.
  *
  * @param {string} schema - a ref: `@/name` or `@org/name`
  * @returns {string[]|null} the directory segments below `records/`, or null for

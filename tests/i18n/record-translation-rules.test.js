@@ -188,9 +188,9 @@ sections:
     [computeHash('The river rose in the night.')]: 'NO',
   }
 
-  it('⭐ a lean list’s and a whole record’s, from the translated body — and never a unit', async () => {
+  it('⭐ a list’s and a whole record’s, from the translated body — and never a unit', async () => {
     onFoundation({ post: POST })
-    w('queries.yml', "posts:\n  schema: '@/post'\n  deferred: [content]\n")
+    w('queries.yml', "posts:\n  schema: '@/post'\n")
     w('public/data/posts.json', [{ title: 'Flood', excerpt: 'The river rose in the night.', $name: 'flood' }])
     // a record's own file holds it AS STORED (2026-09-27): its brief under `brief`, and no excerpt —
     // the build derives one only into a brief that declares `excerpt`, which this one does not

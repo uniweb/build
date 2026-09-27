@@ -175,8 +175,6 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
     }
   }
 
-  await deriveDeferredFromSchemas(siteRoot, siteYml, declarations)
-
   // ⛔ `folderSync` AND `folders` WERE DELETED HERE, 2026-09-06. Both were
   // `collections.yml` survivors kept "for one step" while `records.yml` took
   // over, and both had become literals — `true` and `null` — that no longer
@@ -195,7 +193,7 @@ export async function resolveQueriesConfig(siteRoot, opts = {}) {
 }
 
 /** What a query over the site's records declares, which an external query cannot. */
-const SITE_RECORDS_ONLY = ['schema', 'model', 'scope', 'deferred', 'excerpt', 'path']
+const SITE_RECORDS_ONLY = ['schema', 'model', 'scope', 'excerpt', 'path']
 /** The keys of an external query's `record:` request. */
 const RECORD_KEYS = ['url', 'method', 'body', 'transform']
 
@@ -209,7 +207,7 @@ const RECORD_KEYS = ['url', 'method', 'body', 'transform']
  * them, `record:` — `{ url, method, body, transform }` — for one record on a
  * parametric page, and `name_field:`, the field each record is named by (`$name`, which
  * a `[slug]` page matches). What describes the site's records — `schema`, `scope`,
- * `deferred`, `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` and `detail:` are
+ * `excerpt` — is refused beside `url:`. ⛔ `detailUrl:` and `detail:` are
  * retired everywhere: their one real case is `record.url`. ⛔ And `limit:` is a whole
  * number, 0 or more (`refuseLimit`).
  *
@@ -235,6 +233,17 @@ export function refuseQueryDeclaration(decl) {
     throw new Error(
       `[uniweb] ${where}: \`detail:\` is retired. An API's single-record request is \`record: { url: … }\` ` +
         `on an external query — one with \`url:\`.`
+    )
+  }
+  // ⛔ `deferred:` IS RETIRED (2026-09-27 [Diego]: "the `deferred:` concept keeps getting in the way
+  // and doesn't match a hosted lane"). A list carries each record's brief, on every site, so a
+  // field a list should leave out belongs in a section of its own, outside the brief — where a
+  // host leaves it out too. `deferred:` only made a static site's lists differ from a hosted one's.
+  if (decl.deferred !== undefined) {
+    throw new Error(
+      `[uniweb] ${where}: \`deferred:\` is retired. A list carries each record's brief — the fields ` +
+        `of its schema's brief section — so a field a list should leave out belongs in a section of ` +
+        `its own, outside the brief. Remove the key.`
     )
   }
   refuseQueryRoute(decl, where)
@@ -326,82 +335,6 @@ export function toConfigQueries(declarations) {
   return out
 }
 
-
-/**
- * Fill in `deferred:` from each collection's own data schema.
- *
- * ⭐ A schema's **brief** section already states what a record's summary is — the
- * card, the row, the thing a list shows. Everything else is wanted only when one
- * record is the focus. That is exactly what `deferred:` says, so an author with a
- * schema should not have to say it twice, in a second vocabulary, with nothing
- * checking the two against each other.
- *
- * ⇒ `deferred` = every top-level section of the schema other than its brief — the keys
- * a delivered record holds them under (`body` for `@std/article`), which is
- * exactly what a host's records service leaves out of a list and adds for `whole`.
- * ⛔ It was the flat form's fields minus the brief's until 2026-09-24; a delivered
- * record carries those under their section, so stripping them by name stripped nothing.
- *
- * Derived from the SCHEMA, never from a record. That is what keeps the
- * build-derived keys safe without a reserved list: `slug`, `route`, `path`,
- * `excerpt`, `image` and `lastModified` are not sections, so they are never
- * stripped. A markdown body goes where its content field is — inside `body`,
- * say — so it is deferred with that section.
- *
- * ⛔ Silent on every path that cannot answer, because none of them is an error:
- *
- *   - an author-declared `deferred:` wins outright — this never overrides one;
- *   - no local foundation (a linked or cataloged one), or it is unbuilt → nothing
- *     to read, and a site must still build;
- *   - the schema is not in the foundation's built map → the same soft-skip the
- *     sync lane already applies. `dist/meta/schema.json` carries the schemas
- *     COMPONENTS reference, so a collection whose schema no component binds is
- *     simply not there;
- *   - the schema has no brief, or only one section (`recordLayout`) → there is no
- *     lean shape to honour, so records stay whole.
- *
- * The last two are why this reads the built artifact rather than resolving
- * schemas itself: it is the same input the sync lane uses, so both lanes agree
- * about which schemas exist.
- */
-async function deriveDeferredFromSchemas(siteRoot, siteYml, declarations) {
-  const pending = Object.values(declarations).filter(
-    (d) => d.schema && !Array.isArray(d.deferred)
-  )
-  if (pending.length === 0) return
-
-  const dataSchemas = foundationDataSchemas(siteRoot, siteYml)
-  if (!dataSchemas) return
-
-  for (const decl of pending) {
-    const heavy = deferredFromSchema(dataSchemas[decl.schema])
-    if (heavy) decl.deferred = heavy
-  }
-}
-
-/**
- * The `deferred:` a schema implies — every top-level section but its **brief**, by name.
- *
- * ⛔ ONE IMPLEMENTATION, TWO CALLERS, and that is the point. `deriveDeferredFromSchemas`
- * above uses it to FILL an unstated `deferred:`; `uwx/records-project.js` uses it to
- * RECOGNIZE a derived value on the way back in, so a pull does not write a derivation
- * into the author's file as though they had typed it.
- *
- * ⚠️ A second copy would drift, and the drift would be invisible: the deriver and the
- * inverter would simply stop agreeing about which values are "the derived one", and the
- * pull would start persisting values it was written to drop.
- *
- * @param {object|undefined} schema a data schema, or undefined when it does not resolve
- * @returns {string[]|null} the implied deferred list, or null when the schema states no
- *   brief (a root list, say) or implies nothing heavy — in both cases there is no
- *   derivation to recognize
- */
-export function deferredFromSchema(schema) {
-  const layout = schema ? recordLayout(schema) : null
-  if (!layout || layout.flat || !layout.brief) return null
-  const heavy = layout.sections.map(([name]) => name).filter((name) => name !== layout.brief)
-  return heavy.length ? heavy : null
-}
 
 /**
  * The data schemas a site's records are shaped by, keyed by ref — each resolved from

@@ -479,7 +479,7 @@ year: 1858
       expect(slugs).toEqual(['darwin1859', 'lyell1830', 'wallace1858'])
     })
 
-    it('should treat the BibTeX cite key as slug for per-record file emission', async () => {
+    it('should name each BibTeX record file by its cite key', async () => {
       const contentDir = join(testDir, 'records', 'bibliography')
       mkdirSync(contentDir, { recursive: true })
 
@@ -492,15 +492,13 @@ year: 1858
 
       const collections = await processQueries(testDir, {
         bibliography: {
-          schema: '@/bibliography',
-          deferred: ['author']
+          schema: '@/bibliography'
         }
       })
 
       await writeQueryFiles(testDir, collections, {
         bibliography: {
-          schema: '@/bibliography',
-          deferred: ['author']
+          schema: '@/bibliography'
         }
       })
 
