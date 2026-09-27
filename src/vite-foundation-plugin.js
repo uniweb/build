@@ -39,9 +39,8 @@ async function buildSchemaWithPreviews(srcDir, outDir, isProduction, sectionPath
 }
 
 /**
- * Module-level guard to prevent recursive SSR bundle builds.
- * When buildSSRBundle calls esbuild, it should not re-trigger
- * the foundation plugin's writeBundle hook.
+ * Module-level guard around the `entry-ssr.js` sub-build (buildEntrySSR): while
+ * it runs, the foundation plugin's writeBundle hook does nothing.
  */
 let _buildingSSRBundle = false
 
@@ -68,11 +67,8 @@ let _buildingSSRBundle = false
  * ⚠️ **This used to say "the selector is `site.yml::runtime`". It is not.** That
  * key is an operator-level override, not the authoring surface: a link-mode site
  * is CODELESS, so it has nothing that binds to a runtime version and no basis for
- * an opinion about one. The selector is the backend's resolution (an explicit pin
- * → the site's current → a deployment default → newest installed). What a
+ * an opinion about one. The selector is whatever serves the site. What a
  * foundation declares here is the CONSTRAINT on that choice, never the choice.
- * the site/foundation/runtime model, § "who gets to say
- * whether a site accepts a newer runtime" is the authority.
  *
  * Reads the resolved version from the foundation's node_modules/@uniweb/
  * runtime/package.json so the pin reflects what was actually linked at
@@ -101,13 +97,9 @@ let _buildingSSRBundle = false
  * about every host the framework serves and framework can substantiate it for
  * none of them.
  *
- * 📌 **The check that refutes it, so this is not a claim with no expiry:** grep a
- * host's serving code for `runtime-pin` / `runtimePolicy`. Asked and answered for
- * the Uniweb host on **2026-08-26 — zero consumers across its delivery worker,
- * mirror, runtime host and capability worker**, and its runtime version comes
- * solely from published site metadata and is part of a render-cache key, so a
- * request-time policy would collide with its invalidation model. **That is one
- * host on one date; a static host or a foreign backend is a separate question.**
+ * 📌 **The check, so this is not a claim with no expiry:** grep a host's serving
+ * code for `runtime-pin` / `runtimePolicy`. An answer is about one host on one
+ * date; a static host or a foreign backend is a separate question.
  *
  * ⚖️ **This is a field with standing and no consumer — NOT a mistake to delete.**
  * The architecture assigns this declaration to the foundation on principle: each
@@ -116,7 +108,7 @@ let _buildingSSRBundle = false
  * core. So this is the designated home for the answer; nothing has asked for the
  * answer yet.
  *
- * ⇒ **The event that gives it a consumer** (agreed with the backend, 2026-08-16):
+ * ⇒ **The event that gives it a consumer:**
  * when the runtime declares what it supplies — replacing today's `>=` version
  * compare, which is a proxy that holds only while the runtime's version number
  * tracks its externals contract — **or** when the publish path starts consulting
@@ -180,7 +172,8 @@ async function emitRuntimePin(outDir, projectRoot) {
   }
 
   if (!runtimePkgPath) {
-    // No runtime resolvable. Skip emission — edge will treat as legacy.
+    // No runtime resolvable. Skip emission — the foundation then states no
+    // floor (see the header).
     return
   }
 
@@ -194,10 +187,10 @@ async function emitRuntimePin(outDir, projectRoot) {
   if (!runtimeVersion) return
 
   // Read foundation's own package.json for an optional runtimePolicy
-  // field. Default policy (auto-minor) is applied platform-side when
-  // the field is omitted; we only record the foundation's override
-  // here if explicitly set. See framework/docs/reference/foundation-config.md
-  // for the full set of `uniweb.*` fields foundations can declare.
+  // field, recorded only when explicitly set. What a host does when it is
+  // omitted is that host's to say (see the header). See
+  // framework/docs/reference/foundation-config.md for the full set of
+  // `uniweb.*` fields foundations can declare.
   let policy = null
   try {
     const foundationPkgPath = join(projectRoot, 'package.json')
@@ -224,150 +217,6 @@ async function emitRuntimePin(outDir, projectRoot) {
         `        The floor (runtime ${runtimeVersion}) does travel, as info.runtime.\n` +
         `        Whether your host reads the file is its own to say — see the header for how to check.`
     )
-  }
-}
-
-/**
- * @deprecated 2026-04-27 — Strategy S Phase 2.
- *
- * Foundations no longer carry their own runtime bundle. Runtime + React +
- * core + theming now live in R2 under `runtime/{version}/worker-runtime.js`,
- * published by the platform's `/deploy-runtime` skill, and side-loaded
- * by the Cloudflare isolate alongside `dist/entry.js`.
- *
- * The invocation in `writeBundle()` is commented out; this function
- * definition is kept for the rollout window so it can be flipped back
- * on with one line if Phase 1's edge dispatcher misbehaves in production.
- * Phase 3 cleanup deletes this function entirely once the new path is
- * proven healthy.
- *
- * Original purpose (preserved for context):
- * Build a self-contained ESM bundle for edge SSR (Cloudflare Dynamic Workers).
- * Produces `ssr-worker-bundle.js` — a single ESM file with React,
- * ReactDOM/server, `@uniweb/core`, `@uniweb/runtime/ssr`,
- * `@uniweb/theming`, and the foundation's components all inlined. No
- * external imports. The artifact was bundled this way because the
- * Dynamic Worker LOADER accepts a closed `modules` map at isolate
- * construction. The Phase -1 prototype (2026-04-27) verified the LOADER
- * actually deduplicates shared modules across multiple ESM bundles, so
- * a multi-entry modules map became viable — that's what Strategy S uses.
- *
- * @param {string} outDir - Path to dist/ directory containing entry.js
- */
-async function buildSSRBundle(outDir) {
-  if (_buildingSSRBundle) return
-  _buildingSSRBundle = true
-
-  const entryPath = join(outDir, 'entry.js')
-  try {
-    const { build: esbuild } = await import('esbuild')
-    const { statSync } = await import('node:fs')
-
-    // Collect all node_modules directories up the tree (pnpm hoists to workspace root)
-    const { existsSync } = await import('node:fs')
-    let searchDir = resolve(outDir, '..')
-    let nodePaths = []
-    for (let i = 0; i < 10; i++) {
-      const candidate = join(searchDir, 'node_modules')
-      if (existsSync(candidate)) {
-        nodePaths.push(candidate)
-      }
-      const parent = resolve(searchDir, '..')
-      if (parent === searchDir) break
-      searchDir = parent
-    }
-
-    // Resolve workspace packages that esbuild can't find via node_modules
-    // (pnpm workspace symlinks aren't in node_modules for the foundation project)
-    const { createRequire } = await import('node:module')
-    const pluginRequire = createRequire(import.meta.url)
-    let runtimeSSRPath
-    try {
-      runtimeSSRPath = pluginRequire.resolve('@uniweb/runtime/ssr')
-    } catch {
-      // Fallback: try to find it relative to the workspace root
-      for (const np of nodePaths) {
-        const candidate = join(np, '@uniweb', 'runtime', 'dist', 'ssr.js')
-        if (existsSync(candidate)) {
-          runtimeSSRPath = candidate
-          break
-        }
-      }
-    }
-
-    // Build a self-contained ESM bundle including:
-    // - Foundation components (from the just-built ESM output)
-    // - React + ReactDOM/server (browser version, no Node.js built-ins)
-    // - @uniweb/core (Website, Page, Block classes)
-    // - @uniweb/runtime/ssr (initPrerender, renderPage, injectPageContent)
-    // - @uniweb/theming (buildSectionOverrides, used by runtime/ssr)
-    //
-    // All in a single file so the Dynamic Worker isolate has one React instance.
-    // L2/L3 helpers from @uniweb/runtime/ssr that worker SSR + framework SSG
-    // both depend on. Keep this list in sync with runtime/src/ssr-renderer.js
-    // exports — missing one here makes the foundation bundle fail to import
-    // it ("module does not provide an export named X") inside the SSR isolate.
-    const ssrExports = runtimeSSRPath
-      ? `export {
-          initPrerender, initPrerenderForLocale,
-          renderPage, injectPageContent, prefetchIcons,
-          sliceContentForLocale, hydrateDataStore,
-        } from "${runtimeSSRPath.replace(/\\/g, '/')}";`
-      : ''
-
-    // Resolve React to a single package directory to avoid duplicate instances
-    // (entry.js and runtime/ssr may resolve to different copies)
-    const { dirname } = await import('node:path')
-    let reactDir
-    try {
-      reactDir = dirname(pluginRequire.resolve('react/package.json'))
-    } catch {
-      // Fall back to nodePaths resolution
-    }
-    const alias = {}
-    if (reactDir) {
-      alias['react'] = reactDir
-      // Force react-dom/server imports to the browser version (no Node.js built-ins)
-      const reactDomDir = dirname(pluginRequire.resolve('react-dom/package.json'))
-      alias['react-dom'] = reactDomDir
-      alias['react-dom/server'] = join(reactDomDir, 'server.browser.js')
-    }
-
-    const foundationPath = entryPath.replace(/\\/g, '/')
-    await esbuild({
-      stdin: {
-        contents: [
-          // Foundation components (named + default export)
-          `export * from "${foundationPath}";`,
-          `export { default } from "${foundationPath}";`,
-          // React SSR
-          `export { renderToString } from "react-dom/server.browser";`,
-          `export { createElement } from "react";`,
-          // Runtime SSR functions (initPrerender, renderPage, etc.)
-          ssrExports,
-        ].join('\n'),
-        resolveDir: outDir,
-        loader: 'js',
-      },
-      bundle: true,
-      format: 'esm',
-      platform: 'browser',
-      outfile: join(outDir, 'ssr-worker-bundle.js'),
-      minify: false,
-      external: [],
-      nodePaths,
-      alias,
-      conditions: ['browser', 'module'],
-      logLevel: 'warning',
-    })
-
-    const ssrFile = join(outDir, 'ssr-worker-bundle.js')
-    const size = (statSync(ssrFile).size / 1024).toFixed(1)
-    console.log(`Generated ssr-worker-bundle.js (${size} KB)`)
-  } catch (err) {
-    console.warn(`Warning: SSR bundle build failed: ${err.message}`)
-  } finally {
-    _buildingSSRBundle = false
   }
 }
 
@@ -414,18 +263,18 @@ async function emitFoundationVarsCss(outDir, schema) {
  * Externals for the SSR bundle (`dist/entry-ssr.js`).
  *
  * Same set the browser foundation build externalizes, and now literally the
- * same array — `DEFAULT_EXTERNALS`, imported rather than re-typed. The isolate
- * resolves these to the SHARED runtime's React/core (worker-runtime.js) via its
- * shims, so React stays deduped and runtime patches still propagate without a
+ * same array — `DEFAULT_EXTERNALS`, imported rather than re-typed. A host
+ * rendering the SSR bundle resolves these to the runtime's shared React/core,
+ * so React stays deduped and runtime patches still propagate without a
  * foundation rebuild. "Same set" was a comment three copies made a promise
  * rather than a fact; deriving it makes drift unrepresentable.
  *
  * PLUS the client-only library kit code-splits via dynamic import:
  *   - shiki / shiki/bundle/full — syntax highlighting (kit Code renderer)
- * It hydrates in the browser and never runs during renderToString (CLAUDE.md
- * gotcha #12). Keeping it external drops the ~10 MB Shiki language graph from
- * the SSR bundle and leaves it a DORMANT dynamic import the isolate never
- * awaits — so no extra modules-map entry is needed for it edge-side.
+ * It hydrates in the browser and never runs during renderToString. Keeping it
+ * external drops the ~10 MB Shiki language graph from the SSR bundle and leaves
+ * it a DORMANT dynamic import that server rendering never awaits — so a host
+ * has nothing to supply for it.
  *
  * ⛔ `fuse.js` was listed here too, until the local search ranker became
  * `@uniweb/projections/search` (2026-09-06). Nothing imports fuse now, so the
@@ -447,20 +296,20 @@ function isSSRExternal(id) {
  *
  * The modern browser `entry.js` is a facade that re-exports from
  * `_entry.generated-*.js` and lazily code-splits kit's client-only features
- * (Shiki) into hundreds of chunks — a graph the Cloudflare Dynamic Worker
- * isolate can't resolve (it loads a single `foundation` module). This builds the
- * SAME source entry into ONE file, inlining the foundation's own graph and
- * externalizing the runtime/React set (→ the isolate's shared worker-runtime)
- * and the client-only Shiki lib. Result: a ~foundation-sized ESM module
- * (no React, no Shiki) the edge loads as `foundation` for request-time SSR.
+ * (Shiki) into hundreds of chunks — a graph that a request-time renderer loading
+ * the foundation as a single module can't resolve. This builds the SAME source
+ * entry into ONE file, inlining the foundation's own graph and externalizing the
+ * runtime/React set (→ the runtime's shared build) and the client-only Shiki
+ * lib. Result: a ~foundation-sized ESM module (no React, no Shiki) that a host
+ * can load for request-time SSR.
  *
  * Built from source (not by re-bundling the built `entry.js`, whose Shiki
  * specifier is already rewritten to a relative chunk path that couldn't be
  * externalized) via a secondary Vite build into a temp dir; only the JS is
  * copied out (the throwaway CSS is discarded — the SSR bundle needs no styles).
  *
- * Best-effort: a failure warns and emits nothing, so the edge simply serves
- * the client-render shell for this foundation (existence-gated) — no regression.
+ * Best-effort: a failure warns and emits nothing. The browser `entry.js` is
+ * unaffected, so the foundation still renders client-side.
  *
  * @param {string} foundationRoot - foundation project root (vite `root`).
  * @param {string} entrySourcePath - absolute path to `_entry.generated.js`.
@@ -589,7 +438,7 @@ export function foundationBuildPlugin(options = {}) {
     },
 
     async writeBundle(_options, bundle) {
-      // Skip if this is a recursive call from buildSSRBundle
+      // Skip while the entry-ssr.js sub-build (buildEntrySSR) is running
       if (_buildingSSRBundle) return
 
       // What host services this foundation actually reaches for, read off the
@@ -637,26 +486,23 @@ export function foundationBuildPlugin(options = {}) {
       // site build's theme.css — this is harmless redundancy there.
       await emitFoundationVarsCss(outDir, schema)
 
-      // Record which @uniweb/runtime this build linked against. A compatibility
-      // floor for a validation step that does not exist yet, and read by nothing
-      // today — see emitRuntimePin's header before assuming otherwise.
+      // Record which @uniweb/runtime this build linked against: a compatibility
+      // floor that `register` carries as `info.runtime` and that nothing in the
+      // framework enforces — see emitRuntimePin's header before assuming more.
       await emitRuntimePin(outDir, resolvedRoot)
 
       // Emit dist/entry-ssr.js — the single-file SSR twin of the (code-split)
-      // browser dist/entry.js — for the Cloudflare edge isolate. React + the
-      // runtime stay externalized (resolved to the isolate's SHARED
-      // worker-runtime, so runtime patches propagate without a rebuild — the
-      // Strategy S win); the client-only Shiki lib are externalized so the
-      // ~10 MB Shiki graph stays out. The edge loads this as its single
-      // `foundation` module for request-time SSR, gated on its presence.
+      // browser dist/entry.js — for a host that renders at request time. React
+      // + the runtime stay externalized (resolved to the runtime's shared build,
+      // so runtime patches propagate without a foundation rebuild); the
+      // client-only Shiki lib is externalized so the ~10 MB Shiki graph stays
+      // out.
       //
-      // (The legacy self-contained buildSSRBundle() — React + runtime INLINED,
-      // ~14 MB with Shiki — is retained below, unused, for reference only.)
       // Skipped on a DEV rebuild: this is a second full Vite pass, it runs on
       // every save, and nothing in the dev loop reads its output. The local SSR
       // lanes load `entry.js` (SSG prerender via `import()`, unipress the same);
-      // only the edge isolate needs the single-file twin, and dev ships nothing
-      // to it.
+      // only a request-time host needs the single-file twin, and dev ships
+      // nothing to one.
       //
       // Shipping lanes are unaffected — `uniweb build`, and `register`/`publish`
       // which build through it. `register`'s build-if-stale check also requires
