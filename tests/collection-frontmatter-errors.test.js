@@ -38,10 +38,12 @@ afterAll(async () => {
 })
 
 // The exact shape that bit: a colon-space inside an unquoted scalar.
+// ⛔ Neither fixture states a `slug:`: a record file may not (its name is its file's), and a
+// `slug:` in the valid one made this suite order-dependent — which file threw first decided
+// the message (until 2026-09-27).
 const UNQUOTED_COLON = [
   '---',
   'title: A Post',
-  'slug: a-post',
   'description: Building on a framework: everything hard is a website problem',
   '---',
   '',
@@ -51,7 +53,6 @@ const UNQUOTED_COLON = [
 const VALID = [
   '---',
   'title: A Post',
-  'slug: a-post',
   '---',
   '',
   'Body text.',
