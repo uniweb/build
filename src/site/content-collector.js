@@ -1011,14 +1011,16 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
 
   // `query`, `fetch` and `data` are never params: `query:` / `fetch:` declare the
   // section's own data, and a leftover `data:` is refused (`declaredFetch`).
-  // ⭐ Nor is `grid`: a section key framework reserves for the layout of the section's
-  // child sections — `3` or `'40/60'` [Diego, 2026-09-27] — laid out by kit's
-  // `ChildGrid` from `block.grid`. A component offers layouts in `meta.js`
-  // `children.grid`; it never receives the choice as a param.
-  const { type, preset, input, props, fetch, query, data, grid, id: frontmatterId, ...params } = frontMatter
-  if (grid !== undefined && !parseGrid(grid)) {
+  const { type, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
+  // ⭐ `grid` — the layout of the section's child sections, `3` or `'40/60'` [Diego,
+  // 2026-09-27] — is a name framework reserves, and it stays in the params like
+  // `background`: that is where it is stored and synced, with no field of its own.
+  // `@uniweb/core` lifts it to `block.grid` (a component never receives it as a param)
+  // and kit's `ChildGrid` lays the children out. ⛔ For a few hours on 2026-09-27 it was
+  // taken out of the params into a field the sync wire could not carry.
+  if (params.grid !== undefined && !parseGrid(params.grid)) {
     console.warn(
-      `[content-collector] ${relative(siteRoot, filePath)}: grid: ${JSON.stringify(grid)} is not a layout — ` +
+      `[content-collector] ${relative(siteRoot, filePath)}: grid: ${JSON.stringify(params.grid)} is not a layout — ` +
         `write a column count (grid: 3) or relative widths (grid: '40/60'). The component's own layout applies.`
     )
   }
@@ -1052,7 +1054,6 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     params: { ...params, ...props },
     content: proseMirrorContent,
     fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath), { level: 'section' }),
-    ...(grid !== undefined ? { grid } : {}),
     subsections: []
   }
 
