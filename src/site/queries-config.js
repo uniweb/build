@@ -329,7 +329,7 @@ export function toConfigQueries(declarations) {
  * checking the two against each other.
  *
  * ⇒ `deferred` = every top-level section of the schema other than its brief — the keys
- * a delivered record holds them under (`article_body` for `@std/article`), which is
+ * a delivered record holds them under (`body` for `@std/article`), which is
  * exactly what a host's records service leaves out of a list and adds for `whole`.
  * ⛔ It was the flat form's fields minus the brief's until 2026-09-24; a delivered
  * record carries those under their section, so stripping them by name stripped nothing.
@@ -337,7 +337,7 @@ export function toConfigQueries(declarations) {
  * Derived from the SCHEMA, never from a record. That is what keeps the
  * build-derived keys safe without a reserved list: `slug`, `route`, `path`,
  * `excerpt`, `image` and `lastModified` are not sections, so they are never
- * stripped. A markdown body goes where its content field is — inside `article_body`,
+ * stripped. A markdown body goes where its content field is — inside `body`,
  * say — so it is deferred with that section.
  *
  * ⛔ Silent on every path that cannot answer, because none of them is an error:

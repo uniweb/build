@@ -198,7 +198,7 @@ function leanDataSchema(value, dataSchemaMap) {
     // ⭐ THE DELIVERED RECORD'S FIELDS (`deliveredFields`) — the brief's at the top and each
     // other section as one field under its name — so a default lands where the record
     // a component receives carries its field: `@std/article`'s `status` inside
-    // `article_body`, as the records service delivers it (measured 2026-09-24). A section
+    // `body` (`article_body` until 2026-09-27), as the records service delivers it (measured 2026-09-24). A section
     // is filled only when the record holds it (`applySchemaToObject` recurses into what is
     // there), so a list of briefs gains no section it was not sent.
     //

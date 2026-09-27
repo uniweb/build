@@ -166,10 +166,10 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
 
   it('@std schemas resolve without a foundation of their own — from the build\'s copy', async () => {
     site('articles:\n  schema: "@std/article"\n')
-    w('site/records/std/article/hi.md', '---\narticle:\n  title: Hi\n---\n\nBody text.\n')
+    w('site/records/std/article/hi.md', '---\nbrief:\n  title: Hi\n---\n\nBody text.\n')
     const [article] = (await compile({ articles: { schema: '@std/article' } })).articles
     expect(article.title).toBe('Hi')
-    expect(textOf(article.article_body.content)).toEqual(['Body text.'])
+    expect(textOf(article.body.content)).toEqual(['Body text.'])
   })
 })
 

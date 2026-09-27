@@ -255,7 +255,7 @@ export function recordsToEntities({
   }
   // The markdown body of a `.md` record is the value of the schema's CONTENT body field,
   // wherever a top-level single section declares it — the brief, or a body section like
-  // `article_body.content`. One field is the target; zero means a body has nowhere to go.
+  // `body.content`. One field is the target; zero means a body has nowhere to go.
   const { target: bodyTarget, count: bodyFields } = contentBodyTarget(declaration)
 
   const entities = []

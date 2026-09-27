@@ -392,7 +392,7 @@ function isProseMirrorDoc(value) {
 
 /**
  * Every ProseMirror document a record holds, with its path. ⭐ A markdown body is
- * delivered in its schema's content body field — `article_body.content` for
+ * delivered in its schema's content body field — `body.content` for
  * `@std/article` — and at `content` only for a record with no schema; a rich field can
  * sit anywhere else. ⛔ Until 2026-09-24 only `content` at the top was read, which is
  * where a delivered `@std/article` holds no body.
@@ -890,7 +890,7 @@ async function pruneRecordFiles(recordsDir, dataDir, keep) {
 
 /**
  * Extract from a ProseMirror document — `field` is where the record holds it
- * (`content`, `article_body.content`), which each unit's `field` starts with.
+ * (`content`, `body.content`), which each unit's `field` starts with.
  */
 function extractFromProseMirrorDoc(doc, context, units, field = 'content') {
   // The units a page section's body makes (`extract.js::extractUnitsFromDoc`) — the keys translation

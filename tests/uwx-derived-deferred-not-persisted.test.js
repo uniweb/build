@@ -121,11 +121,11 @@ describe('a clone’s query over a standard schema', () => {
   }
 
   it('⛔ does not get the derived `deferred:` written into it', () => {
-    expect(pullInto(['article_body'])).toEqual({ schema: '@std/article', sort: 'date desc' })
+    expect(pullInto(['body'])).toEqual({ schema: '@std/article', sort: 'date desc' })
   })
 
   it('CONTROL — an authored `deferred:` that differs from the derivation survives', () => {
-    expect(pullInto(['article_body', 'article']).deferred).toEqual(['article_body', 'article'])
+    expect(pullInto(['body', 'brief']).deferred).toEqual(['body', 'brief'])
   })
 })
 
@@ -144,7 +144,7 @@ describe('a pull over queries declared in site.yml', () => {
   }
 
   it('⭐ restating them writes nothing — no queries.yml, site.yml as it was', () => {
-    pullInto({ name: 'articles', schema: '@std/article', sort: 'date desc', deferred: ['article_body'] })
+    pullInto({ name: 'articles', schema: '@std/article', sort: 'date desc', deferred: ['body'] })
     expect(existsSync(join(SITE, 'queries.yml'))).toBe(false)
     expect(readFileSync(join(SITE, 'site.yml'), 'utf8')).toBe(SITE_YML)
   })

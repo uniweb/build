@@ -40,7 +40,7 @@ export function recordFileLayout(declaration) {
  * The schema's CONTENT body field — the one a `.md` record's markdown body fills: a
  * markup `text` field (`format: markdown|html`) or a `format: prosemirror` json field,
  * declared directly on a top-level single section — the brief or another, like
- * `@std/article`'s `article_body.content`. The first in declared order.
+ * `@std/article`'s `body.content`. The first in declared order.
  *
  * ⛔ Not the brief's alone. Until 2026-09-24 the pull and the per-locale body override
  * looked only in the brief, while the push looked in every single section, so a body

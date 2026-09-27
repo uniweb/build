@@ -605,7 +605,7 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
  * backend: the brief's fields at the top and every other section under its own name
  * (`@uniweb/schemas/conform`'s `toDeliveredRecord`), with a markdown body in the
  * schema's content body field — the ProseMirror document for a `format: prosemirror`
- * field (`article_body.content`, for `@std/article`), the markdown source for a markup
+ * field (`body.content`, for `@std/article`), the markdown source for a markup
  * `text` one. A component is written against one shape, so both lanes deliver the same
  * one — ruled 2026-09-24 [Diego] as a requirement that the shape be one AND a good one,
  * not as an instruction to adopt the host's. ⚠️ It was built by adopting the host's as it
