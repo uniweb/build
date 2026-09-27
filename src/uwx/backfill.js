@@ -21,10 +21,12 @@
 // reaches the file on a pull (`records-project.js`), which restores asset paths first.
 //
 // Single-record YAML/JSON/markdown files are rendered/back-filled in place.
-// Multi-record files — array-form YAML/JSON and BibTeX (many records in one
-// file) — are grouped by file and written once, one `$uuid` per record keyed by
-// slug/cite-key. Anything genuinely unwritable is reported as 'deferred', never
-// silently skipped.
+// A BibTeX file (many records in one file) is grouped by file and written once,
+// one `$uuid` per record keyed by cite key. Anything genuinely unwritable is
+// reported as 'deferred', never silently skipped.
+// ⛔ A YAML or JSON file holding a list is refused before a push since 2026-09-27
+// (`site/record-file.js`: one record per file), so no entry reaches
+// `backfillArrayFile` from a push any more; it stays exported.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -450,9 +452,9 @@ export function backfillEntityUuids({ index, finalized }) {
       continue
     }
     if (entry.multiRecord) {
-      // Many records in one file → group by file, written once. BibTeX and
-      // array-form YAML/JSON both re-render canonically (sync owns the output);
-      // the per-file writer is chosen by format below.
+      // Many records in one file → group by file, written once. BibTeX re-renders
+      // canonically (sync owns the output); the per-file writer is chosen by format
+      // below. (A YAML/JSON list file is refused before a push — header.)
       const group = entry.format === 'bib' ? bibFiles : arrayFiles
       let m = group.get(entry.sourceFile)
       if (!m) {

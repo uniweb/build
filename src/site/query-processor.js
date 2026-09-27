@@ -451,15 +451,13 @@ async function processDataItemAssets(data, itemPath, siteRoot, recordsRoot, base
  * YAML items are pure data — no ProseMirror conversion, no body, no excerpt,
  * no image extraction, no lastModified.
  *
- * A YAML file containing a top-level array returns all items (single-file
- * collection); each item must carry its own `slug`. A YAML file containing
- * a mapping returns a single item with `slug` derived from the filename.
- * Mirrors `processJsonItem` for parity across pure-data formats.
+ * A YAML file holds ONE record, named by the file (`record-file.js` refuses a list
+ * or a `slug:`). Mirrors `processJsonItem` for parity across pure-data formats.
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - YAML filename (.yml or .yaml)
  * @param {Object} config - the parsed query (`includeDrafts`, `dataSchema`)
- * @returns {Promise<Object|Array|null>} Processed item(s), or null for a draft this run withholds
+ * @returns {Promise<Object|null>} The processed record, or null for a draft this run withholds
  */
 async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, config) {
   const filepath = join(dir, filename)
@@ -470,9 +468,7 @@ async function processDataItem(dir, filename, siteRoot, recordsRoot, basePath, c
 }
 
 /**
- * The records a YAML or JSON file holds, delivered (`deliverRecord`): an array → one
- * record per entry, each carrying its own `slug`; a mapping → one record, its `slug` the
- * file's name unless it states one.
+ * The record a YAML or JSON file holds, delivered (`deliverRecord`) and named by the file.
  */
 async function processDataRecords(data, fileSlug, filepath, where, siteRoot, recordsRoot, basePath, config) {
   // ONE record per file, named by the file (`record-file.js`).
@@ -487,13 +483,12 @@ async function processDataRecords(data, fileSlug, filepath, where, siteRoot, rec
  * Process a single data item from a JSON file
  *
  * JSON items are pure data — like YAML items, no ProseMirror conversion.
- * A JSON file containing an array returns all items (single-file collection).
- * A JSON file containing an object returns a single item with slug from filename.
+ * A JSON file holds ONE record, named by the file (`record-file.js`).
  *
  * @param {string} dir - Collection directory path
  * @param {string} filename - JSON filename
  * @param {Object} config - the parsed query (`includeDrafts`, `dataSchema`)
- * @returns {Promise<Object|Array|null>} Processed item(s), or null for a draft this run withholds
+ * @returns {Promise<Object|null>} The processed record, or null for a draft this run withholds
  */
 async function processJsonItem(dir, filename, siteRoot, recordsRoot, basePath, config) {
   const filepath = join(dir, filename)
@@ -617,16 +612,16 @@ export const WHOLE_RECORD = Symbol.for('uniweb.query.whole')
  * ⛔ A record written in the retired flat form (`misplacedFields`) STOPS THE BUILD, as it
  * stops a push: which section a key belongs in is not a guess to make.
  *
- * @param {*} record - the record as its file holds it, `slug` included
+ * @param {*} record - the record as its file holds it, with `slug`: the file's name, added by its reader
  * @param {Object} config - the parsed query (`dataSchema`, `excerpt`)
- * @param {string} where - the file, and the entry in a file of several, for a message
+ * @param {string} where - the file, for a message
  * @param {{ doc: Object, markdown: string }|null} [body] - a markdown record's body
  * @returns {*} the delivered record (anything but a record, as it came)
  */
 function deliverRecord(file, config, where, body = null) {
   if (!file || typeof file !== 'object' || Array.isArray(file)) return file
-  // ⭐ The record's NAME rides as `$name`, and nowhere else. `slug` is how its file names it —
-  // the file's stem, or a `slug:` the file states — and never a key of what a component
+  // ⭐ The record's NAME rides as `$name`, and nowhere else. `slug` is how its reader hands the
+  // file's name to here — the file's stem — and never a key of what a component
   // receives: a records service serves no `slug`, and a field of that name has no meaning to
   // the framework [Diego, 2026-09-27]. ⛔ Until then the delivered record carried `slug` too.
   const { slug: handle, ...record } = file
@@ -989,8 +984,8 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
     return result && { ...result, path }
   })
 
-  // Flatten one level: array-form YAML/JSON files and every .bib file
-  // contribute their entries individually.
+  // Flatten one level: a .bib file contributes its entries individually. Every other
+  // record file is one record (`record-file.js`).
   items = items.flat()
 
   // Filter out nulls (drafts this run withholds)
@@ -998,8 +993,9 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
 
   // ⭐ `$name` IS THE RECORD HANDLE ON EVERY SITE (ruled 2026-09-11 [Diego]) — the
   // field a `[slug]` or `[...path]` page matches, and the one the records service
-  // serves: the name its file gives it — the file's stem, a `slug:` the file states, an
-  // array-form file's entry's own `slug`, a BibTeX cite key — exactly what our sync
+  // serves: the name its file gives it — the file's stem, or a BibTeX entry's cite key
+  // (a file's own `slug:` renamed it, and a list file held several, until 2026-09-27;
+  // both are refused now, `record-file.js`) — exactly what our sync
   // sends as the entry's name (`uwx/entity-source.js`). `deliverRecord` and
   // `processBibtexItem` set it. ⛔ Until 2026-09-27 the delivered record carried `slug`
   // beside it, and this filled `$name` from it; no record carries `slug` now.
