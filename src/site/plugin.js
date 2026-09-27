@@ -1335,8 +1335,8 @@ export function siteContentPlugin(options = {}) {
         }
 
         // Handle localized collection data (e.g., /fr/data/articles.json), and a
-        // `deferred:` query's per-record files (/fr/data/articles/<slug>.json) — one
-        // record each, translated the same way.
+        // query's per-record files (/fr/data/articles/<$name>.json) — one record
+        // each, translated the same way.
         const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/${DATA_DIR}\\/(.+\\.json)$`))
         if (localeDataMatch) {
           const locale = localeDataMatch[1]

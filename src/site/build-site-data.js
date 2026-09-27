@@ -60,8 +60,8 @@ import {
  *
  *     ⇒ The rule stands on its own: we do not know which consumers
  *     re-derive, so we always ship enough for the ones that do.
- *   - `data/<collection>.json` (+ per-record files for `deferred:`
- *     collections) — same shape `processQueries` produces today.
+ *   - `data/<collection>.json` (+ each record's own file,
+ *     `data/<collection>/<$name>.json`) — same shape `processQueries` produces today.
  *   - `records/<path under the records directory>` — the records' co-located assets, where
  *     the compiled records point.
  *   - `assets/<media>` — processed images / video posters / PDF

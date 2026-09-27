@@ -6,8 +6,8 @@
  * that resolves a data schema syncs as folder entities — content a backend
  * genuinely consumes, queryable, editable, with a `brief:` for its lean shape.
  * A **schema-less** collection has no entity model, so its compiled
- * `dist/data/<name>.json` (plus any `deferred:` per-record files) is delivered
- * as files instead. That fallback tier is all this module is about.
+ * `dist/data/<name>.json` (plus its per-record files, `<name>/<$name>.json`) is
+ * delivered as files instead. That fallback tier is all this module is about.
  *
  *   { data: { "<relpath under dist/data>": <json> } }   // schema-less only
  *
@@ -67,7 +67,8 @@ function queryOf(relPath) {
 }
 
 /**
- * Assemble the static-data ball from a built site's dist/.
+ * Gather the schema-less set from a built site's dist/ — in memory, one entry per
+ * file; nothing is bundled (see the header).
  *
  * @param {string} distDir - the site's built dist/ directory
  * @param {string[]} [schemalessNames] - collection names with no data schema (from

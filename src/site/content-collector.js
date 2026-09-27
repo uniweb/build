@@ -470,8 +470,11 @@ async function readYamlFile(filePath) {
  * stay at the document root. Both share the same refId/getInset(refId)
  * lookup machinery — only the position differs.
  *
+ * RefIds count from `inset_0` per section, in document order. `title` is the
+ * reference's `[...]` text, which the inset's Block receives as `content.title`.
+ *
  * @param {Object} doc - ProseMirror document (mutated in place)
- * @returns {Array} Array of { refId, type, params, description, embedKind }
+ * @returns {Array} Array of { refId, type, embedKind, params, title }
  */
 function extractInsets(doc) {
   if (!doc?.content || !Array.isArray(doc.content)) return []
