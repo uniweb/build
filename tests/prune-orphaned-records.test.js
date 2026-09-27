@@ -26,7 +26,8 @@ import { writeQueryFiles } from '../src/site/query-processor.js'
 
 const DEFERRED = { articles: { path: 'collections/articles', deferred: ['body'] } }
 
-const rec = (slug, extra = {}) => ({ slug, title: slug, body: `body of ${slug}`, ...extra })
+// A compiled record carries its handle as `$name` — what its own file is named by.
+const rec = (slug, extra = {}) => ({ $name: slug, slug, title: slug, body: `body of ${slug}`, ...extra })
 
 /** Filenames under public/data/<name>/, sorted. */
 async function recordFiles(siteDir, name) {
@@ -68,19 +69,17 @@ describe('per-record file pruning', () => {
     ).toBe(false)
   })
 
-  it('clears the directory when a collection stops declaring deferred:', async () => {
+  // ⭐ Every query writes a per-record file for each record since 2026-09-27 — the record whole,
+  // where its list holds its brief. ⛔ Until then only a `deferred:` query did, and a query that
+  // stopped declaring it had its directory cleared.
+  it('writes each record\'s file whether or not the query declares deferred:', async () => {
     await writeQueryFiles(siteDir, { articles: [rec('a'), rec('b')] }, DEFERRED)
-    expect(await recordFiles(siteDir, 'articles')).toEqual(['a.json', 'b.json'])
-
-    // Without deferred: nothing will ever write this directory again, so every
-    // file in it is stale from this point on.
     await writeQueryFiles(
       siteDir,
       { articles: [rec('a'), rec('b')] },
       { articles: { path: 'collections/articles' } }
     )
-
-    expect(await recordFiles(siteDir, 'articles')).toEqual([])
+    expect(await recordFiles(siteDir, 'articles')).toEqual(['a.json', 'b.json'])
   })
 
   it('leaves records that are still present untouched', async () => {
@@ -150,9 +149,9 @@ describe('per-record file pruning', () => {
     expect(await recordFiles(siteDir, 'team')).toEqual(['alice.json'])
   })
 
-  it('is a no-op for a collection that never had per-record files', async () => {
+  it('CONTROL — a record with no handle has no file of its own, and is still listed', async () => {
     const plain = { articles: { path: 'collections/articles' } }
-    await writeQueryFiles(siteDir, { articles: [rec('a')] }, plain)
+    await writeQueryFiles(siteDir, { articles: [{ title: 'no handle' }] }, plain)
     expect(existsSync(join(siteDir, 'public', DATA_DIR, 'articles.json'))).toBe(true)
     expect(await recordFiles(siteDir, 'articles')).toEqual([])
   })

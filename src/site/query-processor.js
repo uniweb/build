@@ -58,7 +58,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseBibtex } from '@citestyle/bibtex'
-import { DATA_DIR, withoutRouteVariables } from '@uniweb/core'
+import { DATA_DIR, withoutRouteVariables, mapQueryPaths } from '@uniweb/core'
 import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
@@ -66,7 +66,7 @@ import { readRecordsConfig, resolveFolder, folderTreeOrder } from './records-con
 import { isDraftRecord } from './record-draft.js'
 import { resolveRecordSchemas } from './queries-config.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
-import { toDeliveredRecord, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
+import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { collectNestedRefs } from '@uniweb/schemas/format'
 
 // Try to import content-reader for markdown parsing
@@ -599,6 +599,15 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
 }
 
 /**
+ * ⭐ WHAT A QUERY'S FILES HOLD, beside the merged view this module evaluates a query over (ruled
+ * 2026-09-27 [Diego]): each record's BRIEF, which its list holds — the brief's fields at the top —
+ * and the record WHOLE, as stored, which its own file holds — a key per section, the brief's
+ * included. Carried on each compiled item under these keys, which `JSON.stringify` never writes.
+ */
+export const BRIEF_RECORD = Symbol.for('uniweb.query.brief')
+export const WHOLE_RECORD = Symbol.for('uniweb.query.whole')
+
+/**
  * One record as its file holds it → the record a component receives.
  *
  * ⭐ THE SHAPE A HOST'S RECORDS SERVICE ANSWERS — measured 2026-09-24 on a local
@@ -657,10 +666,57 @@ function deliverRecord(record, config, where, body = null) {
       out.image = out.image || extractFirstImage(body.doc)
     }
     if (config.references) out = config.references.deliver(schema, out, where)
+    out[WHOLE_RECORD] = storedRecord(record, schema, config, where, body, out)
   }
   const handle = record.slug
-  if (handle !== undefined && handle !== null && handle !== '') out.$name = String(handle)
+  if (handle !== undefined && handle !== null && handle !== '') {
+    out.$name = String(handle)
+    if (out[WHOLE_RECORD]) {
+      const { $uuid, ...rest } = out[WHOLE_RECORD]
+      out[WHOLE_RECORD] = { ...($uuid !== undefined ? { $uuid } : {}), $name: out.$name, ...rest }
+    }
+  }
   return out
+}
+
+/**
+ * The record WHOLE, as stored — what its own file serves and a whole question answers: its file's
+ * fields under their sections (`toStoredRecord`), its markdown body in the content body field's
+ * section, its references hydrated as a host hydrates them. An excerpt and an image the build
+ * derives go in its brief only where the brief declares them.
+ */
+function storedRecord(record, schema, config, where, body, merged) {
+  let file = { ...record }
+  if (body) placeBodyInFile(file, schema, body)
+  if (config.references) file = config.references.deliver(schema, file, where, { file: true })
+  const stored = toStoredRecord(schema, file)
+  const layout = recordLayout(schema)
+  const briefName = schema.fields ? 'brief' : (layout?.flat ? layout.sections[0][0] : layout?.brief)
+  const declared = schema.fields ?? (layout?.sections.find(([n]) => n === briefName)?.[1]?.fields || {})
+  if (briefName && stored[briefName] && typeof stored[briefName] === 'object') {
+    for (const key of ['excerpt', 'image']) {
+      if (declared[key] && stored[briefName][key] == null && merged[key] != null) {
+        stored[briefName] = { ...stored[briefName], [key]: merged[key] }
+      }
+    }
+  }
+  return stored
+}
+
+/** A markdown body placed where the record's FILE holds its content body field (`fileSection`). */
+function placeBodyInFile(file, schema, body) {
+  const blank = !body.markdown || !body.markdown.trim()
+  const target = contentBodyField(schema)
+  if (!target || blank) return
+  const value = target.field?.type === 'text' ? body.markdown : body.doc
+  if (!target.fileSection) {
+    if (file[target.key] == null) file[target.key] = value
+    return
+  }
+  const held = file[target.fileSection]
+  if (held != null && (typeof held !== 'object' || Array.isArray(held))) return
+  if (held?.[target.key] != null) return
+  file[target.fileSection] = { ...(held || {}), [target.key]: value }
 }
 
 /**
@@ -851,7 +907,7 @@ function referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, ba
         if (!targets.has(ref)) targets.set(ref, await load(ref))
       }
     },
-    deliver(schema, record, where) {
+    deliver(schema, record, where, { file = false } = {}) {
       return mapReferences(
         schema,
         record,
@@ -865,7 +921,7 @@ function referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, ba
           }
           return value
         },
-        { delivered: true }
+        { delivered: !file }
       )
     },
   }
@@ -990,16 +1046,27 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   //
   // ⛔ `scope` is NEVER baked, fixed or routed — the runtime applies it, as the
   // records service does, so a routed `scope: :dir` binds per page.
+  //
+  // ⭐ A PATH READS THE RECORD AS STORED, as the records service reads it (ruled 2026-09-27
+  // [Diego]): `details` is the brief's field and `details.pages` the
+  // section's, even where the two share a name — which the merged view the records are carried in
+  // cannot hold apart. A record with no data schema is read as it is.
   const fixed = withoutRouteVariables({ where: config.where })
-  if (fixed.where) {
-    items = applyWhere(items, fixed.where)
+  const asked = config.dataSchema
+    ? mapQueryPaths({ where: fixed.where, sort: config.sort }, (path) => storedPath(config.dataSchema, path))
+    : { where: fixed.where, sort: config.sort }
+  const read = (item) => (item && item[WHOLE_RECORD]) || item
+  if (asked.where) {
+    const kept = new Set(applyWhere(items.map(read), asked.where))
+    items = items.filter((item) => kept.has(read(item)))
   }
 
   // The query's `sort` orders the file; the runtime applies whichever sort wins —
   // a binding's own, else this one — so the order here only spares it the work.
   // Texts collate in the site's default language; each page re-sorts in its own.
-  if (config.sort) {
-    items = applySort(items, config.sort, { locale })
+  if (asked.sort) {
+    const itemOf = new Map(items.map((item) => [read(item), item]))
+    items = applySort([...itemOf.keys()], asked.sort, { locale }).map((held) => itemOf.get(held))
   }
 
   // ⛔ `limit` IS NEVER BAKED. A query's `limit` is part of its set (ruled 2026-09-14
@@ -1012,7 +1079,41 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // file — before a page's `scope` or routed clauses, which the runtime has applied
   // since 2026-09-11, could select anything from it.
 
+  // ⭐ EACH RECORD'S BRIEF — what its list holds: the brief's fields at the top, beside the record's
+  // own keys and what the build derives (`excerpt`, `image`, `path`). A record of a schema with no
+  // brief, or of one with a single section, is its brief as it is.
+  const briefOf = briefBuilder(config.dataSchema)
+  if (briefOf) {
+    items = items.map((item) =>
+      item && typeof item === 'object' && !Array.isArray(item) ? { ...item, [BRIEF_RECORD]: briefOf(item) } : item
+    )
+  }
+
   return items
+}
+
+/**
+ * A record's BRIEF, built from the record AS STORED — its brief section's fields — beside the keys of
+ * the merged view that are neither a section nor a brief field. ⛔ Not the merged view less the other
+ * sections: sections are namespaces (ruled 2026-09-26 [Diego]), so a brief field may share a
+ * section's name, and the merged view holds only one of the two. Null when a list is the record as
+ * it is.
+ */
+function briefBuilder(schema) {
+  const layout = schema ? recordLayout(schema) : null
+  if (!layout || schema.fields || layout.flat || !layout.brief) return null
+  const sections = new Set(layout.sections.map(([name]) => name))
+  const fields = new Set(Object.keys(briefFieldMap(schema) || {}))
+  return (item) => {
+    const stored = item[WHOLE_RECORD]
+    const held = stored?.[layout.brief]
+    const brief = held && typeof held === 'object' && !Array.isArray(held) ? held : null
+    const out = {}
+    for (const [key, value] of Object.entries(item)) {
+      if (!sections.has(key) && !(brief && fields.has(key))) out[key] = value
+    }
+    return brief ? { ...out, ...brief } : out
+  }
 }
 
 /**
@@ -1219,62 +1320,52 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
   for (const [name, items] of Object.entries(byQuery)) {
     const rawConfig = queriesConfig?.[name]
     const parsed = rawConfig ? parseQueryConfig(name, rawConfig) : null
-    const deferred = parsed?.deferred
+    const deferred = parsed?.deferred || []
 
-    if (deferred && deferred.length > 0) {
-      // `deferred:` is set — emit two payloads:
-      //   1. The cascade JSON at /data/<name>.json with deferred fields stripped.
-      //      This is what `query: <name>` declarations deliver everywhere.
-      //   2. Per-record full files at /data/<name>/<slug>.json with every field.
-      //      Dynamic-route singular fetches and kit's useWholeRecord read these.
-      const recordsDir = join(dataDir, name)
-      await mkdir(recordsDir, { recursive: true })
+    // ⭐ TWO PAYLOADS FOR EVERY QUERY (ruled 2026-09-27 [Diego]):
+    //   1. Each record WHOLE, as stored, at /data/<name>/<$name>.json — a key per section, the
+    //      brief's included — what a whole question answers: a parametric page's record for a
+    //      component that declares `'@x/y/*'`, and kit's `useWholeRecord`.
+    //   2. The list at /data/<name>.json — each record's BRIEF, the brief's fields at the top,
+    //      less any `deferred:` field — what `query: <name>` delivers everywhere else.
+    // ⛔ Until then only a `deferred:` query had per-record files, and they held the merged view:
+    // the brief's fields at the top beside the other sections' names.
+    const recordsDir = join(dataDir, name)
+    await mkdir(recordsDir, { recursive: true })
+    const written = new Set()
+    for (const item of items) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const handle = item.$name
+      if (handle === undefined || handle === null || handle === '') continue
+      const filename = `${handle}.json`
+      await writeFile(join(recordsDir, filename), JSON.stringify(item[WHOLE_RECORD] ?? item, null, 2))
+      written.add(filename)
+    }
+    const pruned = await pruneOrphanedRecords(dataDir, name, written)
 
-      const written = new Set()
-      for (const item of items) {
-        if (!item || typeof item !== 'object' || !item.slug) continue
-        const filename = `${item.slug}.json`
-        await writeFile(join(recordsDir, filename), JSON.stringify(item, null, 2))
-        written.add(filename)
-      }
-      const perRecordCount = written.size
-      const pruned = await pruneOrphanedRecords(dataDir, name, written)
-
-      const stripped = items.map((item) => {
-        if (!item || typeof item !== 'object') return item
-        const out = { ...item }
-        for (const field of deferred) delete out[field]
-        return out
-      })
-      const cascadePath = join(dataDir, `${name}.json`)
-      await writeFile(cascadePath, JSON.stringify(stripped, null, 2))
+    const list = items.map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return item
+      const out = { ...(item[BRIEF_RECORD] ?? item) }
+      // A brief holds no section, so a `deferred:` name that is one of the record's sections —
+      // what a schema's brief implies (`deferredFromSchema`) — is already absent, and stripping
+      // it would take a brief field of the same name with it (sections are namespaces).
+      const sections = item[BRIEF_RECORD] ? item[WHOLE_RECORD] || {} : null
+      for (const field of deferred) if (!sections || !(field in sections)) delete out[field]
+      return out
+    })
+    const cascadePath = join(dataDir, `${name}.json`)
+    await writeFile(cascadePath, JSON.stringify(list, null, 2))
+    console.log(
+      `[query-processor] Generated ${cascadePath} (${items.length} items` +
+      (deferred.length ? `, deferred: [${deferred.join(', ')}]` : '') + `) + ${written.size} per-record files`
+    )
+    if (pruned.length > 0) {
+      // A deletion is always worth naming. These files were public a moment
+      // ago, so "which ones went" is the question an author will have.
       console.log(
-        `[query-processor] Generated ${cascadePath} (${items.length} items, ` +
-        `deferred: [${deferred.join(', ')}]) + ${perRecordCount} per-record files`
+        `[query-processor] Removed ${pruned.length} stale per-record ` +
+        `file(s) from ${recordsDir}: ${pruned.join(', ')}`
       )
-      if (pruned.length > 0) {
-        // A deletion is always worth naming. These files were public a moment
-        // ago, so "which ones went" is the question an author will have.
-        console.log(
-          `[query-processor] Removed ${pruned.length} stale per-record ` +
-          `file(s) from ${recordsDir}: ${pruned.join(', ')}`
-        )
-      }
-    } else {
-      const filepath = join(dataDir, `${name}.json`)
-      await writeFile(filepath, JSON.stringify(items, null, 2))
-      console.log(`[query-processor] Generated ${filepath} (${items.length} items)`)
-
-      // This collection is not deferred, so it has no per-record files. If it
-      // used to, the directory is still there and will never be written again
-      // — every file in it is stale. Same reconciliation, empty expected set.
-      const pruned = await pruneOrphanedRecords(dataDir, name, new Set())
-      if (pruned.length > 0) {
-        console.log(
-          `[query-processor] Removed ${pruned.length} per-record file(s) ` +
-          `from ${join(dataDir, name)} — "${name}" no longer declares deferred:`
-        )
-      }
     }
   }
 }

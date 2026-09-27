@@ -50,9 +50,10 @@ describe('compiled collection data: emit ↔ request agreement', () => {
   let siteDir
   let emittedUrls
 
+  // A compiled record carries its handle as `$name` — what its own file is named by.
   const items = [
-    { slug: 'design-tips', title: 'Design Tips', body: 'long body A' },
-    { slug: 'getting-started', title: 'Getting Started', body: 'long body B' }
+    { $name: 'design-tips', slug: 'design-tips', title: 'Design Tips', body: 'long body A' },
+    { $name: 'getting-started', slug: 'getting-started', title: 'Getting Started', body: 'long body B' }
   ]
   const queriesConfig = { articles: { schema: '@/article', deferred: ['body'] } }
 

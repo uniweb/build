@@ -24,7 +24,7 @@ import { loadFreeformRecord } from './freeform.js'
 import { resolveQueriesConfig, resolveRecordSchemas, foundationSchemaJson } from '../site/queries-config.js'
 import { dataKeyTypes, keyOfDefaultRef } from '../uwx/data-key-types.js'
 import { toDataSchemaDeclaration, isProseMirrorField, isOpenMapSection } from '../uwx/data-schema.js'
-import { toDeliveredRecord, contentBodyField, misplacedFields } from '@uniweb/schemas/conform'
+import { toDeliveredRecord, contentBodyField, misplacedFields, mergedFromStored, storedFromMerged } from '@uniweb/schemas/conform'
 import { resolveDocForLocale } from './merge.js'
 import { extractUnitsFromDoc } from './extract.js'
 import { flatFormRefusal, extractExcerpt } from '../site/query-processor.js'
@@ -796,7 +796,7 @@ export async function extractRecordContent(siteRoot, options = {}) {
       // record whole beside its lean list, and a deferred field is exactly what the list
       // does not hold. ⛔ Until 2026-09-14 only the list was read, so a deferred body —
       // one derived from a schema's brief included — never reached the manifest.
-      const wholes = await wholeRecords(dataDir, queryName)
+      const wholes = await wholeRecords(dataDir, queryName, dataSchemas.get(queryName) ?? null)
       const extract = (item) => {
         const whole = wholes.get(recordHandle(item))
         const skip = derivesExcerpt(item, whole, dataSchemas.get(queryName), excerpts.get(queryName)) ? EXCERPT : null
@@ -847,15 +847,19 @@ async function recordFileNames(dataDir, queryName) {
 }
 
 /**
- * A query's per-record files (`recordFileNames`), each record whole, by its handle.
+ * A query's per-record files (`recordFileNames`), each record whole, by its handle — as the MERGED
+ * view this module walks (`mergedFromStored`): a file holds the record as stored, a key per
+ * section (2026-09-27), and translation reads a record with its brief's fields at the top.
  *
+ * @param {Object|null} [dataSchema] - the query's data schema; with none a file is read as it is
  * @returns {Promise<Map<string, Object>>}
  */
-async function wholeRecords(dataDir, queryName) {
+async function wholeRecords(dataDir, queryName, dataSchema = null) {
   const out = new Map()
   for (const name of await recordFileNames(dataDir, queryName)) {
     try {
-      const record = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
+      const stored = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
+      const record = dataSchema && isPlainObject(stored) ? mergedFromStored(dataSchema, stored) : stored
       if (isPlainObject(record)) out.set(recordHandle(record), record)
     } catch (err) {
       console.warn(`[i18n] Skipping ${queryName}/${name}: ${err.message}`)
@@ -1043,13 +1047,18 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
         const wholes = new Map() // handle → { source, translated }
         for (const name of recordNames) {
           try {
-            const record = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
+            // ⭐ A record's file holds it AS STORED (2026-09-27); it is translated as the merged
+            // view and written back as stored (`mergedFromStored`, `storedFromMerged`).
+            const stored = JSON.parse(await readFile(join(dataDir, queryName, name), 'utf-8'))
+            const { dataSchema } = recordOptions
+            const record = dataSchema && isPlainObject(stored) ? mergedFromStored(dataSchema, stored) : stored
             const translatedRecord = isPlainObject(record)
               ? await translateItemAsync(record, recordDir, translations, schema, recordOptions)
               : record
             if (isPlainObject(record)) wholes.set(recordHandle(record), { source: record, translated: translatedRecord })
+            const written = dataSchema && isPlainObject(translatedRecord) ? storedFromMerged(dataSchema, translatedRecord) : translatedRecord
             await mkdir(localeRecordsDir, { recursive: true })
-            await writeFile(join(localeRecordsDir, name), JSON.stringify(translatedRecord, null, 2))
+            await writeFile(join(localeRecordsDir, name), JSON.stringify(written, null, 2))
           } catch (err) {
             console.error(`[i18n] Failed to translate ${queryName}/${name} for ${locale}: ${err.message}`)
             failures.push({ locale, file: `${queryName}/${name}`, message: err.message })
@@ -1265,7 +1274,6 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
 
   const one = !!items && typeof items === 'object' && !Array.isArray(items)
   if (!Array.isArray(items) && !one) return items
-  const records = one ? [items] : items
 
   const schema = await resolveSchema(queryName, siteRoot)
   const { poolDirs, schemas: dataSchemas, models, targets, excerpts } = await recordQueries(siteRoot)
@@ -1279,11 +1287,15 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
     targets,
     excerpt: excerpts.get(queryName),
   }
+  const { dataSchema } = recordOptions
+  // ONE record is a record's own file, which holds it AS STORED (2026-09-27): translated as the
+  // merged view, returned as stored (`mergedFromStored`, `storedFromMerged`).
+  const records = one ? [dataSchema ? mergedFromStored(dataSchema, items) : items] : items
 
   // A lean list's derived excerpt is derived from its record's translated body (`EXCERPT`).
   const wholes = new Map()
   if (!one) {
-    for (const [handle, record] of await wholeRecords(join(siteRoot, 'public', DATA_DIR), queryName)) {
+    for (const [handle, record] of await wholeRecords(join(siteRoot, 'public', DATA_DIR), queryName, dataSchema)) {
       wholes.set(handle, { source: record, translated: await translateItemAsync(record, recordDir, translations, schema, recordOptions) })
     }
   }
@@ -1291,7 +1303,8 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
     records.map((item) => translateItemAsync(item, recordDir, translations, schema, { ...recordOptions, whole: wholes.get(recordHandle(item)) }))
   )
 
-  return one ? translated[0] : translated
+  if (!one) return translated
+  return dataSchema && isPlainObject(translated[0]) ? storedFromMerged(dataSchema, translated[0]) : translated[0]
 }
 
 // ---------------------------------------------------------------------------

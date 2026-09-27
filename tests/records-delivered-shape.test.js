@@ -164,6 +164,41 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     expect(textOf(read('public/data/posts/hello.json').details.content)).toEqual(['The body.'])
   })
 
+  it('⭐ a brief field that shares a section\'s name — the list keeps it, the record\'s file holds both', async () => {
+    // Sections are field namespaces (ruled 2026-09-26 [Diego]): `details` is a brief field AND a
+    // section. The brief implies `deferred: [details]` — the section — which must not take the
+    // brief's field of that name out of the list.
+    site('books:\n  schema: "@/book"\n')
+    w(
+      'fdn/schemas/book.yml',
+      'name: book\nsections:\n  brief:\n    brief: true\n    fields: { title: string, details: string }\n  details:\n    fields: { pages: integer }\n'
+    )
+    w('site/records/book/frankenstein.yml', 'brief:\n  title: Frankenstein\n  details: A gothic novel\ndetails:\n  pages: 280\n')
+    await compile({ books: { schema: '@/book', deferred: ['details'] } })
+    expect(read('public/data/books.json')[0]).toMatchObject({ $name: 'frankenstein', title: 'Frankenstein', details: 'A gothic novel' })
+    expect(read('public/data/books/frankenstein.json')).toEqual({
+      $name: 'frankenstein',
+      brief: { title: 'Frankenstein', details: 'A gothic novel' },
+      details: { pages: 280 },
+    })
+  })
+
+  it('⭐ a query path reads the record as stored — `details` the brief\'s field, `details.pages` the section', async () => {
+    site('books:\n  schema: "@/book"\n')
+    w(
+      'fdn/schemas/book.yml',
+      'name: book\nsections:\n  brief:\n    brief: true\n    fields: { title: string, details: string }\n  details:\n    fields: { pages: integer }\n'
+    )
+    w('site/records/book/frankenstein.yml', 'brief:\n  title: Frankenstein\n  details: gothic\ndetails:\n  pages: 280\n')
+    w('site/records/book/dracula.yml', 'brief:\n  title: Dracula\n  details: gothic\ndetails:\n  pages: 418\n')
+    w('site/records/book/emma.yml', 'brief:\n  title: Emma\n  details: comedy\ndetails:\n  pages: 474\n')
+    const names = async (query) => (await compile({ books: { schema: '@/book', ...query } })).books.map((r) => r.$name)
+    expect(await names({ where: { details: 'gothic' }, sort: 'title' })).toEqual(['dracula', 'frankenstein'])
+    expect(await names({ where: { 'details.pages': { gte: 400 } }, sort: 'title' })).toEqual(['dracula', 'emma'])
+    expect(await names({ where: { 'brief.details': 'comedy' } })).toEqual(['emma'])
+    expect(await names({ sort: '-details.pages' })).toEqual(['emma', 'dracula', 'frankenstein'])
+  })
+
   it('@std schemas resolve without a foundation of their own — from the build\'s copy', async () => {
     site('articles:\n  schema: "@std/article"\n')
     w('site/records/std/article/hi.md', '---\nbrief:\n  title: Hi\n---\n\nBody text.\n')
@@ -229,12 +264,13 @@ describe('a delivered record is translated where it holds its body', () => {
     const { translations } = await spanish()
     w('site/locales/records/es.json', translations)
     await buildLocalizedRecords(SITE, { locales: ['es'], outputDir: join(SITE, 'dist') })
+    // a record's own file holds it AS STORED (2026-09-27) — its brief under `card`
     const record = read('dist/es/data/posts/hello.json')
-    expect(record.title).toBe('Hola')
+    expect(record.card.title).toBe('Hola')
     expect(textOf(record.details.content)).toEqual(['Un encabezado', 'El cuerpo.'])
   })
 
-  it('a free-form translation lands in the delivered shape — body in its field, frontmatter by section', async () => {
+  it('a free-form translation lands in the record as stored — body in its field, frontmatter by section', async () => {
     await setup()
     w('site/locales/freeform/es/records/post/hello.md', '---\ncard:\n  title: Hola (libre)\ndetails:\n  author: Ada\n---\n\nCuerpo libre.\n')
     const record = read('public/data/posts/hello.json')
@@ -243,10 +279,10 @@ describe('a delivered record is translated where it holds its body', () => {
       localesDir: join(SITE, 'locales'),
       freeformEnabled: true,
     })
-    expect(out.title).toBe('Hola (libre)')
+    expect(out.card.title).toBe('Hola (libre)')
     expect(out.details.author).toBe('Ada')
     expect(textOf(out.details.content)).toEqual(['Cuerpo libre.'])
-    expect(out).not.toHaveProperty('card')
+    expect(out).not.toHaveProperty('title')
     expect(out).not.toHaveProperty('content')
   })
 })

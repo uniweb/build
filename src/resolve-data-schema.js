@@ -38,6 +38,7 @@
 import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, isAbsolute, extname, basename } from 'node:path'
+import { dataRefOf } from '@uniweb/core/data-keys'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
@@ -105,8 +106,9 @@ export function collectSchemaRefs(components, foundationData = null) {
   const readData = (data) => {
     if (!data || typeof data !== 'object' || data === false) return
     for (const binding of Object.values(data)) {
-      const ref = typeof binding === 'string' ? binding : binding?.schema
-      if (typeof ref === 'string') refs.add(ref)
+      // `'@std/article/*'` asks for whole records of `@std/article` — the ref is what precedes it.
+      const { ref } = dataRefOf(binding)
+      if (ref) refs.add(ref)
     }
   }
   for (const meta of Object.values(components || {})) readData(meta?.data)

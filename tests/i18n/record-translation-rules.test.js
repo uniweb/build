@@ -192,7 +192,9 @@ sections:
     onFoundation({ post: POST })
     w('queries.yml', "posts:\n  schema: '@/post'\n  deferred: [content]\n")
     w('public/data/posts.json', [{ title: 'Flood', excerpt: 'The river rose in the night.', $name: 'flood' }])
-    w('public/data/posts/flood.json', { title: 'Flood', content: { body: 'The river rose in *the* night.' }, excerpt: 'The river rose in the night.', $name: 'flood' })
+    // a record's own file holds it AS STORED (2026-09-27): its brief under `brief`, and no excerpt —
+    // the build derives one only into a brief that declares `excerpt`, which this one does not
+    w('public/data/posts/flood.json', { $name: 'flood', brief: { title: 'Flood' }, content: { body: 'The river rose in *the* night.' } })
     w('locales/records/es.json', translations)
 
     const sources = Object.values((await extractRecordContent(ROOT)).units).map((u) => u.source).sort()
@@ -201,7 +203,7 @@ sections:
     const outputs = await buildLocalizedRecords(ROOT, { locales: ['es'] })
     expect(JSON.parse(readFileSync(outputs.es.posts, 'utf8'))[0]).toMatchObject({ title: 'Inundación', excerpt: 'El río creció en la noche.' })
     const whole = JSON.parse(readFileSync(join(outputs.es.posts, '..', 'posts', 'flood.json'), 'utf8'))
-    expect(whole).toMatchObject({ content: { body: 'El río creció en *la* noche.' }, excerpt: 'El río creció en la noche.' })
+    expect(whole).toEqual({ $name: 'flood', brief: { title: 'Inundación' }, content: { body: 'El río creció en *la* noche.' } })
   })
 
   it('a record with no data schema: derived from its translated body; an authored one is translated (CONTROL)', async () => {

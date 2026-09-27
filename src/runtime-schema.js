@@ -25,7 +25,8 @@
  */
 
 import { isRichSchema } from '@uniweb/core'
-import { deliveredFields } from '@uniweb/schemas/conform'
+import { dataRefOf } from '@uniweb/core/data-keys'
+import { briefFieldMap, wholeFieldMap } from '@uniweb/schemas/conform'
 import { enumValues } from '@uniweb/schemas/format'
 
 /**
@@ -189,26 +190,22 @@ function normalizeRichSchemaValue(value) {
  * @returns {Object|null}
  */
 function leanDataSchema(value, dataSchemaMap) {
-  // Named ref → the resolved schema's fields.
-  const ref = typeof value === 'string'
-    ? value
-    : (value && typeof value.schema === 'string' ? value.schema : null)
+  // Named ref → the resolved schema's fields. `'@std/article/*'` asks for whole records of it.
+  const { ref, whole } = dataRefOf(value)
   if (ref) {
     const resolved = dataSchemaMap[ref]
-    // ⭐ THE DELIVERED RECORD'S FIELDS (`deliveredFields`) — the brief's at the top and each
-    // other section as one field under its name — so a default lands where the record
-    // a component receives carries its field: `@std/article`'s `status` inside
-    // `body` (`article_body` until 2026-09-27), as the records service delivers it (measured 2026-09-24). A section
-    // is filled only when the record holds it (`applySchemaToObject` recurses into what is
-    // there), so a list of briefs gains no section it was not sent.
+    // ⭐ THE FIELDS OF WHAT THE COMPONENT RECEIVES (ruled 2026-09-27 [Diego]): a brief's fields at
+    // the top (`briefFieldMap`), or, for `'@x/y/*'`, the whole record as stored — one field per
+    // section, the brief's included (`wholeFieldMap`) — so a default lands where the record carries
+    // its field: `@std/article`'s `status` inside `body`. A section is filled only when the record
+    // holds it (`applySchemaToObject` recurses into what is there).
     //
-    // ⛔ It was `flatRecordFields` until 2026-09-24 — the retired flat form, every single
-    // section's fields at the top — so on a delivered record those defaults landed beside
-    // the section they belong to. And before 2026-09-03 it read `resolved.fields`, which a
-    // sections-form schema does not have: no defaults at all. `dataSchemaMap` holds each
-    // schema normalized in its authored form (`fields:` or `sections:`), and only these
-    // readers say what one record of it looks like.
-    const fields = deliveredFields(resolved)
+    // ⛔ It was the merged `deliveredFields` until 2026-09-27 — the brief's fields beside the other
+    // sections' names, one map for two shapes; `flatRecordFields`, the retired flat form, until
+    // 2026-09-24; and before 2026-09-03 `resolved.fields`, which a sections-form schema does not
+    // have. `dataSchemaMap` holds each schema normalized in its authored form (`fields:` or
+    // `sections:`), and only these readers say what one record of it looks like.
+    const fields = whole ? wholeFieldMap(resolved) : briefFieldMap(resolved)
     if (!fields) return null
     const lean = extractSchemaFields(fields)
     return Object.keys(lean).length > 0 ? lean : null

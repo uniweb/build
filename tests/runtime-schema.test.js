@@ -151,21 +151,36 @@ describe('extractRuntimeSchema', () => {
           },
         },
       })
-      // As DELIVERED: the brief's fields at the top, another section under its name —
-      // so `status`'s default lands inside `article_body`, where the record carries it.
-      expect(withoutData(result)).toEqual({
+      // A BRIEF, as its component expects: the brief's fields at the top, and nothing of another
+      // section (ruled 2026-09-27 [Diego]).
+      expect(withoutData(result)).toEqual({ schemas: { articles: { title: 'string', slug: 'string' } } })
+    })
+
+    it('a key declared WHOLE (`/*`) is filled as the record is stored — a field per section, the brief included', () => {
+      const meta = { data: { articles: '@std/article/*' } }
+      const result = extractRuntimeSchema(meta, {
+        '@std/article': {
+          name: 'article',
+          sections: {
+            article: { brief: true, fields: { title: 'string', slug: 'string' } },
+            article_body: { fields: { status: { type: 'string', default: 'published' } } },
+          },
+        },
+      })
+      // `status`'s default lands inside `article_body`, where the whole record carries it
+      expect(result).toEqual({
+        data: { articles: '@std/article/*' },
         schemas: {
           articles: {
-            title: 'string',
-            slug: 'string',
+            article: { type: 'object', fields: { title: 'string', slug: 'string' } },
             article_body: { type: 'object', fields: { status: { type: 'string', default: 'published' } } },
           },
         },
       })
     })
 
-    it('a `multi` section is one field of the delivered record — a list, each record filled', () => {
-      const meta = { data: { x: '@/thing' } }
+    it('a `multi` section is one field of a whole record — a list, each record filled', () => {
+      const meta = { data: { x: '@/thing/*' } }
       const result = extractRuntimeSchema(meta, {
         '@/thing': {
           name: 'thing',
@@ -176,7 +191,7 @@ describe('extractRuntimeSchema', () => {
         },
       })
       expect(result.schemas.x).toEqual({
-        title: 'string',
+        thing: { type: 'object', fields: { title: 'string' } },
         entries: { type: 'array', items: { type: 'object', fields: { note: { type: 'string', default: '—' } } } },
       })
       // Never a field of the record itself.
