@@ -493,7 +493,9 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
  * there — so `folder.yml` carries the branches and the records placed in them, and
  * a folder with no branches is a site with no `folder.yml`: a local one is REMOVED
  * (it could only describe sub-folders the backend's folder no longer has). No state
- * of the file removes a record, so this cannot empty anything.
+ * of the file removes a record, so this cannot empty anything. ⭐ The one exception,
+ * since 2026-09-27: a record whose entry has `tags` or a `label` is written wherever it
+ * sits, as `{ path, tags?, label? }`, since only `folder.yml` can say them.
  *
  * ⛔ A PULL THAT CARRIED NO FOLDER, or one with a placed record that was not written
  * locally, leaves the file alone: it has nothing true to write.
@@ -524,22 +526,34 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
         // does not caption its rows. On the wire the label is a localized map;
         // folder.yml carries the source-locale string (a bare string passes).
         if (node.label !== undefined) entry.label = unwrapLocalized(node.label, sourceLocale)
+        if (Array.isArray(node.tags) && node.tags.length) entry.tags = node.tags.map(String)
         entry.records = walk(node.$children, true)
         out.push(entry)
         continue
       }
       const uuid = node.entry?.entity ?? node.entry
       const rel = typeof uuid === 'string' ? poolPathByUuid.get(uuid) : null
-      // A record at the top of the folder needs no line — but one that did not land
-      // is still said: the next push sends the folder the directory holds, which
-      // would not have it.
+      // ⭐ What the folder says about the record — its entry's `tags` and `label` — comes
+      // back as the entry `{ path, tags?, label? }` (ruled 2026-09-27 [Diego]).
+      const said = {}
+      if (Array.isArray(node.tags) && node.tags.length) said.tags = node.tags.map(String)
+      if (node.label !== undefined && node.label !== null) {
+        const label = unwrapLocalized(node.label, sourceLocale)
+        if (typeof label === 'string' && label) said.label = label
+      }
+      const says = Object.keys(said).length > 0
+      // A record at the top of the folder needs no line unless the folder says something
+      // about it — but one that did not land is still said: the next push sends the folder
+      // the directory holds, which would not have it.
       if (!inBranch) {
         if (!rel) {
           warnings.push(
             `the folder holds a record ("${node.name ?? '?'}") that was not written locally — ` +
               `a push from here would remove it from the folder.`
           )
+          continue
         }
+        if (says && !out.some((e) => e?.path === rel)) out.push({ path: rel, ...said })
         continue
       }
       if (!rel) {
@@ -554,7 +568,8 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
         continue
       }
       // A list file holds several records and is one path — listed once.
-      if (!out.includes(rel)) out.push(rel)
+      if (out.some((e) => e === rel || e?.path === rel)) continue
+      out.push(says ? { path: rel, ...said } : rel)
     }
     return out
   }

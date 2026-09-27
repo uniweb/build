@@ -7,11 +7,12 @@
 //   - `contents` is the self-nesting tree (an array), nesting via `$children` — the
 //     same mechanism site-content pages/sections use. Each node holds REFERENCES,
 //     never content:
-//       - a LEAF references one record entity: `{ kind: 'ref', name, entry }` —
+//       - a LEAF references one record entity: `{ kind: 'ref', name, entry, label?, tags? }` —
 //         `entry: { schema, entity: <uuid> }` once the record was minted (back-filled
 //         into its file), or `entry: { $ref: "<$id>" }` while brand-new (resolved
-//         within this payload).
-//       - a BRANCH is a sub-folder: `{ kind: 'branch', name, label?, $children }`.
+//         within this payload); `label` (a localized map) and `tags` are what
+//         `records/folder.yml` says about the record, since 2026-09-27.
+//       - a BRANCH is a sub-folder: `{ kind: 'branch', name, label?, tags?, $children }`.
 //
 // ⭐ A LEAF'S `name` IS ITS RECORD'S HANDLE — the slug, the records service's `$name` —
 // and a branch's `name` is the segment a query's `scope:` names. `label` is a branch's
@@ -99,6 +100,7 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
       // map, like every localized scalar this producer sends — keyed by the
       // site's source locale.
       if (node.label !== undefined) branch.label = { [sourceLocale]: String(node.label) }
+      if (Array.isArray(node.tags) && node.tags.length) branch.tags = [...node.tags]
       branch.$children = contentsFromNodes(node.$children, byEntityId, missing, sourceLocale)
       out.push(branch)
       continue
@@ -108,7 +110,13 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
       missing.push(node.$entityId)
       continue
     }
-    out.push(refLeaf(entity))
+    const leaf = refLeaf(entity)
+    // ⭐ What the folder says about the record (`records/folder.yml`, ruled 2026-09-27
+    // [Diego]): its display text, localized as a branch's is, and its tags, in the order
+    // written. A records service answers them beside the record as `$label` and `$tags`.
+    if (node.label !== undefined) leaf.label = { [sourceLocale]: String(node.label) }
+    if (Array.isArray(node.tags) && node.tags.length) leaf.tags = [...node.tags]
+    out.push(leaf)
   }
   return out
 }

@@ -932,6 +932,16 @@ function pickBrief(record, keys) {
   return out
 }
 
+// What a record's folder entry says about it, as the keys a record is answered with — `$tags`
+// (in the order written) and `$label` — or null when it says nothing.
+function entryKeys(placed) {
+  if (!placed) return null
+  const out = {}
+  if (Array.isArray(placed.tags) && placed.tags.length) out.$tags = [...placed.tags]
+  if (typeof placed.label === 'string' && placed.label) out.$label = placed.label
+  return Object.keys(out).length ? out : null
+}
+
 // A query's records in folder-tree order (`folderTreeOrder`), before anything reads them — so
 // `where`, `sort` (stable) and `limit` start from the order a records service answers in.
 function inFolderOrder(pooled, rank) {
@@ -985,10 +995,20 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   //
   // ⚠️ It stays a SCALAR. `@uniweb/core`'s `withinScope` matches strings only, so
   // an array would match nothing — one placement per record is the ruling.
+  //
+  // ⭐ AND WHAT THE FOLDER SAYS ABOUT THE RECORD — its entry's `tags` and `label` — rides
+  // beside it as `$tags` and `$label`, in its list and in its own file, as a records service
+  // answers them (ruled 2026-09-27 [Diego]). Absent when the entry says none.
   items = items.map((result, i) => {
-    const branch = pooled[i] ? (config.placements?.get(pooled[i].id)?.path ?? '') : ''
-    if (Array.isArray(result)) return result.map((item) => item && { ...item, [BRANCH_KEY]: branch })
-    return result && { ...result, [BRANCH_KEY]: branch }
+    const placed = pooled[i] ? config.placements?.get(pooled[i].id) : null
+    const said = entryKeys(placed)
+    const at = (item) => {
+      if (!item) return item
+      const out = { ...item, ...said, [BRANCH_KEY]: placed?.path ?? '' }
+      if (said && out[WHOLE_RECORD]) out[WHOLE_RECORD] = { ...out[WHOLE_RECORD], ...said }
+      return out
+    }
+    return Array.isArray(result) ? result.map(at) : at(result)
   })
 
   // Flatten one level: a .bib file contributes its entries individually. Every other

@@ -164,9 +164,25 @@ export async function readRecordsConfig(siteRoot, { dir } = {}) {
  * @param {object} [opts]
  * @param {string} [opts.dir] - the records directory as written, for messages
  * @returns {{ nodes: Array, placements: Map, errors: string[], warnings: string[] }}
- *   `nodes` is the folder tree — the declared sub-folders in file order, then every
- *   record no sub-folder names; `placements` maps EVERY record's id to its
- *   `{ entity, path, slug }`, `path` being `''` at the top of the folder.
+ *   `nodes` is the folder tree — the declared entries in file order, then every
+ *   record no entry names; `placements` maps EVERY record's id to its
+ *   `{ entity, path, slug, tags?, label? }`, `path` being `''` at the top of the folder.
+ *
+ * ⭐ WHAT THE FOLDER SAYS ABOUT A RECORD — its entry's `tags` and `label` (ruled
+ * 2026-09-27 [Diego]). A record's entry is a path, or `{ path, tags?, label? }`:
+ *
+ *     - folder: team
+ *       records:
+ *         - team/grace.md
+ *         - path: team/ada.md
+ *           tags: [staff, featured]
+ *           label: Ada Lovelace
+ *
+ * They are the ENTRY's, not the record's — a backend keeps them on the folder entry and
+ * answers them beside the record as `$tags` and `$label`, and so does the static lane.
+ * Tags keep the order written. At the top level an entry is allowed only when it says
+ * one of them: a bare path there would claim to place a record the directory already
+ * placed.
  */
 export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
   // The file as the author sees it, for every message below.
@@ -187,7 +203,7 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
     byRelPath.set(e.poolPath, e)
   }
 
-  const place = (entity, pathSegs, where) => {
+  const place = (entity, pathSegs, where, said = null) => {
     const key = entity.id
     const prior = claimedBy.get(key)
     if (prior) {
@@ -200,60 +216,94 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
     claimedBy.set(key, where)
     const slug = slugForEntity(entity)
     const path = pathSegs.join('/')
-    placements.set(key, { entity, path, slug })
-    return { kind: 'ref', name: slug, $entityId: key }
+    placements.set(key, { entity, path, slug, ...said })
+    return { kind: 'ref', name: slug, $entityId: key, ...said }
+  }
+
+  // The records one path names — a file, or a pattern's matches — placed where the entry sits.
+  const placePath = (raw, pathSegs, where, said = null) => {
+    const pattern = typeof raw === 'string' ? raw.trim() : ''
+    if (!pattern) {
+      errors.push(`${file}: ${where} ${said ? 'has an empty `path:`' : 'is an empty string'}.`)
+      return []
+    }
+    if (!isPattern(pattern)) {
+      const hit = byRelPath.get(pattern)
+      if (!hit) {
+        errors.push(
+          `${file}: ${where} names "${pattern}", which is not in ${dir}/. ` +
+            `A path is relative to ${dir}/, extension included.`
+        )
+        return []
+      }
+      const leaf = place(hit, pathSegs, where, said)
+      return leaf ? [leaf] : []
+    }
+    // ⛔ A PATTERN MATCHING NOTHING IS AN ERROR. `artcle/*.md` is the old
+    // empty-branch defect respelled, and it produced a real, reachable, empty
+    // path with no warning.
+    const matches = [...byRelPath.entries()]
+      .filter(([rel]) => matchEntityPattern(pattern, rel))
+      .map(([, e]) => e)
+    if (matches.length === 0) {
+      errors.push(
+        `${file}: ${where} pattern "${pattern}" matches no record in ${dir}/. ` +
+          `Check the schema folder name and the extension.`
+      )
+      return []
+    }
+    // Matches sort alphanumerically by filename, numeric-aware — so `1-`, `2-`,
+    // `10-` order as written rather than as strings, and `2025-…` precedes
+    // `2026-…`. Ordering only: the number never leaves the name.
+    matches.sort((a, b) => compareByNumericPrefix(a.slug, b.slug))
+    return matches.map((e) => place(e, pathSegs, where, said)).filter(Boolean)
+  }
+
+  // An entry's `tags` and `label` — text, as YAML may type a tag or a label a number
+  // (`2024`). Tags keep the order written; an empty one is dropped. Null when one is
+  // not text (said).
+  const saidOf = (entry, where) => {
+    const said = {}
+    if (entry.tags !== undefined && entry.tags !== null) {
+      const tags = []
+      for (const tag of Array.isArray(entry.tags) ? entry.tags : [entry.tags]) {
+        if (typeof tag !== 'string' && typeof tag !== 'number') {
+          errors.push(`${file}: ${where} has a tag that is not text: ${JSON.stringify(tag)}. Write each tag as a word.`)
+          return null
+        }
+        const text = String(tag).trim()
+        if (text) tags.push(text)
+      }
+      if (tags.length) said.tags = tags
+    }
+    if (entry.label !== undefined && entry.label !== null) {
+      if (typeof entry.label !== 'string' && typeof entry.label !== 'number') {
+        errors.push(`${file}: ${where} has a \`label:\` that is not text. A label is the entry's display text.`)
+        return null
+      }
+      const label = String(entry.label).trim()
+      if (label) said.label = label
+    }
+    return said
   }
 
   const resolveEntry = (entry, pathSegs, index, trail) => {
     const where = `entry ${trail}[${index}]`
 
     if (typeof entry === 'string') {
-      const pattern = entry.trim()
       // ⛔ A PATH AT THE TOP LEVEL SELECTED RECORDS until 2026-09-21 — it was how a
       // file became one. Every file in the directory is a record now, so the line
       // would claim to choose while choosing nothing: refused, with the reason.
       if (pathSegs.length === 0) {
         errors.push(
-          `${file}: ${where} ("${pattern}") lists records at the top level. Every file in ` +
-            `${dir}/ is a record already — ${file} only sorts records into folders. ` +
+          `${file}: ${where} ("${entry.trim()}") lists records at the top level. Every file in ` +
+            `${dir}/ is a record already — ${file} only sorts records into folders, and says ` +
+            `what a folder knows about a record (\`tags:\`, \`label:\`). ` +
             `Remove the entry, or put it under a \`folder:\`.`
         )
         return []
       }
-      if (!pattern) {
-        errors.push(`${file}: ${where} is an empty string.`)
-        return []
-      }
-      if (!isPattern(pattern)) {
-        const hit = byRelPath.get(pattern)
-        if (!hit) {
-          errors.push(
-            `${file}: ${where} names "${pattern}", which is not in ${dir}/. ` +
-              `A path is relative to ${dir}/, extension included.`
-          )
-          return []
-        }
-        const leaf = place(hit, pathSegs, where)
-        return leaf ? [leaf] : []
-      }
-      // ⛔ A PATTERN MATCHING NOTHING IS AN ERROR. `artcle/*.md` is the old
-      // empty-branch defect respelled, and it produced a real, reachable, empty
-      // path with no warning.
-      const matches = [...byRelPath.entries()]
-        .filter(([rel]) => matchEntityPattern(pattern, rel))
-        .map(([, e]) => e)
-      if (matches.length === 0) {
-        errors.push(
-          `${file}: ${where} pattern "${pattern}" matches no record in ${dir}/. ` +
-            `Check the schema folder name and the extension.`
-        )
-        return []
-      }
-      // Matches sort alphanumerically by filename, numeric-aware — so `1-`, `2-`,
-      // `10-` order as written rather than as strings, and `2025-…` precedes
-      // `2026-…`. Ordering only: the number never leaves the name.
-      matches.sort((a, b) => compareByNumericPrefix(a.slug, b.slug))
-      return matches.map((e) => place(e, pathSegs, where)).filter(Boolean)
+      return placePath(entry, pathSegs, where)
     }
 
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -261,6 +311,30 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
         `${file}: ${where} is neither ${pathSegs.length ? 'a path nor ' : ''}a \`folder:\` entry.`
       )
       return []
+    }
+
+    // ⭐ A RECORD'S ENTRY WITH WHAT THE FOLDER SAYS ABOUT IT — `{ path, tags?, label? }`.
+    if (entry.path !== undefined) {
+      const extra = Object.keys(entry).filter((k) => !['path', 'tags', 'label'].includes(k))
+      if (extra.length) {
+        errors.push(
+          `${file}: ${where} is a record's entry (\`path:\`), which takes \`tags:\` and \`label:\` — ` +
+            `not ${extra.map((k) => `\`${k}:\``).join(', ')}.` +
+            (extra.includes('folder') || extra.includes('records') ? ' A folder is its own entry, `folder:`.' : '')
+        )
+        return []
+      }
+      const said = saidOf(entry, where)
+      if (!said) return []
+      if (pathSegs.length === 0 && !said.tags && !said.label) {
+        errors.push(
+          `${file}: ${where} ("${String(entry.path).trim()}") lists a record at the top level and says ` +
+            `nothing about it. Every file in ${dir}/ sits at the top already — give it \`tags:\` or a ` +
+            `\`label:\`, or remove the entry.`
+        )
+        return []
+      }
+      return placePath(entry.path, pathSegs, where, said)
     }
 
     if (entry.folder !== undefined) {
@@ -298,6 +372,13 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       folderAt.set(at, where)
       const branch = { kind: 'branch', name: segment }
       if (entry.label !== undefined && entry.label !== null) branch.label = String(entry.label)
+      // A folder takes `tags:` as a record's entry does — kept, sent and pulled back, though
+      // no question answers a folder.
+      if (entry.tags !== undefined && entry.tags !== null) {
+        const said = saidOf({ tags: entry.tags }, where)
+        if (!said) return []
+        if (said.tags) branch.tags = said.tags
+      }
       const kids = Array.isArray(entry.records) ? entry.records : []
       if (kids.length === 0) {
         warnings.push(
@@ -328,8 +409,8 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
     errors.push(
       `${file}: ${where} has no recognized kind. ` +
         (pathSegs.length
-          ? `Inside a folder, a path names records; anything else says \`folder:\`.`
-          : `An entry is a \`folder:\` — its \`records:\` are paths under ${dir}/.`)
+          ? `Inside a folder, a path names records — or \`path:\` with its \`tags:\` and \`label:\`; anything else says \`folder:\`.`
+          : `An entry is a \`folder:\` — its \`records:\` are paths under ${dir}/ — or a record's \`path:\` with its \`tags:\` or \`label:\`.`)
     )
     return []
   }

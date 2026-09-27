@@ -729,8 +729,13 @@ function placeProducedRecords(nodes, producedBy) {
       out.push({ ...node, $children: placeProducedRecords(node.$children, producedBy) })
       continue
     }
+    // What the folder says about the record — its entry's `tags` and `label` — goes with
+    // every record the file produced.
+    const said = {}
+    if (node?.tags) said.tags = node.tags
+    if (node?.label !== undefined) said.label = node.label
     for (const r of producedBy.get(node?.$entityId) || []) {
-      out.push({ kind: 'ref', name: r.slug, $entityId: r.id })
+      out.push({ kind: 'ref', name: r.slug, $entityId: r.id, ...said })
     }
   }
   return out
