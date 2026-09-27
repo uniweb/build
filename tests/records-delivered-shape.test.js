@@ -200,6 +200,30 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     expect(await names({ sort: '-details.pages' })).toEqual(['emma', 'dracula', 'frankenstein'])
   })
 
+  // ⭐ A query named for a data key holds records of the key's type (ruled 2026-09-25 [Diego]): a push
+  // sends them as that type, and since 2026-09-27 the static build delivers them as that type too.
+  it('⭐ a query named for a data key is delivered as the key\'s type — its record\'s file as stored', async () => {
+    site('articles: {}\n')
+    w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: '@/post/*' } }\n")
+    w('fdn/sections/Article/index.jsx', 'export default function Article() { return null }\n')
+    w('site/records/articles/hello.md', '---\ncard:\n  title: Hello\n---\n\nThe body.\n')
+    await compile({ articles: { schema: '@/articles' } })
+    expect(read('public/data/articles.json')[0]).toMatchObject({ $name: 'hello', title: 'Hello' })
+    const whole = read('public/data/articles/hello.json')
+    expect(whole.card).toEqual({ title: 'Hello' })
+    expect(textOf(whole.details.content)).toEqual(['The body.'])
+  })
+
+  it('CONTROL — a query that asked for its schema explicitly is not typed by a data key', async () => {
+    site('articles:\n  schema: "@/articles"\n')
+    w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: '@/post/*' } }\n")
+    w('fdn/sections/Article/index.jsx', 'export default function Article() { return null }\n')
+    w('site/records/articles/hello.md', '---\ntitle: Hello\n---\n\nThe body.\n')
+    await compile({ articles: { schema: '@/articles' } })
+    // compiled as its file holds it: no data schema has the name, and the author named one
+    expect(read('public/data/articles/hello.json')).toMatchObject({ $name: 'hello', title: 'Hello' })
+  })
+
   it('@std schemas resolve without a foundation of their own — from the build\'s copy', async () => {
     site('articles:\n  schema: "@std/article"\n')
     w('site/records/std/article/hi.md', '---\nbrief:\n  title: Hi\n---\n\nBody text.\n')

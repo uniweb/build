@@ -35,6 +35,7 @@ import { detectFoundationType, parseCatalogRef } from './foundation-ref.js'
 import { readRegisteredFoundation } from './registered-foundation.js'
 import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
+import { buildSchema } from '../schema.js'
 import { refuseQueryRoute, refuseLimit } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
@@ -451,6 +452,30 @@ function localFoundationSrcDir(siteRoot, siteYml) {
   } catch {
     return null // a declaration the resolver refuses is reported by the build that reads it
   }
+}
+
+/**
+ * A site's foundation's section types, each with its `data:` — what types a query named for a data
+ * key (`uwx/data-key-types.js`). Read from the foundation's SOURCE when it is local, as
+ * `resolveRecordSchemas` reads its data schemas, so `pnpm dev` without a built foundation types a
+ * query as a production build does; else from its built or registered `schema.json`
+ * (`foundationSchemaJson`). Null when there is neither.
+ *
+ * @param {string} siteRoot
+ * @param {object} [siteYml] - an already-read site.yml
+ * @returns {Promise<object|null>}
+ */
+export async function foundationSections(siteRoot, siteYml = null) {
+  const yml = siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
+  const srcDir = localFoundationSrcDir(siteRoot, yml)
+  if (srcDir) {
+    try {
+      return await buildSchema(srcDir)
+    } catch {
+      // a foundation whose source does not read is reported by the build that builds it
+    }
+  }
+  return foundationSchemaJson(siteRoot, yml)
 }
 
 /** The data schemas a site's foundation declares, or null when unresolvable. */

@@ -64,7 +64,8 @@ import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, folderTreeOrder } from './records-config.js'
 import { isDraftRecord } from './record-draft.js'
-import { resolveRecordSchemas } from './queries-config.js'
+import { resolveRecordSchemas, resolveQueriesConfig, foundationSections } from './queries-config.js'
+import { dataKeyTypes } from '../uwx/data-key-types.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { collectNestedRefs } from '@uniweb/schemas/format'
@@ -1233,7 +1234,46 @@ async function querySchemas(siteDir, queriesConfig) {
         `their files hold them rather than as a component receives them: ${message}`
     )
   }
+  await typeByDataKey(siteDir, queriesConfig, schemas)
   return schemas
+}
+
+/**
+ * ⭐ A QUERY NAMED FOR A DATA KEY HOLDS RECORDS OF THE KEY'S TYPE (ruled 2026-09-25 [Diego],
+ * `uwx/data-key-types.js`). `articles:` with no `schema:` names `@/articles`; when no data schema
+ * has that name while the foundation's section types declare `data: { articles: '@/post' }`, its
+ * records are `@/post` records — a push sends them as such, and they are delivered as such here,
+ * where they still live and are keyed by the name (`records/articles/`). Never for a schema the
+ * query asked for explicitly: that one is the author's, and does not resolve. ⛔ Until 2026-09-27
+ * this lane compiled them as if they had no data schema, while a push typed them.
+ *
+ * @param {string} siteDir
+ * @param {Object} queriesConfig
+ * @param {Object} schemas - resolved data schemas by ref; a typed query's ref is added to it
+ */
+async function typeByDataKey(siteDir, queriesConfig, schemas) {
+  const untyped = Object.entries(queriesConfig).filter(
+    ([name, c]) => c && typeof c === 'object' && c.url === undefined && c.schema === `@/${name}` && !schemas[c.schema]
+  )
+  if (untyped.length === 0) return
+  // `config.queries` carries no trace of whether its author wrote the schema; the declarations do.
+  let declarations = {}
+  try {
+    declarations = (await resolveQueriesConfig(siteDir)).declarations || {}
+  } catch {
+    // a declaration the build refuses is reported where the build reads it
+  }
+  const pending = untyped.filter(([name]) => declarations[name]?.schemaExplicit !== true)
+  if (pending.length === 0) return
+  const keyTypes = dataKeyTypes(await foundationSections(siteDir))
+  const wanted = new Map()
+  for (const [name, c] of pending) {
+    const type = keyTypes.get(name)
+    if (type) wanted.set(c.schema, type)
+  }
+  if (wanted.size === 0) return
+  const { schemas: types } = await resolveRecordSchemas(siteDir, wanted.values())
+  for (const [ref, type] of wanted) if (types[type]) schemas[ref] = types[type]
 }
 
 /**
