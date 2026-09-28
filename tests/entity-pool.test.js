@@ -10,6 +10,7 @@ import {
   poolPathReadings,
   resolveRecordsDir,
 } from '../src/site/entity-pool.js'
+import { readEntityFile } from '../src/uwx/entity-source.js'
 
 let ROOT
 const w = (rel, body = '---\ntitle: X\n---\n\nBody.\n') => {
@@ -209,5 +210,28 @@ describe('where the records live — `site.yml::paths.records`', () => {
     w('entities/person/ada.md')
     const pool = await readEntityPool(ROOT)
     expect(pool.entities.map((e) => e.id)).toEqual(['person/ada'])
+  })
+})
+
+describe('a record is named by its file, without the extension however it is written', () => {
+  // Until 2026-09-28 the extension was lowercased to be compared and then cut as an exact
+  // suffix, so `Post.MD` was the record "Post.MD" and a camera's `SCAN.PDF` the file record "SCAN.PDF".
+  it('in the pool, for a record and for a file record', async () => {
+    w('records/note/Post.MD')
+    w('records/note/plain.md')
+    w('records/uniweb/file/SCAN.PDF', '%PDF-1.4\n')
+    const { entities, errors } = await readEntityPool(ROOT)
+    expect(errors).toEqual([])
+    expect(entities.map((e) => [e.id, e.ext])).toEqual([
+      ['note/Post', '.md'],
+      ['note/plain', '.md'],
+      ['uniweb/file/SCAN', '.pdf'],
+    ])
+  })
+
+  it('where a push reads the file, the same name', async () => {
+    w('records/note/Post.MD')
+    const [record] = await readEntityFile(join(ROOT, 'records/note/Post.MD'))
+    expect(record.slug).toBe('Post')
   })
 })

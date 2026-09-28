@@ -73,7 +73,8 @@ export async function readEntityFile(filepath) {
 async function readOneFile(filepath) {
   const ext = extname(filepath).toLowerCase()
   const format = formatFor(ext)
-  const slugFromName = basename(filepath, ext)
+  // Cut as written, as the pool names it (`site/entity-pool.js`) — `ext` is lowercased.
+  const slugFromName = basename(filepath, extname(filepath))
   const raw = await readFile(filepath, 'utf-8')
 
   if (format === 'md') {

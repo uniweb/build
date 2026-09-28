@@ -327,7 +327,9 @@ export async function readEntityPool(siteRoot, opts = {}) {
       // DATE (`2026-03-…`), and the two are indistinguishable by shape, so
       // consuming one into the record's name mangles the other. A number is read
       // to SORT by (`compareByNumericPrefix`) and never to rename.
-      const slug = basename(e.name, ext)
+      // The extension is cut as written: `ext` is lowercased to be compared, and `basename` cuts
+      // only an exact suffix — so `Scan.PDF` was the record "Scan.PDF" until 2026-09-28.
+      const slug = basename(e.name, extname(e.name))
       if (fileRecord) {
         const first = fileStems.get(slug)
         if (first) {
