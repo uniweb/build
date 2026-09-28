@@ -1037,7 +1037,7 @@ function externalSource(d) {
   return source
 }
 
-function queriesNested(declarations, uuids = null, scope = null, keyTyped = null, queryFields = null) {
+function queriesNested(declarations, uuids = null, scope = null, keyTyped = null, queryFields = null, schemaless = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
@@ -1058,7 +1058,14 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     // names that type — the data schema its records are sent as (`data-key-types.js`).
     const typed = (!d.schemaExplicit && keyTyped?.get(d.schema)) || null
     const schema = typed || d.schema
-    setIf(data, 'schema', resolveSelfScope(schema, scope))
+    // ⛔ NO MODEL FOR A QUERY WHOSE RECORDS RESOLVED NONE (`schemaless`, decided by the records
+    // lane — `records.js`). Its name-defaulted `schema` names a Model nothing declares, its records
+    // are not pushed, and its compiled data travels as static files — so the declaration goes up
+    // with no `schema`. ⛔ Until 2026-09-28 it named that Model anyway (`videos` → `@std/videos`),
+    // and a store that checks a query's `schema` against the site's declared types refused the
+    // whole content push for it. An explicit `schema:` that does not resolve never reaches here:
+    // the records lane refuses it.
+    if (!schemaless?.has(name)) setIf(data, 'schema', resolveSelfScope(schema, scope))
     // ⭐ …AND SAYS SO, so a pull can tell the author's form (`team:`, no schema) from an explicit
     // one — sent only where the deployment's `queries` Section declares the key (`GET /dev/config`
     // → `siteContent.queryFields`), since one that does not refuses a push carrying it.
@@ -1377,6 +1384,8 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  *        resolves into (`@/x` → `@scope/x`): the site's foundation's. Defaults to
  *        `siteSelfScope`; pass the scope the records are emitted with. With none
  *        known, `@/x` ships as written.
+ * @param {string[]} [opts.schemaless] - the queries whose records resolved no data schema
+ *        (the records lane's `schemaless`): their declarations name no `schema`.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $schema, info, settings?, pages, layout_sections, extensions,
  *        queries, services?, secrets? }`
@@ -1688,7 +1697,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // ⚠️ `queriesNested` keeps its name. §2's rule: rename what an author or a
   // consumer sees, leave the identifier alone.
   const scope = opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot)
-  doc.queries = queriesNested(colConfig.declarations, opts.queryUuids, scope, opts.keyTyped, opts.queryFields)
+  doc.queries = queriesNested(
+    colConfig.declarations,
+    opts.queryUuids,
+    scope,
+    opts.keyTyped,
+    opts.queryFields,
+    Array.isArray(opts.schemaless) ? new Set(opts.schemaless) : null
+  )
   // Emitted ONLY when the file declares the key — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.

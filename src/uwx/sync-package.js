@@ -359,6 +359,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         // …and the same data schema, where a name stands for the type of its data key
         // (`@/team` → `@/member`, `data-key-types.js`): decided once, by the records.
         keyTyped: col.keyTyped,
+        // …and which queries resolved NO data schema — their declarations go up naming none.
+        schemaless: col.schemaless.map((q) => q.name),
         // …and whether this deployment takes the key that says so (`siteContent.queryFields`) —
         // and the page and `settings` keys that carry Open Graph texts per language.
         ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),

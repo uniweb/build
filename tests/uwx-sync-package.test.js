@@ -168,6 +168,25 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(pkg.records.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
   })
 
+  it('⛔ a query whose records resolved no schema goes up naming NO Model', async () => {
+    // Its name-defaulted `schema` names a Model nothing declares, and a store that checks a
+    // query's `schema` against the site's declared types refused the whole content push for
+    // it (`videos` → `@std/videos`, 2026-09-28). Its records are not pushed; its data travels
+    // as static files; its declaration keeps everything but the Model.
+    w('queries.yml', 'articles:\n  schema: "@/article"\nnotes:\n  sort: title\n')
+    w('records/notes/first.md', '---\ntitle: First\n---\nNote body\n')
+    const pkg = await emitSyncPackages(SITE)
+    expect(pkg.schemaless.map((q) => q.name)).toEqual(['notes'])
+
+    const body = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
+    const notes = body.queries.find((q) => q.name === 'notes')
+    expect(notes).not.toHaveProperty('schema')
+    expect(notes.sort).toBe('title')
+    // CONTROL — a query that resolves its Model still names it (unqualified here: this
+    // fixture's foundation states no name in its source, so `@/x` ships as written).
+    expect(body.queries.find((q) => q.name === 'articles').schema).toBe('@/article')
+  })
+
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {
     // Articles with embedded $uuid → the folder references them by `entry.schema` (minted form).
     w('records/article/hello.md', '---\n$uuid: 0192-hello\ntitle: Hello\ndate: 2026-01-01\n---\nBody\n')

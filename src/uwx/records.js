@@ -1196,9 +1196,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     refusals.push(...mappedOut.refusals)
   }
 
-  // Queries whose schema resolved to nothing — not pushed as entities. The composite
-  // deploy delivers these statically (the "data ball") instead, so the caller can
-  // route them there.
+  // Queries whose schema resolved to nothing — not pushed as entities. Their compiled
+  // data is delivered as static files instead (`site/schemaless-data.js`), so the caller
+  // can route it there; and their declarations are sent naming no Model
+  // (`site.js::queriesNested`).
   //
   // ⛔ Deliberately NOT a `warnings` string. This is a product decision the author
   // is making — entities or static files — and it needs to be reported at a
