@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { validateDataInputs } from '../src/validate-data.js'
+import { readEntityFile } from '../src/uwx/entity-source.js'
 import { queryDataUrl } from '@uniweb/core'
 
 let root
@@ -56,6 +57,9 @@ beforeAll(async () => {
   write(join(siteRoot, 'records', 'post', 'hello.md'), '---\ncard:\n  title: Hello\n---\n\nThe body.\n')
   write(join(siteRoot, 'records', 'post', 'untitled.md'), '---\ncard: {}\n---\n\nThe body.\n')
 
+  // A file record: its bytes are its value (a PDF here), never data to parse.
+  write(join(siteRoot, 'records', 'uniweb', 'file', 'brochure.pdf'), '%PDF-1.4\n1 0 obj\n')
+
   report = await validateDataInputs({ siteRoot, foundationPath })
 })
 
@@ -82,6 +86,14 @@ describe('validateDataInputs — every record file', () => {
 
   it('does not defer a sections-form schema', () => {
     expect(report.deferred).toEqual([])
+  })
+
+  // Measured 2026-09-28: every push of a site holding a PDF file record warned
+  // "records/uniweb/file/brochure.pdf — directives end mark is expected".
+  it('never reads a file record as data', async () => {
+    expect(report.setupErrors.map((e) => e.file)).toEqual([])
+    // CONTROL — the same bytes, read as a record file, are the error it used to report.
+    await expect(readEntityFile(join(siteRoot, 'records', 'uniweb', 'file', 'brochure.pdf'))).rejects.toThrow(/directives end mark/)
   })
 
   it('counts each record once', () => {

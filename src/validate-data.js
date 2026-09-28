@@ -365,6 +365,14 @@ async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes = n
     names.set(ref, known)
     if (ref !== folderRef) names.set(folderRef, known)
     for (const pooled of entities) {
+      // ⭐ A FILE RECORD'S FILE IS ITS VALUE, never its data (`site/file-records.js`): nothing in it
+      // is read, so there is nothing to check — only its name, which a reference may give.
+      // ⛔ Until 2026-09-28 its bytes were parsed as YAML here, and every push of a site holding a
+      // PDF warned "directives end mark is expected".
+      if (pooled.fileRecord) {
+        known.add(String(pooled.slug))
+        continue
+      }
       let records
       try {
         records = await readEntityFile(pooled.absPath)
