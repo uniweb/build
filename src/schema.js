@@ -17,7 +17,7 @@ import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describeChildren, describeVisuals } from '@uniweb/schemas/component'
-import { SECTION_PARAMS } from '@uniweb/schemas/section'
+import { SECTION_PARAMS, SECTION_KEYS } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -973,6 +973,15 @@ export function reportPlacementDeclarations(components) {
           (param === 'grid'
             ? ` To offer layouts for the child sections, declare children: { grid: [...] } and lay them out with kit's ChildGrid.`
             : '')
+      )
+    }
+    // …and a key of a section's frontmatter that is not a param at all (`SECTION_KEYS`): the build
+    // takes it out before the params are stored, so a param of that name is never given one.
+    for (const [key, { is }] of Object.entries(SECTION_KEYS)) {
+      if (!Object.hasOwn(params, key)) continue
+      console.warn(
+        `Warning: ${name} (meta.js): params declares "${key}", a key a section's frontmatter keeps for ` +
+          `itself — ${is} — so the component is never given it (@uniweb/schemas/section). Remove it from params:.`
       )
     }
   }

@@ -23,6 +23,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { resolveQueriesConfig, toConfigQueries } from './queries-config.js'
+import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { readLayoutFolder, DEFAULT_LAYOUT, layoutAreaRoute } from './layout-folder.js'
@@ -1016,9 +1017,14 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     console.warn(`[content-collector] ${err.message}`)
   }
 
-  // `query`, `fetch` and `data` are never params: `query:` / `fetch:` declare the
-  // section's own data, and a leftover `data:` is refused (`declaredFetch`).
-  const { type, hidden, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
+  // ⭐ WHAT IS NOT A PARAM is `SECTION_KEYS` (`@uniweb/schemas/section`) — the list the build's
+  // warning on a component's `params:` reads too — and `fetch`, one of the section's settings,
+  // kept on the section as a field of its own. `query:` / `fetch:` declare the section's own
+  // data, and a leftover `data:` is refused (`declaredFetch`).
+  const { type, hidden, preset, input, props, fetch, query, data, id: frontmatterId } = frontMatter
+  const params = Object.fromEntries(
+    Object.entries(frontMatter).filter(([key]) => !isSectionKey(key) && key !== 'fetch')
+  )
   // ⭐ `hidden: true` — a draft section, the page's meaning one level down: left out of a
   // published build, kept by `uniweb dev`, and synced as the section's own `hidden`
   // [Diego, 2026-09-28]. ⛔ Until then it was an ordinary param: the component received it

@@ -5,6 +5,7 @@
  */
 
 import { reportPlacementDeclarations } from '../src/schema.js'
+import { SECTION_KEYS } from '@uniweb/schemas/section'
 
 let warnings
 beforeEach(() => {
@@ -20,6 +21,14 @@ describe('a component param named after a section setting', () => {
     })
     const text = warnings.join('\n')
     for (const name of ['theme', 'background', 'vars', 'grid']) expect(text).toMatch(new RegExp(`params declares "${name}", a setting of the section`))
+    expect(text).not.toMatch(/params declares "layout"/)
+  })
+
+  it('and for a key a section keeps for itself — every one of SECTION_KEYS', () => {
+    const names = Object.keys(SECTION_KEYS)
+    reportPlacementDeclarations({ Hero: { name: 'Hero', params: Object.fromEntries([...names, 'layout'].map((n) => [n, {}])) } })
+    const text = warnings.join('\n')
+    for (const name of names) expect(text).toMatch(new RegExp(`params declares "${name}", a key a section's frontmatter keeps for itself`))
     expect(text).not.toMatch(/params declares "layout"/)
   })
 
