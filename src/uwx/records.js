@@ -68,6 +68,7 @@ import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTrans
 import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
 import { LINK_MODEL, linkRecordRefusal } from './link-records.js'
+import { FILE_MODEL } from './file-records.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 // The record's OWN keys — identity and transport, never a field of any section, never
@@ -912,6 +913,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       declarations: new Map(),
       keyTyped: new Map(),
       links: [],
+      files: [],
     }
   }
 
@@ -1113,8 +1115,26 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     producedBy.set(pooled.id, produced)
   }
 
+  // ⭐ A FILE RECORD IS A FOLDER ENTRY OF KIND `file`, NEVER AN ENTITY (`@uniweb/file`, 2026-09-28 —
+  // `./file-records.js`). The file itself is the record; nothing in it is read. Its identity is the
+  // uuid this backend holds its entry by, banked per backend by the file's path (`sync.json` `files`).
+  const files = []
+  const fileMap = opts.backend ? readBackendState(siteRoot, opts.backend).files || {} : {}
+  for (const pooled of poolBySchema.get(FILE_MODEL) || []) {
+    const id = [...pooled.dirs, pooled.slug].join('/')
+    files.push({
+      id,
+      slug: pooled.slug,
+      name: pooled.file,
+      absPath: pooled.absPath,
+      poolPath: pooled.poolPath,
+      uuid: fileMap[pooled.poolPath] ?? null,
+    })
+    producedBy.set(pooled.id, [{ id, slug: pooled.slug }])
+  }
+
   for (const [schema, poolEntities] of poolBySchema) {
-    if (schema === LINK_MODEL) continue
+    if (schema === LINK_MODEL || schema === FILE_MODEL) continue
     const label = poolEntities[0].dirs.join('/')
     const modelName = modelFor(schema, `${pool.dir}/${label}/`)
     const declaration = (await declarationFor(modelName)) || (await typedFor(schema))
@@ -1253,7 +1273,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     const schema = decl.schema || decl.model
     const hasRecords = poolBySchema.has(schema)
     // A query over link records names a system Model, which resolves whatever the foundation holds.
-    const resolved = schema === LINK_MODEL || (hasRecords
+    const resolved = schema === LINK_MODEL || schema === FILE_MODEL || (hasRecords
       ? !unresolved.has(schema)
       : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema))))
     if (!resolved) {
@@ -1292,7 +1312,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     colConfig,
     folder: { ...folder, nodes },
     recordsDirExists: pool.exists,
-    sendFolder: sendsFolder(pool, entities, links),
+    sendFolder: sendsFolder(pool, entities, [...links, ...files]),
     // Each entity's declaration, by its Model — what walks a record's lists
     // (`record-items.js`).
     declarations: new Map(readSchemas.map(({ declaration }) => [declaration.name, declaration])),
@@ -1301,6 +1321,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     keyTyped,
     // The link records, sent as folder entries rather than entities (`./link-records.js`).
     links,
+    // The file records, likewise (`./file-records.js`).
+    files,
   }
 }
 

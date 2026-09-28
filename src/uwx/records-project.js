@@ -51,6 +51,7 @@ import { parseCatalogRef } from '../site/foundation-ref.js'
 import { renderEntityDocument } from './backfill.js'
 import { labelForFile } from '../site/entry-label.js'
 import { LINK_MODEL, writeLinkRecords } from './link-records.js'
+import { FILE_MODEL, filesToPull } from './file-records.js'
 import { parseBibtex } from '@citestyle/bibtex'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
@@ -167,6 +168,9 @@ export function indexFolder(folderDoc) {
         // ⭐ A link entry is a record of `@uniweb/link`, its identity the item's own
         // (`./link-records.js`).
         byUuid.set(node.$uuid, { folderPath, slug: node.name, schema: LINK_MODEL })
+      } else if (node?.kind === 'file' && typeof node.$uuid === 'string' && node.$uuid) {
+        // …and a file entry one of `@uniweb/file` (`./file-records.js`).
+        byUuid.set(node.$uuid, { folderPath, slug: node.name, schema: FILE_MODEL })
       }
     }
   }
@@ -540,8 +544,9 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
         out.push(entry)
         continue
       }
-      // A link entry is its own record — its identity is the item's (`./link-records.js`).
-      const uuid = node.kind === 'link' ? node.$uuid : node.entry?.entity ?? node.entry
+      // A link or file entry is its own record — its identity is the item's (`./link-records.js`,
+      // `./file-records.js`).
+      const uuid = node.kind === 'link' || node.kind === 'file' ? node.$uuid : node.entry?.entity ?? node.entry
       const rel = typeof uuid === 'string' ? poolPathByUuid.get(uuid) : null
       // ⭐ What the folder says about the record — its entry's `tags` and `label` — comes
       // back as the entry `{ path, tags?, label? }` (ruled 2026-09-27 [Diego]).
@@ -788,6 +793,16 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   updated.push(...linked.updated)
   unchanged.push(...linked.unchanged)
   warnings.push(...linked.warnings)
+  // ⭐ AND ITS FILE ENTRIES (`./file-records.js`): where each file lands in `records/uniweb/file/`,
+  // placed like any record — the bytes are the CLI's to fetch (`fileDownloads`), as it fetches media.
+  const pulledFiles = filesToPull({
+    folderDoc,
+    recordsRoot,
+    fileMap: backendState.files || {},
+    assetMap: backendState.assets || {},
+  })
+  for (const [theirs, rel] of pulledFiles.pathByUuid) poolPathByUuid.set(theirs, rel)
+  warnings.push(...pulledFiles.warnings)
 
   const records = folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
   warnings.push(...records.warnings)
@@ -803,6 +818,13 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   if (opts.backend && Object.keys(learned).length) {
     updateBackendMap(siteRoot, opts.backend, 'records', learned)
   }
+  if (opts.backend && Object.keys(pulledFiles.learned).length) {
+    updateBackendMap(siteRoot, opts.backend, 'files', pulledFiles.learned)
+  }
 
-  return { updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status, recordsFile: records.file }
+  return {
+    updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status, recordsFile: records.file,
+    // The file records' bytes to fetch — `{ url, path, poolPath }` each (`./file-records.js`).
+    fileDownloads: pulledFiles.downloads,
+  }
 }

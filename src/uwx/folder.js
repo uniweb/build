@@ -52,6 +52,7 @@
 
 import { labelOnWire } from '../site/entry-label.js'
 import { linkLeaf } from './link-records.js'
+import { fileLeaf } from './file-records.js'
 
 export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'
@@ -94,7 +95,7 @@ function refLeaf(entity) {
  * @param {Map<string, object>} byEntityId - record entities, keyed by pool id
  * @param {string[]} missing - collects ids that resolved to no entity
  */
-function contentsFromNodes(nodes, byEntityId, missing, sourceLocale, byLinkId = new Map()) {
+function contentsFromNodes(nodes, byEntityId, missing, sourceLocale, byLinkId = new Map(), byFileId = new Map()) {
   const out = []
   for (const node of nodes || []) {
     if (node.kind === 'branch') {
@@ -105,7 +106,7 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale, byLinkId = 
       // (`entry-label.js`).
       if (node.label !== undefined) branch.label = labelOnWire(node.label, sourceLocale)
       if (Array.isArray(node.tags) && node.tags.length) branch.tags = [...node.tags]
-      branch.$children = contentsFromNodes(node.$children, byEntityId, missing, sourceLocale, byLinkId)
+      branch.$children = contentsFromNodes(node.$children, byEntityId, missing, sourceLocale, byLinkId, byFileId)
       out.push(branch)
       continue
     }
@@ -114,6 +115,12 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale, byLinkId = 
     const link = byLinkId.get(node.$entityId)
     if (link) {
       out.push(linkLeaf(link, node, sourceLocale))
+      continue
+    }
+    // …and so is a file record, its value an asset (`./file-records.js`).
+    const file = byFileId.get(node.$entityId)
+    if (file) {
+      out.push(fileLeaf(file, node, sourceLocale))
       continue
     }
     const entity = byEntityId.get(node.$entityId)
@@ -247,6 +254,8 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  *        send-only-changed filtering), each `{ id, uuid, slug, model }`
  * @param {object[]} [params.links] - the link records, each `{ id, slug, url, uuid }` — sent as
  *        entries of kind `link`, never as entities (`./link-records.js`)
+ * @param {object[]} [params.files] - the file records, each `{ id, slug, uuid, value }` — sent as
+ *        entries of kind `file`, their `value` an asset (`./file-records.js`)
  * @param {Array} params.folderNodes - the placed records: `folder.yml`'s sub-folders,
  *        then every record at the top
  * @param {boolean} [params.declared] - whether the records DIRECTORY exists. See below.
@@ -257,7 +266,7 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  *        keyed under on the wire
  * @returns {{ id, uuid, model, file, document, warnings }|null}
  */
-export function buildFolderEntity({ recordEntities, links = [], folderNodes = [], declared, itemUuids = null, sourceLocale = 'en' }) {
+export function buildFolderEntity({ recordEntities, links = [], files = [], folderNodes = [], declared, itemUuids = null, sourceLocale = 'en' }) {
   // ⛔ `missing` AND `empty` ARE DIFFERENT, AND THE ASYMMETRY IS DELIBERATE.
   //
   //   no records directory  → null. INERT: nothing is sent, and the backend's
@@ -276,9 +285,10 @@ export function buildFolderEntity({ recordEntities, links = [], folderNodes = []
   const byEntityId = new Map()
   for (const e of recordEntities || []) byEntityId.set(e.id, e)
   const byLinkId = new Map((links || []).map((l) => [l.id, l]))
+  const byFileId = new Map((files || []).map((f) => [f.id, f]))
 
   const missing = []
-  const contents = contentsFromNodes(folderNodes, byEntityId, missing, sourceLocale, byLinkId)
+  const contents = contentsFromNodes(folderNodes, byEntityId, missing, sourceLocale, byLinkId, byFileId)
   // ⚠️ `id` IS THE RECORD'S PATH IN THE RECORDS DIRECTORY, NOT A FOLDER PATH — say
   // so, because the two read identically and a reader who takes it for a placement
   // concludes the emitter is dropping a branch it never had. *(Measured 2026-08-31:

@@ -48,7 +48,7 @@ const VERSION = 1
  * `recordItems` is keyed by a record's uuid here, each entry that record's list items
  * (`record-items.js`) — replaced whole, one record at a time.
  */
-const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems'])
+const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files'])
 
 const storePath = (siteDir) => join(siteDir, SYNC_STORE_FILE)
 

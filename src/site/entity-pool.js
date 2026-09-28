@@ -172,6 +172,16 @@ export function resolveRecordsDir(siteRoot, paths) {
 /** Source extensions a record file may have. Mirrors the sync-lane reader. */
 export const ENTITY_EXTENSIONS = new Set(['.md', '.yml', '.yaml', '.json', '.bib'])
 
+/**
+ * ⭐ WHERE THE FILE ITSELF IS THE RECORD — `<records>/uniweb/file/`, `@uniweb/file` (2026-09-28
+ * [Diego]). Any file placed there, of any type, is a record named by its stem, and nothing in it is
+ * read: a `.yml` there is a file to deliver, not a record's data. What the folder says about it — its
+ * label and tags — is its `folder.yml` entry.
+ */
+export const FILE_RECORD_DIRS = Object.freeze(['uniweb', 'file'])
+const isFileRecordDir = (dirs) =>
+  dirs.length === 2 && dirs[0] === FILE_RECORD_DIRS[0] && dirs[1] === FILE_RECORD_DIRS[1]
+
 const isHidden = (name) => name.startsWith('_') || name.startsWith('.')
 
 /**
@@ -267,6 +277,8 @@ export async function readEntityPool(siteRoot, opts = {}) {
 
   const entities = []
   const errors = []
+  // A file record is named by its stem, so two files of one stem cannot both be one.
+  const fileStems = new Map()
 
   const walk = async (dir, dirs) => {
     let listing
@@ -299,7 +311,8 @@ export async function readEntityPool(siteRoot, opts = {}) {
       // The folder's organization, not a record — see the header.
       if (dirs.length === 0 && e.name === FOLDER_YML) continue
       const ext = extname(e.name).toLowerCase()
-      if (!ENTITY_EXTENSIONS.has(ext)) continue
+      const fileRecord = isFileRecordDir(dirs)
+      if (!fileRecord && !ENTITY_EXTENSIONS.has(ext)) continue
       if (dirs.length === 0) {
         errors.push(
           `${rel}/${e.name} sits directly in \`${rel}/\`, which names no model. ` +
@@ -315,6 +328,17 @@ export async function readEntityPool(siteRoot, opts = {}) {
       // consuming one into the record's name mangles the other. A number is read
       // to SORT by (`compareByNumericPrefix`) and never to rename.
       const slug = basename(e.name, ext)
+      if (fileRecord) {
+        const first = fileStems.get(slug)
+        if (first) {
+          errors.push(
+            `${rel}/${dirs.join('/')}/${e.name}: a file record is named by its file, and ${first} is ` +
+              `named "${slug}" too — rename one of them. This one is not a record until then.`
+          )
+          continue
+        }
+        fileStems.set(slug, e.name)
+      }
       entities.push({
         id: [...dirs, slug].join('/'),
         schema: schemaForPoolDirs(dirs),
@@ -325,6 +349,7 @@ export async function readEntityPool(siteRoot, opts = {}) {
         poolPath: [...dirs, e.name].join('/'),
         absPath: full,
         ext,
+        ...(fileRecord ? { fileRecord: true } : {}),
       })
     }
   }

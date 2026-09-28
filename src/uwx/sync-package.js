@@ -22,6 +22,7 @@
 import { buildRecordEntities, entityContentHash } from './records.js'
 import { recordItemLists, hasListItems, stampRecordItems } from './record-items.js'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
+import { fileRecordUploads } from './file-records.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
@@ -314,10 +315,16 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
 
   // The folder rides over the FULL record set (before filtering) so its references
   // are complete — new records by `$ref`, already-minted ones by `entry: <uuid>`.
+  // ⭐ File records ride the folder as entries too, their value an asset: the push writes an upload
+  // key where each URL goes, uploads the files (`localFiles`), and its second emit swaps the keys for
+  // serve URLs and stamps the assets' identity beside them, as it does media (`./file-records.js`).
+  const { values: fileValues, uploads: localFiles } = await fileRecordUploads({ files: col.files || [], siteRoot })
+  const files = (col.files || []).map((f) => ({ ...f, value: fileValues.get(f.poolPath) }))
   const folder = buildFolderEntity({
     recordEntities: col.entities,
     // Link records ride the folder as entries of their own kind (`./link-records.js`).
     links: col.links || [],
+    files,
     ...(sourceLocale ? { sourceLocale } : {}),
     // ⭐ Every record in the directory, at the top of the folder or in the
     // sub-folder `folder.yml` places it in — and NOTHING when there is no folder to
@@ -451,6 +458,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // recognizes on pull by fingerprint (asset-map.js → `servedFingerprint`).
     if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds, siteDoc.info)
     for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite, assetIds)
+    // The folder too: a file entry's value names its asset by an upload key until here.
+    if (folder) rewriteEntityAssets(folder.document, assetRewrite, assetIds)
   }
   // Collect the site-root local refs the deploy must upload (`/images/x.png`).
   // Co-located refs (`./x`, `../x`) need the source `.md` location to resolve — the
@@ -566,7 +575,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     const referencedModels = [...collectReferencedModels(folder.document, new Set())]
     // `links` rides beside the index: the caller banks each link's uuid from the folder the
     // backend returns (`link-records.js::backfillLinkUuids`).
-    records = { ...emitLane(entities, exporter, exportedAt, referencedModels), index, links: col.links || [] }
+    records = { ...emitLane(entities, exporter, exportedAt, referencedModels), index, links: col.links || [], files: col.files || [] }
   }
 
   // --- site-content lane -------------------------------------------------------
@@ -613,6 +622,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     namesNew,
     refusals,
     schemaless: col.schemaless, localAssets, applied,
+    // The files a push uploads for its file records, each `{ ref, path, contentType }` — the file, and
+    // a PDF's preview. Uploaded through the media lane; `ref` is the key the second emit rewrites.
+    localFiles,
     // { stamped, unknown } when identity was applied; null when the caller passed
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed
     // before is the index-loss signature the backend refuses — the caller reports it.

@@ -71,6 +71,7 @@ import { parseFrontmatter } from '../utils/frontmatter.js'
 import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { collectNestedRefs } from '@uniweb/schemas/format'
 import { labelIn } from './entry-label.js'
+import { fileRecordValue, makeFilePreview } from './file-records.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -825,6 +826,8 @@ function warnDuplicateSlugs(items, queryName) {
 function readPooledRecords(pooled, config, siteDir, recordsRoot, basePath) {
   return Promise.all(
     pooled.map((e) => {
+      // ⭐ The file itself is the record (`file-records.js`) — nothing in it is read.
+      if (e.fileRecord) return processFileRecord(e, config, siteDir, recordsRoot, basePath)
       const dir = resolve(recordsRoot, ...e.dirs)
       const file = `${e.slug}${e.ext}`
       if (e.ext === '.bib') {
@@ -839,6 +842,18 @@ function readPooledRecords(pooled, config, siteDir, recordsRoot, basePath) {
       return processContentItem(dir, file, config, siteDir, basePath, recordsRoot)
     })
   )
+}
+
+/**
+ * A file record — `@uniweb/file` (`file-records.js`): the file published under `public/records/`
+ * as a record's co-located asset is (`publishRecordAsset`), a PDF's placeholder preview beside it,
+ * and the record delivered as `{ file: { url, name, mime, size, preview? } }`.
+ */
+async function processFileRecord(e, config, siteDir, recordsRoot, basePath) {
+  const { url, copied } = await publishRecordAsset(e.absPath, siteDir, recordsRoot, basePath)
+  const preview = (await makeFilePreview(e.absPath, `${copied}.preview.webp`)) ? `${url}.preview.webp` : undefined
+  const record = { slug: e.slug, file: fileRecordValue({ absPath: e.absPath, name: e.file, url, preview }) }
+  return deliverRecord(record, config, e.relPath)
 }
 
 /**

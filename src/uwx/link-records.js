@@ -59,6 +59,11 @@ export function linkRecordRefusal(record, where) {
     return `${where}: a link record holds its \`url\` and nothing else — not ${extra.map((k) => `\`${k}:\``).join(', ')}.`
   }
   if (typeof data.url !== 'string' || !data.url.trim()) return `${where}: a link record needs a \`url\`.`
+  // ⭐ ABSOLUTE — a scheme and `://` — as a backend holds a link's url (`format: url`, 2026-09-28): a
+  // relative path or a `mailto:` is refused there, so it is refused here, before anything is sent.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(data.url.trim())) {
+    return `${where}: a link's \`url\` is absolute — a scheme and \`://\`, like \`https://…\` — not "${data.url.trim()}".`
+  }
   return null
 }
 
