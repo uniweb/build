@@ -50,6 +50,8 @@
 // is keyed by the site's uuid on that backend, from `sync.json`). The framework
 // never holds a folder uuid.
 
+import { labelOnWire } from '../site/entry-label.js'
+
 export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'
 
@@ -97,9 +99,10 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
     if (node.kind === 'branch') {
       const branch = { kind: 'branch', name: node.name }
       // The display text is a LOCALIZED field on the wire — a `{ locale: value }`
-      // map, like every localized scalar this producer sends — keyed by the
-      // site's source locale.
-      if (node.label !== undefined) branch.label = { [sourceLocale]: String(node.label) }
+      // map, like every localized scalar this producer sends: every language the
+      // file gives, or the one text it gives as the site's source locale's
+      // (`entry-label.js`).
+      if (node.label !== undefined) branch.label = labelOnWire(node.label, sourceLocale)
       if (Array.isArray(node.tags) && node.tags.length) branch.tags = [...node.tags]
       branch.$children = contentsFromNodes(node.$children, byEntityId, missing, sourceLocale)
       out.push(branch)
@@ -114,7 +117,7 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
     // ⭐ What the folder says about the record (`records/folder.yml`, ruled 2026-09-27
     // [Diego]): its display text, localized as a branch's is, and its tags, in the order
     // written. A records service answers them beside the record as `$label` and `$tags`.
-    if (node.label !== undefined) leaf.label = { [sourceLocale]: String(node.label) }
+    if (node.label !== undefined) leaf.label = labelOnWire(node.label, sourceLocale)
     if (Array.isArray(node.tags) && node.tags.length) leaf.tags = [...node.tags]
     out.push(leaf)
   }

@@ -15,6 +15,7 @@ import yaml from 'js-yaml'
 import { readEntityPool } from '../src/site/entity-pool.js'
 import { readRecordsConfig, resolveFolder } from '../src/site/records-config.js'
 import { processQueries, writeQueryFiles } from '../src/site/query-processor.js'
+import { buildLocalizedRecords } from '../src/i18n/records.js'
 import { buildFolderEntity } from '../src/uwx/folder.js'
 import { folderToFolderYml } from '../src/uwx/records-project.js'
 import { evaluateQuery } from '@uniweb/core'
@@ -103,7 +104,10 @@ describe('folder.yml — a record\'s entry may say its tags and label', () => {
     w('records/team/ada.md')
     const nested = (line) => `- folder: team\n  records:\n    - path: team/ada.md\n      ${line}\n`
     expect((await folder(nested('tags: [{ a: 1 }]'))).errors.join('\n')).toMatch(/a tag that is not text/)
-    expect((await folder(nested('label: { en: Ada }'))).errors.join('\n')).toMatch(/`label:` that is not text/)
+    // ⭐ One text per language IS a label (2026-09-28); a list, or a language given no text, is not.
+    expect((await folder(nested('label: { en: Ada, fr: Ada }'))).errors).toEqual([])
+    expect((await folder(nested('label: [Ada]'))).errors.join('\n')).toMatch(/`label:` that is neither a text nor one text per language/)
+    expect((await folder(nested('label: { en: [Ada] }'))).errors.join('\n')).toMatch(/`label:` that gives `en` something that is not text/)
     expect((await folder(nested('records: []'))).errors.join('\n')).toMatch(/takes `tags:` and `label:` — not `records:`/)
   })
 
@@ -135,6 +139,45 @@ describe('the static lane answers them as `$tags` and `$label`', () => {
     // A query asks for them as for any other key, and they reach the component.
     const tagged = evaluateQuery(list, { where: { $tags: 'staff' } })
     expect(tagged.map((r) => [r.$name, r.$label])).toEqual([['ada', 'Ada Lovelace']])
+  })
+})
+
+describe('⭐ a label given per language is answered per language (2026-09-28)', () => {
+  // One text per language in `records/folder.yml`: the site's own language answers in the data it
+  // compiles; every other language in its own files — the language, its base, then the site's.
+  // A language the label holds nothing of answers no `$label`, as a records service does.
+  const setup = async () => {
+    w('queries.yml', 'team:\n  schema: "@/team"\n')
+    w('records/team/ada.md', '---\ntitle: Ada\n---\n\nB\n')
+    w('records/team/grace.md', '---\ntitle: Grace\n---\n\nB\n')
+    w(
+      'records/folder.yml',
+      '- folder: team\n  records:\n' +
+        '    - path: team/ada.md\n      label: { en: Ada Lovelace, fr: Ada (fr) }\n' +
+        '    - path: team/grace.md\n      label: { fr: Grace (fr) }\n'
+    )
+    const queries = { team: { name: 'team', schema: '@/team' } }
+    await writeQueryFiles(ROOT, await processQueries(ROOT, queries, undefined, '/', { locale: 'en' }), queries)
+    await buildLocalizedRecords(ROOT, { locales: ['fr', 'fr-CA', 'es'], outputDir: join(ROOT, 'dist') })
+  }
+  const labelsIn = (rel) =>
+    Object.fromEntries(JSON.parse(readFileSync(join(ROOT, rel), 'utf8')).map((r) => [r.$name, r.$label ?? null]))
+  const ownLabel = (rel) => JSON.parse(readFileSync(join(ROOT, rel), 'utf8')).$label ?? null
+
+  it('the site’s own language, in the data it compiles', async () => {
+    await setup()
+    expect(labelsIn('public/data/team.json')).toEqual({ ada: 'Ada Lovelace', grace: null })
+    expect(ownLabel('public/data/team/ada.json')).toBe('Ada Lovelace')
+  })
+
+  it('each other language, in its list and in each record’s own file', async () => {
+    await setup()
+    expect(labelsIn('dist/fr/data/team.json')).toEqual({ ada: 'Ada (fr)', grace: 'Grace (fr)' })
+    expect(ownLabel('dist/fr/data/team/ada.json')).toBe('Ada (fr)')
+    expect(ownLabel('dist/fr/data/team/grace.json')).toBe('Grace (fr)')
+    // its base language, then the site's
+    expect(labelsIn('dist/fr-CA/data/team.json')).toEqual({ ada: 'Ada (fr)', grace: 'Grace (fr)' })
+    expect(labelsIn('dist/es/data/team.json')).toEqual({ ada: 'Ada Lovelace', grace: null })
   })
 })
 
@@ -177,7 +220,9 @@ describe('a push sends them, and a pull writes them back', () => {
     expect(report.warnings).toEqual([])
     expect(yaml.load(readFileSync(join(ROOT, 'records', 'folder.yml'), 'utf8'))).toEqual([
       { folder: 'team', tags: ['people'], records: [
-        { path: 'team/ada.md', tags: ['staff', 'featured'], label: 'Ada Lovelace' },
+        // ⭐ Every language the label holds, the source language first (2026-09-28) — the
+        // source language's alone until then, so a translated label lost the rest.
+        { path: 'team/ada.md', tags: ['staff', 'featured'], label: { en: 'Ada Lovelace', fr: 'Ada' } },
         'team/grace.md',
       ] },
       { path: 'news/welcome.md', label: 'Welcome' },
@@ -195,6 +240,26 @@ describe('a push sends them, and a pull writes them back', () => {
     expect(out.errors).toEqual([])
     const entities = [...out.placements.values()].map(({ entity, slug }, i) => ({ id: entity.id, slug, uuid: `U${i}`, model: '@acme/x' }))
     const sent = buildFolderEntity({ recordEntities: entities, folderNodes: out.nodes, sourceLocale: 'en' }).document
+    const poolPathByUuid = new Map([...out.placements.values()].map(({ entity }, i) => [`U${i}`, entity.poolPath]))
+    folderToFolderYml({ folderDoc: sent, siteRoot: ROOT, poolPathByUuid, sourceLocale: 'en' })
+    expect(yaml.load(readFileSync(join(ROOT, 'records', 'folder.yml'), 'utf8'))).toEqual(written)
+  })
+
+  it('⭐ round-trips a label in several languages — a folder’s and a record entry’s (2026-09-28)', async () => {
+    w('records/team/ada.md')
+    w('records/news/welcome.md')
+    const written = [
+      { folder: 'team', label: { en: 'Team', fr: 'Équipe' }, records: [{ path: 'team/ada.md', label: { en: 'Ada Lovelace', fr: 'Ada (fr)' } }] },
+      { path: 'news/welcome.md', label: 'Welcome' },
+    ]
+    const out = await folder(yaml.dump(written))
+    expect(out.errors).toEqual([])
+    const entities = [...out.placements.values()].map(({ entity, slug }, i) => ({ id: entity.id, slug, uuid: `U${i}`, model: '@acme/x' }))
+    const sent = buildFolderEntity({ recordEntities: entities, folderNodes: out.nodes, sourceLocale: 'en' }).document
+    // the wire carries every language as written, and one text as the source language's
+    expect(sent.contents[0].label).toEqual({ en: 'Team', fr: 'Équipe' })
+    expect(sent.contents[0].$children[0].label).toEqual({ en: 'Ada Lovelace', fr: 'Ada (fr)' })
+    expect(sent.contents[1].label).toEqual({ en: 'Welcome' })
     const poolPathByUuid = new Map([...out.placements.values()].map(({ entity }, i) => [`U${i}`, entity.poolPath]))
     folderToFolderYml({ folderDoc: sent, siteRoot: ROOT, poolPathByUuid, sourceLocale: 'en' })
     expect(yaml.load(readFileSync(join(ROOT, 'records', 'folder.yml'), 'utf8'))).toEqual(written)

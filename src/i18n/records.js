@@ -14,7 +14,7 @@ import { readFile, writeFile, readdir, mkdir, rm } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { DATA_DIR } from '@uniweb/core'
+import { DATA_DIR, resolveDefaultLocale } from '@uniweb/core'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
@@ -28,7 +28,9 @@ import { toDeliveredRecord, contentBodyField, misplacedFields, mergedFromStored,
 import { resolveDocForLocale } from './merge.js'
 import { extractUnitsFromDoc } from './extract.js'
 import { flatFormRefusal, extractExcerpt } from '../site/query-processor.js'
-import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir, readEntityPool, groupPoolBySchema } from '../site/entity-pool.js'
+import { readRecordsConfig, resolveFolder } from '../site/records-config.js'
+import { labelIn } from '../site/entry-label.js'
 // The heuristic judgement about which strings inside structured data are prose.
 // It lives in its own module because the page lane needs exactly the same
 // answer for a tagged data block's payload — a `label` is prose and an `href`
@@ -679,7 +681,9 @@ async function poolDirsByQuery(siteRoot) {
  *   none), which says where a free-form body and frontmatter go, and where the body is;
  * - `models` — the model its records are pushed as (`modelOf`), which says which of their fields
  *   are translated; `targets` — the model each reference names, by its ref, transitively;
- * - `excerpts` — its excerpt settings, which derive an excerpt (`EXCERPT`).
+ * - `excerpts` — its excerpt settings, which derive an excerpt (`EXCERPT`);
+ * - `labels` — the labels its records' folder entries give per language, by record name, which
+ *   each language answers as `$label` (`entry-label.js`); and `defaultLocale`, the site's.
  *
  * ⭐ THE MODEL IS THE TYPE THE RECORDS ARE OF, which is not always the schema they are delivered
  * in. A query whose name-defaulted schema (`@/team`) no data schema answers, for a data key the
@@ -687,9 +691,11 @@ async function poolDirsByQuery(siteRoot) {
  * as its entities (`uwx/data-key-types.js`) — while the build delivers them as they are written.
  * The type is read from the foundation's built `schema.json`, the input a push reads it from.
  *
- * @returns {Promise<{ poolDirs: Map<string, string>, schemas: Map<string, Object|null>, models: Map<string, Object|null>, targets: Map<string, Object|null>, excerpts: Map<string, Object> }>}
+ * @returns {Promise<{ poolDirs: Map<string, string>, schemas: Map<string, Object|null>, models: Map<string, Object|null>, targets: Map<string, Object|null>, excerpts: Map<string, Object>, labels: Map<string, Map<string, Object>>, defaultLocale: string|null }>}
  */
 async function recordQueries(siteRoot) {
+  const labels = new Map()
+  let defaultLocale = null
   const poolDirs = new Map()
   const schemas = new Map()
   const models = new Map()
@@ -697,6 +703,7 @@ async function recordQueries(siteRoot) {
   const excerpts = new Map()
   try {
     const siteYml = await readSiteYml(siteRoot)
+    defaultLocale = resolveDefaultLocale(siteYml) ?? null
     const { declarations } = await resolveQueriesConfig(siteRoot, { siteYml })
     const entries = Object.entries(declarations || {})
     for (const [name, decl] of entries) {
@@ -706,6 +713,24 @@ async function recordQueries(siteRoot) {
       excerpts.set(name, { maxLength: decl.excerpt?.maxLength || 160, field: decl.excerpt?.field || null })
     }
     const local = entries.filter(([, d]) => d.url === undefined && d.schema)
+
+    // ⭐ A LABEL GIVEN PER LANGUAGE (`records/folder.yml`, 2026-09-28) is answered per language:
+    // the site's own when its data was compiled (`query-processor.js`), and every other one here,
+    // from the same placements the compile read — so the two cannot place a label differently.
+    const pool = await readEntityPool(siteRoot)
+    const folderCfg = await readRecordsConfig(siteRoot, { dir: pool.dir })
+    if (!folderCfg.error) {
+      const { placements } = resolveFolder(folderCfg.entries, pool.entities, { dir: pool.dir })
+      const bySchema = groupPoolBySchema(pool.entities)
+      for (const [name, decl] of local) {
+        const byName = new Map()
+        for (const entity of bySchema.get(decl.schema) || []) {
+          const label = placements.get(entity.id)?.label
+          if (isPlainObject(label)) byName.set(String(entity.slug), label)
+        }
+        if (byName.size) labels.set(name, byName)
+      }
+    }
     const resolved = (await resolveRecordSchemas(siteRoot, local.map(([, d]) => d.schema), { siteYml })).schemas
     for (const [name, decl] of entries) schemas.set(name, (decl.schema && resolved[decl.schema]) || null)
 
@@ -740,7 +765,7 @@ async function recordQueries(siteRoot) {
     // No resolvable config — every record keys by its query name, which is what
     // the extractor did before records existed.
   }
-  return { poolDirs, schemas, models, targets, excerpts }
+  return { poolDirs, schemas, models, targets, excerpts, labels, defaultLocale }
 }
 
 /** A site's `site.yml`, or `{}`. */
@@ -979,7 +1004,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
   // simply miss and every string falls back to its source. (This was missing for
   // a while and the failure was swallowed by the per-file catch below — the build
   // stayed green while nothing was translated.)
-  const { poolDirs, schemas: dataSchemas, models, targets, excerpts } = await recordQueries(siteRoot)
+  const { poolDirs, schemas: dataSchemas, models, targets, excerpts, labels, defaultLocale } = await recordQueries(siteRoot)
 
   const outputs = {}
   // Reported rather than only logged — see the catch below.
@@ -1058,7 +1083,12 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
               ? await translateItemAsync(record, recordDir, translations, schema, recordOptions)
               : record
             if (isPlainObject(record)) wholes.set(recordHandle(record), { source: record, translated: translatedRecord })
-            const written = dataSchema && isPlainObject(translatedRecord) ? storedFromMerged(dataSchema, translatedRecord) : translatedRecord
+            const written = relabel(
+              dataSchema && isPlainObject(translatedRecord) ? storedFromMerged(dataSchema, translatedRecord) : translatedRecord,
+              labels.get(queryName),
+              locale,
+              defaultLocale
+            )
             await mkdir(localeRecordsDir, { recursive: true })
             await writeFile(join(localeRecordsDir, name), JSON.stringify(written, null, 2))
           } catch (err) {
@@ -1077,7 +1107,8 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
         )
 
         const destPath = join(localeDataDir, file)
-        await writeFile(destPath, JSON.stringify(translatedItems, null, 2))
+        const labelled = translatedItems.map((item) => relabel(item, labels.get(queryName), locale, defaultLocale))
+        await writeFile(destPath, JSON.stringify(labelled, null, 2))
         outputs[locale][queryName] = destPath
       } catch (err) {
         // ⛔ A FAILURE HERE USED TO BE A `console.warn` AND NOTHING ELSE, and it
@@ -1278,7 +1309,7 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
   if (!Array.isArray(items) && !one) return items
 
   const schema = await resolveSchema(queryName, siteRoot)
-  const { poolDirs, schemas: dataSchemas, models, targets, excerpts } = await recordQueries(siteRoot)
+  const { poolDirs, schemas: dataSchemas, models, targets, excerpts, labels, defaultLocale } = await recordQueries(siteRoot)
   const recordDir = poolDirs.get(queryName) ?? queryName
   const recordOptions = {
     locale,
@@ -1305,8 +1336,35 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
     records.map((item) => translateItemAsync(item, recordDir, translations, schema, { ...recordOptions, whole: wholes.get(recordHandle(item)) }))
   )
 
-  if (!one) return translated
-  return dataSchema && isPlainObject(translated[0]) ? storedFromMerged(dataSchema, translated[0]) : translated[0]
+  const labelsOf = labels.get(queryName)
+  if (!one) return translated.map((item) => relabel(item, labelsOf, locale, defaultLocale))
+  return relabel(
+    dataSchema && isPlainObject(translated[0]) ? storedFromMerged(dataSchema, translated[0]) : translated[0],
+    labelsOf,
+    locale,
+    defaultLocale
+  )
+}
+
+/**
+ * A record in one language, with its entry's label in that language: `$label` as the label a
+ * folder entry gives per language answers it there (`entry-label.js::labelIn`), and no `$label`
+ * when it gives none of that language's chain. A record whose entry gives one text keeps the
+ * `$label` its compile gave it.
+ *
+ * @param {*} record - a list item or a record's own file, with its `$name`
+ * @param {Map<string, Object>|undefined} labelsOf - the query's labels per language, by record name
+ * @param {string} locale
+ * @param {string|null} defaultLocale
+ */
+function relabel(record, labelsOf, locale, defaultLocale) {
+  if (!labelsOf || !isPlainObject(record) || record.$name === undefined) return record
+  const label = labelsOf.get(String(record.$name))
+  if (!label) return record
+  const text = labelIn(label, locale, defaultLocale)
+  if (text) return { ...record, $label: text }
+  const { $label: _none, ...rest } = record
+  return rest
 }
 
 // ---------------------------------------------------------------------------

@@ -70,6 +70,7 @@ import { dataKeyTypes } from '../uwx/data-key-types.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { collectNestedRefs } from '@uniweb/schemas/format'
+import { labelIn } from './entry-label.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -933,12 +934,15 @@ function pickBrief(record, keys) {
 }
 
 // What a record's folder entry says about it, as the keys a record is answered with — `$tags`
-// (in the order written) and `$label` — or null when it says nothing.
-function entryKeys(placed) {
+// (in the order written) and `$label` — or null when it says nothing. A label given per language
+// answers in the language compiled (`entry-label.js::labelIn`); the site's other languages get
+// theirs where their files are written (`i18n/records.js`).
+function entryKeys(placed, locale = null) {
   if (!placed) return null
   const out = {}
   if (Array.isArray(placed.tags) && placed.tags.length) out.$tags = [...placed.tags]
-  if (typeof placed.label === 'string' && placed.label) out.$label = placed.label
+  const label = labelIn(placed.label, locale, locale)
+  if (label) out.$label = label
   return Object.keys(out).length ? out : null
 }
 
@@ -1001,7 +1005,7 @@ async function collectItems(siteDir, config, recordsRoot, basePath, locale = nul
   // answers them (ruled 2026-09-27 [Diego]). Absent when the entry says none.
   items = items.map((result, i) => {
     const placed = pooled[i] ? config.placements?.get(pooled[i].id) : null
-    const said = entryKeys(placed)
+    const said = entryKeys(placed, locale)
     const at = (item) => {
       if (!item) return item
       const out = { ...item, ...said, [BRANCH_KEY]: placed?.path ?? '' }

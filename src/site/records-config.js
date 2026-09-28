@@ -47,6 +47,11 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { RECORDS_DIR, FOLDER_YML, resolveRecordsDir } from './entity-pool.js'
+import { readLabel } from './entry-label.js'
+
+// What a label may be, for every message that refuses one.
+const LABEL_FORMS =
+  "A label is the entry's display text: one text, or one per language (`label: { en: …, fr: … }`)."
 
 export { FOLDER_YML }
 
@@ -276,13 +281,15 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       }
       if (tags.length) said.tags = tags
     }
+    // ⭐ One text — the site's default language — or one text per language, `{ en: …, fr: … }`
+    // (`entry-label.js`, 2026-09-28).
     if (entry.label !== undefined && entry.label !== null) {
-      if (typeof entry.label !== 'string' && typeof entry.label !== 'number') {
-        errors.push(`${file}: ${where} has a \`label:\` that is not text. A label is the entry's display text.`)
+      const read = readLabel(entry.label)
+      if (read.error) {
+        errors.push(`${file}: ${where} has a \`label:\` that ${read.error}. ${LABEL_FORMS}`)
         return null
       }
-      const label = String(entry.label).trim()
-      if (label) said.label = label
+      if (read.label !== null) said.label = read.label
     }
     return said
   }
@@ -371,7 +378,14 @@ export function resolveFolder(entries, pool, { dir = RECORDS_DIR } = {}) {
       }
       folderAt.set(at, where)
       const branch = { kind: 'branch', name: segment }
-      if (entry.label !== undefined && entry.label !== null) branch.label = String(entry.label)
+      if (entry.label !== undefined && entry.label !== null) {
+        const read = readLabel(entry.label)
+        if (read.error) {
+          errors.push(`${file}: folder "${segment}" (${where}) has a \`label:\` that ${read.error}. ${LABEL_FORMS}`)
+          return []
+        }
+        if (read.label !== null) branch.label = read.label
+      }
       // A folder takes `tags:` as a record's entry does — kept, sent and pulled back, though
       // no question answers a folder.
       if (entry.tags !== undefined && entry.tags !== null) {

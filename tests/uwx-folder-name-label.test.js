@@ -10,6 +10,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
 import { buildFolderEntity, collectFolderItemUuids } from '../src/uwx/folder.js'
 import { folderToFolderYml } from '../src/uwx/records-project.js'
 
@@ -54,7 +55,7 @@ describe('the pull reader reads { name, label }', () => {
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-  it('writes folder.yml from `name`, and unwraps a localized `label` to the source-locale string', () => {
+  it('writes folder.yml from `name`, and keeps every language a localized `label` holds — the source first', () => {
     const folderDoc = {
       contents: [
         { kind: 'branch', name: 'blog', label: { fr: 'Le blog', en: 'Blog' }, $children: [
@@ -67,7 +68,10 @@ describe('the pull reader reads { name, label }', () => {
     expect(report.warnings).toEqual([])
     const yml = readFileSync(join(root, 'records', 'folder.yml'), 'utf8')
     expect(yml).toContain('folder: blog')
-    expect(yml).toContain('label: Le blog')
+    // ⛔ The source language's text alone until 2026-09-28 — the `en` text was dropped.
+    const [branch] = yaml.load(yml)
+    expect(branch.label).toEqual({ fr: 'Le blog', en: 'Blog' })
+    expect(Object.keys(branch.label)).toEqual(['fr', 'en'])
     expect(yml).not.toContain('path_segment')
   })
 

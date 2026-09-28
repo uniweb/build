@@ -48,7 +48,8 @@ import { folderYmlPath } from '../site/records-config.js'
 import { contentBodyTarget } from './record-layout.js'
 import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption } from './self-scope.js'
 import { parseCatalogRef } from '../site/foundation-ref.js'
-import { unwrapLocalized, renderEntityDocument } from './backfill.js'
+import { renderEntityDocument } from './backfill.js'
+import { labelForFile } from '../site/entry-label.js'
 import { parseBibtex } from '@citestyle/bibtex'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
@@ -522,10 +523,13 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
       if (!node || typeof node !== 'object') continue
       if (node.kind === 'branch') {
         const entry = { folder: node.name }
-        // Only a BRANCH takes a label. A record carries its own title; the folder
-        // does not caption its rows. On the wire the label is a localized map;
-        // folder.yml carries the source-locale string (a bare string passes).
-        if (node.label !== undefined) entry.label = unwrapLocalized(node.label, sourceLocale)
+        // A folder's label, as a record entry's below: on the wire a map of languages;
+        // in folder.yml the source language's text alone, or every language the label
+        // holds when it holds another (`entry-label.js`, 2026-09-28). ⛔ This kept the
+        // source language's text only until then, and said only a branch takes a label —
+        // a record's entry has taken one since 2026-09-27.
+        const folderLabel = labelForFile(node.label, sourceLocale)
+        if (folderLabel !== null) entry.label = folderLabel
         if (Array.isArray(node.tags) && node.tags.length) entry.tags = node.tags.map(String)
         entry.records = walk(node.$children, true)
         out.push(entry)
@@ -537,10 +541,10 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
       // back as the entry `{ path, tags?, label? }` (ruled 2026-09-27 [Diego]).
       const said = {}
       if (Array.isArray(node.tags) && node.tags.length) said.tags = node.tags.map(String)
-      if (node.label !== undefined && node.label !== null) {
-        const label = unwrapLocalized(node.label, sourceLocale)
-        if (typeof label === 'string' && label) said.label = label
-      }
+      // Every language the label holds (`entry-label.js`, 2026-09-28) — ⛔ the source
+      // language's alone until then, so a translated label lost the rest on a round trip.
+      const label = labelForFile(node.label, sourceLocale)
+      if (label !== null) said.label = label
       const says = Object.keys(said).length > 0
       // A record at the top of the folder needs no line unless the folder says something
       // about it — but one that did not land is still said: the next push sends the folder
