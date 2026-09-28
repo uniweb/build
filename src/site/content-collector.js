@@ -2806,7 +2806,7 @@ export async function collectSiteContent(sitePath, options = {}) {
     // Dev keeps them so drafts stay previewable.
     pages: dropUnpublished ? dropUnpublishedPages(pages).map(withoutHiddenSections) : pages,
     // Layout area sets: { default: { header: page, footer: page, ... }, marketing: { ... } }
-    layouts: dropUnpublished ? mapLayoutAreas(layouts, withoutHiddenSections) : layouts,
+    layouts: dropUnpublished ? withoutHiddenAreas(layouts) : layouts,
     // ⭐ THE SAME REACHABILITY AXIS, for the 404 slot. `hidden: true` means DRAFT —
     // "excluded from the published site" (`docs/reference/page-configuration.md`);
     // `hideIn: ['*']` is the control for "routed but in no nav".
@@ -2836,16 +2836,23 @@ function withoutHiddenSections(page) {
   return { ...page, sections: dropHiddenSections(page.sections) }
 }
 
-// Apply `fn` to every area of every layout: `{ default: { header: page, … }, … }`.
-function mapLayoutAreas(layouts, fn) {
+// Every layout's areas without their hidden sections — and without an area whose sections
+// were all hidden: drafting every section of an area drafts the area, so a layout gets no area
+// there rather than an empty one (a backend's publish does the same).
+function withoutHiddenAreas(layouts) {
   if (!layouts || typeof layouts !== 'object') return layouts
   return Object.fromEntries(
-    Object.entries(layouts).map(([name, areas]) => [
-      name,
-      areas && typeof areas === 'object'
-        ? Object.fromEntries(Object.entries(areas).map(([area, page]) => [area, fn(page)]))
-        : areas,
-    ])
+    Object.entries(layouts).map(([name, areas]) => {
+      if (!areas || typeof areas !== 'object') return [name, areas]
+      const kept = {}
+      for (const [area, page] of Object.entries(areas)) {
+        const shown = withoutHiddenSections(page)
+        const hadSections = Array.isArray(page?.sections) && page.sections.length > 0
+        if (hadSections && shown.sections.length === 0) continue
+        kept[area] = shown
+      }
+      return [name, kept]
+    })
   )
 }
 

@@ -70,9 +70,15 @@ describe('the build', () => {
 
   it('a published build leaves hidden sections out, in pages and layout areas alike', async () => {
     write(dir, site)
-    const { pages, layouts } = await collectSiteContent(dir, { dropUnpublished: true })
+    const { pages } = await collectSiteContent(dir, { dropUnpublished: true })
     expect(typesOf(pages.find((p) => p.route === '/'))).toEqual(['Hero'])
-    expect(layouts.default.header.sections).toEqual([])
+  })
+
+  it('an area whose sections are all hidden is left out whole, not kept empty', async () => {
+    write(dir, { ...site, 'layout/footer.md': '---\ntype: Footer\n---\n\n# Footer\n' })
+    const { layouts } = await collectSiteContent(dir, { dropUnpublished: true })
+    expect(layouts.default).not.toHaveProperty('header')
+    expect(layouts.default.footer.sections.map((s) => s.type)).toEqual(['Footer'])
   })
 
   it('dev keeps them, so a draft stays previewable', async () => {

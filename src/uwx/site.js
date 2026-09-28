@@ -307,15 +307,16 @@ function mapSectionData(section) {
   // ⭐ A draft section — the store's own `hidden`, which an editor also writes [2026-09-28].
   if (section.hidden === true) data.hidden = true
   // No `preset` or `input`: nothing read either, and the collector drops them (2026-09-27).
-  // ⭐ `background` and `theme` stay IN `params` [Diego, 2026-09-28] — where the runtime reads
-  // them, and where a section stores them from now on. ⚠️ Also sent as the two fields they had
-  // until today, until every reader of a stored section reads `params`; a pull prefers a
-  // stored field meanwhile (`sectionRecordToFile`). uwx-format.md § A page section's fields.
+  // ⭐ `background` and `theme` ride IN `params` [Diego, 2026-09-28] — where the runtime reads
+  // them, and where a section stores them. ⛔ Not also as the `background` / `theme_override`
+  // fields, as build 0.69 sent them: every reader of a stored section reads `params` — a publish
+  // carries `params` whole, and the app reads a stored field first, then `params` — so nothing
+  // needs them, and a push that stops sending them lets a backend retire them without refusing
+  // it. A pull still prefers a stored field while one exists (`sectionRecordToFile`).
+  // uwx-format.md § A page section's fields, Order.
   if (Object.keys(params).length > 0) data.params = params
   data.content = section.content // leaf insets in it as written — no `insets` field since 2026-09-27
   setIf(data, 'fetch', section.fetch ?? undefined)
-  setIf(data, 'background', params.background)
-  setIf(data, 'theme_override', params.theme)
   return data
 }
 
