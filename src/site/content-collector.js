@@ -10,8 +10,6 @@
  *
  * Section frontmatter reserved properties:
  * - type: Component type (e.g., "Hero", "Features")
- * - preset: Preset configuration name
- * - input: Input field mapping
  * - props: Additional component props (merged with other params)
  * - fetch: The section's binding — names a query (query, as, where, sort, limit, current,
  *   prerender, detailPage); `query:` is its shorthand
@@ -1012,6 +1010,17 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // `query`, `fetch` and `data` are never params: `query:` / `fetch:` declare the
   // section's own data, and a leftover `data:` is refused (`declaredFetch`).
   const { type, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
+  // ⛔ `preset:` and `input:` do nothing, so they are dropped with a warning rather than
+  // handed to the component as params. Nothing ever read either [2026-09-27]: a preset is
+  // a named set of params a section type's `meta.js` offers an editor, and a file writes
+  // the params themselves (`uniweb add section <Type> --starter --preset <name>` writes them).
+  for (const [key, value] of [['preset', preset], ['input', input]]) {
+    if (value === undefined) continue
+    console.warn(
+      `[content-collector] ${relative(siteRoot, filePath)}: ${key}: ${JSON.stringify(value)} has no effect and is ignored` +
+        (key === 'preset' ? ' — write the preset’s params in the frontmatter instead.' : '.')
+    )
+  }
   // ⭐ `grid` — the layout of the section's child sections, `3` or `'40/60'` [Diego,
   // 2026-09-27] — is a name framework reserves, and it stays in the params like
   // `background`: that is where it is stored and synced, with no field of its own.
@@ -1049,8 +1058,6 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     id,
     stableId,
     type: type || null,
-    preset,
-    input,
     params: { ...params, ...props },
     content: proseMirrorContent,
     fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath), { level: 'section' }),

@@ -425,7 +425,7 @@ function reinlineInsets(content, insets) {
  * Project one section `$`-record (from `page_sections` / `layout_sections`) to a
  * section `.md` file — the inverse of site.js `mapSectionData`. Frontmatter is
  * `type` + the flat `params` + `background` / `theme` (`theme_override`) /
- * `preset` / `input` / `fetch` / `id` (`stable_id`); the body is the section's
+ * `fetch` / `id` (`stable_id`); the body is the section's
  * content (insets re-inlined) serialized to markdown. Idempotent.
  *
  * Note: `$children` (a section's child sections) are NOT written here — the page
@@ -442,7 +442,9 @@ function reinlineInsets(content, insets) {
  * @returns {'updated'|'unchanged'}
  */
 export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null }) {
-  const { type, stable_id, preset, input, params, content, insets, fetch, background, theme_override } = record || {}
+  // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
+  // would only warn about it (2026-09-27).
+  const { type, stable_id, params, content, insets, fetch, background, theme_override } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
@@ -455,8 +457,6 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   if (params && typeof params === 'object') Object.assign(frontmatter, params)
   if (background !== undefined) frontmatter.background = background
   if (theme_override !== undefined) frontmatter.theme = theme_override
-  if (preset !== undefined) frontmatter.preset = preset
-  if (input !== undefined) frontmatter.input = input
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
   // file gets `query:` for a declaration of names alone; a section that declares
   // its data locally keeps it (`writeSectionFile`, the declaration keys).

@@ -142,8 +142,8 @@ function stripCredentials(block, label) {
 }
 
 // page_sections and layout_sections share this content shape.
-// processMarkdownFile only destructures type/component/preset/input/props/
-// fetch/data/id out of frontmatter, so `background:` and `theme:` stay
+// processMarkdownFile takes only type/props/fetch/query/data/id out of the
+// frontmatter (and drops preset/input), so `background:` and `theme:` stay
 // inside section.params — lift them into the entity type's dedicated fields.
 // The `type` a push sends for a section whose file names none — the Model requires one. A pull does
 // not write it back into a file that names none (`sectionRecordToFile`): absent, the foundation's
@@ -309,8 +309,7 @@ function mapSectionData(section) {
 
   const data = { type: section.type || FILLED_SECTION_TYPE } // entity type requires `type`
   setIf(data, 'stable_id', section.stableId ?? undefined)
-  setIf(data, 'preset', section.preset ?? undefined)
-  setIf(data, 'input', section.input ?? undefined)
+  // No `preset` or `input`: nothing read either, and the collector drops them (2026-09-27).
   if (Object.keys(params).length > 0) data.params = params
   data.content = section.content // leaf insets in it as written — no `insets` field since 2026-09-27
   setIf(data, 'fetch', section.fetch ?? undefined)
