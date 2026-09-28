@@ -150,3 +150,46 @@ describe('the sync wire', () => {
     }
   })
 })
+
+describe('what a hidden section means for its page', () => {
+  it('its heading never titles the page: the first section that publishes does', async () => {
+    write(dir, {
+      'site.yml': "name: S\nindex: home\nfoundation: '@a/base@1.0.0'\n",
+      'pages/home/page.yml': '{}\n',
+      'pages/home/1-draft.md': '---\ntype: Hero\nhidden: true\n---\n\n# Draft heading\n',
+      'pages/home/2-hero.md': '---\ntype: Hero\n---\n\n# Published heading\n',
+    })
+    for (const dropUnpublished of [false, true]) {
+      const { pages } = await collectSiteContent(dir, { dropUnpublished })
+      expect(pages.find((p) => p.route === '/').title).toBe('Published heading')
+    }
+  })
+
+  it('a page whose sections are all hidden takes its prettified name, and stays a page', async () => {
+    write(dir, {
+      'site.yml': "name: S\nindex: home\nfoundation: '@a/base@1.0.0'\n",
+      'pages/home/page.yml': 'title: Home\n',
+      'pages/about-us/page.yml': '{}\n',
+      'pages/about-us/draft.md': '---\ntype: Hero\nhidden: true\n---\n\n# Draft heading\n',
+    })
+    const { pages } = await collectSiteContent(dir, { dropUnpublished: true })
+    const about = pages.find((p) => p.route === '/about-us')
+    expect(about.title).toBe('About Us')
+    expect(about.hasContent).toBe(true)
+    expect(about.sections).toEqual([])
+  })
+
+  it('in folder mode the file is the page, so its `hidden: true` drafts the page', async () => {
+    write(dir, {
+      'site.yml': "name: S\nindex: home\nfoundation: '@a/base@1.0.0'\n",
+      'pages/home/page.yml': 'title: Home\n',
+      'pages/docs/folder.yml': 'title: Docs\n',
+      'pages/docs/guide.md': '---\ntype: Article\n---\n\n# Guide\n',
+      'pages/docs/draft.md': '---\ntype: Article\nhidden: true\n---\n\n# Draft\n',
+    })
+    const routes = async (dropUnpublished) =>
+      (await collectSiteContent(dir, { dropUnpublished })).pages.map((p) => p.route).filter((r) => r.startsWith('/docs/'))
+    expect((await routes(true)).sort()).toEqual(['/docs/guide'])
+    expect((await routes(false)).sort()).toEqual(['/docs/draft', '/docs/guide'])
+  })
+})

@@ -749,8 +749,13 @@ function prettifySlug(slug) {
  *
  * A node with no sections of its own (a group/container node, a redirect stub)
  * has nothing to humanize from, so it shows the identifier the author actually
- * wrote — `v1` stays `v1`. A node with content falls back to its opening H1,
- * and only then to a prettified slug.
+ * wrote — `v1` stays `v1`. A node with content falls back to the opening H1 of
+ * its first section that publishes, and only then to a prettified slug.
+ *
+ * ⭐ "That publishes": a `hidden: true` section is a draft, so its heading never
+ * titles the page — in dev as in a published build, so the title does not change
+ * between them, and as a backend's publish does [2026-09-28]. A node whose sections
+ * are all hidden takes the prettified slug.
  *
  * The runtime has no fallback of its own: an empty title renders empty. The
  * fill belongs here, at the producer, because `title` also feeds `<title>`,
@@ -765,7 +770,8 @@ function prettifySlug(slug) {
 function resolveDisplayTitle(declaredTitle, segment, sections) {
   if (declaredTitle) return declaredTitle
   if (!sections?.length) return segment
-  return extractH1(sections[0]?.content) || prettifySlug(segment)
+  const first = sections.find((section) => section?.hidden !== true)
+  return extractH1(first?.content) || prettifySlug(segment)
 }
 
 // ⭐ The rule now lives in `utils/numeric-prefix.js` — `records/folder.yml` needs the
@@ -957,7 +963,9 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
       version: null,
       versionMeta: null,
       versionScope: null,
-      hidden: false,
+      // The file IS the page, so its `hidden: true` drafts the page — left out of a published
+      // build, kept in dev — rather than leaving a page with no section (2026-09-28).
+      hidden: section.hidden === true,
       hideIn: [],
       layout: {},
       seo: {
