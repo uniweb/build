@@ -70,10 +70,12 @@ describe('a section declares its own data with `query:`', () => {
     expect(b.fetch.map((f) => f.as)).toEqual(['team', 'articles'])
   })
 
-  it('the sync push carries it as the section\'s fetch', async () => {
+  it('the sync push carries it in the section\'s params, as `params.fetch`', async () => {
     w('pages/home/1-a.md', '---\ntype: Grid\nquery: team\n---\n# A\n')
     const home = wirePage(await siteProjectToDocument(ROOT), 'home')
-    expect(home.page_sections[0].fetch).toMatchObject({ query: 'team' })
+    expect(home.page_sections[0].params.fetch).toMatchObject({ query: 'team' })
+    // ⛔ not also as the `fetch` field beside the params, as it was until 2026-09-28
+    expect(home.page_sections[0]).not.toHaveProperty('fetch')
   })
 
   it('refuses a retired `data:`, naming the file and the key that replaced it', async () => {

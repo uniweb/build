@@ -303,8 +303,10 @@ function localizePageMeta(page, route, sourceLocale, translations) {
 function mapSectionData(section) {
   const params = { ...section.params }
   // ⭐ The section's own data rides in `params.fetch` [Diego, 2026-09-28] — nothing on a store's
-  // side acts on it by name. ⚠️ Also sent as the `fetch` field it had until then, until an
-  // editor's reader looks in `params.fetch` (uwx-format.md § A page section's fields).
+  // side acts on it by name, and every reader looks there first: core since 0.34.0 (runtime
+  // 0.28.1, the least a site publishes at), and an editor. ⛔ Until 2026-09-28 it was also sent as
+  // the `fetch` field beside the params, equal; a pull still reads a stored field where `params`
+  // has no `fetch` (`sectionRecordToFile`). uwx-format.md § A page section's fields.
   if (section.fetch) params.fetch = section.fetch
   const data = { type: section.type || FILLED_SECTION_TYPE } // entity type requires `type`
   setIf(data, 'stable_id', section.stableId ?? undefined)
@@ -313,14 +315,10 @@ function mapSectionData(section) {
   // No `preset` or `input`: nothing read either, and the collector drops them (2026-09-27).
   // ⭐ `background` and `theme` ride IN `params` [Diego, 2026-09-28] — where the runtime reads
   // them, and where a section stores them. ⛔ Not also as the `background` / `theme_override`
-  // fields, as build 0.69 sent them: every reader of a stored section reads `params` — a publish
-  // carries `params` whole, and the app reads a stored field first, then `params` — so nothing
-  // needs them, and a push that stops sending them lets a backend retire them without refusing
-  // it. A pull still prefers a stored field while one exists (`sectionRecordToFile`).
-  // uwx-format.md § A page section's fields, Order.
+  // fields, as build 0.69 sent them: every reader of a stored section reads `params`, and the
+  // site-content Model no longer has either field. uwx-format.md § A page section's fields.
   if (Object.keys(params).length > 0) data.params = params
   data.content = section.content // leaf insets in it as written — no `insets` field since 2026-09-27
-  setIf(data, 'fetch', section.fetch ?? undefined)
   return data
 }
 

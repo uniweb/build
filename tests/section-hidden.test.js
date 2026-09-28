@@ -224,11 +224,26 @@ describe('a section’s data on the wire — `params.fetch` [2026-09-28]', () =>
     'pages/home/team.md': '---\ntype: Team\nquery: members\n---\n\n# Team\n',
   }
 
-  it('a push sends it in `params`, and still as the field, equal', async () => {
+  it('a push sends it in `params` alone — the `fetch` field beside them went 2026-09-28', async () => {
     write(dir, dataSite)
     const section = (await siteProjectToDocument(dir)).pages[0].page_sections[0]
-    expect(section.params.fetch).toBeTruthy()
-    expect(section.params.fetch).toEqual(section.fetch)
+    expect(section.params.fetch).toMatchObject({ query: 'members' })
+    expect(section).not.toHaveProperty('fetch')
+  })
+
+  it('a pull still reads a stored `fetch` field where `params` has none — a section an earlier push stored', async () => {
+    write(dir, dataSite)
+    const doc = await siteProjectToDocument(dir)
+    const section = doc.pages[0].page_sections[0]
+    section.fetch = section.params.fetch
+    delete section.params.fetch
+    const dest = mkdtempSync(join(tmpdir(), 'section-fetch-field-pulled-'))
+    try {
+      siteContentDocumentToProject({ document: doc, siteRoot: dest })
+      expect(readFileSync(join(dest, 'pages/home/team.md'), 'utf8')).toMatch(/query: members/)
+    } finally {
+      rmSync(dest, { recursive: true, force: true })
+    }
   })
 
   it('a pull writes the declaration back from `params.fetch`, which wins over a stored field', async () => {
