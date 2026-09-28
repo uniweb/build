@@ -461,11 +461,12 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // `params`, so one stored there counts when the field is absent.
   frontmatter.hidden = (typeof hidden === 'boolean' ? hidden : paramHidden === true) ? true : undefined
   Object.assign(frontmatter, paramsRest)
-  // ⚠️ A stored `background` / `theme_override` field wins over the same key in `params` while
-  // one is stored: an editor may still write the fields rather than `params` (2026-09-28;
-  // uwx-format.md § A page section's fields, Order).
-  if (background !== undefined) frontmatter.background = background
-  if (theme_override !== undefined) frontmatter.theme = theme_override
+  // A stored `background` / `theme_override` field fills in only where `params` lacks the key.
+  // Every writer writes `params` now — the app since its switch, a push since build 0.70.1 — so a
+  // field can only be as new as `params`, or older: one a push left out may survive in the store.
+  // ⛔ Until 2026-09-28 the field won here (uwx-format.md § A page section's fields, Order).
+  if (background !== undefined && !Object.hasOwn(paramsRest, 'background')) frontmatter.background = background
+  if (theme_override !== undefined && !Object.hasOwn(paramsRest, 'theme')) frontmatter.theme = theme_override
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
   // file gets `query:` for a declaration of names alone; a section that declares
   // its data locally keeps it (`writeSectionFile`, the declaration keys).

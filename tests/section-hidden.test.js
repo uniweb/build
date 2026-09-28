@@ -193,3 +193,26 @@ describe('what a hidden section means for its page', () => {
     expect((await routes(false)).sort()).toEqual(['/docs/draft', '/docs/guide'])
   })
 })
+
+describe('a stored background or theme on pull', () => {
+  it('comes from `params`; a stored field fills in only where `params` lacks the key', async () => {
+    write(dir, {
+      'site.yml': "name: S\nindex: home\nfoundation: '@a/base@1.0.0'\n",
+      'pages/home/page.yml': 'title: Home\n',
+      'pages/home/hero.md': "---\ntype: Hero\nbackground: '#new'\n---\n\n# Hi\n",
+    })
+    const doc = await siteProjectToDocument(dir)
+    // what a store may hold: a field an earlier push left, beside the newer params value
+    Object.assign(doc.pages[0].page_sections[0], { background: '#old', theme_override: 'dark' })
+    const dest = mkdtempSync(join(tmpdir(), 'section-fields-pulled-'))
+    try {
+      siteContentDocumentToProject({ document: doc, siteRoot: dest })
+      const file = readFileSync(join(dest, 'pages/home/hero.md'), 'utf8')
+      expect(file).toMatch(/background: '#new'/)
+      expect(file).not.toMatch(/#old/)
+      expect(file).toMatch(/theme: dark/) // no `theme` in params, so the field fills it
+    } finally {
+      rmSync(dest, { recursive: true, force: true })
+    }
+  })
+})
