@@ -17,6 +17,7 @@ import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describeChildren, describeVisuals } from '@uniweb/schemas/component'
+import { SECTION_PARAMS } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -957,13 +958,17 @@ export function reportPlacementDeclarations(components) {
           `provides renders "Component not found".`
       )
     }
-    // `grid` is a section key framework reserves for the layout of a section's children,
-    // so a param by that name never receives what an author writes as `grid:`.
-    if (entry.params && typeof entry.params === 'object' && Object.hasOwn(entry.params, 'grid')) {
+    // A name framework reserves in a section's params whose value the component never
+    // receives — `component: false` in `@uniweb/schemas/section`, as `grid` is.
+    const params = entry.params && typeof entry.params === 'object' ? entry.params : {}
+    for (const [param, reserved] of Object.entries(SECTION_PARAMS)) {
+      if (reserved.component || !Object.hasOwn(params, param)) continue
       console.warn(
-        `Warning: ${name} (meta.js): a param named "grid" never receives the author's grid: — it is a section ` +
-          `key reserved for the layout of child sections. Offer layouts with children: { grid: [...] } and ` +
-          `lay the children out with kit's ChildGrid, or rename the param.`
+        `Warning: ${name} (meta.js): a param named "${param}" never receives the author's ${param}: — framework ` +
+          `reserves it in a section's params (@uniweb/schemas/section). Rename the param.` +
+          (param === 'grid'
+            ? ` To offer layouts for the child sections, declare children: { grid: [...] } and lay them out with kit's ChildGrid.`
+            : '')
       )
     }
   }
