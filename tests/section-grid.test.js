@@ -83,8 +83,17 @@ describe('the sync wire', () => {
 })
 
 describe('a component param named grid', () => {
-  it('is warned about — it never receives the author’s grid:', () => {
+  it('is warned about — grid: is the section’s setting, never passed to the component', () => {
     reportPlacementDeclarations({ Grid: { name: 'Grid', params: { grid: { type: 'number' } } } })
-    expect(warnings.join('\n')).toMatch(/Grid.*param named "grid"/)
+    expect(warnings.join('\n')).toMatch(/Grid.*params declares "grid", a setting of the section/)
+    expect(warnings.join('\n')).toMatch(/children: \{ grid: \[\.\.\.\] \}/)
+  })
+
+  // The same for theme and background — ⛔ worded until 2026-09-28 as if the section lost the
+  // author's value; the section keeps it, and framework applies it.
+  it('and theme or background the same way: the section applies it, so the declaration goes', () => {
+    reportPlacementDeclarations({ CTA: { name: 'CTA', params: { theme: { type: 'select', options: ['light', 'dark'] } } } })
+    expect(warnings.join('\n')).toMatch(/CTA.*params declares "theme", a setting of the section.*framework applies an author's theme: to the section.*Remove it from params:/)
+    expect(warnings.join('\n')).not.toMatch(/Rename the param/)
   })
 })

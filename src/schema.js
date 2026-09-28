@@ -958,14 +958,18 @@ export function reportPlacementDeclarations(components) {
           `provides renders "Component not found".`
       )
     }
-    // A name framework reserves in a section's params whose value the component never
-    // receives — `component: false` in `@uniweb/schemas/section`, as `grid` is.
+    // A name framework reserves in a section's params: a setting of the SECTION, which framework
+    // applies — `component: false` in `@uniweb/schemas/section`. A component that declares one in
+    // its `params:` declares a setting it is never given. ⛔ Until 2026-09-28 this said the param
+    // "never receives the author's theme:" and to rename it — read as "the section loses the
+    // author's value", the opposite of what happens: the section gets it, and framework applies it.
     const params = entry.params && typeof entry.params === 'object' ? entry.params : {}
     for (const [param, reserved] of Object.entries(SECTION_PARAMS)) {
       if (reserved.component || !Object.hasOwn(params, param)) continue
       console.warn(
-        `Warning: ${name} (meta.js): a param named "${param}" never receives the author's ${param}: — framework ` +
-          `reserves it in a section's params (@uniweb/schemas/section). Rename the param.` +
+        `Warning: ${name} (meta.js): params declares "${param}", a setting of the section, not of its ` +
+          `component — framework applies an author's ${param}: to the section and never passes it to the ` +
+          `component, and an editor offers it for every section (@uniweb/schemas/section). Remove it from params:.` +
           (param === 'grid'
             ? ` To offer layouts for the child sections, declare children: { grid: [...] } and lay them out with kit's ChildGrid.`
             : '')
