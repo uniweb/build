@@ -32,14 +32,34 @@ import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
 import { stripBasePath } from './site/extension-urls.js'
+import { isSiteRelative, resolveExtensionDist } from './site/emit-extensions.js'
 
 /**
- * Resolve an extension URL to a filesystem path for prerender.
+ * Resolve an extension URL to the file prerender imports.
  * Browser URLs like "/effects/entry.js" need mapping to local files.
  *
+ * ⭐ AN EXTENSION IS IMPORTED FROM ITS OWN BUILD, as the primary foundation is
+ * (`<foundation>/dist/entry.js`, in prerenderSite). A foundation build leaves its
+ * externals — `@uniweb/core`, `react`, `react/jsx-runtime` — as bare imports, and
+ * Node resolves them from where the FILE sits: inside the extension's own
+ * package, which depends on them.
+ *
+ * ⛔ Not from the copy the site build emits into `dist/` (site/emit-extensions.js).
+ * That copy is the browser's, which resolves the same imports through the page's
+ * import map; here it sits under the site package, which need not depend on
+ * `@uniweb/core` at all. It was the first candidate until 2026-09-28 — an order
+ * written when nothing put a file there — and once the build began emitting one
+ * (2026-08-05), every workspace extension failed here with "Cannot find package
+ * '@uniweb/core'", and the static HTML carried `Component not found` where its
+ * sections belonged until the page ran in the browser.
+ *
  * Resolution order:
- * 1. dist directory (post-build copy target, e.g., site/dist/effects/entry.js)
- * 2. Project root with dist subdir (dev layout, e.g., project/effects/dist/entry.js)
+ * 1. The extension's own build — `<project>/<name>/dist/` or
+ *    `<project>/extensions/<name>/dist/` — found by the emitter's lookup
+ *    (`resolveExtensionDist`), so the two lanes find the same build.
+ * 2. A file in the site's dist, for an extension no workspace package builds (a
+ *    pre-built module placed in `public/`). Its bare imports resolve only where
+ *    the site's own dependencies carry them.
  * 3. Original URL (absolute or remote — let import() handle it)
  */
 export function resolveExtensionPath(url, distDir, projectRoot, base) {
@@ -50,32 +70,18 @@ export function resolveExtensionPath(url, distDir, projectRoot, base) {
   // so a payload produced before this change still resolves.
   url = stripBasePath(url, base)
 
-  // Only resolve URLs that look like root-relative paths
-  if (url.startsWith('/')) {
-    // Try dist directory first (production: files copied to site/dist/)
-    const distPath = join(distDir, url)
-    if (existsSync(distPath)) return distPath
+  // Return as-is for absolute paths or remote URLs
+  if (!isSiteRelative(url)) return url
 
-    // Workspace layouts: "/effects/entry.js" → "<pkg>/dist/entry.js", checked
-    // both at the project root and under an `extensions/` parent — the standard
-    // multi-foundation layout puts extensions in `extensions/<name>/`, so the
-    // bare-root candidate alone misses the built module and prerender can't load
-    // the extension.
-    const parts = url.slice(1).split('/')
-    if (parts.length >= 2) {
-      const pkgName = parts[0]
-      const rest = parts.slice(1).join('/')
-      const candidates = [
-        join(projectRoot, pkgName, 'dist', rest),
-        join(projectRoot, 'extensions', pkgName, 'dist', rest),
-      ]
-      for (const devPath of candidates) {
-        if (existsSync(devPath)) return devPath
-      }
-    }
+  const build = resolveExtensionDist(url, projectRoot)
+  if (build) {
+    const inBuild = join(build.distDir, build.rest)
+    if (existsSync(inBuild)) return inBuild
   }
 
-  // Return as-is for absolute paths or remote URLs
+  const inDist = join(distDir, url)
+  if (existsSync(inDist)) return inDist
+
   return url
 }
 

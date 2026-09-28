@@ -39,6 +39,11 @@
  * Same browser/internal split the runtime's distribution channel draws, for the
  * same reason: what a visitor fetches and what a renderer needs are different
  * sets, and only one of them belongs on a public origin.
+ *
+ * ⛔ The emitted copy is the BROWSER's, and only the browser's. Prerender imports
+ * the extension from its own build (`resolveExtensionPath`), because the copy
+ * sits under the site package, where the extension's bare imports
+ * (`@uniweb/core`, `react`) do not resolve.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -69,26 +74,31 @@ function isBrowserAsset(rel) {
 }
 
 /**
- * Locate the built `dist/` behind a site-relative extension URL.
+ * Locate the built `dist/` behind a site-relative extension URL:
+ * `/effects/entry.js` → `<project>/effects/dist/` or
+ * `<project>/extensions/effects/dist/`, with `rest` the path inside it.
  *
- * The same candidates `resolveExtensionPath` walks for prerender, kept in step
- * deliberately: if prerender can load an extension from the workspace but the
- * build cannot find it to emit, that is exactly the split that produced the
- * bug — one lane resolving it and the other not.
+ * One lookup for both lanes that need the extension's build: this emitter, which
+ * copies it into the site's output, and prerender, which imports it from where it
+ * was built (`resolveExtensionPath`). Neither can find an extension the other
+ * cannot, by construction rather than by two lists kept in step by hand.
  *
- * @returns {{ distDir: string, urlBase: string }|null}
+ * @param {string} url - a site-relative URL, with any deployment base removed
+ * @param {string} projectRoot - the directory holding the site and its extensions
+ * @returns {{ distDir: string, urlBase: string, rest: string }|null}
  */
-export function resolveExtensionDist(url, siteDir) {
+export function resolveExtensionDist(url, projectRoot) {
   const parts = url.replace(/^\//, '').split('/')
   if (parts.length < 2) return null
   const pkgName = parts[0]
-  const projectRoot = resolve(siteDir, '..')
 
   for (const candidate of [
     join(projectRoot, pkgName, 'dist'),
     join(projectRoot, 'extensions', pkgName, 'dist')
   ]) {
-    if (existsSync(candidate)) return { distDir: candidate, urlBase: pkgName }
+    if (existsSync(candidate)) {
+      return { distDir: candidate, urlBase: pkgName, rest: parts.slice(1).join('/') }
+    }
   }
   return null
 }
@@ -108,11 +118,12 @@ export function collectExtensionAssets(extensions, siteDir) {
   const emit = []
   const unresolved = []
   if (!Array.isArray(extensions)) return { emit, unresolved }
+  const projectRoot = resolve(siteDir, '..')
 
   for (const decl of extensions) {
     if (!isSiteRelative(decl)) continue // absolute URL or a ref — someone else serves it
     const url = typeof decl === 'string' ? decl : decl.url
-    const found = resolveExtensionDist(url, siteDir)
+    const found = resolveExtensionDist(url, projectRoot)
     if (!found) {
       unresolved.push(url)
       continue

@@ -82,7 +82,7 @@ describe('collectExtensionAssets', () => {
     const alt = join(root, 'fx', 'dist')
     mkdirSync(alt, { recursive: true })
     writeFileSync(join(alt, 'entry.js'), 'x')
-    expect(resolveExtensionDist('/fx/entry.js', siteDir).distDir).toBe(alt)
+    expect(resolveExtensionDist('/fx/entry.js', root)).toEqual({ distDir: alt, urlBase: 'fx', rest: 'entry.js' })
   })
 
   it('classifies declaration shapes', () => {
