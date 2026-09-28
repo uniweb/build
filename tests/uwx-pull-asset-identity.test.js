@@ -39,7 +39,7 @@ function pulled() {
       $id: 'home', slug: { en: 'home' }, mode: 'page', stable_id: 'home', title: { en: 'Home' }, is_index: true,
       page_sections: [{
         $id: 'hero', stable_id: 'hero', type: 'Hero', content,
-        background: { image: { src: SERVED, assetId: ID, assetExt: 'jpg' } },
+        params: { background: { image: { src: SERVED, assetId: ID, assetExt: 'jpg' } } },
       }],
     }],
   }
@@ -73,7 +73,7 @@ describe('pull — an image the project holds', () => {
     SITE = mkdtempSync(join(tmpdir(), 'uwx-pull-assets-'))
     mkdirSync(join(SITE, 'pages/home'), { recursive: true })
     writeFileSync(join(SITE, 'pages/home/hero.md'), authored)
-    pull({ '/images/hero.jpg': { id: ID, ext: 'jpg' } }, { background: undefined })
+    pull({ '/images/hero.jpg': { id: ID, ext: 'jpg' } }, { params: undefined })
     expect(readFileSync(join(SITE, 'pages/home/hero.md'), 'utf8')).toBe(authored)
   })
 

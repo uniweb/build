@@ -195,22 +195,22 @@ describe('what a hidden section means for its page', () => {
 })
 
 describe('a stored background or theme on pull', () => {
-  it('comes from `params`; a stored field fills in only where `params` lacks the key', async () => {
+  it('comes from `params` alone — the two fields the site-content Model dropped are not read', async () => {
     write(dir, {
       'site.yml': "name: S\nindex: home\nfoundation: '@a/base@1.0.0'\n",
       'pages/home/page.yml': 'title: Home\n',
       'pages/home/hero.md': "---\ntype: Hero\nbackground: '#new'\n---\n\n# Hi\n",
     })
     const doc = await siteProjectToDocument(dir)
-    // what a store may hold: a field an earlier push left, beside the newer params value
+    // the two fields as a store kept them before the Model dropped them — a pull ignores
+    // both, `theme_override` where `params` has no `theme` too
     Object.assign(doc.pages[0].page_sections[0], { background: '#old', theme_override: 'dark' })
     const dest = mkdtempSync(join(tmpdir(), 'section-fields-pulled-'))
     try {
       siteContentDocumentToProject({ document: doc, siteRoot: dest })
       const file = readFileSync(join(dest, 'pages/home/hero.md'), 'utf8')
       expect(file).toMatch(/background: '#new'/)
-      expect(file).not.toMatch(/#old/)
-      expect(file).toMatch(/theme: dark/) // no `theme` in params, so the field fills it
+      expect(file).not.toMatch(/#old|theme:/)
     } finally {
       rmSync(dest, { recursive: true, force: true })
     }

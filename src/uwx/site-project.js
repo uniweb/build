@@ -384,49 +384,11 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
 // ---------------------------------------------------------------------------
 
 /**
- * Re-inline a section's extracted insets back into its ProseMirror content —
- * the exact inverse of content-collector's `extractInsets`. The producer pulls
- * each `![alt](@Component){params}` ref out of the body into an `insets[]` array
- * and leaves an `inset_placeholder` behind; content-writer only serializes
- * `inset_ref` nodes, so we restore them before serializing or the inset would
- * be reported as unmappable and dropped.
- *
- * @param {object} content - the section's ProseMirror document (placeholders in)
- * @param {Array} insets - `[{ refId, type, params, title, embedKind }]`
- * @returns {object} a content document with `inset_ref` nodes restored
- */
-function reinlineInsets(content, insets) {
-  if (!content || !Array.isArray(content.content) || !Array.isArray(insets) || insets.length === 0) {
-    return content
-  }
-  const byRef = new Map(insets.map((i) => [i.refId, i]))
-
-  const visit = (nodes) =>
-    nodes.map((node) => {
-      if (!node) return node
-      if (node.type === 'inset_placeholder') {
-        const inset = byRef.get(node.attrs?.refId)
-        if (!inset) return node // no match → leave the placeholder (the guard reports it)
-        const attrs = { component: inset.type, ...(inset.params || {}) }
-        if (inset.title != null) attrs.alt = inset.title
-        // `visual` is the extractor's default — omit it so the projected markdown
-        // doesn't gain a spurious `{embedKind=visual}` the source never had.
-        if (inset.embedKind && inset.embedKind !== 'visual') attrs.embedKind = inset.embedKind
-        return { type: 'inset_ref', attrs }
-      }
-      if (Array.isArray(node.content)) return { ...node, content: visit(node.content) }
-      return node
-    })
-
-  return { ...content, content: visit(content.content) }
-}
-
-/**
  * Project one section `$`-record (from `page_sections` / `layout_sections`) to a
  * section `.md` file — the inverse of site.js `mapSectionData`. Frontmatter is
- * `type` + the flat `params` + `background` / `theme` (`theme_override`) /
- * `fetch` / `id` (`stable_id`); the body is the section's
- * content (insets re-inlined) serialized to markdown. Idempotent.
+ * `type` + `hidden` + the flat `params` (`background` and `theme` among them) +
+ * the data declaration (`params.fetch`, else the `fetch` field) + `id` (`stable_id`);
+ * the body is the section's content serialized to markdown. Idempotent.
  *
  * Note: `$children` (a section's child sections) are NOT written here — the page
  * walk (`pageSectionsToFiles`) writes each to its own file and nests it under its
@@ -444,7 +406,10 @@ function reinlineInsets(content, insets) {
 export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
-  const { type, stable_id, hidden, params, content, insets, fetch, background, theme_override } = record || {}
+  // ⛔ No `background` / `theme_override` / `insets`: the site-content Model dropped all three
+  // (2026-09-28), with a stored background and theme copied into `params`. Until then a field
+  // filled in where `params` lacked the key, and a stored `insets[]` was re-inlined into the body.
+  const { type, stable_id, hidden, params, content, fetch } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
@@ -461,12 +426,6 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // `params`, so one stored there counts when the field is absent.
   frontmatter.hidden = (typeof hidden === 'boolean' ? hidden : paramHidden === true) ? true : undefined
   Object.assign(frontmatter, paramsRest)
-  // A stored `background` / `theme_override` field fills in only where `params` lacks the key.
-  // Every writer writes `params` now — the app since its switch, a push since build 0.70.1 — so a
-  // field can only be as new as `params`, or older: one a push left out may survive in the store.
-  // ⛔ Until 2026-09-28 the field won here (uwx-format.md § A page section's fields, Order).
-  if (background !== undefined && !Object.hasOwn(paramsRest, 'background')) frontmatter.background = background
-  if (theme_override !== undefined && !Object.hasOwn(paramsRest, 'theme')) frontmatter.theme = theme_override
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
   // file gets `query:` for a declaration of names alone; a section that declares
   // its data locally keeps it (`writeSectionFile`, the declaration keys).
@@ -480,10 +439,9 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // `id:` only where the file's name does not already give it (`writeId`, `pageSectionsToFiles`).
   if (stable_id !== undefined && writeId) frontmatter.id = stable_id
 
-  const body = insets ? reinlineInsets(sourceContent, insets) : sourceContent
   // ⛔ Not `type: Content` into a file that names no type: it is what the push sent for it, and
   // absent, the foundation's `defaultSection` renders it. Until 2026-09-26 a pull wrote it back.
-  return writeSectionFile({ filePath, content: body, params: frontmatter, implied: { type: FILLED_SECTION_TYPE } })
+  return writeSectionFile({ filePath, content: sourceContent, params: frontmatter, implied: { type: FILLED_SECTION_TYPE } })
 }
 
 // ---------------------------------------------------------------------------

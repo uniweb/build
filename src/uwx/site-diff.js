@@ -29,8 +29,8 @@
 // It needs TWO bases, and that is the non-obvious part.
 //
 // Our document and the backend's are not byte-comparable renderings of the same
-// unit: the backend's copy carries fields we don't emit (`params`,
-// `theme_override`, its own `$uuid`) and serializes in its own key order. So a hash
+// unit: the backend's copy carries fields we don't emit (its own `$uuid`, for
+// one) and serializes in its own key order. So a hash
 // taken on our side and one taken on theirs differ for a unit NEITHER side touched.
 // A single base therefore validates exactly one comparison and silently corrupts
 // the other — with a local-representation base every unit looks "changed

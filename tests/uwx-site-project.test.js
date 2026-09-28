@@ -105,13 +105,11 @@ describe('siteInfoToConfig — info → config files', () => {
 describe('sectionRecordToFile — section record → .md', () => {
   const para = (text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
 
-  it('writes frontmatter (type + flat params + background/theme/id) and a markdown body', () => {
+  it('writes frontmatter (type + flat params — background and theme among them — + id) and a markdown body', () => {
     const record = {
       type: 'Hero',
       stable_id: 'hero',
-      params: { align: 'center', cta: 'Start' },
-      background: '/bg.jpg',
-      theme_override: 'dark',
+      params: { align: 'center', cta: 'Start', background: '/bg.jpg', theme: 'dark' },
       content: { type: 'doc', content: [para('Hello world')] },
     }
     const f = join(dir, 'hero.md')
@@ -122,24 +120,6 @@ describe('sectionRecordToFile — section record → .md', () => {
     const fm = yaml.load(text.slice(4, text.indexOf('\n---', 4)))
     expect(fm).toEqual({ type: 'Hero', align: 'center', cta: 'Start', background: '/bg.jpg', theme: 'dark', id: 'hero' })
     expect(text.trimEnd().endsWith('Hello world')).toBe(true)
-  })
-
-  it('re-inlines a block-level inset back to ![](@Component){params}', () => {
-    const record = {
-      type: 'Section',
-      content: {
-        type: 'doc',
-        content: [para('Intro'), { type: 'inset_placeholder', attrs: { refId: 'inset_0', embedKind: 'visual' } }],
-      },
-      insets: [{ refId: 'inset_0', type: 'Chart', embedKind: 'visual', params: { variant: 'compact' }, title: 'A chart' }],
-    }
-    const f = join(dir, 'with-inset.md')
-    sectionRecordToFile({ filePath: f, record })
-
-    const text = readFileSync(f, 'utf8')
-    expect(text).toContain('![A chart](@Chart){variant=compact}')
-    // embedKind=visual (the extractor default) is omitted — no spurious attr.
-    expect(text).not.toContain('embedKind')
   })
 
   it('is idempotent', () => {
