@@ -452,7 +452,7 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // locales/freeform/. A bare doc (source-only / pre-localization) passes through.
   const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates, context)
 
-  const { hidden: paramHidden, ...paramsRest } = params && typeof params === 'object' ? params : {}
+  const { hidden: paramHidden, fetch: paramFetch, ...paramsRest } = params && typeof params === 'object' ? params : {}
   const frontmatter = {}
   if (type !== undefined) frontmatter.type = type
   // ⭐ `hidden:` says what the store says: written for a hidden section, and removed from the
@@ -470,8 +470,11 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
   // file gets `query:` for a declaration of names alone; a section that declares
   // its data locally keeps it (`writeSectionFile`, the declaration keys).
-  if (fetch !== undefined) {
-    const { key, value } = authorableDeclaration(fetch)
+  // ⭐ From `params.fetch` when present — where a section carries its data since 2026-09-28 —
+  // else the stored field.
+  const ownFetch = paramFetch !== undefined ? paramFetch : fetch
+  if (ownFetch !== undefined) {
+    const { key, value } = authorableDeclaration(ownFetch)
     frontmatter[key] = value
   }
   // `id:` only where the file's name does not already give it (`writeId`, `pageSectionsToFiles`).

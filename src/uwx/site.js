@@ -302,6 +302,10 @@ function localizePageMeta(page, route, sourceLocale, translations) {
 
 function mapSectionData(section) {
   const params = { ...section.params }
+  // ⭐ The section's own data rides in `params.fetch` [Diego, 2026-09-28] — nothing on a store's
+  // side acts on it by name. ⚠️ Also sent as the `fetch` field it had until then, until an
+  // editor's reader looks in `params.fetch` (uwx-format.md § A page section's fields).
+  if (section.fetch) params.fetch = section.fetch
   const data = { type: section.type || FILLED_SECTION_TYPE } // entity type requires `type`
   setIf(data, 'stable_id', section.stableId ?? undefined)
   // ⭐ A draft section — the store's own `hidden`, which an editor also writes [2026-09-28].

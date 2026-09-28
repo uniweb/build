@@ -216,3 +216,34 @@ describe('a stored background or theme on pull', () => {
     }
   })
 })
+
+describe('a section’s data on the wire — `params.fetch` [2026-09-28]', () => {
+  const dataSite = {
+    'site.yml': "name: S\nindex: home\nfoundation: '@a/base@1.0.0'\n",
+    'pages/home/page.yml': 'title: Home\n',
+    'pages/home/team.md': '---\ntype: Team\nquery: members\n---\n\n# Team\n',
+  }
+
+  it('a push sends it in `params`, and still as the field, equal', async () => {
+    write(dir, dataSite)
+    const section = (await siteProjectToDocument(dir)).pages[0].page_sections[0]
+    expect(section.params.fetch).toBeTruthy()
+    expect(section.params.fetch).toEqual(section.fetch)
+  })
+
+  it('a pull writes the declaration back from `params.fetch`, which wins over a stored field', async () => {
+    write(dir, dataSite)
+    const doc = await siteProjectToDocument(dir)
+    const section = doc.pages[0].page_sections[0]
+    section.fetch = { query: 'old-query' } // a field an earlier push left in a store
+    const dest = mkdtempSync(join(tmpdir(), 'section-fetch-pulled-'))
+    try {
+      siteContentDocumentToProject({ document: doc, siteRoot: dest })
+      const file = readFileSync(join(dest, 'pages/home/team.md'), 'utf8')
+      expect(file).toMatch(/query: members/)
+      expect(file).not.toMatch(/old-query|^fetch:/m)
+    } finally {
+      rmSync(dest, { recursive: true, force: true })
+    }
+  })
+})
