@@ -255,7 +255,7 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  * @param {object} [opts.exporter] @param {string} [opts.exportedAt]
  * @returns {Promise<{
  *   siteContent: { buffer, entityCount, index, models }|null,
- *   records: { buffer, entityCount, index, models }|null,
+ *   records: { buffer, entityCount, index, models, links }|null,
  *   hashes: Object<string,string>, warnings: string[], refusals: string[],
  *   skipped: number, schemaless: Array<{name: string, model: string}>,
  *   localAssets: string[], applied: object, namesNew: string[],
@@ -316,6 +316,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // are complete — new records by `$ref`, already-minted ones by `entry: <uuid>`.
   const folder = buildFolderEntity({
     recordEntities: col.entities,
+    // Link records ride the folder as entries of their own kind (`./link-records.js`).
+    links: col.links || [],
     ...(sourceLocale ? { sourceLocale } : {}),
     // ⭐ Every record in the directory, at the top of the folder or in the
     // sub-folder `folder.yml` places it in — and NOTHING when there is no folder to
@@ -562,7 +564,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // filtered out here by send-only-changed. Declare them all (the backend rejects a
     // folder that references an undeclared Model).
     const referencedModels = [...collectReferencedModels(folder.document, new Set())]
-    records = { ...emitLane(entities, exporter, exportedAt, referencedModels), index }
+    // `links` rides beside the index: the caller banks each link's uuid from the folder the
+    // backend returns (`link-records.js::backfillLinkUuids`).
+    records = { ...emitLane(entities, exporter, exportedAt, referencedModels), index, links: col.links || [] }
   }
 
   // --- site-content lane -------------------------------------------------------

@@ -50,6 +50,7 @@ import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption }
 import { parseCatalogRef } from '../site/foundation-ref.js'
 import { renderEntityDocument } from './backfill.js'
 import { labelForFile } from '../site/entry-label.js'
+import { LINK_MODEL, writeLinkRecords } from './link-records.js'
 import { parseBibtex } from '@citestyle/bibtex'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
@@ -162,6 +163,10 @@ export function indexFolder(folderDoc) {
         const uuid = typeof node.entry === 'object' ? node.entry.entity : node.entry
         const schema = typeof node.entry === 'object' ? node.entry.schema : undefined
         if (uuid) byUuid.set(uuid, { folderPath, slug: node.name, schema })
+      } else if (node?.kind === 'link' && typeof node.$uuid === 'string' && node.$uuid) {
+        // ⭐ A link entry is a record of `@uniweb/link`, its identity the item's own
+        // (`./link-records.js`).
+        byUuid.set(node.$uuid, { folderPath, slug: node.name, schema: LINK_MODEL })
       }
     }
   }
@@ -535,7 +540,8 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
         out.push(entry)
         continue
       }
-      const uuid = node.entry?.entity ?? node.entry
+      // A link entry is its own record — its identity is the item's (`./link-records.js`).
+      const uuid = node.kind === 'link' ? node.$uuid : node.entry?.entity ?? node.entry
       const rel = typeof uuid === 'string' ? poolPathByUuid.get(uuid) : null
       // ⭐ What the folder says about the record — its entry's `tags` and `label` — comes
       // back as the entry `{ path, tags?, label? }` (ruled 2026-09-27 [Diego]).
@@ -772,6 +778,17 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   //
   // The folder ENTITY still carries no `$uuid` we persist: the backend owns the
   // site's folder, keyed by the site-content uuid.
+  // ⭐ THE FOLDER'S LINK ENTRIES, written as their record files (`./link-records.js`) — before the
+  // folder, which places them by the files they land in. ⛔ Until 2026-09-28 a pull could not write
+  // one, and warned that a push from here would remove it.
+  const linked = writeLinkRecords({ folderDoc, recordsRoot, ownIdByTheirs })
+  for (const [theirs, rel] of linked.pathByUuid) poolPathByUuid.set(theirs, rel)
+  Object.assign(learned, linked.learned)
+  placed.push(...linked.placed)
+  updated.push(...linked.updated)
+  unchanged.push(...linked.unchanged)
+  warnings.push(...linked.warnings)
+
   const records = folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
   warnings.push(...records.warnings)
   for (const path of keptBib) {

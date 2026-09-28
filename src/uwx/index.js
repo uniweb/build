@@ -188,3 +188,7 @@ export {
   writeRegisteredFoundation,
 } from '../site/registered-foundation.js'
 export { parseCatalogRef } from '../site/foundation-ref.js'
+
+// Link records — `@uniweb/link`: a file in `records/uniweb/link/` on the file side, a folder entry of
+// kind `link` on the wire, never an entity.
+export { LINK_MODEL, linkItems, backfillLinkUuids, writeLinkRecords, linkRecordRefusal } from './link-records.js'

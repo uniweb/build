@@ -39,6 +39,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, isAbsolute, extname, basename } from 'node:path'
 import { dataRefOf } from '@uniweb/core/data-keys'
+import { SYSTEM_RECORD_SCHEMAS } from '@uniweb/schemas/system'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
@@ -138,10 +139,17 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
     return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
   }
 
+  // ⭐ THE SYSTEM MODELS A SITE'S RECORDS MAY NAME — `@uniweb/link` — resolve from the build's own
+  // copy (`@uniweb/schemas/system`), whatever the foundation holds: a site with no backend builds,
+  // validates and renders a link record with it. Every other `@uniweb/` name is platform plumbing,
+  // never a data-schema source. (The whole scope was refused until 2026-09-28.)
   if (scope === RESERVED_SYSTEM_SCOPE) {
+    const system = SYSTEM_RECORD_SCHEMAS[name]
+    if (system) return validateAndNormalizeSchema(system, ref)
+    const allowed = Object.keys(SYSTEM_RECORD_SCHEMAS).map((n) => `'@${scope}/${n}'`).join(', ')
     throw new Error(
-      `'@${scope}' is the reserved platform system namespace and is not a data-schema source. ` +
-        `Use '@std/${name}' for the shared standard schemas.`
+      `'@${scope}' is the reserved platform system namespace: the only data schemas a site's records ` +
+        `may name in it are ${allowed}. Use '@std/${name}' for the shared standard schemas.`
     )
   }
 

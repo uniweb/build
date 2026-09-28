@@ -67,6 +67,7 @@ import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
+import { LINK_MODEL, linkRecordRefusal } from './link-records.js'
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 // The record's OWN keys — identity and transport, never a field of any section, never
@@ -907,9 +908,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       colConfig,
       folder: { ...folder, nodes: [] },
       recordsDirExists: pool.exists,
-      sendFolder: sendsFolder(pool, []),
+      sendFolder: sendsFolder(pool, [], []),
       declarations: new Map(),
       keyTyped: new Map(),
+      links: [],
     }
   }
 
@@ -1073,7 +1075,46 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // (`self-scope.js::unresolveSelfScope`), and a push then reported only a name two
   // records share.
   const fileByOwnId = new Map()
+
+  // ⭐ A LINK RECORD IS A FOLDER ENTRY, NEVER AN ENTITY (`@uniweb/link`, 2026-09-28 —
+  // `./link-records.js`). Its file holds its `url` and its own `$uuid`; the push sends it as an
+  // item of the folder, `{ kind: 'link', name, url }`, under the uuid this backend holds it by
+  // (`recordMap`), or none on its first push. Placed like any record, so `folder.yml` gives its
+  // label and tags.
+  const links = []
+  const linkNames = new Map() // slug → the file that gave it, so two files cannot claim one name
+  for (const pooled of poolBySchema.get(LINK_MODEL) || []) {
+    const produced = []
+    for (const r of await readEntityFile(pooled.absPath)) {
+      const where = r.multiRecord ? `${pooled.relPath} (${r.slug})` : pooled.relPath
+      const refusal = linkRecordRefusal(r, where)
+      if (refusal) {
+        refusals.push(refusal)
+        continue
+      }
+      const first = linkNames.get(r.slug)
+      if (first) {
+        refusals.push(`${pooled.relPath}: a link named "${r.slug}" is also ${first} — a link is named by its file, so each needs its own name.`)
+        continue
+      }
+      linkNames.set(r.slug, pooled.relPath)
+      const id = [...pooled.dirs, r.slug].join('/')
+      const ownId = typeof r.data?.$uuid === 'string' && r.data.$uuid ? r.data.$uuid : null
+      links.push({
+        id,
+        slug: r.slug,
+        url: r.data.url.trim(),
+        ownId,
+        uuid: ownId ? recordMap[ownId] ?? null : null,
+        sourceFile: r.multiRecord ? null : r.sourceFile ?? pooled.absPath,
+      })
+      produced.push({ id, slug: r.slug })
+    }
+    producedBy.set(pooled.id, produced)
+  }
+
   for (const [schema, poolEntities] of poolBySchema) {
+    if (schema === LINK_MODEL) continue
     const label = poolEntities[0].dirs.join('/')
     const modelName = modelFor(schema, `${pool.dir}/${label}/`)
     const declaration = (await declarationFor(modelName)) || (await typedFor(schema))
@@ -1211,9 +1252,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   for (const { name, decl } of queries) {
     const schema = decl.schema || decl.model
     const hasRecords = poolBySchema.has(schema)
-    const resolved = hasRecords
+    // A query over link records names a system Model, which resolves whatever the foundation holds.
+    const resolved = schema === LINK_MODEL || (hasRecords
       ? !unresolved.has(schema)
-      : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema)))
+      : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema))))
     if (!resolved) {
       if (decl.schemaExplicit) throw unresolvedExplicit(resolveSelfScope(schema, scope), name)
       schemaless.push({ name, model: resolveSelfScope(schema, scope) })
@@ -1250,13 +1292,15 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     colConfig,
     folder: { ...folder, nodes },
     recordsDirExists: pool.exists,
-    sendFolder: sendsFolder(pool, entities),
+    sendFolder: sendsFolder(pool, entities, links),
     // Each entity's declaration, by its Model — what walks a record's lists
     // (`record-items.js`).
     declarations: new Map(readSchemas.map(({ declaration }) => [declaration.name, declaration])),
     // A name-defaulted schema that stands for the type of the data key of its name
     // (`@/team` → `@/member`) — see `typedFor` above.
     keyTyped,
+    // The link records, sent as folder entries rather than entities (`./link-records.js`).
+    links,
   }
 }
 
@@ -1270,9 +1314,9 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
 // holds only files that are not records (warned). Neither is an author emptying
 // the folder, and sending one would remove the backend's records — including any
 // authored there — for a state nobody chose. Inert instead, like no directory.
-function sendsFolder(pool, entities) {
+function sendsFolder(pool, entities, links = []) {
   if (!pool.exists) return false
-  if (entities.length > 0) return true
+  if (entities.length > 0 || links.length > 0) return true
   return pool.entities.length === 0 && pool.errors.length === 0
 }
 

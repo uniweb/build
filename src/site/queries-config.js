@@ -31,6 +31,7 @@
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { recordLayout } from '@uniweb/schemas/conform'
+import { isSystemRecordRef } from '@uniweb/schemas/system'
 import { detectFoundationType, parseCatalogRef } from './foundation-ref.js'
 import { readRegisteredFoundation } from './registered-foundation.js'
 import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
@@ -348,8 +349,8 @@ export function toConfigQueries(declarations) {
  * A `@/name` ref the foundation defines no schema for is absent without a word: a query
  * is named after no schema when its records have none. Any other ref that does not
  * resolve is absent too, and reported in `failures`. With no local foundation only
- * `@std/*` refs resolve — from the build's own copy of the standard schemas — since
- * nothing else is on disk.
+ * `@std/*` refs resolve — from the build's own copy of the standard schemas — and the
+ * system Models a record may name (`@uniweb/link`), since nothing else is on disk.
  *
  * @param {string} siteRoot
  * @param {Iterable<string>} refs - the `schema:` refs of the site's queries
@@ -364,7 +365,7 @@ export async function resolveRecordSchemas(siteRoot, refs, opts = {}) {
   const siteYml = opts.siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
   const srcDir = localFoundationSrcDir(siteRoot, siteYml)
   for (const ref of wanted) {
-    if (!srcDir && !ref.startsWith('@std/')) continue
+    if (!srcDir && !ref.startsWith('@std/') && !isSystemRecordRef(ref)) continue
     try {
       Object.assign(schemas, await buildDataSchemaMap([ref], { srcDir: srcDir ?? siteRoot }))
     } catch (err) {

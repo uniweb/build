@@ -51,6 +51,7 @@
 // never holds a folder uuid.
 
 import { labelOnWire } from '../site/entry-label.js'
+import { linkLeaf } from './link-records.js'
 
 export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'
@@ -93,7 +94,7 @@ function refLeaf(entity) {
  * @param {Map<string, object>} byEntityId - record entities, keyed by pool id
  * @param {string[]} missing - collects ids that resolved to no entity
  */
-function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
+function contentsFromNodes(nodes, byEntityId, missing, sourceLocale, byLinkId = new Map()) {
   const out = []
   for (const node of nodes || []) {
     if (node.kind === 'branch') {
@@ -104,8 +105,15 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale) {
       // (`entry-label.js`).
       if (node.label !== undefined) branch.label = labelOnWire(node.label, sourceLocale)
       if (Array.isArray(node.tags) && node.tags.length) branch.tags = [...node.tags]
-      branch.$children = contentsFromNodes(node.$children, byEntityId, missing, sourceLocale)
+      branch.$children = contentsFromNodes(node.$children, byEntityId, missing, sourceLocale, byLinkId)
       out.push(branch)
+      continue
+    }
+    // ⭐ A LINK RECORD IS AN ENTRY OF ITS OWN KIND, holding its data — never a ref to an entity
+    // (`./link-records.js`).
+    const link = byLinkId.get(node.$entityId)
+    if (link) {
+      out.push(linkLeaf(link, node, sourceLocale))
       continue
     }
     const entity = byEntityId.get(node.$entityId)
@@ -208,7 +216,13 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
   let stamped = 0
   let unknown = 0
   const claimed = new Set()
+  // ⭐ An item that already carries its identity keeps it — a link entry's `$uuid` is its
+  // record's (`./link-records.js`) — and no other item may be stamped with it.
+  walkFolderItems(doc?.contents, (_at, item) => {
+    if (typeof item.$uuid === 'string' && item.$uuid) claimed.add(item.$uuid)
+  })
   walkFolderItems(doc?.contents, ({ path, unique, record }, item) => {
+    if (typeof item.$uuid === 'string' && item.$uuid) return
     let uuid = record ? pathToUuid[`@${record}`] : undefined
     if (!uuid && unique) uuid = pathToUuid[path]
     if (uuid && !claimed.has(uuid)) {
@@ -231,6 +245,8 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  * @param {object} params
  * @param {object[]} params.recordEntities - the record entities (full set, BEFORE
  *        send-only-changed filtering), each `{ id, uuid, slug, model }`
+ * @param {object[]} [params.links] - the link records, each `{ id, slug, url, uuid }` — sent as
+ *        entries of kind `link`, never as entities (`./link-records.js`)
  * @param {Array} params.folderNodes - the placed records: `folder.yml`'s sub-folders,
  *        then every record at the top
  * @param {boolean} [params.declared] - whether the records DIRECTORY exists. See below.
@@ -241,7 +257,7 @@ export function stampFolderItemUuids(doc, pathToUuid = {}) {
  *        keyed under on the wire
  * @returns {{ id, uuid, model, file, document, warnings }|null}
  */
-export function buildFolderEntity({ recordEntities, folderNodes = [], declared, itemUuids = null, sourceLocale = 'en' }) {
+export function buildFolderEntity({ recordEntities, links = [], folderNodes = [], declared, itemUuids = null, sourceLocale = 'en' }) {
   // ⛔ `missing` AND `empty` ARE DIFFERENT, AND THE ASYMMETRY IS DELIBERATE.
   //
   //   no records directory  → null. INERT: nothing is sent, and the backend's
@@ -259,9 +275,10 @@ export function buildFolderEntity({ recordEntities, folderNodes = [], declared, 
 
   const byEntityId = new Map()
   for (const e of recordEntities || []) byEntityId.set(e.id, e)
+  const byLinkId = new Map((links || []).map((l) => [l.id, l]))
 
   const missing = []
-  const contents = contentsFromNodes(folderNodes, byEntityId, missing, sourceLocale)
+  const contents = contentsFromNodes(folderNodes, byEntityId, missing, sourceLocale, byLinkId)
   // ⚠️ `id` IS THE RECORD'S PATH IN THE RECORDS DIRECTORY, NOT A FOLDER PATH — say
   // so, because the two read identically and a reader who takes it for a placement
   // concludes the emitter is dropping a branch it never had. *(Measured 2026-08-31:
