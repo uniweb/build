@@ -65,6 +65,14 @@ const RETIRED_KEYS = ['merge']
  * The declaration as an author would have written it — the wire's resolved form
  * minus what the build derived, and minus a retired key the build would refuse.
  *
+ * ⭐ `as` EQUAL TO THE QUERY NAME IS THE DEFAULT, so it is dropped too: the parse fills
+ * it (`data-fetcher.js`, `as: fetch.as || fetch.query`) and a fetch's key is "its
+ * query's name unless the author wrote another" (`@uniweb/core/data-keys`), so writing
+ * it back changes nothing but the file. ⛔ Until 2026-09-28 it was kept on a `fetch:`
+ * object while `queryNamesOf` already dropped it for the `query:` shorthand, so a round
+ * trip of `fetch: { query: posts, limit: 3 }` came back with `as: posts` added. An `as`
+ * naming another key is the author's, and stays.
+ *
  * @param {object} fetch a `fetch:` declaration off the sync wire
  * @returns {object} the same declaration, safe to write into authored config
  */
@@ -75,6 +83,7 @@ export function authorableFetch(fetch) {
   const out = {}
   for (const [k, v] of Object.entries(fetch)) {
     if (drop.includes(k)) continue
+    if (shape === 'query' && k === 'as' && v === fetch.query) continue
     out[k] = v
   }
   return out

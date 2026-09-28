@@ -7,7 +7,7 @@
 // continuing to work, which is why this is the one place the rename is enforced
 // rather than merely applied.
 import { parseFetchConfig, _resetUnknownFetchKeyWarnings } from '../src/site/data-fetcher.js'
-import { authorableFetch, fetchShapeOf } from '../src/site/fetch-shapes.js'
+import { authorableDeclaration, authorableFetch, fetchShapeOf } from '../src/site/fetch-shapes.js'
 
 beforeEach(() => _resetUnknownFetchKeyWarnings())
 
@@ -64,10 +64,23 @@ describe('one name, end to end — no crossing', () => {
     expect(fetchShapeOf({ collection: 'articles' })).toBe('source')
   })
 
-  it('drops the derived path, keeping what the author wrote', () => {
+  it('drops the derived path, and the default `as` — the query name', () => {
     expect(
       authorableFetch({ query: 'members', path: '/data/members.json', as: 'members' })
-    ).toEqual({ query: 'members', as: 'members' })
+    ).toEqual({ query: 'members' })
+  })
+
+  it('a binding with adaptations comes back as written — no `as` added', () => {
+    // What a push sends for `fetch: { query: posts, limit: 3 }` — it adds `as` and `path`.
+    const wire = { as: 'posts', path: '/data/posts.json', limit: 3, query: 'posts' }
+    expect(authorableFetch(wire)).toEqual({ query: 'posts', limit: 3 })
+    expect(authorableDeclaration(wire)).toEqual({ key: 'fetch', value: { query: 'posts', limit: 3 } })
+  })
+
+  it('CONTROL — an `as` naming another key is the author’s, and stays', () => {
+    expect(
+      authorableFetch({ query: 'articles', path: '/data/articles.json', as: 'latest', limit: 3 })
+    ).toEqual({ query: 'articles', as: 'latest', limit: 3 })
   })
 
   it('CONTROL — a source-shaped fetch keeps its path, which the author wrote', () => {

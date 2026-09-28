@@ -111,14 +111,14 @@ describe('a pull never writes a stored `merge` back, whatever its value', () => 
   it('a richer declaration keeps what the author wrote and drops `merge`', () => {
     const { key, value } = authorableDeclaration({ query: 'team', path: '/data/team.json', as: 'team', limit: 3, merge: true })
     expect(key).toBe('fetch')
-    expect(value).toEqual({ query: 'team', as: 'team', limit: 3 })
+    expect(value).toEqual({ query: 'team', limit: 3 })
   })
 
   it('a section file and a page.yml projected from a stored document hold no `merge`', async () => {
     const record = { type: 'Grid', content: null, params: { fetch: { query: 'team', path: '/data/team.json', as: 'team', limit: 3, merge: true } } }
     const section = join(ROOT, 'grid.md')
     sectionRecordToFile({ filePath: section, record })
-    expect(frontmatterOf(section).fetch).toEqual({ query: 'team', as: 'team', limit: 3 })
+    expect(frontmatterOf(section).fetch).toEqual({ query: 'team', limit: 3 })
 
     w('pages/team/page.yml', 'title: Team\nquery: team\n')
     const doc = await quiet(() => siteProjectToDocument(ROOT))
