@@ -142,9 +142,9 @@ function stripCredentials(block, label) {
 }
 
 // page_sections and layout_sections share this content shape.
-// processMarkdownFile takes only type/props/fetch/query/data/id out of the
+// processMarkdownFile takes only type/hidden/props/fetch/query/data/id out of the
 // frontmatter (and drops preset/input), so `background:` and `theme:` stay
-// inside section.params — lift them into the entity type's dedicated fields.
+// inside section.params — and ride there on the wire too (`mapSectionData`).
 // The `type` a push sends for a section whose file names none — the Model requires one. A pull does
 // not write it back into a file that names none (`sectionRecordToFile`): absent, the foundation's
 // `defaultSection` renders it, which is not always `Content`.
@@ -302,19 +302,20 @@ function localizePageMeta(page, route, sourceLocale, translations) {
 
 function mapSectionData(section) {
   const params = { ...section.params }
-  const background = params.background
-  const themeOverride = params.theme
-  delete params.background
-  delete params.theme
-
   const data = { type: section.type || FILLED_SECTION_TYPE } // entity type requires `type`
   setIf(data, 'stable_id', section.stableId ?? undefined)
+  // ⭐ A draft section — the store's own `hidden`, which an editor also writes [2026-09-28].
+  if (section.hidden === true) data.hidden = true
   // No `preset` or `input`: nothing read either, and the collector drops them (2026-09-27).
+  // ⭐ `background` and `theme` stay IN `params` [Diego, 2026-09-28] — where the runtime reads
+  // them, and where a section stores them from now on. ⚠️ Also sent as the two fields they had
+  // until today, until every reader of a stored section reads `params`; a pull prefers a
+  // stored field meanwhile (`sectionRecordToFile`). uwx-format.md § A page section's fields.
   if (Object.keys(params).length > 0) data.params = params
   data.content = section.content // leaf insets in it as written — no `insets` field since 2026-09-27
   setIf(data, 'fetch', section.fetch ?? undefined)
-  setIf(data, 'background', background)
-  setIf(data, 'theme_override', themeOverride)
+  setIf(data, 'background', params.background)
+  setIf(data, 'theme_override', params.theme)
   return data
 }
 

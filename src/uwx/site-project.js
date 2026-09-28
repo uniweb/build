@@ -444,7 +444,7 @@ function reinlineInsets(content, insets) {
 export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
-  const { type, stable_id, params, content, insets, fetch, background, theme_override } = record || {}
+  const { type, stable_id, hidden, params, content, insets, fetch, background, theme_override } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
@@ -452,9 +452,18 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // locales/freeform/. A bare doc (source-only / pre-localization) passes through.
   const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates, context)
 
+  const { hidden: paramHidden, ...paramsRest } = params && typeof params === 'object' ? params : {}
   const frontmatter = {}
   if (type !== undefined) frontmatter.type = type
-  if (params && typeof params === 'object') Object.assign(frontmatter, params)
+  // ⭐ `hidden:` says what the store says: written for a hidden section, and removed from the
+  // file of a visible one — an editor toggles it [2026-09-28]. ⛔ Until then a pull dropped it,
+  // and the next push un-hid the section. A push before that day sent a file's `hidden:` inside
+  // `params`, so one stored there counts when the field is absent.
+  frontmatter.hidden = (typeof hidden === 'boolean' ? hidden : paramHidden === true) ? true : undefined
+  Object.assign(frontmatter, paramsRest)
+  // ⚠️ A stored `background` / `theme_override` field wins over the same key in `params` while
+  // one is stored: an editor may still write the fields rather than `params` (2026-09-28;
+  // uwx-format.md § A page section's fields, Order).
   if (background !== undefined) frontmatter.background = background
   if (theme_override !== undefined) frontmatter.theme = theme_override
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new

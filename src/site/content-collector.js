@@ -10,6 +10,7 @@
  *
  * Section frontmatter reserved properties:
  * - type: Component type (e.g., "Hero", "Features")
+ * - hidden: `true` makes the section a draft — left out of a published build, kept in dev
  * - props: Additional component props (merged with other params)
  * - fetch: The section's binding — names a query (query, as, where, sort, limit, current,
  *   prerender, detailPage); `query:` is its shorthand
@@ -31,7 +32,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
-import { normalizeHideIn, dropUnpublishedPages } from './nav-visibility.js'
+import { normalizeHideIn, dropUnpublishedPages, dropHiddenSections } from './nav-visibility.js'
 import { parseFetchConfig, toFetchList } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
@@ -1009,7 +1010,17 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
 
   // `query`, `fetch` and `data` are never params: `query:` / `fetch:` declare the
   // section's own data, and a leftover `data:` is refused (`declaredFetch`).
-  const { type, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
+  const { type, hidden, preset, input, props, fetch, query, data, id: frontmatterId, ...params } = frontMatter
+  // ⭐ `hidden: true` — a draft section, the page's meaning one level down: left out of a
+  // published build, kept by `uniweb dev`, and synced as the section's own `hidden`
+  // [Diego, 2026-09-28]. ⛔ Until then it was an ordinary param: the component received it
+  // and the section rendered everywhere.
+  if (hidden !== undefined && typeof hidden !== 'boolean') {
+    console.warn(
+      `[content-collector] ${relative(siteRoot, filePath)}: hidden: ${JSON.stringify(hidden)} is not true or false — ` +
+        `the section stays visible.`
+    )
+  }
   // ⛔ `preset:` and `input:` do nothing, so they are dropped with a warning rather than
   // handed to the component as params. Nothing ever read either [2026-09-27]: a preset is
   // a named set of params a section type's `meta.js` offers an editor, and a file writes
@@ -1058,6 +1069,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     id,
     stableId,
     type: type || null,
+    ...(hidden === true ? { hidden: true } : {}),
     params: { ...params, ...props },
     content: proseMirrorContent,
     fetch: parseFetchConfig(resolvedFetch, relative(siteRoot, filePath), { level: 'section' }),
@@ -2790,10 +2802,11 @@ export async function collectSiteContent(sitePath, options = {}) {
       links: themeLinks
     },
     // Reachability axis: on the published build paths, drop `hidden` pages and
-    // their whole subtree (cascade). Dev keeps them so drafts stay previewable.
-    pages: dropUnpublished ? dropUnpublishedPages(pages) : pages,
+    // their whole subtree (cascade), and every `hidden` section with its children.
+    // Dev keeps them so drafts stay previewable.
+    pages: dropUnpublished ? dropUnpublishedPages(pages).map(withoutHiddenSections) : pages,
     // Layout area sets: { default: { header: page, footer: page, ... }, marketing: { ... } }
-    layouts,
+    layouts: dropUnpublished ? mapLayoutAreas(layouts, withoutHiddenSections) : layouts,
     // ⭐ THE SAME REACHABILITY AXIS, for the 404 slot. `hidden: true` means DRAFT —
     // "excluded from the published site" (`docs/reference/page-configuration.md`);
     // `hideIn: ['*']` is the control for "routed but in no nav".
@@ -2806,7 +2819,7 @@ export async function collectSiteContent(sitePath, options = {}) {
     // shell), and `uniweb dev` keeps the page previewable like any other draft.
     // No cascade to resolve: this slot is root-level only, so its own flag is
     // the only one that can apply.
-    notFound: dropUnpublished && notFound?.hidden ? null : notFound,
+    notFound: dropUnpublished ? (notFound?.hidden ? null : withoutHiddenSections(notFound)) : notFound,
     // Versioned scopes: route → { versions, latestId }
     versionedScopes: versionedScopesObj,
     assets: assetCollection.assets,
@@ -2815,6 +2828,25 @@ export async function collectSiteContent(sitePath, options = {}) {
     // Icon manifest for preloading
     icons: iconManifest
   }
+}
+
+// A page (or a layout area) without its hidden sections — `dropHiddenSections`.
+function withoutHiddenSections(page) {
+  if (!page || !Array.isArray(page.sections)) return page
+  return { ...page, sections: dropHiddenSections(page.sections) }
+}
+
+// Apply `fn` to every area of every layout: `{ default: { header: page, … }, … }`.
+function mapLayoutAreas(layouts, fn) {
+  if (!layouts || typeof layouts !== 'object') return layouts
+  return Object.fromEntries(
+    Object.entries(layouts).map(([name, areas]) => [
+      name,
+      areas && typeof areas === 'object'
+        ? Object.fromEntries(Object.entries(areas).map(([area, page]) => [area, fn(page)]))
+        : areas,
+    ])
+  )
 }
 
 // Shared pure / IO helpers. Exported for testing AND reused by

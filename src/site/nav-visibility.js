@@ -1,6 +1,7 @@
 // Page-visibility helpers — the two orthogonal axes a page carries:
 //   • Reachability — `hidden: bool`. `true` = excluded from the PUBLISHED output
-//     entirely (see `dropUnpublishedPages`). Still previewable in `uniweb dev`.
+//     entirely (see `dropUnpublishedPages`, and `dropHiddenSections` for a section).
+//     Still previewable in `uniweb dev`.
 //   • Nav placement — `hideIn: string[]`. Which nav areas suppress the page while
 //     it IS routed (see `normalizeHideIn`). `['*']` = suppressed from every area.
 
@@ -66,4 +67,24 @@ export function dropUnpublishedPages(pages) {
     return result
   }
   return pages.filter((p) => !isUnpublished(p))
+}
+
+/**
+ * Drop hidden sections — the same reachability axis, one level down. A section with
+ * `hidden: true` in its frontmatter is a draft: left out of the PUBLISHED output together
+ * with its child sections, and kept by `uniweb dev` so it stays previewable. Applied where
+ * `dropUnpublishedPages` is, to a page's sections and a layout area's alike.
+ *
+ * @param {Array<object>} sections - collected sections (each may hold `subsections`)
+ * @returns {Array<object>} the sections without the hidden ones, at every depth
+ */
+export function dropHiddenSections(sections) {
+  if (!Array.isArray(sections)) return sections
+  return sections
+    .filter((section) => section?.hidden !== true)
+    .map((section) =>
+      Array.isArray(section.subsections) && section.subsections.length > 0
+        ? { ...section, subsections: dropHiddenSections(section.subsections) }
+        : section
+    )
 }

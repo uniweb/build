@@ -124,9 +124,11 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
     expect(hero.$id).toBe('hero')
     expect(hero.type).toBe('Hero')
     expect(hero.content.en.type).toBe('doc') // raw ProseMirror, per-locale keyed
-    expect(hero.background).toEqual({ image: '/img/bg.jpg' }) // lifted from params
+    expect(hero.background).toEqual({ image: '/img/bg.jpg' }) // sent as a field too, for now
     expect(hero.theme_override).toBe('dark')
-    expect(hero.params).toEqual({ cta: 'Get Started' })
+    // …and both stay in `params`, where a section stores them since 2026-09-28; the two
+    // fields are sent as well until the app and the backend read `params`.
+    expect(hero.params).toEqual({ cta: 'Get Started', background: { image: '/img/bg.jpg' }, theme: 'dark' })
     // no positional bookkeeping anywhere
     expect(hero).not.toHaveProperty('parent_path')
     expect(hero).not.toHaveProperty('parent_section')

@@ -41,7 +41,8 @@ export const DEFAULT_RESERVED_FRONTMATTER = new Set([
   'fetch',
   'data',
   'nest',
-  'hidden',
+  // ⛔ Not `hidden`, which was here from the start (2026-05-30) with no reason recorded: an
+  // editor toggles it, so a pull must carry the store's value into the file (2026-09-28).
 ])
 
 // js-yaml dump options shared by every config write, so output is byte-stable.
