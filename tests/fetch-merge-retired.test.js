@@ -115,7 +115,7 @@ describe('a pull never writes a stored `merge` back, whatever its value', () => 
   })
 
   it('a section file and a page.yml projected from a stored document hold no `merge`', async () => {
-    const record = { type: 'Grid', content: null, fetch: { query: 'team', path: '/data/team.json', as: 'team', limit: 3, merge: true } }
+    const record = { type: 'Grid', content: null, params: { fetch: { query: 'team', path: '/data/team.json', as: 'team', limit: 3, merge: true } } }
     const section = join(ROOT, 'grid.md')
     sectionRecordToFile({ filePath: section, record })
     expect(frontmatterOf(section).fetch).toEqual({ query: 'team', as: 'team', limit: 3 })

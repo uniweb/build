@@ -231,7 +231,7 @@ describe('a section’s data on the wire — `params.fetch` [2026-09-28]', () =>
     expect(section).not.toHaveProperty('fetch')
   })
 
-  it('a pull still reads a stored `fetch` field where `params` has none — a section an earlier push stored', async () => {
+  it('a stored section `fetch` field is not read — the Model retired it, its values copied into `params`', async () => {
     write(dir, dataSite)
     const doc = await siteProjectToDocument(dir)
     const section = doc.pages[0].page_sections[0]
@@ -240,13 +240,13 @@ describe('a section’s data on the wire — `params.fetch` [2026-09-28]', () =>
     const dest = mkdtempSync(join(tmpdir(), 'section-fetch-field-pulled-'))
     try {
       siteContentDocumentToProject({ document: doc, siteRoot: dest })
-      expect(readFileSync(join(dest, 'pages/home/team.md'), 'utf8')).toMatch(/query: members/)
+      expect(readFileSync(join(dest, 'pages/home/team.md'), 'utf8')).not.toMatch(/query:|fetch:/)
     } finally {
       rmSync(dest, { recursive: true, force: true })
     }
   })
 
-  it('a pull writes the declaration back from `params.fetch`, which wins over a stored field', async () => {
+  it('a pull writes the declaration back from `params.fetch`, and reads no stored section field', async () => {
     write(dir, dataSite)
     const doc = await siteProjectToDocument(dir)
     const section = doc.pages[0].page_sections[0]

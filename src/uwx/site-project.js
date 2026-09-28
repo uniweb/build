@@ -387,7 +387,7 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  * Project one section `$`-record (from `page_sections` / `layout_sections`) to a
  * section `.md` file — the inverse of site.js `mapSectionData`. Frontmatter is
  * `type` + `hidden` + the flat `params` (`background` and `theme` among them) +
- * the data declaration (`params.fetch`, else the `fetch` field) + `id` (`stable_id`);
+ * the data declaration (`params.fetch`) + `id` (`stable_id`);
  * the body is the section's content serialized to markdown. Idempotent.
  *
  * Note: `$children` (a section's child sections) are NOT written here — the page
@@ -406,10 +406,11 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
 export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
-  // ⛔ No `background` / `theme_override` / `insets`: the site-content Model dropped all three
-  // (2026-09-28), with a stored background and theme copied into `params`. Until then a field
-  // filled in where `params` lacked the key, and a stored `insets[]` was re-inlined into the body.
-  const { type, stable_id, hidden, params, content, fetch } = record || {}
+  // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
+  // four from a section (2026-09-28), with a stored background, theme and data declaration copied
+  // into `params`. Until then a field filled in where `params` lacked the key, and a stored
+  // `insets[]` was re-inlined into the body. (A PAGE's `fetch` is its own field — `pageRecordToYml`.)
+  const { type, stable_id, hidden, params, content } = record || {}
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
@@ -429,11 +430,9 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
   // file gets `query:` for a declaration of names alone; a section that declares
   // its data locally keeps it (`writeSectionFile`, the declaration keys).
-  // ⭐ From `params.fetch` when present — where a section carries its data since 2026-09-28 —
-  // else the stored field.
-  const ownFetch = paramFetch !== undefined ? paramFetch : fetch
-  if (ownFetch !== undefined) {
-    const { key, value } = authorableDeclaration(ownFetch)
+  // ⭐ From `params.fetch` — where a section carries its data since 2026-09-28.
+  if (paramFetch !== undefined) {
+    const { key, value } = authorableDeclaration(paramFetch)
     frontmatter[key] = value
   }
   // `id:` only where the file's name does not already give it (`writeId`, `pageSectionsToFiles`).

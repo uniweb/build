@@ -174,7 +174,7 @@ describe('a pull writes ONE declaration key back — the one the file uses', () 
   })
 
   it('a new section file gets `query:`; a section that declares its data locally keeps it', () => {
-    const record = { type: 'Grid', content: null, fetch: { query: 'team', path: '/data/team.json', as: 'team', prerender: true, merge: false } }
+    const record = { type: 'Grid', content: null, params: { fetch: { query: 'team', path: '/data/team.json', as: 'team', prerender: true, merge: false } } }
     const fresh = join(ROOT, 'fresh.md')
     sectionRecordToFile({ filePath: fresh, record })
     expect(frontmatterOf(fresh)).toMatchObject({ type: 'Grid', query: 'team' })
