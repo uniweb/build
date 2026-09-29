@@ -422,10 +422,10 @@ describe('reportPlacementDeclarations', () => {
     expect(warnings[0]).toMatch(/Tabs.*"TabPanel".*not a section type/)
   })
 
-  it('warns about a children or visuals declaration it cannot read', () => {
+  it('warns about a children or content declaration it cannot read', () => {
     reportPlacementDeclarations({
       Grid: { name: 'Grid', children: { grid: ['40/'], colums: 2 } },
-      Split: { name: 'Split', visuals: 'chart' },
+      Split: { name: 'Split', content: { media: { types: ['chart'] } } },
     })
     expect(warnings.join('\n')).toMatch(/Grid.*children\.grid.*"40\/"/)
     expect(warnings.join('\n')).toMatch(/Grid.*children\.colums/)
@@ -434,7 +434,11 @@ describe('reportPlacementDeclarations', () => {
 
   it('says nothing about declarations it can read', () => {
     reportPlacementDeclarations({
-      Grid: { name: 'Grid', children: { label: 'Items', grid: [2, '40/60'], types: ['Card'] }, visuals: 1 },
+      Grid: {
+        name: 'Grid',
+        children: { label: 'Items', grid: [2, '40/60'], types: ['Card'] },
+        content: { title: 'Headline', media: 'Photo or video [1]' },
+      },
       Card: { name: 'Card', inset: true, section: true },
     })
     expect(warnings).toEqual([])

@@ -16,7 +16,8 @@ import { createHash } from 'node:crypto'
 import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { describeChildren, describeVisuals } from '@uniweb/schemas/component'
+import { describeChildren, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
+import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { SECTION_PARAMS, SECTION_KEYS } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
@@ -46,6 +47,20 @@ const SECTIONS_PATH = 'sections'
 
 // The layouts path where layout components are discovered
 export const LAYOUTS_PATH = 'layouts'
+
+/**
+ * Which form a foundation schema's entries hold — `_self.schemaFormat`.
+ *
+ *   (absent)  1 — each entry is its `meta.js`, copied as written
+ *   2         `content:` and `children:` lowered (2026-09-29): `content` is the canonical
+ *             list `describeContent` returns, concept blocks included, and `children` the
+ *             object form `lowerChildren` returns; `data:` keys are the keys a component
+ *             reads (`lowerData`). `visuals` and the `content:` element `data` are refused.
+ *
+ * ⭐ A registered version never changes, so a reader holding one learns its form here,
+ * before the form ever changes again — never by sniffing a key's shape.
+ */
+export const SCHEMA_FORMAT = 2
 
 /**
  * Load a meta.js file via dynamic import — as it is on disk now.
@@ -553,8 +568,16 @@ function createImplicitMeta() {
 }
 
 /**
+ * What lowering an entry could not read — said once, when the schema is built
+ * (`reportPlacementDeclarations`), rather than at every discovery: the entry is also
+ * discovered to generate the foundation's entry file.
+ */
+const loweringProblems = new WeakMap()
+
+/**
  * Build a component entry: the `meta.js` default export, plus the build's `name`
- * and `path`.
+ * and `path`, with its declarations LOWERED — the form a foundation registers
+ * (`SCHEMA_FORMAT`).
  *
  * ⭐ `title` IS THERE ONLY WHEN THE DEVELOPER WROTE ONE, so its absence says the
  * component is unnamed. That difference decides whether a name can be translated:
@@ -566,16 +589,72 @@ function createImplicitMeta() {
  * ⛔ Until 2026-09-27 the build filled `title` from the name whenever `meta.js`
  * declared none, and added `titleInferred: true` to restore the fact the filling-in
  * erased. Consumers derive the title where they use it instead [Diego, 2026-09-27].
+ *
+ * ⭐ `content:` and `children:` ARE LOWERED, and `data:` with them (ruled 2026-09-29):
+ * `content` becomes the canonical list `describeContent` returns — `image:` and
+ * `videos:` as the `media` element, a count as `min` / `max`, a label only where one
+ * was written, and each `'md:<tag>'` concept block as `{ key, kind: 'concept' }` —
+ * `children` the object form `lowerChildren` returns, and a `'md:<tag>'` key in `data:`
+ * the key a component reads (`lowerData`), so the lean runtime schema delivers
+ * `content.data.<tag>`. A reader of the registered schema needs no framework grammar.
+ * ⛔ Until then every key was copied as written.
  */
 function buildComponentEntry(name, relativePath, meta) {
+  refuseRetired(name, meta)
+
   // ⭐ `name` and `path` are the build's facts, so they are set AFTER the spread: a
   // `meta.js` declaring either cannot change them. ⛔ Until 2026-09-27 they came first,
   // and a `meta.js` `name` became the entry's `name` — which an editor reads as the
   // section type — while the schema stayed keyed by the folder's name.
-  return {
+  const entry = {
     ...meta,
     name,
     path: relativePath,
+  }
+
+  const content = describeContent(meta)
+  if (content.elements.length > 0) entry.content = content.elements
+  else delete entry.content
+
+  const children = lowerChildren(meta)
+  if (children) entry.children = children
+  else delete entry.children
+
+  if (meta.data !== undefined) entry.data = lowerData(meta.data)
+
+  const problems = [...content.problems, ...describeChildren(meta).problems]
+  if (problems.length > 0) loweringProblems.set(entry, problems)
+  return entry
+}
+
+/**
+ * Refuse a declaration that was retired, naming what replaces it. A refusal, not a
+ * warning: a retired key would otherwise register as if it still meant something.
+ */
+function refuseRetired(name, meta) {
+  if (meta.visuals !== undefined) {
+    // ⛔ Retired 2026-09-29: the slot is the `media` element of `content:`.
+    const { max, types } = describeVisuals(meta)
+    const count = max === null ? '' : ` [0-${max}]`
+    const suggestion = types
+      ? `media: { label: 'Visual${count}', types: ${JSON.stringify(types).replace(/"/g, "'")} }`
+      : `media: 'Visual${count}'`
+    throw new Error(
+      `[uniweb] ${name} (meta.js): \`visuals\` is retired. Declare the slot in \`content:\` as \`media\` — ` +
+        `an image, a video, or an embedded component — here, \`${suggestion}\`.`
+    )
+  }
+  if (meta.content && typeof meta.content === 'object' && meta.content.data !== undefined) {
+    // ⛔ Retired 2026-09-29: it named no tag, and declaring it delivered nothing.
+    const declared = Object.keys(meta.data && typeof meta.data === 'object' ? meta.data : {})
+    throw new Error(
+      `[uniweb] ${name} (meta.js): the \`content:\` element \`data\` is retired — it named no tag. ` +
+        `Declare the block's tag as a key in \`data:\`: \`'md:<tag>': '<label>'\` for a concept block ` +
+        `(\`\`\`md:<tag>), \`<tag>: {}\` for a data block.` +
+        (declared.length > 0
+          ? ` ${name} already declares \`data: { ${declared.join(', ')} }\`, so remove \`content.data\`.`
+          : '')
+    )
   }
 }
 
@@ -932,9 +1011,9 @@ function reportSupports(srcDir, authored, derived, emitted) {
 }
 
 /**
- * Warn about `children` and `visuals` declarations an editor cannot use — read with
- * `@uniweb/schemas`, the grammar the editor reads them with. The entry is emitted as
- * written either way; these are warnings, never refusals.
+ * Warn about `content` and `children` declarations an editor cannot use — what lowering
+ * them could not read (`@uniweb/schemas`, the grammar the editor reads them with). The
+ * entry is emitted lowered either way; these are warnings, never refusals.
  *
  * ⭐ A `children.types` entry must name one of this foundation's section types. A hidden
  * one is not a section type at all, and a child of a type nothing provides renders
@@ -945,9 +1024,15 @@ function reportSupports(srcDir, authored, derived, emitted) {
  */
 export function reportPlacementDeclarations(components) {
   for (const [name, entry] of Object.entries(components)) {
+    // An entry built here was lowered, and kept what it could not read aside; one handed
+    // in as written is read now. (A lowered entry reads as itself, with no problems.)
     const children = describeChildren(entry)
-    const visuals = describeVisuals(entry)
-    for (const problem of [...children.problems, ...visuals.problems]) {
+    const problems = [
+      ...(loweringProblems.get(entry) || []),
+      ...describeContent(entry).problems,
+      ...children.problems,
+    ]
+    for (const problem of problems) {
       console.warn(`Warning: ${name} (meta.js): ${problem}`)
     }
     for (const type of children.types || []) {
@@ -1082,6 +1167,8 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
       ...(foundationConfig.description && { description: foundationConfig.description }),
       ...(foundationConfig.defaultLayout && { defaultLayout: foundationConfig.defaultLayout }),
       ...(isExtension && { role: 'extension' }),
+      // The build's fact, last: which form the entries below hold.
+      schemaFormat: SCHEMA_FORMAT,
     },
     // Layout metadata (full, for editor)
     ...(Object.keys(dataSchemas).length > 0 && { dataSchemas }),

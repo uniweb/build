@@ -8,6 +8,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
+import { describeContent } from '@uniweb/schemas/content'
 import { buildSchema } from './schema.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 
@@ -94,30 +95,42 @@ function generateComponentDocs(name, meta) {
     lines.push('')
   }
 
-  // Content expectations — what an author writes in the markdown. The key is
-  // `content`; this read `meta.content` as `meta.elements` until 2026-09-16 —
-  // the pre-rename name, which nothing has produced since. A dead branch reads
-  // exactly like a component that declares nothing, so the whole section was
-  // missing from every generated catalog.
+  // Content expectations — what an author writes in the markdown, read through
+  // `describeContent`: a built schema holds the lowered list (`SCHEMA_FORMAT` 2), a
+  // `meta.js` the declaration as written, and both describe alike. ⛔ This read
+  // `meta.content` as a map of labels until 2026-09-29 — which the lowered list is not —
+  // and as `meta.elements`, the pre-rename name, until 2026-09-16.
   //
-  // A value is either a label string ('Description [1-2]') or { label, hint }.
-  // The LABEL is the point: `paragraphs` alone tells an author nothing, and the
-  // count hint is the part that says how much to write.
-  const elements = Object.entries(meta.content || {})
+  // The LABEL is the point: `paragraphs` alone tells an author nothing, and the count is
+  // the part that says how much to write — shown in the bracket syntax they write.
+  const { elements } = describeContent(meta)
   if (elements.length > 0) {
     lines.push('### Content')
     lines.push('')
 
-    for (const [key, el] of elements) {
-      const label = typeof el === 'string' ? el : el?.label || ''
-      lines.push(`**${key}**${label ? ` — ${label}` : ''}`)
-      const hint = typeof el === 'object' && el?.hint ? el.hint : ''
-      if (hint) lines.push(`  ${hint}`)
+    for (const el of elements) {
+      const name = el.kind === 'concept' ? `md:${el.key}` : el.element
+      const types = el.element === 'media' && el.types.length < 3 ? ` (${el.types.join(', ')})` : ''
+      const count = bracketCount(el)
+      const label = [el.label, count].filter(Boolean).join(' ')
+      lines.push(`**${name}**${types}${label ? ` — ${label}` : ''}`)
+      if (el.hint) lines.push(`  ${el.hint}`)
+      if (el.except) lines.push(`  Leaves out: ${el.except.join(', ')}`)
+      if (el.content) {
+        lines.push(`  Each entry: ${el.content.map((c) => [c.element, c.label].filter(Boolean).join(' — ')).join(' · ')}`)
+      }
       lines.push('')
     }
   }
 
   return lines.join('\n')
+}
+
+/** A lowered entry's count, as a developer writes it: `[1]`, `[3-6]`, `[2+]` — or ''. */
+function bracketCount({ min, max }) {
+  if (typeof min !== 'number') return ''
+  if (typeof max !== 'number') return `[${min}+]`
+  return min === max ? `[${min}]` : `[${min}-${max}]`
 }
 
 /** The section types of a foundation schema: every key but `_self`, `_layouts` and `dataSchemas`. */

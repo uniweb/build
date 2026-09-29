@@ -28,6 +28,7 @@ import { isRichSchema } from '@uniweb/core'
 import { dataRefOf } from '@uniweb/core/data-keys'
 import { briefFieldMap, wholeFieldMap } from '@uniweb/schemas/conform'
 import { enumValues } from '@uniweb/schemas/format'
+import { lowerData } from '@uniweb/schemas/content'
 
 /**
  * A `data:` entry's schema ref — a ref string, or `{ schema }` — or null for an inline
@@ -282,10 +283,16 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
   // with their refs, because the keys ARE what the section receives, and a key's ref is
   // what a fetch of another name fills it by. `schemas` carries field defaults for the
   // keys that have fields. `data: false` declares nothing, as no `data:` does.
-  if (fullMeta.data === false) {
+  //
+  // ⭐ A concept block's key is written as its fence is — `'md:faq': 'Questions and
+  // answers'` — and lowered to the key a component reads, `faq`, with no schema: the value
+  // is the author's label, never a ref (`lowerData`; ruled 2026-09-29). A built entry is
+  // already lowered; this holds for a `meta.js` handed in as written.
+  const data = lowerData(fullMeta.data)
+  if (data === false) {
     // declares no key
-  } else if (fullMeta.data && typeof fullMeta.data === 'object' && !Array.isArray(fullMeta.data)) {
-    for (const [key, value] of Object.entries(fullMeta.data)) {
+  } else if (data && typeof data === 'object' && !Array.isArray(data)) {
+    for (const [key, value] of Object.entries(data)) {
       // ⛔ A value that is no schema at all declares a key by accident — it would reach the
       // component as `null`, silently. `data: { inherit: [...] }` — the opt-in to cascaded
       // data from 2026-01-31 until declared keys replaced it — is the shape this refuses: it
@@ -307,9 +314,9 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
         runtime.schemas[key] = lean
       }
     }
-  } else if (fullMeta.data !== undefined) {
+  } else if (data !== undefined) {
     throw new Error(
-      `[uniweb] Invalid 'data' in meta.js: expected false or { <key>: <schema> }, got ${JSON.stringify(fullMeta.data)}. ` +
+      `[uniweb] Invalid 'data' in meta.js: expected false or { <key>: <schema> }, got ${JSON.stringify(data)}. ` +
         "A <schema> is a named ref ('@/x'), an inline field map, or a rich-form { fields: [...] }."
     )
   }
