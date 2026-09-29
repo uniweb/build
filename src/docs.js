@@ -120,6 +120,11 @@ function generateComponentDocs(name, meta) {
   return lines.join('\n')
 }
 
+/** The section types of a foundation schema: every key but `_self`, `_layouts` and `dataSchemas`. */
+function sectionTypesOf(schema) {
+  return Object.keys(schema).filter((key) => !key.startsWith('_') && key !== 'dataSchemas')
+}
+
 /**
  * Generate full markdown documentation for a foundation
  *
@@ -146,8 +151,10 @@ export function generateDocsFromSchema(schema, options = {}) {
   lines.push('---')
   lines.push('')
 
-  // Table of contents
-  const componentNames = Object.keys(schema).filter(k => k !== '_self')
+  // Table of contents. A schema's section types are its keys but `_self`, `_layouts` and
+  // `dataSchemas` (`buildSchema`); ⛔ until 2026-09-29 only `_self` was left out, so a
+  // foundation with layouts or data schemas documented both as components.
+  const componentNames = sectionTypesOf(schema)
 
   if (componentNames.length > 0) {
     lines.push('## Components')
@@ -222,7 +229,7 @@ export async function generateDocs(foundationDir, options = {}) {
   await writeFile(outputPath, markdown)
 
   // Count components
-  const componentCount = Object.keys(schema).filter(k => k !== '_self').length
+  const componentCount = sectionTypesOf(schema).length
 
   return { outputPath, componentCount }
 }
