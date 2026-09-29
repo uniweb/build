@@ -16,6 +16,11 @@ import { processAllPreviews } from './images.js'
 import { generateFoundationVars } from './theme/index.js'
 import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
 import { deriveSupports } from './foundation/derive-supports.js'
+import { proseWithoutStyles, PROSE_WITHOUT_STYLES_WARNING } from './foundation/prose-styles.js'
+
+// Foundations already told that their prose has no stylesheet — once per process, so a dev
+// server's rebuild on every save does not repeat it.
+const warnedProseWithoutStyles = new Set()
 
 /**
  * Build schema.json with preview image references
@@ -440,6 +445,14 @@ export function foundationBuildPlugin(options = {}) {
     async writeBundle(_options, bundle) {
       // Skip while the entry-ssr.js sub-build (buildEntrySSR) is running
       if (_buildingSSRBundle) return
+
+      // kit's <Prose> / <Article> with no prose styles in the CSS: correct markup, unstyled page,
+      // and nothing else says so (`foundation/prose-styles.js`). Dev rebuilds included — that is
+      // where a developer sees it first.
+      if (!warnedProseWithoutStyles.has(resolvedSrcDir) && proseWithoutStyles(bundle)) {
+        warnedProseWithoutStyles.add(resolvedSrcDir)
+        console.warn(PROSE_WITHOUT_STYLES_WARNING)
+      }
 
       // What host services this foundation actually reaches for, read off the
       // post-tree-shake module graph rather than asked for in package.json.
