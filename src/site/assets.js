@@ -8,7 +8,7 @@
  * act as implicit imports and should be processed/optimized during build.
  */
 
-import { join, dirname, isAbsolute, normalize } from 'node:path'
+import { join, dirname, isAbsolute, normalize, relative, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 
 // Image extensions we should process
@@ -107,21 +107,23 @@ export function isMediaFieldReference(value) {
  * @param {any} data - Parsed JSON/YAML data
  * @param {Function} visitor - Callback for each asset path: (path) => void
  */
-function walkDataAssets(data, visitor) {
+function walkDataAssets(data, visitor, set) {
   if (typeof data === 'string') {
     if (isLocalAssetPath(data)) {
-      visitor(data)
+      visitor(data, set)
     }
     return
   }
 
   if (Array.isArray(data)) {
-    data.forEach(item => walkDataAssets(item, visitor))
+    data.forEach((item, i) => walkDataAssets(item, visitor, (v) => { data[i] = v }))
     return
   }
 
   if (data && typeof data === 'object') {
-    Object.values(data).forEach(value => walkDataAssets(value, visitor))
+    for (const [key, value] of Object.entries(data)) {
+      walkDataAssets(value, visitor, (v) => { data[key] = v })
+    }
   }
 }
 
@@ -137,7 +139,8 @@ function walkDataBlockAssets(doc, visitor) {
 
   // dataBlock nodes have pre-parsed data in attrs.data
   if (doc.type === 'dataBlock' && doc.attrs?.data) {
-    walkDataAssets(doc.attrs.data, visitor)
+    const attrs = doc.attrs
+    walkDataAssets(attrs.data, visitor, (v) => { attrs.data = v })
   }
 
   // Recurse into content
@@ -203,8 +206,9 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
  * Walk a ProseMirror document and collect all asset references
  *
  * @param {Object} doc - ProseMirror document
- * @param {Function} visitor - Callback for each asset: (node, path, attrName) => void
- *                             attrName is 'src', 'poster', or 'preview'
+ * @param {Function} visitor - Callback for each asset: (node, path, attrName, holder) => void
+ *                             attrName is 'src', 'poster', or 'preview'; `holder` is
+ *                             the attrs object the reference lives on, at `holder[attrName]`
  * @param {string} [path=''] - Current path in document (for debugging)
  */
 export function walkContentAssets(doc, visitor, path = '') {
@@ -212,14 +216,14 @@ export function walkContentAssets(doc, visitor, path = '') {
 
   // Check for image nodes
   if (doc.type === 'image' && doc.attrs?.src) {
-    visitor(doc, path, 'src')
+    visitor(doc, path, 'src', doc.attrs)
 
     // Also collect explicit poster/preview attributes as assets
     if (doc.attrs.poster && !isExternalUrl(doc.attrs.poster)) {
-      visitor({ type: 'image', attrs: { src: doc.attrs.poster } }, path, 'poster')
+      visitor({ type: 'image', attrs: { src: doc.attrs.poster } }, path, 'poster', doc.attrs)
     }
     if (doc.attrs.preview && !isExternalUrl(doc.attrs.preview)) {
-      visitor({ type: 'image', attrs: { src: doc.attrs.preview } }, path, 'preview')
+      visitor({ type: 'image', attrs: { src: doc.attrs.preview } }, path, 'preview', doc.attrs)
     }
   }
 
@@ -234,7 +238,7 @@ export function walkContentAssets(doc, visitor, path = '') {
   if (doc.marks && Array.isArray(doc.marks)) {
     doc.marks.forEach((mark, index) => {
       if (mark.attrs?.src) {
-        visitor(mark, `${path}/marks[${index}]`, 'src')
+        visitor(mark, `${path}/marks[${index}]`, 'src', mark.attrs)
       }
     })
   }
@@ -250,42 +254,45 @@ export function walkContentAssets(doc, visitor, path = '') {
  *   - assets: Asset manifest mapping original paths to resolved info
  *   - hasExplicitPoster: Set of video src paths that have explicit poster attributes
  *   - hasExplicitPreview: Set of PDF src paths that have explicit preview attributes
+ *   - uses: every co-located reference, with the file it resolved to and a setter
+ *     for the place it is written — what `disambiguateAssetRefs` needs to rename
+ *     one. In memory only; never part of the site content.
  */
 export function collectSectionAssets(section, markdownPath, siteRoot) {
   const assets = {}
   const hasExplicitPoster = new Set()
   const hasExplicitPreview = new Set()
+  const uses = []
 
-  // Track current image node's src when we encounter poster/preview
-  let currentImageSrc = null
+  // One entry per reference. `set` writes a new reference where this one stands;
+  // `flags` carries the explicit-poster/preview marks a renamed video/PDF must keep.
+  const add = (ref, set, flags = null) => {
+    const result = resolveAssetPath(ref, markdownPath, siteRoot)
+    if (result.external || !result.resolved) return
+    assets[ref] = {
+      original: ref,
+      resolved: result.resolved,
+      isImage: result.isImage,
+      isVideo: result.isVideo,
+      isPdf: result.isPdf
+    }
+    // Only a co-located ref depends on WHERE it is written, so only it can name
+    // two different files with one string. A site-root ref (`/x.png`) cannot.
+    if (!ref.startsWith('/') && set) uses.push({ ref, resolved: result.resolved, set, flags })
+  }
 
   // Collect from ProseMirror content
   if (section.content) {
-    walkContentAssets(section.content, (node, path, attrName) => {
-      const result = resolveAssetPath(node.attrs.src, markdownPath, siteRoot)
-
+    walkContentAssets(section.content, (node, path, attrName, holder) => {
+      const ref = node.attrs.src
+      let flags = null
       if (attrName === 'src') {
-        // Main src attribute - track it for potential poster/preview
-        currentImageSrc = node.attrs.src
-
         // Check if this image has explicit poster/preview
-        if (node.attrs.poster) {
-          hasExplicitPoster.add(node.attrs.src)
-        }
-        if (node.attrs.preview) {
-          hasExplicitPreview.add(node.attrs.src)
-        }
+        if (node.attrs.poster) hasExplicitPoster.add(ref)
+        if (node.attrs.preview) hasExplicitPreview.add(ref)
+        flags = { poster: !!node.attrs.poster, preview: !!node.attrs.preview }
       }
-
-      if (!result.external && result.resolved) {
-        assets[node.attrs.src] = {
-          original: node.attrs.src,
-          resolved: result.resolved,
-          isImage: result.isImage,
-          isVideo: result.isVideo,
-          isPdf: result.isPdf
-        }
-      }
+      add(ref, holder ? (v) => { holder[attrName] = v } : null, flags)
     })
   }
 
@@ -301,16 +308,7 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
     // Only resolve values that are actually asset references. A dual-use field
     // like `background: gray` (a CSS color) must not be treated as a file path.
     if (isMediaFieldReference(value)) {
-      const result = resolveAssetPath(value, markdownPath, siteRoot)
-      if (!result.external && result.resolved) {
-        assets[value] = {
-          original: value,
-          resolved: result.resolved,
-          isImage: result.isImage,
-          isVideo: result.isVideo,
-          isPdf: result.isPdf
-        }
-      }
+      add(value, (v) => { section.params[field] = v })
     }
   }
 
@@ -318,40 +316,66 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
   // Background can be { image: { src }, video: { src } } with nested asset paths
   const bg = section.params?.background
   if (bg && typeof bg === 'object') {
-    const bgSources = [bg.image?.src, bg.video?.src].filter(Boolean)
-    for (const src of bgSources) {
-      if (typeof src === 'string') {
-        const result = resolveAssetPath(src, markdownPath, siteRoot)
-        if (!result.external && result.resolved) {
-          assets[src] = {
-            original: src,
-            resolved: result.resolved,
-            isImage: result.isImage,
-            isVideo: result.isVideo,
-            isPdf: result.isPdf
-          }
-        }
-      }
+    for (const media of [bg.image, bg.video]) {
+      if (typeof media?.src === 'string') add(media.src, (v) => { media.src = v })
     }
   }
 
   // Collect from tagged code blocks (JSON/YAML data)
   if (section.content) {
-    walkDataBlockAssets(section.content, (assetPath) => {
-      const result = resolveAssetPath(assetPath, markdownPath, siteRoot)
-      if (!result.external && result.resolved) {
-        assets[assetPath] = {
-          original: assetPath,
-          resolved: result.resolved,
-          isImage: result.isImage,
-          isVideo: result.isVideo,
-          isPdf: result.isPdf
-        }
-      }
-    })
+    walkDataBlockAssets(section.content, (assetPath, set) => add(assetPath, set))
   }
 
-  return { assets, hasExplicitPoster, hasExplicitPreview }
+  return { assets, hasExplicitPoster, hasExplicitPreview, uses }
+}
+
+/**
+ * Give every co-located reference that names more than one file its own key.
+ *
+ * The manifest is keyed by the reference AS WRITTEN, site-wide, and a co-located
+ * ref means a different file in every folder — so two pages that both wrote
+ * `./media/shot.png` shared one entry: the last one collected won, and both pages
+ * rendered its image. Each colliding use is renamed to its file's path from the
+ * site root (`./pages/alpha/media/shot.png`, or `../…` for a mounted folder
+ * outside it), which is one key per file by construction and keeps the extension
+ * the later steps classify by. A ref that names one file keeps its key, so a
+ * site without a collision is unchanged.
+ *
+ * Call it on the merged page + layout collection, before the site config's assets
+ * (which have no written place to rename) are merged in.
+ *
+ * @param {Object} collection - merged asset collection (mutated in place)
+ * @param {string} siteRoot - Site root directory
+ * @returns {number} how many references were renamed
+ */
+export function disambiguateAssetRefs(collection, siteRoot) {
+  const uses = collection.uses || []
+  const filesByRef = new Map()
+  for (const use of uses) {
+    if (!filesByRef.has(use.ref)) filesByRef.set(use.ref, new Set())
+    filesByRef.get(use.ref).add(use.resolved)
+  }
+
+  let renamed = 0
+  for (const use of uses) {
+    if (filesByRef.get(use.ref).size < 2) continue
+    const fromRoot = relative(siteRoot, use.resolved).split(sep).join('/')
+    const key = fromRoot.startsWith('../') ? fromRoot : `./${fromRoot}`
+    const entry = collection.assets[use.ref]
+    collection.assets[key] = { ...entry, original: key, resolved: use.resolved }
+    if (use.flags?.poster) collection.hasExplicitPoster?.add(key)
+    if (use.flags?.preview) collection.hasExplicitPreview?.add(key)
+    use.set(key)
+    renamed++
+  }
+  // The shared key no longer names anything written in the content.
+  for (const [ref, files] of filesByRef) {
+    if (files.size < 2) continue
+    delete collection.assets[ref]
+    collection.hasExplicitPoster?.delete(ref)
+    collection.hasExplicitPreview?.delete(ref)
+  }
+  return renamed
 }
 
 /**
@@ -426,13 +450,15 @@ export function mergeAssetCollections(...collections) {
   const merged = {
     assets: {},
     hasExplicitPoster: new Set(),
-    hasExplicitPreview: new Set()
+    hasExplicitPreview: new Set(),
+    uses: []
   }
 
   for (const collection of collections) {
     // Handle both old format (plain object) and new format (with sets)
     if (collection.assets) {
       Object.assign(merged.assets, collection.assets)
+      if (collection.uses) merged.uses.push(...collection.uses)
       collection.hasExplicitPoster?.forEach(p => merged.hasExplicitPoster.add(p))
       collection.hasExplicitPreview?.forEach(p => merged.hasExplicitPreview.add(p))
     } else {

@@ -31,7 +31,7 @@ import { join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
-import { collectSectionAssets, mergeAssetCollections, collectConfigAssets } from './assets.js'
+import { collectSectionAssets, mergeAssetCollections, collectConfigAssets, disambiguateAssetRefs } from './assets.js'
 import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages, dropHiddenSections } from './nav-visibility.js'
 import { parseFetchConfig, toFetchList } from './data-fetcher.js'
@@ -2591,6 +2591,12 @@ export async function collectSiteContent(sitePath, options = {}) {
   // The layout sections' assets and icons, beside the pages'.
   assetCollection = mergeAssetCollections(assetCollection, layoutAssets)
   iconCollection = mergeIconCollections(iconCollection, layoutIcons)
+
+  // One manifest key per file: a co-located ref written the same way in two
+  // folders (`./media/shot.png`) names two files, and would otherwise share one
+  // entry — every page rendering the last one collected. Before the config
+  // assets, which have no written place to rename.
+  disambiguateAssetRefs(assetCollection, sitePath)
 
   // Merge top-level config assets (e.g. document.yml's book.covers.front,
   // banner images, logos) into the manifest. The compile pipeline reads

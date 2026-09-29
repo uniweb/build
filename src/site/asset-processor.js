@@ -231,11 +231,16 @@ export function rewriteContentPaths(content, pathMapping) {
   function walk(node) {
     if (!node) return
 
-    // Rewrite image src
+    // Rewrite image src — and a video's `poster` / a document's `preview`, which
+    // the collector processes as assets of their own (`walkContentAssets`). Only
+    // `src` was rewritten until 2026-09-29, so an explicit poster was emitted to
+    // dist/assets/ while the page still pointed at its source path.
     if (node.type === 'image' && node.attrs?.src) {
-      const newPath = pathMapping[node.attrs.src]
-      if (newPath) {
-        node.attrs.src = newPath
+      for (const attr of ['src', 'poster', 'preview']) {
+        const newPath = node.attrs[attr] && pathMapping[node.attrs[attr]]
+        if (newPath) {
+          node.attrs[attr] = newPath
+        }
       }
     }
 
