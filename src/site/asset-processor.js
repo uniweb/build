@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs'
 import { join, basename, extname, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
+import { mimeFor } from '@uniweb/semantic-parser'
 
 // Image formats that can be converted to WebP
 const CONVERTIBLE_FORMATS = ['.png', '.jpg', '.jpeg', '.gif']
@@ -157,10 +158,15 @@ export async function processAsset(asset, options = {}) {
  * @param {Object} assetManifest - Asset manifest from content collector
  * @param {Object} options - Processing options
  * @param {string} [options.basePath='/'] - Site base path for subdirectory deployments
- * @returns {Promise<Object>} Mapping of original paths to output URLs
+ * @returns {Promise<Object>} `pathMapping` — original paths to output URLs — `results`, and
+ *   `files`: what the build knows of each file it copied, by original path (`name`, `size`, `mime`)
  */
 export async function processAssets(assetManifest, options = {}) {
   const pathMapping = {}
+  // ⭐ A copied file is renamed `{name}-{hash}{ext}`, so its new address no longer names it. A
+  // document carries its file's `name`, `mime` and `size` (a file record's field names), and this
+  // is the one place that knows all three for a local file — `rewriteContentPaths` stamps them.
+  const files = {}
   const results = {
     processed: 0,
     converted: 0,
@@ -175,6 +181,7 @@ export async function processAssets(assetManifest, options = {}) {
     pathMapping[originalPath] = result.output
 
     if (result.processed) {
+      files[originalPath] = { name: basename(asset.resolved), size: result.size, mime: mimeFor(result.outputPath) }
       results.processed++
       results.totalSize += result.size || 0
       if (result.converted) {
@@ -185,7 +192,7 @@ export async function processAssets(assetManifest, options = {}) {
     }
   }
 
-  return { pathMapping, results }
+  return { pathMapping, results, files }
 }
 
 /**
@@ -220,9 +227,10 @@ function rewriteDataPaths(data, pathMapping) {
  *
  * @param {Object} content - ProseMirror document
  * @param {Object} pathMapping - Map of original paths to new paths
+ * @param {Object} [files] - what the build knows of each file it copied (`processAssets`)
  * @returns {Object} Content with rewritten paths
  */
-export function rewriteContentPaths(content, pathMapping) {
+export function rewriteContentPaths(content, pathMapping, files = null) {
   if (!content) return content
 
   // Deep clone to avoid mutating original
@@ -236,10 +244,20 @@ export function rewriteContentPaths(content, pathMapping) {
     // `src` was rewritten until 2026-09-29, so an explicit poster was emitted to
     // dist/assets/ while the page still pointed at its source path.
     if (node.type === 'image' && node.attrs?.src) {
+      const original = node.attrs.src
       for (const attr of ['src', 'poster', 'preview']) {
         const newPath = node.attrs[attr] && pathMapping[node.attrs[attr]]
         if (newPath) {
           node.attrs[attr] = newPath
+        }
+      }
+      // A document whose file the build copied: the file's name as the author gave it — the
+      // address now holds a hashed one — its size, and its type (2026-09-29). Only on the built
+      // output, never on what an author stored; a value written on the node stays.
+      const file = node.attrs.role === 'pdf' ? files?.[original] : null
+      if (file) {
+        for (const key of ['name', 'mime', 'size']) {
+          if (node.attrs[key] === undefined && file[key] !== undefined) node.attrs[key] = file[key]
         }
       }
     }
@@ -310,15 +328,16 @@ export function rewriteParamPaths(params, pathMapping) {
  *
  * @param {Object} siteContent - Full site content object
  * @param {Object} pathMapping - Map of original paths to new paths
+ * @param {Object} [files] - what the build knows of each file it copied (`processAssets`)
  * @returns {Object} Site content with rewritten paths
  */
-export function rewriteSiteContentPaths(siteContent, pathMapping) {
+export function rewriteSiteContentPaths(siteContent, pathMapping, files = null) {
   // Deep clone
   const result = JSON.parse(JSON.stringify(siteContent))
 
   function processSection(section) {
     if (section.content) {
-      section.content = rewriteContentPaths(section.content, pathMapping)
+      section.content = rewriteContentPaths(section.content, pathMapping, files)
     }
     if (section.params) {
       section.params = rewriteParamPaths(section.params, pathMapping)

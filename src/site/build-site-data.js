@@ -173,7 +173,7 @@ export async function buildSiteData({
   if (assetsOpts.process && siteContent?.assets) {
     const assetCount = Object.keys(siteContent.assets).length
     if (assetCount > 0) {
-      const { pathMapping } = await processAssets(siteContent.assets, {
+      const { pathMapping, files } = await processAssets(siteContent.assets, {
         outputDir: resolvedDistDir,
         assetsSubdir: assetsOpts.outputDir,
         convertToWebp: assetsOpts.convertToWebp,
@@ -197,7 +197,7 @@ export async function buildSiteData({
           }
         )
 
-        finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+        finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
         if (Object.keys(posterMapping).length > 0 || Object.keys(thumbnailMapping).length > 0) {
           finalContent._assetMeta = {
             posters: posterMapping,
@@ -205,7 +205,7 @@ export async function buildSiteData({
           }
         }
       } else {
-        finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+        finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
       }
     }
   } else {

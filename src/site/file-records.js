@@ -17,63 +17,16 @@
 
 import { statSync } from 'node:fs'
 import { extname } from 'node:path'
+import { mimeFor } from '@uniweb/semantic-parser'
 import { generatePdfThumbnail } from './advanced-processors.js'
 
 export const FILE_MODEL = '@uniweb/file'
 
 // What a file is, by its extension — for the `mime` a file record carries and the type its upload
-// declares. Anything not here is `application/octet-stream`.
-const MIME = {
-  pdf: 'application/pdf',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  odt: 'application/vnd.oasis.opendocument.text',
-  ods: 'application/vnd.oasis.opendocument.spreadsheet',
-  odp: 'application/vnd.oasis.opendocument.presentation',
-  rtf: 'application/rtf',
-  epub: 'application/epub+zip',
-  zip: 'application/zip',
-  gz: 'application/gzip',
-  tar: 'application/x-tar',
-  csv: 'text/csv',
-  tsv: 'text/tab-separated-values',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  json: 'application/json',
-  xml: 'application/xml',
-  yml: 'application/yaml',
-  yaml: 'application/yaml',
-  html: 'text/html',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  m4a: 'audio/mp4',
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  mov: 'video/quicktime',
-}
-
-/**
- * The media type of a file, by its extension.
- *
- * @param {string} name - a file name or path
- * @returns {string}
- */
-export function mimeFor(name) {
-  const ext = extname(String(name || '')).slice(1).toLowerCase()
-  return MIME[ext] || 'application/octet-stream'
-}
+// declares. ⭐ The table is `@uniweb/semantic-parser`'s: the parser reads it for a document's `mime`,
+// and could not reach one here — it has no dependencies. One table; anything not in it is
+// `application/octet-stream`.
+export { mimeFor }
 
 /** Is this file a PDF — the one type a preview is made for? */
 export function isPdfFile(name) {

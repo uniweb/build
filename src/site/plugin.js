@@ -1496,7 +1496,7 @@ export function siteContentPlugin(options = {}) {
           console.log(`[site-content] Processing ${assetCount} assets...`)
 
           // Process standard assets (images)
-          const { pathMapping, results } = await processAssets(siteContent.assets, {
+          const { pathMapping, results, files } = await processAssets(siteContent.assets, {
             outputDir: resolvedOutDir,
             assetsSubdir: assetsOptions.outputDir,
             convertToWebp: assetsOptions.convertToWebp,
@@ -1542,7 +1542,7 @@ export function siteContentPlugin(options = {}) {
             // Merge poster and thumbnail mappings into the path mapping
             // Videos: add a .poster property to the content (not replace the src)
             // PDFs: add a .thumbnail property to the content
-            finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+            finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
 
             // Add poster and thumbnail metadata to the site content
             if (Object.keys(posterMapping).length > 0 || Object.keys(thumbnailMapping).length > 0) {
@@ -1553,7 +1553,7 @@ export function siteContentPlugin(options = {}) {
             }
           } else {
             // Rewrite paths in content
-            finalContent = rewriteSiteContentPaths(siteContent, pathMapping)
+            finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
           }
 
           // Log results
