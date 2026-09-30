@@ -791,6 +791,12 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     // A page's own localized URL segments, for `localizeRouteSlugs` — under a symbol, so they
     // are never serialized as a field of the record.
     if (!dyn && isPlainRecord(f.config?.slug)) record[AUTHORED_SLUG] = f.config.slug
+    // A parametric page's OWN slug, where it is not its param — a page made in an app — is kept in
+    // its page.yml by the pull as a plain string (`site-project.js::dynamicOwnSlug`), since its folder
+    // is named by its param. The route, the folder and the page's identity stay the param's.
+    if (dyn && dyn[1] !== CATCH_ALL_MARKER && typeof f.config?.slug === 'string' && f.config.slug) {
+      record.slug = { ...record.slug, [sourceLocale]: f.config.slug }
+    }
 
     if (mode === 'page') {
       const sections = await collectPageSectionsNested(f.path, siteRoot, f.config)

@@ -839,7 +839,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
 // ⚖️ A pull adds and changes these, and never removes one: a page pushed by a CLI from before carries
 // none, and reading that as "none" would delete what the author wrote.
 function pageSlugToYml(record, canon, existing, sourceLocale, ctx) {
-  if (record.is_dynamic) return null
+  if (record.is_dynamic) return dynamicOwnSlug(record, existing, sourceLocale)
   const targets = localizedTargets(record.slug, sourceLocale)
   const own = isPlainRecord(existing?.slug)
   if (!own && ctx.routes?.siteMap && !record.is_index) {
@@ -849,6 +849,20 @@ function pageSlugToYml(record, canon, existing, sourceLocale, ctx) {
   if (!Object.keys(targets).length) return null
   const next = { ...(own ? existing.slug : {}), ...targets }
   return own && stableJson(next) === stableJson(existing.slug) ? null : next
+}
+
+// A parametric page's folder is named by its param (`pageDirName`), so its OWN slug — where a page
+// made in an app gives it one of its own (`slug: detail`, `param_name: id`) — has no other place on
+// disk. It is kept in `page.yml` as a plain string, which the build never reads for a route (only a
+// per-language map names URL segments) and the push sends back as the page's slug. A string written
+// here before is rewritten to the stored slug, so it is never left stale.
+// ⛔ Until 2026-09-30 a pull dropped it, and the next push sent the param in its place: an authored
+// value lost on a round trip (`uwx-format.md` § THE ROUND-TRIP LAW).
+function dynamicOwnSlug(record, existing, sourceLocale) {
+  const own = unwrapLocalized(record.slug, sourceLocale)
+  if (typeof own !== 'string' || !own || own === '...path') return null
+  if (own !== (record.param_name || own)) return own
+  return typeof existing?.slug === 'string' ? own : null
 }
 
 // The locales of a pulled localized `slug` other than the source one.
