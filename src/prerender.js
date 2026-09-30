@@ -1098,12 +1098,16 @@ export async function prerenderSite(siteDir, options = {}) {
         continue
       }
 
-      // ⛔ `notFound` cannot happen here — this loop iterates pages it already has,
-      // so `render` never resolves. Handled anyway: silently writing nothing for a
-      // page the loop selected would be the same shape of empty-success bug that
-      // `renderPage`'s content-not-loaded guard exists to catch.
+      // `notFound` means the URL names nothing, and there is no page to write for it:
+      // written, a not-found page would be published as a real one. Two cases, said
+      // apart. No route matched — which this loop, iterating pages it already has,
+      // cannot produce, and is handled anyway so a selected page is never silently
+      // dropped. Or the page's record does not exist (`result.page` is set) — which an
+      // expanded page reaches only if its record is not in the set it was expanded from.
       if (result.outcome === 'notFound') {
-        console.warn(`  Warning: ${outputRoute} resolved to no page; skipped`)
+        console.warn(
+          `  Warning: ${outputRoute} ${result.page ? 'names a record that does not exist' : 'resolved to no page'}; skipped`
+        )
         continue
       }
 
