@@ -224,7 +224,15 @@ function localizeRouteSlugs(pages, siteYml, sourceLocale) {
 export function buildRouteOf(record, parentRoute, sourceLocale) {
   if (record?.is_index) return parentRoute
   const slug = unwrapLocalized(record?.slug, sourceLocale)
-  const segment = record?.is_dynamic ? (slug === CATCH_ALL_MARKER ? ':path*' : `:${slug}`) : slug
+  // A parametric page's segment is its PARAM — the name the pull gives its folder, `[param_name]`
+  // (`site-project.js::pageDirName`), which is the route the build then reads. A page pushed from
+  // files has one word for both; a page made in an app may not (`slug: detail`, `param_name: id`).
+  // ⛔ Until 2026-09-30 this used the slug, so such a page was addressed `/…/:detail` while its
+  // folder built `/…/:id`, and its translated title and description were filed under a route no
+  // build reads.
+  const segment = record?.is_dynamic
+    ? (slug === CATCH_ALL_MARKER ? ':path*' : `:${record.param_name || slug}`)
+    : slug
   return parentRoute === '/' ? `/${segment}` : `${parentRoute}/${segment}`
 }
 
