@@ -279,10 +279,11 @@ export async function executeAllFetches(siteContent, siteDir, onProgress, locale
  *
  * Emitting the canonical route raw sent a reader who asked for `/fr/<container>`
  * to the DEFAULT-locale page — a language switch they never asked for, from a
- * URL that was correct. The runtime's copy of this redirect (PageRenderer.jsx)
- * had the identical bug and was fixed first; this is its twin, and the two must
- * agree or a container behaves differently on a cold load than on an in-app
- * navigation.
+ * URL that was correct. The in-app redirect had the identical bug and was fixed
+ * first. ⭐ Since 2026-09-30 that one is `resolveRoute`'s (`@uniweb/core/resolve-route`,
+ * `localeUrl`); this is the static twin of its destination — the same prefix and
+ * translated slug, with the deployment base this pass writes under — and the two
+ * must agree or a container behaves differently on a cold load than in the app.
  *
  * The DECISION to redirect stays canonical (`target !== page.route`) — only the
  * destination is localized. Comparing a localized destination against a
@@ -1024,9 +1025,10 @@ export async function prerenderSite(siteDir, options = {}) {
         continue
       }
 
-      // Content-less containers: auto-redirect to first descendant with content.
-      // Mirrors the runtime's auto-redirect in PageRenderer.jsx so the redirect
-      // works without JS (via <meta http-equiv="refresh">).
+      // Content-less containers: auto-redirect to first descendant with content —
+      // `getNavigableRoute()`, which is `resolveRoute`'s landing rule
+      // (`@uniweb/core/resolve-route`), so the stub goes where the app would.
+      // A stub so the redirect works without JS (via <meta http-equiv="refresh">).
       if (!page.hasContent()) {
         const target = page.getNavigableRoute()
         if (target && target !== page.route) {
