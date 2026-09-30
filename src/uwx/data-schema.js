@@ -143,13 +143,16 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   // refuses the key. (It was emitted here when authored.)
 
   // `linkable` — AUTHORED ONLY (2026-09-27 [Diego]). A model is linkable unless it says
-  // `linkable: false` (omitted ⇒ true), with or without a brief: only `linkable: false`
-  // keeps its entries out of references and out of a site's folder. A reference to a
-  // model with no brief carries no card, and that is not a reason to refuse one.
+  // `linkable: false` (omitted ⇒ true), with or without a brief. `linkable: false` keeps
+  // its entries out of references and out of a site's folder, and nothing else keeps them
+  // out of a folder. Whether a reference field may point at a model with no brief — no
+  // card to show — is the host's to decide, and nothing here derives it.
   //
   // ⛔ Until then a brief-less model was emitted `linkable: false` and `linkable: true`
   // on one was refused, on the reasoning that a reference would have no card to show —
   // which kept its records out of every site's folder.
+  // ⛔ And until 2026-09-30 this said a missing card "is not a reason to refuse" a
+  // reference, which read as a promise that one is accepted. A backend refuses it.
   if (normalized.linkable === false) decl.linkable = false
 
   decl.sections = sections
