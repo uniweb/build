@@ -233,13 +233,24 @@ describe('buildSchemaOnlyPackage (foundation-less — schemas only)', () => {
 // The standards as `uniweb register --scope @std` sends them: the real `@uniweb/schemas`
 // package, read the way register reads it, not a fixture.
 describe('the @std standards, as register sends them', () => {
-  // ⛔ Until 2026-09-30 `plural` was warned about and dropped before the lowering saw it.
-  it('every one carries its plural onto its entity', async () => {
+  let doc
+  beforeAll(async () => {
     const packageDir = dirname(dirname(createRequire(import.meta.url).resolve('@uniweb/schemas')))
-    const doc = buildSchemaOnlyPackage({ schemas: await collectStandaloneSchemas(packageDir), scope: '@std' })
+    doc = buildSchemaOnlyPackage({ schemas: await collectStandaloneSchemas(packageDir), scope: '@std' })
+  })
+
+  // ⛔ Until 2026-09-30 `plural` was warned about and dropped before the lowering saw it.
+  it('every one carries its plural onto its entity', () => {
     expect(doc.entities.length).toBeGreaterThan(0)
     for (const entity of doc.entities) expect(typeof entity.plural, entity.name).toBe('string')
     expect(doc.entities.find((e) => e.name === '@std/person').plural).toBe('People')
+  })
+
+  // Form and nav declare `linkable: false` (2026-09-30 [Diego]); every other standard is
+  // linkable by saying nothing, so it is sent with no `linkable` at all.
+  it('sends form and nav as linkable: false, and the rest with no linkable', () => {
+    const declared = doc.entities.filter((e) => 'linkable' in e).map((e) => [e.name, e.linkable]).sort()
+    expect(declared).toEqual([['@std/form', false], ['@std/nav', false]])
   })
 })
 
