@@ -30,6 +30,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { resolveRoute } from '@uniweb/core/resolve-route'
 
 import { DeployError, spawnTool, readCredential, credentialHint } from './deploy-utils.js'
 import {
@@ -61,7 +62,13 @@ async function collectRoutingEntries(localeConfigs) {
     const prefix = localeConfig.routePrefix || ''
     for (const page of siteContent.pages || []) {
       if (page.redirect) {
-        entries.push(`${prefix}${page.route} ${page.redirect} 302`)
+        // Where the app sends a visitor of this locale (`resolveRoute`): a page of the site in their
+        // language, anything else as written. ⛔ Until 2026-09-30 the target was written raw, so
+        // `/fr/old` redirected a French reader to the English page.
+        const route = `${prefix}${page.route}`
+        const resolved = resolveRoute(siteContent, route, { activeLocale: prefix ? prefix.slice(1) : undefined })
+        const location = resolved.kind === 'redirect' ? resolved.location : page.redirect
+        entries.push(`${route} ${location} 302`)
       }
       if (page.rewrite) {
         entries.push(`${prefix}${page.route}/* ${page.rewrite}/:splat 200`)

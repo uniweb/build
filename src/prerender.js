@@ -1003,10 +1003,18 @@ export async function prerenderSite(siteDir, options = {}) {
       const translatedPageRoute = isDefault ? page.route : website.translateRoute(page.route, locale)
       const outputRoute = routePrefix + translatedPageRoute
 
-      // Redirect pages: emit a redirect HTML instead of rendering content
+      // Redirect pages: emit a redirect HTML instead of rendering content — to where the app sends
+      // a visitor of this locale (`resolveRoute`): a page of the site in their language, anything
+      // else as written. ⛔ Until 2026-09-30 the stub wrote the target raw, so a French reader was
+      // sent to the English page and a relative target resolved against the stub's own URL.
       if (page.redirect) {
-        onProgress(`  Redirect ${outputRoute} → ${page.redirect}`)
-        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${page.redirect}"><link rel="canonical" href="${page.redirect}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${page.redirect}">${page.redirect}</a></p></body></html>`
+        const resolved = website.resolveRoute(page.route)
+        const location = resolved.kind === 'redirect' ? resolved.location : page.redirect
+        const target = location.startsWith('/') && !location.startsWith('//')
+          ? (website.basePath || '') + location
+          : location
+        onProgress(`  Redirect ${outputRoute} → ${target}`)
+        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><link rel="canonical" href="${target}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${target}">${target}</a></p></body></html>`
         const outputPath = getOutputPath(distDir, outputRoute)
         await mkdir(dirname(outputPath), { recursive: true })
         await writeFile(outputPath, redirectHtml)

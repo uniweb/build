@@ -175,6 +175,17 @@ describe('cloudflare-pages adapter', () => {
     expect(body).toMatch(/^\/fr\/old \/new 302$/m)
   })
 
+  test('a redirect to a page of the site goes to that page in the locale', async () => {
+    const pages = [{ route: '/old', redirect: '/new' }, { route: '/new', hasContent: true }]
+    const en = await makeLocale('', pages)
+    const fr = await makeLocale('/fr', pages, 'fr-content.json')
+    await emitRedirectsFile(distDir, [en, fr])
+
+    const body = await readFile(join(distDir, '_redirects'), 'utf8')
+    expect(body).toMatch(/^\/old \/new 302$/m)
+    expect(body).toMatch(/^\/fr\/old \/fr\/new 302$/m)
+  })
+
   test('preserves a hand-authored _redirects by appending', async () => {
     const { writeFile } = await import('node:fs/promises')
     await writeFile(join(distDir, '_redirects'), '# hand-authored\n/legacy /home 301\n')

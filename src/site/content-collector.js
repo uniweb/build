@@ -38,6 +38,7 @@ import { parseFetchConfig, toFetchList } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig, pageRouteQuery, currentFor } from '@uniweb/core'
+import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 
@@ -1333,11 +1334,9 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   if (pageConfig.redirect) {
     const route = isIndex ? parentRoute
       : parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
-    const redirect = pageConfig.redirect
-    // Resolve relative redirects against the page's own route
-    const target = redirect.startsWith('/') || redirect.startsWith('http')
-      ? redirect
-      : (route === '/' ? `/${redirect}` : `${route}/${redirect}`)
+    // A relative redirect resolves against the page's own route — core's rule, which a host
+    // resolving a pushed payload applies too (`@uniweb/core/resolve-route`).
+    const target = authoredRedirectTarget(route, pageConfig.redirect)
 
     return {
       page: {
