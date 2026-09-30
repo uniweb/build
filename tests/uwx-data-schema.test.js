@@ -738,6 +738,13 @@ describe('model-level keys on the declaration', () => {
     expect('creatable_by' in decl).toBe(false)
   })
 
+  // ⛔ Until 2026-09-30 `plural` never got here: the format warned about it and dropped it.
+  it('emits plural, the name for many entries, beside the label', () => {
+    const decl = toDataSchemaDeclaration(normalize({ label: 'Session', plural: 'Sessions' }), { name: '@demo/session' })
+    expect(decl.plural).toBe('Sessions')
+    expect('plural' in toDataSchemaDeclaration(normalize({}), { name: '@demo/session' })).toBe(false)
+  })
+
   it('honours an authored `linkable: false` on a model that has a brief', () => {
     // A real choice — "do not let other models point at this".
     const decl = toDataSchemaDeclaration(normalize({ linkable: false }), { name: '@demo/session' })

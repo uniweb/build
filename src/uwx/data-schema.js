@@ -112,8 +112,8 @@ export function isContentBodyField(field) {
  * @param {(ref: string) => string} [opts.resolveOptions] - maps an `options`
  *   (item_ref) ref to its full `@org/model/<section>` path. Falls back to
  *   `resolveName` (model only) when not supplied.
- * @returns {Object} the declaration (`{ name, label?, description?, source_locale?,
- *          linkable?, sections }`).
+ * @returns {Object} the declaration (`{ name, label?, plural?, description?,
+ *          source_locale?, linkable?, sections }`).
  */
 export function toDataSchemaDeclaration(normalized, { name, resolveName, resolveOptions } = {}) {
   if (!name) throw new Error('toDataSchemaDeclaration: a registry name is required')
@@ -136,6 +136,7 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
 
   const decl = { name }
   if (normalized.label) decl.label = normalized.label
+  if (normalized.plural) decl.plural = normalized.plural
   if (normalized.description) decl.description = normalized.description
   if (normalized.sourceLocale) decl.source_locale = normalized.sourceLocale
   // ⛔ No `creatable_by`: retired 2026-09-23 — Models are open, and `@uniweb/schemas`

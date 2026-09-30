@@ -1,5 +1,7 @@
+import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
 import { buildRegistryPackage, buildSchemaOnlyPackage } from '../src/uwx/registry-package.js'
-import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
+import { validateAndNormalizeSchema, collectStandaloneSchemas } from '../src/resolve-data-schema.js'
 
 // schema.json shape: _self (identity + config), dataSchemas (normalized, keyed by
 // ref), component sections, _layouts. Build a realistic one.
@@ -225,6 +227,19 @@ describe('buildSchemaOnlyPackage (foundation-less — schemas only)', () => {
   it('throws when there are no schemas to register', () => {
     expect(() => buildSchemaOnlyPackage({ schemas: {} })).toThrow(/no data schemas to register/)
     expect(() => buildSchemaOnlyPackage({})).toThrow(/no data schemas to register/)
+  })
+})
+
+// The standards as `uniweb register --scope @std` sends them: the real `@uniweb/schemas`
+// package, read the way register reads it, not a fixture.
+describe('the @std standards, as register sends them', () => {
+  // ⛔ Until 2026-09-30 `plural` was warned about and dropped before the lowering saw it.
+  it('every one carries its plural onto its entity', async () => {
+    const packageDir = dirname(dirname(createRequire(import.meta.url).resolve('@uniweb/schemas')))
+    const doc = buildSchemaOnlyPackage({ schemas: await collectStandaloneSchemas(packageDir), scope: '@std' })
+    expect(doc.entities.length).toBeGreaterThan(0)
+    for (const entity of doc.entities) expect(typeof entity.plural, entity.name).toBe('string')
+    expect(doc.entities.find((e) => e.name === '@std/person').plural).toBe('People')
   })
 })
 
