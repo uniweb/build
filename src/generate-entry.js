@@ -5,7 +5,8 @@
  *
  * Exports:
  * - `components` - Object map of component name -> React component
- * - `capabilities` - Custom Layout and props from src/main.js (if present)
+ * - `capabilities` - what the runtime reads of src/main.js (`extractFoundationRuntime`): the
+ *   code it calls, referenced from the module, and its data, lean — plus the discovered layouts
  * - `meta` - Per-component runtime metadata extracted from meta.js files
  *
  * The `meta` export contains only properties needed at runtime:
@@ -26,10 +27,11 @@ import { join, dirname } from 'node:path'
 import {
   discoverComponents,
   discoverLayoutsInPath,
+  loadFoundationConfig,
   DEFAULT_SECTION_PATHS,
   LAYOUTS_PATH
 } from './schema.js'
-import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas } from './runtime-schema.js'
+import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas, extractFoundationRuntime } from './runtime-schema.js'
 import { collectSchemaRefs, buildDataSchemaMap, SCHEMA_EXTENSIONS } from './resolve-data-schema.js'
 
 /**
@@ -88,31 +90,12 @@ async function detectHostShareableImports(srcDir) {
 }
 
 /**
- * Detect foundation config file (for props, vars, etc.)
- *
- * Looks for (in priority order): main.js, main.jsx
- *
- * The foundation's main authored module.
- *
- * The file should export:
- * - props (optional) - Foundation-wide props
- * - vars (optional) - CSS custom properties (also read by schema builder)
- * - defaultLayout (optional) - Default layout name
- *
- * Note: Layout components are now discovered from layouts/ at the source root.
+ * The foundation's `main.js` — its declarations, read by `loadFoundationConfig` as the schema
+ * reads them. `main.js` is the only name: ⛔ until 2026-10-01 this also took a `main.jsx`, which
+ * nothing else read, so the editor saw none of its declarations while the runtime saw all of them.
  */
 function detectFoundationExports(srcDir) {
-  const candidates = [
-    { path: 'main.js', ext: 'js' },
-    { path: 'main.jsx', ext: 'jsx' },
-  ]
-
-  for (const { path, ext } of candidates) {
-    if (existsSync(join(srcDir, path))) {
-      return { path: `./${path}`, ext }
-    }
-  }
-  return null
+  return existsSync(join(srcDir, 'main.js')) ? { path: './main.js', ext: 'js' } : null
 }
 
 /**
@@ -140,6 +123,7 @@ function generateEntrySource(components, options = {}) {
   const {
     cssPath = null,
     foundationExports = null,
+    foundationRuntime = { code: [], data: {} },
     meta = {},
     layouts = {},
     layoutMeta = {},
@@ -160,10 +144,15 @@ function generateEntrySource(components, options = {}) {
     lines.push(`import '${cssPath}'`)
   }
 
-  // Foundation capabilities import (for props, vars, etc.)
-  // Note: Layout/layouts no longer merged from main.js — layouts come from src/layouts/ discovery
+  // The foundation's `main.js` — imported for the code the runtime calls, and only referenced for
+  // it, so the bundler drops the rest of its default export (measured 2026-10-01). With no such
+  // code, imported for its side effects alone. Its data is written below, lean.
   if (foundationExports) {
-    lines.push(`import * as _foundationModule from '${foundationExports.path}'`)
+    lines.push(
+      foundationRuntime.code.length > 0
+        ? `import * as _foundationModule from '${foundationExports.path}'`
+        : `import '${foundationExports.path}'`
+    )
   }
 
   // Component imports
@@ -185,21 +174,19 @@ function generateEntrySource(components, options = {}) {
     lines.push(`export { ${componentNames.join(', ')} }`)
   }
 
-  // Foundation capabilities (props, vars, etc. + discovered layouts)
+  // Foundation capabilities — what the runtime reads of `main.js`, and nothing else of it
+  // (`extractFoundationRuntime`, ruled 2026-10-01 [Diego]): the code it calls, referenced from the
+  // module, and its data as a lean literal — `vars` (each var's `default`, `type`, `applyTo`, as
+  // `loadFoundationConfig` reads them, named export first), `data` (each key's schema ref), and the
+  // defaults that pick a layout, a section type, transitions and scroll. Plus the discovered layouts.
+  // ⛔ Until 2026-10-01 the whole default export was spread in, so a foundation's name, description
+  // and its vars' descriptions shipped in every published bundle.
   lines.push('')
   if (foundationExports || layoutNames.length > 0) {
     const capParts = []
     if (foundationExports) {
-      capParts.push('..._foundationModule.default')
-      // `vars` is a NAMED export of main.js, so the spread above misses it —
-      // schema.js reads `module.vars || module.default?.vars` and this must
-      // agree with it (named wins), or the runtime and the editor would see
-      // different foundation vars. Without this line the declared theme vars
-      // exist ONLY in dist/meta/schema.json, which is a build-time artifact:
-      // any lane that generates theme CSS outside the build (the runtime's
-      // ensureThemeCss, a cloud shell assembler) would silently produce a
-      // theme missing every foundation-declared var.
-      capParts.push('vars: _foundationModule.vars || _foundationModule.default?.vars')
+      for (const key of foundationRuntime.code) capParts.push(`${key}: _foundationModule.default?.${key}`)
+      for (const [key, value] of Object.entries(foundationRuntime.data)) capParts.push(`${key}: ${JSON.stringify(value)}`)
     }
     if (layoutNames.length > 0) {
       capParts.push(`layouts: { ${layoutNames.join(', ')} }`)
@@ -316,8 +303,13 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   // Check for CSS file
   const cssPath = detectCssFile(srcDir)
 
-  // Check for foundation exports (props, vars, etc.)
+  // The foundation's `main.js`, and what the runtime reads of it — read as the schema reads it
+  // (`loadFoundationConfig`: the named `vars` first, JSX imports transpiled), so the editor and the
+  // runtime see one declaration.
+  // Asked even with no main.js: it refuses a `foundation.js` or `main.jsx` left in its place.
   const foundationExports = detectFoundationExports(srcDir)
+  const foundationConfig = await loadFoundationConfig(srcDir)
+  const foundationRuntime = foundationExports ? extractFoundationRuntime(foundationConfig) : { code: [], data: {} }
 
   // Resolve the data schemas referenced by section bindings, then extract
   // per-component runtime metadata (which lean-extracts field defaults from
@@ -347,6 +339,7 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   const source = generateEntrySource(components, {
     cssPath,
     foundationExports,
+    foundationRuntime,
     meta,
     layouts,
     layoutMeta,
@@ -386,6 +379,7 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     componentNames,
     layoutNames,
     foundationExports,
+    foundationRuntime,
     meta,
     layoutMeta,
     hostShareableImports,

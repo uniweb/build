@@ -434,3 +434,87 @@ export function extractAllLayoutRuntimeSchemas(layoutsMeta) {
 
   return schemas
 }
+
+/**
+ * ⭐ WHAT THE RUNTIME READS OF A FOUNDATION'S `main.js` — and nothing else of it. Ruled
+ * 2026-10-01 [Diego]: *"Only what runtime really reads for rendering should reach it."*
+ *
+ * Read off every runtime reader of the entry's `capabilities` (2026-10-01): core's `Uniweb` and
+ * `Website`, the runtime's wiring, navigation and scroll, `@uniweb/theming`, kit's xref, the
+ * fetch dispatcher, and press. Two kinds:
+ *
+ *   code  `handlers`, `defaultInsets`, `xref`, `transports`, `outputs`, `props` — functions and
+ *         components, so the entry REFERENCES each from the module and the bundler drops the rest
+ *         of `main.js`'s default export.
+ *   data  `defaultLayout`, `defaultSection`, `viewTransitions`, `scroll`; `vars`, each var's
+ *         `default`, `type` and `applyTo` — all `@uniweb/theming` reads; `data`, each key's schema
+ *         ref — all `declaredKeys` reads. Written as a literal, like a section type's lean schema.
+ *
+ * ⛔ Never: `name`, `description`, `extension`, a var's label or description, a data key's shape,
+ * or any key the framework does not read. ⛔ Until 2026-10-01 the entry spread the whole default
+ * export into `capabilities`, and a foundation's name and its vars' descriptions shipped in every
+ * published bundle.
+ *
+ * A data key whose value is not plain data (a function, say) is referenced like code, so nothing
+ * is lost to serialization.
+ *
+ * @param {Object} config - the foundation's `main.js`, as `loadFoundationConfig` reads it
+ * @returns {{ code: string[], data: Object }} the code keys to reference, and the data to inline
+ */
+export function extractFoundationRuntime(config = {}) {
+  const code = RUNTIME_CODE_CAPABILITIES.filter((key) => config?.[key] !== undefined)
+  const data = {}
+  for (const key of RUNTIME_DATA_CAPABILITIES) {
+    const value = config?.[key]
+    if (value === undefined) continue
+    if (isPlainData(value)) data[key] = value
+    else code.push(key)
+  }
+  const vars = leanVars(config?.vars)
+  if (vars) data.vars = vars
+  const keys = leanDataKeys(config?.data)
+  if (keys) data.data = keys
+  return { code, data }
+}
+
+/** The `main.js` capabilities the runtime calls or renders — referenced, never copied. */
+export const RUNTIME_CODE_CAPABILITIES = ['handlers', 'defaultInsets', 'xref', 'transports', 'outputs', 'props']
+
+/** The `main.js` values the runtime reads as data — written into the entry. */
+const RUNTIME_DATA_CAPABILITIES = ['defaultLayout', 'defaultSection', 'viewTransitions', 'scroll']
+
+/** What `@uniweb/theming` reads of a foundation var: its value, its kind, and a font role's selectors. */
+const RUNTIME_VAR_FIELDS = ['default', 'type', 'applyTo']
+
+function leanVars(vars) {
+  if (!vars || typeof vars !== 'object' || Array.isArray(vars)) return null
+  const out = {}
+  for (const [name, config] of Object.entries(vars)) {
+    if (config !== null && typeof config === 'object' && !Array.isArray(config)) {
+      const lean = {}
+      for (const field of RUNTIME_VAR_FIELDS) if (config[field] !== undefined) lean[field] = config[field]
+      out[name] = lean
+    } else {
+      out[name] = config
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/** A foundation's `data:` as a section type's lean `data` is: each key → its schema ref, or null. */
+function leanDataKeys(data) {
+  const lowered = lowerData(data)
+  if (!lowered || typeof lowered !== 'object' || Array.isArray(lowered)) return null
+  const out = {}
+  for (const [key, value] of Object.entries(lowered)) out[key] = dataRef(value)
+  return Object.keys(out).length > 0 ? out : null
+}
+
+function isPlainData(value) {
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true
+  if (Array.isArray(value)) return value.every(isPlainData)
+  if (typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.values(value).every(isPlainData)
+  }
+  return false
+}

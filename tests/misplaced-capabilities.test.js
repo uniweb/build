@@ -1,9 +1,9 @@
 /**
  * Capabilities written as named exports are dropped — say so.
  *
- * `generate-entry.js` builds `capabilities` as `{ ..._foundationModule.default,
- * vars: … }`. It spreads the DEFAULT export only, so `export const xref = …`
- * vanishes with no error and a build that succeeds. The feature simply does not
+ * `generate-entry.js` builds `capabilities` from the DEFAULT export only (`vars`
+ * aside), so `export const xref = …` vanishes with no error and a build that
+ * succeeds. The feature simply does not
  * happen, which reads as "not implemented" rather than "declared in the wrong
  * place".
  *

@@ -329,8 +329,9 @@ const DEFAULT_ONLY_CAPABILITIES = [
 /**
  * Warn when a capability was written as a named export.
  *
- * `generate-entry.js` builds `capabilities` as `{ ..._foundationModule.default,
- * vars: … }` — it spreads only the DEFAULT export. A named `export const xref =
+ * `generate-entry.js` builds `capabilities` from the DEFAULT export only — the code the
+ * runtime calls, referenced, and its data, lean (`extractFoundationRuntime`; until
+ * 2026-10-01 it spread the whole default export). A named `export const xref =
  * …` is therefore dropped with no error, no warning, and a build that succeeds.
  * Whatever the capability did simply does not happen, which reads as "the
  * feature is not implemented" rather than "it is declared in the wrong place".
@@ -477,6 +478,16 @@ export async function loadFoundationConfig(srcDir) {
         `${legacy} is no longer read — rename it to main.js.\n` +
           `  A foundation's declarations (vars, defaultLayout, defaultSection, props, name) live in\n` +
           `  main.js. Left as foundation.js, the build would continue with none of them.`,
+      )
+    }
+    // ⛔ The same for `main.jsx`, which the entry used to import while this read nothing — the
+    // editor saw none of its declarations, the runtime all of them (until 2026-10-01). A main.js
+    // may hold JSX: `importFoundationConfig` transpiles it.
+    const jsx = join(srcDir, 'main.jsx')
+    if (existsSync(jsx)) {
+      throw new Error(
+        `${jsx} is not read — rename it to main.js, which may hold JSX.\n` +
+          `  A foundation's declarations live in main.js; left as main.jsx, the build would continue with none of them.`,
       )
     }
     return {}
