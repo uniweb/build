@@ -30,8 +30,8 @@ describe('extractFoundationRuntime — what the runtime reads of main.js', () =>
   }
 
   it('references the code the runtime calls', () => {
-    expect(extractFoundationRuntime(config).code).toEqual(['handlers', 'props'])
-    expect(RUNTIME_CODE_CAPABILITIES).toEqual(['handlers', 'defaultInsets', 'xref', 'transports', 'outputs', 'props'])
+    expect(extractFoundationRuntime(config).code).toEqual(['handlers'])
+    expect(RUNTIME_CODE_CAPABILITIES).toEqual(['handlers', 'defaultInsets', 'xref', 'transports', 'outputs'])
   })
 
   it('writes its data lean — a var\'s default, type and applyTo; a data key\'s ref', () => {
@@ -49,7 +49,8 @@ describe('extractFoundationRuntime — what the runtime reads of main.js', () =>
     })
   })
 
-  it('never the identity, nor a key the framework does not read', () => {
+  it('never the identity, nor a key the framework does not read — `props` among them, retired 2026-10-01', () => {
+    expect(extractFoundationRuntime(config).code).not.toContain('props')
     const json = JSON.stringify(extractFoundationRuntime(config))
     for (const absent of ['@acme/site-kit', 'A kit', 'extension', 'somethingCustom', 'Header height', 'How tall', 'Body face']) {
       expect(json).not.toContain(absent)

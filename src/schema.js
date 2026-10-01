@@ -299,7 +299,6 @@ function retiredScopeMessage(pkgPath, scope, name) {
  * Contains foundation-wide configuration:
  * - vars: CSS custom properties sites can override
  * - defaultLayout: Default layout name
- * - props: Foundation-wide props
  * - Future: providers, middleware, etc.
  */
 /**
@@ -316,7 +315,6 @@ const DEFAULT_ONLY_CAPABILITIES = [
   'defaultLayout',
   'defaultSection',
   'viewTransitions',
-  'props',
   'defaultInsets',
   'xref',
   'outputs',
@@ -476,7 +474,7 @@ export async function loadFoundationConfig(srcDir) {
     if (existsSync(legacy)) {
       throw new Error(
         `${legacy} is no longer read — rename it to main.js.\n` +
-          `  A foundation's declarations (vars, defaultLayout, defaultSection, props, name) live in\n` +
+          `  A foundation's declarations (vars, defaultLayout, defaultSection, name) live in\n` +
           `  main.js. Left as foundation.js, the build would continue with none of them.`,
       )
     }

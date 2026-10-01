@@ -443,7 +443,7 @@ export function extractAllLayoutRuntimeSchemas(layoutsMeta) {
  * `Website`, the runtime's wiring, navigation and scroll, `@uniweb/theming`, kit's xref, the
  * fetch dispatcher, and press. Two kinds:
  *
- *   code  `handlers`, `defaultInsets`, `xref`, `transports`, `outputs`, `props` — functions and
+ *   code  `handlers`, `defaultInsets`, `xref`, `transports`, `outputs` — functions and
  *         components, so the entry REFERENCES each from the module and the bundler drops the rest
  *         of `main.js`'s default export.
  *   data  `defaultLayout`, `defaultSection`, `viewTransitions`, `scroll`; `vars`, each var's
@@ -478,7 +478,7 @@ export function extractFoundationRuntime(config = {}) {
 }
 
 /** The `main.js` capabilities the runtime calls or renders — referenced, never copied. */
-export const RUNTIME_CODE_CAPABILITIES = ['handlers', 'defaultInsets', 'xref', 'transports', 'outputs', 'props']
+export const RUNTIME_CODE_CAPABILITIES = ['handlers', 'defaultInsets', 'xref', 'transports', 'outputs']
 
 /** The `main.js` values the runtime reads as data — written into the entry. */
 const RUNTIME_DATA_CAPABILITIES = ['defaultLayout', 'defaultSection', 'viewTransitions', 'scroll']
