@@ -9,6 +9,7 @@ import { discoverComponents, buildSchema, reportPlacementDeclarations, SCHEMA_FO
 import { extractRuntimeSchema } from '../src/runtime-schema.js'
 import { buildRegistryPackage } from '../src/uwx/registry-package.js'
 import { generateDocsFromSchema } from '../src/docs.js'
+import { FOUNDATION_SCHEMA_FORMAT } from '@uniweb/schemas/foundation'
 
 let dir
 
@@ -73,10 +74,20 @@ describe('an entry, lowered', () => {
   })
 
   it('nothing declared is nothing written — absent stays unknown', async () => {
-    meta('Plain', { title: 'Plain', content: {} })
+    meta('Plain', { title: 'Plain' })
     const { Plain } = await discoverComponents(dir)
     expect(Plain).not.toHaveProperty('content')
     expect(Plain).not.toHaveProperty('children')
+  })
+
+  // ⭐ Ruled 2026-10-01 [Diego]: `content: {}` or `content: []` says the component takes no
+  // content — one that only reads `content.data`. ⛔ Until then it came out absent, like nothing.
+  it('an empty content declaration is [] — the component takes no content', async () => {
+    meta('Feed', { content: {}, data: { posts: '@std/article' } })
+    meta('Banner', { content: [] })
+    const { Feed, Banner } = await discoverComponents(dir)
+    expect(Feed.content).toEqual([])
+    expect(Banner.content).toEqual([])
   })
 })
 
@@ -111,20 +122,43 @@ describe('retired declarations are refused, naming what replaces them', () => {
 })
 
 describe('the schema says which form it holds', () => {
-  it('`_self.schemaFormat`, and the registered blob carries it', async () => {
-    meta('Hero', { content: { title: 'Headline' } })
+  it('`_self.schemaFormat` — the build\'s 2, and the registered blob\'s 3, normalized', async () => {
+    meta('Hero', { content: { title: 'Headline' }, data: { team: '@/member' } })
+    write('schemas/member.yml', 'name: member\nfields:\n  name: string\n')
     const schema = await buildSchema(dir)
     expect(SCHEMA_FORMAT).toBe(2)
     expect(schema._self.schemaFormat).toBe(SCHEMA_FORMAT)
     const pkg = buildRegistryPackage({ schema, scope: '@acme' })
     const blob = pkg.entities.find((e) => e.model === '@uniweb/foundation-schema').schema
-    expect(blob._self.schemaFormat).toBe(SCHEMA_FORMAT)
+    expect(blob._self.schemaFormat).toBe(FOUNDATION_SCHEMA_FORMAT)
     expect(blob.Hero.content).toEqual([{ element: 'title', kind: 'heading', label: 'Headline' }])
+    expect(blob.Hero.data).toEqual({ team: { kind: 'schema', schema: '@acme/member', whole: false } })
   })
 
   it('a main.js key of the same name does not replace it', async () => {
     write('main.js', "export default { name: '@acme/site-kit', schemaFormat: 7 }\n")
     expect((await buildSchema(dir))._self.schemaFormat).toBe(SCHEMA_FORMAT)
+  })
+})
+
+describe('a data: value register will refuse is said when the schema is built', () => {
+  it('an inline field map that is not a data schema — the build goes on, and says register stops', async () => {
+    meta('Article', { content: {}, data: { articles: { content: { type: 'object', default: null } } } })
+    const warnings = []
+    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
+    const schema = await buildSchema(dir)
+    expect(schema.Article.content).toEqual([])
+    expect(warnings.join('\n')).toMatch(
+      /Article \(meta\.js\): data\.articles is an inline field map that is not a valid data schema: object field 'content'.*`uniweb register` refuses it/
+    )
+  })
+
+  it('CONTROL — a valid map, a ref and a key with no schema say nothing', async () => {
+    meta('Feed', { data: { links: { href: 'url' }, team: '@std/person', raw: {} } })
+    const warnings = []
+    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
+    await buildSchema(dir)
+    expect(warnings.filter((w) => /register` refuses/.test(w))).toEqual([])
   })
 })
 

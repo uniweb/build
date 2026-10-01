@@ -75,7 +75,8 @@ describe('buildRegistryPackage', () => {
       expect(f.schema.Hero).toBeTruthy()
       expect(f.schema._layouts).toBeTruthy()
       expect(f.schema.dataSchemas).toBeUndefined() // excluded
-      expect(f.schema._self).toEqual({ vars: { '--accent': '#09f' }, defaultLayout: 'main' }) // config kept, identity dropped
+      // config kept, identity dropped — and the form it is written in (format 3, normalized)
+      expect(f.schema._self).toEqual({ vars: { '--accent': '#09f' }, defaultLayout: 'main', schemaFormat: 3 })
       expect(f.schema._self.name).toBeUndefined()
     })
 
@@ -158,6 +159,56 @@ describe('buildRegistryPackage — the scope is the one in the name', () => {
     expect(() => buildRegistryPackage({ schema: withName('@acme/marketing'), scope: '@proximify' })).toThrow(
       /named @acme\/marketing, so it registers under @acme — not @proximify/
     )
+  })
+})
+
+// ⭐ THE FOUNDATION SCHEMA REGISTERS NORMALIZED — format 3 (`@uniweb/schemas/foundation`, ruled
+// 2026-10-01 [Diego]): one spelling per meaning, every `@/x` a `data:` key names in the scope the
+// foundation registers under. ⛔ Until then the build's format 2 shipped as built, and
+// `data: { team: '@/member' }` reached the editor as written.
+describe('the foundation schema, as register sends it — format 3', () => {
+  const built = () => ({
+    _self: { name: '@globex/portal', version: '2.0.0', schemaFormat: 2, data: { profile: {} } },
+    Team: { name: 'Team', path: 'sections/Team', data: { team: '@/member', posts: '@std/article/*' } },
+    Feed: { name: 'Feed', path: 'sections/Feed', content: [], data: { links: { label: 'string', href: { type: 'url' } } } },
+    Hero: { name: 'Hero', path: 'sections/Hero', params: { variant: { type: 'select', options: ['glass', 'flat'] } } },
+  })
+  const blob = (schema) =>
+    buildRegistryPackage({ schema, exportedAt: '2026-10-01T00:00:00Z' }).entities.find(
+      (e) => e.model === '@uniweb/foundation-schema'
+    ).schema
+
+  it('qualifies @/x with the foundation\'s own scope — not @std — and keeps a standard ref', () => {
+    expect(blob(built()).Team.data).toEqual({
+      team: { kind: 'schema', schema: '@globex/member', whole: false },
+      posts: { kind: 'schema', schema: '@std/article', whole: true },
+    })
+  })
+
+  it('writes every inline shape, option and the foundation\'s own data in one spelling', () => {
+    const b = blob(built())
+    expect(b.Feed.data.links).toEqual({
+      kind: 'fields',
+      fields: { label: { type: 'string' }, href: { type: 'string', format: 'url' } },
+    })
+    expect(b.Hero.params.variant.options).toEqual([{ value: 'glass', label: 'glass' }, { value: 'flat', label: 'flat' }])
+    expect(b._self.data).toEqual({ profile: { kind: 'untyped' } })
+  })
+
+  it('keeps [] — a component that takes no content', () => {
+    expect(blob(built()).Feed.content).toEqual([])
+  })
+
+  it('refuses an inline field map that is not a data schema, naming the component and the key', () => {
+    const schema = { ...built(), Article: { name: 'Article', data: { articles: { content: { type: 'object' } } } } }
+    expect(() => buildRegistryPackage({ schema })).toThrow(/Article: data\.articles is an inline field map that is not a valid data schema/)
+  })
+
+  it('CONTROL — the dist schema it was given is not changed', () => {
+    const schema = built()
+    blob(schema)
+    expect(schema.Team.data.team).toBe('@/member')
+    expect(schema._self.schemaFormat).toBe(2)
   })
 })
 

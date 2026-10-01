@@ -26,6 +26,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { normalizeFoundationSchema } from '@uniweb/schemas/foundation'
 import { toDataSchemaDeclaration, SHORTHAND_SECTION } from './data-schema.js'
 import { checkFoundationName, splitFoundationName } from '../foundation-name.js'
 
@@ -81,7 +82,7 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
   const foundationEntity = {
     model: FOUNDATION_SCHEMA,
     info: buildInfo(self, org, digest, runtime),
-    schema: buildSchemaBlob(schema),
+    schema: buildSchemaBlob(schema, org),
     i18n: { locales: loadI18nLocales(foundationDir) },
     'data-schemas': { refs: buildRefs(dataSchemas, scoped) },
   }
@@ -250,16 +251,27 @@ function buildInfo(self, org, digest, runtime) {
   return info
 }
 
-// The whole renderable schema.json MINUS identity and MINUS dataSchemas, shipped
-// as one opaque object the backend never reads into (custodian).
-function buildSchemaBlob(schema) {
+// The foundation schema an editor reads: the whole renderable schema.json MINUS identity
+// and MINUS dataSchemas, shipped as one object the backend stores and serves, and never
+// reads into (custodian).
+//
+// ⭐ IN ITS NORMALIZED FORM — `schemaFormat: 3` (`@uniweb/schemas/foundation`, ruled
+// 2026-10-01 [Diego]): every entry in one spelling per meaning, so the editor needs no
+// framework grammar, and each `@/x` a `data:` key names qualified with the scope the
+// foundation registers under — the name its Model was stored under. ⛔ Until 2026-10-01 the
+// build's format 2 shipped as built, and `data: { team: '@/member' }` reached the editor
+// as written. `dist/meta/schema.json` stays format 2: the build's own readers read it.
+//
+// It throws for a `data:` value that cannot be normalized — an inline field map that is
+// not a valid data schema — naming the component and the key; the build warns of it first.
+function buildSchemaBlob(schema, org) {
   const { dataSchemas: _ds, ...rest } = schema
   // Every key hoisted into `info` is stripped here, so the wire carries each
   // fact ONCE. Two copies of one fact is a drift liability, and the copy inside
   // an opaque blob is the one nobody would think to update.
   const { name: _n, version: _v, description: _d, role: _r, supports: _s, ...selfConfig } =
     rest._self || {}
-  return { ...rest, _self: selfConfig }
+  return normalizeFoundationSchema({ ...rest, _self: selfConfig }, { scope: org || undefined })
 }
 
 // The data-schemas the foundation renders, by NAME (own + shared), sorted.

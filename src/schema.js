@@ -18,6 +18,7 @@ import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describeChildren, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
 import { describeContent, lowerData } from '@uniweb/schemas/content'
+import { normalizeData } from '@uniweb/schemas/foundation'
 import { SECTION_PARAMS, SECTION_KEYS } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
@@ -612,8 +613,12 @@ function buildComponentEntry(name, relativePath, meta) {
     path: relativePath,
   }
 
+  // ⭐ `[]` says the component TAKES NO CONTENT — `content: {}` or `content: []` in its `meta.js`
+  // [Diego, 2026-10-01] — a component that only reads `content.data`, say. Absent says it
+  // declared nothing, which is unknown. ⛔ Until 2026-10-01 both came out absent.
   const content = describeContent(meta)
   if (content.elements.length > 0) entry.content = content.elements
+  else if (declaresNoContent(meta.content)) entry.content = []
   else delete entry.content
 
   const children = lowerChildren(meta)
@@ -625,6 +630,12 @@ function buildComponentEntry(name, relativePath, meta) {
   const problems = [...content.problems, ...describeChildren(meta).problems]
   if (problems.length > 0) loweringProblems.set(entry, problems)
   return entry
+}
+
+/** `content: {}` or `content: []` — the component's way of saying it takes no content. */
+function declaresNoContent(content) {
+  if (Array.isArray(content)) return content.length === 0
+  return content !== null && typeof content === 'object' && Object.keys(content).length === 0
 }
 
 /**
@@ -1011,6 +1022,31 @@ function reportSupports(srcDir, authored, derived, emitted) {
 }
 
 /**
+ * Warn of a `data:` value `register` will refuse — one the normalized form it sends cannot
+ * write (`@uniweb/schemas/foundation`): an inline field map that is not a valid data schema.
+ * The build goes on; the site renders the map as before. `register` is where it stops, since
+ * a registered schema is written in one spelling per meaning or not at all.
+ *
+ * @param {Object} components - discovered section types, by name
+ * @param {Object} [layouts] - discovered layouts, by name
+ * @param {Object} [foundationConfig] - the foundation's `main.js`, whose `data:` reaches every section
+ */
+export function reportUnregistrableData(components, layouts = {}, foundationConfig = {}) {
+  const owners = [
+    ...Object.entries(components).map(([name, entry]) => [`${name} (meta.js)`, entry?.data]),
+    ...Object.entries(layouts || {}).map(([name, entry]) => [`layout ${name} (meta.js)`, entry?.data]),
+    ['the foundation (main.js)', foundationConfig?.data],
+  ]
+  for (const [owner, data] of owners) {
+    try {
+      normalizeData(data, { owner })
+    } catch (err) {
+      console.warn(`Warning: ${err.message} \`uniweb register\` refuses it until it is one.`)
+    }
+  }
+}
+
+/**
  * Warn about `content` and `children` declarations an editor cannot use — what lowering
  * them could not read (`@uniweb/schemas`, the grammar the editor reads them with). The
  * entry is emitted lowered either way; these are warnings, never refusals.
@@ -1109,6 +1145,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
+  reportUnregistrableData(components, layouts, foundationConfig)
 
   // Determine extension role
   const isExtension = !!foundationConfig.extension
