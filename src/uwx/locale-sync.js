@@ -23,7 +23,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown, serializeInlineContent } from '@uniweb/content-writer'
 import { computeHash } from '../i18n/hash.js'
 import { blockElements, elementText, dataBlockNodes } from '../i18n/extract.js'
-import { visitDataStrings } from '../i18n/data-strings.js'
+import { visitDataBlockStrings } from '../i18n/data-strings.js'
 import { resolveDocForLocale } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
@@ -167,8 +167,11 @@ export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
  * @param {string} sourceLocale
  * @param {string[]} [targetLocales]
  * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
+ * @param {object} [context] - the section's translation context
+ * @param {(tag: string) => object|null} [modelFor] - the section's data-block models by tag
+ *   (`i18n/data-models.js`), so a block is translated as the build translates it
  */
-export function localizeContentDoc(doc, sourceLocale, targetLocales, translations, context = undefined) {
+export function localizeContentDoc(doc, sourceLocale, targetLocales, translations, context = undefined, modelFor = () => null) {
   // Non-docs (null, an already-localized map) pass through untouched.
   if (!isProseMirrorDoc(doc)) return doc
 
@@ -178,7 +181,7 @@ export function localizeContentDoc(doc, sourceLocale, targetLocales, translation
       const table = translations[locale]
       if (!table) continue
       // With the section's context, so a context-specific override resolves as the build resolves it.
-      const resolved = resolveDocForLocale(doc, table, context)
+      const resolved = resolveDocForLocale(doc, table, context, modelFor)
       if (resolved) result[locale] = resolved
     }
   }
@@ -363,7 +366,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
  * per-locale link hrefs survive. Keyed by the source element's cleaned text, so
  * `computeHash(key)` matches the extractor's unit hash — closing the round trip.
  */
-function deriveStructuralMap(sourceDoc, targetDoc) {
+function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null) {
   if (!isProseMirrorDoc(sourceDoc) || !isProseMirrorDoc(targetDoc)) return null
   const src = blockElements(sourceDoc)
   const tgt = blockElements(targetDoc)
@@ -383,15 +386,18 @@ function deriveStructuralMap(sourceDoc, targetDoc) {
     // a mark we can't serialize → don't risk a lossy map; store as free-form
     return null
   }
-  return addDataBlockStrings(map, sourceDoc, targetDoc)
+  return addDataBlockStrings(map, sourceDoc, targetDoc, modelFor)
 }
 
 // ⭐ A TAGGED DATA BLOCK's translated strings, read pairwise — the strings the build translates
-// (`visitDataStrings`, the extractor's judgement), keyed by their source text as the build keys them.
+// (`visitDataBlockStrings`: a block's declared shape, else the extractor's heuristic), keyed by their
+// source text as the build keys them. ⭐ Walked by the same model the push translated with — the pairing
+// is by position, so a declared text field the heuristic skips (a `status`) would otherwise read a
+// faithful translation as another shape.
 // A target that is not the source with only those strings changed — another shape, another `href` —
 // cannot be said per string, and the whole translation is free-form. ⛔ Until 2026-09-26 a data block
 // was not read here at all, and its translations were not sent (`merge.js::translateDataBlocks`).
-function addDataBlockStrings(map, sourceDoc, targetDoc) {
+function addDataBlockStrings(map, sourceDoc, targetDoc, modelFor = () => null) {
   const srcBlocks = dataBlockNodes(sourceDoc)
   const tgtBlocks = dataBlockNodes(targetDoc)
   if (srcBlocks.length !== tgtBlocks.length) return null
@@ -405,7 +411,7 @@ function addDataBlockStrings(map, sourceDoc, targetDoc) {
     }
     const strings = (data) => {
       const out = []
-      visitDataStrings(JSON.parse(JSON.stringify(data ?? null)), (value) => void out.push(value))
+      visitDataBlockStrings(JSON.parse(JSON.stringify(data ?? null)), (value) => void out.push(value), modelFor(s.tag))
       return out
     }
     const from = strings(s.data)
@@ -418,7 +424,7 @@ function addDataBlockStrings(map, sourceDoc, targetDoc) {
       pairs.set(from[j], to[j])
     }
     const rebuilt = JSON.parse(JSON.stringify(s.data))
-    visitDataStrings(rebuilt, (value) => pairs.get(value) ?? value)
+    visitDataBlockStrings(rebuilt, (value) => pairs.get(value) ?? value, modelFor(s.tag))
     if (canonicalJson(rebuilt) !== canonicalJson(t.data)) return null
     for (const [from, to] of pairs) map[from.trim()] = to
   }
@@ -436,7 +442,7 @@ function addDataBlockStrings(map, sourceDoc, targetDoc) {
  * reserved `@` (and `$`-prefixed) key is opaque metadata — NEVER a locale. A bare
  * doc (no locale wrap) is returned unchanged.
  */
-export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null, context = null) {
+export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null, context = null, modelFor = () => null) {
   if (!isLocalizedContent(content)) return content
   const source = content[sourceLocale]
   for (const [locale, value] of Object.entries(content)) {
@@ -445,7 +451,7 @@ export function unwrapLocalizedContent(content, sourceLocale, collector, freefor
     if (isProseMirrorDoc(value)) {
       // A translation the site keeps as a free-form file stays one, even when it lines up.
       const kept = collector?.keptFreeform?.(locale, freeformCandidates || freeformRelPath) || null
-      const map = kept ? null : deriveStructuralMap(source, value)
+      const map = kept ? null : deriveStructuralMap(source, value, modelFor)
       if (map) collector?.addStructuralMap?.(locale, map, context)
       else collector?.noteFreeform?.(locale, value, source, kept || freeformRelPath)
     } else {

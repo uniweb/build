@@ -14,6 +14,7 @@ import { join, dirname } from 'node:path'
 import { computeHash, normalizeText } from './hash.js'
 import { availableLocales, resolveLocaleList } from './locales.js'
 import { extractTranslatableContent } from './extract.js'
+import { dataBlockModels } from './data-models.js'
 import { syncManifests, formatSyncReport } from './sync.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
 import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
@@ -160,8 +161,8 @@ export async function extractManifest(siteRoot, siteContent, options = {}) {
     dryRun = false
   } = options
 
-  // Extract translatable content
-  const manifest = extractTranslatableContent(siteContent)
+  // Extract translatable content — a data block by what its section type declares it is
+  const manifest = extractTranslatableContent(siteContent, { dataModel: await dataBlockModels(siteRoot) })
 
   // Ensure locales directory exists
   const localesPath = join(siteRoot, localesDir)
@@ -372,6 +373,8 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
   const defaultLocale = resolveDefaultLocale(siteContent.config)
 
   const outputs = {}
+  // What each section type declares its data blocks are, so a block translates what extraction offered.
+  const dataModel = await dataBlockModels(siteRoot)
 
   // ⭐ The DEFAULT locale's payload needs the same stamp. It is not written in
   // this loop — it is the source this function reads — but a visitor landing on
@@ -420,7 +423,8 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
         fallbackToSource,
         locale,
         localesDir: localesPath,
-        freeformEnabled: true
+        freeformEnabled: true,
+        dataModel
       })
 
       // Check for stale/orphaned free-form translations and warn
@@ -428,7 +432,8 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
     } else {
       // Use sync merge (original behavior)
       translated = mergeTranslations(siteContent, translations, {
-        fallbackToSource
+        fallbackToSource,
+        dataModel
       })
     }
 

@@ -45,6 +45,7 @@
 // (favicon/assets — carried out of band).
 
 import { readdir, readFile } from 'node:fs/promises'
+import { dataBlockModels } from '../i18n/data-models.js'
 import { existsSync } from 'node:fs'
 import { join, parse, relative } from 'node:path'
 import {
@@ -245,6 +246,8 @@ export function buildRouteOf(record, parentRoute, sourceLocale) {
 // hits the filesystem.
 async function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot) {
   const freeformBase = localesDir(siteRoot)
+  // What each section type declares its data blocks are, so a block is pushed as the build translates it.
+  const dataModel = await dataBlockModels(siteRoot)
 
   const localizeSection = async (record, page) => {
     if (!record.content) return
@@ -252,7 +255,7 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
     // Resolved in the section's context, as the build resolves it (`translationContext`): a
     // context-specific override applies here and nowhere else. ⛔ Until 2026-09-26 every section was
     // resolved with none, so an override never reached a backend.
-    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, translationContext({ stableId }, page?.route))
+    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, translationContext({ stableId }, page?.route), (tag) => dataModel(record.type, tag))
     if (page) {
       const section = { stableId }
       for (const locale of targetLocales) {

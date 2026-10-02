@@ -78,6 +78,8 @@ export { matchStoredRecords } from './record-identity.js'
 // The scope a site's `@/x` refs resolve into — its foundation's. A pull resolves it
 // up front and hands it to the synchronous projections above.
 export { siteSelfScope } from './self-scope.js'
+// What each section type declares its data blocks are — a pull reads a translated block back by it.
+export { dataBlockModels } from '../i18n/data-models.js'
 export {
   siteInfoToConfig,
   sectionRecordToFile,

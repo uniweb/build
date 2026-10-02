@@ -15,7 +15,7 @@
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
 import { elementText, blockElements, translationContext, SITE_META_CONTEXT } from './extract.js'
-import { visitDataStrings } from './data-strings.js'
+import { visitDataBlockStrings } from './data-strings.js'
 
 // Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
 // translation VALUE (which carries marks/links/icons as inline markdown). Same
@@ -42,6 +42,9 @@ try {
  * @param {string} [options.locale] - Locale code for free-form lookups
  * @param {string} [options.localesDir] - Path to locales directory
  * @param {boolean} [options.freeformEnabled=false] - Enable free-form translation lookup
+ * @param {(type: string, tag: string) => Object|null} [options.dataModel] - what each section type
+ *   declares its data blocks are (`data-models.js::dataBlockModels`), so a block translates the
+ *   fields extraction offered; without it, every block is walked by the heuristic
  * @returns {Object|Promise<Object>} Translated site content (async if freeformEnabled)
  */
 export function mergeTranslations(siteContent, translations, options = {}) {
@@ -49,7 +52,8 @@ export function mergeTranslations(siteContent, translations, options = {}) {
     fallbackToSource = true,
     locale = null,
     localesDir = null,
-    freeformEnabled = false
+    freeformEnabled = false,
+    dataModel = null
   } = options
 
   // If free-form is enabled, use async version
@@ -57,18 +61,19 @@ export function mergeTranslations(siteContent, translations, options = {}) {
     return mergeTranslationsAsync(siteContent, translations, {
       fallbackToSource,
       locale,
-      localesDir
+      localesDir,
+      dataModel
     })
   }
 
   // Sync version (original behavior)
-  return mergeTranslationsSync(siteContent, translations, fallbackToSource)
+  return mergeTranslationsSync(siteContent, translations, fallbackToSource, dataModel)
 }
 
 /**
  * Synchronous merge (original behavior, no free-form)
  */
-function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
+function mergeTranslationsSync(siteContent, translations, fallbackToSource, dataModel = null) {
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
   translateSiteMeta(translated.config, translations, fallbackToSource)
@@ -81,7 +86,7 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
 
     // Translate section content
     for (const section of page.sections || []) {
-      translateSectionSync(section, pageRoute, translations, fallbackToSource)
+      translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel)
     }
   }
 
@@ -90,7 +95,7 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
     const pageRoute = translated.notFound.route || '/404'
     translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource)
     for (const section of translated.notFound.sections || []) {
-      translateSectionSync(section, pageRoute, translations, fallbackToSource)
+      translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel)
     }
   }
 
@@ -103,7 +108,7 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
         if (layoutPage?.sections) {
           const pageRoute = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
           for (const section of layoutPage.sections) {
-            translateSectionSync(section, pageRoute, translations, fallbackToSource)
+            translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel)
           }
         }
       }
@@ -117,7 +122,7 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource) {
  * Asynchronous merge with free-form support
  */
 async function mergeTranslationsAsync(siteContent, translations, options) {
-  const { fallbackToSource, locale, localesDir } = options
+  const { fallbackToSource, locale, localesDir, dataModel } = options
 
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
@@ -134,7 +139,8 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
       await translateSectionAsync(section, page, translations, {
         fallbackToSource,
         locale,
-        localesDir
+        localesDir,
+        dataModel
       })
     }
   }
@@ -147,7 +153,8 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
       await translateSectionAsync(section, translated.notFound, translations, {
         fallbackToSource,
         locale,
-        localesDir
+        localesDir,
+        dataModel
       })
     }
   }
@@ -164,7 +171,8 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
             await translateSectionAsync(section, layoutPage, translations, {
               fallbackToSource,
               locale,
-              localesDir
+              localesDir,
+              dataModel
             })
           }
         }
@@ -281,17 +289,17 @@ function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
 /**
  * Translate a section's content (synchronous, hash-based only)
  */
-function translateSectionSync(section, pageRoute, translations, fallbackToSource) {
+function translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel = null) {
   const context = translationContext(section, pageRoute)
 
   if (section.content?.type === 'doc') {
     translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
-    translateDataBlocks(section.content, context, translations, fallbackToSource)
+    translateDataBlocks(section.content, context, translations, fallbackToSource, (tag) => dataModel?.(section.type, tag) ?? null)
   }
 
   // Recursively translate subsections
   for (const subsection of section.subsections || []) {
-    translateSectionSync(subsection, pageRoute, translations, fallbackToSource)
+    translateSectionSync(subsection, pageRoute, translations, fallbackToSource, dataModel)
   }
 }
 
@@ -303,7 +311,7 @@ function translateSectionSync(section, pageRoute, translations, fallbackToSource
  * 2. Fall back to hash-based translation (element-by-element)
  */
 async function translateSectionAsync(section, page, translations, options) {
-  const { fallbackToSource, locale, localesDir } = options
+  const { fallbackToSource, locale, localesDir, dataModel } = options
   const pageRoute = page.route || '/'
   const context = translationContext(section, pageRoute)
 
@@ -318,7 +326,7 @@ async function translateSectionAsync(section, page, translations, options) {
     // Fall back to hash-based translation
     if (section.content?.type === 'doc') {
       translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
-      translateDataBlocks(section.content, context, translations, fallbackToSource)
+      translateDataBlocks(section.content, context, translations, fallbackToSource, (tag) => dataModel?.(section.type, tag) ?? null)
     }
   }
 
@@ -496,9 +504,15 @@ function withMarks(node, marks) {
  * silently; it now does (`uwx/locale-sync.js::deriveStructuralMap`), so the two
  * halves travel together.
  *
+ * ⭐ A block whose key its section type declares the shape of translates the fields that shape says
+ * are text, and only those (`data-strings.js::visitDataBlockStrings`) — the fields extraction
+ * offered, so a translation of an enum's value that happens to share its words with prose elsewhere
+ * is never applied to it.
+ *
+ * @param {(tag: string) => Object|null} [modelFor] - the model of a block's key, by its tag
  * @returns {boolean} whether any value was translated
  */
-function translateDataBlocks(doc, context, translations, fallbackToSource) {
+function translateDataBlocks(doc, context, translations, fallbackToSource, modelFor = () => null) {
   let changed = false
   const walk = (nodes) => {
     for (const node of nodes || []) {
@@ -506,11 +520,11 @@ function translateDataBlocks(doc, context, translations, fallbackToSource) {
       if (node.type === 'dataBlock') {
         const data = node.attrs?.data
         if (data && typeof data === 'object') {
-          visitDataStrings(data, (value) => {
+          visitDataBlockStrings(data, (value) => {
             const translated = lookupTranslation(value, context, translations, fallbackToSource)
             if (translated !== value) changed = true
             return translated
-          })
+          }, modelFor(node.attrs?.tag))
         }
       } else if (Array.isArray(node.content)) {
         walk(node.content)
@@ -529,12 +543,15 @@ function translateDataBlocks(doc, context, translations, fallbackToSource) {
  * (so the caller can omit an untranslated locale — it falls back to the source
  * locale). Lets the sync producer emit a self-contained per-locale DOC instead of a
  * source-keyed map (which a consumer would otherwise resolve against the source).
+ *
+ * `modelFor` is the section's data-block models by tag — `(tag) => dataModel(section.type, tag)` —
+ * so a push translates a block as the build does; without it, blocks are walked by the heuristic.
  */
-export function resolveDocForLocale(sourceDoc, table, context = { page: '', section: '' }) {
+export function resolveDocForLocale(sourceDoc, table, context = { page: '', section: '' }, modelFor = () => null) {
   if (!sourceDoc || sourceDoc.type !== 'doc' || !table) return null
   const doc = JSON.parse(JSON.stringify(sourceDoc))
   const elements = translateProseMirrorDoc(doc, context, table, true)
-  const data = translateDataBlocks(doc, context, table, true)
+  const data = translateDataBlocks(doc, context, table, true, modelFor)
   return elements || data ? doc : null
 }
 

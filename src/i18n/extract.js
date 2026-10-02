@@ -7,7 +7,7 @@
 
 import { resolveDefaultLocale } from '@uniweb/core'
 import { computeHash, stripInlineTags } from './hash.js'
-import { visitDataStrings } from './data-strings.js'
+import { visitDataBlockStrings } from './data-strings.js'
 
 // ProseMirror inline fragment → inline markdown, for the TRANSLATOR-FACING half of
 // a unit. Same lazy-import-with-fallback pattern as merge.js, so the synchronous
@@ -25,9 +25,13 @@ try {
 /**
  * Extract all translatable units from site content
  * @param {Object} siteContent - Parsed site-content.json
+ * @param {Object} [options]
+ * @param {(type: string, tag: string) => Object|null} [options.dataModel] - what each section type
+ *   declares its data blocks are (`data-models.js::dataBlockModels`); without it, every block is
+ *   walked by the heuristic
  * @returns {Object} Manifest with translation units
  */
-export function extractTranslatableContent(siteContent) {
+export function extractTranslatableContent(siteContent, { dataModel = null } = {}) {
   const units = {}
 
   // The site's own Open Graph title and description (`site.yml` `seo:`), in the site's context.
@@ -41,7 +45,7 @@ export function extractTranslatableContent(siteContent) {
 
     // Extract section content
     for (const section of page.sections || []) {
-      extractFromSection(section, pageRoute, units)
+      extractFromSection(section, pageRoute, units, dataModel)
     }
   }
 
@@ -51,7 +55,7 @@ export function extractTranslatableContent(siteContent) {
     const pageRoute = notFoundPage.route || '/404'
     extractFromPageMeta(notFoundPage, pageRoute, units)
     for (const section of notFoundPage.sections || []) {
-      extractFromSection(section, pageRoute, units)
+      extractFromSection(section, pageRoute, units, dataModel)
     }
   }
 
@@ -64,7 +68,7 @@ export function extractTranslatableContent(siteContent) {
         if (layoutPage?.sections) {
           const pageRoute = layoutPage.route || `/layout/${layoutName === 'default' ? '' : layoutName + '/'}${areaKey}`
           for (const section of layoutPage.sections) {
-            extractFromSection(section, pageRoute, units)
+            extractFromSection(section, pageRoute, units, dataModel)
           }
         }
       }
@@ -169,7 +173,7 @@ export function translationContext(section, pageRoute) {
  * @param {string} pageRoute - Parent page route
  * @param {Object} units - Units accumulator
  */
-function extractFromSection(section, pageRoute, units) {
+function extractFromSection(section, pageRoute, units, dataModel = null) {
   const context = translationContext(section, pageRoute)
 
   // Extract from parsed semantic content if available
@@ -179,12 +183,12 @@ function extractFromSection(section, pageRoute, units) {
 
   if (section.content?.type === 'doc') {
     extractFromProseMirrorDoc(section.content, context, units)
-    extractFromDataBlocks(section.content, context, units)
+    extractFromDataBlocks(section.content, context, units, (tag) => dataModel?.(section.type, tag) ?? null)
   }
 
   // Recursively process subsections
   for (const subsection of section.subsections || []) {
-    extractFromSection(subsection, pageRoute, units)
+    extractFromSection(subsection, pageRoute, units, dataModel)
   }
 }
 
@@ -214,14 +218,14 @@ function extractFromSection(section, pageRoute, units) {
  * as the same per-string entries this lane writes — the block-element keying
  * contract is untouched.
  */
-function extractFromDataBlocks(doc, context, units) {
+function extractFromDataBlocks(doc, context, units, modelFor = () => null) {
   for (const node of dataBlockNodes(doc)) {
     const { tag, data } = node.attrs || {}
     if (!tag || !data || typeof data !== 'object') continue
 
-    visitDataStrings(data, (value, fieldPath) => {
+    visitDataBlockStrings(data, (value, fieldPath) => {
       addUnit(units, value, `data.${tag}.${fieldPath}`, context)
-    })
+    }, modelFor(tag))
   }
 }
 

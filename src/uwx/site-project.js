@@ -403,7 +403,7 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  *        structural maps on a localized `content` field are captured into it
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
   // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
@@ -416,7 +416,8 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // target-locale structural maps are captured into the locales/ collector, and any
   // free-form target body is captured with `freeformRelPath` for writing under
   // locales/freeform/. A bare doc (source-only / pre-localization) passes through.
-  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates, context)
+  // A data block is read back by what the section's type declares it is, as the push translated it.
+  const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates, context, (tag) => dataModel?.(type, tag) ?? null)
 
   const { hidden: paramHidden, fetch: paramFetch, ...paramsRest } = params && typeof params === 'object' ? params : {}
   const frontmatter = {}
@@ -556,6 +557,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         record,
         sourceLocale: ctx?.sourceLocale,
         collector: ctx?.collector,
+        dataModel: ctx?.dataModel,
         freeformRelPath,
         freeformCandidates,
         writeId: fileSectionName(filePath) !== stableId,
@@ -1081,6 +1083,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
       record,
       sourceLocale: ctx?.sourceLocale,
       collector: ctx?.collector,
+      dataModel: ctx?.dataModel,
       writeId: fileSectionName(filePath) !== stableId,
       freeformRelPath: stableId ? buildFreeformPath({ stableId }, page) : null,
       freeformCandidates: stableId ? freeformPathsFor({ stableId }, page) : null,
@@ -1116,7 +1119,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  *        `declarationsToQueriesYml`, whose default it overrides.
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope, dataModel = null }) {
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
@@ -1145,7 +1148,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // rename detection, build a fresh one as we project, then persist it. Items not
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
-  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map() }
+  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map(), dataModel }
   // Where the site keeps its localized URLs — `site.yml`'s map, when it has one (`pageSlugToYml`).
   const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
   ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }

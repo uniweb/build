@@ -23,7 +23,8 @@ import { computeHash } from './hash.js'
 import { loadFreeformRecord } from './freeform.js'
 import { resolveQueriesConfig, resolveRecordSchemas, foundationSchemaJson } from '../site/queries-config.js'
 import { dataKeyTypes, keyOfDefaultRef } from '../uwx/data-key-types.js'
-import { toDataSchemaDeclaration, isProseMirrorField, isOpenMapSection } from '../uwx/data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField } from '../uwx/data-schema.js'
+import { eachModelField, eachSectionField, isRecordSystemField, isPlainObject } from './model-fields.js'
 import { toDeliveredRecord, contentBodyField, misplacedFields, mergedFromStored, storedFromMerged } from '@uniweb/schemas/conform'
 import { resolveDocForLocale } from './merge.js'
 import { extractUnitsFromDoc } from './extract.js'
@@ -186,7 +187,7 @@ function isFieldTranslatable(fieldDef) {
  * @param {string} ref - the ref it was resolved from
  * @returns {Object|null} the lowered declaration, or null when there is none
  */
-function modelOf(schema, ref) {
+export function modelOf(schema, ref) {
   if (!schema) return null
   try {
     return toDataSchemaDeclaration(schema, { name: ref || '@/record', resolveName: (r) => r })
@@ -206,40 +207,6 @@ function referencedModels(model) {
   }
   for (const section of Object.values(model?.sections || {})) walk(section?.fields)
   return out
-}
-
-/**
- * Each field of a model that a record holds a value for, in the shape the record is DELIVERED in
- * (`toDeliveredRecord`): the brief's fields at the top — every field, for a model of one single
- * section — and each other section under its name, a list of them for a `multiple` one, a nested
- * section the same way. Calls `visit(holder, name, field, path)` for each.
- */
-function eachModelField(record, model, visit) {
-  const sections = Object.entries(model?.sections || {})
-  const flat = sections.length === 1 && !sections[0][1]?.multiple
-  for (const [name, section] of sections) {
-    if (flat || section?.brief) eachSectionField(record, section?.fields, '', visit)
-    else eachSectionValue(record?.[name], section, name, visit)
-  }
-}
-
-function eachSectionValue(value, section, path, visit) {
-  if (!section?.multiple) return eachSectionField(value, section?.fields, path, visit)
-  if (Array.isArray(value)) value.forEach((item, i) => eachSectionField(item, section.fields, `${path}[${i}]`, visit))
-  // An open map as its file holds it: each entry is one of the rows a push sends (`isOpenMapSection`).
-  else if (isOpenMapSection(section) && isPlainObject(value)) {
-    for (const [key, item] of Object.entries(value)) eachSectionField(item, section.fields, `${path}.${key}`, visit)
-  }
-}
-
-function eachSectionField(holder, fields, path, visit) {
-  if (!isPlainObject(holder)) return
-  for (const [name, field] of Object.entries(fields || {})) {
-    if (holder[name] == null || isRecordSystemField(name, !path)) continue
-    const at = path ? `${path}.${name}` : name
-    if (field?.type === 'section') eachSectionValue(holder[name], field, at, visit)
-    else visit(holder, name, field || {}, at)
-  }
 }
 
 /** The fields of a model's brief — what a reference to one of its records is delivered as. */
@@ -358,25 +325,6 @@ function derivedExcerptOf(whole, dataSchema, config) {
 function derivesExcerpt(record, whole, dataSchema, config) {
   if (typeof record?.excerpt !== 'string' || !record.excerpt || !config) return false
   return derivedExcerptOf(whole ?? record, dataSchema, config) === record.excerpt
-}
-
-/**
- * ⛔ A RECORD'S SYSTEM FIELDS ARE NEVER PROSE — never extracted, never translated, by
- * either path. A `$`-prefixed key at any depth is the system's (`$name`, the handle a
- * parametric page's URL names; `$uuid`; `$branch`, the folder a compiled list holds a
- * record under), and a top-level `slug` is how a record's reader hands the file's name
- * on. Until 2026-09-14 they became translation units, and a translation whose source
- * happened to equal one rewrote it, so a record's page stopped matching its URL.
- * ⛔ A top-level `path` was one too until 2026-09-27, when the placement it named moved to
- * `$branch` [Diego]: a field an author names `path` is theirs, and translated as its schema says.
- *
- * @param {string|number} key - a field name (an array index is never one)
- * @param {boolean} topLevel - whether the key sits at the record's own level
- * @returns {boolean}
- */
-function isRecordSystemField(key, topLevel) {
-  if (typeof key !== 'string') return false
-  return key.startsWith('$') || (topLevel && key === 'slug')
 }
 
 /**
@@ -1206,10 +1154,6 @@ function applyFreeform(record, freeform, dataSchema, schemaRef) {
     else out[target.section] = { ...(isPlainObject(out[target.section]) ? out[target.section] : {}), [target.key]: value }
   }
   return out
-}
-
-function isPlainObject(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 /**

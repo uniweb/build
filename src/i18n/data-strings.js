@@ -19,6 +19,8 @@
  * missed field shows up as untranslated content nobody notices.
  */
 
+import { visitModelStrings } from './model-fields.js'
+
 /** Types that are never translatable regardless of schema. */
 export const NON_TRANSLATABLE_TYPES = new Set([
   'number', 'boolean', 'date', 'datetime', 'url', 'email', 'image'
@@ -111,4 +113,29 @@ export function visitDataStrings(data, visit, path = '', depth = 0) {
     }
     // numbers and booleans are never prose
   }
+}
+
+/**
+ * ⭐ A TAGGED DATA BLOCK'S STRINGS, BY ITS DECLARED SHAPE WHEN IT HAS ONE. A section type that
+ * declares the shape of the key a block is tagged with — `data: { logos: { name: 'string', style:
+ * { type: 'string', enum: [...] } } }`, or a data schema ref — says which of its fields are text,
+ * and that is what is walked: the fields its model marks `localized`, the push's own rule
+ * (`model-fields.js`). An enum, a URL, a `translatable: false` field is never offered, whatever its
+ * name. A block whose key declares no shape (`{}`, or no declaration) keeps the heuristic above.
+ *
+ * ⛔ Until 2026-10-02 every block was walked by the heuristic, so a field the heuristic does not know
+ * — a `style: display-black` naming one of a component's looks — was offered for translation, and
+ * a translated one quietly fell back to the component's default look.
+ *
+ * One rule for the four places that walk a block — extraction, the build's merge, the push and the
+ * pull — so a string extracted is a string translated, and a translation pushed is one read back.
+ *
+ * @param {object|Array} data - the block's value: a list of items, or one
+ * @param {(value: string, path: string) => string|void} visit
+ * @param {object|null} [model] - the block's lowered model (`data-models.js`), or null
+ */
+export function visitDataBlockStrings(data, visit, model = null) {
+  if (!model) return visitDataStrings(data, visit)
+  if (Array.isArray(data)) data.forEach((item, i) => visitModelStrings(item, model, visit, `[${i}]`))
+  else visitModelStrings(data, model, visit)
 }

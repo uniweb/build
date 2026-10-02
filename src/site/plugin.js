@@ -251,6 +251,7 @@ async function processDevSectionFetches(sections, fetchOptions, resolve) {
 }
 import { generateSearchIndex, getSearchIndexFilename } from '@uniweb/projections'
 import { mergeTranslations } from '../i18n/merge.js'
+import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { searchDeclaredOn } from './search-declared.js'
 import { mountDevApi } from '../dev/api-mount.js'
 
@@ -654,6 +655,9 @@ export function siteContentPlugin(options = {}) {
   }
 
   let siteContent = null
+  // What each section type declares its data blocks are — read once per collection of the site.
+  let dataModelPromise = null
+  const dataModels = () => (dataModelPromise ||= dataBlockModels(resolvedSitePath).catch(() => NO_DATA_MODELS))
   let resolvedSitePath = null
   let resolvedPublicDir = null
   let resolvedOutDir = null
@@ -791,7 +795,8 @@ export function siteContentPlugin(options = {}) {
     return mergeTranslations(siteContent, translations || {}, {
       locale,
       localesDir: join(resolvedSitePath, localesDir),
-      freeformEnabled: hasFreeform
+      freeformEnabled: hasFreeform,
+      dataModel: await dataModels()
     })
   }
 
@@ -951,6 +956,7 @@ export function siteContentPlugin(options = {}) {
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
         siteContent = await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })
+        dataModelPromise = null
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
 
@@ -1020,6 +1026,7 @@ export function siteContentPlugin(options = {}) {
             console.log('[site-content] Content changed, rebuilding...')
             try {
               siteContent = await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })
+              dataModelPromise = null
               headHtml = await loadHeadHtml()
               if (materialize) {
                 queriesConfig = siteContent.config?.queries
