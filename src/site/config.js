@@ -36,6 +36,7 @@ import { checkFoundationResolution } from '../utils/foundation-resolution-check.
 import { detectFoundationType } from './foundation-ref.js'
 import { readPreview, PREVIEW_ENV } from './preview.js'
 import { previewMediaPlugin } from './preview-media.js'
+import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -395,6 +396,9 @@ export async function defineSiteConfig(options = {}) {
   } : null
 
   if (noopFoundationPlugin) plugins.push(noopFoundationPlugin)
+
+  // `vite preview` answers `/about` with `about/index.html`, as the hosts a build deploys to do.
+  plugins.push(previewDirectoryIndexPlugin())
 
   // Import map plugin for runtime mode production builds.
   // Emits re-export modules for each externalized package (react, @uniweb/core, etc.)
