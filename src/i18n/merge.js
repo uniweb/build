@@ -345,21 +345,144 @@ function translateProseMirrorDoc(doc, context, translations, fallbackToSource) {
   return changed
 }
 
-// Replace one block element's inline content with the parsed translation
-// fragment. `lookupTranslation` with the already-trimmed key adds no surrounding
-// whitespace and returns the source on a miss, so `value === key` means
-// "no translation" → leave the element as-is. Returns true if it replaced.
+// Replace one block element's inline content with what its translation gives it
+// (`translatedInline`). `lookupTranslation` with the already-trimmed key adds no
+// surrounding whitespace and returns the source on a miss, so `value === key`
+// means "no translation" → leave the element as-is. Returns true if it replaced.
 function applyElementTranslation(node, context, translations, fallbackToSource) {
   const key = elementText(node)
   if (!key) return false
   const value = lookupTranslation(key, context, translations, fallbackToSource)
   if (value === key) return false
-  const fragment = inlineMarkdownToFragment(value)
+  const fragment = translatedInline(node.content, value)
   if (fragment && fragment.length) {
     node.content = fragment
     return true
   }
   return false
+}
+
+/**
+ * ⭐ WHAT A TRANSLATION GIVES AN ELEMENT: its value, parsed as inline markdown — with one
+ * exception. A value that names no link, given to an element made only of links, is their
+ * LABELS: a button's translation is its label (`Créer un groupe`), and buttons on consecutive
+ * lines take one label per line. Each keeps its source link — its target and its attributes
+ * (`{role=primary icon=…}`), which are structure, not words.
+ *
+ * ⛔ Until 2026-10-01 the value replaced the element whole, so a label translated on its own lost
+ * its link: the button became a plain paragraph, or vanished from a section that renders only
+ * links. Locale files keyed before whole-element keying hold exactly such labels.
+ *
+ * A value that writes a link is taken as written, re-targeted or not. So is a plain value for an
+ * element that mixes words and links, since which words were linked cannot be known;
+ * `uniweb i18n status` reports that loss (`translationKeepsMarkup`).
+ *
+ * @param {Array} source - the element's source inline content
+ * @param {string} value - the translation, inline markdown
+ * @returns {Array|null} the translated inline content; null for an empty value
+ */
+export function translatedInline(source, value) {
+  const fragment = inlineMarkdownToFragment(value)
+  if (!fragment) return null
+  return asLinkLabels(source, fragment) || fragment
+}
+
+/**
+ * Does a translation keep the inline markup of its source element? The merge's own answer —
+ * what `translatedInline` makes of the value — so the audit can neither report a loss the merge
+ * does not make nor miss one it does.
+ *
+ * @param {string} markup - the source element's inline markdown (a manifest unit's `markup`)
+ * @param {string} value - the translation
+ * @returns {boolean}
+ */
+export function translationKeepsMarkup(markup, value) {
+  const result = translatedInline(inlineMarkdownToFragment(markup) || [], value) || []
+  return result.some((node) => node.type !== 'text' || (node.marks && node.marks.length > 0))
+}
+
+// The source's links with the fragment as their labels — the whole fragment for one link, a line
+// each for several — or null: the fragment names a link of its own, the source is not only links,
+// or the lines do not match the links one to one.
+function asLinkLabels(source, fragment) {
+  if (fragment.some((node) => linkMarkOf(node))) return null
+  const links = linkRuns(source)
+  if (!links) return null
+  const labels = links.length === 1 ? [trimInline(fragment)] : inlineLines(fragment)
+  if (labels.length !== links.length || labels.some((label) => !label.length)) return null
+  const out = []
+  links.forEach((link, i) => {
+    if (i > 0) out.push(...link.before)
+    for (const node of labels[i]) out.push(withMarks(node, link.marks))
+  })
+  return out
+}
+
+// An element made only of links, as its runs: each link's marks (those all its text shares) and
+// the line breaks or spaces before it. Null when anything else is in it — words outside a link,
+// an icon, an image.
+function linkRuns(source) {
+  const runs = []
+  let gap = []
+  for (const node of source || []) {
+    if (!node) continue
+    const link = linkMarkOf(node)
+    if (link) {
+      const last = runs[runs.length - 1]
+      if (last && !gap.length && sameMark(last.link, link)) {
+        last.marks = last.marks.filter((mark) => node.marks.some((own) => sameMark(own, mark)))
+      } else {
+        runs.push({ link, marks: [...node.marks], before: gap })
+      }
+      gap = []
+    } else if (node.type === 'hardBreak' || (node.type === 'text' && !node.marks?.length && !node.text?.trim())) {
+      gap.push(node)
+    } else {
+      return null
+    }
+  }
+  return runs.length ? runs : null
+}
+
+function linkMarkOf(node) {
+  return node?.type === 'text' ? node.marks?.find((mark) => mark.type === 'link') || null : null
+}
+
+function sameMark(a, b) {
+  return Boolean(a && b) && a.type === b.type && JSON.stringify(a.attrs || {}) === JSON.stringify(b.attrs || {})
+}
+
+// A fragment's lines, split at line breaks, each trimmed; blank lines dropped.
+function inlineLines(fragment) {
+  const lines = [[]]
+  for (const node of fragment) {
+    if (node.type === 'hardBreak') {
+      lines.push([])
+    } else if (node.type === 'text' && node.text.includes('\n')) {
+      node.text.split('\n').forEach((part, i) => {
+        if (i > 0) lines.push([])
+        if (part) lines[lines.length - 1].push({ ...node, text: part })
+      })
+    } else {
+      lines[lines.length - 1].push(node)
+    }
+  }
+  return lines.map(trimInline).filter((line) => line.length)
+}
+
+// Leading and trailing whitespace off a run of inline nodes.
+function trimInline(nodes) {
+  const out = nodes.map((node) => ({ ...node }))
+  if (out[0]?.type === 'text') out[0].text = out[0].text.replace(/^\s+/, '')
+  const last = out[out.length - 1]
+  if (last?.type === 'text') last.text = last.text.replace(/\s+$/, '')
+  return out.filter((node) => node.type !== 'text' || node.text)
+}
+
+// A label node with its link's marks; a mark of its own of another type stays.
+function withMarks(node, marks) {
+  const own = (node.marks || []).filter((mark) => !marks.some((linkMark) => linkMark.type === mark.type))
+  return { ...node, marks: [...marks, ...own] }
 }
 
 /**

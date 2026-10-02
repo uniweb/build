@@ -10,6 +10,7 @@
 import { readFile, writeFile } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { translationKeepsMarkup } from './merge.js'
 
 // Inline markdown → ProseMirror, so the markup check asks the merge's own question
 // ("would this value produce marks?") instead of pattern-matching markdown syntax.
@@ -67,16 +68,18 @@ export async function auditLocale(localesPath, locale) {
       const translation = getTranslationText(translations[hash])
       valid.push({ hash, source, translation })
 
-      // ⭐ The source element carries inline markdown; the translation does not.
-      // `merge` builds the translated element from the VALUE alone — it never
-      // re-applies marks from the source — so this entry will render as flat prose
-      // and its links will be gone. It still counts as translated, which is why
-      // coverage cannot see it: the whole class scores 100%.
+      // ⭐ The source element carries inline markdown, and what the merge makes of
+      // the translation does not — so this entry will render as flat prose and its
+      // links will be gone. It still counts as translated, which is why coverage
+      // cannot see it: the whole class scores 100%. The merge's own answer
+      // (`translationKeepsMarkup`): a plain label for a button keeps its link there,
+      // so it is no loss. ⛔ Until 2026-10-01 any plain value counted, when the merge
+      // rebuilt every element from the value alone.
       // ⛔ REPLACES a `<N>`-tag check that could no longer fire. Those tags were the
       // pre-2026-06-24 keying scheme (`d12d594`); extraction has not emitted one
       // since, so the check was dead while looking like a live guard — and it was
       // the only thing in the pipeline that even gestured at mark fidelity.
-      if (unit.markup && translation.length > 0 && !carriesInlineMarkup(translation)) {
+      if (unit.markup && translation.length > 0 && dropsSourceMarkup(unit.markup, translation)) {
         losesMarkup.push({ hash, source, markup: unit.markup, translation })
       }
     } else {
@@ -111,24 +114,19 @@ export async function auditLocale(localesPath, locale) {
 }
 
 /**
- * Does this translation value produce any inline marks when the merge parses it?
+ * Does the merge drop the inline markup this translation's source element carries?
  *
- * Asks the parser rather than a regex: the merge resolves a value through
- * `markdownToProseMirror`, so the only honest test of "will this keep its link"
- * is to run the same conversion. With no converter available the check declines
- * to fire — a missing dependency must not invent findings.
+ * Asks the merge rather than a regex (`translationKeepsMarkup`), since what the
+ * merge makes of a value is the only honest answer to "will this keep its link".
+ * With no converter available the check declines to fire — a missing dependency
+ * must not invent findings.
  */
-function carriesInlineMarkup(value) {
-  if (!markdownToProseMirror) return true
+function dropsSourceMarkup(markup, value) {
+  if (!markdownToProseMirror) return false
   try {
-    const doc = markdownToProseMirror(value)
-    const walk = (nodes) =>
-      (nodes || []).some(
-        (n) => (n?.marks && n.marks.length > 0) || (n?.type && n.type !== 'text' && n.type !== 'paragraph') || walk(n?.content)
-      )
-    return walk(doc?.content)
+    return !translationKeepsMarkup(markup, value)
   } catch {
-    return true
+    return false
   }
 }
 
