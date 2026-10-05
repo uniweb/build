@@ -3,7 +3,7 @@ import {
   extractAllRuntimeSchemas,
 } from '../src/runtime-schema.js'
 
-// What a lean schema says apart from its declared keys — for the tests of field extraction,
+// What a lean schema says apart from its declared keys — for the tests of the other parts,
 // which the `data` map of keys (asserted on its own below) does not change.
 const withoutData = (lean) => {
   if (!lean) return lean
@@ -27,22 +27,9 @@ describe('extractRuntimeSchema', () => {
     expect(extractRuntimeSchema(meta)).toBeNull()
   })
 
-  describe('inset extraction', () => {
-    it('extracts inset: true', () => {
-      const meta = { inset: true }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({ inset: true })
-    })
-
-    it('ignores inset when falsy', () => {
-      const meta = { inset: false }
-      expect(extractRuntimeSchema(meta)).toBeNull()
-    })
-
-    it('ignores inset when not present', () => {
-      const meta = { background: 'self' }
-      const result = extractRuntimeSchema(meta)
-      expect(result.inset).toBeUndefined()
-    })
+  it('⛔ does not carry `inset` — an inset is found by name; the flag is the editor’s (2026-10-05)', () => {
+    expect(extractRuntimeSchema({ inset: true })).toBeNull()
+    expect(extractRuntimeSchema({ inset: true, background: 'self' })).toEqual({ background: 'self' })
   })
 
   describe('background extraction', () => {
@@ -78,11 +65,9 @@ describe('extractRuntimeSchema', () => {
           notes: {},
         },
       }
-      const result = extractRuntimeSchema(meta, { '@std/article': { name: 'article', fields: { title: { type: 'string' } } } })
+      const result = extractRuntimeSchema(meta)
       expect(result.data).toEqual({ post: '@std/article', team: '@/member', nav: null, form: null, notes: null })
       expect(Object.keys(result.data)).toEqual(['post', 'team', 'nav', 'form', 'notes'])
-      // field defaults only where there are fields
-      expect(Object.keys(result.schemas)).toEqual(['post', 'nav', 'form'])
     })
 
     it('⛔ a value that is no schema is refused — it would declare a key by accident', () => {
@@ -102,107 +87,47 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema({ data: {} })).toBeNull()
     })
 
-    it('extracts an inline field-map schema keyed by data key', () => {
-      const meta = {
-        data: { nav: { label: 'string', href: 'string' } },
+    it('a concept block’s key is the tag a component reads, with no schema', () => {
+      expect(extractRuntimeSchema({ data: { 'md:faq': 'Questions [2+]' } })).toEqual({ data: { faq: null } })
+    })
+  })
+
+  describe('⛔ no field defaults — ruled 2026-10-05', () => {
+    // Until then each declared key carried `schemas` — its schema's field defaults, `enum`
+    // and the nesting that led to them — and the runtime filled a missing field from its
+    // `default` and replaced a value its `enum` rejected.
+    const meta = {
+      data: {
+        team: '@/member',
+        posts: '@std/article/*',
+        specs: { cpu: { type: 'string', default: 'quad', label: 'CPU', enum: ['quad', 'octa'] } },
+        signup: {
+          fields: [
+            { id: 'email', type: 'text', label: 'Email address', placeholder: 'you@example.com', default: 'a@b.c' },
+            { id: 'topic', type: 'select', label: 'Topic', options: ['Sales', 'Support'], condition: { email: 'x' } },
+          ],
+        },
+      },
+    }
+
+    it('a section type carries its keys and their refs, and no shape of any of them', () => {
+      expect(extractRuntimeSchema(meta)).toEqual({
+        data: { team: '@/member', posts: '@std/article/*', specs: null, signup: null },
+      })
+    })
+
+    it('a form in `data:` is the editor’s, for authoring the block — none of it reaches the runtime', () => {
+      const lean = JSON.stringify(extractRuntimeSchema(meta))
+      for (const word of ['Email address', 'you@example.com', 'a@b.c', 'Sales', 'condition', 'quad', 'CPU']) {
+        expect(lean).not.toContain(word)
       }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: { nav: { label: 'string', href: 'string' } },
-      })
+      // CONTROL — the keys themselves are there
+      expect(lean).toContain('"signup":null')
     })
 
-    it('resolves a named ref via dataSchemaMap', () => {
-      const meta = { data: { member: '@/member' } }
-      const result = extractRuntimeSchema(meta, {
-        '@/member': {
-          name: 'member',
-          fields: { name: 'string', role: { type: 'string', label: 'Role' } },
-        },
-      })
-      expect(withoutData(result)).toEqual({
-        schemas: { member: { name: 'string', role: 'string' } },
-      })
-    })
-
-    // ⛔ THE REGRESSION THIS SUITE MISSED FOR ITS WHOLE LIFE. Every case above
-    // hands `dataSchemaMap` a schema in the FIELDS-FORM — the authoring sugar for
-    // a one-section model. `leanDataSchema` read `resolved.fields` directly, which
-    // only that form has, so a SECTIONS-FORM schema resolved to null and the
-    // section's `data:` binding supplied no field defaults at all. Every `@std/*`
-    // schema is sections-form, so that was every standard binding — and the suite
-    // stayed green because it contained no sections-form schema to fail on.
-    //
-    // ⚖️ `dataSchemaMap` holds each schema AS AUTHORED: resolution and lowering
-    // are different steps, and only lowering (on the way to the registry)
-    // normalizes the two forms. A reader here must therefore accept both.
-    it('resolves a SECTIONS-FORM named ref, not just the fields-form sugar', () => {
-      const meta = { data: { articles: '@std/article' } }
-      const result = extractRuntimeSchema(meta, {
-        '@std/article': {
-          name: 'article',
-          sections: {
-            article: {
-              brief: true,
-              fields: { title: 'string', slug: 'string' },
-            },
-            article_body: {
-              fields: { status: { type: 'string', default: 'published' } },
-            },
-          },
-        },
-      })
-      // A BRIEF, as its component expects: the brief's fields at the top, and nothing of another
-      // section (ruled 2026-09-27 [Diego]).
-      expect(withoutData(result)).toEqual({ schemas: { articles: { title: 'string', slug: 'string' } } })
-    })
-
-    it('a key declared WHOLE (`/*`) is filled as the record is stored — a field per section, the brief included', () => {
-      const meta = { data: { articles: '@std/article/*' } }
-      const result = extractRuntimeSchema(meta, {
-        '@std/article': {
-          name: 'article',
-          sections: {
-            article: { brief: true, fields: { title: 'string', slug: 'string' } },
-            article_body: { fields: { status: { type: 'string', default: 'published' } } },
-          },
-        },
-      })
-      // `status`'s default lands inside `article_body`, where the whole record carries it
-      expect(result).toEqual({
-        data: { articles: '@std/article/*' },
-        schemas: {
-          articles: {
-            article: { type: 'object', fields: { title: 'string', slug: 'string' } },
-            article_body: { type: 'object', fields: { status: { type: 'string', default: 'published' } } },
-          },
-        },
-      })
-    })
-
-    it('a `multi` section is one field of a whole record — a list, each record filled', () => {
-      const meta = { data: { x: '@/thing/*' } }
-      const result = extractRuntimeSchema(meta, {
-        '@/thing': {
-          name: 'thing',
-          sections: {
-            thing: { brief: true, fields: { title: 'string' } },
-            entries: { kind: 'multi', fields: { note: { type: 'string', default: '—' } } },
-          },
-        },
-      })
-      expect(result.schemas.x).toEqual({
-        thing: { type: 'object', fields: { title: 'string' } },
-        entries: { type: 'array', items: { type: 'object', fields: { note: { type: 'string', default: '—' } } } },
-      })
-      // Never a field of the record itself.
-      expect(result.schemas.x.note).toBeUndefined()
-    })
-
-    it('a ref that resolves to neither form yields no field defaults — the key still reaches the runtime', () => {
-      // The control: no `schemas` entry rather than an empty object, which would be a
-      // schema key a component can do nothing with. The key itself is what it receives.
-      const meta = { data: { x: '@/empty' } }
-      expect(extractRuntimeSchema(meta, { '@/empty': { name: 'empty' } })).toEqual({ data: { x: '@/empty' } })
+    it('resolved data schemas change nothing — the extractor takes none', () => {
+      const resolved = { '@/member': { name: 'member', fields: { role: { type: 'string', default: 'Member' } } } }
+      expect(extractRuntimeSchema(meta, resolved)).toEqual(extractRuntimeSchema(meta))
     })
   })
 
@@ -279,317 +204,6 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
-  describe('schemas extraction (inline field maps under data:)', () => {
-    it('extracts schemas with shorthand notation', () => {
-      const meta = {
-        data: {
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-        },
-      })
-    })
-
-    it('strips editor-only fields (label, hint)', () => {
-      const meta = {
-        data: {
-          'nav-links': {
-            label: {
-              type: 'string',
-              label: 'Link Label',
-              hint: 'Text shown in the navigation',
-            },
-            href: {
-              type: 'string',
-              label: 'Link URL',
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-        },
-      })
-    })
-
-    it('keeps runtime-relevant fields (default, options)', () => {
-      const meta = {
-        data: {
-          'nav-links': {
-            type: {
-              type: 'select',
-              label: 'Link Type',
-              options: ['plain', 'button', 'dropdown'],
-              default: 'plain',
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          'nav-links': {
-            type: {
-              type: 'select',
-              options: ['plain', 'button', 'dropdown'],
-              default: 'plain',
-            },
-          },
-        },
-      })
-    })
-
-    it('handles a nested object via fields', () => {
-      const meta = {
-        data: {
-          card: {
-            meta: {
-              type: 'object',
-              label: 'Metadata',
-              fields: {
-                author: { type: 'string', label: 'Author Name' },
-                date: 'string',
-              },
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          card: {
-            meta: {
-              type: 'object',
-              fields: {
-                author: 'string',
-                date: 'string',
-              },
-            },
-          },
-        },
-      })
-    })
-
-    it('handles an array with scalar items', () => {
-      const meta = {
-        data: {
-          card: {
-            tags: { type: 'array', items: 'string' },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          card: {
-            tags: { type: 'array', items: 'string' },
-          },
-        },
-      })
-    })
-
-    it('handles an array of objects via items.fields', () => {
-      const meta = {
-        data: {
-          social: {
-            links: {
-              type: 'array',
-              label: 'Social Links',
-              items: {
-                type: 'object',
-                fields: {
-                  platform: { type: 'string', label: 'Platform' },
-                  url: 'string',
-                },
-              },
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          social: {
-            links: {
-              type: 'array',
-              items: {
-                type: 'object',
-                fields: {
-                  platform: 'string',
-                  url: 'string',
-                },
-              },
-            },
-          },
-        },
-      })
-    })
-
-    it('carries defaults through nested object and array-of-object fields', () => {
-      const meta = {
-        data: {
-          event: {
-            location: {
-              type: 'object',
-              fields: {
-                city: 'string',
-                virtual: { type: 'bool', default: false },
-              },
-            },
-            sessions: {
-              type: 'array',
-              items: {
-                type: 'object',
-                fields: {
-                  name: 'string',
-                  published: { type: 'bool', default: true },
-                },
-              },
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          event: {
-            location: {
-              type: 'object',
-              fields: {
-                city: 'string',
-                virtual: { type: 'bool', default: false },
-              },
-            },
-            sessions: {
-              type: 'array',
-              items: {
-                type: 'object',
-                fields: {
-                  name: 'string',
-                  published: { type: 'bool', default: true },
-                },
-              },
-            },
-          },
-        },
-      })
-    })
-
-    it('an empty schema entry carries no field defaults — the key still reaches the runtime', () => {
-      expect(extractRuntimeSchema({ data: { nav: {} } })).toEqual({ data: { nav: null } })
-      expect(extractRuntimeSchema({ data: {} })).toBeNull()
-    })
-
-    it('handles multiple schemas', () => {
-      const meta = {
-        data: {
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-          'social': {
-            platform: 'string',
-            url: 'string',
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          'nav-links': { label: 'string', href: 'string' },
-          'social': { platform: 'string', url: 'string' },
-        },
-      })
-    })
-
-    it('handles full @uniweb/schemas format (with name/version/fields)', () => {
-      const meta = {
-        data: {
-          team: {
-            name: 'person',
-            version: '1.0.0',
-            description: 'A person schema',
-            fields: {
-              name: { type: 'string', required: true, description: 'Full name' },
-              role: { type: 'string', description: 'Job title' },
-              featured: { type: 'boolean', default: false },
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          team: {
-            name: 'string',
-            role: 'string',
-            featured: { type: 'boolean', default: false },
-          },
-        },
-      })
-    })
-
-    it('handles mixed inline and full format schemas', () => {
-      const meta = {
-        data: {
-          // Full format (from @uniweb/schemas)
-          team: {
-            name: 'person',
-            fields: {
-              name: 'string',
-              email: { type: 'string', format: 'email' },
-            },
-          },
-          // Inline format
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          team: {
-            name: 'string',
-            email: 'string',
-          },
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-        },
-      })
-    })
-
-    it('extracts defaults from full format schema fields', () => {
-      const meta = {
-        data: {
-          config: {
-            name: 'config',
-            fields: {
-              theme: { type: 'select', options: ['light', 'dark'], default: 'light' },
-              maxItems: { type: 'number', default: 10 },
-            },
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        schemas: {
-          config: {
-            theme: { type: 'select', options: ['light', 'dark'], default: 'light' },
-            maxItems: { type: 'number', default: 10 },
-          },
-        },
-      })
-    })
-  })
-
   describe('combined extraction', () => {
     it('extracts all runtime properties', () => {
       const meta = {
@@ -602,34 +216,15 @@ describe('extractRuntimeSchema', () => {
           layout: { type: 'select', default: 'grid' },
           columns: { type: 'number', default: 3 },
         },
+        context: { allowTranslucentTop: true },
+        initialState: { expanded: false },
       }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
+      expect(extractRuntimeSchema(meta)).toEqual({
         background: true,
-        schemas: { events: { title: 'string', date: 'string' } },
+        data: { events: null },
         defaults: { layout: 'grid', columns: 3 },
-      })
-    })
-
-    it('extracts all properties including schemas', () => {
-      const meta = {
-        title: 'Header',
-        background: true,
-        params: {
-          theme: { type: 'select', default: 'dark' },
-        },
-        data: {
-          'nav-links': {
-            label: 'string',
-            href: 'string',
-          },
-        },
-      }
-      expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-        background: true,
-        defaults: { theme: 'dark' },
-        schemas: {
-          'nav-links': { label: 'string', href: 'string' },
-        },
+        context: { allowTranslucentTop: true },
+        initialState: { expanded: false },
       })
     })
   })
@@ -641,7 +236,6 @@ describe('`data:` is the delivery — a section receives the keys its component 
     const meta = { data: { team: { name: 'string' } } }
     const result = extractRuntimeSchema(meta)
     expect(result.data).toEqual({ team: null })
-    expect(result.schemas.team).toEqual({ name: 'string' })
     expect(result.inheritData).toBeUndefined()
   })
 
@@ -685,7 +279,6 @@ describe('extractAllRuntimeSchemas', () => {
       },
       Features: {
         data: { features: null },
-        schemas: { features: { title: 'string', summary: 'string' } },
       },
       // Text is excluded (no runtime properties)
     })
@@ -701,106 +294,5 @@ describe('extractAllRuntimeSchemas', () => {
 
   it('handles empty input', () => {
     expect(extractAllRuntimeSchemas({})).toEqual({})
-  })
-})
-
-describe('rich form schemas (FormBlock + tagged-block unified)', () => {
-  it('passes a composite schema through with all editor metadata', () => {
-    const richSchema = {
-      name: { en: 'Stats', fr: 'Statistiques' },
-      isComposite: true,
-      childSchema: {
-        name: { en: 'Stat', fr: 'Statistique' },
-        fields: [
-          {
-            id: 'number',
-            type: 'text',
-            label: { en: 'Number', fr: 'Nombre' },
-            required: true,
-          },
-          { id: 'text', type: 'text', label: 'Text' },
-        ],
-      },
-    }
-    const meta = { data: { stats: richSchema } }
-    expect(withoutData(extractRuntimeSchema(meta))).toEqual({
-      schemas: { stats: richSchema },
-    })
-  })
-
-  it('keeps rich and simple schemas side-by-side in the same map', () => {
-    const meta = {
-      data: {
-        'nav-links': { label: 'string', href: 'string' },
-        'stats': {
-          isComposite: true,
-          childSchema: { fields: [{ id: 'n', type: 'text' }] },
-        },
-      },
-    }
-    const result = extractRuntimeSchema(meta)
-    expect(result.schemas['nav-links']).toEqual({ label: 'string', href: 'string' })
-    expect(result.schemas.stats).toEqual({
-      isComposite: true,
-      childSchema: { fields: [{ id: 'n', type: 'text' }] },
-    })
-  })
-
-  it('does NOT convert a form field type of "string" — the legacy text alias was removed 2026-09-05', () => {
-    const meta = {
-      data: {
-        item: {
-          fields: [{ id: 'date', type: 'string' }],
-        },
-      },
-    }
-    const result = extractRuntimeSchema(meta)
-    // The value passes through untouched; `string` is no longer a form type.
-    expect(result.schemas.item.fields[0].type).toBe('string')
-  })
-
-  it('preserves condition operators on rich fields', () => {
-    const fields = [
-      { id: 'for', type: 'select' },
-      { id: 'department', type: 'text', condition: { for: 'scholar' } },
-      { id: 'label', type: 'text', condition: { for: { $in: ['a', 'b'] } } },
-    ]
-    const meta = { data: { form: { fields } } }
-    const result = extractRuntimeSchema(meta)
-    expect(result.schemas.form.fields).toEqual(fields)
-  })
-
-  it('distinguishes rich schema (fields array) from full format (fields object)', () => {
-    const meta = {
-      data: {
-        rich: { fields: [{ id: 'a', type: 'text' }] },
-        full: { name: 's', fields: { a: 'string' } },
-      },
-    }
-    const result = extractRuntimeSchema(meta)
-    expect(result.schemas.rich.fields).toEqual([{ id: 'a', type: 'text' }])
-    expect(result.schemas.full).toEqual({ a: 'string' })
-  })
-
-  it('treats childSchema presence as a rich-schema marker even without isComposite', () => {
-    const meta = {
-      data: {
-        items: { childSchema: { fields: [{ id: 'n', type: 'text' }] } },
-      },
-    }
-    const result = extractRuntimeSchema(meta)
-    expect(result.schemas.items).toEqual({
-      childSchema: { fields: [{ id: 'n', type: 'text' }] },
-    })
-  })
-})
-
-describe('an enum of `{ value, label }` entries', () => {
-  it('reaches the runtime as its values — the label is an editor’s', () => {
-    const lean = extractRuntimeSchema({
-      data: { posts: { fields: { status: { type: 'string', default: 'draft', enum: [{ value: 'draft', label: 'Draft' }, { value: 'live', label: 'Live' }] } } } },
-    })
-    expect(JSON.stringify(lean)).toContain('"enum":["draft","live"]')
-    expect(JSON.stringify(lean)).not.toContain('Draft')
   })
 })

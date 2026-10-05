@@ -243,9 +243,9 @@ export function foundationDevPlugin(options = {}) {
           // Ignore generated files (build output triggers entry regeneration)
           if (!filename || filename.includes('_entry.generated')) return
 
-          // Rebuild for source file changes, and for any file the entry is generated
-          // from — a data schema under `schemas/` is `.yml` or `.json` as often as `.js`
-          // (`shouldRegenerateForFile`)
+          // Rebuild for source file changes, and for the other structural files
+          // (`shouldRegenerateForFile`) — a data schema under `schemas/`, `.yml` or `.json`
+          // as often as `.js`, moves the rebuilt schema.json
           if (
             filename.endsWith('.js') ||
             filename.endsWith('.jsx') ||

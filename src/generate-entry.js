@@ -12,7 +12,6 @@
  * The `meta` export contains only properties needed at runtime:
  * - `background` - 'self' opt-out when component handles its own background
  * - `data` - the `content.data` keys the component declares, with their schema refs
- * - `schemas` - field defaults for those keys
  * - `defaults` - Param default values
  * - `context` - Static capabilities for cross-block coordination
  * - `initialState` - Initial values for mutable block state
@@ -32,7 +31,7 @@ import {
   LAYOUTS_PATH
 } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas, extractFoundationRuntime } from './runtime-schema.js'
-import { collectSchemaRefs, buildDataSchemaMap, SCHEMA_EXTENSIONS } from './resolve-data-schema.js'
+import { SCHEMA_EXTENSIONS } from './resolve-data-schema.js'
 
 /**
  * The files a foundation's data schemas are read from, relative to its source root:
@@ -201,7 +200,7 @@ function generateEntrySource(components, options = {}) {
   const metaJson = JSON.stringify(Object.keys(meta).length > 0 ? meta : {}, null, 2)
   lines.push(`const meta = ${metaJson}`)
 
-  // Per-layout runtime metadata (areas, transitions, defaults)
+  // Per-layout runtime metadata (transitions, layers, scroll, defaults)
   lines.push('')
   const layoutMetaJson = JSON.stringify(Object.keys(layoutMeta).length > 0 ? layoutMeta : {}, null, 2)
   lines.push(`const layoutMeta = ${layoutMetaJson}`)
@@ -311,23 +310,12 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   const foundationConfig = await loadFoundationConfig(srcDir)
   const foundationRuntime = foundationExports ? extractFoundationRuntime(foundationConfig) : { code: [], data: {} }
 
-  // Resolve the data schemas referenced by section bindings, then extract
-  // per-component runtime metadata (which lean-extracts field defaults from
-  // the resolved schemas into meta.schemas[<key>]).
-  // ⛔ Components only, unlike `schema.js`, which also passes the foundation's
-  // `main.js` `data:`. Not an oversight: this map feeds `extractAllRuntimeSchemas`,
-  // and `extractRuntimeSchema` reads `fullMeta.data` — per component. A
-  // foundation-tier key reaches every section (`declaredKeys`) but has nowhere to
-  // put its lean schema in a PER-COMPONENT runtime meta, so resolving its ref here
-  // would produce an entry nothing reads.
-  //
-  // ⚠️ The consequence is real and still open: a foundation-tier `data:` entry
-  // naming a schema gets no field defaults from `applySchemas` at runtime. Latent
-  // today — every foundation-tier declaration in the templates is ref-less — and
-  // fixing it means deciding where a foundation-wide schema lives in the runtime
-  // meta, which is a design question, not a missing argument.
-  const dataSchemaMap = await buildDataSchemaMap(collectSchemaRefs(components), { srcDir })
-  const meta = extractAllRuntimeSchemas(components, dataSchemaMap)
+  // Per-component runtime metadata. ⭐ No data schema is resolved for it: the runtime reads a
+  // declared key's ref and nothing of its shape (2026-10-05), so the entry no longer depends on
+  // a schema file — `schema.js` resolves them, for schema.json, and a missing one stops the
+  // build there. ⛔ Until then the entry carried each key's field defaults, resolved here, and a
+  // foundation-tier `data:` key got none, having no per-component place to put them.
+  const meta = extractAllRuntimeSchemas(components)
 
   // Extract per-layout runtime metadata from meta.js files
   const layoutMeta = extractAllLayoutRuntimeSchemas(layouts)
@@ -519,13 +507,11 @@ export function shouldRegenerateForFile(file, srcDir) {
     }
   }
 
-  // ⭐ The foundation's data schemas — `schemas/<name>.<ext>` and `schemas.config.js`.
-  // The entry's `meta` carries each declared `data:` key with its schema's field
-  // defaults, and a `@/name` ref whose file is missing stops entry generation. A
-  // section receives only the keys its entry declares (2026-09-14), so an entry that
-  // falls behind withholds data: a `data:` key declaring `@/member` before
-  // `schemas/member.yml` exists fails the regeneration, and until 2026-09-14 writing
-  // the file triggered no other — the dev server kept the entry without the key.
+  // The foundation's data schemas — `schemas/<name>.<ext>` and `schemas.config.js`.
+  // ⚠️ The entry holds nothing read from one since 2026-10-05 (no field defaults), so
+  // regenerating it changes nothing. The match stays for the dev rebuild of a
+  // runtime-linked foundation (`dev/plugin.js`), which also writes the editor's
+  // schema.json — whose `dataSchemas` a schema change does move.
   if (rel.startsWith(`${SCHEMAS_PATH}/`)) {
     const inner = rel.slice(SCHEMAS_PATH.length + 1)
     if (!inner.includes('/') && SCHEMA_EXTENSIONS.some(ext => inner.endsWith(ext))) {

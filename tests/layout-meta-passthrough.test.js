@@ -42,14 +42,19 @@ describe('layout meta reaches the runtime', () => {
   it('omits both when the layout declares neither', () => {
     // Absent must stay absent, or every layout would ship keys it never wrote
     // and the runtime could not tell "unset" from "set to the default".
-    const out = extractLayoutRuntimeSchema({ areas: ['header'] })
+    const out = extractLayoutRuntimeSchema({ areas: ['header'], scroll: 'main' })
     expect(out).not.toHaveProperty('transitions')
     expect(out).not.toHaveProperty('layers')
   })
 
   it('ignores a malformed value rather than passing it through', () => {
-    const out = extractLayoutRuntimeSchema({ areas: ['header'], layers: 'above', transitions: 7 })
+    const out = extractLayoutRuntimeSchema({ areas: ['header'], scroll: 'main', layers: 'above', transitions: 7 })
     expect(out).not.toHaveProperty('layers')
     expect(out).not.toHaveProperty('transitions')
+  })
+
+  it("does not carry `areas` — a page's areas are its site's layout/ folder; the list is the editor's", () => {
+    expect(extractLayoutRuntimeSchema({ areas: ['header', 'footer'], scroll: 'main' })).toEqual({ scroll: 'main' })
+    expect(extractLayoutRuntimeSchema({ areas: ['header'] })).toBeNull()
   })
 })

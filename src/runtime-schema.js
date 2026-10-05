@@ -1,14 +1,12 @@
 /**
  * Runtime Schema Extractor
  *
- * Extracts lean runtime-relevant metadata from full meta.js files.
- * The runtime schema is optimized for size and contains only what's
- * needed at render time:
+ * Extracts lean runtime-relevant metadata from full meta.js files — what a published page
+ * reads to render, and nothing else:
  *
  * - background: 'self' when component handles its own background
  * - data: { <key>: <schema ref> | null } — every `content.data` key the component
  *     declares, in order, with its schema ref (null for an inline shape)
- * - schemas: { <key>: <lean fields> } — field defaults for the declared keys that have any
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
  * - initialState: initial values for mutable block state
@@ -20,14 +18,20 @@
  * delivery was default-on — every key that reached a section — and `data:` was a hint for
  * defaults and the editor; `data: false` was the opt-out, emitted as `inheritData: false`.
  *
+ * ⛔ NO FIELD DEFAULTS — ruled 2026-10-05 [Diego]. Each declared key also carried `schemas`
+ * until then — its schema's field defaults, with `enum` and the nesting that led to them — and
+ * the runtime filled a missing field from its `default` and replaced a value its `enum`
+ * rejected. A missing field is the record's own fact, and what it renders as is the
+ * component's choice; a copy frozen into the bundle drifts from the schema it was taken from;
+ * and checking a value is `uniweb validate`'s and the push's job, not the page's. A form in
+ * `data:` is the editor's, for authoring the block: none of it reaches the runtime.
+ * ⛔ Nor `inset` (an editor's flag — an inset is found by name) or a layout's `areas` (a page's
+ * areas are its site's `layout/` folder): no runtime reader read either, until 2026-10-05.
+ *
  * Full metadata (titles, descriptions, hints, etc.) stays in schema.json
  * for the visual editor.
  */
 
-import { isRichSchema } from '@uniweb/core'
-import { dataRefOf } from '@uniweb/core/data-keys'
-import { briefFieldMap, wholeFieldMap } from '@uniweb/schemas/conform'
-import { enumValues } from '@uniweb/schemas/format'
 import { lowerData } from '@uniweb/schemas/content'
 
 /**
@@ -41,188 +45,6 @@ function dataRef(value) {
   if (typeof value === 'string') return value || null
   return value && typeof value === 'object' && typeof value.schema === 'string' && value.schema ? value.schema : null
 }
-
-/**
- * Extract lean schema field for runtime
- * Strips editor-only fields (label, hint, description)
- * Keeps runtime fields (type, default, enum, options, fields, items)
- *
- * Vocabulary is the data-schema format:
- * an `object` field nests via `fields:` (a field map); an `array` field nests
- * via `items:` (a single element field). This matches what
- * resolve-data-schema.js normalizes named refs to, so named-ref and inline
- * `data:` schemas share one shape.
- *
- * @param {string|Object} field - Schema field definition
- * @returns {string|Object} - Lean field definition
- */
-function extractSchemaField(field) {
-  // Shorthand: a bare type string ('string', 'decimal', …).
-  if (typeof field === 'string') {
-    return field
-  }
-
-  if (!field || typeof field !== 'object') {
-    return field
-  }
-
-  const lean = {}
-
-  // Keep runtime-relevant fields: the default, plus the inline picklist
-  // (`enum`) used for value validation. `options` is a curated-ref string —
-  // inert at runtime but carried through.
-  if (field.type) lean.type = field.type
-  if (field.default !== undefined) lean.default = field.default
-  // The values only: an entry's label (`{ value, label }`) is an editor's, and the runtime compares.
-  if (field.enum !== undefined) lean.enum = enumValues(field.enum)
-  if (field.options) lean.options = field.options
-
-  // Nested object → recurse into its field map.
-  if (field.type === 'object' && field.fields && typeof field.fields === 'object') {
-    lean.fields = extractSchemaFields(field.fields)
-  }
-
-  // Array → recurse into its single element field (which may itself be an
-  // object carrying nested `fields`).
-  if (field.type === 'array' && field.items !== undefined) {
-    lean.items = extractSchemaField(field.items)
-  }
-
-  // If the only thing left is `type`, collapse to the bare type string.
-  const keys = Object.keys(lean)
-  if (keys.length === 1 && keys[0] === 'type') {
-    return lean.type
-  }
-
-  return keys.length > 0 ? lean : null
-}
-
-/**
- * Extract lean schema fields for an entire schema object
- *
- * @param {Object} schemaFields - Map of fieldName -> field definition
- * @returns {Object} - Map of fieldName -> lean field definition
- */
-function extractSchemaFields(schemaFields) {
-  if (!schemaFields || typeof schemaFields !== 'object') {
-    return {}
-  }
-
-  const lean = {}
-  for (const [name, field] of Object.entries(schemaFields)) {
-    const leanField = extractSchemaField(field)
-    if (leanField !== null) {
-      lean[name] = leanField
-    }
-  }
-  return lean
-}
-
-/**
- * Check if a schema value is in the full @uniweb/schemas format
- * Full format has: { name, version?, description?, fields: { fieldName: fieldDef, ... } }
- *
- * The distinguishing feature is that `fields` is a *keyed object*, not an array.
- * (A rich form schema also has `fields`, but as an array.)
- *
- * @param {Object} schema - Schema value to check
- * @returns {boolean}
- */
-function isFullSchemaFormat(schema) {
-  return (
-    schema &&
-    typeof schema === 'object' &&
-    typeof schema.fields === 'object' &&
-    schema.fields !== null &&
-    !Array.isArray(schema.fields)
-  )
-}
-
-/**
- * Pass a rich form schema through with minimal normalization.
- *
- * Rich schemas are passed to the editor (for FormBlock UI rendering) and to
- * the runtime (for default application). We keep all authored metadata so the
- * editor has what it needs; we do not strip editor-only fields here because
- * the same schema feeds both audiences.
- *
- * Normalizations:
- *
- * @param {Object} schema - Rich schema as authored
- * @returns {Object} - Normalized rich schema
- */
-function normalizeRichSchema(schema) {
-  return normalizeRichSchemaValue(schema)
-}
-
-function normalizeRichSchemaValue(value) {
-  if (Array.isArray(value)) {
-    return value.map(normalizeRichSchemaValue)
-  }
-  if (!value || typeof value !== 'object') return value
-  const out = {}
-  for (const [key, v] of Object.entries(value)) {
-    if (v && typeof v === 'object') {
-      out[key] = normalizeRichSchemaValue(v)
-    } else {
-      out[key] = v
-    }
-  }
-  return out
-}
-
-/**
- * Lean a single `data:` entry value into the runtime field structure that
- * prepare-props.applySchemas applies. A `data:` value is one of:
- *   - a named ref (`'@/member'`, or `{ schema: '@/member' }`) → resolved on
- *     disk by the build's data-schema resolver; its fields are lean-extracted.
- *   - an inline rich-form schema (`{ fields: [...] }`) → passed through
- *     normalized (drives the FormBlock editor UI + default application).
- *   - an inline full-format schema (`{ name, version, fields: {...} }`) or a
- *     bare field map (`{ field: {...} }`) → lean-extracted.
- *
- * Source-agnostic: the same `content.data` key may be filled by a fetched
- * collection, a tagged code block, or an editor form — the schema (and its
- * defaults) is identical, so there is one declaration surface. Returns the
- * lean structure, or null when there's nothing to apply.
- *
- * @param {string|Object} value - The `data:` entry value
- * @param {Object} dataSchemaMap - Resolved schemas keyed by ref
- * @returns {Object|null}
- */
-function leanDataSchema(value, dataSchemaMap) {
-  // Named ref → the resolved schema's fields. `'@std/article/*'` asks for whole records of it.
-  const { ref, whole } = dataRefOf(value)
-  if (ref) {
-    const resolved = dataSchemaMap[ref]
-    // ⭐ THE FIELDS OF WHAT THE COMPONENT RECEIVES (ruled 2026-09-27 [Diego]): a brief's fields at
-    // the top (`briefFieldMap`), or, for `'@x/y/*'`, the whole record as stored — one field per
-    // section, the brief's included (`wholeFieldMap`) — so a default lands where the record carries
-    // its field: `@std/article`'s `status` inside `body`. A section is filled only when the record
-    // holds it (`applySchemaToObject` recurses into what is there).
-    //
-    // ⛔ It was the merged `deliveredFields` until 2026-09-27 — the brief's fields beside the other
-    // sections' names, one map for two shapes; `flatRecordFields`, the retired flat form, until
-    // 2026-09-24; and before 2026-09-03 `resolved.fields`, which a sections-form schema does not
-    // have. `dataSchemaMap` holds each schema normalized in its authored form (`fields:` or
-    // `sections:`), and only these readers say what one record of it looks like.
-    const fields = whole ? wholeFieldMap(resolved) : briefFieldMap(resolved)
-    if (!fields) return null
-    const lean = extractSchemaFields(fields)
-    return Object.keys(lean).length > 0 ? lean : null
-  }
-
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-
-  // Inline rich-form schema (fields: array) — drives FormBlock + defaults.
-  if (isRichSchema(value)) return normalizeRichSchema(value)
-
-  // Inline full-format schema or a bare field map.
-  const fields = isFullSchemaFormat(value) ? value.fields : value
-  const lean = extractSchemaFields(fields)
-  return Object.keys(lean).length > 0 ? lean : null
-}
-
 
 /**
  * Extract param defaults from params object
@@ -250,22 +72,14 @@ function extractParamDefaults(params) {
  * Extract lean runtime schema from a full meta.js object
  *
  * @param {Object} fullMeta - The full meta.js default export
- * @param {Object} [dataSchemaMap] - Resolved data schemas keyed by ref (from
- *                 resolve-data-schema.js), used to lean-extract field defaults
- *                 for each `data:` binding.
  * @returns {Object|null} - Lean runtime schema or null if empty
  */
-export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
+export function extractRuntimeSchema(fullMeta) {
   if (!fullMeta || typeof fullMeta !== 'object') {
     return null
   }
 
   const runtime = {}
-
-  // Inset flag: signals this component is available for inline @ references
-  if (fullMeta.inset) {
-    runtime.inset = true
-  }
 
   // Background opt-out: 'self' means the component renders its own background
   // layer (solid colors, insets, effects), so the runtime skips its Background.
@@ -277,12 +91,12 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
   // data: it maps each `content.data` key to its schema. A value is a named ref
   // (`'@/member'`), an inline field map, or an inline rich-form (`{ fields: [...] }`,
   // an editor form). Source-agnostic — the data may arrive by fetch, tagged code
-  // block, or editor form; the schema and its defaults are identical.
+  // block, or editor form, and it reaches the component as it arrived.
   //
-  // ⭐ Every key reaches the runtime, a key with no fields included — `data` lists them
-  // with their refs, because the keys ARE what the section receives, and a key's ref is
-  // what a fetch of another name fills it by. `schemas` carries field defaults for the
-  // keys that have fields. `data: false` declares nothing, as no `data:` does.
+  // ⭐ Every key reaches the runtime — `data` lists them with their refs, because the keys
+  // ARE what the section receives, and a key's ref is what a fetch of another name fills
+  // it by. Its shape stays in schema.json, for the editor. `data: false` declares nothing,
+  // as no `data:` does.
   //
   // ⭐ A concept block's key is written as its fence is — `'md:faq': 'Questions and
   // answers'` — and lowered to the key a component reads, `faq`, with no schema: the value
@@ -308,11 +122,6 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
       }
       runtime.data = runtime.data || {}
       runtime.data[key] = dataRef(value)
-      const lean = leanDataSchema(value, dataSchemaMap)
-      if (lean) {
-        runtime.schemas = runtime.schemas || {}
-        runtime.schemas[key] = lean
-      }
     }
   } else if (data !== undefined) {
     throw new Error(
@@ -339,9 +148,6 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
     runtime.initialState = fullMeta.initialState
   }
 
-  // (Top-level `schemas:` is gone — inline field maps and rich-forms are now
-  // just `data:` entries with an inline value. See leanDataSchema.)
-
   return Object.keys(runtime).length > 0 ? runtime : null
 }
 
@@ -351,11 +157,11 @@ export function extractRuntimeSchema(fullMeta, dataSchemaMap = {}) {
  * @param {Object} componentsMeta - Map of componentName -> meta.js content
  * @returns {Object} - Map of componentName -> runtime schema (excludes null entries)
  */
-export function extractAllRuntimeSchemas(componentsMeta, dataSchemaMap = {}) {
+export function extractAllRuntimeSchemas(componentsMeta) {
   const schemas = {}
 
   for (const [name, meta] of Object.entries(componentsMeta)) {
-    const schema = extractRuntimeSchema(meta, dataSchemaMap)
+    const schema = extractRuntimeSchema(meta)
     if (schema) {
       schemas[name] = schema
     }
@@ -368,7 +174,6 @@ export function extractAllRuntimeSchemas(componentsMeta, dataSchemaMap = {}) {
  * Extract lean runtime schema for a layout from its full meta.js
  *
  * Layout runtime metadata:
- * - areas: Array of area names this layout supports
  * - transitions: View transition name overrides (the runtime auto-names areas;
  *   this overrides per region, or `false` opts the layout out)
  * - defaults: Param default values
@@ -385,9 +190,8 @@ export function extractLayoutRuntimeSchema(fullMeta) {
 
   const runtime = {}
 
-  if (fullMeta.areas && Array.isArray(fullMeta.areas)) {
-    runtime.areas = fullMeta.areas
-  }
+  // ⛔ No `areas`: the areas a page renders are its site's `layout/` folder
+  // (`Website.getLayoutAreas`), and a layout's list of them is for the editor.
 
   // `false` is a value, not an absence: it is the documented way a layout opts
   // out of per-area view transitions. The previous guard was
