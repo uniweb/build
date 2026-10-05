@@ -113,6 +113,18 @@ describe('expandDynamicPages', () => {
     expect(title('/blog/bare')).toBe('bare')
     expect(title('/blog/post')).toBe('A Post')
   })
+
+  it('a link to each page shows its record\'s image — `recordImage`, the SPA\'s rule (2026-10-05)', () => {
+    const withImage = { ...template, seo: { image: '/og/blog.png' } }
+    const out = expandDynamicPages([blog(), withImage], parentData([
+      { $name: 'pictured', title: 'P', image: '/img/p.jpg' },
+      { $name: 'bare', title: 'B' },
+    ]), noop)
+    const seo = (route) => out.find((p) => p.route === route).seo
+    expect(seo('/blog/pictured').image).toBe('/img/p.jpg')
+    // the page's own image serves a record that has none
+    expect(seo('/blog/bare').image).toBe('/og/blog.png')
+  })
 })
 
 describe('the route query decides what a parametric page expands over (ruled 2026-09-11)', () => {

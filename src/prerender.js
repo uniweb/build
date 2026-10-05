@@ -23,7 +23,7 @@ import {
   deriveCacheKey,
   evaluateQuery,
 } from '@uniweb/core'
-import { recordTitle, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
+import { recordTitle, recordImage, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
 import DataStore from '@uniweb/core/datastore'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { createFileTransport } from './site/file-transport.js'
@@ -473,6 +473,9 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
         const title = recordTitle(item)
         if (title) concretePage.title = title
         if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
+        // ⭐ And its picture is what a link to the page shows (`recordImage`) — the SPA's rule.
+        const image = recordImage(item)
+        if (image) concretePage.seo = { ...(concretePage.seo || {}), image }
 
         expandedPages.push(concretePage)
       }
