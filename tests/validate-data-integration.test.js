@@ -39,7 +39,7 @@ beforeAll(() => {
       'name: project',
       'fields:',
       '  name: { type: string, required: true }',
-      '  status: { type: string, enum: [active, archived], default: active }',
+      '  status: { type: string, enum: [active, archived] }',
       '  when: { type: date }',
       '  url: { type: url }',
       '',

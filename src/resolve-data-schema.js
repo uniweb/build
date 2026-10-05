@@ -85,6 +85,60 @@ const RESERVED_SYSTEM_SCOPE = 'uniweb'
 const packageForScope = (scope) => SCOPE_PACKAGE[scope] ?? `@${scope}/schemas`
 
 /**
+ * A NAMED data schema — a `schemas/` file, `@std/<name>`, `@org/<name>` — validated and
+ * normalized, and refused when a field declares a `default`.
+ *
+ * ⛔ A named schema declares no default — ruled 2026-10-05 [Diego], when the runtime stopped
+ * filling fields: nothing would read one. The runtime fills no field, the declaration a
+ * registry stores carries none (`uwx/data-schema.js`), and the foundation schema an editor
+ * reads leaves `dataSchemas` out (`uwx/registry-package.js`) — so a `default:` here would be a
+ * promise kept nowhere. What an absent field renders as is the component's choice. A default
+ * stays where an editor reads it: a component's own inline field map or form in `data:`.
+ *
+ * @param {object} schema - the schema as authored
+ * @param {string} ref - its ref, for the message
+ * @returns {object} the normalized schema
+ */
+function normalizeNamedSchema(schema, ref) {
+  const normalized = validateAndNormalizeSchema(schema, ref)
+  const paths = fieldsWithDefaults(normalized)
+  if (paths.length > 0) {
+    throw new Error(
+      `Data schema '${ref}': a named data schema declares no default — remove \`default:\` from ` +
+        `${paths.map((p) => `'${p}'`).join(', ')}. A component decides what an absent field ` +
+        `renders as; an editor pre-fills from a component's own inline field map or form in \`data:\`.`
+    )
+  }
+  return normalized
+}
+
+/** The dotted paths of every field in a normalized schema that declares a `default`. */
+function fieldsWithDefaults(schema) {
+  const found = []
+  const walkFields = (fields, prefix) => {
+    if (!fields || typeof fields !== 'object') return
+    for (const [name, spec] of Object.entries(fields)) walkSpec(spec, `${prefix}${name}`)
+  }
+  const walkSpec = (spec, path) => {
+    if (!spec || typeof spec !== 'object') return
+    if (spec.default !== undefined) found.push(path)
+    walkFields(spec.fields, `${path}.`)
+    if (spec.items) walkSpec(spec.items, `${path}[]`)
+    if (spec.values) walkSpec(spec.values, `${path}{}`)
+  }
+  const walkSections = (sections, prefix) => {
+    if (!sections || typeof sections !== 'object') return
+    for (const [name, section] of Object.entries(sections)) {
+      walkFields(section?.fields, `${prefix}${name}.`)
+      walkSections(section?.sections, `${prefix}${name}.`)
+    }
+  }
+  walkFields(schema?.fields, '')
+  walkSections(schema?.sections, '')
+  return found
+}
+
+/**
  * Collect every distinct schema ref used by a foundation's section bindings.
  * Reads `data: { key: '<ref>' }` (short) and `data: { key: { schema: '<ref>' } }`
  * (full). Non-string / schemaless entries are ignored.
@@ -94,9 +148,9 @@ const packageForScope = (scope) => SCOPE_PACKAGE[scope] ?? `@${scope}/schemas`
  * (`declaredKeys`, `@uniweb/core/data-keys`) — but only components were scanned
  * here, so a ref at that tier was neither resolved into `dataSchemas` nor
  * rejected when dangling, while the key was still delivered at runtime. The
- * symptom would have been no schema for the editor and no field defaults from
- * `applySchemas`, with no build error. It bit nobody only because every
- * foundation-tier declaration in the templates is ref-less.
+ * symptom would have been no schema for the editor, with no build error. It bit
+ * nobody only because every foundation-tier declaration in the templates is
+ * ref-less.
  *
  * @param {Object} components - Map of componentName → full meta (with `data`)
  * @param {Object|false|null} [foundationData] - the foundation's `main.js` `data:`
@@ -136,7 +190,7 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
         { code: SCHEMA_NOT_FOUND }
       )
     }
-    return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
+    return normalizeNamedSchema(await loadSchemaFile(file), ref)
   }
 
   // ⭐ THE SYSTEM MODELS A SITE'S RECORDS MAY NAME — `@uniweb/link` — resolve from the build's own
@@ -145,7 +199,7 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
   // never a data-schema source. (The whole scope was refused until 2026-09-28.)
   if (scope === RESERVED_SYSTEM_SCOPE) {
     const system = SYSTEM_RECORD_SCHEMAS[name]
-    if (system) return validateAndNormalizeSchema(system, ref)
+    if (system) return normalizeNamedSchema(system, ref)
     const allowed = Object.keys(SYSTEM_RECORD_SCHEMAS).map((n) => `'@${scope}/${n}'`).join(', ')
     throw new Error(
       `'@${scope}' is the reserved platform system namespace: the only data schemas a site's records ` +
@@ -170,7 +224,7 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
           `exists there. Point it at a ${SCHEMA_EXTENSIONS.join(' / ')} file.`
       )
     }
-    return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
+    return normalizeNamedSchema(await loadSchemaFile(file), ref)
   }
 
   // A scope alias ('@org' → a DIR) resolves 'name' to a bare schema FILE in that
@@ -195,7 +249,7 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
       }
       throw new Error(msg)
     }
-    return validateAndNormalizeSchema(await loadSchemaFile(file), ref)
+    return normalizeNamedSchema(await loadSchemaFile(file), ref)
   }
 
   // Every other scope is an org namespace: '@org/name' resolves `name` from that
@@ -207,7 +261,7 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
   if (!schema) {
     throw new Error(`Unknown data schema '${ref}': '${pkg}' exports no schema named '${name}'.`)
   }
-  return validateAndNormalizeSchema(schema, ref)
+  return normalizeNamedSchema(schema, ref)
 }
 
 /**
@@ -224,9 +278,8 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
 export async function buildDataSchemaMap(refs, { srcDir }) {
   // Load the foundation's optional schemas.config.js once; every ref (and every
   // transitively-discovered ref) resolves against the same alias map. This is
-  // the single entry both schema discovery and the runtime-schema build go
-  // through, so editor schema.json, runtime defaults, and `uniweb validate` all
-  // resolve refs identically.
+  // the single entry schema discovery and `uniweb validate` go through, so the
+  // editor's schema.json and the check of a site's data resolve refs identically.
   const aliases = await loadSchemaAliases(srcDir)
   const map = {}
   const queue = Array.from(refs)
@@ -299,7 +352,7 @@ async function collectSchemasFromExports(packageDir) {
   for (const name of names) {
     const schema = get(name)
     if (!schema || typeof schema !== 'object') continue
-    out[`@/${name}`] = validateAndNormalizeSchema(schema, `@/${name}`)
+    out[`@/${name}`] = normalizeNamedSchema(schema, `@/${name}`)
   }
   return out
 }
@@ -309,7 +362,7 @@ async function collectSchemasFromExports(packageDir) {
 async function collectSchemasFromDir(dir) {
   const out = {}
   for (const { file, name } of schemaFilesIn(dir)) {
-    out[`@/${name}`] = validateAndNormalizeSchema(await loadSchemaFile(join(dir, file)), `@/${name}`)
+    out[`@/${name}`] = normalizeNamedSchema(await loadSchemaFile(join(dir, file)), `@/${name}`)
   }
   return out
 }

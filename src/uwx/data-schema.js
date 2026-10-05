@@ -451,8 +451,10 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
   if (Array.isArray(field.enum)) out.enum = field.enum
   if (leafFormat) out.format = leafFormat
 
-  // `default` is intentionally NOT emitted — it rides in the foundation-schema
-  // blob (render / editor pre-fill), not the content type.
+  // No `default`: a named schema declares none (`resolve-data-schema.js` refuses one, since
+  // 2026-10-05). ⛔ This said it "rides in the foundation-schema blob (render / editor
+  // pre-fill)" until then — but that blob leaves `dataSchemas` out, so a named schema's
+  // default reached the runtime alone, and no editor.
   return out
 }
 

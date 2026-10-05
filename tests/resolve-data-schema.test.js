@@ -472,3 +472,52 @@ describe('resolveSchemaRef — org scope resolution', () => {
     expect(out.fields.marker).toEqual({ type: 'string' })
   })
 })
+
+describe('a named data schema declares no default — ruled 2026-10-05', () => {
+  // Nothing would read one: the runtime fills no field, a registry's declaration carries
+  // none, and the foundation schema an editor reads leaves `dataSchemas` out.
+  let dir
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ds-nodefault-'))
+    mkdirSync(join(dir, 'schemas'), { recursive: true })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  const write = (name, body) => writeFileSync(join(dir, 'schemas', `${name}.yml`), body)
+
+  it('refuses a schema file whose field declares one, naming each field', async () => {
+    write(
+      'member',
+      [
+        'name: member',
+        'fields:',
+        '  name: { type: string }',
+        '  role: { type: string, default: Member }',
+        '  tags: { type: string, many: true, default: [] }',
+        '  address:',
+        '    type: object',
+        '    fields:',
+        '      country: { type: string, default: CA }',
+        '',
+      ].join('\n')
+    )
+    await expect(resolveSchemaRef('@/member', { srcDir: dir })).rejects.toThrow(
+      /Data schema '@\/member': a named data schema declares no default — remove `default:` from 'role', 'tags', 'address\.country'/
+    )
+  })
+
+  it('refuses one in a section of a `sections:` schema', async () => {
+    write('article', 'name: article\nsections:\n  brief:\n    brief: true\n    fields:\n      title: { type: string }\n  body:\n    fields:\n      status: { type: string, default: live }\n')
+    await expect(buildDataSchemaMap(new Set(['@/article']), { srcDir: dir })).rejects.toThrow(/'body\.status'/)
+  })
+
+  it('CONTROL — a field NAMED `default` is no default, and a schema without one resolves', async () => {
+    write('control', 'name: control\nfields:\n  label: { type: string }\n  default: { type: json }\n')
+    const out = await resolveSchemaRef('@/control', { srcDir: dir })
+    expect(out.fields.default).toEqual({ type: 'json' })
+  })
+
+  it('the format itself keeps `default` — a component’s inline field map is the editor’s, and may declare one', () => {
+    expect(validateAndNormalizeSchema({ fields: { cpu: { type: 'string', default: 'quad' } } }, '@/inline').fields.cpu.default).toBe('quad')
+  })
+})
