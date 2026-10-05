@@ -204,6 +204,44 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
+  describe('vars — the CSS variables a section type declares', () => {
+    // `Block.mergeComponentVars` (`@uniweb/core`) emits each default on the section and takes a
+    // section's `vars:` value only for a declared name. ⛔ Not emitted until 2026-10-05, so a
+    // section type's vars reached no page.
+    it('carries every declared name, with its default', () => {
+      const meta = {
+        vars: {
+          'card-gap': { default: '1.5rem', label: 'Card Gap', type: 'select', options: ['1rem', '1.5rem'], group: 'Layout' },
+          'card-radius': { default: 'var(--radius-md)', description: 'Inherits from foundation var by default' },
+        },
+      }
+      expect(extractRuntimeSchema(meta)).toEqual({
+        vars: { 'card-gap': { default: '1.5rem' }, 'card-radius': { default: 'var(--radius-md)' } },
+      })
+    })
+
+    it('keeps the name of a var with no default — a section may still set it', () => {
+      expect(extractRuntimeSchema({ vars: { accent: { label: 'Accent' } } })).toEqual({ vars: { accent: {} } })
+    })
+
+    it('writes a shorthand value as its default', () => {
+      expect(extractRuntimeSchema({ vars: { gap: '1rem', columns: 3 } })).toEqual({
+        vars: { gap: { default: '1rem' }, columns: { default: 3 } },
+      })
+    })
+
+    it('none of an editor’s words reach the runtime', () => {
+      const lean = JSON.stringify(extractRuntimeSchema({ vars: { gap: { default: '1rem', label: 'Gap', description: 'Space between' } } }))
+      expect(lean).not.toContain('Gap')
+      expect(lean).not.toContain('Space between')
+    })
+
+    it('omits vars when none are declared', () => {
+      expect(extractRuntimeSchema({ vars: {} })).toBeNull()
+      expect(extractRuntimeSchema({ vars: null })).toBeNull()
+    })
+  })
+
   describe('combined extraction', () => {
     it('extracts all runtime properties', () => {
       const meta = {
@@ -212,6 +250,7 @@ describe('extractRuntimeSchema', () => {
         category: 'showcase',
         background: true,
         data: { events: { title: 'string', date: 'string' } },
+        vars: { 'grid-gap': '1rem' },
         params: {
           layout: { type: 'select', default: 'grid' },
           columns: { type: 'number', default: 3 },
@@ -222,6 +261,7 @@ describe('extractRuntimeSchema', () => {
       expect(extractRuntimeSchema(meta)).toEqual({
         background: true,
         data: { events: null },
+        vars: { 'grid-gap': { default: '1rem' } },
         defaults: { layout: 'grid', columns: 3 },
         context: { allowTranslucentTop: true },
         initialState: { expanded: false },

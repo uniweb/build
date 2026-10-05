@@ -12,6 +12,7 @@
  * The `meta` export contains only properties needed at runtime:
  * - `background` - 'self' opt-out when component handles its own background
  * - `data` - the `content.data` keys the component declares, with their schema refs
+ * - `vars` - the CSS variables the component declares, with their defaults
  * - `defaults` - Param default values
  * - `context` - Static capabilities for cross-block coordination
  * - `initialState` - Initial values for mutable block state
@@ -195,7 +196,7 @@ function generateEntrySource(components, options = {}) {
     lines.push('const capabilities = null')
   }
 
-  // Per-component runtime metadata (defaults, context, initialState, background, data)
+  // Per-component runtime metadata (defaults, context, initialState, background, data, vars)
   lines.push('')
   const metaJson = JSON.stringify(Object.keys(meta).length > 0 ? meta : {}, null, 2)
   lines.push(`const meta = ${metaJson}`)

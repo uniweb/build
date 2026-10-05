@@ -7,6 +7,7 @@
  * - background: 'self' when component handles its own background
  * - data: { <key>: <schema ref> | null } — every `content.data` key the component
  *     declares, in order, with its schema ref (null for an inline shape)
+ * - vars: { <name>: { default? } } — the CSS variables the component declares
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
  * - initialState: initial values for mutable block state
@@ -69,6 +70,32 @@ function extractParamDefaults(params) {
 }
 
 /**
+ * A section type's CSS variables as the runtime reads them: every declared name, with its
+ * `default` when it has one. `Block.mergeComponentVars` (`@uniweb/core`) emits each default
+ * on the section and takes a section's `vars:` value only for a name declared here, so a
+ * var with no default still needs its name. A label, a type, options and a description are
+ * the editor's. A shorthand value (`'card-gap': '1.5rem'`) is written as its `default`.
+ *
+ * ⛔ Not emitted until 2026-10-05, while core read it since 2026-03-02: a section type's
+ * `vars:` reached no page, and neither did a section's `vars:` for them.
+ *
+ * @param {Object} vars - the `vars:` of a meta.js
+ * @returns {Object|null} `{ <name>: { default? } }`, or null when none is declared
+ */
+function leanComponentVars(vars) {
+  if (!vars || typeof vars !== 'object' || Array.isArray(vars)) return null
+  const out = {}
+  for (const [name, config] of Object.entries(vars)) {
+    if (config !== null && typeof config === 'object' && !Array.isArray(config)) {
+      out[name] = config.default !== undefined ? { default: config.default } : {}
+    } else {
+      out[name] = config === null || config === undefined ? {} : { default: config }
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/**
  * Extract lean runtime schema from a full meta.js object
  *
  * @param {Object} fullMeta - The full meta.js default export
@@ -128,6 +155,11 @@ export function extractRuntimeSchema(fullMeta) {
       `[uniweb] Invalid 'data' in meta.js: expected false or { <key>: <schema> }, got ${JSON.stringify(data)}. ` +
         "A <schema> is a named ref ('@/x'), an inline field map, or a rich-form { fields: [...] }."
     )
+  }
+
+  const vars = leanComponentVars(fullMeta.vars)
+  if (vars) {
+    runtime.vars = vars
   }
 
   const paramsObj = fullMeta.params
