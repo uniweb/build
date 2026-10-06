@@ -1152,12 +1152,17 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
 // ⚖️ WHAT THESE ARE NOT. A site's OWN service declarations — `search:`, `submit:`,
 // `assistant:`, `tracking:` — ride the `settings` Section and are untouched here.
 // (They were top-level `info.*` keys until 2026-09-09; `settingsNested` below is
-// where they are now written.) Those
-// are authored, they resolve at the SITE tier (`config.<name>`, first choice in
-// `@uniweb/core`'s `resolveService`), and moving them here would flip them to the
-// host tier, where a block's mere presence declines every service it does not name.
-// These Sections carry the services a site is PROVISIONED with — `api` above all,
-// which has no file-authored form because it is bought, not declared.
+// where they are now written.) Those are authored addresses and land at the SITE
+// tier, `config.<name>`, which `@uniweb/core`'s `resolveService` reads for any
+// service the host does not offer — the host's `config.services.<name>` wins where
+// it offers one. These Sections are another kind of thing: a REQUEST about what the
+// site is PROVISIONED with — `api` above all, which has no file-authored form
+// because it is bought, not declared. A row's `config` is read by the service's
+// owner and reaches neither tier, so an address filed here would reach no page.
+// ⛔ *Until 2026-10-06 this called the authored tier `resolveService`'s first choice
+// (the host's offer has come first since 2026-09-10) and these Sections the host
+// tier, "where a block's mere presence declines every service it does not name" —
+// that rule is the payload's `config.services`; here a missing row is no opinion.*
 //
 // ⛔ ABSENT IS NOT EMPTY, and the difference is destructive. The Section is
 // REPLACED by what we send, so `[]` means "drop every stored config row" while a
@@ -1342,12 +1347,14 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // carries the translation collector with it.
   setIf(settings, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
 
-  // Authored service declarations. ⛔ These must NOT be filed with the `$services`
-  // Section: authored ones resolve at the SITE tier (`config.<name>`, first choice
-  // in `@uniweb/core`'s `resolveService`) while `$services` is the HOST tier, where
-  // a block's mere PRESENCE declines every service it does not name
-  // (`core/src/services.js`). Moving them there would invert their precedence and
-  // turn a site's own search off with no error and no message.
+  // Authored service declarations. ⛔ These must NOT be filed with the `services`
+  // Section. Here they are the SITE tier, `config.<name>` — the address
+  // `@uniweb/core`'s `resolveService` uses wherever the host offers none. That
+  // Section is a provisioning request whose rows reach neither tier, so filed there
+  // a site's own search endpoint would reach no page, and on a host whose services
+  // block does not name search the site would lose search with no error and no
+  // message (`core/src/services.js`). *(Until 2026-10-06 this called that Section
+  // "the HOST tier"; it is a request about what the host provides.)*
   setIf(settings, 'search', siteYml.search)
   setIf(settings, 'submit', siteYml.submit)
   // ⛔ Credentials are stripped, not trusted — this block is published world-readable.
