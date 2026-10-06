@@ -745,6 +745,13 @@ describe('model-level keys on the declaration', () => {
     expect('plural' in toDataSchemaDeclaration(normalize({}), { name: '@demo/session' })).toBe(false)
   })
 
+  // ⛔ Until 2026-10-05 `icon` never got here either: the format warned about it and dropped it.
+  it('emits icon, a framework icon name, as written', () => {
+    const decl = toDataSchemaDeclaration(normalize({ label: 'Session', icon: 'lu-calendar-days' }), { name: '@demo/session' })
+    expect(decl.icon).toBe('lu-calendar-days')
+    expect('icon' in toDataSchemaDeclaration(normalize({}), { name: '@demo/session' })).toBe(false)
+  })
+
   it('honours an authored `linkable: false` on a model that has a brief', () => {
     // A real choice — "do not let other models point at this".
     const decl = toDataSchemaDeclaration(normalize({ linkable: false }), { name: '@demo/session' })
