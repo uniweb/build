@@ -106,7 +106,7 @@
     },
     "services": {
       "kind": "passthrough",
-      "authoredAs": "sync.json::backends.<origin>.services"
+      "authoredAs": "site.yml::services"
     },
     "secrets": {
       "kind": "passthrough",

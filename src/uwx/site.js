@@ -80,6 +80,7 @@ import { resolveLocaleList } from '../i18n/locales.js'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
+import { readServicesRequest, mergeServiceRows } from './services-request.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
@@ -1129,53 +1130,35 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
   return out
 }
 
-// ── `services` + `secrets` — a site's own service records ─────────────────────
+// ── `services` + `secrets` — what a site asks of its host ─────────────────────────
 //
-// ⚠️ THESE WERE `site.yml::$services` / `$secrets` UNTIL 2026-09-20. They now live in
-// `sync.json::backends.<origin>.{services,secrets}`, because what a site is PROVISIONED
-// with is a fact about one backend — a service is bought on the backend that sold it.
-// The `$` prefix existed to keep them off `site.yml::services`, which means something
-// else on the bundle lane (the HOST tier); out of `site.yml` entirely, that collision
-// is gone too.
+// ⭐ THE `services` SECTION IS THE OWNER'S REQUEST, AUTHORED IN `site.yml::services` — a
+// map from service name to `true`, `false` or the service's settings (spec:
+// kb/framework/reference/site-services-request.md). It is sent as a FULL LIST: the
+// site's rows, with the owner's asks applied by name (`mergeServiceRows`), because the
+// backend REPLACES the Section with what it is sent and a row left out would lose its
+// stored settings. The site's rows come from the caller when it has just read them
+// (`opts.serviceRows`, already merged), else from the record of the last agreement —
+// that backend's entry in `sync.json`, written by pull and by a push that succeeded.
+// ⛔ *The rows lived only in `sync.json` from 2026-09-20 to 2026-10-06, which left a
+// CLI user nowhere to ask; `site.yml::$services` / `$secrets` before that.*
 //
-// The original note, kept because it explains why the names could not simply be reused: `site.yml::services` is ALREADY TAKEN,
-// on the other lane: the bundle lane spreads site.yml whole into the payload, so a
-// `services:` block there lands at `config.services` — the HOST tier — which is the
-// documented way to simulate a host locally (`kit/src/utils/submitTarget.js`).
-// Reusing the name would give one key two meanings that differ per lane, which is
-// the shape of bug nobody finds.
-//
-// `$` already means "backend-scoped, round-tripped, not hand-authored" in this file
-// (`$uuid`, `$org`, `$backend`), and that is exactly what these are: a service's
-// config is bound where the service is provisioned, and arrives here by `pull`.
+// `secrets` stays in `sync.json`: an inventory of names a pull writes, whose values are
+// set in the app — `#ref` marks one as set.
 //
 // ⚖️ WHAT THESE ARE NOT. A site's OWN service declarations — `search:`, `submit:`,
 // `assistant:`, `tracking:` — ride the `settings` Section and are untouched here.
-// (They were top-level `info.*` keys until 2026-09-09; `settingsNested` below is
-// where they are now written.) Those are authored addresses and land at the SITE
-// tier, `config.<name>`, which `@uniweb/core`'s `resolveService` reads for any
-// service the host does not offer — the host's `config.services.<name>` wins where
-// it offers one. These Sections are another kind of thing: a REQUEST about what the
-// site is PROVISIONED with — `api` above all, which has no file-authored form
-// because it is bought, not declared. A row's `config` is read by the service's
-// owner and reaches neither tier, so an address filed here would reach no page.
-// ⛔ *Until 2026-10-06 this called the authored tier `resolveService`'s first choice
-// (the host's offer has come first since 2026-09-10) and these Sections the host
-// tier, "where a block's mere presence declines every service it does not name" —
-// that rule is the payload's `config.services`; here a missing row is no opinion.*
+// Those are authored addresses and land at the SITE tier, `config.<name>`, which
+// `@uniweb/core`'s `resolveService` reads for any service the host does not offer.
+// A row here is read by the service's owner and reaches neither tier, so an address
+// filed here would reach no page.
 //
-// ⛔ ABSENT IS NOT EMPTY, and the difference is destructive. The Section is
-// REPLACED by what we send, so `[]` means "drop every stored config row" while a
-// missing key means "I am not telling you about this". A project that has never
-// pulled has no `services` for that backend, and its ordinary push must not read as
-// a request to wipe a service the operator configured in the app. So: emit the
-// Section only when that backend's entry in `sync.json` carries the key. Clearing is
-// available and explicit — `services: []` there. *(Both said `site.yml::$services`
-// until the move on 2026-09-20.)*
-//
-// ⚠️ The push gate is NOT what makes this safe, though it usually catches it: its
-// tokens live in a gitignored per-clone cache, so a fresh clone pushes
-// unconditionally. Correctness has to sit here.
+// ⛔ ABSENT IS NOT EMPTY, and the difference is destructive. The Section is REPLACED
+// by what we send, so `[]` means "drop every stored row" while a missing key means "I
+// am not telling you about this". So `services` is emitted only when `site.yml` asks
+// for something and there is a list to apply it to — never for a file that says
+// nothing, and never as a partial list for a site whose rows this project does not
+// know. A site with no entry in `sync.json` has nothing stored yet.
 
 /**
  * A backend's provisioned `services` / `secrets` (its `sync.json` entry) → Section
@@ -1228,12 +1211,34 @@ function serviceRecords(declared, identify, label) {
 }
 
 /** One service per `name` — the same keyspace `config.services` uses at runtime. */
-function servicesNested(provisioned) {
+function servicesNested(rows) {
   return serviceRecords(
-    provisioned?.services,
+    rows,
     (e) => (typeof e.name === 'string' && e.name ? e.name : null),
-    '$services'
+    'services'
   )
+}
+
+/**
+ * The `services` Section for this push, or undefined when there is nothing to send:
+ * the caller's rows when it passes them (the site's, read just now, with the asks it
+ * decided to send applied), else the file's asks over the record of the site's rows.
+ *
+ * @param {object} siteYml
+ * @param {object|null} provisioned - the backend's entry in `sync.json`
+ * @param {object[]} [serviceRows]
+ * @returns {object[]|undefined}
+ */
+function requestedServices(siteYml, provisioned, serviceRows) {
+  if (Array.isArray(serviceRows)) return servicesNested(serviceRows)
+  const asks = readServicesRequest(siteYml.services)
+  if (!asks) return undefined
+  const base = Array.isArray(provisioned?.services)
+    ? provisioned.services
+    : provisioned?.site?.uuid
+      ? null
+      : []
+  return base ? servicesNested(mergeServiceRows(base, asks)) : undefined
 }
 
 /**
@@ -1410,6 +1415,10 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  *        known, `@/x` ships as written.
  * @param {string[]} [opts.schemaless] - the queries whose records resolved no data schema
  *        (the records lane's `schemaless`): their declarations name no `schema`.
+ * @param {object[]} [opts.serviceRows] - the `services` Section to send, as the caller
+ *        decided it (the site's rows with the owner's asks applied). Default: the
+ *        file's asks over the record in `sync.json`.
+ * @param {boolean} [opts.declareServices] - `false` withholds `services` and `secrets`.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $schema, info, settings?, pages, layout_sections, extensions,
  *        queries, services?, secrets? }`
@@ -1565,7 +1574,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // comments above describe — there, a dropped block leaves a site with NO
   // endpoint; here it leaves the site with the RIGHT answer.
   //
-  // The provisioned record rides the `$services` section instead (see servicesNested).
+  // Asking for the `api` service is `site.yml::services` → the `services` Section (see
+  // requestedServices); its address still comes from the host.
   // ⛔ THE CONFIGURATION KEYS ARE NOT HERE — they ride the `settings` Section
   // (`settingsNested` above). `info` is the BRIEF: what a card or a select dropdown
   // renders, plus what a listing can filter on. Eighteen keys moved off it on
@@ -1729,31 +1739,22 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     opts.queryFields,
     Array.isArray(opts.schemaless) ? new Set(opts.schemaless) : null
   )
-  // Emitted ONLY when the file declares the key — see the header above
+  // Emitted ONLY when there is something to say — see the header above
   // `serviceRecords`: on a replaced Section, absent and empty are different
   // requests and one of them is destructive.
   //
-  // ⭐ AND ONLY WHEN THE CALLER SAYS THE DECLARATION IS A REQUEST.
-  // `opts.declareServices === false` withholds both Sections for THIS push, which
-  // is not the same as the file having no key — the file still declares one; the
-  // caller has determined the owner is not asking for anything new by it.
+  // ⭐ WHICH ASKS GO IS THE CALLER'S. Push and publish read the site's rows and the
+  // record of the last agreement, apply only what the owner changed, and pass the
+  // result as `opts.serviceRows` — so an ask the site has since decided otherwise is
+  // never re-sent over that decision (`reconcileServices`). Without them, the file's
+  // asks apply over the record, which is what `status` and a pull's re-bank compare.
   //
-  // ⛔ Why this decision cannot live here: the Sections are REPLACED wholesale by
-  // what we send (`SectionScope::DeclaredOnly`), so re-sending an unchanged block
-  // OVERWRITES whatever the stored request has become since — including a decision
-  // the owner made in the app, where the consent workflow's publish happens. But
-  // "has it changed since we last agreed?" needs the last agreed state, which is
-  // project memory (`deploy.yml`) the CLI owns and this pure mapper must not read.
-  // ⇒ The CLI decides; this honours the decision.
-  //
-  // ⚖️ Default is to declare, so every existing caller is unchanged and the
-  // withholding is opt-in.
+  // `opts.declareServices === false` withholds both Sections for THIS push.
   const declare = opts.declareServices !== false
-  // ⭐ Provisioned per backend — a service is bought on the backend that sold it,
-  // so which rows exist is a question about ONE backend. They were `site.yml::$services`
-  // / `$secrets`, a single copy that could only ever describe one.
+  // ⭐ The rows are per backend — a service is bought on the backend that sold it —
+  // and the request is one, in `site.yml`.
   const provisioned = opts.backend ? readBackendState(siteRoot, opts.backend) : null
-  const services = declare ? servicesNested(provisioned) : undefined
+  const services = declare ? requestedServices(siteYml, provisioned, opts.serviceRows) : undefined
   if (services) doc.services = services
   const secrets = declare ? secretsNested(provisioned) : undefined
   if (secrets) doc.secrets = secrets

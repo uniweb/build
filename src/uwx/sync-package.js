@@ -215,6 +215,8 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
  * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter
+ * @param {object[]} [opts.serviceRows]   - the `services` Section to send, as the
+ *                                          caller decided it (site.js `requestedServices`)
  * @param {Object<string,string>} [opts.itemUuids] - unit path → backend `$uuid`,
  *        stamped onto the site-content document so the backend matches our items
  *        instead of re-minting them (which deletes and recreates every page and
@@ -375,10 +377,11 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),
         ...(Array.isArray(opts.pageFields) ? { pageFields: opts.pageFields } : {}),
         ...(Array.isArray(opts.settingsFields) ? { settingsFields: opts.settingsFields } : {}),
-        // Withhold the `$services`/`$secrets` Sections when the caller has
-        // determined the file is not asking for anything new by them. Passed
-        // through rather than decided here: the last-agreed state is project
-        // memory the CLI owns. See site.js at `declareServices`.
+        // The `services` Section as the caller decided it — the site's rows with the
+        // owner's changed asks applied — or the Sections withheld. Passed through
+        // rather than decided here: the site's rows and the last agreement are what
+        // the CLI reads. See site.js at `requestedServices`.
+        ...(Array.isArray(opts.serviceRows) ? { serviceRows: opts.serviceRows } : {}),
         ...(opts.declareServices === false ? { declareServices: false } : {})
       })
     : null

@@ -113,6 +113,15 @@ export {
   refForAssetId,
   normalizeOrigin as normalizeBackendOrigin,
 } from './sync-store.js'
+// A site's services request — `site.yml::services`, applied over the site's own rows.
+// Spec: kb/framework/reference/site-services-request.md
+export {
+  readServicesRequest,
+  takeServices,
+  mergeServiceRows,
+  reconcileServices,
+  recordAfter,
+} from './services-request.js'
 export {
   diffSiteUnits,
   describeSiteDiff,

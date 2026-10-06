@@ -2437,6 +2437,48 @@ async function collectLayouts(layoutDir, siteRoot) {
  * @param {boolean} [options.strict=false] - Fail on content problems that would ship broken output rather than warning about them. A production build passes true; dev leaves it false, because a folder an author just created is empty for a moment and that is not an error.
  * @returns {Promise<Object>} Site content object with assets manifest
  */
+/**
+ * `site.yml` as a payload carries it — without what is authoring or publish intent,
+ * and without the backend-scoped `$` keys. One rule for every path that ships a
+ * site's config.
+ *
+ * `publishLanguages` is authoring/publish intent — it has no runtime consumer and
+ * never ships in a payload (the visitor runtime is list-unaware; the sync lane reads
+ * site.yml directly, not this output). The `query:` shorthand ships as
+ * `config.fetch`, desugared by the caller; carried raw it would sit beside
+ * `config.queries`, the declarations, and read as one.
+ *
+ * ⛔ `services` is the owner's REQUEST to their host (`uwx/services-request.js`), and
+ * here it would land at `config.services` — the HOST tier, where a present block
+ * declines every service it does not name. A request is never an answer, so it never
+ * ships. *(Until 2026-10-06 it did, and doubled as an undocumented way to simulate a
+ * host's offer locally.)*
+ *
+ * ⛔ `$`-prefixed keys were the project's BACKEND-SCOPED state — `$uuid`, `$org`,
+ * `$backend`, `$services`, `$secrets` — until they moved to `sync.json` (2026-09-20),
+ * and a `site.yml` written before then can still carry them. This payload is a
+ * PUBLISHED artifact that a visitor can fetch. They have no runtime reader (nothing in
+ * core, runtime or kit reads a `config.$*` key), so this removes noise for four of
+ * them and a real disclosure for the fifth: `$secrets` carries no values, but its
+ * entries name every secret the site has, and an inventory of credential names is not
+ * something an `export` should publish.
+ *
+ * @param {object} siteConfig
+ * @returns {object}
+ */
+function payloadSiteConfig(siteConfig) {
+  const {
+    publishLanguages: _publishLanguages,
+    query: _query,
+    services: _services,
+    ...runtimeSiteConfig
+  } = siteConfig
+  for (const key of Object.keys(runtimeSiteConfig)) {
+    if (key.startsWith('$')) delete runtimeSiteConfig[key]
+  }
+  return runtimeSiteConfig
+}
+
 export async function collectSiteContent(sitePath, options = {}) {
   const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/', strict = false } = options
 
@@ -2547,7 +2589,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Check if pages directory exists
   if (!existsSync(pagesPath)) {
     return {
-      config: siteConfig,
+      config: payloadSiteConfig(siteConfig),
       theme: {
         ...processedTheme,
         css: themeCSS,
@@ -2725,23 +2767,7 @@ export async function collectSiteContent(sitePath, options = {}) {
     if (page.slug) delete page.slug
   }
 
-  // `publishLanguages` is authoring/publish intent — it has no runtime
-  // consumer and never ships in a payload (the visitor runtime is
-  // list-unaware; the sync lane reads site.yml directly, not this output).
-  // The `query:` shorthand ships as `config.fetch`, desugared below; carried raw
-  // it would sit beside `config.queries`, the declarations, and read as one.
-  const { publishLanguages: _publishLanguages, query: _query, ...runtimeSiteConfig } = siteConfig
-  // ⛔ `$`-prefixed keys were the project's BACKEND-SCOPED state — `$uuid`, `$org`,
-  // `$backend`, `$services`, `$secrets` — until they moved to `sync.json`
-  // (2026-09-20), and a `site.yml` written before then can still carry them. This
-  // payload is a PUBLISHED artifact that a visitor can fetch. They have no runtime reader (nothing in core, runtime
-  // or kit reads a `config.$*` key), so this removes noise for four of them and a
-  // real disclosure for the fifth: `$secrets` carries no values, but its entries
-  // name every secret the site has, and an inventory of credential names is not
-  // something an `export` should publish.
-  for (const key of Object.keys(runtimeSiteConfig)) {
-    if (key.startsWith('$')) delete runtimeSiteConfig[key]
-  }
+  const runtimeSiteConfig = payloadSiteConfig(siteConfig)
 
   // ⛔ **A BUILD does not ship a site whose config failed to parse.**
   // `strict` is already this codebase's word for it — `build-site-data.js` sets

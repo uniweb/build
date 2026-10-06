@@ -36,6 +36,7 @@ import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
+import { servicesRequestFromRows } from './services-request.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -309,30 +310,24 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
     : []
   if (extensions.length > 0) siteChanges.extensions = extensions
 
-  // services[] / secrets[] → sync.json::backends.<origin>.{services,secrets}.
+  // services[] → site.yml::services, and the same rows → sync.json as the record.
   //
-  // ⭐ The `$` prefix, and not the bare name, for the reason spelled out in
-  // `uwx/site.js`: `site.yml::services` already means "pretend a host offers these"
-  // on the bundle lane, and one key cannot mean two things.
+  // ⭐ `site.yml` TAKES WHAT WAS DECIDED [Diego, 2026-10-06: "pull writes it"]. The
+  // stored list is the site's settled request, so the author's map becomes it, whole: a
+  // row is `true`, `false`, or its settings (`servicesRequestFromRows`). An empty list
+  // removes the key; a document with no `services` Section writes nothing.
   //
-  // ⭐ `$id` is DROPPED — it is derived (a service's `name`; a secret's
-  // `service:name` pair), so writing it back would put a redundant handle in the
-  // author's file and invite them to edit the one field that must not drift from
-  // the fields it is derived from. Same call as `extensions` above.
-  //
-  // ⛔ Everything else rides VERBATIM, `config` included: it is opaque, per-service
-  // and will grow, so projecting a known subset would quietly drop whatever the
-  // service gained since this line was written — and the next push would then send
-  // the truncated version back as authoritative.
-  //
-  // ⚠️ An EMPTY section is written as an empty list, not skipped. `[]` is a real
-  // state — "this site has no service rows" — and it is the state a `pull` must be
-  // able to deliver after the last one was removed. Skipping would leave a stale
-  // `$services` on disk that the next push would resurrect.
-  // ⭐ To `sync.json`, under the backend that provisioned them — not `site.yml`.
-  // A service is bought on one backend, so its rows describe that backend alone.
-  // ⛔ Needs a backend: with none there is nowhere coherent to file them, and
-  // writing them to a shared place is exactly the single-copy bug this removed.
+  // ⭐ The record goes to `sync.json`, under this backend: the rows as the site holds
+  // them — the last state both sides agreed on, which push and publish compare the file
+  // against (`reconcileServices`). `$id` is dropped, being derived; everything else rides
+  // VERBATIM, `config` included — it is opaque, per-service and will grow, and the next
+  // push sends the stored rows as its base. `secrets` likewise: an inventory of names
+  // whose values are set in the app. `[]` is written as `[]`: "the site holds no rows" is
+  // a state a pull must be able to deliver.
+  // ⛔ The record needs a backend: with none there is nowhere coherent to file it.
+  if (Array.isArray(document?.services)) {
+    siteChanges.services = servicesRequestFromRows(document.services)
+  }
   if (backend) {
     const provisioned = {}
     for (const section of ['services', 'secrets']) {

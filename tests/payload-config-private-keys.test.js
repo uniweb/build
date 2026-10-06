@@ -1,10 +1,10 @@
 /**
  * `$`-prefixed site.yml keys must not reach the published payload.
  *
- * `config` on the bundle lane is site.yml spread whole, which is what makes a
- * `services:` block a working local stand-in for a host's offer. The same spread
- * also carried the project's BACKEND-SCOPED state — `$uuid`, `$org`, `$backend`,
- * and now `$services` / `$secrets` — into an artifact any visitor can fetch.
+ * `config` on the bundle lane is site.yml spread whole. That spread carried the
+ * project's BACKEND-SCOPED state — `$uuid`, `$org`, `$backend`, `$services` /
+ * `$secrets` — into an artifact any visitor can fetch; and since 2026-10-06 it must
+ * not carry `services:` either, the owner's request to their host.
  *
  * For four of those it is noise with no reader (nothing in core, runtime or kit
  * reads a `config.$*` key). For `$secrets` it is a disclosure: the entries carry
@@ -53,18 +53,43 @@ describe('collectSiteContent — $-prefixed keys stay out of the payload', () =>
     expect(JSON.stringify(config)).not.toContain('stripe_key')
   })
 
-  it('leaves ordinary keys alone — including `services:`, the host stand-in', async () => {
-    // ⚖️ `services:` (no `$`) is a DIFFERENT key with a different job: it lands at
-    // `config.services`, the HOST tier, so a developer can exercise a host's offer
-    // with no backend. Stripping `$` keys must not touch it.
-    const dir = await makeSite(
-      'name: Test\nservices:\n  submit:\n    endpoint: /forms\nsearch: false\n'
-    )
+  it('⛔ drops `services:` — a request to the host is never the host\'s answer', async () => {
+    // At `config.services` it would be the HOST tier, where a present block declines
+    // every service it does not name: `search: true` asked of a host would switch this
+    // static site's own search off. Until 2026-10-06 it shipped, and doubled as an
+    // undocumented way to simulate a host's offer.
+    const dir = await makeSite('name: Test\nservices:\n  search: true\n  submit: false\n')
 
     const { config } = await collectSiteContent(dir)
 
-    expect(config.services).toEqual({ submit: { endpoint: '/forms' } })
+    expect(config.services).toBeUndefined()
+    expect(config.name).toBe('Test')
+  })
+
+  it('leaves ordinary keys alone — the site\'s own service keys included', async () => {
+    const dir = await makeSite('name: Test\nsubmit:\n  endpoint: /forms\nsearch: false\n')
+
+    const { config } = await collectSiteContent(dir)
+
+    expect(config.submit).toEqual({ endpoint: '/forms' })
     expect(config.search).toBe(false)
+    expect(config.name).toBe('Test')
+  })
+
+  it('strips the same keys when the site has no pages directory', async () => {
+    // The early return for a site with no `pages/` handed `site.yml` over unstripped
+    // until 2026-10-06 — `$` keys, `publishLanguages` and the request with it.
+    siteDir = await mkdtemp(join(tmpdir(), 'uniweb-private-keys-'))
+    await writeFile(
+      join(siteDir, 'site.yml'),
+      "name: Test\nservices:\n  search: true\npublishLanguages: [en]\n$org: acme\n"
+    )
+
+    const { config } = await collectSiteContent(siteDir)
+
+    expect(config.services).toBeUndefined()
+    expect(config.publishLanguages).toBeUndefined()
+    expect(config.$org).toBeUndefined()
     expect(config.name).toBe('Test')
   })
 })

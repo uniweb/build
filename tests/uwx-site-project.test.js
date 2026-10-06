@@ -1037,68 +1037,52 @@ describe('info.favicon / info.assets (A5)', () => {
   })
 })
 
-// ⛔ `info.app` is RETIRED. It named a separate entity a host bound to the site;
-// that entity is gone and NOTHING replaces it. (uwx-format.md → info.app.)
-//
-// These two cases used to assert the round trip; they now assert its absence, in
-// BOTH directions, because reintroducing it fails differently on each side:
-//
-//   - producing it again is LOUD but late — a host refuses a key it does not
-//     declare, so every push of every site fails, not just this one;
-//   - projecting it again is SILENT — a stray key reappears in the author's
-//     site.yml, and the next push is the loud half.
-describe('$services / $secrets — the service records a site is provisioned with', () => {
-  // ⭐ Provisioned rows live in `sync.json` under the backend that sold them
-  // (2026-09-20), not in site.yml. The fixtures stay readable YAML: this routes the
-  // `$services` / `$secrets` keys to the store and leaves the author's keys behind,
-  // so each case below still reads as the file a person would picture.
+describe('services — the request in site.yml, the record in sync.json', () => {
+  // ⭐ `site.yml::services` is the owner's request — a map by service name — and
+  // `sync.json` holds this backend's record of the site's rows, which a pull writes and
+  // the request is applied over (kb/framework/reference/site-services-request.md).
   const ORIGIN = 'http://backend.test'
-  const write = (yml) => {
+  const write = (yml, record = null) => {
     const src = join(dir, 'src')
     mkdirSync(src, { recursive: true })
-    const all = yaml.load(yml) || {}
-    const { $services, $secrets, ...authored } = all
-    writeFileSync(join(src, 'site.yml'), yaml.dump(authored))
-    const provisioned = {
-      ...($services !== undefined ? { services: $services } : {}),
-      ...($secrets !== undefined ? { secrets: $secrets } : {})
-    }
-    if (Object.keys(provisioned).length) {
-      writeFileSync(
-        join(src, 'sync.json'),
-        JSON.stringify({ version: 1, backends: { [ORIGIN]: provisioned } })
-      )
+    writeFileSync(join(src, 'site.yml'), yml)
+    if (record) {
+      writeFileSync(join(src, 'sync.json'), JSON.stringify({ version: 1, backends: { [ORIGIN]: record } }))
     }
     return src
   }
+  const BASE = "name: S\nfoundation: '@a/base'\n"
 
-  it('omits both sections entirely when the file declares neither', async () => {
-    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n"), { backend: ORIGIN })
-    // ⛔ Not `[]`. The section is REPLACED by what we send, so an empty list asks the
-    // backend to drop every stored config row — which is what an ordinary push from a
-    // project that has never pulled would then do to a service configured in the app.
+  it('omits both Sections when the file asks nothing and the record holds nothing', async () => {
+    const document = await siteProjectToDocument(write(BASE), { backend: ORIGIN })
+    // ⛔ Not `[]`. The Section is REPLACED by what we send, so an empty list asks the
+    // backend to drop every stored row.
     expect('services' in document).toBe(false)
     expect('secrets' in document).toBe(false)
   })
 
-  it('an explicit empty list IS sent — clearing is available, just never implicit', async () => {
-    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n$services: []\n"), { backend: ORIGIN })
-    expect(document.services).toEqual([])
+  it('a record alone sends no services — a file that asks nothing has no opinion', async () => {
+    const document = await siteProjectToDocument(write(BASE, { services: [{ name: 'api' }] }), {
+      backend: ORIGIN
+    })
+    expect('services' in document).toBe(false)
   })
 
-  it('forwards a service verbatim, treating `config` as opaque', async () => {
-    const document = await siteProjectToDocument(write(
-        "name: S\nfoundation: '@a/base'\n" +
-          '$services:\n' +
-          '  - name: api\n' +
-          '    config:\n' +
-          '      grade: small\n' +
-          '      auth:\n' +
-          '        providers: [google]\n' +
-          '      billing:\n' +
-          '        currency: CAD\n' +
-          '      somethingAddedLater: 7\n'
-      ), { backend: ORIGIN })
+  it('forwards a service\'s settings verbatim, treating them as opaque', async () => {
+    const document = await siteProjectToDocument(
+      write(
+        BASE +
+          'services:\n' +
+          '  api:\n' +
+          '    grade: small\n' +
+          '    auth:\n' +
+          '      providers: [google]\n' +
+          '    billing:\n' +
+          '      currency: CAD\n' +
+          '    somethingAddedLater: 7\n'
+      ),
+      { backend: ORIGIN }
+    )
     expect(document.services).toEqual([
       {
         $id: 'api',
@@ -1107,8 +1091,7 @@ describe('$services / $secrets — the service records a site is provisioned wit
           grade: 'small',
           auth: { providers: ['google'] },
           billing: { currency: 'CAD' },
-          // The point of the passthrough: a key this emitter has never heard of
-          // survives. An allowlist would delete it from the store on every push.
+          // The point of the passthrough: a key this emitter has never heard of survives.
           somethingAddedLater: 7
         }
       }
@@ -1116,21 +1099,20 @@ describe('$services / $secrets — the service records a site is provisioned wit
   })
 
   it('keys a secret by (service, name), and by the bare name when site-level', async () => {
-    const document = await siteProjectToDocument(write(
-        "name: S\nfoundation: '@a/base'\n" +
-          '$secrets:\n' +
-          '  - service: api\n' +
-          '    name: stripe_key\n' +
-          "    value: '#ref'\n" +
-          '    consumer: leaseholder\n' +
-          '  - name: site_wide\n'
-      ), { backend: ORIGIN })
+    const document = await siteProjectToDocument(
+      write(BASE, {
+        secrets: [
+          { service: 'api', name: 'stripe_key', value: '#ref', consumer: 'leaseholder' },
+          { name: 'site_wide' }
+        ]
+      }),
+      { backend: ORIGIN }
+    )
     expect(document.secrets).toEqual([
       {
         $id: 'api:stripe_key',
         service: 'api',
         name: 'stripe_key',
-        // The marker means "a secret is set"; pushing it back means "leave it alone".
         value: '#ref',
         consumer: 'leaseholder'
       },
@@ -1138,50 +1120,81 @@ describe('$services / $secrets — the service records a site is provisioned wit
     ])
   })
 
-  it('skips an entry with no name rather than sending an unkeyed record', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\n$services:\n  - config: { grade: small }\n"), { backend: ORIGIN })
-    expect(document.services).toEqual([])
-    expect(warn).toHaveBeenCalled()
-    warn.mockRestore()
+  it('a value it cannot read asks nothing; the rest still goes', async () => {
+    const document = await siteProjectToDocument(write(BASE + "services:\n  search: 'yes'\n  submit: true\n"), {
+      backend: ORIGIN
+    })
+    expect(document.services).toEqual([{ $id: 'submit', name: 'submit' }])
   })
 
-  it('leaves site.yml::services alone — it is the other lane, and the other tier', async () => {
-    // `services:` (no `$`) simulates a HOST offer on the bundle lane, where config is
-    // site.yml spread whole. It must not be mistaken for the site's own records.
-    const document = await siteProjectToDocument(write("name: S\nfoundation: '@a/base'\nservices:\n  submit:\n    endpoint: /forms\n"), { backend: ORIGIN })
-    expect('services' in document).toBe(false)
-    expect(document.info.services).toBeUndefined()
-  })
-
-  it('projects both sections into sync.json for that backend, dropping the derived $id', () => {
+  it('⭐ pull writes the site\'s request into site.yml, and its rows into sync.json', () => {
     const dest = join(dir, 'dest')
     mkdirSync(dest, { recursive: true })
     siteInfoToConfig({
       document: {
         info: { name: 'S', foundation: '@a/base' },
-        services: [{ $id: 'api', name: 'api', config: { grade: 'small' } }],
+        services: [
+          { $id: 'api', name: 'api', config: { grade: 'small' } },
+          { $id: 'search', name: 'search' },
+          { $id: 'submit', name: 'submit', enabled: false },
+          { $id: 'assistant', name: 'assistant', enabled: false, config: { model: 'x' } }
+        ],
         secrets: [{ $id: 'api:k', service: 'api', name: 'k', value: '#ref' }]
       },
       siteRoot: dest,
       backend: ORIGIN
     })
-    // ⭐ In the store, under the backend that provisioned them.
-    const stored = JSON.parse(readFileSync(join(dest, 'sync.json'), 'utf8')).backends[ORIGIN]
-    expect(stored.services).toEqual([{ name: 'api', config: { grade: 'small' } }])
-    expect(stored.secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
-    // ⛔ And NOT in site.yml, which now holds only what an author wrote.
     const yml = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+    expect(yml.services).toEqual({
+      api: { grade: 'small' },
+      search: true,
+      submit: false,
+      // Off, with settings: the switch beside them.
+      assistant: { enabled: false, model: 'x' }
+    })
+    const stored = JSON.parse(readFileSync(join(dest, 'sync.json'), 'utf8')).backends[ORIGIN]
+    expect(stored.services).toEqual([
+      { name: 'api', config: { grade: 'small' } },
+      { name: 'search' },
+      { name: 'submit', enabled: false },
+      { name: 'assistant', enabled: false, config: { model: 'x' } }
+    ])
+    expect(stored.secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
     expect(yml.$services).toBeUndefined()
     expect(yml.$secrets).toBeUndefined()
   })
 
+  it('pull replaces the map whole — a service the site does not list leaves it', () => {
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    writeFileSync(join(dest, 'site.yml'), BASE + 'services:\n  search: true\n  tracking: true\n')
+    siteInfoToConfig({
+      document: { info: { name: 'S', foundation: '@a/base' }, services: [{ $id: 'search', name: 'search' }] },
+      siteRoot: dest,
+      backend: ORIGIN
+    })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).services).toEqual({ search: true })
+  })
+
+  it('an empty list removes the key; a document with no Section writes nothing', () => {
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    writeFileSync(join(dest, 'site.yml'), BASE + 'services:\n  search: true\n')
+    const read = () => yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+
+    siteInfoToConfig({ document: { info: { name: 'S', foundation: '@a/base' } }, siteRoot: dest, backend: ORIGIN })
+    expect(read().services).toEqual({ search: true })
+
+    siteInfoToConfig({ document: { info: { name: 'S', foundation: '@a/base' }, services: [] }, siteRoot: dest, backend: ORIGIN })
+    expect('services' in read()).toBe(false)
+  })
+
   it('round-trips produce → project → produce unchanged', async () => {
-    const src = write(
-      "name: S\nfoundation: '@a/base'\n" +
-        '$services:\n  - name: api\n    config: { grade: small }\n' +
-        "$secrets:\n  - service: api\n    name: k\n    value: '#ref'\n"
-    )
+    const src = write(BASE + 'services:\n  api:\n    grade: small\n  search: false\n', {
+      site: { uuid: 'SITE-1' },
+      services: [{ name: 'api', config: { grade: 'small', auth: { providers: ['google'] } } }],
+      secrets: [{ service: 'api', name: 'k', value: '#ref' }]
+    })
     const first = await siteProjectToDocument(src, { backend: ORIGIN })
     const dest = join(dir, 'dest2')
     mkdirSync(dest, { recursive: true })
@@ -1192,6 +1205,16 @@ describe('$services / $secrets — the service records a site is provisioned wit
   })
 })
 
+// ⛔ `info.app` is RETIRED. It named a separate entity a host bound to the site;
+// that entity is gone and NOTHING replaces it. (uwx-format.md → info.app.)
+//
+// These two cases used to assert the round trip; they now assert its absence, in
+// BOTH directions, because reintroducing it fails differently on each side:
+//
+//   - producing it again is LOUD but late — a host refuses a key it does not
+//     declare, so every push of every site fails, not just this one;
+//   - projecting it again is SILENT — a stray key reappears in the author's
+//     site.yml, and the next push is the loud half.
 describe('info.app — retired, and must not come back', () => {
   it('does not emit info.app even when site.yml still carries an app: key', async () => {
     const src = join(dir, 'src')

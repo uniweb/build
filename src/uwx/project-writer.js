@@ -268,12 +268,16 @@ const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArr
  * ⛔ The declaration keys (`query` / `fetch` / `data`) are written WHOLE, never
  * merged: a declaration is one value, and merging an incoming `fetch:` into the
  * local one kept whatever key the remote no longer has — a stale `limit` survived
- * every pull.
+ * every pull. So is `services`: it is the site's settled request, and a service
+ * merged in from the old map would be an ask nobody made.
  * @returns {'updated'|'unchanged'}
  */
 export function writeSiteConfig(siteRoot, config) {
-  return mergeYamlConfig(join(siteRoot, 'site.yml'), config, { replace: DECLARATION_KEYS })
+  return mergeYamlConfig(join(siteRoot, 'site.yml'), config, { replace: SITE_CONFIG_WHOLE })
 }
+
+/** `site.yml` keys a writer replaces whole rather than merging into. */
+const SITE_CONFIG_WHOLE = Object.freeze([...DECLARATION_KEYS, 'services'])
 
 /**
  * Write a YAML object to a file (full dump, idempotent) — for machine-owned
