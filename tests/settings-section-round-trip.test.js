@@ -51,7 +51,7 @@ function fullSite() {
       'languages: [en, fr]', 'defaultLanguage: en', 'publishLanguages: [en]',
       'base: /x/', 'seo: { image: /og.png }', 'keywords: [a, b]',
       'fetcher: { transports: {} }', 'build: { prerender: true }',
-      'search: { enabled: true }', 'submit: /s', 'assistant: /a', 'tracking: /t',
+      'services: { search: { include: { lists: false } }, submit: /s, assistant: /a, tracking: /t }',
       'agents: false', 'paths: { pages: ./pages }', 'query: articles',
       'layout: { name: DocsLayout, hide: [right] }',
       'placeholders: { product: Uniweb }',

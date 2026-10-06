@@ -116,6 +116,7 @@ export {
 // A site's services request — `site.yml::services`, applied over the site's own rows.
 // Spec: kb/framework/reference/site-services-request.md
 export {
+  RUNTIME_KEYS,
   readServicesRequest,
   takeServices,
   mergeServiceRows,

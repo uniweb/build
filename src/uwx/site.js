@@ -80,7 +80,12 @@ import { resolveLocaleList } from '../i18n/locales.js'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
-import { readServicesRequest, mergeServiceRows } from './services-request.js'
+import {
+  readServicesRequest,
+  mergeServiceRows,
+  runtimeServiceConfig,
+  refuseRetiredServiceKeys
+} from './services-request.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
@@ -101,46 +106,6 @@ function scalarString(value) {
   if (typeof value === 'string') return value
   if (typeof value === 'number') return String(value)
   return undefined
-}
-
-// Credential-shaped keys, mirroring the set the delivery edge strips on the
-// reading side. Deliberately the SAME list rather than a stricter one, so the
-// two guards are visibly twins and a key added to one is obviously owed to the
-// other.
-const CREDENTIAL_KEYS = ['apiKey', 'api_key', 'key', 'token', 'secret']
-
-/**
- * Drop credential-shaped keys out of an authored service block.
- *
- * An authored block crosses into backend storage here and is served from there
- * in a published payload — which is world-readable. So a credential in
- * `site.yml` is not merely untidy, it is disclosed. The host's secret store is
- * the only right home, resolved at request time.
- *
- * Warns rather than throwing: the fix belongs to the author, a failed push
- * helps nobody, and the block is still useful without the key. Returns the
- * value untouched when there is nothing to strip, so `setIf`'s absent-vs-empty
- * behaviour is unchanged — a block that carried ONLY a credential arrives as
- * `{}` rather than vanishing, keeping the mistake visible where the author
- * looks for it.
- *
- * @param {*} block - the authored value, any shape
- * @param {string} label - the site.yml key, for the warning
- * @returns {*} the block, minus anything credential-shaped
- */
-function stripCredentials(block, label) {
-  if (!block || typeof block !== 'object' || Array.isArray(block)) return block
-  const found = CREDENTIAL_KEYS.filter(key => key in block)
-  if (found.length === 0) return block
-
-  console.warn(
-    `uwx/site: dropped ${found.join(', ')} from \`${label}:\` — authored config is published ` +
-      'world-readable, so a credential belongs in the host secret store, never in site.yml.'
-  )
-
-  const cleaned = { ...block }
-  for (const key of found) delete cleaned[key]
-  return cleaned
 }
 
 // page_sections and layout_sections share this content shape.
@@ -1352,19 +1317,18 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // carries the translation collector with it.
   setIf(settings, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
 
-  // Authored service declarations. ⛔ These must NOT be filed with the `services`
-  // Section. Here they are the SITE tier, `config.<name>` — the address
-  // `@uniweb/core`'s `resolveService` uses wherever the host offers none. That
-  // Section is a provisioning request whose rows reach neither tier, so filed there
-  // a site's own search endpoint would reach no page, and on a host whose services
-  // block does not name search the site would lose search with no error and no
-  // message (`core/src/services.js`). *(Until 2026-10-06 this called that Section
-  // "the HOST tier"; it is a request about what the host provides.)*
-  setIf(settings, 'search', siteYml.search)
-  setIf(settings, 'submit', siteYml.submit)
-  // ⛔ Credentials are stripped, not trusted — this block is published world-readable.
-  setIf(settings, 'assistant', stripCredentials(siteYml.assistant, 'assistant'))
-  setIf(settings, 'tracking', stripCredentials(siteYml.tracking, 'tracking'))
+  // ⭐ EACH SERVICE'S SITE TIER, from its entry in `site.yml::services` — the switch,
+  // an address the site brings, and its options (`runtimeServiceConfig`). It lands at
+  // `config.<name>`, which `@uniweb/core`'s `resolveService` reads for whatever the
+  // host does not offer, and where a host reads what it reads of the site's own (the
+  // assistant's `system` persona). Credentials never reach it. ⛔ *Until 2026-10-06
+  // these were the top-level `search:` / `submit:` / `assistant:` / `tracking:` keys,
+  // now refused.* The request to the host rides the `services` Section
+  // (`requestedServices`); `api`'s address is the host's, so it has no slot here.
+  setIf(settings, 'search', runtimeServiceConfig('search', siteYml.services?.search))
+  setIf(settings, 'submit', runtimeServiceConfig('submit', siteYml.services?.submit))
+  setIf(settings, 'assistant', runtimeServiceConfig('assistant', siteYml.services?.assistant))
+  setIf(settings, 'tracking', runtimeServiceConfig('tracking', siteYml.services?.tracking))
 
   // Projections opt-out + route exclusions. Carried because the app is a second
   // PUBLISHER of projections and derives them from stored content: without this it
@@ -1426,6 +1390,7 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
 export async function siteProjectToDocument(siteRoot, opts = {}) {
   refuseOrgOption(opts, 'uwx/site')
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
+  refuseRetiredServiceKeys(siteYml)
   const sourceLocale = opts.sourceLocale || resolveDefaultLocale(siteYml)
   if (!siteYml.name) {
     throw new Error('uwx/site: site.yml::name is required')
@@ -1514,68 +1479,32 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // and default keywords exist for any share/SSR/crawler. `seo` rides verbatim
   // as authored config (round-trips like favicon); `keywords` is a localized
   // list (like page keywords).
-  // `submit` — where this site's forms send submissions. Same family as
-  // `fetcher`/`search`: the site declares it, the runtime reads it, and it
-  // round-trips verbatim. It has to be listed HERE because this lane is an
-  // explicit allowlist while the bundle lane spreads all of site.yml — without
-  // the line a `submit:` block works on a static host and vanishes silently on
-  // the synced lane, which is the worst shape a config bug can take.
   // `agents` — the projections opt-out + route exclusions. Carried because the
   // app is a second PUBLISHER of projections and derives them from stored
   // content: without this block it cannot see `agents: false` or
   // `agents.exclude`, so an author's opt-out is silently reversed and an
   // excluded branch becomes both discoverable AND summarized by the index.
   // (The CLI lane reads site.yml directly and honors it either way.)
-  // `assistant` — the site's own declaration for an AI assistant: where it
-  // lives (`endpoint`, read by kit's `resolveService`) plus authored settings a
-  // host reads (`system` persona, model hints). Same family as
-  // `search`/`submit`, and here for the reason spelled out above them — the
-  // bundle lane spreads all of site.yml while this one is an allowlist, so
-  // without this line the block works on a static host and vanishes silently
-  // on the synced lane.
   //
-  // ⚠️ That is not hypothetical: this replaces `intelligence.yml`, a SEPARATE
-  // file, which needed a bespoke line in each lane and got one in only the
-  // bundle lane — so an authored persona never reached a hosted site at all.
-  // A key inside site.yml cannot repeat that, because only this lane needs a
-  // line.
+  // The services — `site.yml::services` — ride the `settings` Section (each one's
+  // site tier) and the `services` Section (the request): see `settingsNested` and
+  // `requestedServices`. ⚠️ The site tier is carried by explicit name because this
+  // lane is an allowlist while the bundle lane spreads site.yml, and a block that
+  // works on a static host and vanishes on the synced lane is the worst shape a
+  // config bug can take — `intelligence.yml`, a separate file the assistant's
+  // persona once lived in, reached only the bundle lane, so a persona never reached
+  // a hosted site. ⛔ A credential is dropped from both (`runtimeServiceConfig`,
+  // `readServicesRequest`) — but only as a KEYED FIELD: one embedded in an endpoint
+  // URL (`https://collector/e?key=…`) is invisible there and is disclosed. The host's
+  // secret store is the only right home.
   //
-  // ⛔ Credentials are stripped, not trusted — see `stripCredentials`.
-  // `tracking` — where this site's usage events go (`endpoint`, read by the
-  // runtime through `resolveService`, plus `consent:`). Same family as
-  // `search`/`submit`/`assistant` and here for the same reason: the bundle lane
-  // spreads all of site.yml while this one is an allowlist, so without this line
-  // an authored `tracking:` works on a static host and vanishes silently on the
-  // synced lane.
-  //
-  // ⛔ Credentials stripped like `assistant`. A collector that wants a write key
-  // is a real shape, and this block is published world-readable — but note the
-  // strip only reaches a KEYED FIELD: a key embedded in the endpoint URL itself
-  // (`https://collector/e?key=…`) is invisible here and is disclosed. The host's
-  // secret store is the only right home either way.
-
-  // ⛔ `api` IS DELIBERATELY NOT HERE, and this note exists because every comment
-  // above it argues the opposite — three services are on this allowlist precisely so
-  // an authored block cannot work on a static host and vanish on the synced one.
-  // Without this paragraph the next reader adds the missing fourth line and calls it
-  // a bug fix.
-  //
-  // ⭐ `api` is the one service a site does not AUTHOR. It is a real backend that is
-  // provisioned, so its address is the host's to supply — it arrives as
-  // `config.services.api` and `@uniweb/api` reads it there (`resolveBase`). An
-  // authored `api:` is the SITE tier: it yields to a host that offers the service,
-  // and is the answer wherever one does not.
-  //
-  // ⇒ Carrying it would turn a local-dev address into a production one the moment
-  // someone pushed: the host would store `settings.api` and serve it back as
-  // `config.api`, and a site with no `api` service of its own would draw sign-in
-  // against an address nobody answers — where the absence would have drawn
-  // nothing. The vanish on this lane is the correct behaviour, not the bug the
-  // comments above describe — there, a dropped block leaves a site with NO
-  // endpoint; here it leaves the site with the RIGHT answer.
-  //
-  // Asking for the `api` service is `site.yml::services` → the `services` Section (see
-  // requestedServices); its address still comes from the host.
+  // ⛔ `api` HAS NO SITE-TIER SLOT on this lane, deliberately. It is a real backend that
+  // is provisioned, so its address is the host's to supply — `config.services.api`,
+  // read by `@uniweb/api` (`resolveBase`). A carried address would turn a local-dev one
+  // into a production one the moment someone pushed, and a site with no `api` service
+  // of its own would draw sign-in against an address nobody answers. Asking for the
+  // service is `services: { api: … }` → the `services` Section. In `uniweb dev`,
+  // `$devApi` supplies the address of the local mock (`dev/api-mount.js`).
   // ⛔ THE CONFIGURATION KEYS ARE NOT HERE — they ride the `settings` Section
   // (`settingsNested` above). `info` is the BRIEF: what a card or a select dropdown
   // renders, plus what a listing can filter on. Eighteen keys moved off it on

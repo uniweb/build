@@ -41,6 +41,7 @@ import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig
 import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
+import { runtimeServicesConfig, refuseRetiredServiceKeys } from '../uwx/services-request.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -2448,11 +2449,13 @@ async function collectLayouts(layoutDir, siteRoot) {
  * `config.fetch`, desugared by the caller; carried raw it would sit beside
  * `config.queries`, the declarations, and read as one.
  *
- * ⛔ `services` is the owner's REQUEST to their host (`uwx/services-request.js`), and
- * here it would land at `config.services` — the HOST tier, where a present block
- * declines every service it does not name. A request is never an answer, so it never
- * ships. *(Until 2026-10-06 it did, and doubled as an undocumented way to simulate a
- * host's offer locally.)*
+ * ⭐ `services` ships as each service's SITE TIER, `config.<name>`
+ * (`runtimeServicesConfig`), and never whole: at `config.services` it would be the HOST
+ * tier, where a present block declines every service it does not name, and its
+ * request half is not an answer. *(Until 2026-10-06 the whole block shipped there, and
+ * doubled as an undocumented way to simulate a host's offer locally; the site tier was
+ * the top-level `search:` / `submit:` / `assistant:` / `tracking:` / `api:` keys,
+ * refused now.)*
  *
  * ⛔ `$`-prefixed keys were the project's BACKEND-SCOPED state — `$uuid`, `$org`,
  * `$backend`, `$services`, `$secrets` — until they moved to `sync.json` (2026-09-20),
@@ -2470,11 +2473,21 @@ function payloadSiteConfig(siteConfig) {
   const {
     publishLanguages: _publishLanguages,
     query: _query,
-    services: _services,
+    services,
     ...runtimeSiteConfig
   } = siteConfig
   for (const key of Object.keys(runtimeSiteConfig)) {
     if (key.startsWith('$')) delete runtimeSiteConfig[key]
+  }
+  // ⭐ Each service's SITE TIER, from its entry: `config.<name>` — the switch, an
+  // address the site brings, its options — never the request, and never a credential.
+  const warn = (m) => console.warn(`[site-content] ${m}`)
+  for (const [name, value] of Object.entries(runtimeServicesConfig(services, { warn }))) {
+    if (name in runtimeSiteConfig) {
+      warn(`\`services.${name}\` names a site.yml key that is not a service — ignoring it.`)
+      continue
+    }
+    runtimeSiteConfig[name] = value
   }
   return runtimeSiteConfig
 }
@@ -2489,6 +2502,7 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
+  refuseRetiredServiceKeys(siteConfig, configFile)
 
   // Queries are declared in TWO files — `site.yml::queries` and `queries.yml`,
   // the latter winning per key — and resolving them is one question with one

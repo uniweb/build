@@ -600,27 +600,31 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
   // site.yml, so a key that reaches the runtime for free on a static host is
   // dropped in silence here unless it is listed. Both spellings are asserted
   // because the object form is the one that would survive a `typeof === string`
-  // shortcut in either direction.
+  // shortcut in either direction. An address is the site's own form service, so
+  // the request asks the host to leave its own off.
   it.each([
     ['shorthand string', '/forms'],
     ['object form', { endpoint: '/forms' }],
     ['absolute URL', 'https://forms.example.com/intake'],
-  ])('carries site.yml::submit through produce → project (%s)', async (_label, submit) => {
+  ])('carries site.yml::services.submit through produce → project (%s)', async (_label, submit) => {
     const src = join(dir, `src-submit-${_label.replace(/\W/g, '')}`)
     mkdirSync(src, { recursive: true })
     writeFileSync(
       join(src, 'site.yml'),
-      `name: Forms\nfoundation: '@acme/base@2.0.0'\ndefaultLanguage: en\nsubmit: ${JSON.stringify(submit)}\n`
+      `name: Forms\nfoundation: '@acme/base@2.0.0'\ndefaultLanguage: en\nservices:\n  submit: ${JSON.stringify(submit)}\n`
     )
 
     const document = await siteProjectToDocument(src)
     expect(document.settings.submit).toEqual(submit)
+    expect(document.services).toEqual([{ $id: 'submit', name: 'submit', enabled: false }])
 
     const dest = join(dir, `dest-submit-${_label.replace(/\W/g, '')}`)
     mkdirSync(dest, { recursive: true })
     siteInfoToConfig({ document, siteRoot: dest })
 
-    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).submit).toEqual(submit)
+    const written = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+    expect(written.services).toEqual({ submit })
+    expect(written).not.toHaveProperty('submit')
   })
 
   /**
@@ -1120,8 +1124,61 @@ describe('services — the request in site.yml, the record in sync.json', () => 
     ])
   })
 
+  it('⛔ refuses the top-level keys `services:` replaced, saying where each one moves', async () => {
+    await expect(
+      siteProjectToDocument(write(BASE + 'search:\n  include: { lists: false }\n'), { backend: ORIGIN })
+    ).rejects.toThrow(/`search:` is retired — a service lives under `services:`/)
+  })
+
+  it('⭐ a pull moves a project off the retired keys — `services:` written, the old keys gone', () => {
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    writeFileSync(join(dest, 'site.yml'), BASE + 'submit: /s\ntracking:\n  consent: required\n')
+    siteInfoToConfig({
+      document: {
+        info: { name: 'S', foundation: '@a/base' },
+        settings: { submit: '/s', tracking: { consent: 'required' } },
+        services: [
+          { $id: 'submit', name: 'submit', enabled: false },
+          { $id: 'tracking', name: 'tracking' }
+        ]
+      },
+      siteRoot: dest,
+      backend: ORIGIN
+    })
+    const yml = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
+    expect(yml.services).toEqual({ submit: '/s', tracking: { consent: 'required' } })
+    expect(yml).not.toHaveProperty('submit')
+    expect(yml).not.toHaveProperty('tracking')
+  })
+
+  it('⭐ a pull over the author\'s file keeps what no push carries — an api address, a credential', () => {
+    const dest = join(dir, 'dest')
+    mkdirSync(dest, { recursive: true })
+    writeFileSync(
+      join(dest, 'site.yml'),
+      BASE + "services:\n  api: https://own.example\n  assistant:\n    system: Be brief.\n    apiKey: sk-1\n"
+    )
+    siteInfoToConfig({
+      document: {
+        info: { name: 'S', foundation: '@a/base' },
+        settings: { assistant: { system: 'Be brief.' } },
+        services: [
+          { $id: 'api', name: 'api', enabled: false },
+          { $id: 'assistant', name: 'assistant', config: { system: 'Be brief.' } }
+        ]
+      },
+      siteRoot: dest,
+      backend: ORIGIN
+    })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).services).toEqual({
+      api: 'https://own.example',
+      assistant: { system: 'Be brief.', apiKey: 'sk-1' }
+    })
+  })
+
   it('a value it cannot read asks nothing; the rest still goes', async () => {
-    const document = await siteProjectToDocument(write(BASE + "services:\n  search: 'yes'\n  submit: true\n"), {
+    const document = await siteProjectToDocument(write(BASE + 'services:\n  search: 3\n  submit: true\n'), {
       backend: ORIGIN
     })
     expect(document.services).toEqual([{ $id: 'submit', name: 'submit' }])
@@ -1806,7 +1863,7 @@ describe('trackSections: crosses the wire, in both directions, changing case', (
  * would make an authored destination work on a static host and vanish in
  * silence on the synced lane.
  */
-describe('site.yml::tracking across the sync wire', () => {
+describe('site.yml::services.tracking across the sync wire', () => {
   let dir
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'uwx-tracking-'))
@@ -1852,7 +1909,7 @@ describe('site.yml::tracking across the sync wire', () => {
     mkdirSync(src, { recursive: true })
     writeFileSync(
       src + '/site.yml',
-      `name: Tracked\nfoundation: '@acme/base@2.0.0'\ndefaultLanguage: en\ntracking: ${JSON.stringify(tracking)}\n`
+      `name: Tracked\nfoundation: '@acme/base@2.0.0'\ndefaultLanguage: en\nservices:\n  tracking: ${JSON.stringify(tracking)}\n`
     )
 
     const document = await siteProjectToDocument(src)
@@ -1862,7 +1919,20 @@ describe('site.yml::tracking across the sync wire', () => {
     mkdirSync(dest, { recursive: true })
     siteInfoToConfig({ document, siteRoot: dest })
 
-    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).tracking).toEqual(tracking)
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).services).toEqual({ tracking })
+  })
+
+  it('options with no address ride to the site tier, and ask the host for the service', async () => {
+    const src = join(dir, 'src-options')
+    mkdirSync(src, { recursive: true })
+    writeFileSync(
+      src + '/site.yml',
+      "name: Tracked\nfoundation: '@acme/base@2.0.0'\nservices:\n  tracking:\n    consent: required\n    emit: minimal\n"
+    )
+    const document = await siteProjectToDocument(src)
+    expect(document.settings.tracking).toEqual({ consent: 'required', emit: 'minimal' })
+    // Both are the runtime's, so neither is a host setting.
+    expect(document.services).toEqual([{ $id: 'tracking', name: 'tracking' }])
   })
 
   it('omits it entirely when the site declares none', async () => {
@@ -1879,7 +1949,7 @@ describe('site.yml::tracking across the sync wire', () => {
     mkdirSync(src, { recursive: true })
     writeFileSync(
       src + '/site.yml',
-      "name: Keyed\nfoundation: '@acme/base@2.0.0'\ntracking:\n  endpoint: /_t\n  apiKey: super-secret\n"
+      "name: Keyed\nfoundation: '@acme/base@2.0.0'\nservices:\n  tracking:\n    endpoint: /_t\n    apiKey: super-secret\n"
     )
 
     const document = await siteProjectToDocument(src)
@@ -1888,13 +1958,12 @@ describe('site.yml::tracking across the sync wire', () => {
   })
 
   /**
-   * The invariant that makes writing a `services:` block in site.yml a SAFE way
-   * to simulate a host locally (the bundle lane spreads it; this lane must not).
-   * Without this, a site file could impersonate its host on the synced lane —
-   * and `tracking` now resolves through that same host tier, so the property is
-   * load-bearing for two services rather than one.
+   * `services:` never travels WHOLE: it rides as each service's site tier
+   * (`settings.<name>`) and as the request (the `services` Section), never as a
+   * block a host's answer could be mistaken for. *(Until 2026-10-06 this test read
+   * it as a way to simulate a host locally.)*
    */
-  it('does NOT carry site.yml::services across the wire', async () => {
+  it('never carries site.yml::services whole', async () => {
     const src = join(dir, 'src-services')
     mkdirSync(src, { recursive: true })
     writeFileSync(
@@ -1904,6 +1973,8 @@ describe('site.yml::tracking across the sync wire', () => {
 
     const document = await siteProjectToDocument(src)
     expect(document.info).not.toHaveProperty('services')
+    expect(document.settings).not.toHaveProperty('services')
+    expect(document.settings.tracking).toEqual({ endpoint: '/_t' })
   })
 })
 

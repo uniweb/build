@@ -53,25 +53,49 @@ describe('collectSiteContent — $-prefixed keys stay out of the payload', () =>
     expect(JSON.stringify(config)).not.toContain('stripe_key')
   })
 
-  it('⛔ drops `services:` — a request to the host is never the host\'s answer', async () => {
-    // At `config.services` it would be the HOST tier, where a present block declines
-    // every service it does not name: `search: true` asked of a host would switch this
-    // static site's own search off. Until 2026-10-06 it shipped, and doubled as an
-    // undocumented way to simulate a host's offer.
-    const dir = await makeSite('name: Test\nservices:\n  search: true\n  submit: false\n')
+  it('⭐ ships each service as its site tier — never the block whole', async () => {
+    // At `config.services` the block would be the HOST tier, where a present block
+    // declines every service it does not name. Each entry lands at `config.<name>`
+    // instead: `false`, an address, or its options. `true` is the default and says
+    // nothing.
+    const dir = await makeSite(
+      'name: Test\nservices:\n  search:\n    exclude: { routes: [/legal] }\n  submit: /forms\n  tracking: false\n  assistant: true\n'
+    )
 
     const { config } = await collectSiteContent(dir)
 
     expect(config.services).toBeUndefined()
+    expect(config.search).toEqual({ exclude: { routes: ['/legal'] } })
+    expect(config.submit).toBe('/forms')
+    expect(config.tracking).toBe(false)
+    expect(config).not.toHaveProperty('assistant')
     expect(config.name).toBe('Test')
   })
 
-  it('leaves ordinary keys alone — the site\'s own service keys included', async () => {
-    const dir = await makeSite('name: Test\nsubmit:\n  endpoint: /forms\nsearch: false\n')
+  it("⛔ api's settings and every credential stay out of the payload", async () => {
+    const dir = await makeSite(
+      'name: Test\nservices:\n  api:\n    endpoint: https://backend.example.com/_api\n    grade: pro\n' +
+        '  assistant:\n    system: Be helpful.\n    apiKey: sk-live-must-not-ship\n'
+    )
 
     const { config } = await collectSiteContent(dir)
 
-    expect(config.submit).toEqual({ endpoint: '/forms' })
+    expect(config.api).toEqual({ endpoint: 'https://backend.example.com/_api' })
+    expect(config.assistant).toEqual({ system: 'Be helpful.' })
+    expect(JSON.stringify(config)).not.toContain('pro')
+    expect(JSON.stringify(config)).not.toContain('sk-live')
+  })
+
+  it('⛔ refuses the retired top-level service keys, naming the move', async () => {
+    const dir = await makeSite('name: Test\nsubmit: /forms\nsearch: false\n')
+    await expect(collectSiteContent(dir)).rejects.toThrow(/`search:`, `submit:` are retired — a service lives under `services:`/)
+  })
+
+  it('leaves ordinary keys alone', async () => {
+    const dir = await makeSite('name: Test\nbase: /docs/\nservices:\n  search: false\n')
+
+    const { config } = await collectSiteContent(dir)
+
     expect(config.search).toBe(false)
     expect(config.name).toBe('Test')
   })
@@ -82,12 +106,13 @@ describe('collectSiteContent — $-prefixed keys stay out of the payload', () =>
     siteDir = await mkdtemp(join(tmpdir(), 'uniweb-private-keys-'))
     await writeFile(
       join(siteDir, 'site.yml'),
-      "name: Test\nservices:\n  search: true\npublishLanguages: [en]\n$org: acme\n"
+      "name: Test\nservices:\n  search: false\npublishLanguages: [en]\n$org: acme\n"
     )
 
     const { config } = await collectSiteContent(siteDir)
 
     expect(config.services).toBeUndefined()
+    expect(config.search).toBe(false)
     expect(config.publishLanguages).toBeUndefined()
     expect(config.$org).toBeUndefined()
     expect(config.name).toBe('Test')

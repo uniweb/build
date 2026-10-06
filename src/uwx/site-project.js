@@ -36,7 +36,7 @@ import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
-import { servicesRequestFromRows } from './services-request.js'
+import { servicesFromDocument, SETTINGS_SERVICES } from './services-request.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -124,33 +124,14 @@ const INFO_TO_SITE_YML = {
   // Publish intent — verbatim both ways, dangling codes included (they carry
   // the preserved publish intent of a temporarily-undeclared language).
   favicon: 'favicon',
-  // Safe to project back because nothing STAMPS it: `submit` is authored-only,
-  // so a pull can never launder a deploy-derived value into authored config the
-  // way a key carried by both would. A host-supplied destination is resolved at
-  // render time and never enters `info`.
-  // Authored-only, like `submit` above — a host's assistant endpoint is offered
-  // through `config.services` and resolved at render time, so it never enters
-  // `info` and a pull cannot launder it into authored config.
-  //
-  // ⚠️ Credential-shaped keys are STRIPPED ON PUSH (`stripCredentials`), so the
-  // backend never stores one and it cannot come back. What that does to the
-  // author's file depends on which direction they are pulling into, and the two
-  // differ — ⛔ this comment asserted the wrong one until it was run:
-  //
-  //   - `pull` over an EXISTING site.yml — the local `apiKey` SURVIVES.
-  //     `mergeYamlConfig` spreads one level (`{...existing[key], ...value}`), so
-  //     the projected `{endpoint, …}` merges over the local block and nothing
-  //     removes a key the document does not carry.
-  //   - `clone` into a fresh directory — no local block exists, so the file is
-  //     written from the document alone and has no `apiKey`.
-  //
-  // Both are correct: a pull does not silently delete something the author
-  // typed, and the push already warned them. The security property is upheld at
-  // the push, not by the pull. Measured end-to-end against a live uniwebd —
-  // every unit test passed before and after, so only a real push touched it.
-  // Authored-only, like `submit` and `assistant`: a host's tracking endpoint is
-  // offered through `config.services.tracking` and resolved at render, so it
-  // never enters `info` and a pull cannot launder it into authored config.
+  // ⛔ `submit` / `assistant` / `tracking` are not `info` keys: they left it for the
+  // `settings` Section on 2026-09-09, and since 2026-10-06 a pull folds them into
+  // `site.yml::services` (`servicesFromDocument`). Two behaviours measured while they
+  // were here still hold, now in `keepLocal`: a credential is stripped on push and a
+  // pull over an existing file keeps the author's (a `clone` into a fresh directory
+  // has none to keep) — a pull does not silently delete what the author typed, and
+  // the push already warned them; and a host's endpoint never enters the record, so
+  // a pull cannot launder it into authored config.
   // ⛔ The site's declaration is not verbatim — see the explicit `settings.fetch`
   // branch below: it projects to `site.yml::query` or `site.yml::fetch`.
   template: 'template',
@@ -200,14 +181,12 @@ const SETTINGS_TO_SITE_YML = {
   paths: 'paths',
   seo: 'seo',
   layout: 'layout',
-  // Authored-only service declarations: nothing STAMPS them, so a pull cannot
-  // launder a host-supplied endpoint into authored config. A host's own address is
-  // offered through `config.services` and resolved at render, never entering the
-  // stored record.
-  search: 'search',
-  submit: 'submit',
-  assistant: 'assistant',
-  tracking: 'tracking',
+  // ⛔ `search` / `submit` / `assistant` / `tracking` are not mapped here: each is
+  // the site tier of a service, folded back into `site.yml::services` with the
+  // service's request (`servicesFromDocument`, below). They were top-level keys until
+  // 2026-10-06. Nothing STAMPS them, so a pull cannot launder a host-supplied
+  // endpoint into authored config — a host's own address is offered through
+  // `config.services` and resolved at render, never entering the stored record.
   agents: 'agents',
 }
 
@@ -310,12 +289,16 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
     : []
   if (extensions.length > 0) siteChanges.extensions = extensions
 
-  // services[] → site.yml::services, and the same rows → sync.json as the record.
+  // services → site.yml::services, one entry per service; the rows → sync.json as
+  // the record.
   //
-  // ⭐ `site.yml` TAKES WHAT WAS DECIDED [Diego, 2026-10-06: "pull writes it"]. The
-  // stored list is the site's settled request, so the author's map becomes it, whole: a
-  // row is `true`, `false`, or its settings (`servicesRequestFromRows`). An empty list
-  // removes the key; a document with no `services` Section writes nothing.
+  // ⭐ `site.yml` TAKES WHAT WAS DECIDED [Diego, 2026-10-06: "pull writes it"]. Each
+  // entry is rebuilt from the service's two halves (`servicesFromDocument`): its row
+  // in the `services` Section — the site's settled request: on or off, and the host's
+  // settings — and its site tier in `settings` — an address the site brings, and its
+  // options. The map is written whole; an empty one removes the key; a document
+  // carrying neither half writes nothing. The retired top-level keys go, so a pulled
+  // file builds.
   //
   // ⭐ The record goes to `sync.json`, under this backend: the rows as the site holds
   // them — the last state both sides agreed on, which push and publish compare the file
@@ -325,8 +308,16 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // whose values are set in the app. `[]` is written as `[]`: "the site holds no rows" is
   // a state a pull must be able to deliver.
   // ⛔ The record needs a backend: with none there is nowhere coherent to file it.
-  if (Array.isArray(document?.services)) {
-    siteChanges.services = servicesRequestFromRows(document.services)
+  const carriesServices =
+    Array.isArray(document?.services) ||
+    SETTINGS_SERVICES.some((name) => settingsSection[name] !== undefined)
+  if (carriesServices) {
+    siteChanges.services = servicesFromDocument({
+      rows: document.services,
+      settings: settingsSection,
+      local: readAuthoredYaml(join(siteRoot, 'site.yml'))?.services
+    })
+    for (const retired of ['search', 'submit', 'assistant', 'tracking', 'api']) siteChanges[retired] = null
   }
   if (backend) {
     const provisioned = {}

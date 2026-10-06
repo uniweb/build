@@ -655,6 +655,18 @@ export function siteContentPlugin(options = {}) {
   }
 
   let siteContent = null
+  // Where `uniweb dev` answers the site's `api` service with `$devApi`'s handler — set
+  // in `configureServer`, so never in a build.
+  let devApiAddress = null
+  /**
+   * The dev payload names `$devApi`'s address as the site's `api` service: the site
+   * tier, which `resolveService` reads when no host speaks. A build never gets here
+   * with one.
+   */
+  const withDevApi = (content) => {
+    if (devApiAddress && content?.config) content.config.api = devApiAddress
+    return content
+  }
   // What each section type declares its data blocks are — read once per collection of the site.
   let dataModelPromise = null
   const dataModels = () => (dataModelPromise ||= dataBlockModels(resolvedSitePath).catch(() => NO_DATA_MODELS))
@@ -955,7 +967,7 @@ export function siteContentPlugin(options = {}) {
         // pages stay in the graph so in-progress drafts remain previewable.
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
-        siteContent = await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })
+        siteContent = withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction }))
         dataModelPromise = null
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
@@ -998,13 +1010,14 @@ export function siteContentPlugin(options = {}) {
       server = devServer
 
       // A site's own backend, answered locally in development. `site.yml::$devApi`
-      // names a module that default-exports a fetch handler, mounted at the site's
-      // own `api:` address so the address is identical in dev and in production.
+      // names a module that default-exports a fetch handler; the dev server mounts it
+      // at an address of its own and names that address in the payload it serves
+      // (`withDevApi`), so the site's `api` service resolves to it.
       // ⚠️ Synchronous on purpose — see mountDevApi. An await here and the
       // middleware lands after Vite's SPA fallback, which answers the API with
       // index.html and says nothing about why.
       try {
-        mountDevApi(devServer, { root: resolvedSitePath })
+        devApiAddress = mountDevApi(devServer, { root: resolvedSitePath })
       } catch (err) {
         console.error(`[dev-api] ${err.message}`)
       }
@@ -1025,7 +1038,7 @@ export function siteContentPlugin(options = {}) {
             rebuildQueries = false
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })
+              siteContent = withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath }))
               dataModelPromise = null
               headHtml = await loadHeadHtml()
               if (materialize) {

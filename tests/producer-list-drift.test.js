@@ -103,7 +103,14 @@ describe('producer-side lists cannot drift silently', () => {
       'fetch',      // → site.yml::fetch, via the shorthand-normalizing branch
       'og_title',       // → site.yml::seo.ogTitle, folded back per language (`uwx/open-graph.js`)
       'og_description', // → site.yml::seo.ogDescription, likewise
+      // → site.yml::services.<name>, each folded together with the service's request
+      // (`servicesFromDocument`, asserted below)
+      'search',
+      'submit',
+      'assistant',
+      'tracking',
     ])
+    expect(projectSrc).toMatch(/servicesFromDocument\(\{\s*rows: document\.services,\s*settings: settingsSection\b/)
 
     expect(emitted.size).toBeGreaterThan(0) // the regex actually found something
     const unaccounted = [...emitted].filter((k) => !mapped.has(k) && !specialCased.has(k))

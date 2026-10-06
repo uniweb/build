@@ -5,18 +5,33 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 /**
+ * Where `uniweb dev` answers the site's `api` service when `$devApi` names a handler.
+ * The dev server is the host here, so the address is its own.
+ */
+export const DEV_API_ADDRESS = '/_api'
+
+/**
  * Mount a site's own request handler in the dev server.
  *
  * A site that talks to a backend needs one running to be developed against, and
  * making that a live deployment is slow, costs money, and puts a shared database
- * behind a developer's experiments. So a site may name a **local handler** and the
- * dev server mounts it at the site's own service address:
+ * behind a developer's experiments. So a site may name a **local handler**, and in
+ * `uniweb dev` the dev server answers the site's `api` service with it:
  *
  * ```yaml
  * # site.yml
- * api: /_api                 # where the site's app backend answers
- * devApi: ./mock/api.js      # what answers it, in development only
+ * services:
+ *   api: true                # ask your host for an app backend (in production)
+ * $devApi: ./mock/api.js     # what answers it in `uniweb dev`, at /_api
  * ```
+ *
+ * ⭐ THE DEV SERVER SUPPLIES THE ADDRESS [Diego, 2026-10-06]. In `uniweb dev` it is
+ * the host, so where it answers is its own to choose — `DEV_API_ADDRESS` — and the
+ * plugin puts that address in the dev payload's `config.api`, the site tier
+ * `resolveService` reads when no host speaks. ⛔ *Until then the site wrote it, as a
+ * top-level `api: /_api` "the same in development and in production" — an address
+ * that, under `services:`, would read as "the site brings its own backend" and ask the
+ * host to turn its own off.*
  *
  * ```js
  * // mock/api.js — default-export a fetch handler
@@ -35,10 +50,9 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
  *
  * ## ⛔ Development only, and it cannot leak
  *
- * `devApi` is read by the dev plugin and by nothing else: no build reads it, no
- * `info` key carries it, and nothing writes it into a payload. A site's *address*
- * (`api:`) is authored config and travels; what answers that address locally is a
- * fact about one machine.
+ * `$devApi` is read by the dev plugin and by nothing else: no build reads it, no
+ * `info` key carries it, and only the dev server's payload names its address. What
+ * answers the site's `api` service locally is a fact about one machine.
  *
  * ⚠️ **Same-origin on purpose.** Mounting inside the dev server means cookies and
  * `credentials: 'same-origin'` behave as they do in production, where a site's app
@@ -59,7 +73,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
  * @param {import('vite').ViteDevServer} server
  * @param {object} options
  * @param {string} options.root - the site directory
- * @returns {boolean} whether a handler was mounted
+ * @returns {string|null} the address the handler answers on, or null when none was mounted
  */
 export function mountDevApi(server, { root }) {
   // ⛔ Read from the RAW site.yml, never from the collected `config`. `$`-prefixed
@@ -70,18 +84,12 @@ export function mountDevApi(server, { root }) {
   try {
     site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
   } catch {
-    return false
+    return null
   }
 
   const spec = site.$devApi
-  if (!spec) return false
-
-  const declared = site.api
-  const mount = typeof declared === 'string' ? declared : declared?.endpoint
-  if (!mount) {
-    console.error("[dev-api] `$devApi` needs an `api:` address to answer on — add `api: /_api` to site.yml.")
-    return false
-  }
+  if (!spec) return null
+  const mount = DEV_API_ADDRESS
 
   // Loaded once, lazily, and awaited by the middleware. ⚠️ Loud and specific on
   // failure: a dev API that silently fails to load looks exactly like a backend
@@ -139,5 +147,5 @@ export function mountDevApi(server, { root }) {
   })
 
   console.log(`[dev-api] '${spec}' answering ${prefix}/*`)
-  return true
+  return mount
 }

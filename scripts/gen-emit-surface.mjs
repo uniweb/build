@@ -89,9 +89,11 @@ const src = readFileSync(PRODUCER, 'utf8')
  * is not a site.yml key.
  */
 function sourcesOf(expr) {
-  const out = [...expr.matchAll(/\bsiteYml\.([A-Za-z_$][\w$]*)/g)].map(
-    (m) => `site.yml::${m[1]}`
-  )
+  // ⭐ One level deep, except under `services:` — a service's site tier is read from
+  // its own entry (`siteYml.services?.search` → `site.yml::services.search`).
+  const out = [
+    ...expr.matchAll(/\bsiteYml\.([A-Za-z_$][\w$]*)(?:\??\.([A-Za-z_$][\w$]*))?/g)
+  ].map((m) => (m[1] === 'services' && m[2] ? `site.yml::services.${m[2]}` : `site.yml::${m[1]}`))
   return out.length ? [...new Set(out)] : null
 }
 
