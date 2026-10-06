@@ -106,11 +106,11 @@
     },
     "services": {
       "kind": "passthrough",
-      "authoredAs": "site.yml::$services"
+      "authoredAs": "sync.json::backends.<origin>.services"
     },
     "secrets": {
       "kind": "passthrough",
-      "authoredAs": "site.yml::$secrets"
+      "authoredAs": "sync.json::backends.<origin>.secrets"
     },
     "pages": {
       "kind": "records"

@@ -54,11 +54,14 @@ const SCHEMA_VERSION = 1
  * Section without classifying it fails rather than passing silently.
  */
 const NON_CLOSED = {
-  // Author keys copied verbatim — `serviceRecords` has no allowlist, by
-  // design: an unrecognized key is the consumer's to judge, not ours.
+  // Keys copied verbatim — `serviceRecords` has no allowlist, by design: an
+  // unrecognized key is the consumer's to judge, not ours.
   // ⛔ A consumer MUST NOT assert a closed key set for these.
-  services: { kind: 'passthrough', authoredAs: 'site.yml::$services' },
-  secrets: { kind: 'passthrough', authoredAs: 'site.yml::$secrets' },
+  // ⭐ Read from the project's `sync.json`, under the backend the push goes to — the
+  // rows a pull wrote there, not keys an author types. *(`site.yml::$services` /
+  // `$secrets` until 2026-09-20; `authoredAs` kept saying so until 2026-10-06.)*
+  services: { kind: 'passthrough', authoredAs: 'sync.json::backends.<origin>.services' },
+  secrets: { kind: 'passthrough', authoredAs: 'sync.json::backends.<origin>.secrets' },
   // Content records with their own field shapes — not site.yml config keys.
   pages: { kind: 'records' },
   layout_sections: { kind: 'records' },
