@@ -86,7 +86,6 @@ import {
   refuseRetiredServiceKeys,
   refuseUnreadableServices
 } from './services-request.js'
-import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { siteContentDirs } from './site-dirs.js'

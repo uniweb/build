@@ -1,8 +1,8 @@
 /**
  * Asset references that are a BARE STRING — `info.preview` (the site card's image
  * [Diego, 2026-09-10]), `info.favicon`, `seo.image` at the site and page tiers, a
- * section param — and `removeYamlScalar`, which the CLI uses to drop a previous
- * site's generated `preview` from site.yml.
+ * section param — and dropping a previous site's generated `preview` from site.yml, as the CLI
+ * does, through `writeSiteConfig` (`removeYamlScalar` until 2026-10-07).
  *
  * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
  * the author's path by id. A bare string has no object to carry it: the stored value
@@ -33,7 +33,7 @@ import {
   carryServed,
   restoreAssetRefs,
   servedFingerprint,
-  removeYamlScalar,
+  writeSiteConfig,
 } from '../src/uwx/index.js'
 
 // Stand-ins for what an upload plan hands back. A real serve URL is whatever the host
@@ -165,28 +165,27 @@ describe('assets.json — the served fingerprint', () => {
   })
 })
 
-describe('removeYamlScalar', () => {
+describe('dropping a key from site.yml — what the CLI does to a generated `preview`', () => {
   const siteYml = (body) => {
     const root = tmp('uwx-yml-')
     writeFileSync(join(root, 'site.yml'), body)
     return root
   }
 
-  it('removeYamlScalar removes one scalar line and nothing else', () => {
+  it('removes the key and nothing else', () => {
     const root = siteYml("# keep me\npreview: '123'\nname: S\n$uuid: abc\n")
     const file = join(root, 'site.yml')
-    expect(removeYamlScalar(file, 'preview')).toBe(true)
+    expect(writeSiteConfig(root, { preview: null })).toBe('updated')
     expect(readFileSync(file, 'utf8')).toBe('# keep me\nname: S\n$uuid: abc\n')
-    expect(removeYamlScalar(file, 'preview')).toBe(false)
-    // A `$`-prefixed key is matched literally, not read as a regex anchor.
-    expect(removeYamlScalar(file, '$uuid')).toBe(true)
+    expect(writeSiteConfig(root, { preview: null })).toBe('unchanged')
+    // A `$`-prefixed key is a key like any other.
+    expect(writeSiteConfig(root, { $uuid: null })).toBe('updated')
     expect(readFileSync(file, 'utf8')).toBe('# keep me\nname: S\n')
   })
 
-  it('removeYamlScalar leaves a block value alone rather than half-removing it', () => {
-    const root = siteYml('seo:\n  image: /og.png\nname: S\n')
-    const file = join(root, 'site.yml')
-    expect(removeYamlScalar(file, 'seo')).toBe(false)
-    expect(readFileSync(file, 'utf8')).toBe('seo:\n  image: /og.png\nname: S\n')
+  it('removes a block value whole — the line editor it replaced left one alone rather than half-remove it', () => {
+    const root = siteYml('seo:\n  image: /og.png   # the card\nname: S\n')
+    expect(writeSiteConfig(root, { seo: null })).toBe('updated')
+    expect(readFileSync(join(root, 'site.yml'), 'utf8')).toBe('name: S\n')
   })
 })

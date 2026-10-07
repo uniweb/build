@@ -54,7 +54,8 @@ export {
   queriesYmlPath,
   QUERIES_YML_RELPATH,
 } from './queries-config.js'
-export { upsertYamlScalar, removeYamlScalar, editYamlText } from './yaml-upsert.js'
+// Edits to a YAML file an author wrote — the one editor; files are written through project-writer.js.
+export { editYamlText, setYamlKey, replaceInYamlList } from './yaml-edit.js'
 export { buildFolderEntity,
   collectFolderItemUuids,
   stampFolderItemUuids

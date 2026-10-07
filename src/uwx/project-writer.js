@@ -22,7 +22,7 @@ import { canonicalJson, sameMarkdownDocument } from './same-content.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
-import { editYamlText } from './yaml-upsert.js'
+import { editYamlText, YAML_DUMP_OPTS } from './yaml-edit.js'
 import { DECLARATION_KEYS } from '../site/fetch-shapes.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
@@ -45,9 +45,6 @@ export const DEFAULT_RESERVED_FRONTMATTER = new Set([
   // ⛔ Not `hidden`, which was here from the start (2026-05-30) with no reason recorded: an
   // editor toggles it, so a pull must carry the store's value into the file (2026-09-28).
 ])
-
-// js-yaml dump options shared by every config write, so output is byte-stable.
-export const YAML_DUMP_OPTS = { lineWidth: -1, quotingType: "'", forceQuotes: false, noRefs: true }
 
 /**
  * Write `text` to `filePath` only when it differs from what's on disk, using a
@@ -239,14 +236,20 @@ function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
   return writeYamlIfChanged(filePath, existing, prior)
 }
 
-// A YAML file, parsed, with its text — and whether there was one: a missing or unreadable file is never
-// "unchanged".
+// A YAML file, parsed, with its text — and whether there was one: a missing file is never "unchanged".
+// ⛔ One that EXISTS and does not parse is refused, never read as missing: read as missing, the writer
+// replaced the author's whole file with only the keys it was writing (until 2026-10-07).
 function loadYamlFile(filePath) {
+  let text
   try {
-    const text = readFileSync(filePath, 'utf8')
-    return { value: yaml.load(text, YAML_OPTIONS) ?? {}, read: true, text }
+    text = readFileSync(filePath, 'utf8')
   } catch {
     return { value: {}, read: false, text: null }
+  }
+  try {
+    return { value: yaml.load(text, YAML_OPTIONS) ?? {}, read: true, text }
+  } catch (err) {
+    throw new Error(`${filePath} is not YAML that can be read, so it was not written: ${err.message.split('\n')[0]}`)
   }
 }
 

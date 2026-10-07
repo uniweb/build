@@ -56,7 +56,6 @@ import { siteContentDirs } from './site-dirs.js'
 import { layoutAreaRoute } from '../site/layout-folder.js'
 import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames } from '../site/content-collector.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
-import { upsertYamlScalar } from './yaml-upsert.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
 // map under `.uniweb/`, the home for the backend's per-item identity so that
@@ -1155,7 +1154,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
       const listed = Array.isArray(root.pages) ? parseWildcardArray(root.pages) : null
       // A list that names the homepage first beats `index:`, so it opens with `...` instead.
       if (listed && listed.before.length > 0) root.write(['...', ...root.pages.filter((e) => e !== '...')])
-      upsertYamlScalar(join(siteRoot, 'site.yml'), 'index', ctx.homepage)
+      writeSiteConfig(siteRoot, { index: ctx.homepage })
     }
   }
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)

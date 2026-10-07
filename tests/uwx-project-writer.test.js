@@ -230,6 +230,15 @@ describe('⭐ a config file is EDITED, not re-dumped — its comments stay (F1)'
     expect(read()).toBe('# Nothing here yet\nname: S\n')
   })
 
+  it('⛔ a file that does not parse is refused and left as it is — never read as missing and replaced', () => {
+    // Read as missing, the writer used to replace the author's whole file with only the keys
+    // it was writing — `uniweb snapshot` setting `preview` would have left one line.
+    const broken = '# mine\nname: S\nfoundation: @acme/base\n'
+    write(broken)
+    expect(() => writeSiteConfig(dir, { preview: '/card.png' })).toThrow(/is not YAML that can be read, so it was not written/)
+    expect(read()).toBe(broken)
+  })
+
   it('⚠️ a file with an alias is written whole — same meaning, comments not kept', () => {
     write('# shared\ndefaults: &d\n  prerender: true\nbuild: *d\nname: A\n')
     writeSiteConfig(dir, { name: 'B' })
