@@ -204,6 +204,24 @@ export function refuseUnder(where, context) {
 }
 
 /**
+ * ⛔ `filter:` IS RETIRED (2026-10-06 [Diego]: "it should not be supported. We don't need to keep
+ * legacy concepts around") — refused on a query and on a fetch. It was the string predicate
+ * (`tags contains featured`) that `where:` replaced. A fetch has not read it since 2026-09-05; a
+ * query carried it into `config.queries` and applied it nowhere, so a query that said `filter:`
+ * delivered every record with nothing said (measured 2026-10-06).
+ *
+ * @param {Object|undefined} declaration - a query declaration or a binding
+ * @param {string} context - where it sits, for the message
+ */
+export function refuseFilter(declaration, context) {
+  if (!declaration || typeof declaration !== 'object' || declaration.filter === undefined) return
+  throw new Error(
+    `[uniweb] ${context}: \`filter:\` is retired. Write the predicate as \`where:\`, a where-object — ` +
+      `e.g. \`where: { tags: { contains: featured } }\`.`
+  )
+}
+
+/**
  * ⛔ A `where` OUTSIDE THE LANGUAGE STOPS THE BUILD — a retired operator (`like`,
  * `nin`), an unknown one, an empty `and` / `or`, a text operator with an empty
  * argument. Every lane answers such a where with no records (`@uniweb/core`'s
@@ -340,6 +358,7 @@ export function refuseBinding(fetch, context, { level = null } = {}) {
   if (typeof fetch !== 'object' || Array.isArray(fetch)) return
   refuseRefineAndMisplacedCurrent(fetch, context, level)
   refuseMerge(fetch, context)
+  refuseFilter(fetch, context)
   refuseSourceKeys(fetch, context)
   if (fetch.collection === undefined) refuseQueryName(fetch.query, context, { object: true })
   refuseUnder(fetch.where, context)

@@ -388,12 +388,13 @@ describe('parseFetchConfig — unrecognized keys are reported, not swallowed', (
     expect(messages().filter((m) => m.includes('unrecognized key'))).toHaveLength(0)
   })
 
-  it('the retired `filter:` DSL is now an unrecognized key, reported', () => {
-    // `filter:` (the legacy DSL string) was removed 2026-09-05. It is no longer
-    // a recognized fetch key, so it is reported like any other unknown one —
-    // loud, not silently honoured.
-    parseFetchConfig({ query: 'articles', filter: 'a == 1' })
-    expect(messages().filter((m) => m.includes('unrecognized key')).length).toBeGreaterThan(0)
+  it('⛔ the retired `filter:` DSL stops the build, naming `where:`', () => {
+    // `filter:` (the legacy DSL string) stopped being read on 2026-09-05 and was
+    // reported as an unrecognized key; since 2026-10-06 it is refused, like every
+    // retired predicate spelling. The control is the recognized-shapes case above.
+    expect(() => parseFetchConfig({ query: 'articles', filter: 'a == 1' })).toThrow(
+      /`filter:` is retired\. Write the predicate as `where:`/
+    )
   })
 })
 

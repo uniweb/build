@@ -59,7 +59,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseBibtex } from '@citestyle/bibtex'
 import { DATA_DIR, withoutRouteVariables, mapQueryPaths, BRANCH_KEY } from '@uniweb/core'
-import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute, refuseLimit } from './data-fetcher.js'
+import { applyWhere, applySort, refuseUnder, refuseOutsideLanguage, refuseQueryRoute, refuseLimit, refuseFilter } from './data-fetcher.js'
 import { resolveAssetPath, walkContentAssets, isLocalAssetPath } from './assets.js'
 import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-pool.js'
 import { readRecordsConfig, resolveFolder, folderTreeOrder } from './records-config.js'
@@ -126,7 +126,6 @@ function parseQueryConfig(name, config) {
       scope: null,
       sort: null,
       where: null,
-      filter: null,
       limit: 0,
       excerpt: { maxLength: 160 },
     }
@@ -136,6 +135,7 @@ function parseQueryConfig(name, config) {
   refuseOutsideLanguage(config.where, `queries.${name}`)
   refuseQueryRoute(config, `queries.${name}`)
   refuseLimit(config.limit, `queries.${name}`)
+  refuseFilter(config, `queries.${name}`)
   return {
     name,
     // The query's schema selects its records — `records/{schema}/` declares the
@@ -146,11 +146,8 @@ function parseQueryConfig(name, config) {
     // here until 2026-09-11: a named query's `scope` was ignored on this lane.
     scope: typeof config.scope === 'string' ? config.scope : null,
     sort: config.sort || null,
-    // `where:` is the CANONICAL predicate; `filter:` is the deprecated string DSL
-    // it replaced. Both are carried and both are applied below, in the same order
-    // `data-fetcher.js::applyPostProcessing` uses — see the note there.
+    // The predicate. ⛔ `filter:`, the string DSL it replaced, is refused above.
     where: config.where || null,
-    filter: config.filter || null,
     limit: config.limit || 0,
     excerpt: {
       maxLength: config.excerpt?.maxLength || 160,

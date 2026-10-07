@@ -1002,8 +1002,8 @@ const DECL_NOT_ON_WIRE = new Set([
   // passed unknown keys through blindly and would have sent `route` from every site
   // that declared one.
   'route',
-  // Legacy predicate, translated to the canonical `where` upstream. No legacy
-  // fields on the wire.
+  // ⛔ RETIRED 2026-10-06 — the build refuses it (`refuseQueryDeclaration`), so it is never sent.
+  // ⚠️ This said it was "translated to the canonical `where` upstream"; nothing translated it.
   'filter',
   // ⛔ RETIRED 2026-09-27 — the build refuses it (`refuseQueryDeclaration`), so it is never sent.
   'deferred',
@@ -1053,8 +1053,6 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     // → `siteContent.queryFields`), since one that does not refuses a push carrying it.
     if (typed && Array.isArray(queryFields) && queryFields.includes('typed_by_data_key')) data.typed_by_data_key = true
     setIf(data, 'sort', d.sort)
-    // Legacy `filter:` is not synced — it is translated to `where` upstream
-    // (the canonical predicate). No legacy fields on the wire.
     setIf(data, 'where', d.where)
     setIf(data, 'limit', d.limit)
     setIf(data, 'excerpt', d.excerpt)

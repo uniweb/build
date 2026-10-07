@@ -37,7 +37,7 @@ import { readRegisteredFoundation } from './registered-foundation.js'
 import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { buildSchema } from '../schema.js'
-import { refuseQueryRoute, refuseLimit } from './data-fetcher.js'
+import { refuseQueryRoute, refuseLimit, refuseFilter } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -248,6 +248,7 @@ export function refuseQueryDeclaration(decl) {
   }
   refuseQueryRoute(decl, where)
   refuseLimit(decl.limit, where)
+  refuseFilter(decl, where)
   // ⛔ `sync:` IS RETIRED (2026-09-21). `sync: false` kept a query's records off a
   // backend while a query owned its records; every record in `records/` is pushed
   // now, whatever reads it, so an ignored `sync: false` would push exactly what the
