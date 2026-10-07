@@ -45,9 +45,6 @@
         "agents": [
           "site.yml::agents"
         ],
-        "assistant": [
-          "site.yml::services.assistant"
-        ],
         "base": [
           "site.yml::base"
         ],
@@ -89,19 +86,10 @@
         "publish_languages": [
           "site.yml::publishLanguages"
         ],
-        "search": [
-          "site.yml::services.search"
-        ],
         "seo": [
           "site.yml::seo"
         ],
-        "submit": [
-          "site.yml::services.submit"
-        ],
-        "theme": null,
-        "tracking": [
-          "site.yml::services.tracking"
-        ]
+        "theme": null
       }
     },
     "services": {

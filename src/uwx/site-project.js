@@ -36,7 +36,7 @@ import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
-import { servicesFromDocument, SETTINGS_SERVICES } from './services-request.js'
+import { servicesFromDocument } from './services-request.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -125,13 +125,14 @@ const INFO_TO_SITE_YML = {
   // the preserved publish intent of a temporarily-undeclared language).
   favicon: 'favicon',
   // ⛔ `submit` / `assistant` / `tracking` are not `info` keys: they left it for the
-  // `settings` Section on 2026-09-09, and since 2026-10-06 a pull folds them into
-  // `site.yml::services` (`servicesFromDocument`). Two behaviours measured while they
-  // were here still hold, now in `keepLocal`: a credential is stripped on push and a
-  // pull over an existing file keeps the author's (a `clone` into a fresh directory
-  // has none to keep) — a pull does not silently delete what the author typed, and
-  // the push already warned them; and a host's endpoint never enters the record, so
-  // a pull cannot launder it into authored config.
+  // `settings` Section on 2026-09-09, and on 2026-10-06 left that for each service's
+  // row — a pull writes `site.yml::services` from the rows (`servicesFromDocument`).
+  // Two behaviours measured while they were here still hold, now in
+  // `keepCredentials`: a credential is stripped on push and a pull over an existing
+  // file keeps the author's (a `clone` into a fresh directory has none to keep) — a
+  // pull does not silently delete what the author typed, and the push already warned
+  // them; and a host's endpoint never enters the record, so a pull cannot launder it
+  // into authored config.
   // ⛔ The site's declaration is not verbatim — see the explicit `settings.fetch`
   // branch below: it projects to `site.yml::query` or `site.yml::fetch`.
   template: 'template',
@@ -181,12 +182,12 @@ const SETTINGS_TO_SITE_YML = {
   paths: 'paths',
   seo: 'seo',
   layout: 'layout',
-  // ⛔ `search` / `submit` / `assistant` / `tracking` are not mapped here: each is
-  // the site tier of a service, folded back into `site.yml::services` with the
-  // service's request (`servicesFromDocument`, below). They were top-level keys until
-  // 2026-10-06. Nothing STAMPS them, so a pull cannot launder a host-supplied
-  // endpoint into authored config — a host's own address is offered through
-  // `config.services` and resolved at render, never entering the stored record.
+  // ⛔ `search` / `submit` / `assistant` / `tracking` are not here: each service rides
+  // its row in the `services` Section, whole, and a pull writes it into
+  // `site.yml::services` (`servicesFromDocument`, below). They were top-level keys
+  // until 2026-10-06 and `settings` keys until that evening. A host's own address is
+  // offered through `config.services` and resolved at render, never entering the
+  // stored record, so a pull cannot launder it into authored config.
   agents: 'agents',
 }
 
@@ -293,12 +294,11 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // the record.
   //
   // ⭐ `site.yml` TAKES WHAT WAS DECIDED [Diego, 2026-10-06: "pull writes it"]. Each
-  // entry is rebuilt from the service's two halves (`servicesFromDocument`): its row
-  // in the `services` Section — the site's settled request: on or off, and the host's
-  // settings — and its site tier in `settings` — an address the site brings, and its
-  // options. The map is written whole; an empty one removes the key; a document
-  // carrying neither half writes nothing. The retired top-level keys go, so a pulled
-  // file builds.
+  // entry is its row in the `services` Section — the site's settled request, the whole
+  // entry in its `config` (`servicesFromDocument`). The map is written whole, keeping
+  // only the credentials an author typed, which a push never sends; an empty Section
+  // removes the key; a document with no Section writes nothing. The retired top-level
+  // keys go, so a pulled file builds.
   //
   // ⭐ The record goes to `sync.json`, under this backend: the rows as the site holds
   // them — the last state both sides agreed on, which push and publish compare the file
@@ -308,13 +308,9 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // whose values are set in the app. `[]` is written as `[]`: "the site holds no rows" is
   // a state a pull must be able to deliver.
   // ⛔ The record needs a backend: with none there is nowhere coherent to file it.
-  const carriesServices =
-    Array.isArray(document?.services) ||
-    SETTINGS_SERVICES.some((name) => settingsSection[name] !== undefined)
-  if (carriesServices) {
+  if (Array.isArray(document?.services)) {
     siteChanges.services = servicesFromDocument({
       rows: document.services,
-      settings: settingsSection,
       local: readAuthoredYaml(join(siteRoot, 'site.yml'))?.services
     })
     for (const retired of ['search', 'submit', 'assistant', 'tracking', 'api']) siteChanges[retired] = null

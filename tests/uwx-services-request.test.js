@@ -36,19 +36,19 @@ describe('readServicesRequest — what the host is asked', () => {
     ])
   })
 
-  it('⭐ an address means the site brings its own — the host is asked to leave its own off', () => {
+  it('⭐ an address means the site brings its own — it rides as `endpoint`, and the host is asked to leave its own off', () => {
     expect(
       readServicesRequest({
-        submit: 'https://forms.example.com/f/abc',
+        submit: ' https://forms.example.com/f/abc ',
         search: { provider: 'endpoint', endpoint: '/_search', include: { lists: false } }
       })
     ).toEqual([
-      { name: 'submit', enabled: false },
-      { name: 'search', enabled: false }
+      { name: 'submit', enabled: false, config: { endpoint: 'https://forms.example.com/f/abc' } },
+      { name: 'search', enabled: false, config: { provider: 'endpoint', endpoint: '/_search', include: { lists: false } } }
     ])
   })
 
-  it('⚠️ an address a push cannot carry is said — only the four with a settings slot travel', () => {
+  it("⚠️ an `api` address is said — it turns the host's off, and `api: /_api` was the mock's", () => {
     const said = []
     expect(
       readServicesRequest(
@@ -56,26 +56,24 @@ describe('readServicesRequest — what the host is asked', () => {
         { warn: (m) => said.push(m) }
       )
     ).toEqual([
-      { name: 'api', enabled: false },
-      { name: 'booking', enabled: false },
-      { name: 'submit', enabled: false }
+      { name: 'api', enabled: false, config: { endpoint: '/_api' } },
+      { name: 'booking', enabled: false, config: { endpoint: 'https://book.example.com' } },
+      { name: 'submit', enabled: false, config: { endpoint: '/s' } }
     ])
-    expect(said).toHaveLength(2)
-    expect(said[0]).toMatch(/`services\.api` is an address, which a push does not carry/)
-    expect(said[0]).toMatch(/write `api: true`; `\$devApi` answers it/)
-    expect(said[1]).toMatch(/`services\.booking` is an address/)
-    expect(said[1]).not.toMatch(/devApi/)
+    expect(said).toHaveLength(1)
+    expect(said[0]).toMatch(/`services\.api` is an address: it asks your host to leave its own `api` off/)
+    expect(said[0]).toMatch(/write `api: true`; in `uniweb dev`, `\$devApi` answers it/)
   })
 
-  it('the options the runtime reads are not the host\'s settings', () => {
+  it('⭐ the row carries the whole entry — the options the page reads and the host\'s settings, in one `config`', () => {
     expect(
       readServicesRequest({
         search: { exclude: { routes: ['/legal'] } },
         tracking: { consent: 'required', emit: 'minimal', retentionDays: 30 }
       })
     ).toEqual([
-      { name: 'search' },
-      { name: 'tracking', config: { retentionDays: 30 } }
+      { name: 'search', config: { exclude: { routes: ['/legal'] } } },
+      { name: 'tracking', config: { consent: 'required', emit: 'minimal', retentionDays: 30 } }
     ])
   })
 
@@ -170,69 +168,60 @@ describe('runtimeServiceConfig — what the site\'s config carries', () => {
 })
 
 describe('servicesFromDocument — what pull writes', () => {
-  it('the row decides on or off and carries the host\'s settings; the site tier carries the options', () => {
+  it('⭐ each row is the whole entry — `enabled` the switch, `config` everything else', () => {
     expect(
       servicesFromDocument({
         rows: [
-          { $id: 'search', name: 'search' },
+          { $id: 'search', name: 'search', config: { exclude: { routes: ['/legal'] } } },
           { name: 'submit', enabled: false },
           { name: 'api', config: { grade: 'pro' } },
-          { name: 'assistant', enabled: false, config: { model: 'x' } }
-        ],
-        settings: { search: { exclude: { routes: ['/legal'] } }, tracking: { consent: 'required' } }
+          { name: 'assistant', enabled: false, config: { model: 'x' } },
+          { name: 'tracking' }
+        ]
       })
     ).toEqual({
       search: { exclude: { routes: ['/legal'] } },
-      tracking: { consent: 'required' },
       submit: false,
       api: { grade: 'pro' },
-      assistant: { enabled: false, model: 'x' }
+      // Off, with settings: the switch beside them.
+      assistant: { enabled: false, model: 'x' },
+      tracking: true
     })
   })
 
-  it('⭐ an address with the host\'s own off is the site\'s own provider, written as it was', () => {
+  it("⭐ an address with the host's own off is the site's own provider, written as it was", () => {
     expect(
       servicesFromDocument({
-        rows: [{ name: 'submit', enabled: false }],
-        settings: { submit: { endpoint: 'https://forms.example.com/f' } }
+        rows: [
+          { name: 'submit', enabled: false, config: { endpoint: 'https://forms.example.com/f' } },
+          { name: 'search', enabled: false, config: { provider: 'endpoint', endpoint: '/_search' } }
+        ]
       })
-    ).toEqual({ submit: { endpoint: 'https://forms.example.com/f' } })
+    ).toEqual({
+      submit: 'https://forms.example.com/f',
+      search: { provider: 'endpoint', endpoint: '/_search' }
+    })
   })
 
-  it('an address with the host\'s own on is dropped — the host\'s offer answers', () => {
-    expect(
-      servicesFromDocument({ rows: [{ name: 'submit' }], settings: { submit: '/forms' } })
-    ).toEqual({ submit: true })
-  })
-
-  it('⭐ keeps an address the wire cannot carry while the host\'s stays off — and drops it once it is on', () => {
-    // `api` has no `settings` slot: the push sent only `enabled: false`.
-    expect(
-      servicesFromDocument({ rows: [{ name: 'api', enabled: false }], local: { api: 'https://own.example' } })
-    ).toEqual({ api: 'https://own.example' })
-    expect(
-      servicesFromDocument({ rows: [{ name: 'booking', enabled: false }], local: { booking: { endpoint: '/b' } } })
-    ).toEqual({ booking: { endpoint: '/b' } })
-    expect(
-      servicesFromDocument({ rows: [{ name: 'api' }], local: { api: 'https://own.example' } })
-    ).toEqual({ api: true })
-  })
-
-  it('CONTROL — an address the wire carries is the document\'s, never the file\'s', () => {
+  it("an address with the host's own on is dropped — the host's offer answers", () => {
     expect(
       servicesFromDocument({
-        rows: [{ name: 'search', enabled: false }],
-        settings: { search: { provider: 'endpoint', endpoint: '/s2' } },
-        local: { search: { provider: 'endpoint', endpoint: '/s1' } }
+        rows: [
+          { name: 'submit', config: { endpoint: '/forms' } },
+          { name: 'tracking', config: { endpoint: '/collect', emit: 'minimal' } }
+        ]
       })
-    ).toEqual({ search: { provider: 'endpoint', endpoint: '/s2' } })
+    ).toEqual({ submit: true, tracking: { emit: 'minimal' } })
   })
 
-  it('⭐ keeps the author\'s credential — never sent, so a pull does not delete it', () => {
+  it("⭐ keeps the author's credential — never sent, so a pull does not delete it", () => {
     expect(
       servicesFromDocument({
-        rows: [{ name: 'assistant', config: { system: 'Be brief.' } }, { name: 'tracking' }, { name: 'submit', enabled: false }],
-        settings: { assistant: { system: 'Be brief.' } },
+        rows: [
+          { name: 'assistant', config: { system: 'Be brief.' } },
+          { name: 'tracking' },
+          { name: 'submit', enabled: false }
+        ],
         local: {
           assistant: { system: 'Be terse.', apiKey: 'sk-1' },
           tracking: { token: 't-1' },
@@ -246,27 +235,51 @@ describe('servicesFromDocument — what pull writes', () => {
     })
   })
 
+  it('CONTROL — everything but a credential is the row\'s, never the file\'s', () => {
+    expect(
+      servicesFromDocument({
+        rows: [{ name: 'search', config: { exclude: { routes: ['/b'] } } }],
+        local: { search: { exclude: { routes: ['/a'] }, include: { lists: false } } }
+      })
+    ).toEqual({ search: { exclude: { routes: ['/b'] } } })
+  })
+
   it('nothing to write is null', () => {
     expect(servicesFromDocument({ rows: [] })).toBeNull()
     expect(servicesFromDocument({})).toBeNull()
   })
 
   it('what it writes reads back as the same asks', () => {
-    const rows = [{ name: 'api', enabled: false, config: { grade: 'pro' } }, { name: 'search' }]
+    const rows = [
+      { name: 'api', enabled: false, config: { grade: 'pro' } },
+      { name: 'search', config: { exclude: { routes: ['/x'] } } },
+      { name: 'submit', enabled: false, config: { endpoint: '/s' } }
+    ]
     expect(readServicesRequest(servicesFromDocument({ rows }))).toEqual(rows)
   })
 })
 
 describe('takeServices — the offer to bring site.yml in line', () => {
-  it("takes the site's switch and settings; the entry's options stay", () => {
-    const stored = [{ name: 'search', enabled: false }, { name: 'api', config: { grade: 'pro' } }]
+  it("takes the site's whole entry for each service named", () => {
+    const stored = [
+      { name: 'search', enabled: false, config: { exclude: { routes: ['/y'] } } },
+      { name: 'api', config: { grade: 'pro' } }
+    ]
     expect(
       takeServices({ search: { exclude: { routes: ['/x'] } }, submit: true }, stored, ['search'])
-    ).toEqual({ search: { enabled: false, exclude: { routes: ['/x'] } }, submit: true })
+    ).toEqual({ search: { enabled: false, exclude: { routes: ['/y'] } }, submit: true })
   })
 
   it("an own address goes when the site's host now provides the service", () => {
-    expect(takeServices({ submit: '/forms' }, [{ name: 'submit' }], ['submit'])).toEqual({ submit: true })
+    expect(
+      takeServices({ submit: '/forms' }, [{ name: 'submit', config: { endpoint: '/forms' } }], ['submit'])
+    ).toEqual({ submit: true })
+  })
+
+  it("keeps the author's credential", () => {
+    expect(
+      takeServices({ tracking: { token: 't-1', emit: 'all' } }, [{ name: 'tracking', config: { emit: 'minimal' } }], ['tracking'])
+    ).toEqual({ tracking: { emit: 'minimal', token: 't-1' } })
   })
 
   it('a service the site holds no row for leaves the map; an emptied map is null', () => {
@@ -389,6 +402,16 @@ describe('reconcileServices — who moved', () => {
       stored: [{ name: 'api', config: { grade: 'pro', seats: 5 } }]
     })
     expect(r).toMatchObject({ send: [], adopt: [], conflict: [] })
+  })
+
+  it("fields a backend adds to a stored row are not the site moving — only its switch and `config` are", () => {
+    // Measured on a pull: a stored row carries `$uuid`, and once a `"config": null`.
+    const r = reconcileServices({
+      asks: [OFF],
+      record: [ON],
+      stored: [{ name: 'search', $uuid: '019e-0000', config: null }]
+    })
+    expect(r).toMatchObject({ send: ['search'], adopt: [], conflict: [] })
   })
 
   it('a service new to the file and to the site → send', () => {

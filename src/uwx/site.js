@@ -83,7 +83,6 @@ import { updateBackendState, readBackendState } from './sync-store.js'
 import {
   readServicesRequest,
   mergeServiceRows,
-  runtimeServiceConfig,
   refuseRetiredServiceKeys
 } from './services-request.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
@@ -1317,18 +1316,11 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // carries the translation collector with it.
   setIf(settings, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
 
-  // ⭐ EACH SERVICE'S SITE TIER, from its entry in `site.yml::services` — the switch,
-  // an address the site brings, and its options (`runtimeServiceConfig`). It lands at
-  // `config.<name>`, which `@uniweb/core`'s `resolveService` reads for whatever the
-  // host does not offer, and where a host reads what it reads of the site's own (the
-  // assistant's `system` persona). Credentials never reach it. ⛔ *Until 2026-10-06
-  // these were the top-level `search:` / `submit:` / `assistant:` / `tracking:` keys,
-  // now refused.* The request to the host rides the `services` Section
-  // (`requestedServices`); `api`'s address is the host's, so it has no slot here.
-  setIf(settings, 'search', runtimeServiceConfig('search', siteYml.services?.search))
-  setIf(settings, 'submit', runtimeServiceConfig('submit', siteYml.services?.submit))
-  setIf(settings, 'assistant', runtimeServiceConfig('assistant', siteYml.services?.assistant))
-  setIf(settings, 'tracking', runtimeServiceConfig('tracking', siteYml.services?.tracking))
+  // ⛔ NO SERVICE IS HERE. A service's address and options ride its row in the
+  // `services` Section, whole (`requestedServices`) [Diego, 2026-10-06: "If it's on and
+  // has configuration, it can all be in the same place"]. *Until that evening
+  // `settings.search` / `.submit` / `.assistant` / `.tracking` carried them beside the
+  // row, and until that morning they were top-level `site.yml` keys.*
 
   // Projections opt-out + route exclusions. Carried because the app is a second
   // PUBLISHER of projections and derives them from stored content: without this it
@@ -1486,25 +1478,22 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // excluded branch becomes both discoverable AND summarized by the index.
   // (The CLI lane reads site.yml directly and honors it either way.)
   //
-  // The services — `site.yml::services` — ride the `settings` Section (each one's
-  // site tier) and the `services` Section (the request): see `settingsNested` and
-  // `requestedServices`. ⚠️ The site tier is carried by explicit name because this
-  // lane is an allowlist while the bundle lane spreads site.yml, and a block that
-  // works on a static host and vanishes on the synced lane is the worst shape a
-  // config bug can take — `intelligence.yml`, a separate file the assistant's
-  // persona once lived in, reached only the bundle lane, so a persona never reached
-  // a hosted site. ⛔ A credential is dropped from both (`runtimeServiceConfig`,
-  // `readServicesRequest`) — but only as a KEYED FIELD: one embedded in an endpoint
-  // URL (`https://collector/e?key=…`) is invisible there and is disclosed. The host's
-  // secret store is the only right home.
+  // The services — `site.yml::services` — ride the `services` Section: one row per
+  // entry, the whole entry in its `config` (`requestedServices`). ⚠️ An entry must
+  // reach this lane whole because the bundle lane spreads it into the payload, and a
+  // block that works on a static host and vanishes on the synced lane is the worst
+  // shape a config bug can take — `intelligence.yml`, a separate file the assistant's
+  // persona once lived in, reached only the bundle lane, so a persona never reached a
+  // hosted site. ⛔ A credential is dropped (`readServicesRequest`) — but only as a
+  // KEYED FIELD: one embedded in an endpoint URL (`https://collector/e?key=…`) is
+  // invisible there and is disclosed. The host's secret store is the only right home.
   //
-  // ⛔ `api` HAS NO SITE-TIER SLOT on this lane, deliberately. It is a real backend that
-  // is provisioned, so its address is the host's to supply — `config.services.api`,
-  // read by `@uniweb/api` (`resolveBase`). A carried address would turn a local-dev one
-  // into a production one the moment someone pushed, and a site with no `api` service
-  // of its own would draw sign-in against an address nobody answers. Asking for the
-  // service is `services: { api: … }` → the `services` Section. In `uniweb dev`,
-  // `$devApi` supplies the address of the local mock (`dev/api-mount.js`).
+  // ⛔ `api`'S ADDRESS IS THE HOST'S TO SUPPLY — `config.services.api`, read by
+  // `@uniweb/api` (`resolveBase`). Asking for it is `services: { api: true }`, or a map
+  // of the host's settings; an address of the site's own asks the host to leave its own
+  // off, and `readServicesRequest` says so, because `api: /_api` — where a local mock
+  // used to answer — reads that way. In `uniweb dev`, `$devApi` supplies the mock's
+  // address (`dev/api-mount.js`).
   // ⛔ THE CONFIGURATION KEYS ARE NOT HERE — they ride the `settings` Section
   // (`settingsNested` above). `info` is the BRIEF: what a card or a select dropdown
   // renders, plus what a listing can filter on. Eighteen keys moved off it on

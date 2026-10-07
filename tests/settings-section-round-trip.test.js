@@ -91,9 +91,18 @@ describe('the info / settings split', () => {
     }
 
     expect(Object.keys(doc.settings).sort()).toEqual([
-      'agents', 'assistant', 'base', 'build', 'default_language', 'fetch', 'fetcher',
+      'agents', 'base', 'build', 'default_language', 'fetch', 'fetcher',
       'head_html', 'keywords', 'languages', 'layout', 'paths', 'placeholders',
-      'publish_languages', 'search', 'seo', 'submit', 'theme', 'tracking',
+      'publish_languages', 'seo', 'theme',
+    ])
+
+    // ⭐ A service rides its row, whole — never `settings` (`search`, `submit`,
+    // `assistant` and `tracking` sat there until the evening of 2026-10-06).
+    expect(doc.services.map(({ $id: _id, ...row }) => row)).toEqual([
+      { name: 'search', config: { include: { lists: false } } },
+      { name: 'submit', enabled: false, config: { endpoint: '/s' } },
+      { name: 'assistant', enabled: false, config: { endpoint: '/a' } },
+      { name: 'tracking', enabled: false, config: { endpoint: '/t' } },
     ])
   })
 
@@ -124,6 +133,7 @@ describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', (
     // fail here even if nobody added an assertion for it.
     expect(second.info).toEqual(first.info)
     expect(second.settings).toEqual(first.settings)
+    expect(second.services).toEqual(first.services)
   })
 
   it('a value the projector cannot place would surface as a missing key, not a silent pass', async () => {
@@ -131,7 +141,8 @@ describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', (
     // test above would compare two empty objects and pass. Assert the cycle actually
     // carried something substantial.
     const first = await siteProjectToDocument(fullSite())
-    expect(Object.keys(first.settings).length).toBeGreaterThan(15)
+    expect(Object.keys(first.settings).length).toBeGreaterThanOrEqual(15)
+    expect(first.services.length).toBe(4)
     expect(first.settings.theme).toEqual({ colors: { primary: '#000' } })
   })
 

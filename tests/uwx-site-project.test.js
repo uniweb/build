@@ -600,13 +600,14 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
   // site.yml, so a key that reaches the runtime for free on a static host is
   // dropped in silence here unless it is listed. Both spellings are asserted
   // because the object form is the one that would survive a `typeof === string`
-  // shortcut in either direction. An address is the site's own form service, so
-  // the request asks the host to leave its own off.
+  // shortcut in either direction. An address is the site's own form service: it
+  // rides in the row as `endpoint`, and the request asks the host to leave its own
+  // off. ⚖️ Both spellings make the same row, so a pull writes the shorthand back.
   it.each([
-    ['shorthand string', '/forms'],
-    ['object form', { endpoint: '/forms' }],
-    ['absolute URL', 'https://forms.example.com/intake'],
-  ])('carries site.yml::services.submit through produce → project (%s)', async (_label, submit) => {
+    ['shorthand string', '/forms', '/forms'],
+    ['object form', { endpoint: '/forms' }, '/forms'],
+    ['absolute URL', 'https://forms.example.com/intake', 'https://forms.example.com/intake'],
+  ])('carries site.yml::services.submit through produce → project (%s)', async (_label, submit, address) => {
     const src = join(dir, `src-submit-${_label.replace(/\W/g, '')}`)
     mkdirSync(src, { recursive: true })
     writeFileSync(
@@ -615,15 +616,17 @@ describe('siteInfoToConfig — round-trip against the real producer', () => {
     )
 
     const document = await siteProjectToDocument(src)
-    expect(document.settings.submit).toEqual(submit)
-    expect(document.services).toEqual([{ $id: 'submit', name: 'submit', enabled: false }])
+    expect(document.settings?.submit).toBeUndefined()
+    expect(document.services).toEqual([
+      { $id: 'submit', name: 'submit', enabled: false, config: { endpoint: address } }
+    ])
 
     const dest = join(dir, `dest-submit-${_label.replace(/\W/g, '')}`)
     mkdirSync(dest, { recursive: true })
     siteInfoToConfig({ document, siteRoot: dest })
 
     const written = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
-    expect(written.services).toEqual({ submit })
+    expect(written.services).toEqual({ submit: address })
     expect(written).not.toHaveProperty('submit')
   })
 
@@ -1137,10 +1140,9 @@ describe('services — the request in site.yml, the record in sync.json', () => 
     siteInfoToConfig({
       document: {
         info: { name: 'S', foundation: '@a/base' },
-        settings: { submit: '/s', tracking: { consent: 'required' } },
         services: [
-          { $id: 'submit', name: 'submit', enabled: false },
-          { $id: 'tracking', name: 'tracking' }
+          { $id: 'submit', name: 'submit', enabled: false, config: { endpoint: '/s' } },
+          { $id: 'tracking', name: 'tracking', config: { consent: 'required' } }
         ]
       },
       siteRoot: dest,
@@ -1152,19 +1154,18 @@ describe('services — the request in site.yml, the record in sync.json', () => 
     expect(yml).not.toHaveProperty('tracking')
   })
 
-  it('⭐ a pull over the author\'s file keeps what no push carries — an api address, a credential', () => {
+  it("⭐ a pull writes each row's whole entry, and keeps the credential the author typed", () => {
     const dest = join(dir, 'dest')
     mkdirSync(dest, { recursive: true })
     writeFileSync(
       join(dest, 'site.yml'),
-      BASE + "services:\n  api: https://own.example\n  assistant:\n    system: Be brief.\n    apiKey: sk-1\n"
+      BASE + "services:\n  api: https://own.example\n  assistant:\n    system: Be terse.\n    apiKey: sk-1\n"
     )
     siteInfoToConfig({
       document: {
         info: { name: 'S', foundation: '@a/base' },
-        settings: { assistant: { system: 'Be brief.' } },
         services: [
-          { $id: 'api', name: 'api', enabled: false },
+          { $id: 'api', name: 'api', enabled: false, config: { endpoint: 'https://own.example' } },
           { $id: 'assistant', name: 'assistant', config: { system: 'Be brief.' } }
         ]
       },
@@ -1913,7 +1914,17 @@ describe('site.yml::services.tracking across the sync wire', () => {
     )
 
     const document = await siteProjectToDocument(src)
-    expect(document.settings.tracking).toEqual(tracking)
+    // One place: the whole entry in its row's `config`, an address as `endpoint` — and
+    // nothing beside it.
+    expect(document.settings?.tracking).toBeUndefined()
+    expect(document.services).toEqual([
+      {
+        $id: 'tracking',
+        name: 'tracking',
+        enabled: false,
+        config: typeof tracking === 'string' ? { endpoint: tracking } : tracking
+      }
+    ])
 
     const dest = join(dir, `dest-${label.replace(/\W/g, '')}`)
     mkdirSync(dest, { recursive: true })
@@ -1922,7 +1933,7 @@ describe('site.yml::services.tracking across the sync wire', () => {
     expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).services).toEqual({ tracking })
   })
 
-  it('options with no address ride to the site tier, and ask the host for the service', async () => {
+  it('options with no address ride in the row, which asks the host for the service', async () => {
     const src = join(dir, 'src-options')
     mkdirSync(src, { recursive: true })
     writeFileSync(
@@ -1930,9 +1941,10 @@ describe('site.yml::services.tracking across the sync wire', () => {
       "name: Tracked\nfoundation: '@acme/base@2.0.0'\nservices:\n  tracking:\n    consent: required\n    emit: minimal\n"
     )
     const document = await siteProjectToDocument(src)
-    expect(document.settings.tracking).toEqual({ consent: 'required', emit: 'minimal' })
-    // Both are the runtime's, so neither is a host setting.
-    expect(document.services).toEqual([{ $id: 'tracking', name: 'tracking' }])
+    expect(document.services).toEqual([
+      { $id: 'tracking', name: 'tracking', config: { consent: 'required', emit: 'minimal' } }
+    ])
+    expect(document.settings?.tracking).toBeUndefined()
   })
 
   it('omits it entirely when the site declares none', async () => {
@@ -1953,15 +1965,18 @@ describe('site.yml::services.tracking across the sync wire', () => {
     )
 
     const document = await siteProjectToDocument(src)
-    expect(document.settings.tracking).toEqual({ endpoint: '/_t' })
+    expect(document.services).toEqual([
+      { $id: 'tracking', name: 'tracking', enabled: false, config: { endpoint: '/_t' } }
+    ])
     expect(JSON.stringify(document)).not.toContain('super-secret')
   })
 
   /**
-   * `services:` never travels WHOLE: it rides as each service's site tier
-   * (`settings.<name>`) and as the request (the `services` Section), never as a
-   * block a host's answer could be mistaken for. *(Until 2026-10-06 this test read
-   * it as a way to simulate a host locally.)*
+   * `services:` never travels WHOLE: it rides as one row per entry in the `services`
+   * Section, never as a block a host's answer could be mistaken for, and nothing of
+   * it goes beside the rows. *(Until 2026-10-06 this test read it as a way to
+   * simulate a host locally, and until that evening each entry's address and options
+   * also rode as `settings.<name>`.)*
    */
   it('never carries site.yml::services whole', async () => {
     const src = join(dir, 'src-services')
@@ -1973,8 +1988,9 @@ describe('site.yml::services.tracking across the sync wire', () => {
 
     const document = await siteProjectToDocument(src)
     expect(document.info).not.toHaveProperty('services')
-    expect(document.settings).not.toHaveProperty('services')
-    expect(document.settings.tracking).toEqual({ endpoint: '/_t' })
+    expect(document.settings ?? {}).not.toHaveProperty('services')
+    for (const name of ['tracking', 'submit']) expect(document.settings ?? {}).not.toHaveProperty(name)
+    expect(document.services.map((r) => r.name)).toEqual(['tracking', 'submit'])
   })
 })
 

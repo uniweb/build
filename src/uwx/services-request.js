@@ -16,16 +16,20 @@
  * the request to the host in `services:` — two switches for one thing. Those keys are
  * retired and refused (`refuseRetiredServiceKeys`).
  *
- * Each entry is ROUTED, here and nowhere else:
+ * Each entry goes ONE place per lane, decided here and nowhere else:
  *
- *   - **to the site's config** (`config.<name>` in a payload, `settings.<name>` on the
- *     sync wire) — the switch, an address, and the entry's options, as the retired
- *     top-level keys carried them: a host reads some of them there too (the
- *     assistant's `system` persona). ⛔ Except `api`, whose settings are for the host
- *     that provisions it: only its switch and address are published. Never a
- *     credential.
- *   - **to the host** (the `services` Section, a request) — the switch, and every key
- *     the framework's runtime does not read (`RUNTIME_KEYS`) as the host's settings.
+ *   - **a built site** reads it as its own config (`config.<name>` in the payload) —
+ *     the switch, an address, the options. ⛔ For `api` only its switch and address:
+ *     its settings are for the host that provisions it. Never a credential.
+ *   - **a push** sends it as the request: ONE row per entry in the `services` Section,
+ *     `{ name, enabled?: false, config? }`, whose `config` is the whole entry — an
+ *     address, the options, the host's settings — never a credential. What reaches a
+ *     hosted page from a row is the host's to project.
+ *
+ * ⭐ THE ROW CARRIES THE WHOLE ENTRY [Diego, 2026-10-06: "If it's on and has
+ * configuration, it can all be in the same place"]. ⛔ Until that evening a push sent
+ * the address and the options as `settings.<name>` beside the row — the two places
+ * this module exists to replace, moved from `site.yml` onto the wire.
  *
  * ⭐ AN ADDRESS MEANS THE SITE BRINGS ITS OWN PROVIDER [Diego, 2026-10-06], so the
  * host is asked to leave its own off — a host's offer outranks the site's address
@@ -47,18 +51,16 @@ const isMap = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 /**
  * The options each service's RUNTIME reads from the site's config — the framework's
- * own vocabulary. Every other key of a known service is the host's setting, sent with
- * the request; a service the framework does not know (the registry is open) sends
- * every key, since only its reader knows which are whose.
+ * own vocabulary, which `uniweb doctor` checks an entry against. On the wire they ride
+ * in the row's `config` with everything else; this list decides nothing there.
  *
  * ⚠️ Read off the readers, and owed to them: `Website.getSearchConfig` and kit's search
- * client (search), `readEndpoint` (every `endpoint`), `wireTracker` (tracking). A key
- * one of them starts reading belongs here — or the host is sent it as a setting it
- * never asked for, and for `api`, whose settings are not published, it never reaches
- * the page at all.
+ * client, and the search index `@uniweb/projections` builds (search); `readEndpoint`
+ * (every `endpoint`); `wireTracker` (tracking). A key one of them starts reading
+ * belongs here, or `doctor` calls it unknown.
  */
 export const RUNTIME_KEYS = Object.freeze({
-  search: Object.freeze(['enabled', 'provider', 'endpoint', 'include', 'exclude']),
+  search: Object.freeze(['enabled', 'provider', 'endpoint', 'include', 'exclude', 'fields', 'weight']),
   submit: Object.freeze(['enabled', 'endpoint']),
   assistant: Object.freeze(['enabled', 'endpoint']),
   tracking: Object.freeze(['enabled', 'endpoint', 'emit', 'consent', 'scripts', 'flushIntervalMs', 'debug']),
@@ -206,12 +208,15 @@ export function runtimeServicesConfig(declared, { warn = () => {} } = {}) {
 }
 
 /**
- * `site.yml::services` → the asks to the host, as rows in the `services` Section's
- * shape: `{ name, enabled?: false, config? }`.
+ * `site.yml::services` → the asks to the host, ONE row per entry, in the `services`
+ * Section's shape: `{ name, enabled?: false, config? }`.
  *
- * `true` asks on; `false` asks off; an address asks the host to leave its own off —
- * the site brings its own; a map asks on (or off, with `enabled: false`), with every
- * key the runtime does not read as the host's settings.
+ * `true` asks on; `false` asks off; a map asks on — or off, with `enabled: false` — and
+ * its keys are the row's `config`. An address — a string, or `endpoint:` in a map — is
+ * the site's own provider: it rides as `config.endpoint`, and the host is asked to
+ * leave its own off, since a host's offer outranks the site's address
+ * (`core/src/services.js`) and would otherwise win. `enabled` is the row's switch and
+ * never in `config`; a credential never leaves at all.
  *
  * @param {*} declared - the raw `services:` value
  * @param {{ warn?: (message: string) => void }} [opts] - told about every value it
@@ -234,97 +239,70 @@ export function readServicesRequest(declared, { warn = () => {} } = {}) {
       asks.push({ name, enabled: false })
       continue
     }
-    if (typeof value === 'string' || isMap(value)) {
-      if (isMap(value) && value.enabled !== undefined && typeof value.enabled !== 'boolean') {
-        warn(`\`services.${name}.enabled\` is true or false. Ignoring \`${name}\`.`)
-        continue
-      }
-      if (addressOf(value)) {
-        if (HOST_ONLY.has(name)) {
-          warn(`\`services.${name}\` has no address of its own — your host provides it. Ignoring \`${name}\`.`)
-          continue
-        }
-        // The site brings its own provider: the host's stays off. ⚠️ Only the services
-        // with a `settings` slot carry the address with the site; any other one's goes
-        // nowhere on a push, which a silent off would hide.
-        if (!SETTINGS_SERVICES.includes(name)) {
-          warn(
-            `\`services.${name}\` is an address, which a push does not carry (only search's, submit's, ` +
-              `assistant's and tracking's travel with the site) — and it asks your host to leave its own ` +
-              `\`${name}\` off.` +
-              (name === 'api' ? " For your host's, write `api: true`; `$devApi` answers it in `uniweb dev`." : '')
-          )
-        }
-        asks.push({ name, enabled: false })
-        continue
-      }
-      if (typeof value === 'string') continue // an empty string asks nothing
-      const { value: kept, found } = withoutCredentials(value)
-      sayCredentials(name, found, warn)
-      const settings = {}
-      for (const [key, v] of Object.entries(kept)) {
-        if (key === 'enabled' || key === 'endpoint') continue
-        if (!RUNTIME_KEYS[name] || !isRuntimeKey(name, key)) settings[key] = v
-      }
-      asks.push({
-        name,
-        ...(value.enabled === false ? { enabled: false } : {}),
-        ...(Object.keys(settings).length ? { config: settings } : {})
-      })
+    if (typeof value !== 'string' && !isMap(value)) {
+      warn(`\`services.${name}\` is true, false, an address, or a map. Ignoring it.`)
       continue
     }
-    warn(`\`services.${name}\` is true, false, an address, or a map. Ignoring it.`)
+    if (isMap(value) && value.enabled !== undefined && typeof value.enabled !== 'boolean') {
+      warn(`\`services.${name}.enabled\` is true or false. Ignoring \`${name}\`.`)
+      continue
+    }
+    const address = addressOf(value)
+    if (typeof value === 'string' && !address) continue // an empty string asks nothing
+    if (address && HOST_ONLY.has(name)) {
+      warn(`\`services.${name}\` has no address of its own — your host provides it. Ignoring \`${name}\`.`)
+      continue
+    }
+    const { enabled, ...entry } = isMap(value) ? value : { endpoint: address }
+    const { value: config, found } = withoutCredentials(entry)
+    sayCredentials(name, found, warn)
+    if (address) {
+      config.endpoint = address
+      // ⚠️ Said for `api` because its old spelling invites it: `api: /_api` was where a
+      // local mock answered, and under `services:` an address turns the host's off.
+      if (name === 'api') {
+        warn(
+          "`services.api` is an address: it asks your host to leave its own `api` off, so the site uses yours. " +
+            "For your host's, write `api: true`; in `uniweb dev`, `$devApi` answers it."
+        )
+      }
+    }
+    asks.push({
+      name,
+      ...(address || enabled === false ? { enabled: false } : {}),
+      ...(Object.keys(config).length ? { config } : {})
+    })
   }
   return asks.length ? asks : null
 }
 
-/** The `settings` slots the sync wire carries a service's runtime part in. */
-export const SETTINGS_SERVICES = Object.freeze(['search', 'submit', 'assistant', 'tracking'])
-
 /**
- * One service, as `site.yml::services` writes it, from its runtime part and its row.
+ * One row → the entry `site.yml::services` writes for it.
  *
- * The row decides on or off — it is the site's settled request — and carries the
- * host's settings; the runtime part carries the options. An address with the host's
- * service off is the site's own provider, written as it was; with the host's on, the
- * address is dropped, because the host's offer is what answers.
+ * An address with the host's own off is the site's own provider, written as the entry
+ * was — a bare address when that is all it says. With the host's own on, the address
+ * goes: the host's offer is what answers now, and it was turned on elsewhere.
  */
-function composeEntry(runtime, row) {
-  const address = addressOf(runtime)
-  if (address && (!row || row.enabled === false)) return runtime
-  const on = row ? row.enabled !== false : !(runtime === false || (isMap(runtime) && runtime.enabled === false))
-  const options = {}
-  if (isMap(runtime)) {
-    for (const [key, v] of Object.entries(runtime)) {
-      if (key === 'enabled' || (key === 'endpoint' && row && on)) continue
-      options[key] = v
-    }
-  }
-  const settings = isMap(row?.config) ? row.config : {}
-  if (!Object.keys(options).length && !Object.keys(settings).length) return on
-  return { ...(on ? {} : { enabled: false }), ...options, ...settings }
+function entryFromRow(row) {
+  const off = row.enabled === false
+  const config = isMap(row.config) ? { ...row.config } : {}
+  const address = addressOf(config)
+  if (address && off) return Object.keys(config).length === 1 ? address : config
+  if (address) delete config.endpoint
+  if (!Object.keys(config).length) return !off
+  return off ? { enabled: false, ...config } : config
 }
 
 /**
- * What the wire never carries, kept from the entry a pull writes over — so a pull does
- * not delete what the author typed and a push could not send:
- *
- *   - **an address for a service with no `settings` slot** (`api`, or one the framework
- *     does not know) — a static build's own provider. The push sent only `enabled:
- *     false`, so the row comes back off; while it stays off, the file's entry stands.
- *     Once the host's is on, the host's answers and the address goes, as everywhere.
- *   - **a credential** — stripped on every push, with a warning naming the app.
- *
- * ⛔ *Until 2026-10-06 these lived in top-level keys a pull merged one level deep, which
- * kept them; `services` is replaced whole, which would not.*
+ * The credentials an author typed into an entry, kept on the one a pull writes over it.
+ * A push never sends one — it is stripped, with a warning naming the app — so the site's
+ * row cannot hold it, and writing the row whole would delete what the author typed.
+ * ⛔ *Until 2026-10-06 they sat in top-level keys the writer merged one level deep,
+ * which kept them; `services` is written whole.*
  */
-function keepLocal(name, entry, local, row) {
-  if (local === undefined) return entry
-  if (!SETTINGS_SERVICES.includes(name) && !HOST_ONLY.has(name) && addressOf(local) && row?.enabled === false) {
-    return local
-  }
+function keepCredentials(entry, local) {
   if (!isMap(local)) return entry
-  const { found } = withoutCredentials(local)
+  const found = CREDENTIAL_KEYS.filter((k) => k in local)
   if (!found.length) return entry
   const kept = Object.fromEntries(found.map((k) => [k, local[k]]))
   if (entry === true) return kept
@@ -334,45 +312,28 @@ function keepLocal(name, entry, local, row) {
 }
 
 /**
- * The site's stored rows and runtime parts → the `site.yml::services` map — what pull
- * writes.
+ * The site's rows → the `site.yml::services` map — what pull writes.
  *
  * @param {object} p
  * @param {object[]} [p.rows] - the `services` Section: the site's settled request
- * @param {object} [p.settings] - the `settings` Section: each service's runtime part
- * @param {object} [p.local] - the `services:` the pull writes over, for what the wire
- *   never carries (`keepLocal`)
+ * @param {object} [p.local] - the `services:` the pull writes over, for the credentials
+ *   a push never sends (`keepCredentials`)
  * @returns {object|null} null when there is nothing to write
  */
-export function servicesFromDocument({ rows, settings, local } = {}) {
-  const runtime = {}
-  const names = []
-  for (const name of SETTINGS_SERVICES) {
-    if (isMap(settings) && settings[name] !== undefined) {
-      runtime[name] = settings[name]
-      names.push(name)
-    }
-  }
-  const byName = new Map()
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (!isMap(row) || typeof row.name !== 'string' || !row.name) continue
-    byName.set(row.name, row)
-    if (!names.includes(row.name)) names.push(row.name)
-  }
-  const out = {}
+export function servicesFromDocument({ rows, local } = {}) {
   const before = isMap(local) ? local : {}
-  for (const name of names) {
-    const row = byName.get(name)
-    out[name] = keepLocal(name, composeEntry(runtime[name], row), before[name], row)
+  const out = {}
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!isMap(row) || typeof row.name !== 'string' || !row.name || row.name in out) continue
+    out[row.name] = keepCredentials(entryFromRow(row), before[row.name])
   }
   return Object.keys(out).length ? out : null
 }
 
 /**
  * The `site.yml::services` map with these services taken from the site's rows — the
- * offer to bring the file in line. The entry's options stay; the row's switch and
- * settings replace the file's, and an own address goes when the site's host now
- * provides the service. A service the site holds no row for leaves the map.
+ * offer to bring the file in line. Each named entry becomes what its row says, keeping
+ * only the author's credentials; a service the site holds no row for leaves the map.
  *
  * @param {*} declared - the current `services:` value
  * @param {object[]} stored - the site's rows now
@@ -383,13 +344,8 @@ export function takeServices(declared, stored, names) {
   const out = isMap(declared) ? { ...declared } : {}
   for (const name of names) {
     const row = rowNamed(stored, name)
-    if (!row) {
-      delete out[name]
-      continue
-    }
-    const current = out[name]
-    const runtime = runtimeServiceConfig(name, current)
-    out[name] = composeEntry(isMap(runtime) || typeof runtime === 'string' ? runtime : undefined, row)
+    if (row) out[name] = keepCredentials(entryFromRow(row), out[name])
+    else delete out[name]
   }
   return Object.keys(out).length ? out : null
 }
@@ -410,9 +366,21 @@ export function satisfies(row, ask) {
   return Object.entries(ask.config).every(([key, value]) => stable(stored[key]) === stable(value))
 }
 
-/** Two rows that are the same as stored — both absent included. */
+/**
+ * What a row SAYS — its switch and its `config`, nothing else — so two rows compare by
+ * the owner's decisions and not by fields a backend adds to what it stores.
+ */
+function said(row) {
+  if (!isMap(row)) return null
+  const out = {}
+  if (row.enabled === false) out.enabled = false
+  if (isMap(row.config) && Object.keys(row.config).length) out.config = row.config
+  return out
+}
+
+/** Do two rows say the same — the switch and the whole `config`? Both absent included. */
 function sameRow(a, b) {
-  return stable(isMap(a) ? canonicalRow(a) : null) === stable(isMap(b) ? canonicalRow(b) : null)
+  return stable(said(a)) === stable(said(b))
 }
 
 /**
@@ -420,9 +388,10 @@ function sameRow(a, b) {
  *
  * ⭐ A FULL LIST, because the backend replaces the `services` Section with what it is
  * sent: a row left out would lose its stored settings. A row no ask names is sent as
- * stored. A row an ask names takes the ask's switch, and its settings over the
- * stored ones, key by key. Every field is kept — a row is opaque past `name`,
- * `enabled` and `config`.
+ * stored. A row an ask names takes the ask's switch, and its `config` over the stored
+ * one, key by key — a key the file does not name is kept, since the file may never
+ * have seen it (set in the app, say). Every other field of the row is kept — a row is
+ * opaque past `name`, `enabled` and `config`.
  *
  * @param {object[]|null|undefined} base - the site's rows (or the record of them)
  * @param {object[]} asks - from `readServicesRequest`
@@ -465,11 +434,13 @@ export function mergeServiceRows(base, asks) {
  * | unchanged | changed | `adopt` — the site's is kept, and may be taken into the file |
  * | changed | changed, differently | `conflict` — only the owner can rank the two |
  *
- * A service the site already gives as asked is nothing, whoever moved. With no record
- * the two cannot be told apart: a service the site holds nothing for is sent, one it
- * holds differently is a conflict. With the site unreadable, what changed against the
- * record is sent over the record; with neither, nothing can be merged onto for a site
- * that exists — `unreadable` — while a site not yet created has nothing stored.
+ * A service the site already gives as asked is nothing, whoever moved — and "as
+ * asked" is what the file NAMES (`satisfies`): a key it does not name is not its
+ * business. With no record the two cannot be told apart: a service the site holds
+ * nothing for is sent, one it holds differently is a conflict. With the site
+ * unreadable, what changed against the record is sent over the record; with neither,
+ * nothing can be merged onto for a site that exists — `unreadable` — while a site not
+ * yet created has nothing stored.
  *
  * @param {object} p
  * @param {object[]} p.asks - from `readServicesRequest`

@@ -17,8 +17,9 @@ import { siteProjectToDocument } from '../src/uwx/index.js'
 // The first two cases below are the ones that would have caught it.
 //
 // The assistant's entry is `site.yml::services.assistant` (the top-level `assistant:`
-// key until 2026-10-06, refused now). A host reads the persona from the site tier, so the
-// whole entry rides there, minus credentials.
+// key until 2026-10-06, refused now). It rides its row in the `services` Section, whole,
+// minus credentials — the persona included — and what a hosted page gets of it is the
+// host's to project. (`settings.assistant` carried it until the evening of 2026-10-06.)
 
 const ROOTS = []
 
@@ -39,26 +40,33 @@ afterEach(() => {
 })
 
 describe('uwx/site — the assistant block reaches the wire', () => {
-  it('carries an authored block onto info', async () => {
+  it('carries an authored block in its row, whole', async () => {
     const root = siteRoot([
       'services:',
       '  assistant:',
       '    system: You are the Acme support assistant.',
       '    model: claude-sonnet-4',
     ])
-    const { info, settings } = await siteProjectToDocument(root)
-    expect(settings.assistant).toEqual({
-      system: 'You are the Acme support assistant.',
-      model: 'claude-sonnet-4',
-    })
+    const { settings, services } = await siteProjectToDocument(root)
+    expect(services).toEqual([
+      {
+        $id: 'assistant',
+        name: 'assistant',
+        config: { system: 'You are the Acme support assistant.', model: 'claude-sonnet-4' },
+      },
+    ])
+    // ⛔ One place: nothing of it beside the row.
+    expect(settings?.assistant).toBeUndefined()
   })
 
-  it('carries an address untouched — the site brings its own assistant', async () => {
+  it('carries an address as `endpoint` — the site brings its own assistant', async () => {
     const root = siteRoot(['services:', '  assistant: https://agent.example.com/chat'])
     const { settings, services } = await siteProjectToDocument(root)
-    expect(settings.assistant).toBe('https://agent.example.com/chat')
     // …and asks the host to leave its own off, or the host's would win.
-    expect(services).toEqual([{ $id: 'assistant', name: 'assistant', enabled: false }])
+    expect(services).toEqual([
+      { $id: 'assistant', name: 'assistant', enabled: false, config: { endpoint: 'https://agent.example.com/chat' } },
+    ])
+    expect(settings?.assistant).toBeUndefined()
   })
 
   // The claim that adding this line is inert for every existing site rests on
@@ -76,7 +84,7 @@ describe('uwx/site — the assistant block reaches the wire', () => {
 // than merely untidy. The delivery edge strips the same key set on the reading
 // side; this is the producer half of that pair.
 describe('uwx/site — credentials never reach the wire', () => {
-  it('drops every credential-shaped key — from the site tier and from the request', async () => {
+  it('drops every credential-shaped key from the row', async () => {
     const root = siteRoot([
       'services:',
       '  assistant:',
@@ -90,7 +98,6 @@ describe('uwx/site — credentials never reach the wire', () => {
 
     const doc = await siteProjectToDocument(root)
 
-    expect(doc.settings.assistant).toEqual({ system: 'Be helpful.' })
     expect(doc.services).toEqual([{ $id: 'assistant', name: 'assistant', config: { system: 'Be helpful.' } }])
     // The strongest form: nothing of any credential anywhere in the document.
     for (const leaked of ['sk-live-must-not-ship', 'also-not', 'nor-this']) {
