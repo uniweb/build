@@ -75,9 +75,10 @@
  *
  * ⚠️ `@uniweb/api` deliberately needs no entry: it calls
  * `resolveService(website, SERVICE_NAME)` against a module-level `const`, which
- * `readModuleConsts` resolves. Without that resolution `api` would be both
+ * `readModuleConsts` resolves. Without that resolution `backend` would be both
  * missed *and* counted as blindness, marking every foundation that uses it
- * unknowable.
+ * unknowable. ⛔ *The constant was `api` until 2026-10-07, so a foundation built
+ * against an earlier `@uniweb/api` derives `api` — a service no host offers now.*
  *
  * ## Why the AST rather than a regex
  *

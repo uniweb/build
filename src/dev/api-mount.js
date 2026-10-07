@@ -5,7 +5,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 /**
- * Where `uniweb dev` answers the site's `api` service when `$devApi` names a handler.
+ * Where `uniweb dev` answers the site's `backend` service when `$devBackend` names a handler.
  * The dev server is the host here, so the address is its own.
  */
 export const DEV_API_ADDRESS = '/_api'
@@ -16,22 +16,24 @@ export const DEV_API_ADDRESS = '/_api'
  * A site that talks to a backend needs one running to be developed against, and
  * making that a live deployment is slow, costs money, and puts a shared database
  * behind a developer's experiments. So a site may name a **local handler**, and in
- * `uniweb dev` the dev server answers the site's `api` service with it:
+ * `uniweb dev` the dev server answers the site's `backend` service with it:
  *
  * ```yaml
  * # site.yml
  * services:
- *   api: true                # ask your host for an app backend (in production)
- * $devApi: ./mock/api.js     # what answers it in `uniweb dev`, at /_api
+ *   backend: true              # ask your host for it (in production)
+ * $devBackend: ./mock/api.js   # what answers it in `uniweb dev`, at /_api
  * ```
  *
  * ⭐ THE DEV SERVER SUPPLIES THE ADDRESS [Diego, 2026-10-06]. In `uniweb dev` it is
  * the host, so where it answers is its own to choose — `DEV_API_ADDRESS` — and the
- * plugin puts that address in the dev payload's `config.api`, the site tier
+ * plugin puts that address in the dev payload's `config.backend`, the site tier
  * `resolveService` reads when no host speaks. ⛔ *Until then the site wrote it, as a
  * top-level `api: /_api` "the same in development and in production" — an address
  * that, under `services:`, would read as "the site brings its own backend" and ask the
- * host to turn its own off.*
+ * host to turn its own off.* ⛔ *And until 2026-10-07 the service was `api` and this
+ * key `$devApi`; both are refused by those names now — `services.api` by
+ * `refuseUnreadableServices`, `$devApi` by `refuseRetiredServiceKeys`.*
  *
  * ```js
  * // mock/api.js — default-export a fetch handler
@@ -50,9 +52,9 @@ export const DEV_API_ADDRESS = '/_api'
  *
  * ## ⛔ Development only, and it cannot leak
  *
- * `$devApi` is read by the dev plugin and by nothing else: no build reads it, no
+ * `$devBackend` is read by the dev plugin and by nothing else: no build reads it, no
  * `info` key carries it, and only the dev server's payload names its address. What
- * answers the site's `api` service locally is a fact about one machine.
+ * answers the site's `backend` service locally is a fact about one machine.
  *
  * ⚠️ **Same-origin on purpose.** Mounting inside the dev server means cookies and
  * `credentials: 'same-origin'` behave as they do in production, where a site's app
@@ -87,7 +89,7 @@ export function mountDevApi(server, { root }) {
     return null
   }
 
-  const spec = site.$devApi
+  const spec = site.$devBackend
   if (!spec) return null
   const mount = DEV_API_ADDRESS
 

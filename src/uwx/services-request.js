@@ -8,7 +8,7 @@
  *     exclude: { routes: [/legal] }           # an option the site's runtime reads
  *   submit: https://forms.example.com/f/abc   # an address: a provider the site brings
  *   tracking: { consent: required }
- *   api: { grade: pro }                       # a setting for the host's service
+ *   backend: { grade: pro }                   # a setting for the host's service
  * ```
  *
  * ⭐ ONE PLACE [Diego, 2026-10-06]. Until then the site's own provider and options
@@ -19,8 +19,8 @@
  * Each entry goes ONE place per lane, decided here and nowhere else:
  *
  *   - **a built site** reads it as its own config (`config.<name>` in the payload) —
- *     the switch, an address, the options. ⛔ For `api` only its switch and address:
- *     its settings are for the host that provisions it. Never a credential.
+ *     the switch, an address, the options. ⛔ For `backend` only its switch and
+ *     address: its settings are for the host that provisions it. Never a credential.
  *   - **a push** sends it as the request: ONE row per entry in the `services` Section,
  *     `{ name, enabled?: false, config? }`, whose `config` is the whole entry — an
  *     address, the options, the host's settings — never a credential. What reaches a
@@ -65,8 +65,26 @@ export const RUNTIME_KEYS = Object.freeze({
   submit: Object.freeze(['enabled', 'endpoint']),
   assistant: Object.freeze(['enabled', 'endpoint']),
   tracking: Object.freeze(['enabled', 'endpoint', 'emit', 'consent', 'scripts', 'flushIntervalMs', 'debug']),
-  api: Object.freeze(['enabled', 'endpoint'])
+  backend: Object.freeze(['enabled', 'endpoint'])
 })
+
+/**
+ * Services renamed, by their old name. The old name is refused wherever a service is
+ * named — an entry here, and a foundation's `uniweb.supports` — naming the new one.
+ *
+ * ⛔ No alias, and the reason is the runtime: a name no host offers resolves to
+ * nothing, so a site or a foundation still saying `api` would simply lose the service
+ * on every page, with nothing anywhere saying why. Here it stops where it is written.
+ *
+ * ⭐ `api` → `backend`, 2026-10-07 [Diego: "name the actual service, and not the
+ * interface of the service, which is a route named /api"]. The site's own backend is
+ * named for what it is; `/_api` stays the route it answers on, and `@uniweb/api` is
+ * named for that interface.
+ */
+export const RENAMED_SERVICES = Object.freeze({ api: 'backend' })
+
+/** `site.yml` keys renamed with a service — refused by the old name, like the services. */
+const RENAMED_SITE_KEYS = Object.freeze({ $devApi: '$devBackend' })
 
 /**
  * Services only a host provides, which a site never answers itself: no address, no
@@ -123,6 +141,13 @@ function switchWord(path, key, value) {
  * the one judgement both `readServicesRequest` and `refuseUnreadableServices` make.
  */
 function entryProblem(name, value) {
+  if (RENAMED_SERVICES[name]) {
+    const now = RENAMED_SERVICES[name]
+    return (
+      `\`services.${name}\` is now \`services.${now}\` — the site's own backend is the \`${now}\` service. ` +
+      `Rename the entry; what it says stays. On a site you push, \`uniweb pull\` brings it renamed.`
+    )
+  }
   if (typeof value === 'boolean') return null
   if (typeof value === 'string') {
     if (SWITCH_WORDS.test(value.trim())) return switchWord(`services.${name}`, name, value)
@@ -225,12 +250,20 @@ function sayCredentials(name, found, warn) {
  */
 export function refuseRetiredServiceKeys(siteYml, where = 'site.yml') {
   if (!isMap(siteYml)) return
+  const renamed = Object.keys(RENAMED_SITE_KEYS).filter((k) => siteYml[k] !== undefined)
+  if (renamed.length) {
+    throw new Error(
+      `[uniweb] ${where}: ${renamed.map((k) => `\`${k}:\` is now \`${RENAMED_SITE_KEYS[k]}:\``).join(', ')} — ` +
+        "it names what answers the site's `backend` service in `uniweb dev`. Rename the key; its value stays."
+    )
+  }
   const found = RETIRED_SERVICE_KEYS.filter((k) => siteYml[k] !== undefined)
   if (!found.length) return
-  const lines = found.map((k) => `  ${k}: …`).join('\n')
+  // The block to move them into names each service as `services:` does now.
+  const lines = found.map((k) => `  ${RENAMED_SERVICES[k] || k}: …`).join('\n')
   const api = found.includes('api')
-    ? '\n  `api:` named the address a local mock answered on — in `uniweb dev`, `$devApi` now ' +
-      'supplies it. Asking your host for an app backend is `api: true` under `services:`.'
+    ? '\n  `api:` named the address a local mock answered on — in `uniweb dev`, `$devBackend` now ' +
+      "supplies it. Asking your host for the site's own backend is `backend: true` under `services:`."
     : ''
   throw new Error(
     `[uniweb] ${where}: ${found.map((k) => `\`${k}:\``).join(', ')} ` +
@@ -241,10 +274,10 @@ export function refuseRetiredServiceKeys(siteYml, where = 'site.yml') {
 
 /**
  * Services whose settings are never published: only the switch and the address reach
- * the site's config. `api`'s settings are for the host that provisions it (a grade,
+ * the site's config. `backend`'s settings are for the host that provisions it (a grade,
  * sign-in providers, billing) and no page reads them.
  */
-const UNPUBLISHED_SETTINGS = new Set(['api'])
+const UNPUBLISHED_SETTINGS = new Set(['backend'])
 
 /**
  * One entry → what the site's config carries: `false`, an address, or the entry's
@@ -310,6 +343,14 @@ export function readServicesRequest(declared, { warn = () => {} } = {}) {
   }
   const asks = []
   for (const [name, value] of Object.entries(declared)) {
+    // ⚠️ Skipped here for a caller that only reads; the build and the push stop on it
+    // first (`refuseUnreadableServices`), since a push would state a skipped one off.
+    // First, so a renamed service is skipped whatever its value — `true` included.
+    const problem = entryProblem(name, value)
+    if (problem) {
+      warn(`${problem} Ignoring \`${name}\`.`)
+      continue
+    }
     if (value === true) {
       asks.push({ name })
       continue
@@ -318,25 +359,18 @@ export function readServicesRequest(declared, { warn = () => {} } = {}) {
       asks.push({ name, enabled: false })
       continue
     }
-    // ⚠️ Skipped here for a caller that only reads; the build and the push stop on it
-    // first (`refuseUnreadableServices`), since a push would state a skipped one off.
-    const problem = entryProblem(name, value)
-    if (problem) {
-      warn(`${problem} Ignoring \`${name}\`.`)
-      continue
-    }
     const address = addressOf(value)
     const { enabled, ...entry } = isMap(value) ? value : { endpoint: address }
     const { value: config, found } = withoutCredentials(entry)
     sayCredentials(name, found, warn)
     if (address) {
       config.endpoint = address
-      // ⚠️ Said for `api` because its old spelling invites it: `api: /_api` was where a
-      // local mock answered, and under `services:` an address turns the host's off.
-      if (name === 'api') {
+      // ⚠️ Said for `backend` because its old spelling invites it: `api: /_api` was where
+      // a local mock answered, and under `services:` an address turns the host's off.
+      if (name === 'backend') {
         warn(
-          "`services.api` is an address: it asks your host to leave its own `api` off, so the site uses yours. " +
-            "For your host's, write `api: true`; in `uniweb dev`, `$devApi` answers it."
+          "`services.backend` is an address: it asks your host to leave its own `backend` off, so the site uses yours. " +
+            "For your host's, write `backend: true`; in `uniweb dev`, `$devBackend` answers it."
         )
       }
     }

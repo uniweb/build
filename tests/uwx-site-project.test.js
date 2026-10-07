@@ -1068,10 +1068,10 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
   })
 
   it('a held service the file does not list is stated off — every service is on or off', async () => {
-    const document = await siteProjectToDocument(write(BASE, { services: { api: 'U-api' } }), {
+    const document = await siteProjectToDocument(write(BASE, { services: { backend: 'U-api' } }), {
       backend: ORIGIN
     })
-    expect(document.services).toEqual([{ $id: 'api', name: 'api', enabled: false, $uuid: 'U-api' }])
+    expect(document.services).toEqual([{ $id: 'backend', name: 'backend', enabled: false, $uuid: 'U-api' }])
   })
 
   it('forwards a service\'s settings verbatim, treating them as opaque', async () => {
@@ -1079,7 +1079,7 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
       write(
         BASE +
           'services:\n' +
-          '  api:\n' +
+          '  backend:\n' +
           '    grade: small\n' +
           '    auth:\n' +
           '      providers: [google]\n' +
@@ -1091,8 +1091,8 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
     )
     expect(document.services).toEqual([
       {
-        $id: 'api',
-        name: 'api',
+        $id: 'backend',
+        name: 'backend',
         config: {
           grade: 'small',
           auth: { providers: ['google'] },
@@ -1108,7 +1108,7 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
     const document = await siteProjectToDocument(
       write(BASE, {
         secrets: [
-          { service: 'api', name: 'stripe_key', value: '#ref', consumer: 'leaseholder' },
+          { service: 'backend', name: 'stripe_key', value: '#ref', consumer: 'leaseholder' },
           { name: 'site_wide' }
         ]
       }),
@@ -1116,8 +1116,8 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
     )
     expect(document.secrets).toEqual([
       {
-        $id: 'api:stripe_key',
-        service: 'api',
+        $id: 'backend:stripe_key',
+        service: 'backend',
         name: 'stripe_key',
         value: '#ref',
         consumer: 'leaseholder'
@@ -1158,13 +1158,13 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
     mkdirSync(dest, { recursive: true })
     writeFileSync(
       join(dest, 'site.yml'),
-      BASE + "services:\n  api: https://own.example\n  assistant:\n    system: Be terse.\n    apiKey: sk-1\n"
+      BASE + "services:\n  backend: https://own.example\n  assistant:\n    system: Be terse.\n    apiKey: sk-1\n"
     )
     siteInfoToConfig({
       document: {
         info: { name: 'S', foundation: '@a/base' },
         services: [
-          { $id: 'api', name: 'api', enabled: false, config: { endpoint: 'https://own.example' } },
+          { $id: 'backend', name: 'backend', enabled: false, config: { endpoint: 'https://own.example' } },
           { $id: 'assistant', name: 'assistant', config: { system: 'Be brief.' } }
         ]
       },
@@ -1172,7 +1172,7 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
       backend: ORIGIN
     })
     expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).services).toEqual({
-      api: 'https://own.example',
+      backend: 'https://own.example',
       assistant: { system: 'Be brief.', apiKey: 'sk-1' }
     })
   })
@@ -1220,19 +1220,19 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
       document: {
         info: { name: 'S', foundation: '@a/base' },
         services: [
-          { $id: 'api', $uuid: 'U-api', name: 'api', config: { grade: 'small' } },
+          { $id: 'backend', $uuid: 'U-api', name: 'backend', config: { grade: 'small' } },
           { $id: 'search', $uuid: 'U-search', name: 'search' },
           { $id: 'submit', $uuid: 'U-submit', name: 'submit', enabled: false },
           { $id: 'assistant', $uuid: 'U-assistant', name: 'assistant', enabled: false, config: { model: 'x' } }
         ],
-        secrets: [{ $id: 'api:k', service: 'api', name: 'k', value: '#ref' }]
+        secrets: [{ $id: 'backend:k', service: 'backend', name: 'k', value: '#ref' }]
       },
       siteRoot: dest,
       backend: ORIGIN
     })
     const yml = yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8'))
     expect(yml.services).toEqual({
-      api: { grade: 'small' },
+      backend: { grade: 'small' },
       search: true,
       // `submit` is off with no settings, and the file did not name it: no `false` line.
       // Off, with settings: the switch beside them.
@@ -1240,8 +1240,8 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
     })
     const stored = JSON.parse(readFileSync(join(dest, 'sync.json'), 'utf8')).backends[ORIGIN]
     // Held, written to the file or not — so the next push states `submit` off, as it is.
-    expect(stored.services).toEqual({ api: 'U-api', assistant: 'U-assistant', search: 'U-search', submit: 'U-submit' })
-    expect(stored.secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
+    expect(stored.services).toEqual({ backend: 'U-api', assistant: 'U-assistant', search: 'U-search', submit: 'U-submit' })
+    expect(stored.secrets).toEqual([{ service: 'backend', name: 'k', value: '#ref' }])
     expect(stored.servicesNamed).toBeUndefined()
     expect(yml.$services).toBeUndefined()
     expect(yml.$secrets).toBeUndefined()
@@ -1275,10 +1275,10 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
   it('round-trips produce → project → produce unchanged', async () => {
     // `search: false` is not written into the fresh project — off, no settings, not named
     // there — but it is held, so the second push states it off all the same.
-    const src = write(BASE + 'services:\n  api:\n    grade: small\n  search: false\n', {
+    const src = write(BASE + 'services:\n  backend:\n    grade: small\n  search: false\n', {
       site: { uuid: 'SITE-1' },
-      services: { api: 'U-api', search: 'U-search' },
-      secrets: [{ service: 'api', name: 'k', value: '#ref' }]
+      services: { backend: 'U-api', search: 'U-search' },
+      secrets: [{ service: 'backend', name: 'k', value: '#ref' }]
     })
     const first = await siteProjectToDocument(src, { backend: ORIGIN })
     const dest = join(dir, 'dest2')

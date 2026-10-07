@@ -285,7 +285,7 @@ describe('siteItemsByKey', () => {
     info: { $uuid: 'U-info', name: 'Acme' },
     settings: { $uuid: 'U-settings', placeholders: {} },
     queries: [{ $uuid: 'U-q', name: 'articles' }],
-    services: [{ $uuid: 'U-svc', name: 'search' }, { name: 'api' }],
+    services: [{ $uuid: 'U-svc', name: 'search' }, { name: 'backend' }],
     extensions: [{ $uuid: 'U-ext', ref: '@acme/extra' }, { url: 'https://cdn/x/entry.js' }],
     secrets: [{ $uuid: 'U-secret', service: 'submit', name: 'key', value: '#ref' }],
     unknown_section: [{ $uuid: 'U-unknown', name: 'x' }],
@@ -295,11 +295,11 @@ describe('siteItemsByKey', () => {
     const keys = [...siteItemsByKey(full).keys()]
     expect(keys).toEqual(expect.arrayContaining([
       'unit:site.yml', 'unit:pages/home/page.yml', 'unit:pages/home/hero.md',
-      'settings', 'queries:articles', 'services:search', 'services:api',
+      'settings', 'queries:articles', 'services:search', 'services:backend',
       'extensions:@acme/extra', 'extensions:https://cdn/x/entry.js',
     ]))
     expect(siteItemsByKey(full).get('services:search').uuid).toBe('U-svc')
-    expect(siteItemsByKey(full).get('services:api').uuid).toBe(null)
+    expect(siteItemsByKey(full).get('services:backend').uuid).toBe(null)
   })
 
   it('leaves out secrets, and any Section it does not know', () => {

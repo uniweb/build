@@ -17,7 +17,8 @@ import {
   sameServiceRow,
   refuseRetiredServiceKeys,
   unreadableServices,
-  refuseUnreadableServices
+  refuseUnreadableServices,
+  RENAMED_SERVICES
 } from '../src/uwx/services-request.js'
 
 describe('readServicesRequest — what the host is asked', () => {
@@ -26,13 +27,13 @@ describe('readServicesRequest — what the host is asked', () => {
       readServicesRequest({
         search: true,
         submit: false,
-        api: { grade: 'pro' },
+        backend: { grade: 'pro' },
         assistant: { enabled: false, model: 'x' }
       })
     ).toEqual([
       { name: 'search' },
       { name: 'submit', enabled: false },
-      { name: 'api', config: { grade: 'pro' } },
+      { name: 'backend', config: { grade: 'pro' } },
       { name: 'assistant', enabled: false, config: { model: 'x' } }
     ])
   })
@@ -49,21 +50,21 @@ describe('readServicesRequest — what the host is asked', () => {
     ])
   })
 
-  it("⚠️ an `api` address is said — it turns the host's off, and `api: /_api` was the mock's", () => {
+  it("⚠️ a `backend` address is said — it turns the host's off, and `/_api` was where the mock answered", () => {
     const said = []
     expect(
       readServicesRequest(
-        { api: '/_api', booking: 'https://book.example.com', submit: '/s' },
+        { backend: '/_api', booking: 'https://book.example.com', submit: '/s' },
         { warn: (m) => said.push(m) }
       )
     ).toEqual([
-      { name: 'api', enabled: false, config: { endpoint: '/_api' } },
+      { name: 'backend', enabled: false, config: { endpoint: '/_api' } },
       { name: 'booking', enabled: false, config: { endpoint: 'https://book.example.com' } },
       { name: 'submit', enabled: false, config: { endpoint: '/s' } }
     ])
     expect(said).toHaveLength(1)
-    expect(said[0]).toMatch(/`services\.api` is an address: it asks your host to leave its own `api` off/)
-    expect(said[0]).toMatch(/write `api: true`; in `uniweb dev`, `\$devApi` answers it/)
+    expect(said[0]).toMatch(/`services\.backend` is an address: it asks your host to leave its own `backend` off/)
+    expect(said[0]).toMatch(/write `backend: true`; in `uniweb dev`, `\$devBackend` answers it/)
   })
 
   it('⭐ the row carries the whole entry — the options the page reads and the host\'s settings, in one `config`', () => {
@@ -101,12 +102,12 @@ describe('readServicesRequest — what the host is asked', () => {
   it('a value it cannot read is skipped, said, and the rest kept', () => {
     const said = []
     const asks = readServicesRequest(
-      { search: true, api: { enabled: 'no' }, tracking: 7, records: '/_query' },
+      { search: true, backend: { enabled: 'no' }, tracking: 7, records: '/_query' },
       { warn: (m) => said.push(m) }
     )
     expect(asks).toEqual([{ name: 'search' }])
     expect(said).toHaveLength(3)
-    expect(said[0]).toMatch(/services\.api\.enabled/)
+    expect(said[0]).toMatch(/services\.backend\.enabled/)
     expect(said[2]).toMatch(/`services\.records` has no address of its own/)
   })
 
@@ -144,9 +145,9 @@ describe('runtimeServiceConfig — what the site\'s config carries', () => {
     })
   })
 
-  it("⛔ only api's switch and address — its settings are for the host that provisions it", () => {
-    expect(runtimeServiceConfig('api', { grade: 'pro' })).toBeUndefined()
-    expect(runtimeServiceConfig('api', { endpoint: 'https://b.example/_api', grade: 'pro' })).toEqual({
+  it("⛔ only backend's switch and address — its settings are for the host that provisions it", () => {
+    expect(runtimeServiceConfig('backend', { grade: 'pro' })).toBeUndefined()
+    expect(runtimeServiceConfig('backend', { endpoint: 'https://b.example/_api', grade: 'pro' })).toEqual({
       endpoint: 'https://b.example/_api'
     })
   })
@@ -175,7 +176,7 @@ describe('servicesFromDocument — what pull writes', () => {
         rows: [
           { $id: 'search', name: 'search', config: { exclude: { routes: ['/legal'] } } },
           { name: 'submit', enabled: false },
-          { name: 'api', config: { grade: 'pro' } },
+          { name: 'backend', config: { grade: 'pro' } },
           { name: 'assistant', enabled: false, config: { model: 'x' } },
           { name: 'tracking' }
         ],
@@ -185,7 +186,7 @@ describe('servicesFromDocument — what pull writes', () => {
       search: { exclude: { routes: ['/legal'] } },
       // Off, and named by the file: written, so the file says what the site has.
       submit: false,
-      api: { grade: 'pro' },
+      backend: { grade: 'pro' },
       // Off, with settings: the switch beside them.
       assistant: { enabled: false, model: 'x' },
       tracking: true
@@ -269,7 +270,7 @@ describe('servicesFromDocument — what pull writes', () => {
 
   it('what it writes reads back as the same asks', () => {
     const rows = [
-      { name: 'api', enabled: false, config: { grade: 'pro' } },
+      { name: 'backend', enabled: false, config: { grade: 'pro' } },
       { name: 'search', config: { exclude: { routes: ['/x'] } } },
       { name: 'submit', enabled: false, config: { endpoint: '/s' } }
     ]
@@ -284,8 +285,22 @@ describe('refuseRetiredServiceKeys', () => {
     )
   })
 
-  it('says what became of `api:` — `$devApi` supplies the address in `uniweb dev`', () => {
-    expect(() => refuseRetiredServiceKeys({ api: '/_api' })).toThrow(/`\$devApi` now supplies it/)
+  it('says what became of `api:` — `$devBackend` supplies the address in `uniweb dev`', () => {
+    expect(() => refuseRetiredServiceKeys({ api: '/_api' })).toThrow(/`\$devBackend` now supplies it/)
+    expect(() => refuseRetiredServiceKeys({ api: '/_api' })).toThrow(/is `backend: true` under `services:`/)
+  })
+
+  // ⛔ The block it prints is the one to paste, so it names each service as `services:`
+  // does now — `api` would be refused there next.
+  it('the block to move them into names the site\'s own backend `backend`', () => {
+    expect(() => refuseRetiredServiceKeys({ api: '/_api', search: true })).toThrow(/services:\n {2}search: …\n {2}backend: …/)
+  })
+
+  it('⛔ `$devApi` is refused by that name, naming `$devBackend` — the key followed its service', () => {
+    expect(() => refuseRetiredServiceKeys({ name: 'S', $devApi: './mock/api.js' }, 'site.yml')).toThrow(
+      /^\[uniweb\] site\.yml: `\$devApi:` is now `\$devBackend:` — it names what answers the site's `backend` service/
+    )
+    expect(() => refuseRetiredServiceKeys({ name: 'S', $devBackend: './mock/api.js' })).not.toThrow()
   })
 
   it('a file with none passes', () => {
@@ -301,7 +316,7 @@ describe('unreadableServices / refuseUnreadableServices — what neither lane ca
         submit: false,
         assistant: 'https://ai.example.com/chat',
         tracking: { consent: 'required' },
-        api: { enabled: false, grade: 'pro' },
+        backend: { enabled: false, grade: 'pro' },
         records: true
       })
     ).toEqual([])
@@ -329,6 +344,25 @@ describe('unreadableServices / refuseUnreadableServices — what neither lane ca
     ])
   })
 
+  // ⛔ THE RENAME (2026-10-07): the site's own backend is the `backend` service. `api` is
+  // not an alias — a host offers nothing by that name now, so the page would lose the
+  // service silently; it stops here, in the build and the push, whatever its value.
+  it('⛔ `services.api` is refused by that name, whatever it says, naming `backend`', () => {
+    for (const value of [true, false, '/_api', { grade: 'pro' }]) {
+      expect(unreadableServices({ api: value })).toEqual([
+        "`services.api` is now `services.backend` — the site's own backend is the `backend` service. " +
+          'Rename the entry; what it says stays. On a site you push, `uniweb pull` brings it renamed.'
+      ])
+    }
+    expect(() => refuseUnreadableServices({ services: { api: true } }, 'site.yml')).toThrow(/^\[uniweb\] site\.yml: `services\.api` is now `services\.backend`/)
+    expect(RENAMED_SERVICES).toEqual({ api: 'backend' })
+  })
+
+  it('CONTROL — the renamed service reads as any other', () => {
+    expect(readServicesRequest({ backend: true })).toEqual([{ name: 'backend' }])
+    expect(readServicesRequest({ api: true }, { warn: () => {} })).toBeNull()
+  })
+
   it('refuses with the file named, one entry inline and several listed', () => {
     expect(() => refuseUnreadableServices({ services: { search: 'on' } }, 'site.yml')).toThrow(
       /^\[uniweb\] site\.yml: `services\.search` is the text `on`/
@@ -345,11 +379,11 @@ describe('statedServices — what a push states', () => {
 
   it("⭐ every service the file lists, as it says it — whole, with the held one's $uuid", () => {
     expect(
-      statedServices(asks({ search: { exclude: { routes: ['/x'] } }, submit: false, api: true }), { search: 'U-s' })
+      statedServices(asks({ search: { exclude: { routes: ['/x'] } }, submit: false, backend: true }), { search: 'U-s' })
     ).toEqual([
       { name: 'search', config: { exclude: { routes: ['/x'] } }, $uuid: 'U-s' },
       { name: 'submit', enabled: false },
-      { name: 'api' }
+      { name: 'backend' }
     ])
   })
 
@@ -377,20 +411,20 @@ describe('statedServices — what a push states', () => {
 describe('heldServices — which services this copy holds after a push or a pull', () => {
   const written = [
     { $uuid: 'U-s', name: 'search' },
-    { $uuid: 'U-a', name: 'api', config: { grade: 'pro' } },
+    { $uuid: 'U-a', name: 'backend', config: { grade: 'pro' } },
     { $uuid: 'U-new', name: 'assistant' },
     { name: 'tracking' }
   ]
 
   it('a pull holds every service the site has that carries a $uuid', () => {
-    expect(heldServices({ written })).toEqual({ api: 'U-a', assistant: 'U-new', search: 'U-s' })
+    expect(heldServices({ written })).toEqual({ backend: 'U-a', assistant: 'U-new', search: 'U-s' })
   })
 
   it('⛔ a push holds what it stated and what was held before — never a service added on the site since', () => {
     // Held, the next push would state `assistant` off: switching off a service nobody
     // here has seen.
-    expect(heldServices({ written, sent: [{ name: 'search' }], prior: { api: 'U-a' } })).toEqual({
-      api: 'U-a',
+    expect(heldServices({ written, sent: [{ name: 'search' }], prior: { backend: 'U-a' } })).toEqual({
+      backend: 'U-a',
       search: 'U-s'
     })
   })
@@ -407,7 +441,7 @@ describe('sameServiceRow — a service written as a push sent it', () => {
     expect(sameServiceRow({ name: 'search' }, { $uuid: 'U', name: 'search', enabled: true })).toBe(true)
     // ⛔ On the keys we sent (`name`) these are equal — and they are not the same service.
     expect(sameServiceRow({ name: 'search' }, { name: 'search', enabled: false })).toBe(false)
-    expect(sameServiceRow({ name: 'api' }, { name: 'api', config: { grade: 'pro' } })).toBe(false)
-    expect(sameServiceRow({ name: 'api', config: { grade: 'pro' } }, { name: 'api', config: { grade: 'pro' } })).toBe(true)
+    expect(sameServiceRow({ name: 'backend' }, { name: 'backend', config: { grade: 'pro' } })).toBe(false)
+    expect(sameServiceRow({ name: 'backend', config: { grade: 'pro' } }, { name: 'backend', config: { grade: 'pro' } })).toBe(true)
   })
 })

@@ -109,8 +109,17 @@ describe('loadPackageJson — a malformed declaration reads as UNKNOWN, never as
 
 describe('buildSchema — the declaration reaches _self', () => {
   it('puts supports on _self when declared', async () => {
-    const schema = await buildSchema(foundationDir({ uniweb: { supports: ['api'] } }))
-    expect(schema._self.supports).toEqual(['api'])
+    const schema = await buildSchema(foundationDir({ uniweb: { supports: ['backend'] } }))
+    expect(schema._self.supports).toEqual(['backend'])
+  })
+
+  // ⛔ THE RENAME (2026-10-07): the site's own backend is the `backend` service. A
+  // foundation claiming `api` claims a service no host offers now, so the build stops on
+  // it — the same refusal `site.yml::services` makes — rather than publish the claim.
+  it('⛔ stops on a renamed service, naming the new name', async () => {
+    await expect(buildSchema(foundationDir({ uniweb: { supports: ['search', 'api'] } }))).rejects.toThrow(
+      /`uniweb\.supports` names `api`, which is now `backend`/
+    )
   })
 
   it('leaves _self without the key when undeclared', async () => {

@@ -27,6 +27,7 @@ import {
   deriveRecordsSupport,
   unnameableIn,
 } from './foundation/derive-supports.js'
+import { RENAMED_SERVICES } from './uwx/services-request.js'
 import { foundationNameOf, splitFoundationName } from './foundation-name.js'
 import { resolveFoundationSrcDir } from './utils/foundation-source-root.js'
 
@@ -1011,6 +1012,29 @@ export async function discoverComponents(srcDir, sectionPaths = DEFAULT_SECTION_
 }
 
 /**
+ * Stop on a service `uniweb.supports` names by its old name (`RENAMED_SERVICES`), as
+ * `site.yml::services` does. A foundation claiming `api` claims a service no host offers
+ * now — and the build derives `backend` from the code itself, through kit's and
+ * `@uniweb/api`'s literals, so a renamed claim could only ever disagree with it.
+ *
+ * ⛔ Before the dev-rebuild bail, like `reportSupports`' warning: dev is where the
+ * developer is working.
+ *
+ * @param {string} srcDir
+ * @param {string[]|undefined} authored - normalized `uniweb.supports`
+ * @throws {Error} naming each old name and the new one
+ */
+function refuseRenamedSupports(srcDir, authored) {
+  const renamed = (authored || []).filter((s) => RENAMED_SERVICES[s])
+  if (!renamed.length) return
+  throw new Error(
+    `${srcDir}/package.json: \`uniweb.supports\` names ${renamed.map((s) => `\`${s}\``).join(', ')}, which is now ` +
+      `${renamed.map((s) => `\`${RENAMED_SERVICES[s]}\``).join(', ')} — the site's own backend is the \`backend\` ` +
+      'service. Rename it in package.json.',
+  )
+}
+
+/**
  * Say what the derivation added, at the one moment the developer is looking.
  *
  * ⭐ This is the whole answer to *"a developer may not realize they have to
@@ -1255,6 +1279,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
   // `supports` differs from the one a real build produces is a trap rather than a
   // convenience — the artifact would disagree with itself depending on which
   // command wrote it. One rule: the derivation runs on a real build.
+  refuseRenamedSupports(srcDir, identity.supports)
   const derived = derivedSupports && {
     ...derivedSupports,
     services: deriveRecordsSupport(components, foundationConfig.data)

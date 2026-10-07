@@ -44,18 +44,18 @@ function project({ request = null, record = null } = {}) {
 
 const HELD = {
   site: { uuid: 'SITE-1' },
-  services: { api: 'U-api', search: 'U-search' },
-  secrets: [{ name: 'token', service: 'api', value: '#ref' }]
+  services: { backend: 'U-api', search: 'U-search' },
+  secrets: [{ name: 'token', service: 'backend', value: '#ref' }]
 }
 
 describe('the services a push states', () => {
   it("⭐ each service the file lists, whole — with the held one's $uuid", async () => {
     const doc = await siteProjectToDocument(
-      project({ request: 'services:\n  api:\n    grade: pro\n  submit: true\n  search: false\n', record: HELD }),
+      project({ request: 'services:\n  backend:\n    grade: pro\n  submit: true\n  search: false\n', record: HELD }),
       { backend: ORIGIN }
     )
     expect(doc.services).toEqual([
-      { $id: 'api', name: 'api', config: { grade: 'pro' }, $uuid: 'U-api' },
+      { $id: 'backend', name: 'backend', config: { grade: 'pro' }, $uuid: 'U-api' },
       { $id: 'submit', name: 'submit' },
       { $id: 'search', name: 'search', enabled: false, $uuid: 'U-search' }
     ])
@@ -67,14 +67,14 @@ describe('the services a push states', () => {
     })
     expect(doc.services).toEqual([
       { $id: 'search', name: 'search', $uuid: 'U-search' },
-      { $id: 'api', name: 'api', enabled: false, $uuid: 'U-api' }
+      { $id: 'backend', name: 'backend', enabled: false, $uuid: 'U-api' }
     ])
   })
 
   it('a file that lists nothing still states the held services off', async () => {
     const doc = await siteProjectToDocument(project({ record: HELD }), { backend: ORIGIN })
     expect(doc.services.map((r) => [r.name, r.enabled])).toEqual([
-      ['api', false],
+      ['backend', false],
       ['search', false]
     ])
   })
@@ -97,7 +97,7 @@ describe('the services a push states', () => {
     const doc = await siteProjectToDocument(
       project({
         request: 'services:\n  search: true\n',
-        record: { site: { uuid: 'SITE-1' }, services: [{ name: 'api' }, { name: 'search' }] }
+        record: { site: { uuid: 'SITE-1' }, services: [{ name: 'backend' }, { name: 'search' }] }
       }),
       { backend: ORIGIN }
     )
@@ -106,7 +106,7 @@ describe('the services a push states', () => {
 
   it('secrets ride from the entry, as before', async () => {
     const doc = await siteProjectToDocument(project({ record: HELD }), { backend: ORIGIN })
-    expect(doc.secrets).toEqual([{ $id: 'api:token', name: 'token', service: 'api', value: '#ref' }])
+    expect(doc.secrets).toEqual([{ $id: 'backend:token', name: 'token', service: 'backend', value: '#ref' }])
   })
 
   it('no backend, nothing held: the file alone', async () => {

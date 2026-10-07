@@ -1,5 +1,5 @@
 /**
- * `$devApi` — a site's own backend, answered locally.
+ * `$devBackend` — a site's own backend, answered locally.
  *
  * ⭐ The framework mounts; the site supplies. This module knows nothing about what
  * it mounts — not the routes, not the shapes, not which backend is being imitated —
@@ -62,8 +62,8 @@ describe('mountDevApi', () => {
 
   it('⭐ mounts the handler at the dev server’s own address, and says which', async () => {
     // In `uniweb dev` the dev server is the host: the address is its own, and the site
-    // writes none — `api:` under `services:` would read as "the site brings its own".
-    const root = await site('name: S\nservices:\n  api: true\n$devApi: ./mock/api.js\n', echo)
+    // writes none — `backend:` under `services:` would read as "the site brings its own".
+    const root = await site('name: S\nservices:\n  backend: true\n$devBackend: ./mock/api.js\n', echo)
     const server = fakeServer()
     expect(mountDevApi(server, { root })).toBe(DEV_API_ADDRESS)
     expect(DEV_API_ADDRESS).toBe('/_api')
@@ -76,14 +76,14 @@ describe('mountDevApi', () => {
   it('⭐ strips the mount point, so a handler is not written against one deployment’s prefix', async () => {
     // Where a backend is exposed is the host's business. A handler that saw
     // `/_api/entities` would break the moment a deployment chose another prefix.
-    const root = await site('name: S\n$devApi: ./mock/api.js\n', echo)
+    const root = await site('name: S\n$devBackend: ./mock/api.js\n', echo)
     const server = fakeServer()
     mountDevApi(server, { root })
     expect(JSON.parse((await server.call('/_api/entities')).body).path).toBe('/entities')
   })
 
   it('passes everything outside the mount straight through', async () => {
-    const root = await site('name: S\n$devApi: ./mock/api.js\n', echo)
+    const root = await site('name: S\n$devBackend: ./mock/api.js\n', echo)
     const server = fakeServer()
     mountDevApi(server, { root })
     expect((await server.call('/pages/home')).passed).toBe(true)
@@ -91,7 +91,7 @@ describe('mountDevApi', () => {
     expect((await server.call('/_apiary')).passed).toBe(true)
   })
 
-  it('does nothing without $devApi — the ordinary site', async () => {
+  it('does nothing without $devBackend — the ordinary site', async () => {
     const root = await site('name: S\n')
     const server = fakeServer()
     expect(mountDevApi(server, { root })).toBeNull()
@@ -104,7 +104,7 @@ describe('mountDevApi', () => {
     // is therefore a 500 with a reason, not a silent pass-through to the SPA
     // fallback — which would answer the API with index.html and explain nothing.
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const root = await site('name: S\n$devApi: ./mock/missing.js\n')
+    const root = await site('name: S\n$devBackend: ./mock/missing.js\n')
     const server = fakeServer()
     expect(mountDevApi(server, { root })).toBe(DEV_API_ADDRESS)
 
@@ -120,7 +120,7 @@ describe('mountDevApi', () => {
     // 200 of HTML from the SPA fallback and fails to parse it, with nothing in the
     // log naming the API as the cause.
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const root = await site('name: S\n$devApi: ./mock/api.js\n', 'export default 42')
+    const root = await site('name: S\n$devBackend: ./mock/api.js\n', 'export default 42')
     const server = fakeServer()
     mountDevApi(server, { root })
     const res = await server.call('/_api/x')
@@ -130,7 +130,7 @@ describe('mountDevApi', () => {
   })
 
   it('answers 500 rather than hanging when a handler throws', async () => {
-    const root = await site('name: S\n$devApi: ./mock/api.js\n', 'export default () => { throw new Error("boom") }')
+    const root = await site('name: S\n$devBackend: ./mock/api.js\n', 'export default () => { throw new Error("boom") }')
     const server = fakeServer()
     mountDevApi(server, { root })
     const res = await server.call('/_api/x')
@@ -142,7 +142,7 @@ describe('mountDevApi', () => {
 describe('the payload `uniweb dev` serves names the address', () => {
   // ⭐ The dev server supplies the address, and the site writes none: under `services:` an
   // address means a provider the site brings, which asks a host to leave its own off. So
-  // the dev payload carries it as the site tier — `config.api`, which `resolveService`
+  // the dev payload carries it as the site tier — `config.backend`, which `resolveService`
   // reads when no host speaks.
   let root
   let saved
@@ -177,16 +177,32 @@ describe('the payload `uniweb dev` serves names the address', () => {
     return JSON.parse(json.replace(/\\u003c/g, '<'))
   }
 
-  it('⭐ `$devApi` puts the dev server’s own address in config.api', async () => {
-    const content = await devPayload('name: S\nservices:\n  api: true\n$devApi: ./mock/api.js\n')
-    expect(content.config.api).toBe(DEV_API_ADDRESS)
+  it('⭐ `$devBackend` puts the dev server’s own address in config.backend', async () => {
+    const content = await devPayload('name: S\nservices:\n  backend: true\n$devBackend: ./mock/api.js\n')
+    expect(content.config.backend).toBe(DEV_API_ADDRESS)
     // Never the host tier, and the `$` key itself stays on this machine.
     expect(content.config.services).toBeUndefined()
-    expect(content.config.$devApi).toBeUndefined()
+    expect(content.config.$devBackend).toBeUndefined()
   })
 
-  it('CONTROL — without `$devApi` there is no address: `api: true` asks a host, and none speaks here', async () => {
-    const content = await devPayload('name: S\nservices:\n  api: true\n')
-    expect(content.config.api).toBeUndefined()
+  // ⛔ THE RENAME (2026-10-07): the key was `$devApi` while the service was `api`. Read
+  // by its old name it would mount nothing, and every signed-in feature would simply be
+  // absent in development with nothing saying why — so the collect refuses it instead.
+  it('⛔ `$devApi` mounts nothing and is refused by name, naming `$devBackend`', async () => {
+    const errors = []
+    const savedError = console.error
+    console.error = (...args) => errors.push(args.join(' '))
+    try {
+      const content = await devPayload('name: S\nservices:\n  backend: true\n$devApi: ./mock/api.js\n')
+      expect(content.config.backend).toBeUndefined()
+    } finally {
+      console.error = savedError
+    }
+    expect(errors.join('\n')).toMatch(/`\$devApi:` is now `\$devBackend:`/)
+  })
+
+  it('CONTROL — without `$devBackend` there is no address: `backend: true` asks a host, and none speaks here', async () => {
+    const content = await devPayload('name: S\nservices:\n  backend: true\n')
+    expect(content.config.backend).toBeUndefined()
   })
 })

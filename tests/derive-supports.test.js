@@ -73,9 +73,12 @@ describe('deriveSupports — over real framework source', () => {
     // @uniweb/api calls resolveService(website, SERVICE_NAME). Without const
     // resolution this is BOTH a miss and a false blindness signal, which would
     // mark every foundation using the package unknowable.
+    // ⛔ And the name is `backend` since 2026-10-07 — a foundation built on the package
+    // claims the service hosts offer now, never the retired `api`.
     const { bundle, ctx } = graphOf([realModule('api/src/client.js')])
     const { services, blind } = deriveSupports(bundle, ctx)
-    expect(services).toContain('api')
+    expect(services).toContain('backend')
+    expect(services).not.toContain('api')
     expect(blind).toBe(false)
   })
 
@@ -90,7 +93,7 @@ describe('deriveSupports — over real framework source', () => {
 
     // `tracking` is absent although `isTrackingEnabled()` is right there in the
     // same file, and that is the point of NEVER_EMITTED — see the next test.
-    expect(services).toEqual(['api', 'assistant', 'search', 'submit'])
+    expect(services).toEqual(['assistant', 'backend', 'search', 'submit'])
     expect(blind).toBe(false)
   })
 

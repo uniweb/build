@@ -39,8 +39,8 @@ describe('collectSiteContent — $-prefixed keys stay out of the payload', () =>
         "$uuid: '019e3c01-0000-7c0d-8a03-000000000002'\n" +
         '$org: acme\n' +
         "$backend: 'https://uniweb.app'\n" +
-        '$services:\n  - name: api\n' +
-        "$secrets:\n  - service: api\n    name: stripe_key\n    value: '#ref'\n"
+        '$services:\n  - name: backend\n' +
+        "$secrets:\n  - service: backend\n    name: stripe_key\n    value: '#ref'\n"
     )
 
     const { config } = await collectSiteContent(dir)
@@ -72,15 +72,15 @@ describe('collectSiteContent — $-prefixed keys stay out of the payload', () =>
     expect(config.name).toBe('Test')
   })
 
-  it("⛔ api's settings and every credential stay out of the payload", async () => {
+  it("⛔ backend's settings and every credential stay out of the payload", async () => {
     const dir = await makeSite(
-      'name: Test\nservices:\n  api:\n    endpoint: https://backend.example.com/_api\n    grade: pro\n' +
+      'name: Test\nservices:\n  backend:\n    endpoint: https://backend.example.com/_api\n    grade: pro\n' +
         '  assistant:\n    system: Be helpful.\n    apiKey: sk-live-must-not-ship\n'
     )
 
     const { config } = await collectSiteContent(dir)
 
-    expect(config.api).toEqual({ endpoint: 'https://backend.example.com/_api' })
+    expect(config.backend).toEqual({ endpoint: 'https://backend.example.com/_api' })
     expect(config.assistant).toEqual({ system: 'Be helpful.' })
     expect(JSON.stringify(config)).not.toContain('pro')
     expect(JSON.stringify(config)).not.toContain('sk-live')

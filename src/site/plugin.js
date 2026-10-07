@@ -655,16 +655,16 @@ export function siteContentPlugin(options = {}) {
   }
 
   let siteContent = null
-  // Where `uniweb dev` answers the site's `api` service with `$devApi`'s handler — set
+  // Where `uniweb dev` answers the site's `backend` service with `$devBackend`'s handler — set
   // in `configureServer`, so never in a build.
   let devApiAddress = null
   /**
-   * The dev payload names `$devApi`'s address as the site's `api` service: the site
+   * The dev payload names `$devBackend`'s address as the site's `backend` service: the site
    * tier, which `resolveService` reads when no host speaks. A build never gets here
    * with one.
    */
   const withDevApi = (content) => {
-    if (devApiAddress && content?.config) content.config.api = devApiAddress
+    if (devApiAddress && content?.config) content.config.backend = devApiAddress
     return content
   }
   // What each section type declares its data blocks are — read once per collection of the site.
@@ -1009,10 +1009,10 @@ export function siteContentPlugin(options = {}) {
     configureServer(devServer) {
       server = devServer
 
-      // A site's own backend, answered locally in development. `site.yml::$devApi`
+      // A site's own backend, answered locally in development. `site.yml::$devBackend`
       // names a module that default-exports a fetch handler; the dev server mounts it
       // at an address of its own and names that address in the payload it serves
-      // (`withDevApi`), so the site's `api` service resolves to it.
+      // (`withDevApi`), so the site's `backend` service resolves to it.
       // ⚠️ Synchronous on purpose — see mountDevApi. An await here and the
       // middleware lands after Vite's SPA fallback, which answers the API with
       // index.html and says nothing about why.

@@ -1478,12 +1478,13 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // KEYED FIELD: one embedded in an endpoint URL (`https://collector/e?key=…`) is
   // invisible there and is disclosed. The host's secret store is the only right home.
   //
-  // ⛔ `api`'S ADDRESS IS THE HOST'S TO SUPPLY — `config.services.api`, read by
-  // `@uniweb/api` (`resolveBase`). Asking for it is `services: { api: true }`, or a map
-  // of the host's settings; an address of the site's own asks the host to leave its own
-  // off, and `readServicesRequest` says so, because `api: /_api` — where a local mock
-  // used to answer — reads that way. In `uniweb dev`, `$devApi` supplies the mock's
-  // address (`dev/api-mount.js`).
+  // ⛔ `backend`'S ADDRESS IS THE HOST'S TO SUPPLY — `config.services.backend`, read by
+  // `@uniweb/api` (`resolveBase`). Asking for it is `services: { backend: true }`, or a
+  // map of the host's settings; an address of the site's own asks the host to leave its
+  // own off, and `readServicesRequest` says so, because `/_api` — where a local mock
+  // used to answer — reads that way. In `uniweb dev`, `$devBackend` supplies the mock's
+  // address (`dev/api-mount.js`). *(The service was `api` until 2026-10-07; that name is
+  // refused — `RENAMED_SERVICES`.)*
   // ⛔ THE CONFIGURATION KEYS ARE NOT HERE — they ride the `settings` Section
   // (`settingsNested` above). `info` is the BRIEF: what a card or a select dropdown
   // renders, plus what a listing can filter on. Eighteen keys moved off it on
