@@ -54,7 +54,7 @@ export {
   queriesYmlPath,
   QUERIES_YML_RELPATH,
 } from './queries-config.js'
-export { upsertYamlScalar, removeYamlScalar } from './yaml-upsert.js'
+export { upsertYamlScalar, removeYamlScalar, editYamlText } from './yaml-upsert.js'
 export { buildFolderEntity,
   collectFolderItemUuids,
   stampFolderItemUuids

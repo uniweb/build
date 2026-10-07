@@ -22,6 +22,7 @@ import { canonicalJson, sameMarkdownDocument } from './same-content.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
+import { editYamlText } from './yaml-upsert.js'
 import { DECLARATION_KEYS } from '../site/fetch-shapes.js'
 
 // Frontmatter keys that belong to the CCA framework / the developer's local
@@ -216,10 +217,8 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
 // Shallow-merge `changes` into a YAML config file and write idempotently. A key
 // whose value is null/undefined is deleted; an object value is shallow-merged one
 // level deep (so partial `theme` / `build` updates don't drop sibling keys) unless
-// the key is in `replace`; any other value replaces. NOTE: this re-dumps the file,
-// so author comments/order are not preserved — acceptable for machine-owned
-// config, but comment-preserving merges for hand-authored config files are a
-// quality bar to revisit.
+// the key is in `replace`; any other value replaces. The file is edited, not
+// re-dumped: its comments and layout stay (`writeYamlIfChanged`).
 function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
   const prior = loadYamlFile(filePath)
   const existing = isPlainObject(prior.value) ? { ...prior.value } : {}
@@ -240,23 +239,31 @@ function mergeYamlConfig(filePath, changes, { replace = [] } = {}) {
   return writeYamlIfChanged(filePath, existing, prior)
 }
 
-// A YAML file, parsed — and whether there was one: a missing or unreadable file is never "unchanged".
+// A YAML file, parsed, with its text — and whether there was one: a missing or unreadable file is never
+// "unchanged".
 function loadYamlFile(filePath) {
   try {
-    return { value: yaml.load(readFileSync(filePath, 'utf8'), YAML_OPTIONS) ?? {}, read: true }
+    const text = readFileSync(filePath, 'utf8')
+    return { value: yaml.load(text, YAML_OPTIONS) ?? {}, read: true, text }
   } catch {
-    return { value: {}, read: false }
+    return { value: {}, read: false, text: null }
   }
 }
 
-// ⭐ A FILE WHOSE MEANING WOULD NOT CHANGE IS LEFT AS ITS AUTHOR WROTE IT. Every writer here re-dumps the
-// whole file — its comments dropped, its strings re-quoted, its lists reflowed — so a pull that restated
-// a file rewrote it all the same. ⛔ Until 2026-09-26 a pull into the copy that pushed it re-dumped
-// `site.yml`, `theme.yml` and every `page.yml` (measured on the `international` template: every comment
-// in its `site.yml` gone, and nothing had changed).
+// ⭐ A FILE WHOSE MEANING WOULD NOT CHANGE IS LEFT AS ITS AUTHOR WROTE IT. ⛔ Until 2026-09-26 a pull into
+// the copy that pushed it re-dumped `site.yml`, `theme.yml` and every `page.yml` (measured on the
+// `international` template: every comment in its `site.yml` gone, and nothing had changed).
+//
+// ⭐ AND ONE THAT CHANGES IS EDITED, NOT RE-DUMPED (2026-10-07): only the entries that differ are
+// rewritten, and every comment, blank line and list the author wrote stays (`editYamlText`). ⛔ Until then
+// every writer here dumped the whole file — a pull that changed one key of `site.yml` left the Starter
+// template's 93 lines as 10, and a `pull --merge` conflicted on the whole commented header. The whole dump
+// remains for a file with nothing to keep (none yet, unreadable) and one the editor declines (an alias or a
+// `<<` merge key, or a result that would read differently).
 function writeYamlIfChanged(filePath, value, prior) {
   if (prior.read && canonicalJson(value) === canonicalJson(prior.value)) return 'unchanged'
-  return writeIfChanged(filePath, yaml.dump(value, YAML_DUMP_OPTS))
+  const edited = prior.read ? editYamlText(prior.text, prior.value, value, YAML_DUMP_OPTS) : null
+  return writeIfChanged(filePath, edited ?? yaml.dump(value, YAML_DUMP_OPTS))
 }
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
@@ -280,10 +287,10 @@ export function writeSiteConfig(siteRoot, config) {
 const SITE_CONFIG_WHOLE = Object.freeze([...DECLARATION_KEYS, 'services'])
 
 /**
- * Write a YAML object to a file (full dump, idempotent) — for machine-owned
+ * Write a YAML object to a file (idempotent) — for machine-owned
  * config the projector authors wholesale, e.g. a projected `page.yml`/`folder.yml`.
- * (Comment/unknown-key preservation is a later refinement; `site.yml`/
- * `collections.yml` use the merging writers instead.)
+ * An existing file is edited, not re-dumped — its comments stay (`writeYamlIfChanged`);
+ * `site.yml` and `queries.yml` use the merging writers.
  * @returns {'updated'|'unchanged'}
  */
 export function writeYamlFile(filePath, obj) {
@@ -296,7 +303,7 @@ export function writeYamlFile(filePath, obj) {
  * absent from `projected` is removed (the projector owns the managed set
  * wholesale); unknown keys keep their value and relative order. Idempotent.
  *
- * Same key-preserving (comment-dropping) bar as `writeSiteConfig` — for the
+ * Same key- and comment-preserving bar as `writeSiteConfig` — for the
  * hand-authored `page.yml`/`folder.yml`, whose author-added keys must survive a
  * pull rather than being clobbered by a full re-dump.
  *
@@ -323,7 +330,7 @@ export function writeMergedYaml(filePath, projected, managedKeys) {
 /**
  * Merge `queries` into `queries.yml` (shallow). Preserves queries not in the
  * incoming set; each incoming one is replaced wholesale. Same key-preserving
- * (comment-dropping) bar as `writeSiteConfig`.
+ * (and comment-preserving) bar as `writeSiteConfig`.
  *
  * ⛔ `queries.yml` IS THE MAP — there is no root key, so `queries` is passed bare.
  * The predecessor wrote `{ collections: {...} }` into `collections.yml`; handing

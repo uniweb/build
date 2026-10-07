@@ -7,8 +7,10 @@
  * must not destroy a developer's comments on the targets:/saveDeploys:
  * regions of the file.
  *
- * This is the only place in @uniweb/build that depends on `yaml`. The
- * loader (deploy-config.js) stays on js-yaml for read-only ingestion.
+ * The loader (deploy-config.js) stays on js-yaml for read-only ingestion.
+ * ⚠️ This read "the only place in @uniweb/build that depends on `yaml`" until
+ * 2026-10-07; the pull's config writers locate entries with it too
+ * (`uwx/yaml-upsert.js::editYamlText`), and print with js-yaml.
  *
  * `saveDeploys: false` (or `--no-save`) makes this a no-op; otherwise it
  * touches ONLY deploys.<targetName> — plus targets.<targetName> when the file has no

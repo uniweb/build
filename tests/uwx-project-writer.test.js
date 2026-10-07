@@ -145,6 +145,99 @@ describe('writeSiteConfig / writeThemeFile', () => {
   })
 })
 
+describe('⭐ a config file is EDITED, not re-dumped — its comments stay (F1)', () => {
+  // ⛔ Until 2026-10-07 every write dumped the whole file: a pull that added `services:` left the
+  // Starter template's 93 lines as 10, and `pull --merge` conflicted on the whole commented header.
+  const STARTER = [
+    '# Site Configuration',
+    '# Full reference: uniweb docs site',
+    '',
+    'name: Demo   # shown on cards',
+    '',
+    'index: home',
+    '',
+    '# ─── Page Ordering ───',
+    '# pages: [home, about, ...]',
+    '',
+    'languages: [en, es]',
+    '',
+    'services:',
+    '  # the box in the header',
+    '  search: true',
+    '  submit: https://forms.example.com/f   # our own forms',
+    '',
+    '# ─── Base Path ───',
+    '# base: /docs/',
+    '',
+    'build:',
+    '  prerender: true',
+    ''
+  ].join('\n')
+  const file = () => join(dir, 'site.yml')
+  const write = (text = STARTER) => writeFileSync(file(), text)
+  const read = () => readFileSync(file(), 'utf8')
+
+  it('a new key is added after the last one, and nothing else moves', () => {
+    write()
+    writeSiteConfig(dir, { publishLanguages: ['en'] })
+    expect(read()).toBe(STARTER + 'publishLanguages:\n  - en\n')
+  })
+
+  it('a changed scalar is rewritten where it stands, its comment kept', () => {
+    write()
+    writeSiteConfig(dir, { name: 'Renamed' })
+    expect(read()).toBe(STARTER.replace('name: Demo   #', 'name: Renamed   #'))
+  })
+
+  it('`services` is replaced whole, by editing only the entries that changed', () => {
+    write()
+    writeSiteConfig(dir, { services: { search: false, submit: 'https://forms.example.com/f', records: true } })
+    expect(read()).toBe(
+      STARTER.replace('  search: true\n', '  search: false\n').replace(
+        '   # our own forms\n',
+        '   # our own forms\n  records: true\n'
+      )
+    )
+  })
+
+  it('an entry gone from `services` takes its line, and only its line', () => {
+    write()
+    writeSiteConfig(dir, { services: { search: true } })
+    expect(read()).toBe(STARTER.replace('  submit: https://forms.example.com/f   # our own forms\n', ''))
+  })
+
+  it('a deleted key takes its lines; the comments around it stay', () => {
+    write()
+    writeSiteConfig(dir, { build: null })
+    expect(read()).toBe(STARTER.replace('build:\n  prerender: true\n', ''))
+  })
+
+  it('a list written on one line stays on one line', () => {
+    write()
+    writeSiteConfig(dir, { languages: ['en', 'fr'] })
+    expect(read()).toBe(STARTER.replace('languages: [en, es]', 'languages: [en, fr]'))
+  })
+
+  it("theme.yml's one-level merge edits the entry inside, and keeps the comment beside it", () => {
+    writeFileSync(join(dir, 'theme.yml'), '# Theme\nvars:\n  # the bar\n  header-height: 4rem\n  accent: blue\n')
+    writeThemeFile(dir, { vars: { accent: 'red' } })
+    expect(readFileSync(join(dir, 'theme.yml'), 'utf8')).toBe('# Theme\nvars:\n  # the bar\n  header-height: 4rem\n  accent: red\n')
+  })
+
+  it('a file of comments only keeps them, and gains what it says after them', () => {
+    write('# Nothing here yet\n')
+    writeSiteConfig(dir, { name: 'S' })
+    expect(read()).toBe('# Nothing here yet\nname: S\n')
+  })
+
+  it('⚠️ a file with an alias is written whole — same meaning, comments not kept', () => {
+    write('# shared\ndefaults: &d\n  prerender: true\nbuild: *d\nname: A\n')
+    writeSiteConfig(dir, { name: 'B' })
+    expect(yaml.load(read())).toEqual({ defaults: { prerender: true }, build: { prerender: true }, name: 'B' })
+    expect(read()).not.toContain('# shared')
+  })
+})
+
 describe('writeRecordFile', () => {
   const declaration = {
     name: '@acme/article',
