@@ -321,3 +321,50 @@ export function collectQueryUuids(doc) {
   }
   return out
 }
+
+// The Sections whose items are matched by a field of their own, and that field — how
+// the backend matches them too. `extensions` has no declared key yet; its `ref` or
+// `url` is what the file names it by.
+const KEYED_SECTIONS = {
+  queries: (item) => item?.name,
+  services: (item) => item?.name,
+  extensions: (item) => item?.ref || item?.url
+}
+
+/**
+ * Every item of a site-content document, under a key that names it the same way in OUR
+ * document and in the BACKEND's, so the two can be paired item by item.
+ *
+ * - units — `site.yml` (the `info` item), pages, page sections and layout sections —
+ *   by the path the projector writes them to (`unit:<path>`), each its OWN content, as
+ *   `collectSiteUnits` keys them;
+ * - `settings`, one item, by its Section;
+ * - `queries`, `services` and `extensions` by the field each is matched by
+ *   (`queries:<name>`, …).
+ *
+ * ⛔ `secrets` is left out on purpose: a push never deletes a secret by leaving it out,
+ * and its values are set in the app, so no version of one is ever kept or sent.
+ * A Section this does not know is left out too — an item that cannot be paired is
+ * never taken as seen.
+ *
+ * @returns {Map<string, { uuid: string|null, record: object }>}
+ */
+export function siteItemsByKey(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
+  const out = new Map()
+  const uuidOf = (record) => (typeof record?.$uuid === 'string' && record.$uuid ? record.$uuid : null)
+  const units = collectSiteUnits(doc, sourceLocale)
+  walkSiteUnits(doc, (path, record) => {
+    if (!out.has(`unit:${path}`)) out.set(`unit:${path}`, { uuid: uuidOf(record), record: units.get(path) })
+  }, sourceLocale)
+  if (doc?.settings && typeof doc.settings === 'object' && !Array.isArray(doc.settings)) {
+    out.set('settings', { uuid: uuidOf(doc.settings), record: doc.settings })
+  }
+  for (const [section, keyOf] of Object.entries(KEYED_SECTIONS)) {
+    for (const item of Array.isArray(doc?.[section]) ? doc[section] : []) {
+      const key = keyOf(item)
+      if (typeof key !== 'string' || !key || out.has(`${section}:${key}`)) continue
+      out.set(`${section}:${key}`, { uuid: uuidOf(item), record: item })
+    }
+  }
+  return out
+}

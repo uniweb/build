@@ -1,6 +1,6 @@
 import {
   diffSiteUnits, describeSiteDiff, computeUnitHashes, collectSiteUnits,
-  collectUnitUuids, stampUnitUuids, walkSiteUnits,
+  collectUnitUuids, stampUnitUuids, walkSiteUnits, siteItemsByKey,
 } from '../src/uwx/site-diff.js'
 
 // File-level attribution behind the entity-grained staleness gate.
@@ -274,5 +274,42 @@ describe('diffSiteUnits — an unknown side is only reported when it matters', (
       asRemote(doc(page('h', 'home', [section('hero', 'theirs')])))
     )
     expect(d.changedUnattributed).toContain('pages/home/hero.md')
+  })
+})
+
+// Every item of the document, keyed the same way on both sides, so a push can tell
+// which items it has seen — and send a version for each, which is what lets it delete.
+describe('siteItemsByKey', () => {
+  const full = {
+    ...doc(page('h', 'home', [section('hero', 'x')])),
+    info: { $uuid: 'U-info', name: 'Acme' },
+    settings: { $uuid: 'U-settings', placeholders: {} },
+    queries: [{ $uuid: 'U-q', name: 'articles' }],
+    services: [{ $uuid: 'U-svc', name: 'search' }, { name: 'api' }],
+    extensions: [{ $uuid: 'U-ext', ref: '@acme/extra' }, { url: 'https://cdn/x/entry.js' }],
+    secrets: [{ $uuid: 'U-secret', service: 'submit', name: 'key', value: '#ref' }],
+    unknown_section: [{ $uuid: 'U-unknown', name: 'x' }],
+  }
+
+  it('keys units by path, settings by its Section, and the rest by the field each is matched by', () => {
+    const keys = [...siteItemsByKey(full).keys()]
+    expect(keys).toEqual(expect.arrayContaining([
+      'unit:site.yml', 'unit:pages/home/page.yml', 'unit:pages/home/hero.md',
+      'settings', 'queries:articles', 'services:search', 'services:api',
+      'extensions:@acme/extra', 'extensions:https://cdn/x/entry.js',
+    ]))
+    expect(siteItemsByKey(full).get('services:search').uuid).toBe('U-svc')
+    expect(siteItemsByKey(full).get('services:api').uuid).toBe(null)
+  })
+
+  it('leaves out secrets, and any Section it does not know', () => {
+    const keys = [...siteItemsByKey(full).keys()]
+    expect(keys.some((k) => k.startsWith('secrets'))).toBe(false)
+    expect(keys.some((k) => k.includes('unknown'))).toBe(false)
+  })
+
+  it("a unit is its OWN content, as collectSiteUnits keys it — a page's sections are not part of it", () => {
+    const page = siteItemsByKey(full).get('unit:pages/home/page.yml').record
+    expect(page.page_sections).toBeUndefined()
   })
 })

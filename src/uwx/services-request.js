@@ -368,6 +368,20 @@ function sameRow(a, b) {
 }
 
 /**
+ * Whether the site holds a service as a push sent it: the switch and the WHOLE
+ * `config`. ⛔ Not "equal on the keys we sent", which units use: an `on` row sends no
+ * `enabled` and an entry with no settings no `config`, so a row the app switched off,
+ * or gave settings, would read as ours.
+ *
+ * @param {object} sent - the row a push sent
+ * @param {object} written - the site's row after it
+ * @returns {boolean}
+ */
+export function sameServiceRow(sent, written) {
+  return isMap(sent) && isMap(written) && sameRow(sent, written)
+}
+
+/**
  * The full list to send: the stored rows, with these asks applied by name.
  *
  * ⭐ A FULL LIST, because the backend replaces the `services` Section with what it is

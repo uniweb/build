@@ -42,17 +42,28 @@ const cacheKey = (entity) => `${entity.model} ${entity.id}`
 // uuid→version map (the sync-cache); an entity the map doesn't know is left
 // unconditional rather than guessed at. See entity-document.js for what the
 // token means on the wire.
-const withBaseVersion = (baseVersions, itemBaseVersions) => (entity) => {
+const withBaseVersion = (baseVersions, itemBaseVersions, { every = false } = {}) => (entity) => {
   const uuid = entity?.document?.$uuid
   const v = uuid ? baseVersions[uuid] : null
-  // Per-item preconditions, narrowed to the records THIS package actually carries.
-  // The cache spans the whole site, but a package holds only what changed; sending
-  // tokens for absent records would bloat the manifest and assert preconditions on
-  // items we are not touching.
+  // Per-item preconditions.
+  //
+  // ⭐ THE SITE-CONTENT ENTITY SENDS EVERY VERSION THIS COPY HOLDS (`every`), for items
+  // present AND for items the files dropped. A push deletes only the items it holds a
+  // version for, and only while the site left them unchanged — so a dropped item's
+  // version is what makes leaving it out a deletion, and without it the item is kept
+  // [Diego, 2026-10-07; backend's gate, kb/framework/plans/services-exchange.md]. The
+  // caller holds a version only for an item it has seen (`heldTokens`, cli), so none is
+  // ever sent for an item the backend holds and this copy does not.
+  // ⛔ Until then this narrowed to the units the document carried: a dropped page was
+  // deleted by today's rule anyway, and nothing else was sent a version.
+  //
+  // Any other entity: narrowed to the units it carries, as before — the records lane
+  // is gated by its entity version, and sends none.
   let items = null
   if (itemBaseVersions && Object.keys(itemBaseVersions).length) {
     items = {}
-    for (const itemUuid of Object.values(collectUnitUuids(entity.document))) {
+    const uuids = every ? Object.keys(itemBaseVersions) : Object.values(collectUnitUuids(entity.document))
+    for (const itemUuid of uuids) {
       const t = itemBaseVersions[itemUuid]
       if (t) items[itemUuid] = t
     }
@@ -225,11 +236,12 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  *        identity of its list items, as a previous push or pull banked it
  *        (`record-items.js`); stamped onto each record the backend holds, so a re-sent
  *        record updates its items instead of replacing them.
- * @param {Object<string,string>} [opts.itemBaseVersions] - record `$uuid` → opaque
- *        per-ITEM `version`. Narrowed at emit to the records the package carries and
- *        sent as `entries[].item_base_versions`, so the backend can refuse only the
- *        records that genuinely moved instead of the whole document. Omit to push
- *        those records unconditionally.
+ * @param {Object<string,string>} [opts.itemBaseVersions] - item `$uuid` → opaque
+ *        per-ITEM `version`, for every site-content item this copy has seen. Sent
+ *        whole on the site-content entity as `entries[].item_base_versions` — items
+ *        present and items the files dropped — so the backend refuses only the items
+ *        that genuinely moved, and deletes only what this copy saw (`withBaseVersion`).
+ *        Omit to push unconditionally.
  * @param {Object<string,string>} [opts.baseVersions] - backend-uuid → opaque
  *        `version` token, the push gate's optimistic-concurrency precondition.
  *        Each sent entity whose `$uuid` the map knows carries it as a top-level
@@ -292,6 +304,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const priorHashes = opts.priorHashes || {}
   const sendAll = !!opts.sendAll
   const stamp = withBaseVersion(opts.baseVersions || {}, opts.itemBaseVersions || {})
+  const stampSite = withBaseVersion(opts.baseVersions || {}, opts.itemBaseVersions || {}, { every: true })
   const exporter = opts.exporter
   const exportedAt = opts.exportedAt
   refuseOrgOption(opts, 'emitSyncPackages')
@@ -584,7 +597,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // --- site-content lane -------------------------------------------------------
   let siteContent = null
   if (siteEntity && changed(siteEntity)) {
-    siteContent = { ...emitLane([stamp(siteEntity)], exporter, exportedAt), index: [{ kind: 'site' }] }
+    siteContent = { ...emitLane([stampSite(siteEntity)], exporter, exportedAt), index: [{ kind: 'site' }] }
   }
 
   // The site's current uuid (from site.yml): the verb keys the folder push route on

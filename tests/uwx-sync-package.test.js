@@ -351,22 +351,25 @@ describe('emitSyncPackages — local-media (Slice 5)', () => {
 describe('emitSyncPackages — per-item preconditions (item_base_versions)', () => {
   const manifestOf = (buffer) => JSON.parse(readZip(buffer).get('manifest.json').toString('utf8'))
 
-  it('sends only the tokens for records THIS package carries', async () => {
+  it('sends EVERY version held, for the items the files dropped too — that is what deletes them', async () => {
     writeSiteEntityUuid(SITE, ORIGIN, 'u-site-1')
-    // Identity first — tokens are keyed by record uuid, so they can only be sent
-    // for records whose uuid we know.
+    // Identity first — tokens are keyed by item uuid.
     const pkg0 = await emitSyncPackages(SITE, { backend: ORIGIN, itemUuids: {} })
     const uuids = {}
     for (const p of Object.keys(computeUnitHashes(JSON.parse(readZip(pkg0.siteContent.buffer).get('entities/site-content.json').toString('utf8'))))) {
       uuids[p] = `u-${p.replace(/[^a-z0-9]/gi, '-')}`
     }
     const tokens = Object.fromEntries(Object.values(uuids).map((u) => [u, `v-${u}`]))
-    tokens['u-not-in-this-package'] = 'v-stale'
+    // A page this copy held whose files are gone, and a query or service it holds,
+    // which no unit path names.
+    tokens['u-dropped-page'] = 'v-dropped'
+    tokens['u-a-query'] = 'v-query'
 
     const pkg = await emitSyncPackages(SITE, { itemUuids: uuids, itemBaseVersions: tokens })
     const sent = manifestOf(pkg.siteContent.buffer).entries[0].item_base_versions
-    expect(Object.keys(sent).length).toBe(Object.keys(uuids).length)
-    expect(sent['u-not-in-this-package']).toBeUndefined()
+    // The backend deletes only what a push holds a version for, so leaving the dropped
+    // page's out would keep it. ⛔ Until 2026-10-07 this narrowed to the units present.
+    expect(sent).toEqual(tokens)
   })
 
   it('omits the field entirely with no tokens — unconditional, the force path', async () => {

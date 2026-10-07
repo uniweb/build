@@ -122,6 +122,7 @@ export {
   mergeServiceRows,
   reconcileServices,
   recordAfter,
+  sameServiceRow,
 } from './services-request.js'
 export {
   diffSiteUnits,
@@ -131,6 +132,7 @@ export {
   walkSiteUnits,
   collectUnitUuids,
   collectQueryUuids,
+  siteItemsByKey,
   stampUnitUuids,
 } from './site-diff.js'
 export {
