@@ -31,7 +31,7 @@ import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
 import { parentRouteOf } from '@uniweb/core/route-match'
 
-import { validateItem, validateRecordFile, validateBound, contentBodyField, rootListSection, referencesOf } from '@uniweb/schemas/conform'
+import { validateItem, validateRecordFile, validateBound, validateKeyValue, contentBodyField, rootListSection, referencesOf } from '@uniweb/schemas/conform'
 import { isUuid } from './uwx/uuid.js'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
@@ -147,6 +147,10 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       // `@uniweb/core/page-data`) — ⛔ it wrote its own list until 2026-09-19, which read only
       // the declared parent and had no route binding for a nested page.
       const declared = declaredKeys(bindings)
+      // Each key's schema ref as the runtime reads it — never the raw value, whose spelling varies
+      // (⛔ until 2026-10-07 a `'…/*'` value was looked up whole here, matched no schema, and its
+      // key was never checked).
+      const refOf = new Map(declared.map(([key, ref]) => [key, ref]))
       const levels = fetchLevels({ own: section.fetch, page: page.fetch, parent, route, site: config.fetch })
       const inputs = collectInputs(levels)
       const held = nodesOfType(section.content, 'dataBlock').map((node) => node.attrs?.tag).filter(Boolean)
@@ -194,8 +198,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
         }
         if (!input.path) continue
 
-        const binding = bindings?.[key]
-        const ref = typeof binding === 'string' ? binding : binding?.schema
+        const ref = refOf.get(key)
         if (!ref) continue // ungoverned key — no schema declared for it
 
         const schema = dataSchemas[ref]
@@ -480,9 +483,12 @@ function nodesOfType(doc, type) {
  * becomes one (it falls back to `codeBlock`), so a malformed block cannot reach
  * here and be misreported as a schema violation.
  *
- * Uses `validateBound` rather than `validateItem` because a block's value may be
- * a record OR a list — ```` ```yaml:nav ```` is a bare array. That dispatch is the
- * reason root-list conformance had to land first.
+ * ⭐ A block holds what its key DECLARES (ruled 2026-10-07 [Diego]): a list of records, or one
+ * with `single: true`; each its brief, or as stored with `whole: true`; a list schema's list either
+ * way — `validateKeyValue`, the one rule for a key's value. ⛔ Until 2026-10-07 the schema's root
+ * alone decided (`validateBound`), so a block under a key typed by a record schema had to hold ONE
+ * record while a query under the same key delivered a list — and a key declared `'…/*'` was looked
+ * up with its suffix, matched no schema, and was never checked.
  *
  * @param {Object} site - collected site content
  * @param {Object} foundation - the built foundation schema (type → { data })
@@ -501,16 +507,17 @@ export function validateTaggedDataBlocks(site, foundation, dataSchemas) {
       const bindings = type && foundation?.[type]?.data
       if (!bindings || typeof bindings !== 'object') return
 
+      const declared = new Map(declaredKeys(bindings).map(([key, ref, whole, single]) => [key, { ref, whole, single }]))
       for (const node of nodesOfType(section.content, 'dataBlock')) {
         const tag = node.attrs?.tag
         if (!tag) continue
 
-        const binding = bindings[tag]
-        if (binding === undefined) continue // this key is not governed — say nothing
+        const declaration = declared.get(tag)
+        if (declaration === undefined) continue // this key is not governed — say nothing
 
-        // A binding is a named ref, or an inline schema. Only a ref resolves to a
+        // A key is typed by a named ref, or by an inline schema. Only a ref resolves to a
         // normalized schema here; an inline one is reported rather than guessed at.
-        const ref = typeof binding === 'string' ? binding : binding?.schema
+        const { ref, whole, single } = declaration
         if (typeof ref !== 'string') {
           deferred.push({ route: page.route, section: type, key: tag, reason: 'inline schema on the binding' })
           continue
@@ -520,7 +527,7 @@ export function validateTaggedDataBlocks(site, foundation, dataSchemas) {
 
         schemas.add(ref)
         checked++
-        for (const finding of validateBound(schema, node.attrs?.data)) {
+        for (const finding of validateKeyValue(schema, node.attrs?.data, { whole, single })) {
           violations.push({
             file: `${page.route || '/'} › ${type} › ${node.attrs?.language || 'yaml'}:${tag}`,
             schema: ref,

@@ -169,7 +169,7 @@ describe('buildRegistryPackage — the scope is the one in the name', () => {
 describe('the foundation schema, as register sends it — format 3', () => {
   const built = () => ({
     _self: { name: '@globex/portal', version: '2.0.0', schemaFormat: 2, data: { profile: {} } },
-    Team: { name: 'Team', path: 'sections/Team', data: { team: '@/member', posts: '@std/article/*' } },
+    Team: { name: 'Team', path: 'sections/Team', data: { team: '@/member', posts: { schema: '@std/article', whole: true } } },
     Feed: { name: 'Feed', path: 'sections/Feed', content: [], data: { links: { label: 'string', href: { type: 'url' } } } },
     Hero: { name: 'Hero', path: 'sections/Hero', params: { variant: { type: 'select', options: ['glass', 'flat'] } } },
   })
@@ -180,8 +180,8 @@ describe('the foundation schema, as register sends it — format 3', () => {
 
   it('qualifies @/x with the foundation\'s own scope — not @std — and keeps a standard ref', () => {
     expect(blob(built()).Team.data).toEqual({
-      team: { kind: 'schema', schema: '@globex/member', whole: false },
-      posts: { kind: 'schema', schema: '@std/article', whole: true },
+      team: { kind: 'schema', schema: '@globex/member', single: false, whole: false },
+      posts: { kind: 'schema', schema: '@std/article', single: false, whole: true },
     })
   })
 

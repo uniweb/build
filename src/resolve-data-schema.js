@@ -161,7 +161,8 @@ export function collectSchemaRefs(components, foundationData = null) {
   const readData = (data) => {
     if (!data || typeof data !== 'object' || data === false) return
     for (const binding of Object.values(data)) {
-      // `'@std/article/*'` asks for whole records of `@std/article` — the ref is what precedes it.
+      // A ref, short or long (`{ schema, single, whole }`) — the flags change nothing about which
+      // schema the key is typed by.
       const { ref } = dataRefOf(binding)
       if (ref) refs.add(ref)
     }

@@ -203,7 +203,7 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
   // sends them as that type, and since 2026-09-27 the static build delivers them as that type too.
   it('⭐ a query named for a data key is delivered as the key\'s type — its record\'s file as stored', async () => {
     site('articles: {}\n')
-    w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: '@/post/*' } }\n")
+    w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: { schema: '@/post', whole: true } } }\n")
     w('fdn/sections/Article/index.jsx', 'export default function Article() { return null }\n')
     w('site/records/articles/hello.md', '---\ncard:\n  title: Hello\n---\n\nThe body.\n')
     await compile({ articles: { schema: '@/articles' } })
@@ -215,7 +215,7 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
 
   it('CONTROL — a query that asked for its schema explicitly is not typed by a data key', async () => {
     site('articles:\n  schema: "@/articles"\n')
-    w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: '@/post/*' } }\n")
+    w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: { schema: '@/post', whole: true } } }\n")
     w('fdn/sections/Article/index.jsx', 'export default function Article() { return null }\n')
     w('site/records/articles/hello.md', '---\ntitle: Hello\n---\n\nThe body.\n')
     await compile({ articles: { schema: '@/articles' } })

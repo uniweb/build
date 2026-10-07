@@ -1376,8 +1376,8 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
 
     // ⭐ TWO PAYLOADS FOR EVERY QUERY (ruled 2026-09-27 [Diego]):
     //   1. Each record WHOLE, as stored, at /data/<name>/<$name>.json — a key per section, the
-    //      brief's included — what a whole question answers: a parametric page's record for a
-    //      component that declares `'@x/y/*'`, and kit's `useWholeRecord`.
+    //      brief's included — what a whole question answers: a record for a component that
+    //      declares its key `whole: true`, and kit's `useWholeRecord`.
     //   2. The list at /data/<name>.json — each record's BRIEF, the brief's fields at the top —
     //      what `query: <name>` delivers everywhere else. ⛔ `deferred:`, which left fields of the
     //      brief out of it, was retired the same day [Diego].

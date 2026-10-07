@@ -5,8 +5,9 @@
  * reads to render, and nothing else:
  *
  * - background: 'self' when component handles its own background
- * - data: { <key>: <schema ref> | null } — every `content.data` key the component
- *     declares, in order, with its schema ref (null for an inline shape)
+ * - data: { <key>: <schema ref> | { schema, single?, whole? } | null } — every `content.data`
+ *     key the component declares, in order, with its schema ref and the flags set on it (null for
+ *     an inline shape)
  * - vars: { <name>: { default? } } — the CSS variables the component declares
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
@@ -34,17 +35,34 @@
  */
 
 import { lowerData } from '@uniweb/schemas/content'
+import { schemaDeclarationOf } from '@uniweb/schemas/foundation'
 
 /**
- * A `data:` entry's schema ref — a ref string, or `{ schema }` — or null for an inline
- * shape, which names no schema and is filled only under its own key.
+ * A `data:` entry as the runtime reads it: its schema ref, with the flags set on it — or null for an
+ * inline shape, which names no schema and is filled only under its own key.
  *
- * @param {string|Object} value
- * @returns {string|null}
+ * ⭐ Two flags, independent (ruled 2026-10-07 [Diego]): `single` — one record, not a list — and
+ * `whole` — each record as stored, not its brief.
+ * Lean on purpose: the bare ref when neither is set, which is most keys, and only a flag that is set.
+ * ⛔ Until 2026-10-07 this wrote the ref alone, so `{ schema, whole: true }` lost its flag here and
+ * only the `'…/*'` spelling, now retired, reached the runtime.
+ *
+ * @param {string} key - the key, for a refusal
+ * @param {*} value - its value, as authored
+ * @returns {string|{ schema: string, single?: true, whole?: true }|null}
+ * @throws {Error} for a retired or malformed declaration (`schemaDeclarationOf`)
  */
-function dataRef(value) {
-  if (typeof value === 'string') return value || null
-  return value && typeof value === 'object' && typeof value.schema === 'string' && value.schema ? value.schema : null
+function leanDataValue(key, value) {
+  let declaration
+  try {
+    declaration = schemaDeclarationOf(value)
+  } catch (err) {
+    throw new Error(`[uniweb] Invalid 'data.${key}': ${err.message}`)
+  }
+  if (!declaration || !declaration.schema) return null
+  const { schema, single, whole } = declaration
+  if (!single && !whole) return schema
+  return { schema, ...(single ? { single: true } : {}), ...(whole ? { whole: true } : {}) }
 }
 
 /**
@@ -148,7 +166,7 @@ export function extractRuntimeSchema(fullMeta) {
         )
       }
       runtime.data = runtime.data || {}
-      runtime.data[key] = dataRef(value)
+      runtime.data[key] = leanDataValue(key, value)
     }
   } else if (data !== undefined) {
     throw new Error(
@@ -337,12 +355,12 @@ function leanVars(vars) {
   return Object.keys(out).length > 0 ? out : null
 }
 
-/** A foundation's `data:` as a section type's lean `data` is: each key → its schema ref, or null. */
+/** A foundation's `data:` as a section type's lean `data` is: each key → its ref and flags, or null. */
 function leanDataKeys(data) {
   const lowered = lowerData(data)
   if (!lowered || typeof lowered !== 'object' || Array.isArray(lowered)) return null
   const out = {}
-  for (const [key, value] of Object.entries(lowered)) out[key] = dataRef(value)
+  for (const [key, value] of Object.entries(lowered)) out[key] = leanDataValue(key, value)
   return Object.keys(out).length > 0 ? out : null
 }
 

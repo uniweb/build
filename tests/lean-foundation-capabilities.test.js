@@ -20,7 +20,7 @@ describe('extractFoundationRuntime — what the runtime reads of main.js', () =>
       'font-body': { default: 'Inter', type: 'font', applyTo: 'body', description: 'Body face' },
       accent: '#09f',
     },
-    data: { team: '@/member', posts: '@std/article/*', 'md:faq': 'Questions', raw: {}, inline: { title: 'string' } },
+    data: { team: '@/member', posts: { schema: '@std/article', single: true, whole: true }, 'md:faq': 'Questions', raw: {}, inline: { title: 'string' } },
     handlers: { content() {} },
     props: {},
     defaultLayout: 'main',
@@ -45,7 +45,7 @@ describe('extractFoundationRuntime — what the runtime reads of main.js', () =>
         'font-body': { default: 'Inter', type: 'font', applyTo: 'body' },
         accent: '#09f',
       },
-      data: { team: '@/member', posts: '@std/article/*', faq: null, raw: null, inline: null },
+      data: { team: '@/member', posts: { schema: '@std/article', single: true, whole: true }, faq: null, raw: null, inline: null },
     })
   })
 

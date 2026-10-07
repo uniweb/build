@@ -18,7 +18,8 @@ import { join, dirname, extname, basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describeChildren, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
 import { describeContent, lowerData } from '@uniweb/schemas/content'
-import { normalizeData } from '@uniweb/schemas/foundation'
+import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
+import { rootListSection } from '@uniweb/schemas/conform'
 import { SECTION_PARAMS, SECTION_KEYS } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
@@ -635,10 +636,65 @@ function buildComponentEntry(name, relativePath, meta) {
   else delete entry.children
 
   if (meta.data !== undefined) entry.data = lowerData(meta.data)
+  refuseDataDeclarations(`${name} (meta.js)`, entry.data)
 
   const problems = [...content.problems, ...describeChildren(meta).problems]
   if (problems.length > 0) loweringProblems.set(entry, problems)
   return entry
+}
+
+/**
+ * Refuse a `data:` key typed by a schema that is not written as one: the retired `/*` suffix, a
+ * property of the long form other than `schema`, `single` and `whole`, or a flag that is not a
+ * boolean (`schemaDeclarationOf`; ruled 2026-10-07 [Diego]). A refusal, not a warning: the runtime would
+ * read a mistyped flag as absent, and deliver a list where the author asked for one record.
+ *
+ * @param {string} owner - who declares it, for the message
+ * @param {*} data - a `data:` map, lowered
+ */
+function refuseDataDeclarations(owner, data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return
+  for (const [key, value] of Object.entries(data)) {
+    try {
+      schemaDeclarationOf(value)
+    } catch (err) {
+      throw new Error(`[uniweb] ${owner}: data.${key}: ${err.message}`)
+    }
+  }
+}
+
+/**
+ * Refuse `single` or `whole` on a key whose schema is a LIST — `@std/nav`, `@std/form`: a schema
+ * whose root is one list section describes the key's whole value, so the key holds that list, and
+ * neither one record of it nor a record as stored means anything. Checked once the schemas resolve.
+ *
+ * @param {Array<[string, *]>} owners - `[who, data:]` pairs
+ * @param {Object} dataSchemas - normalized schemas by ref
+ * @param {string} srcDir - to resolve a ref no binding brought in (a layout's)
+ */
+async function refuseFlagsOnListSchemas(owners, dataSchemas, srcDir) {
+  for (const [owner, data] of owners) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) continue
+    for (const [key, value] of Object.entries(data)) {
+      const declaration = schemaDeclarationOf(value)
+      if (!declaration || (!declaration.single && !declaration.whole)) continue
+      let schema = dataSchemas[declaration.schema]
+      if (!schema) {
+        try {
+          schema = (await buildDataSchemaMap([declaration.schema], { srcDir }))[declaration.schema]
+        } catch {
+          schema = null // an unresolvable ref is reported where refs resolve
+        }
+      }
+      if (schema && rootListSection(schema)) {
+        const flags = ['single', 'whole'].filter((flag) => declaration[flag]).map((flag) => `\`${flag}\``).join(' and ')
+        throw new Error(
+          `[uniweb] ${owner}: data.${key}: ${declaration.schema} is a list — its key holds that list, so ${flags} ` +
+            `does not apply. Write data.${key}: '${declaration.schema}'.`
+        )
+      }
+    }
+  }
 }
 
 /** `content: {}` or `content: []` — the component's way of saying it takes no content. */
@@ -1138,6 +1194,8 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
   // Load configuration from foundation.js
   const foundationConfig = await loadFoundationConfig(srcDir)
 
+  refuseDataDeclarations('the foundation (main.js)', lowerData(foundationConfig.data))
+
   // Discover section types
   const components = await discoverComponents(srcDir, sectionPaths)
   reportPlacementDeclarations(components)
@@ -1154,6 +1212,15 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
+  await refuseFlagsOnListSchemas(
+    [
+      ...Object.entries(components).map(([name, entry]) => [`${name} (meta.js)`, entry?.data]),
+      ...Object.entries(layouts).map(([name, entry]) => [`layout ${name} (meta.js)`, entry?.data]),
+      ['the foundation (main.js)', lowerData(foundationConfig.data)],
+    ],
+    dataSchemas,
+    srcDir,
+  )
   reportUnregistrableData(components, layouts, foundationConfig)
 
   // Determine extension role

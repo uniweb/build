@@ -49,7 +49,9 @@ const NAV = validateAndNormalizeSchema(
   '@std/nav'
 )
 
-const foundation = { Form: { data: { form: '@std/form' } }, Nav: { data: { nav: '@std/nav' } } }
+// `Form` holds ONE form in its block, so its key says so (`single: true`, ruled 2026-10-07 [Diego]);
+// `Nav`'s schema is a list, which its key holds as it is.
+const foundation = { Form: { data: { form: { schema: '@std/form', single: true } } }, Nav: { data: { nav: '@std/nav' } } }
 const schemas = { '@std/form': FORM, '@std/nav': NAV }
 const run = (site) => validateTaggedDataBlocks(site, foundation, schemas)
 
@@ -75,10 +77,45 @@ describe('a bound tagged block is finally checked', () => {
 
 describe('a block whose value is a LIST', () => {
   it('checks each record and names its index', () => {
-    // Only reachable because `validateBound` dispatches on the root shape —
-    // `validateItem` would have said nothing here.
+    // A list schema's block is its list — `validateItem` would have said nothing here.
     const site = siteWith('nav', [{ label: 'Home' }, { href: '/x' }], { type: 'Nav' })
     expect(run(site).violations.map((v) => `${v.field}:${v.rule}`)).toEqual(['[1].label:required'])
+  })
+})
+
+// ⭐ A block holds what its key DECLARES — a list of records unless `single: true`, each its brief
+// unless `whole: true` (ruled 2026-10-07 [Diego]). Until then the schema's root alone decided, so a
+// block under a key typed by a record schema had to hold one record.
+describe('a block holds what its key declares', () => {
+  const ARTICLE = validateAndNormalizeSchema(
+    {
+      name: 'article',
+      sections: {
+        brief: { brief: true, fields: { title: { type: 'string', required: true } } },
+        body: { fields: { content: { type: 'string' } } },
+      },
+    },
+    '@std/article'
+  )
+  const declaring = (decl) => ({ Post: { data: { post: decl } } })
+  const check = (decl, value) =>
+    validateTaggedDataBlocks(siteWith('post', value, { type: 'Post' }), declaring(decl), { '@std/article': ARTICLE }).violations.map(
+      (v) => `${v.field}:${v.rule}`
+    )
+
+  it('a list key holds a list — each record checked, by index', () => {
+    expect(check('@std/article', [{ title: 'A' }, {}])).toEqual(['[1].title:required'])
+    expect(check('@std/article', { title: 'A' })).toEqual([':type'])
+  })
+
+  it('a single key holds one record — and refuses a list', () => {
+    expect(check({ schema: '@std/article', single: true }, { title: 'A' })).toEqual([])
+    expect(check({ schema: '@std/article', single: true }, [{ title: 'A' }])).toEqual([':type'])
+  })
+
+  it('a whole key holds each record as stored — the brief under its name', () => {
+    expect(check({ schema: '@std/article', single: true, whole: true }, { brief: { title: 'A' } })).toEqual([])
+    expect(check({ schema: '@std/article', single: true, whole: true }, { title: 'A' })).toEqual(['brief.title:required'])
   })
 })
 

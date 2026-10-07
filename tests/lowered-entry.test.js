@@ -132,12 +132,42 @@ describe('the schema says which form it holds', () => {
     const blob = pkg.entities.find((e) => e.model === '@uniweb/foundation-schema').schema
     expect(blob._self.schemaFormat).toBe(FOUNDATION_SCHEMA_FORMAT)
     expect(blob.Hero.content).toEqual([{ element: 'title', kind: 'heading', label: 'Headline' }])
-    expect(blob.Hero.data).toEqual({ team: { kind: 'schema', schema: '@acme/member', whole: false } })
+    expect(blob.Hero.data).toEqual({ team: { kind: 'schema', schema: '@acme/member', single: false, whole: false } })
   })
 
   it('a main.js key of the same name does not replace it', async () => {
     write('main.js', "export default { name: '@acme/site-kit', schemaFormat: 7 }\n")
     expect((await buildSchema(dir))._self.schemaFormat).toBe(SCHEMA_FORMAT)
+  })
+})
+
+// ⭐ A key typed by a schema says how many records and how much of each — `single` and `whole`
+// (ruled 2026-10-07 [Diego]). A spelling the runtime would misread stops the build, naming the key.
+describe('a key\'s declaration is refused when the runtime would misread it', () => {
+  it('⛔ `/*` is retired — refused before any ref resolves, naming what to write', async () => {
+    meta('Article', { content: {}, data: { article: '@std/article/*' } })
+    await expect(buildSchema(dir)).rejects.toThrow(
+      /Article \(meta\.js\): data\.article: `\/\*` is retired: write \{ schema: '@std\/article', whole: true \}/
+    )
+  })
+
+  it('⛔ a property the long form does not take, in main.js as in meta.js', async () => {
+    write('main.js', "export default { name: '@acme/site-kit', data: { feature: { schema: '@/member', many: true } } }\n")
+    write('schemas/member.yml', 'name: member\nfields:\n  name: string\n')
+    await expect(buildSchema(dir)).rejects.toThrow(/the foundation \(main\.js\): data\.feature: .*not `many`/)
+  })
+
+  it('⛔ single or whole on a list schema — its key holds the list', async () => {
+    write('schemas/menu.yml', 'name: menu\nsections:\n  items:\n    many: true\n    fields:\n      label: string\n')
+    meta('Menu', { content: {}, data: { menu: { schema: '@/menu', single: true } } })
+    await expect(buildSchema(dir)).rejects.toThrow(/Menu \(meta\.js\): data\.menu: @\/menu is a list — its key holds that list, so `single` does not apply/)
+  })
+
+  it('CONTROL — the long form builds, written as authored in schema.json', async () => {
+    write('schemas/member.yml', 'name: member\nfields:\n  name: string\n')
+    meta('Lead', { content: {}, data: { lead: { schema: '@/member', single: true, whole: true } } })
+    const schema = await buildSchema(dir)
+    expect(schema.Lead.data).toEqual({ lead: { schema: '@/member', single: true, whole: true } })
   })
 })
 

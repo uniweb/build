@@ -92,6 +92,39 @@ describe('extractRuntimeSchema', () => {
     })
   })
 
+  // ⭐ `single` and `whole` — how many records, and how much of each (ruled 2026-10-07 [Diego]).
+  describe('a key\'s two flags reach the runtime, lean', () => {
+    it('the bare ref when neither is set; only the flags that are set otherwise', () => {
+      expect(extractRuntimeSchema({
+        data: {
+          list: '@std/article',
+          spelled: { schema: '@std/article', single: false, whole: false },
+          one: { schema: '@std/article', single: true },
+          whole: { schema: '@std/article', whole: true },
+          both: { schema: '@std/article', single: true, whole: true },
+        },
+      })).toEqual({
+        data: {
+          list: '@std/article',
+          spelled: '@std/article',
+          one: { schema: '@std/article', single: true },
+          whole: { schema: '@std/article', whole: true },
+          both: { schema: '@std/article', single: true, whole: true },
+        },
+      })
+    })
+
+    it('⛔ `/*` is refused, naming what to write', () => {
+      expect(() => extractRuntimeSchema({ data: { post: '@std/article/*' } })).toThrow(
+        /Invalid 'data\.post': `\/\*` is retired: write \{ schema: '@std\/article', whole: true \}/
+      )
+    })
+
+    it('⛔ so is a property the long form does not take', () => {
+      expect(() => extractRuntimeSchema({ data: { post: { schema: '@std/article', many: true } } })).toThrow(/not `many`/)
+    })
+  })
+
   describe('⛔ no field defaults — ruled 2026-10-05', () => {
     // Until then each declared key carried `schemas` — its schema's field defaults, `enum`
     // and the nesting that led to them — and the runtime filled a missing field from its
@@ -99,7 +132,7 @@ describe('extractRuntimeSchema', () => {
     const meta = {
       data: {
         team: '@/member',
-        posts: '@std/article/*',
+        posts: { schema: '@std/article', whole: true },
         specs: { cpu: { type: 'string', default: 'quad', label: 'CPU', enum: ['quad', 'octa'] } },
         signup: {
           fields: [
@@ -112,7 +145,7 @@ describe('extractRuntimeSchema', () => {
 
     it('a section type carries its keys and their refs, and no shape of any of them', () => {
       expect(extractRuntimeSchema(meta)).toEqual({
-        data: { team: '@/member', posts: '@std/article/*', specs: null, signup: null },
+        data: { team: '@/member', posts: { schema: '@std/article', whole: true }, specs: null, signup: null },
       })
     })
 
