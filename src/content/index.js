@@ -19,7 +19,6 @@ export { collectSiteContent } from '../site/content-collector.js'
 export {
   processQueries,
   writeQueryFiles,
-  getQueryLastModified,
 } from '../site/query-processor.js'
 // Where a site's records live — `paths.records`, else `records/` — so a caller
 // holding its own config (a document's, not a `site.yml`) asks the one resolver.

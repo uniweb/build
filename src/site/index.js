@@ -41,8 +41,7 @@ export {
 } from './advanced-processors.js'
 export {
   processQueries,
-  writeQueryFiles,
-  getQueryLastModified
+  writeQueryFiles
 } from './query-processor.js'
 export { collectSchemalessData, collectSchemalessDataAssets, rewriteSchemalessDataAssets } from './schemaless-data.js'
 export {

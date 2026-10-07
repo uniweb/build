@@ -51,7 +51,7 @@
  * await writeQueryFiles(siteDir, byQuery)
  */
 
-import { readFile, readdir, stat, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
+import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
 import { join, basename, extname, dirname, relative, resolve, sep, isAbsolute } from 'node:path'
 import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -1418,37 +1418,4 @@ export async function writeQueryFiles(siteDir, byQuery, queriesConfig = null) {
       )
     }
   }
-}
-
-/**
- * Get last modified time for a collection
- *
- * @param {string} siteDir - Site root directory
- * @param {Object} config - Collection config
- * @returns {Promise<Date|null>} Most recent modification time
- */
-export async function getQueryLastModified(siteDir, config) {
-  const parsed = parseQueryConfig('temp', config)
-  const poolDir = join(siteDir, parsed.path)
-
-  if (!existsSync(poolDir)) {
-    return null
-  }
-
-  const files = await readdir(poolDir)
-  const itemFiles = files.filter(f =>
-    !f.startsWith('_') &&
-    (f.endsWith('.md') || f.endsWith('.yml') || f.endsWith('.yaml') || f.endsWith('.json') || f.endsWith('.bib'))
-  )
-
-  let lastModified = null
-
-  for (const file of itemFiles) {
-    const fileStat = await stat(join(poolDir, file))
-    if (!lastModified || fileStat.mtime > lastModified) {
-      lastModified = fileStat.mtime
-    }
-  }
-
-  return lastModified
 }
