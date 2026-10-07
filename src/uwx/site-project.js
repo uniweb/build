@@ -306,7 +306,9 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // VERBATIM, `config` included — it is opaque, per-service and will grow, and the next
   // push sends the stored rows as its base. `secrets` likewise: an inventory of names
   // whose values are set in the app. `[]` is written as `[]`: "the site holds no rows" is
-  // a state a pull must be able to deliver.
+  // a state a pull must be able to deliver. Beside it, `servicesNamed`: every service the
+  // pull wrote into `site.yml`, so the next push can tell a setting the owner removed from
+  // the file from one the file never had (`reconcileServices`).
   // ⛔ The record needs a backend: with none there is nowhere coherent to file it.
   if (Array.isArray(document?.services)) {
     siteChanges.services = servicesFromDocument({
@@ -321,6 +323,9 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
       const records = document?.[section]
       if (!Array.isArray(records)) continue
       provisioned[section] = records.map(({ $id: _id, ...fields }) => fields)
+    }
+    if (Array.isArray(document?.services)) {
+      provisioned.servicesNamed = Object.keys(siteChanges.services || {}).sort()
     }
     if (Object.keys(provisioned).length) {
       updateBackendState(siteRoot, backend, provisioned)

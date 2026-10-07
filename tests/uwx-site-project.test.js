@@ -1218,6 +1218,8 @@ describe('services — the request in site.yml, the record in sync.json', () => 
       { name: 'assistant', enabled: false, config: { model: 'x' } }
     ])
     expect(stored.secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
+    // Every service the pull wrote into site.yml is one the file now names.
+    expect(stored.servicesNamed).toEqual(['api', 'assistant', 'search', 'submit'])
     expect(yml.$services).toBeUndefined()
     expect(yml.$secrets).toBeUndefined()
   })

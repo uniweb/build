@@ -1,9 +1,9 @@
 /**
  * The `services` Section — the owner's request, from `site.yml::services`.
  *
- * ⭐ Sent as a FULL LIST: the site's rows with the owner's asks applied by name,
- * because the backend REPLACES the Section with what it is sent and a row left out
- * would lose its stored settings. Which asks go is the caller's to decide — push and
+ * ⭐ Sent as a FULL LIST: the site's rows with the owner's asks applied by name, each
+ * WHOLE, because the backend REPLACES the Section with what it is sent and a row left
+ * out would be deleted. Which asks go is the caller's to decide — push and
  * publish read the site's rows and the last agreement, and pass the result as
  * `serviceRows`; without it, the file's asks apply over the record in `sync.json`
  * (spec: kb/framework/reference/site-services-request.md).
@@ -51,14 +51,14 @@ const STORED = {
 }
 
 describe('the services request', () => {
-  it('⭐ applies the asks over the record — every stored row and setting kept', async () => {
+  it('⭐ applies the asks over the record — every stored row kept, each named one as the file says it', async () => {
     const doc = await siteProjectToDocument(
       project({ request: 'services:\n  api:\n    grade: pro\n  submit: true\n  search: false\n', record: STORED }),
       { backend: ORIGIN }
     )
     expect(doc.services).toEqual([
-      // `auth` is not in the file and keeps its stored value; `grade` is the file's.
-      { $id: 'api', name: 'api', config: { grade: 'pro', auth: { providers: ['google'] } } },
+      // The file names api, so its entry is api WHOLE: `auth`, not in the file, is gone.
+      { $id: 'api', name: 'api', config: { grade: 'pro' } },
       { $id: 'search', name: 'search', enabled: false },
       { $id: 'submit', name: 'submit' }
     ])

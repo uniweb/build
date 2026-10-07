@@ -351,22 +351,6 @@ export function takeServices(declared, stored, names) {
 }
 
 /**
- * Does this stored row already give what the ask asks — the same switch, and every
- * setting the ask names equal?
- *
- * @param {object|undefined} row
- * @param {object} ask
- * @returns {boolean}
- */
-export function satisfies(row, ask) {
-  if (!isMap(row)) return false
-  if ((row.enabled === false) !== (ask.enabled === false)) return false
-  if (!ask.config) return true
-  const stored = isMap(row.config) ? row.config : {}
-  return Object.entries(ask.config).every(([key, value]) => stable(stored[key]) === stable(value))
-}
-
-/**
  * What a row SAYS — its switch and its `config`, nothing else — so two rows compare by
  * the owner's decisions and not by fields a backend adds to what it stores.
  */
@@ -387,13 +371,14 @@ function sameRow(a, b) {
  * The full list to send: the stored rows, with these asks applied by name.
  *
  * ⭐ A FULL LIST, because the backend replaces the `services` Section with what it is
- * sent: a row left out would lose its stored settings. A row no ask names is sent as
- * stored. A row an ask names takes the ask's switch, and its `config` over the stored
- * one, key by key — a key the file does not name is kept, since the file may never
- * have seen it (set in the app, say). Every other field of the row is kept — a row is
- * opaque past `name`, `enabled` and `config`.
+ * sent, and deletes a service the list leaves out. A row no ask names is sent as
+ * stored. A row an ask names takes the ask's switch and its `config` WHOLE — the entry
+ * is sent as the file says it, so a setting removed from the file is removed
+ * [Diego, 2026-10-07]. Every other field of the row is kept — a row is opaque past
+ * `name`, `enabled` and `config`. ⛔ *Until then the ask's `config` was laid over the
+ * stored one key by key, so a push could never remove a setting.*
  *
- * @param {object[]|null|undefined} base - the site's rows (or the record of them)
+ * @param {object[]|null|undefined} base - the site's rows
  * @param {object[]} asks - from `readServicesRequest`
  * @returns {object[]}
  */
@@ -410,7 +395,8 @@ export function mergeServiceRows(base, asks) {
     const next = index === undefined ? { name: ask.name } : { ...out[index] }
     if (ask.enabled === false) next.enabled = false
     else delete next.enabled
-    if (ask.config) next.config = { ...(isMap(next.config) ? next.config : {}), ...ask.config }
+    if (ask.config) next.config = { ...ask.config }
+    else delete next.config
     if (index === undefined) {
       at.set(ask.name, out.length)
       out.push(next)
@@ -424,8 +410,8 @@ export function mergeServiceRows(base, asks) {
 /**
  * Per service the file names: who moved since the last agreement, and so what to do.
  *
- * Three states — the file's asks, the site's rows now (`stored`), and the record of
- * the last agreement (`record`, from `sync.json`):
+ * Three states — the file's asks, the site's rows now (`stored`), and the record of the
+ * last agreement (`record`, from `sync.json`) — compared WHOLE, switch and `config`:
  *
  * | the file vs the record | the site vs the record | outcome |
  * |---|---|---|
@@ -434,73 +420,85 @@ export function mergeServiceRows(base, asks) {
  * | unchanged | changed | `adopt` — the site's is kept, and may be taken into the file |
  * | changed | changed, differently | `conflict` — only the owner can rank the two |
  *
- * A service the site already gives as asked is nothing, whoever moved — and "as
- * asked" is what the file NAMES (`satisfies`): a key it does not name is not its
- * business. With no record the two cannot be told apart: a service the site holds
- * nothing for is sent, one it holds differently is a conflict. With the site
- * unreadable, what changed against the record is sent over the record; with neither,
- * nothing can be merged onto for a site that exists — `unreadable` — while a site not
- * yet created has nothing stored.
+ * A service the site already has exactly as the file says it is nothing, whoever moved.
+ *
+ * ⭐ THE RECORD SPEAKS FOR THE FILE ONLY FOR THE SERVICES THE FILE NAMED (`named`). A push
+ * sends the full list, so the record also holds services the file never named — one set
+ * in the app, say — and the file cannot have removed a setting it never had. A service
+ * the file names for the first time is therefore `send` when the site holds nothing for
+ * it, and `unseen` when the site holds it differently: the owner is asked, rather than a
+ * setting made in the app being erased [Diego, 2026-10-07].
+ *
+ * ⛔ With the site's rows unreadable nothing is sent for a site that exists
+ * (`unreadable`): the list goes whole, and the record cannot stand in for what the site
+ * holds now. A site not yet created has nothing stored, so every ask is sent.
  *
  * @param {object} p
  * @param {object[]} p.asks - from `readServicesRequest`
- * @param {object[]} [p.record] - the rows last agreed, when the project has them
+ * @param {object[]} [p.record] - the rows last agreed
+ * @param {string[]} [p.named] - the services the file named at the last agreement
  * @param {object[]} [p.stored] - the site's rows now, when they could be read
  * @param {boolean} [p.siteKnown=true] - whether the site exists on this backend
- * @returns {{ send: string[], adopt: string[], conflict: string[], unreadable: boolean }}
+ * @returns {{ send: string[], adopt: string[], conflict: string[], unseen: string[], unreadable: boolean }}
  */
-export function reconcileServices({ asks, record, stored, siteKnown = true }) {
+export function reconcileServices({ asks, record, named, stored, siteKnown = true }) {
   const send = []
   const adopt = []
   const conflict = []
-  const haveRecord = Array.isArray(record)
-  const haveStored = Array.isArray(stored)
-  if (!haveRecord && !haveStored) {
+  const unseen = []
+  if (!Array.isArray(stored)) {
     return siteKnown
-      ? { send, adopt, conflict, unreadable: true }
-      : { send: asks.map((a) => a.name), adopt, conflict, unreadable: false }
+      ? { send, adopt, conflict, unseen, unreadable: true }
+      : { send: asks.map((a) => a.name), adopt, conflict, unseen, unreadable: false }
   }
+  const seen = new Set(Array.isArray(named) ? named : [])
   for (const ask of asks) {
     const now = rowNamed(stored, ask.name)
-    const then = rowNamed(record, ask.name)
-    if (!haveStored) {
-      if (!satisfies(then, ask)) send.push(ask.name)
+    if (sameRow(now, ask)) continue
+    const then = seen.has(ask.name) ? rowNamed(record, ask.name) : undefined
+    if (!then) {
+      ;(now === undefined ? send : unseen).push(ask.name)
       continue
     }
-    if (satisfies(now, ask)) continue
-    if (!haveRecord) {
-      ;(now === undefined ? send : conflict).push(ask.name)
-      continue
-    }
-    const fileMoved = !satisfies(then, ask)
+    const fileMoved = !sameRow(then, ask)
     const siteMoved = !sameRow(now, then)
     if (fileMoved && !siteMoved) send.push(ask.name)
     else if (!fileMoved && siteMoved) adopt.push(ask.name)
-    else conflict.push(ask.name)
+    else if (fileMoved && siteMoved) conflict.push(ask.name)
   }
-  return { send, adopt, conflict, unreadable: false }
+  return { send, adopt, conflict, unseen, unreadable: false }
 }
 
 /**
  * The record after a push: what this project now agrees with the site on.
  *
- * The rows sent, or — when nothing was — the site's rows now. ⛔ For a service left
- * OPEN (an adopt not taken, a conflict not resolved) the earlier agreement stands,
- * or the next run would read the site's change as the file's and send the stale ask.
+ * `services` — the rows sent, or, when nothing was, the site's rows now: the full list,
+ * so a comparison made offline (`status`) rebuilds what was sent. ⛔ For a service left
+ * OPEN (an adopt not taken, a conflict not resolved) the earlier agreement stands, or
+ * the next run would read the site's change as the file's and send the stale ask.
+ *
+ * `servicesNamed` — the services the file names and now agrees on. A service the file
+ * names for the first time and left open stays out, so it is asked about again; one it
+ * named before keeps its place.
  *
  * @param {object} p
  * @param {object[]} [p.record] - the rows last agreed
+ * @param {string[]} [p.named] - the services the file named at the last agreement
  * @param {object[]} [p.agreed] - the rows sent, or the site's rows now
  * @param {string[]} [p.open] - services whose decision is still open
- * @returns {object[]|undefined} undefined when there is nothing to record
+ * @param {string[]} [p.names] - the services the file names now
+ * @returns {{ services: object[], servicesNamed: string[] }|undefined} undefined when there
+ *   is nothing to record
  */
-export function recordAfter({ record, agreed, open = [] }) {
+export function recordAfter({ record, named, agreed, open = [], names = [] }) {
   if (!Array.isArray(agreed)) return undefined
   const keep = new Set(open)
-  const out = agreed.filter((r) => isMap(r) && !keep.has(r.name)).map(canonicalRow)
+  const services = agreed.filter((r) => isMap(r) && !keep.has(r.name)).map(canonicalRow)
   for (const name of open) {
     const then = rowNamed(record, name)
-    if (then) out.push(canonicalRow(then))
+    if (then) services.push(canonicalRow(then))
   }
-  return out
+  const before = new Set(Array.isArray(named) ? named : [])
+  const servicesNamed = [...new Set(names)].filter((n) => !keep.has(n) || before.has(n)).sort()
+  return { services, servicesNamed }
 }
