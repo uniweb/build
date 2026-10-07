@@ -96,8 +96,12 @@ export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.
 export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
   const walkSections = (sections, dir) => {
     for (const record of sections || []) {
-      // The projector's own file rule, so a unit's path here is the file it is
-      // written to — including an app-created section named from its `$uuid`.
+      // The projector's own file rule — including an app-created section named from its
+      // `$uuid`. ⚠️ The path NAMES the unit by its id; it is not always the author's file:
+      // a pull writes into an existing `1-about.md` or `@about.md` in place
+      // (`existingSectionFile`), so a reader mapping a unit to disk looks it up there.
+      // (This said "a unit's path here is the file it is written to" until 2026-10-07,
+      // and a push recorded no file for a numbered section.)
       const base = sectionFileBase(record)
       if (base) cb(`${dir}/${base}.md`, record, 'section')
       walkSections(record.$children, dir)

@@ -88,6 +88,9 @@ export {
   sectionRecordToFile,
   pageSectionsToFiles,
   siteContentDocumentToProject,
+  // The file the author keeps a section in (`1-hero.md` holds `hero`) — what a section
+  // unit's path names on disk, for a push recording what it delivered.
+  existingSectionFile,
 } from './site-project.js'
 export {
   createTranslationCollector,

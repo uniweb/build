@@ -587,7 +587,7 @@ function listedNames(list) {
 //
 // ⛔ A top-level section never takes an `@` file: that is a child's name, and the build renders an
 // `@` file no `nest:` claims only as an orphan appended at the end — listed by name, it is not rendered.
-function existingSectionFile(pageDir, fileBase, stableId, { child = false } = {}) {
+export function existingSectionFile(pageDir, fileBase, stableId, { child = false } = {}) {
   if (!existsSync(pageDir)) return null
   const entries = readdirSync(pageDir).filter((e) => isMarkdownFile(e) && (child || !e.startsWith('@')))
   const found =
