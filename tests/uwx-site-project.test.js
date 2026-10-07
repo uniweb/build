@@ -1177,11 +1177,40 @@ describe('services — the request in site.yml, what this copy holds in sync.jso
     })
   })
 
-  it('a value it cannot read asks nothing; the rest still goes', async () => {
-    const document = await siteProjectToDocument(write(BASE + 'services:\n  search: 3\n  submit: true\n'), {
-      backend: ORIGIN
-    })
-    expect(document.services).toEqual([{ $id: 'submit', name: 'submit' }])
+  it('⛔ a value it cannot read stops the push — skipped, it would state a held service off', async () => {
+    // ⛔ Until 2026-10-07 `search: 3` was skipped with "Ignoring it", and a copy holding search
+    // then stated it off (`statedServices`): the service went off under a warning that said ignored.
+    await expect(
+      siteProjectToDocument(write(BASE + 'services:\n  search: 3\n  submit: true\n'), { backend: ORIGIN })
+    ).rejects.toThrow(/`services\.search` is true, false, an address, or a map — not `3`/)
+  })
+
+  it('⛔ `search: yes` stops the push, saying to write `true` — it was read as an address (F14)', async () => {
+    // js-yaml reads `yes` as the text "yes": the push sent `{ enabled: false, config: { endpoint: 'yes' } }`,
+    // the host's search asked off, while the CLI said site.yml turns it on (measured on 0.85.0).
+    for (const [line, says] of [
+      ['search: yes', /`services\.search` is the text `yes`, not a switch .* Write `search: true` to turn it on/],
+      ['search: on', /`services\.search` is the text `on`.* Write `search: true`/],
+      ['search: off', /`services\.search` is the text `off`.* Write `search: false` to turn it off/],
+      ["search: 'true'", /`services\.search` is the text `true`, not a switch/],
+      ['search: { enabled: no }', /`services\.search\.enabled` is the text `no`.* Write `enabled: false`/],
+      ['search: { endpoint: yes }', /`services\.search\.endpoint` is the text `yes`, not an address/],
+      ['records: /_query', /`services\.records` has no address of its own .* Write `records: true`/],
+      ['search:', /`services\.search` is true, false, an address, or a map — not empty/]
+    ]) {
+      await expect(
+        siteProjectToDocument(write(`${BASE}services:\n  ${line}\n`), { backend: ORIGIN }),
+        line
+      ).rejects.toThrow(says)
+    }
+  })
+
+  it('several unreadable entries are named together, each with its fix', async () => {
+    await expect(
+      siteProjectToDocument(write(BASE + 'services:\n  search: yes\n  tracking: 7\n  submit: true\n'), {
+        backend: ORIGIN
+      })
+    ).rejects.toThrow(/cannot be read:\n {2}- `services\.search` is the text `yes`.*\n {2}- `services\.tracking` is true, false/)
   })
 
   it("⭐ pull writes the site's request into site.yml, and every service it holds into sync.json", () => {

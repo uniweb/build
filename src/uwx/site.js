@@ -83,7 +83,8 @@ import { updateBackendState, readBackendState } from './sync-store.js'
 import {
   readServicesRequest,
   statedServices,
-  refuseRetiredServiceKeys
+  refuseRetiredServiceKeys,
+  refuseUnreadableServices
 } from './services-request.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
 import { resolveQueriesConfig } from './queries-config.js'
@@ -1372,6 +1373,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   refuseOrgOption(opts, 'uwx/site')
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
   refuseRetiredServiceKeys(siteYml)
+  refuseUnreadableServices(siteYml)
   const sourceLocale = opts.sourceLocale || resolveDefaultLocale(siteYml)
   if (!siteYml.name) {
     throw new Error('uwx/site: site.yml::name is required')

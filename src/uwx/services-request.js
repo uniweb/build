@@ -92,6 +92,99 @@ function stable(value) {
   )
 }
 
+/**
+ * YAML 1.1's words for a switch, which js-yaml — YAML 1.2 — reads as TEXT, and `true` /
+ * `false` written in quotes. ⛔ As text, `search: yes` was an address: the site's own
+ * search provider at `yes`, with the host's search asked OFF, while the CLI said
+ * "site.yml turns on search" (measured on 0.85.0, 2026-10-07 — F14).
+ */
+const SWITCH_WORDS = /^(y|yes|on|true|n|no|off|false)$/i
+const ON_WORDS = /^(y|yes|on|true)$/i
+
+/** What a value is, in words — for a message that says what was found. */
+function described(value) {
+  if (value === null || value === undefined) return 'empty'
+  if (Array.isArray(value)) return 'a list'
+  if (typeof value === 'string') return value.trim() ? `the text \`${value}\`` : 'empty'
+  return `\`${JSON.stringify(value)}\``
+}
+
+/** A switch written as a word: what it says, and what to write instead. */
+function switchWord(path, key, value) {
+  const on = ON_WORDS.test(value.trim())
+  return (
+    `\`${path}\` is the text \`${value}\`, not a switch — YAML reads yes, no, on and off as words. ` +
+    `Write \`${key}: ${on}\` to turn it ${on ? 'on' : 'off'}.`
+  )
+}
+
+/**
+ * What is wrong with one entry, or null when it is `true`, `false`, an address or a map —
+ * the one judgement both `readServicesRequest` and `refuseUnreadableServices` make.
+ */
+function entryProblem(name, value) {
+  if (typeof value === 'boolean') return null
+  if (typeof value === 'string') {
+    if (SWITCH_WORDS.test(value.trim())) return switchWord(`services.${name}`, name, value)
+    if (!value.trim()) return `\`services.${name}\` is empty — write true, false, an address, or a map.`
+    if (HOST_ONLY.has(name)) return `\`services.${name}\` has no address of its own — your host provides it. Write \`${name}: true\`.`
+    return null
+  }
+  if (!isMap(value)) return `\`services.${name}\` is true, false, an address, or a map — not ${described(value)}.`
+  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') {
+    return typeof value.enabled === 'string' && SWITCH_WORDS.test(value.enabled.trim())
+      ? switchWord(`services.${name}.enabled`, 'enabled', value.enabled)
+      : `\`services.${name}.enabled\` is true or false — not ${described(value.enabled)}.`
+  }
+  if (typeof value.endpoint === 'string' && SWITCH_WORDS.test(value.endpoint.trim())) {
+    return `\`services.${name}.endpoint\` is the text \`${value.endpoint}\`, not an address — an address is a URL or a path. To turn the service on, leave \`endpoint\` out.`
+  }
+  if (HOST_ONLY.has(name) && addressOf(value)) {
+    return `\`services.${name}\` has no address of its own — your host provides it. Remove \`endpoint\`.`
+  }
+  return null
+}
+
+/**
+ * Every entry of `site.yml::services` that neither a build nor a push can read, each said
+ * with its fix — [] when there is none.
+ *
+ * @param {*} declared - the raw `services:` value
+ * @returns {string[]}
+ */
+export function unreadableServices(declared) {
+  if (declared === undefined || declared === null) return []
+  if (!isMap(declared)) return ['`services:` is a map of service names — `services: { search: true }`.']
+  return Object.entries(declared)
+    .map(([name, value]) => entryProblem(name, value))
+    .filter(Boolean)
+}
+
+/**
+ * Stop on a `services:` entry neither lane can read — beside `refuseRetiredServiceKeys`,
+ * in the static build and in the push.
+ *
+ * ⛔ NOT "warn and ignore it". A push states every service the file lists and OFF for each
+ * one this copy holds that it does not (`statedServices`), so an entry it skipped turned
+ * that service off — `search: 7`, or `records: /_query`, switched off on the site under a
+ * warning that said "Ignoring it" (until 2026-10-07). And a word for a switch was not
+ * skipped but read as an address, which asks the host to leave its own off (F14).
+ *
+ * @param {object} siteYml
+ * @param {string} [where]
+ * @throws {Error} naming each entry and what to write
+ */
+export function refuseUnreadableServices(siteYml, where = 'site.yml') {
+  if (!isMap(siteYml)) return
+  const found = unreadableServices(siteYml.services)
+  if (!found.length) return
+  throw new Error(
+    found.length === 1
+      ? `[uniweb] ${where}: ${found[0]}`
+      : `[uniweb] ${where}: \`services:\` has entries that cannot be read:\n${found.map((f) => `  - ${f}`).join('\n')}`
+  )
+}
+
 /** The address an entry names, or null — a string, or a map's `endpoint`. */
 function addressOf(value) {
   if (typeof value === 'string') return value.trim() || null
@@ -225,20 +318,14 @@ export function readServicesRequest(declared, { warn = () => {} } = {}) {
       asks.push({ name, enabled: false })
       continue
     }
-    if (typeof value !== 'string' && !isMap(value)) {
-      warn(`\`services.${name}\` is true, false, an address, or a map. Ignoring it.`)
-      continue
-    }
-    if (isMap(value) && value.enabled !== undefined && typeof value.enabled !== 'boolean') {
-      warn(`\`services.${name}.enabled\` is true or false. Ignoring \`${name}\`.`)
+    // ⚠️ Skipped here for a caller that only reads; the build and the push stop on it
+    // first (`refuseUnreadableServices`), since a push would state a skipped one off.
+    const problem = entryProblem(name, value)
+    if (problem) {
+      warn(`${problem} Ignoring \`${name}\`.`)
       continue
     }
     const address = addressOf(value)
-    if (typeof value === 'string' && !address) continue // an empty string asks nothing
-    if (address && HOST_ONLY.has(name)) {
-      warn(`\`services.${name}\` has no address of its own — your host provides it. Ignoring \`${name}\`.`)
-      continue
-    }
     const { enabled, ...entry } = isMap(value) ? value : { endpoint: address }
     const { value: config, found } = withoutCredentials(entry)
     sayCredentials(name, found, warn)

@@ -41,7 +41,7 @@ import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig
 import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
-import { runtimeServicesConfig, refuseRetiredServiceKeys } from '../uwx/services-request.js'
+import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -2503,6 +2503,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
   refuseRetiredServiceKeys(siteConfig, configFile)
+  refuseUnreadableServices(siteConfig, configFile)
 
   // Queries are declared in TWO files — `site.yml::queries` and `queries.yml`,
   // the latter winning per key — and resolving them is one question with one

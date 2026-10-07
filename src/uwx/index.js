@@ -120,6 +120,8 @@ export {
 export {
   RUNTIME_KEYS,
   readServicesRequest,
+  unreadableServices,
+  refuseUnreadableServices,
   statedServices,
   heldServices,
   servicesFromDocument,

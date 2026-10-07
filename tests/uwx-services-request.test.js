@@ -15,7 +15,9 @@ import {
   statedServices,
   heldServices,
   sameServiceRow,
-  refuseRetiredServiceKeys
+  refuseRetiredServiceKeys,
+  unreadableServices,
+  refuseUnreadableServices
 } from '../src/uwx/services-request.js'
 
 describe('readServicesRequest — what the host is asked', () => {
@@ -288,6 +290,53 @@ describe('refuseRetiredServiceKeys', () => {
 
   it('a file with none passes', () => {
     expect(() => refuseRetiredServiceKeys({ name: 'S', services: { search: true } })).not.toThrow()
+  })
+})
+
+describe('unreadableServices / refuseUnreadableServices — what neither lane can read', () => {
+  it('true, false, an address and a map are read — and no services at all', () => {
+    expect(
+      unreadableServices({
+        search: true,
+        submit: false,
+        assistant: 'https://ai.example.com/chat',
+        tracking: { consent: 'required' },
+        api: { enabled: false, grade: 'pro' },
+        records: true
+      })
+    ).toEqual([])
+    expect(unreadableServices(undefined)).toEqual([])
+    expect(() => refuseUnreadableServices({ name: 'S' })).not.toThrow()
+  })
+
+  it("⭐ YAML 1.1's words for a switch are text to js-yaml — each named, with what to write (F14)", () => {
+    const found = unreadableServices({ search: 'yes', submit: 'Off', tracking: 'y', assistant: 'TRUE' })
+    expect(found).toHaveLength(4)
+    expect(found[0]).toMatch(/`services\.search` is the text `yes`, not a switch — YAML reads yes, no, on and off as words\. Write `search: true` to turn it on\./)
+    expect(found[1]).toMatch(/Write `submit: false` to turn it off/)
+    expect(found[2]).toMatch(/Write `tracking: true`/)
+    expect(found[3]).toMatch(/`services\.assistant` is the text `TRUE`/)
+  })
+
+  it('an empty entry, a number, a list, a non-boolean `enabled`, and an address for `records`', () => {
+    expect(unreadableServices({ a: null, b: '', c: 4, d: ['x'], e: { enabled: 1 }, records: { endpoint: '/q' } })).toEqual([
+      '`services.a` is true, false, an address, or a map — not empty.',
+      '`services.b` is empty — write true, false, an address, or a map.',
+      '`services.c` is true, false, an address, or a map — not `4`.',
+      '`services.d` is true, false, an address, or a map — not a list.',
+      '`services.e.enabled` is true or false — not `1`.',
+      '`services.records` has no address of its own — your host provides it. Remove `endpoint`.'
+    ])
+  })
+
+  it('refuses with the file named, one entry inline and several listed', () => {
+    expect(() => refuseUnreadableServices({ services: { search: 'on' } }, 'site.yml')).toThrow(
+      /^\[uniweb\] site\.yml: `services\.search` is the text `on`/
+    )
+    expect(() => refuseUnreadableServices({ services: { search: 'on', submit: 3 } })).toThrow(
+      /cannot be read:\n {2}- `services\.search`[^\n]*\n {2}- `services\.submit`/
+    )
+    expect(() => refuseUnreadableServices({ services: [{ name: 'search' }] })).toThrow(/is a map of service names/)
   })
 })
 
