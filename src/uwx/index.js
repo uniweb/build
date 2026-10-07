@@ -12,6 +12,8 @@
 
 export { mintUuidV7 } from './uuid.js'
 export { createZip, readZip } from './zip.js'
+// The queries whose records a site's pages show live — what `records` is for.
+export { recordQueriesShown } from './shown-records.js'
 export {
   sha256Hex,
   toJsonBuffer,
@@ -118,10 +120,9 @@ export {
 export {
   RUNTIME_KEYS,
   readServicesRequest,
-  takeServices,
-  mergeServiceRows,
-  reconcileServices,
-  recordAfter,
+  statedServices,
+  heldServices,
+  servicesFromDocument,
   sameServiceRow,
 } from './services-request.js'
 export {

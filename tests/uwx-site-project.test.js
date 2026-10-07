@@ -1044,10 +1044,11 @@ describe('info.favicon / info.assets (A5)', () => {
   })
 })
 
-describe('services — the request in site.yml, the record in sync.json', () => {
+describe('services — the request in site.yml, what this copy holds in sync.json', () => {
   // ⭐ `site.yml::services` is the owner's request — a map by service name — and
-  // `sync.json` holds this backend's record of the site's rows, which a pull writes and
-  // the request is applied over (kb/framework/reference/site-services-request.md).
+  // `sync.json` holds, per backend, the services this copy has seen, `{ name: $uuid }`,
+  // which a pull and a push write and a push states off when the file does not list them
+  // (kb/framework/reference/site-services-request.md).
   const ORIGIN = 'http://backend.test'
   const write = (yml, record = null) => {
     const src = join(dir, 'src')
@@ -1060,19 +1061,17 @@ describe('services — the request in site.yml, the record in sync.json', () => 
   }
   const BASE = "name: S\nfoundation: '@a/base'\n"
 
-  it('omits both Sections when the file asks nothing and the record holds nothing', async () => {
+  it('omits both Sections when the file asks nothing and this copy holds nothing', async () => {
     const document = await siteProjectToDocument(write(BASE), { backend: ORIGIN })
-    // ⛔ Not `[]`. The Section is REPLACED by what we send, so an empty list asks the
-    // backend to drop every stored row.
     expect('services' in document).toBe(false)
     expect('secrets' in document).toBe(false)
   })
 
-  it('a record alone sends no services — a file that asks nothing has no opinion', async () => {
-    const document = await siteProjectToDocument(write(BASE, { services: [{ name: 'api' }] }), {
+  it('a held service the file does not list is stated off — every service is on or off', async () => {
+    const document = await siteProjectToDocument(write(BASE, { services: { api: 'U-api' } }), {
       backend: ORIGIN
     })
-    expect('services' in document).toBe(false)
+    expect(document.services).toEqual([{ $id: 'api', name: 'api', enabled: false, $uuid: 'U-api' }])
   })
 
   it('forwards a service\'s settings verbatim, treating them as opaque', async () => {
@@ -1185,17 +1184,17 @@ describe('services — the request in site.yml, the record in sync.json', () => 
     expect(document.services).toEqual([{ $id: 'submit', name: 'submit' }])
   })
 
-  it('⭐ pull writes the site\'s request into site.yml, and its rows into sync.json', () => {
+  it("⭐ pull writes the site's request into site.yml, and every service it holds into sync.json", () => {
     const dest = join(dir, 'dest')
     mkdirSync(dest, { recursive: true })
     siteInfoToConfig({
       document: {
         info: { name: 'S', foundation: '@a/base' },
         services: [
-          { $id: 'api', name: 'api', config: { grade: 'small' } },
-          { $id: 'search', name: 'search' },
-          { $id: 'submit', name: 'submit', enabled: false },
-          { $id: 'assistant', name: 'assistant', enabled: false, config: { model: 'x' } }
+          { $id: 'api', $uuid: 'U-api', name: 'api', config: { grade: 'small' } },
+          { $id: 'search', $uuid: 'U-search', name: 'search' },
+          { $id: 'submit', $uuid: 'U-submit', name: 'submit', enabled: false },
+          { $id: 'assistant', $uuid: 'U-assistant', name: 'assistant', enabled: false, config: { model: 'x' } }
         ],
         secrets: [{ $id: 'api:k', service: 'api', name: 'k', value: '#ref' }]
       },
@@ -1206,20 +1205,15 @@ describe('services — the request in site.yml, the record in sync.json', () => 
     expect(yml.services).toEqual({
       api: { grade: 'small' },
       search: true,
-      submit: false,
+      // `submit` is off with no settings, and the file did not name it: no `false` line.
       // Off, with settings: the switch beside them.
       assistant: { enabled: false, model: 'x' }
     })
     const stored = JSON.parse(readFileSync(join(dest, 'sync.json'), 'utf8')).backends[ORIGIN]
-    expect(stored.services).toEqual([
-      { name: 'api', config: { grade: 'small' } },
-      { name: 'search' },
-      { name: 'submit', enabled: false },
-      { name: 'assistant', enabled: false, config: { model: 'x' } }
-    ])
+    // Held, written to the file or not — so the next push states `submit` off, as it is.
+    expect(stored.services).toEqual({ api: 'U-api', assistant: 'U-assistant', search: 'U-search', submit: 'U-submit' })
     expect(stored.secrets).toEqual([{ service: 'api', name: 'k', value: '#ref' }])
-    // Every service the pull wrote into site.yml is one the file now names.
-    expect(stored.servicesNamed).toEqual(['api', 'assistant', 'search', 'submit'])
+    expect(stored.servicesNamed).toBeUndefined()
     expect(yml.$services).toBeUndefined()
     expect(yml.$secrets).toBeUndefined()
   })
@@ -1250,9 +1244,11 @@ describe('services — the request in site.yml, the record in sync.json', () => 
   })
 
   it('round-trips produce → project → produce unchanged', async () => {
+    // `search: false` is not written into the fresh project — off, no settings, not named
+    // there — but it is held, so the second push states it off all the same.
     const src = write(BASE + 'services:\n  api:\n    grade: small\n  search: false\n', {
       site: { uuid: 'SITE-1' },
-      services: [{ name: 'api', config: { grade: 'small', auth: { providers: ['google'] } } }],
+      services: { api: 'U-api', search: 'U-search' },
       secrets: [{ service: 'api', name: 'k', value: '#ref' }]
     })
     const first = await siteProjectToDocument(src, { backend: ORIGIN })

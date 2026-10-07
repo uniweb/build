@@ -1,21 +1,21 @@
 /**
- * `site.yml::services` — the owner's request, and the three-way decision of what to
- * send (kb/framework/reference/site-services-request.md).
+ * `site.yml::services` — the owner's request, what a push states, and what a pull writes
+ * (kb/framework/reference/site-services-request.md; the exchange with the backend:
+ * kb/framework/plans/services-exchange.md).
  *
- * ⭐ The cases that matter most are the two silent failures: a stale ask re-sent over a
- * decision the owner made in the app, and a partial list that drops the site's other
- * rows. Every `reconcileServices` case is one row of the spec's table.
+ * ⭐ The cases that matter most are the silent ones: a service this copy never saw
+ * switched off by a push, a deleted line whose settings stay live, and a pull that fills
+ * the file with `false` lines.
  */
 import {
   readServicesRequest,
   runtimeServiceConfig,
   runtimeServicesConfig,
   servicesFromDocument,
-  takeServices,
-  refuseRetiredServiceKeys,
-  mergeServiceRows,
-  reconcileServices,
-  recordAfter
+  statedServices,
+  heldServices,
+  sameServiceRow,
+  refuseRetiredServiceKeys
 } from '../src/uwx/services-request.js'
 
 describe('readServicesRequest — what the host is asked', () => {
@@ -176,10 +176,12 @@ describe('servicesFromDocument — what pull writes', () => {
           { name: 'api', config: { grade: 'pro' } },
           { name: 'assistant', enabled: false, config: { model: 'x' } },
           { name: 'tracking' }
-        ]
+        ],
+        local: { submit: true }
       })
     ).toEqual({
       search: { exclude: { routes: ['/legal'] } },
+      // Off, and named by the file: written, so the file says what the site has.
       submit: false,
       api: { grade: 'pro' },
       // Off, with settings: the switch beside them.
@@ -243,9 +245,24 @@ describe('servicesFromDocument — what pull writes', () => {
     ).toEqual({ search: { exclude: { routes: ['/b'] } } })
   })
 
+  it('⭐ an off service with no settings is written only where site.yml already names it', () => {
+    // Off is the default, so a `false` line adds nothing — a deleted line stays deleted,
+    // and a service switched off in the app the file never named adds no line. A file
+    // that lists one the site switched off says so; left `true`, its next push would
+    // switch it back on. [Diego, 2026-10-07]
+    const rows = [{ name: 'search', enabled: false }, { name: 'assistant', enabled: false }, { name: 'tracking' }]
+    expect(servicesFromDocument({ rows })).toEqual({ tracking: true })
+    expect(servicesFromDocument({ rows, local: { search: true } })).toEqual({ search: false, tracking: true })
+    // CONTROL — off WITH settings is written whatever the file names: it says something.
+    expect(servicesFromDocument({ rows: [{ name: 'submit', enabled: false, config: { endpoint: '/f' } }] })).toEqual({
+      submit: '/f'
+    })
+  })
+
   it('nothing to write is null', () => {
     expect(servicesFromDocument({ rows: [] })).toBeNull()
     expect(servicesFromDocument({})).toBeNull()
+    expect(servicesFromDocument({ rows: [{ name: 'search', enabled: false }] })).toBeNull()
   })
 
   it('what it writes reads back as the same asks', () => {
@@ -255,34 +272,6 @@ describe('servicesFromDocument — what pull writes', () => {
       { name: 'submit', enabled: false, config: { endpoint: '/s' } }
     ]
     expect(readServicesRequest(servicesFromDocument({ rows }))).toEqual(rows)
-  })
-})
-
-describe('takeServices — the offer to bring site.yml in line', () => {
-  it("takes the site's whole entry for each service named", () => {
-    const stored = [
-      { name: 'search', enabled: false, config: { exclude: { routes: ['/y'] } } },
-      { name: 'api', config: { grade: 'pro' } }
-    ]
-    expect(
-      takeServices({ search: { exclude: { routes: ['/x'] } }, submit: true }, stored, ['search'])
-    ).toEqual({ search: { enabled: false, exclude: { routes: ['/y'] } }, submit: true })
-  })
-
-  it("an own address goes when the site's host now provides the service", () => {
-    expect(
-      takeServices({ submit: '/forms' }, [{ name: 'submit', config: { endpoint: '/forms' } }], ['submit'])
-    ).toEqual({ submit: true })
-  })
-
-  it("keeps the author's credential", () => {
-    expect(
-      takeServices({ tracking: { token: 't-1', emit: 'all' } }, [{ name: 'tracking', config: { emit: 'minimal' } }], ['tracking'])
-    ).toEqual({ tracking: { emit: 'minimal', token: 't-1' } })
-  })
-
-  it('a service the site holds no row for leaves the map; an emptied map is null', () => {
-    expect(takeServices({ search: true }, [], ['search'])).toBeNull()
   })
 })
 
@@ -302,188 +291,74 @@ describe('refuseRetiredServiceKeys', () => {
   })
 })
 
-describe('mergeServiceRows — the full list sent', () => {
-  const STORED = [
-    { $id: 'api', name: 'api', enabled: true, config: { grade: 'starter', auth: { providers: ['google'] } }, since: 3 },
-    { name: 'search' }
+describe('statedServices — what a push states', () => {
+  const asks = (services) => readServicesRequest(services)
+
+  it("⭐ every service the file lists, as it says it — whole, with the held one's $uuid", () => {
+    expect(
+      statedServices(asks({ search: { exclude: { routes: ['/x'] } }, submit: false, api: true }), { search: 'U-s' })
+    ).toEqual([
+      { name: 'search', config: { exclude: { routes: ['/x'] } }, $uuid: 'U-s' },
+      { name: 'submit', enabled: false },
+      { name: 'api' }
+    ])
+  })
+
+  it('⭐ a held service the file no longer lists is stated OFF, with no settings', () => {
+    // Deleting the line turns it off and removes its settings — kept, an own provider
+    // would stay live on the page and come back with the next pull.
+    expect(statedServices(asks({ search: true }), { search: 'U-s', submit: 'U-f' })).toEqual([
+      { name: 'search', $uuid: 'U-s' },
+      { name: 'submit', enabled: false, $uuid: 'U-f' }
+    ])
+  })
+
+  it('⛔ a service this copy never saw is not sent — the site keeps it', () => {
+    const rows = statedServices(asks({ search: true }), {})
+    expect(rows.map((r) => r.name)).toEqual(['search'])
+  })
+
+  it('nothing listed and nothing held is nothing to state; a malformed hold is ignored', () => {
+    expect(statedServices(null, {})).toEqual([])
+    expect(statedServices(null, [{ name: 'search' }])).toEqual([])
+    expect(statedServices(null, { search: '' })).toEqual([])
+  })
+})
+
+describe('heldServices — which services this copy holds after a push or a pull', () => {
+  const written = [
+    { $uuid: 'U-s', name: 'search' },
+    { $uuid: 'U-a', name: 'api', config: { grade: 'pro' } },
+    { $uuid: 'U-new', name: 'assistant' },
+    { name: 'tracking' }
   ]
 
-  it('⭐ every stored row survives an ask about another service', () => {
-    expect(mergeServiceRows(STORED, [{ name: 'search', enabled: false }])).toEqual([
-      { name: 'api', config: { grade: 'starter', auth: { providers: ['google'] } }, since: 3 },
-      { name: 'search', enabled: false }
-    ])
+  it('a pull holds every service the site has that carries a $uuid', () => {
+    expect(heldServices({ written })).toEqual({ api: 'U-a', assistant: 'U-new', search: 'U-s' })
   })
 
-  it("⭐ an ask's `config` replaces the stored one WHOLE — a setting the file removed is removed", () => {
-    expect(mergeServiceRows(STORED, [{ name: 'api', config: { grade: 'pro' } }])[0]).toEqual({
-      name: 'api',
-      config: { grade: 'pro' },
-      // Every other field of the row is kept: a row is opaque past name, enabled and config.
-      since: 3
-    })
-    // …and an ask with no config clears the stored one.
-    expect(mergeServiceRows([{ name: 'search', config: { exclude: { routes: ['/legal'] } } }], [{ name: 'search' }])).toEqual([
-      { name: 'search' }
-    ])
-  })
-
-  it('an ask for on clears a stored off; a new service is added', () => {
-    expect(mergeServiceRows([{ name: 'submit', enabled: false }], [{ name: 'submit' }, { name: 'tracking' }])).toEqual([
-      { name: 'submit' },
-      { name: 'tracking' }
-    ])
-  })
-
-  it('with nothing stored, the asks are the list', () => {
-    expect(mergeServiceRows(undefined, [{ name: 'search' }])).toEqual([{ name: 'search' }])
-  })
-})
-
-describe('reconcileServices — who moved', () => {
-  const ON = { name: 'search' }
-  const OFF = { name: 'search', enabled: false }
-  const NAMED = ['search']
-
-  it('neither moved → nothing', () => {
-    expect(reconcileServices({ asks: [ON], record: [ON], named: NAMED, stored: [ON] })).toMatchObject({
-      send: [],
-      adopt: [],
-      conflict: [],
-      unseen: []
+  it('⛔ a push holds what it stated and what was held before — never a service added on the site since', () => {
+    // Held, the next push would state `assistant` off: switching off a service nobody
+    // here has seen.
+    expect(heldServices({ written, sent: [{ name: 'search' }], prior: { api: 'U-a' } })).toEqual({
+      api: 'U-a',
+      search: 'U-s'
     })
   })
 
-  it('the file moved → send', () => {
-    expect(reconcileServices({ asks: [OFF], record: [ON], named: NAMED, stored: [ON] }).send).toEqual(['search'])
-  })
-
-  it('⭐ a setting the owner removed from the file is a change — and sent', () => {
-    const withExclude = { name: 'search', config: { exclude: { routes: ['/legal'] } } }
-    expect(
-      reconcileServices({ asks: [ON], record: [withExclude], named: NAMED, stored: [withExclude] })
-    ).toMatchObject({ send: ['search'], adopt: [], conflict: [], unseen: [] })
-  })
-
-  it('⭐ the site moved → adopt, never send — the decision made in the app stands', () => {
-    const r = reconcileServices({ asks: [ON], record: [ON], named: NAMED, stored: [OFF] })
-    expect(r.adopt).toEqual(['search'])
-    expect(r.send).toEqual([])
-  })
-
-  it('⛔ both moved, differently → conflict', () => {
-    const r = reconcileServices({
-      asks: [{ name: 'api', config: { grade: 'pro' } }],
-      record: [{ name: 'api', config: { grade: 'starter' } }],
-      named: ['api'],
-      stored: [{ name: 'api', config: { grade: 'team' } }]
-    })
-    expect(r.conflict).toEqual(['api'])
-  })
-
-  it('the site already has exactly what the file says → nothing, whoever moved', () => {
-    expect(reconcileServices({ asks: [OFF], record: [ON], named: NAMED, stored: [OFF] })).toMatchObject({
-      send: [],
-      adopt: [],
-      conflict: [],
-      unseen: []
-    })
-  })
-
-  it("fields a backend adds to a stored row are not the site moving — only its switch and `config` are", () => {
-    // Measured on a pull: a stored row carries `$uuid`, and once a `"config": null`.
-    const r = reconcileServices({
-      asks: [OFF],
-      record: [ON],
-      named: NAMED,
-      stored: [{ name: 'search', $uuid: '019e-0000', config: null }]
-    })
-    expect(r).toMatchObject({ send: ['search'], adopt: [], conflict: [], unseen: [] })
-  })
-
-  describe('a service the file names for the first time', () => {
-    const GRADED = { name: 'api', config: { grade: 'pro' } }
-
-    it('⭐ the site holds it differently → unseen: asked, never sent over — the app set what the file never had', () => {
-      // The record holds api — a push sent it as stored while the file did not name it —
-      // but the file never had its grade, so dropping it is not the file's decision.
-      const r = reconcileServices({ asks: [{ name: 'api' }], record: [GRADED], named: [], stored: [GRADED] })
-      expect(r).toMatchObject({ send: [], adopt: [], conflict: [], unseen: ['api'] })
-    })
-
-    it('the site holds nothing for it → send', () => {
-      expect(reconcileServices({ asks: [ON], record: [], named: [], stored: [] }).send).toEqual(['search'])
-    })
-
-    it('the site already has it as the file says → nothing', () => {
-      expect(reconcileServices({ asks: [GRADED], record: [], named: [], stored: [GRADED] })).toMatchObject({
-        send: [],
-        unseen: []
-      })
-    })
-
-    it('with no record at all, every service is one', () => {
-      expect(reconcileServices({ asks: [ON], stored: [OFF] }).unseen).toEqual(['search'])
-      expect(reconcileServices({ asks: [ON], stored: [] }).send).toEqual(['search'])
-    })
-  })
-
-  describe('the site unreadable', () => {
-    it('⛔ nothing is sent for a site that exists — the record cannot stand in for it', () => {
-      expect(reconcileServices({ asks: [OFF], record: [ON], named: NAMED })).toMatchObject({
-        send: [],
-        unreadable: true
-      })
-      expect(reconcileServices({ asks: [ON] })).toMatchObject({ send: [], unreadable: true })
-    })
-
-    it('a site not created yet has nothing stored — the file is sent', () => {
-      expect(reconcileServices({ asks: [ON], siteKnown: false })).toMatchObject({
-        send: ['search'],
-        unreadable: false
-      })
+  it('a service the site no longer has is no longer held', () => {
+    expect(heldServices({ written: [{ $uuid: 'U-s', name: 'search' }], sent: [], prior: { search: 'U-s', submit: 'U-f' } })).toEqual({
+      search: 'U-s'
     })
   })
 })
 
-describe('recordAfter — the agreement a push leaves', () => {
-  it('what was sent, without the payload-local $id and with `enabled` only when off', () => {
-    expect(recordAfter({ agreed: [{ $id: 'search', name: 'search', enabled: true }], names: ['search'] })).toEqual({
-      services: [{ name: 'search' }],
-      servicesNamed: ['search']
-    })
-  })
-
-  it('⭐ the full list is kept, but only the services the file names are counted as named', () => {
-    const agreed = [{ name: 'api', config: { grade: 'pro' } }, { name: 'search' }]
-    expect(recordAfter({ agreed, names: ['search'] })).toEqual({
-      services: agreed,
-      servicesNamed: ['search']
-    })
-  })
-
-  it('⛔ an open service keeps the earlier agreement, so the next run still sees the site moved', () => {
-    const record = [{ name: 'search' }, { name: 'api', config: { grade: 'starter' } }]
-    const agreed = [{ name: 'search', enabled: false }, { name: 'api', config: { grade: 'team' } }]
-    expect(recordAfter({ record, named: ['api', 'search'], agreed, open: ['api'], names: ['api', 'search'] })).toEqual({
-      services: [{ name: 'search', enabled: false }, { name: 'api', config: { grade: 'starter' } }],
-      servicesNamed: ['api', 'search']
-    })
-    // …and with no earlier agreement for it, the row stays out — still undecided.
-    expect(recordAfter({ record: [], agreed, open: ['api'], names: ['api', 'search'] })).toEqual({
-      services: [{ name: 'search', enabled: false }],
-      servicesNamed: ['search']
-    })
-  })
-
-  it('a service named for the first time and left open stays unnamed, so it is asked about again', () => {
-    expect(
-      recordAfter({ named: ['search'], agreed: [{ name: 'api', config: { grade: 'pro' } }], open: ['api'], names: ['api', 'search'] })
-        .servicesNamed
-    ).toEqual(['search'])
-  })
-
-  it('nothing agreed is nothing to record', () => {
-    expect(recordAfter({ record: [{ name: 'search' }] })).toBeUndefined()
+describe('sameServiceRow — a service written as a push sent it', () => {
+  it('compares the switch and the WHOLE config', () => {
+    expect(sameServiceRow({ name: 'search' }, { $uuid: 'U', name: 'search', enabled: true })).toBe(true)
+    // ⛔ On the keys we sent (`name`) these are equal — and they are not the same service.
+    expect(sameServiceRow({ name: 'search' }, { name: 'search', enabled: false })).toBe(false)
+    expect(sameServiceRow({ name: 'api' }, { name: 'api', config: { grade: 'pro' } })).toBe(false)
+    expect(sameServiceRow({ name: 'api', config: { grade: 'pro' } }, { name: 'api', config: { grade: 'pro' } })).toBe(true)
   })
 })

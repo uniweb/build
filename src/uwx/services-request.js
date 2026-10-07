@@ -35,9 +35,10 @@
  * host is asked to leave its own off — a host's offer outranks the site's address
  * (`core/src/services.js`), and would otherwise win.
  *
- * ⭐ ONE REQUEST, WHICHEVER BACKEND A COMMAND TALKS TO. The rows a backend holds for
- * the site are kept apart, in that backend's entry in `sync.json` — the CLI's record
- * of what it last agreed with that site, which nobody edits.
+ * ⭐ ONE REQUEST, WHICHEVER BACKEND A COMMAND TALKS TO. What a push sends is what the
+ * file says, plus OFF for each service this copy holds that the file no longer lists
+ * (`statedServices`); the services it holds are named, `{ name: $uuid }`, in that
+ * backend's entry in `sync.json`, which nobody edits. The backend decides per service.
  *
  * Pure functions, shared by the static build (`content-collector.js`), the producer
  * (`site.js`), pull (`site-project.js`) and the CLI's push, publish and doctor.
@@ -90,21 +91,6 @@ function stable(value) {
     isMap(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v
   )
 }
-
-/**
- * A row as it is stored and compared: no payload-local `$id`, `enabled` only when
- * it is `false` (absent means on), no empty `config`.
- */
-function canonicalRow(row) {
-  const { $id: _id, enabled, ...rest } = row
-  const out = { ...rest }
-  if (enabled === false) out.enabled = false
-  if (isMap(out.config) && Object.keys(out.config).length === 0) delete out.config
-  return out
-}
-
-const rowNamed = (rows, name) =>
-  Array.isArray(rows) ? rows.find((r) => isMap(r) && r.name === name) : undefined
 
 /** The address an entry names, or null — a string, or a map's `endpoint`. */
 function addressOf(value) {
@@ -312,12 +298,25 @@ function keepCredentials(entry, local) {
 }
 
 /**
- * The site's rows → the `site.yml::services` map — what pull writes.
+ * The site's rows → the `site.yml::services` map — what a pull writes.
+ *
+ * ⭐ AN OFF SERVICE WITH NO SETTINGS IS WRITTEN ONLY WHERE `site.yml` ALREADY NAMES IT
+ * [Diego, 2026-10-07]. Every service is on or off, and off by default, so a `false` line
+ * adds nothing — and writing one for every service switched off in the app, or for each
+ * line the file dropped, would fill the file with them. So a pull writes a service that is
+ * on, or that has settings (an own provider's address); and one that is off, as `false`,
+ * where the file names it — a file listing a service the site has since switched off must
+ * say so, or its next push switches it back on. The rows it leaves out are still held
+ * (`sync.json`), and a push states them off, as the site has them (`statedServices`).
+ * ⛔ *Until then every row was written, an off one as `false`.*
+ *
+ * ⚖️ What it gives up: a `false` an author wrote does not reach a fresh clone, whose
+ * `site.yml` names nothing yet. It still means off there.
  *
  * @param {object} p
- * @param {object[]} [p.rows] - the `services` Section: the site's settled request
- * @param {object} [p.local] - the `services:` the pull writes over, for the credentials
- *   a push never sends (`keepCredentials`)
+ * @param {object[]} [p.rows] - the `services` Section: the site's rows
+ * @param {object} [p.local] - the `services:` the pull writes over — which services it
+ *   names, and the credentials a push never sends (`keepCredentials`)
  * @returns {object|null} null when there is nothing to write
  */
 export function servicesFromDocument({ rows, local } = {}) {
@@ -325,46 +324,97 @@ export function servicesFromDocument({ rows, local } = {}) {
   const out = {}
   for (const row of Array.isArray(rows) ? rows : []) {
     if (!isMap(row) || typeof row.name !== 'string' || !row.name || row.name in out) continue
-    out[row.name] = keepCredentials(entryFromRow(row), before[row.name])
+    const entry = entryFromRow(row)
+    if (entry === false && !(row.name in before)) continue
+    out[row.name] = keepCredentials(entry, before[row.name])
   }
   return Object.keys(out).length ? out : null
 }
 
 /**
- * The `site.yml::services` map with these services taken from the site's rows — the
- * offer to bring the file in line. Each named entry becomes what its row says, keeping
- * only the author's credentials; a service the site holds no row for leaves the map.
+ * The `services` Section a push sends: every service `site.yml` lists, as it says it, and
+ * OFF for every service this copy holds that the file does not list.
  *
- * @param {*} declared - the current `services:` value
- * @param {object[]} stored - the site's rows now
- * @param {string[]} names
- * @returns {object|null} the new map, or null when nothing is left in it
+ * ⭐ A PUSH STATES, AND THE BACKEND DECIDES PER SERVICE [Diego, 2026-10-07 —
+ * kb/framework/plans/services-exchange.md]. Every service is on or off, off by default.
+ *
+ *   - A service the file lists goes WHOLE — its switch, and the entry as its `config` — so
+ *     a setting removed from the file is removed.
+ *   - A service this copy holds — a pull returned it, or a push sent it — and the file
+ *     does not list is stated `{ name, enabled: false }`, with no settings. Deleting the
+ *     line turns it off and removes its settings, which would otherwise stay live on the
+ *     page, since a row's `config` reaches it whether the row is on or off, and come back
+ *     with the next pull.
+ *   - A service this copy never saw is not sent, and the site keeps it.
+ *
+ * A held service carries its `$uuid`, and the push sends the version of every item it
+ * holds (`withBaseVersion`), so a service changed on the site since is kept when the file
+ * left it as it was, and refused when the file changed it too.
+ *
+ * ⛔ *Until then a push sent the site's whole list, read just before it, with the file's
+ * changed asks applied — a service left out was deleted — and the CLI kept its own copy
+ * of the list in `sync.json` to tell who had changed what.*
+ *
+ * @param {object[]|null} asks - from `readServicesRequest`
+ * @param {object} [held] - `{ <name>: <$uuid> }`, the services this copy holds (`sync.json`)
+ * @returns {object[]} the rows; `[]` when there is nothing to state
  */
-export function takeServices(declared, stored, names) {
-  const out = isMap(declared) ? { ...declared } : {}
-  for (const name of names) {
-    const row = rowNamed(stored, name)
-    if (row) out[name] = keepCredentials(entryFromRow(row), out[name])
-    else delete out[name]
+export function statedServices(asks, held = {}) {
+  const ids = isMap(held) ? held : {}
+  const uuidOf = (name) => (typeof ids[name] === 'string' && ids[name] ? ids[name] : null)
+  const rows = []
+  const listed = new Set()
+  for (const ask of asks || []) {
+    listed.add(ask.name)
+    const row = { name: ask.name }
+    if (ask.enabled === false) row.enabled = false
+    if (ask.config) row.config = { ...ask.config }
+    if (uuidOf(ask.name)) row.$uuid = uuidOf(ask.name)
+    rows.push(row)
   }
-  return Object.keys(out).length ? out : null
+  for (const name of Object.keys(ids).sort()) {
+    if (listed.has(name) || !uuidOf(name)) continue
+    rows.push({ name, enabled: false, $uuid: uuidOf(name) })
+  }
+  return rows
 }
 
 /**
- * What a row SAYS — its switch and its `config`, nothing else — so two rows compare by
- * the owner's decisions and not by fields a backend adds to what it stores.
+ * The services this copy holds after a push or a pull — `{ <name>: <$uuid> }`, read from
+ * the document the backend returned.
+ *
+ * A pull returns every service the site has, all seen (`sent` absent). A push returns the
+ * site's rows after the write, which may include services added since this copy's last
+ * pull: those were neither sent nor held before, so they are left out — held, a later
+ * push would state them off, switching off a service nobody here has seen.
+ *
+ * @param {object} p
+ * @param {object[]} [p.written] - the `services` rows the backend returned
+ * @param {object[]} [p.sent] - the rows the push sent; absent for a pull
+ * @param {object} [p.prior] - the services held before
+ * @returns {object} the services now held
  */
+export function heldServices({ written, sent, prior } = {}) {
+  const before = isMap(prior) ? prior : {}
+  const stated = Array.isArray(sent) ? new Set(sent.filter(isMap).map((r) => r.name)) : null
+  const out = {}
+  for (const row of Array.isArray(written) ? written : []) {
+    if (!isMap(row) || typeof row.name !== 'string' || !row.name) continue
+    if (typeof row.$uuid !== 'string' || !row.$uuid) continue
+    if (stated && !stated.has(row.name) && !(row.name in before)) continue
+    out[row.name] = row.$uuid
+  }
+  // Sorted: it is written to `sync.json`, a committed file that must not reorder itself.
+  return Object.fromEntries(Object.keys(out).sort().map((k) => [k, out[k]]))
+}
+
+/** What a row SAYS — its switch and its `config` — not the fields a backend adds to it. */
 function said(row) {
   if (!isMap(row)) return null
   const out = {}
   if (row.enabled === false) out.enabled = false
   if (isMap(row.config) && Object.keys(row.config).length) out.config = row.config
   return out
-}
-
-/** Do two rows say the same — the switch and the whole `config`? Both absent included. */
-function sameRow(a, b) {
-  return stable(said(a)) === stable(said(b))
 }
 
 /**
@@ -378,141 +428,5 @@ function sameRow(a, b) {
  * @returns {boolean}
  */
 export function sameServiceRow(sent, written) {
-  return isMap(sent) && isMap(written) && sameRow(sent, written)
-}
-
-/**
- * The full list to send: the stored rows, with these asks applied by name.
- *
- * ⭐ A FULL LIST, because the backend replaces the `services` Section with what it is
- * sent, and deletes a service the list leaves out. A row no ask names is sent as
- * stored. A row an ask names takes the ask's switch and its `config` WHOLE — the entry
- * is sent as the file says it, so a setting removed from the file is removed
- * [Diego, 2026-10-07]. Every other field of the row is kept — a row is opaque past
- * `name`, `enabled` and `config`. ⛔ *Until then the ask's `config` was laid over the
- * stored one key by key, so a push could never remove a setting.*
- *
- * @param {object[]|null|undefined} base - the site's rows
- * @param {object[]} asks - from `readServicesRequest`
- * @returns {object[]}
- */
-export function mergeServiceRows(base, asks) {
-  const out = []
-  const at = new Map()
-  for (const row of Array.isArray(base) ? base : []) {
-    if (!isMap(row) || typeof row.name !== 'string' || !row.name || at.has(row.name)) continue
-    at.set(row.name, out.length)
-    out.push(canonicalRow(row))
-  }
-  for (const ask of asks || []) {
-    const index = at.get(ask.name)
-    const next = index === undefined ? { name: ask.name } : { ...out[index] }
-    if (ask.enabled === false) next.enabled = false
-    else delete next.enabled
-    if (ask.config) next.config = { ...ask.config }
-    else delete next.config
-    if (index === undefined) {
-      at.set(ask.name, out.length)
-      out.push(next)
-    } else {
-      out[index] = next
-    }
-  }
-  return out
-}
-
-/**
- * Per service the file names: who moved since the last agreement, and so what to do.
- *
- * Three states — the file's asks, the site's rows now (`stored`), and the record of the
- * last agreement (`record`, from `sync.json`) — compared WHOLE, switch and `config`:
- *
- * | the file vs the record | the site vs the record | outcome |
- * |---|---|---|
- * | unchanged | unchanged | nothing |
- * | changed | unchanged | `send` |
- * | unchanged | changed | `adopt` — the site's is kept, and may be taken into the file |
- * | changed | changed, differently | `conflict` — only the owner can rank the two |
- *
- * A service the site already has exactly as the file says it is nothing, whoever moved.
- *
- * ⭐ THE RECORD SPEAKS FOR THE FILE ONLY FOR THE SERVICES THE FILE NAMED (`named`). A push
- * sends the full list, so the record also holds services the file never named — one set
- * in the app, say — and the file cannot have removed a setting it never had. A service
- * the file names for the first time is therefore `send` when the site holds nothing for
- * it, and `unseen` when the site holds it differently: the owner is asked, rather than a
- * setting made in the app being erased [Diego, 2026-10-07].
- *
- * ⛔ With the site's rows unreadable nothing is sent for a site that exists
- * (`unreadable`): the list goes whole, and the record cannot stand in for what the site
- * holds now. A site not yet created has nothing stored, so every ask is sent.
- *
- * @param {object} p
- * @param {object[]} p.asks - from `readServicesRequest`
- * @param {object[]} [p.record] - the rows last agreed
- * @param {string[]} [p.named] - the services the file named at the last agreement
- * @param {object[]} [p.stored] - the site's rows now, when they could be read
- * @param {boolean} [p.siteKnown=true] - whether the site exists on this backend
- * @returns {{ send: string[], adopt: string[], conflict: string[], unseen: string[], unreadable: boolean }}
- */
-export function reconcileServices({ asks, record, named, stored, siteKnown = true }) {
-  const send = []
-  const adopt = []
-  const conflict = []
-  const unseen = []
-  if (!Array.isArray(stored)) {
-    return siteKnown
-      ? { send, adopt, conflict, unseen, unreadable: true }
-      : { send: asks.map((a) => a.name), adopt, conflict, unseen, unreadable: false }
-  }
-  const seen = new Set(Array.isArray(named) ? named : [])
-  for (const ask of asks) {
-    const now = rowNamed(stored, ask.name)
-    if (sameRow(now, ask)) continue
-    const then = seen.has(ask.name) ? rowNamed(record, ask.name) : undefined
-    if (!then) {
-      ;(now === undefined ? send : unseen).push(ask.name)
-      continue
-    }
-    const fileMoved = !sameRow(then, ask)
-    const siteMoved = !sameRow(now, then)
-    if (fileMoved && !siteMoved) send.push(ask.name)
-    else if (!fileMoved && siteMoved) adopt.push(ask.name)
-    else if (fileMoved && siteMoved) conflict.push(ask.name)
-  }
-  return { send, adopt, conflict, unseen, unreadable: false }
-}
-
-/**
- * The record after a push: what this project now agrees with the site on.
- *
- * `services` — the rows sent, or, when nothing was, the site's rows now: the full list,
- * so a comparison made offline (`status`) rebuilds what was sent. ⛔ For a service left
- * OPEN (an adopt not taken, a conflict not resolved) the earlier agreement stands, or
- * the next run would read the site's change as the file's and send the stale ask.
- *
- * `servicesNamed` — the services the file names and now agrees on. A service the file
- * names for the first time and left open stays out, so it is asked about again; one it
- * named before keeps its place.
- *
- * @param {object} p
- * @param {object[]} [p.record] - the rows last agreed
- * @param {string[]} [p.named] - the services the file named at the last agreement
- * @param {object[]} [p.agreed] - the rows sent, or the site's rows now
- * @param {string[]} [p.open] - services whose decision is still open
- * @param {string[]} [p.names] - the services the file names now
- * @returns {{ services: object[], servicesNamed: string[] }|undefined} undefined when there
- *   is nothing to record
- */
-export function recordAfter({ record, named, agreed, open = [], names = [] }) {
-  if (!Array.isArray(agreed)) return undefined
-  const keep = new Set(open)
-  const services = agreed.filter((r) => isMap(r) && !keep.has(r.name)).map(canonicalRow)
-  for (const name of open) {
-    const then = rowNamed(record, name)
-    if (then) services.push(canonicalRow(then))
-  }
-  const before = new Set(Array.isArray(named) ? named : [])
-  const servicesNamed = [...new Set(names)].filter((n) => !keep.has(n) || before.has(n)).sort()
-  return { services, servicesNamed }
+  return isMap(sent) && isMap(written) && stable(said(sent)) === stable(said(written))
 }

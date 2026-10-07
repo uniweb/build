@@ -1,15 +1,16 @@
 /**
- * The `services` Section — the owner's request, from `site.yml::services`.
+ * The `services` Section — what a push STATES, from `site.yml::services` and the
+ * services this copy holds.
  *
- * ⭐ Sent as a FULL LIST: the site's rows with the owner's asks applied by name, each
- * WHOLE, because the backend REPLACES the Section with what it is sent and a row left
- * out would be deleted. Which asks go is the caller's to decide — push and
- * publish read the site's rows and the last agreement, and pass the result as
- * `serviceRows`; without it, the file's asks apply over the record in `sync.json`
- * (spec: kb/framework/reference/site-services-request.md).
+ * ⭐ Every service the file lists goes as the file says it, whole. Every service this
+ * copy holds — `sync.json`, `{ name: $uuid }`, written by pull and push — that the file
+ * no longer lists goes OFF, with no settings. A service this copy never saw is not sent,
+ * and the backend keeps it. The backend decides per service from the versions the push
+ * sends (spec: kb/framework/reference/site-services-request.md; the exchange:
+ * kb/framework/plans/services-exchange.md).
  *
- * ⛔ Absent is never empty: nothing here may turn "the file asks nothing" into `[]`,
- * which would drop every stored row.
+ * ⛔ Until 2026-10-07 the Section was a FULL LIST — the site's rows with the file's asks
+ * applied — because the backend replaced it with what it was sent.
  */
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -25,7 +26,7 @@ afterEach(() => {
 
 const ORIGIN = 'http://backend.test'
 
-/** A project with `services` in site.yml (or none), and this backend's record (or none). */
+/** A project with `services` in site.yml (or none), and this backend's entry (or none). */
 function project({ request = null, record = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'uw-declare-'))
   dirs.push(dir)
@@ -41,103 +42,75 @@ function project({ request = null, record = null } = {}) {
   return dir
 }
 
-const STORED = {
+const HELD = {
   site: { uuid: 'SITE-1' },
-  services: [
-    { name: 'api', config: { grade: 'starter', auth: { providers: ['google'] } } },
-    { name: 'search' }
-  ],
+  services: { api: 'U-api', search: 'U-search' },
   secrets: [{ name: 'token', service: 'api', value: '#ref' }]
 }
 
-describe('the services request', () => {
-  it('⭐ applies the asks over the record — every stored row kept, each named one as the file says it', async () => {
+describe('the services a push states', () => {
+  it("⭐ each service the file lists, whole — with the held one's $uuid", async () => {
     const doc = await siteProjectToDocument(
-      project({ request: 'services:\n  api:\n    grade: pro\n  submit: true\n  search: false\n', record: STORED }),
+      project({ request: 'services:\n  api:\n    grade: pro\n  submit: true\n  search: false\n', record: HELD }),
       { backend: ORIGIN }
     )
     expect(doc.services).toEqual([
-      // The file names api, so its entry is api WHOLE: `auth`, not in the file, is gone.
-      { $id: 'api', name: 'api', config: { grade: 'pro' } },
-      { $id: 'search', name: 'search', enabled: false },
-      { $id: 'submit', name: 'submit' }
+      { $id: 'api', name: 'api', config: { grade: 'pro' }, $uuid: 'U-api' },
+      { $id: 'submit', name: 'submit' },
+      { $id: 'search', name: 'search', enabled: false, $uuid: 'U-search' }
     ])
   })
 
-  it('a file that asks nothing sends no Section — never `[]`', async () => {
-    // `[]` would drop every stored row; an absent key leaves them alone.
-    const doc = await siteProjectToDocument(project({ record: STORED }), { backend: ORIGIN })
-    expect('services' in doc).toBe(false)
-    const empty = await siteProjectToDocument(project({ request: 'services: {}\n', record: STORED }), {
+  it('⭐ a held service the file no longer lists is stated OFF, with no settings', async () => {
+    const doc = await siteProjectToDocument(project({ request: 'services:\n  search: true\n', record: HELD }), {
       backend: ORIGIN
     })
-    expect('services' in empty).toBe(false)
+    expect(doc.services).toEqual([
+      { $id: 'search', name: 'search', $uuid: 'U-search' },
+      { $id: 'api', name: 'api', enabled: false, $uuid: 'U-api' }
+    ])
   })
 
-  it('⛔ an existing site this project holds no record for is sent nothing', async () => {
-    // A partial list would drop the site's other rows. The CLI reads the site's rows
-    // and passes them; with neither, there is nothing to apply the asks to.
-    const doc = await siteProjectToDocument(
-      project({ request: 'services:\n  search: true\n', record: { site: { uuid: 'SITE-1' } } }),
-      { backend: ORIGIN }
-    )
+  it('a file that lists nothing still states the held services off', async () => {
+    const doc = await siteProjectToDocument(project({ record: HELD }), { backend: ORIGIN })
+    expect(doc.services.map((r) => [r.name, r.enabled])).toEqual([
+      ['api', false],
+      ['search', false]
+    ])
+  })
+
+  it('nothing listed and nothing held sends no Section', async () => {
+    const doc = await siteProjectToDocument(project({ record: { site: { uuid: 'SITE-1' } } }), { backend: ORIGIN })
     expect('services' in doc).toBe(false)
+    const fresh = await siteProjectToDocument(project({ request: 'services: {}\n' }), { backend: ORIGIN })
+    expect('services' in fresh).toBe(false)
   })
 
-  it('a site not created yet has nothing stored — the asks are the list', async () => {
+  it('a site not created yet holds nothing — the file is the list', async () => {
     const doc = await siteProjectToDocument(project({ request: 'services:\n  search: true\n' }), {
       backend: ORIGIN
     })
     expect(doc.services).toEqual([{ $id: 'search', name: 'search' }])
   })
 
-  it("the caller's rows are sent as given", async () => {
-    const rows = [{ name: 'api', config: { grade: 'pro' } }, { name: 'search', enabled: false }]
+  it('⛔ the rows a copy kept before 2026-10-07 — a list — are not a hold: nothing is stated off', async () => {
     const doc = await siteProjectToDocument(
-      project({ request: 'services:\n  search: false\n', record: STORED }),
-      { backend: ORIGIN, serviceRows: rows }
+      project({
+        request: 'services:\n  search: true\n',
+        record: { site: { uuid: 'SITE-1' }, services: [{ name: 'api' }, { name: 'search' }] }
+      }),
+      { backend: ORIGIN }
     )
-    expect(doc.services).toEqual([
-      { $id: 'api', name: 'api', config: { grade: 'pro' } },
-      { $id: 'search', name: 'search', enabled: false }
-    ])
+    expect(doc.services).toEqual([{ $id: 'search', name: 'search' }])
   })
 
-  it('secrets ride from the record, as before', async () => {
-    const doc = await siteProjectToDocument(project({ record: STORED }), { backend: ORIGIN })
+  it('secrets ride from the entry, as before', async () => {
+    const doc = await siteProjectToDocument(project({ record: HELD }), { backend: ORIGIN })
     expect(doc.secrets).toEqual([{ $id: 'api:token', name: 'token', service: 'api', value: '#ref' }])
   })
-})
 
-describe('declareServices: false', () => {
-  it('withholds both Sections', async () => {
-    const doc = await siteProjectToDocument(
-      project({ request: 'services:\n  search: true\n', record: STORED }),
-      { backend: ORIGIN, declareServices: false, serviceRows: [{ name: 'search' }] }
-    )
-    // ⭐ ABSENT, not empty.
-    expect('services' in doc).toBe(false)
-    expect('secrets' in doc).toBe(false)
-  })
-
-  it('only `false` withholds — an absent or true option declares', async () => {
-    for (const opts of [{}, { declareServices: true }, { declareServices: undefined }]) {
-      const doc = await siteProjectToDocument(
-        project({ request: 'services:\n  search: true\n', record: STORED }),
-        { backend: ORIGIN, ...opts }
-      )
-      expect(doc.services, JSON.stringify(opts)).toBeDefined()
-    }
-  })
-
-  it('withholding changes nothing else about the document', async () => {
-    const dir = project({ request: 'services:\n  search: true\n', record: STORED })
-    const declared = await siteProjectToDocument(dir, { backend: ORIGIN })
-    const withheld = await siteProjectToDocument(dir, { backend: ORIGIN, declareServices: false })
-    const strip = (d) => {
-      const { services: _s, secrets: _x, ...rest } = d
-      return rest
-    }
-    expect(strip(withheld)).toEqual(strip(declared))
+  it('no backend, nothing held: the file alone', async () => {
+    const doc = await siteProjectToDocument(project({ request: 'services:\n  search: true\n', record: HELD }))
+    expect(doc.services).toEqual([{ $id: 'search', name: 'search' }])
   })
 })

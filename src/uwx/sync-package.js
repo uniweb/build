@@ -28,6 +28,7 @@ import { siteProjectToDocument } from './site.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
+import { recordQueriesShown } from './shown-records.js'
 import { isLocalAssetPath } from '../site/assets.js'
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
@@ -226,8 +227,6 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  * @param {string} [opts.sourceLocale]    - localized-field wrap locale
  * @param {Object<string,string>} [opts.priorHashes] - sync-cache (send-only-changed)
  * @param {boolean} [opts.sendAll]        - bypass the prior-hash filter
- * @param {object[]} [opts.serviceRows]   - the `services` Section to send, as the
- *                                          caller decided it (site.js `requestedServices`)
  * @param {Object<string,string>} [opts.itemUuids] - unit path → backend `$uuid`,
  *        stamped onto the site-content document so the backend matches our items
  *        instead of re-minting them (which deletes and recreates every page and
@@ -389,13 +388,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         // and the page and `settings` keys that carry Open Graph texts per language.
         ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),
         ...(Array.isArray(opts.pageFields) ? { pageFields: opts.pageFields } : {}),
-        ...(Array.isArray(opts.settingsFields) ? { settingsFields: opts.settingsFields } : {}),
-        // The `services` Section as the caller decided it — the site's rows with the
-        // owner's changed asks applied — or the Sections withheld. Passed through
-        // rather than decided here: the site's rows and the last agreement are what
-        // the CLI reads. See site.js at `requestedServices`.
-        ...(Array.isArray(opts.serviceRows) ? { serviceRows: opts.serviceRows } : {}),
-        ...(opts.declareServices === false ? { declareServices: false } : {})
+        ...(Array.isArray(opts.settingsFields) ? { settingsFields: opts.settingsFields } : {})
       })
     : null
   // Deploy-derived `info` fields are stamped here — NOT authored in site.yml, so they
@@ -649,5 +642,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // records this package SENDS that the backend holds with list items and no bank entry
     // (their uuids) — sent as they are, the backend refuses each one (`identity_required`).
     recordItemIdentity,
+    // The queries whose records the site's pages show live — what the `records` service
+    // delivers on a published site (`shown-records.js`). Whether it changed or not.
+    recordsShown: siteDoc ? recordQueriesShown(siteDoc) : [],
   }
 }

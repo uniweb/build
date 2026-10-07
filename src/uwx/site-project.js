@@ -36,7 +36,7 @@ import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
-import { servicesFromDocument } from './services-request.js'
+import { servicesFromDocument, heldServices } from './services-request.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -290,26 +290,24 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
     : []
   if (extensions.length > 0) siteChanges.extensions = extensions
 
-  // services → site.yml::services, one entry per service; the rows → sync.json as
-  // the record.
+  // services → site.yml::services, one entry per service; which services this copy
+  // now holds → sync.json.
   //
   // ⭐ `site.yml` TAKES WHAT WAS DECIDED [Diego, 2026-10-06: "pull writes it"]. Each
-  // entry is its row in the `services` Section — the site's settled request, the whole
-  // entry in its `config` (`servicesFromDocument`). The map is written whole, keeping
-  // only the credentials an author typed, which a push never sends; an empty Section
-  // removes the key; a document with no Section writes nothing. The retired top-level
-  // keys go, so a pulled file builds.
+  // entry is its row in the `services` Section — the whole entry in its `config`
+  // (`servicesFromDocument`) — except an off service with no settings, written only
+  // where the file already names it [Diego, 2026-10-07]. The map is written whole,
+  // keeping only the credentials an author typed, which a push never sends; a document
+  // with no Section writes nothing. The retired top-level keys go, so a pulled file
+  // builds.
   //
-  // ⭐ The record goes to `sync.json`, under this backend: the rows as the site holds
-  // them — the last state both sides agreed on, which push and publish compare the file
-  // against (`reconcileServices`). `$id` is dropped, being derived; everything else rides
-  // VERBATIM, `config` included — it is opaque, per-service and will grow, and the next
-  // push sends the stored rows as its base. `secrets` likewise: an inventory of names
-  // whose values are set in the app. `[]` is written as `[]`: "the site holds no rows" is
-  // a state a pull must be able to deliver. Beside it, `servicesNamed`: every service the
-  // pull wrote into `site.yml`, so the next push can tell a setting the owner removed from
-  // the file from one the file never had (`reconcileServices`).
-  // ⛔ The record needs a backend: with none there is nowhere coherent to file it.
+  // ⭐ `sync.json` takes, under this backend, the services this copy now HOLDS —
+  // `{ name: $uuid }`, every row the site has, written to the file or not
+  // (`heldServices`). A push states each one the file does not list as off, so the site
+  // keeps what it has. `secrets` is an inventory of names whose values are set in the
+  // app, `$id` dropped. ⛔ *Until 2026-10-07 `services` held the rows themselves, the
+  // record a push compared the file against, with `servicesNamed` beside it.*
+  // ⛔ What is held needs a backend: with none there is nowhere coherent to file it.
   if (Array.isArray(document?.services)) {
     siteChanges.services = servicesFromDocument({
       rows: document.services,
@@ -319,13 +317,9 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   }
   if (backend) {
     const provisioned = {}
-    for (const section of ['services', 'secrets']) {
-      const records = document?.[section]
-      if (!Array.isArray(records)) continue
-      provisioned[section] = records.map(({ $id: _id, ...fields }) => fields)
-    }
-    if (Array.isArray(document?.services)) {
-      provisioned.servicesNamed = Object.keys(siteChanges.services || {}).sort()
+    if (Array.isArray(document?.services)) provisioned.services = heldServices({ written: document.services })
+    if (Array.isArray(document?.secrets)) {
+      provisioned.secrets = document.secrets.map(({ $id: _id, ...fields }) => fields)
     }
     if (Object.keys(provisioned).length) {
       updateBackendState(siteRoot, backend, provisioned)

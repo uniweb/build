@@ -82,7 +82,7 @@ import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph
 import { updateBackendState, readBackendState } from './sync-store.js'
 import {
   readServicesRequest,
-  mergeServiceRows,
+  statedServices,
   refuseRetiredServiceKeys
 } from './services-request.js'
 import { upsertYamlScalar } from './yaml-upsert.js'
@@ -1096,14 +1096,16 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
 //
 // ⭐ THE `services` SECTION IS THE OWNER'S REQUEST, AUTHORED IN `site.yml::services` — a
 // map from service name to `true`, `false` or the service's settings (spec:
-// kb/framework/reference/site-services-request.md). It is sent as a FULL LIST: the
-// site's rows, with the owner's asks applied by name (`mergeServiceRows`), because the
-// backend REPLACES the Section with what it is sent and a row left out would lose its
-// stored settings. The site's rows come from the caller when it has just read them
-// (`opts.serviceRows`, already merged), else from the record of the last agreement —
-// that backend's entry in `sync.json`, written by pull and by a push that succeeded.
-// ⛔ *The rows lived only in `sync.json` from 2026-09-20 to 2026-10-06, which left a
-// CLI user nowhere to ask; `site.yml::$services` / `$secrets` before that.*
+// kb/framework/reference/site-services-request.md). A push STATES: every service the
+// file lists, as it says it, and OFF for every service this copy holds that the file no
+// longer lists (`statedServices`). The services it holds are named in that backend's
+// entry in `sync.json`, `{ name: $uuid }`, written by pull and by a push that succeeded;
+// one it never saw is not sent, and the site keeps it. The backend decides per service
+// from the versions the push sends [Diego, 2026-10-07 — kb/framework/plans/services-exchange.md].
+// ⛔ *Until then the Section went as a FULL LIST — the site's rows, read just before the
+// push, with the file's changed asks applied — because the backend replaced the Section
+// with what it was sent; and from 2026-09-20 to 2026-10-06 the rows lived only in
+// `sync.json`, which left a CLI user nowhere to ask.*
 //
 // `secrets` stays in `sync.json`: an inventory of names a pull writes, whose values are
 // set in the app — `#ref` marks one as set.
@@ -1115,12 +1117,8 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
 // A row here is read by the service's owner and reaches neither tier, so an address
 // filed here would reach no page.
 //
-// ⛔ ABSENT IS NOT EMPTY, and the difference is destructive. The Section is REPLACED
-// by what we send, so `[]` means "drop every stored row" while a missing key means "I
-// am not telling you about this". So `services` is emitted only when `site.yml` asks
-// for something and there is a list to apply it to — never for a file that says
-// nothing, and never as a partial list for a site whose rows this project does not
-// know. A site with no entry in `sync.json` has nothing stored yet.
+// The Section is emitted only when there is something to state: a file that lists no
+// service, on a copy that holds none, sends no `services`.
 
 /**
  * A backend's provisioned `services` / `secrets` (its `sync.json` entry) → Section
@@ -1182,25 +1180,22 @@ function servicesNested(rows) {
 }
 
 /**
- * The `services` Section for this push, or undefined when there is nothing to send:
- * the caller's rows when it passes them (the site's, read just now, with the asks it
- * decided to send applied), else the file's asks over the record of the site's rows.
+ * The `services` Section for this push — the file's services, and the held ones it no
+ * longer lists stated off (`statedServices`) — or undefined when there is nothing to state.
  *
  * @param {object} siteYml
- * @param {object|null} provisioned - the backend's entry in `sync.json`
- * @param {object[]} [serviceRows]
+ * @param {object|null} provisioned - the backend's entry in `sync.json`; its `services`
+ *   is `{ <name>: <$uuid> }`, the services this copy holds
  * @returns {object[]|undefined}
  */
-function requestedServices(siteYml, provisioned, serviceRows) {
-  if (Array.isArray(serviceRows)) return servicesNested(serviceRows)
-  const asks = readServicesRequest(siteYml.services)
-  if (!asks) return undefined
-  const base = Array.isArray(provisioned?.services)
-    ? provisioned.services
-    : provisioned?.site?.uuid
-      ? null
-      : []
-  return base ? servicesNested(mergeServiceRows(base, asks)) : undefined
+function requestedServices(siteYml, provisioned) {
+  const held = provisioned?.services
+  const rows = statedServices(
+    readServicesRequest(siteYml.services),
+    held && typeof held === 'object' && !Array.isArray(held) ? held : {}
+  )
+  // `$uuid` rides beside the payload-local `$id`, as on a query's row.
+  return rows.length ? servicesNested(rows) : undefined
 }
 
 /**
@@ -1369,10 +1364,6 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
  *        known, `@/x` ships as written.
  * @param {string[]} [opts.schemaless] - the queries whose records resolved no data schema
  *        (the records lane's `schemaless`): their declarations name no `schema`.
- * @param {object[]} [opts.serviceRows] - the `services` Section to send, as the caller
- *        decided it (the site's rows with the owner's asks applied). Default: the
- *        file's asks over the record in `sync.json`.
- * @param {boolean} [opts.declareServices] - `false` withholds `services` and `secrets`.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $schema, info, settings?, pages, layout_sections, extensions,
  *        queries, services?, secrets? }`
@@ -1655,24 +1646,14 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     opts.queryFields,
     Array.isArray(opts.schemaless) ? new Set(opts.schemaless) : null
   )
-  // Emitted ONLY when there is something to say — see the header above
-  // `serviceRecords`: on a replaced Section, absent and empty are different
-  // requests and one of them is destructive.
-  //
-  // ⭐ WHICH ASKS GO IS THE CALLER'S. Push and publish read the site's rows and the
-  // record of the last agreement, apply only what the owner changed, and pass the
-  // result as `opts.serviceRows` — so an ask the site has since decided otherwise is
-  // never re-sent over that decision (`reconcileServices`). Without them, the file's
-  // asks apply over the record, which is what `status` and a pull's re-bank compare.
-  //
-  // `opts.declareServices === false` withholds both Sections for THIS push.
-  const declare = opts.declareServices !== false
-  // ⭐ The rows are per backend — a service is bought on the backend that sold it —
-  // and the request is one, in `site.yml`.
+  // Emitted only when there is something to state — see the header above
+  // `serviceRecords`. ⭐ What this copy holds is per backend — a service is bought on
+  // the backend that sold it — and the request is one, in `site.yml`. Push, publish,
+  // `status` and a pull's re-bank all build it alike, from the file and `sync.json`.
   const provisioned = opts.backend ? readBackendState(siteRoot, opts.backend) : null
-  const services = declare ? requestedServices(siteYml, provisioned, opts.serviceRows) : undefined
+  const services = requestedServices(siteYml, provisioned)
   if (services) doc.services = services
-  const secrets = declare ? secretsNested(provisioned) : undefined
+  const secrets = secretsNested(provisioned)
   if (secrets) doc.secrets = secrets
   return doc
 }
