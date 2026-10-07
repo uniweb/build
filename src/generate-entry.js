@@ -32,6 +32,7 @@ import {
   LAYOUTS_PATH
 } from './schema.js'
 import { extractAllRuntimeSchemas, extractAllLayoutRuntimeSchemas, extractFoundationRuntime } from './runtime-schema.js'
+import { resolveDefaultLayout } from './foundation/default-layout.js'
 import { SCHEMA_EXTENSIONS } from './resolve-data-schema.js'
 
 /**
@@ -124,6 +125,7 @@ function generateEntrySource(components, options = {}) {
     cssPath = null,
     foundationExports = null,
     foundationRuntime = { code: [], data: {} },
+    defaultLayout = null,
     meta = {},
     layouts = {},
     layoutMeta = {},
@@ -188,6 +190,9 @@ function generateEntrySource(components, options = {}) {
       for (const key of foundationRuntime.code) capParts.push(`${key}: _foundationModule.default?.${key}`)
       for (const [key, value] of Object.entries(foundationRuntime.data)) capParts.push(`${key}: ${JSON.stringify(value)}`)
     }
+    // The resolved default, with or without a main.js — a layout named `Default` is one
+    // (`resolveDefaultLayout`), and `_self.defaultLayout` in the schema carries the same name.
+    if (defaultLayout) capParts.push(`defaultLayout: ${JSON.stringify(defaultLayout)}`)
     if (layoutNames.length > 0) {
       capParts.push(`layouts: { ${layoutNames.join(', ')} }`)
     }
@@ -310,6 +315,11 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   const foundationExports = detectFoundationExports(srcDir)
   const foundationConfig = await loadFoundationConfig(srcDir)
   const foundationRuntime = foundationExports ? extractFoundationRuntime(foundationConfig) : { code: [], data: {} }
+  // Which layout a page that names none renders with — the build's answer, written here and in
+  // the schema's `_self.defaultLayout` (`buildSchema`) from one rule, so the runtime and an editor
+  // agree. It replaces the declared value `extractFoundationRuntime` copied.
+  const defaultLayout = resolveDefaultLayout(foundationConfig.defaultLayout, layoutNames)
+  delete foundationRuntime.data.defaultLayout
 
   // Per-component runtime metadata. ⭐ No data schema is resolved for it: the runtime reads a
   // declared key's ref and nothing of its shape (2026-10-05), so the entry no longer depends on
@@ -329,6 +339,7 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
     cssPath,
     foundationExports,
     foundationRuntime,
+    defaultLayout,
     meta,
     layouts,
     layoutMeta,

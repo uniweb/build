@@ -28,6 +28,7 @@ import {
   unnameableIn,
 } from './foundation/derive-supports.js'
 import { RENAMED_SERVICES } from './uwx/services-request.js'
+import { resolveDefaultLayout } from './foundation/default-layout.js'
 import { foundationNameOf, splitFoundationName } from './foundation-name.js'
 import { resolveFoundationSrcDir } from './utils/foundation-source-root.js'
 
@@ -1236,6 +1237,9 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
+  // The layout a page that names none renders with — the entry gets the same answer
+  // (`generate-entry.js`), so an editor reading `_self.defaultLayout` offers what the runtime draws.
+  const defaultLayout = resolveDefaultLayout(foundationConfig.defaultLayout, Object.keys(layouts))
   await refuseFlagsOnListSchemas(
     [
       ...Object.entries(components).map(([name, entry]) => [`${name} (meta.js)`, entry?.data]),
@@ -1260,8 +1264,9 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
     }
   }
 
-  // Build _self, stripping the raw extension boolean in favor of normalized role
-  const { extension: _ext, ...configWithoutExtension } = foundationConfig
+  // Build _self, stripping the raw extension boolean in favor of normalized role, and the
+  // declared `defaultLayout` in favor of the resolved one (`resolveDefaultLayout`)
+  const { extension: _ext, defaultLayout: _declaredLayout, ...configWithoutExtension } = foundationConfig
 
   // `supports` is the one identity field the build knows better than the file.
   // `identity.supports` is already normalized (absent stays absent, `[]` stays
@@ -1303,7 +1308,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
       ...supports,
       ...(name && { name }),
       ...(foundationConfig.description && { description: foundationConfig.description }),
-      ...(foundationConfig.defaultLayout && { defaultLayout: foundationConfig.defaultLayout }),
+      ...(defaultLayout && { defaultLayout }),
       ...(isExtension && { role: 'extension' }),
       // The build's fact, last: which form the entries below hold.
       schemaFormat: SCHEMA_FORMAT,

@@ -106,10 +106,12 @@ export default {
 }
 `
     )
+    write('layouts/MainLayout/index.jsx', 'export default function MainLayout() { return null }\n')
     const source = await entry()
     expect(source).toContain(`import * as _foundationModule from './main.js'`)
     expect(source).toContain('handlers: _foundationModule.default?.handlers')
-    expect(source).toContain('defaultLayout: "main"')
+    // The layout's own name — `main` names `MainLayout` (`resolveDefaultLayout`).
+    expect(source).toContain('defaultLayout: "MainLayout"')
     expect(source).toContain('vars: {"header-height":{"default":"4rem"}}')
     expect(source).toContain('data: {"team":"@/member"}')
     expect(source).not.toContain('..._foundationModule')
