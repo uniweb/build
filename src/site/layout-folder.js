@@ -30,8 +30,7 @@
  * @module @uniweb/build/site/layout-folder
  */
 
-import { readdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join, parse, relative } from 'node:path'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
@@ -93,7 +92,19 @@ export function _resetLayoutFolderWarnings() {
  *   section order; `source` is the area's path, relative, for messages.
  * @throws when the folder declares something no lane can read the same way
  */
-export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning = (m) => console.warn(m) } = {}) {
+export async function readLayoutFolder(layoutDir, options = {}) {
+  return readLayoutFolderSync(layoutDir, options)
+}
+
+/**
+ * `readLayoutFolder`, synchronously — the same reader, for a caller that cannot await: the pull,
+ * which writes each area's sections back where this finds them (`uwx/site-project.js`).
+ *
+ * @param {string} layoutDir
+ * @param {Object} [options] - as `readLayoutFolder`'s
+ * @returns {Array<{ layout: string, area: string, form: 'file'|'folder', dir: string, files: string[], source: string }>}
+ */
+export function readLayoutFolderSync(layoutDir, { siteRoot = null, onWarning = (m) => console.warn(m) } = {}) {
   if (!layoutDir || !existsSync(layoutDir)) return []
 
   const base = siteRoot || dirname(layoutDir)
@@ -140,8 +151,8 @@ export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning =
   }
 
   /** The areas inside one layout's folder (the root folder is the default layout's). */
-  const readAreas = async (layoutName, dir, { isRoot }) => {
-    const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
+  const readAreas = (layoutName, dir, { isRoot }) => {
+    const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
 
     const files = []
     const folders = []
@@ -168,14 +179,14 @@ export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning =
       const areaDir = join(dir, folder)
       const area = parseNumericPrefix(folder).name
       const sectionFiles = []
-      for (const entry of await readdir(areaDir, { withFileTypes: true })) {
+      for (const entry of readdirSync(areaDir, { withFileTypes: true })) {
         if (entry.isFile()) {
           refusePageConfig(areaDir, entry.name)
           if (!isMarkdownFile(entry.name)) continue
           refuseChild(areaDir, entry.name)
           sectionFiles.push(entry.name)
         } else if (entry.isDirectory() && !isIgnoredFolder(entry.name)) {
-          const nested = (await readdir(join(areaDir, entry.name))).filter(isMarkdownFile)
+          const nested = readdirSync(join(areaDir, entry.name)).filter(isMarkdownFile)
           if (nested.length > 0) {
             fail(
               join(areaDir, entry.name),
@@ -197,7 +208,7 @@ export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning =
     return []
   }
 
-  const layoutFolders = await readAreas(DEFAULT_LAYOUT, layoutDir, { isRoot: true })
+  const layoutFolders = readAreas(DEFAULT_LAYOUT, layoutDir, { isRoot: true })
 
   // Each folder directly under layout/ is a named layout; `default` (in any case, with
   // or without a trailing `Layout`) is the default layout written as a folder.
@@ -229,7 +240,7 @@ export async function readLayoutFolder(layoutDir, { siteRoot = null, onWarning =
         )
       }
     }
-    await readAreas(layoutName, join(layoutDir, folder), { isRoot: false })
+    readAreas(layoutName, join(layoutDir, folder), { isRoot: false })
   }
 
   return areas

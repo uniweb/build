@@ -142,3 +142,65 @@ describe('a child named like a top-level section', () => {
     for (const [rel, text] of Object.entries(SHARED)) expect(read(rel)).toBe(text)
   })
 })
+
+// ⛔ Measured 2026-10-08 on a site keeping its default layout as a folder: `layout/default/footer.md`
+// came back as `layout/footer.md`, and the header's `0-alert.md` and `1-header.md` as `1-alert.md`
+// and `2-header.md` — every layout section went to one fixed place, wherever the author kept it.
+describe('a layout comes back where the author keeps it', () => {
+  const LAYOUT = {
+    'layout/default/footer.md': section('Footer', 'Footer'),
+    'layout/default/header/0-alert.md': section('Alert', 'Alert'),
+    'layout/default/header/1-header.md': section('Header', 'Header'),
+    'pages/home/1-hero.md': section('Hero', 'Hi'),
+  }
+  const layoutFiles = (root) => {
+    const out = []
+    const walk = (d, rel) => {
+      if (!existsSync(d)) return
+      for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(join(d, e.name), `${rel}${e.name}/`) : out.push(`${rel}${e.name}`)
+    }
+    walk(join(root, 'layout'), '')
+    return out.sort()
+  }
+
+  it('⭐ the default layout written as a folder, numbered from 0 — as written', async () => {
+    put(LAYOUT)
+    const document = await siteProjectToDocument(dir)
+    siteContentDocumentToProject({ document, siteRoot: dir, prune: true })
+    expect(layoutFiles(dir)).toEqual(['default/footer.md', 'default/header/0-alert.md', 'default/header/1-header.md'])
+    for (const [rel, text] of Object.entries(LAYOUT)) expect(read(rel)).toBe(text)
+  })
+
+  it('an area whose sections changed order goes to the placement, and the author’s files go', async () => {
+    put(LAYOUT)
+    const document = await siteProjectToDocument(dir)
+    const header = document.layout_sections.filter((s) => s.area === 'header')
+    const [alert, top] = header
+    document.layout_sections = [...document.layout_sections.filter((s) => s.area !== 'header'), top, alert]
+    siteContentDocumentToProject({ document, siteRoot: dir, prune: true })
+    expect(layoutFiles(dir)).toEqual(['default/footer.md', 'default/header/1-header.md', 'default/header/2-alert.md'])
+  })
+
+  it('CONTROL — a clone gets the placement', async () => {
+    put(LAYOUT)
+    const document = await siteProjectToDocument(dir)
+    const clone = mkdtempSync(join(tmpdir(), 'uwx-layout-clone-'))
+    try {
+      writeFileSync(join(clone, 'site.yml'), "name: S\nfoundation: '@a/b'\n")
+      siteContentDocumentToProject({ document, siteRoot: clone, prune: true })
+      expect(layoutFiles(clone)).toEqual(['default/header/1-alert.md', 'default/header/2-header.md', 'footer.md'])
+    } finally {
+      rmSync(clone, { recursive: true, force: true })
+    }
+  })
+
+  it('a layout unit maps to the file the author keeps it in', async () => {
+    put(LAYOUT)
+    const { layoutUnitFile } = await import('../src/uwx/index.js')
+    const base = join(dir, 'layout')
+    expect(layoutUnitFile(base, 'footer.md')).toBe(join(base, 'default/footer.md'))
+    expect(layoutUnitFile(base, 'default/header/1-alert.md')).toBe(join(base, 'default/header/0-alert.md'))
+    expect(layoutUnitFile(base, 'default/header/2-header.md')).toBe(join(base, 'default/header/1-header.md'))
+    expect(layoutUnitFile(base, 'left.md')).toBe(join(base, 'left.md')) // none of the author's: the placement
+  })
+})

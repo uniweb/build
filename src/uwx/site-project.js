@@ -52,7 +52,8 @@ import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteContentDirs } from './site-dirs.js'
-import { layoutAreaRoute } from '../site/layout-folder.js'
+import { layoutAreaRoute, readLayoutFolderSync, DEFAULT_LAYOUT } from '../site/layout-folder.js'
+import { layoutNameKey } from '@uniweb/core/layout-name'
 import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames } from '../site/content-collector.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 
@@ -1054,6 +1055,82 @@ export function layoutSectionPaths(layoutSections) {
   return out
 }
 
+// The key an area is held under on both sides: its layout's name as the runtime compares it.
+const layoutAreaKey = (layout, area) => `${layoutNameKey(layout || DEFAULT_LAYOUT)}/${area}`
+
+// The areas the author's layout folder holds, by key — read by the build's own reader, so found
+// wherever the build finds them. None for a folder the build refuses.
+function authoredLayoutAreas(layoutBaseDir) {
+  let areas = []
+  try {
+    areas = readLayoutFolderSync(layoutBaseDir, { onWarning: () => {} })
+  } catch {
+    areas = []
+  }
+  return new Map(areas.map((area) => [layoutAreaKey(area.layout, area.area), area]))
+}
+
+// The layout and area a placement names, and the section's id where it names one.
+function placementOf(relPath) {
+  const parts = relPath.split('/')
+  const name = (file) => basename(file, extname(file))
+  if (parts.length === 1) return { layout: DEFAULT_LAYOUT, area: name(parts[0]), id: null }
+  if (parts.length === 2) return { layout: parts[0], area: name(parts[1]), id: null }
+  return { layout: parts[0], area: parts[1], id: fileSectionName(parts[2]) }
+}
+
+/**
+ * ⭐ THE FILES THE AUTHOR KEEPS A LAYOUT'S SECTIONS IN — the area found by the build's own reader
+ * (`readLayoutFolderSync`): one file, at the root or in its layout's folder (`default/footer.md`), or a
+ * folder of section files numbered as the author numbers them. Each placed section → its file: the
+ * author's where the area holds exactly the incoming sections, by name and in order; else the place
+ * `layoutSectionPaths` gives it, as for a clone.
+ * ⛔ Until 2026-10-08 every section went to that place, so a pull into the copy that pushed moved
+ * `layout/default/footer.md` to `layout/footer.md` and renumbered `0-alert.md` and `1-header.md` as
+ * `1-alert.md` and `2-header.md` — beside the old files, or, pruning, in place of them.
+ */
+function authoredLayoutFiles(layoutBaseDir, placed) {
+  const areas = authoredLayoutAreas(layoutBaseDir)
+  const byArea = new Map()
+  for (const entry of placed) {
+    const { layout, area } = placementOf(entry.relPath)
+    const key = layoutAreaKey(layout, area)
+    if (!byArea.has(key)) byArea.set(key, [])
+    byArea.get(key).push(entry)
+  }
+  const fileOf = new Map()
+  for (const [key, entries] of byArea) {
+    const area = areas.get(key)
+    let files = null
+    if (area?.form === 'file' && entries.length === 1) files = [area.files[0]]
+    else if (area?.form === 'folder' && area.files.length === entries.length) {
+      const named = area.files.every((file, i) => fileSectionName(file) === recordStableId(entries[i].record))
+      if (named) files = area.files
+    }
+    entries.forEach((entry, i) => fileOf.set(entry, files ? join(area.dir, files[i]) : join(layoutBaseDir, entry.relPath)))
+  }
+  return fileOf
+}
+
+/**
+ * The file a layout unit — a `layoutSectionPaths` place, relative to the layout folder — is on disk:
+ * that place, else the author's file for the same section (`authoredLayoutFiles`). For a reader that
+ * maps a unit to the file a pull wrote it to (`uniweb`'s `unitFilesOf`).
+ *
+ * @param {string} layoutBaseDir - the site's layout folder
+ * @param {string} relPath - the unit's place, as `layoutSectionPaths` gives it
+ * @returns {string} an absolute path
+ */
+export function layoutUnitFile(layoutBaseDir, relPath) {
+  const placed = join(layoutBaseDir, relPath)
+  if (existsSync(placed)) return placed
+  const { layout, area, id } = placementOf(relPath)
+  const found = authoredLayoutAreas(layoutBaseDir).get(layoutAreaKey(layout, area))
+  if (!found) return placed
+  const file = found.form === 'file' || found.files.length === 1 ? found.files[0] : found.files.find((f) => fileSectionName(f) === id)
+  return file ? join(found.dir, file) : placed
+}
+
 // Delete orphan layout section files not in `keep` — at every depth the layout
 // folder reader reads (`<area>.md`, `<layout>/<area>.md`, `<layout>/<area>/*.md`) —
 // and remove an area or layout folder left empty. Only files the reader treats as
@@ -1096,8 +1173,11 @@ function pruneOrphanLayout(layoutBaseDir, keep, report) {
 // layout and area folders. Pruning is guarded against an empty incoming set.
 function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
   const written = []
-  for (const { record, relPath } of layoutSectionPaths(layoutSections)) {
-    const filePath = join(layoutBaseDir, relPath)
+  const placed = layoutSectionPaths(layoutSections)
+  const fileOf = authoredLayoutFiles(layoutBaseDir, placed)
+  for (const entry of placed) {
+    const { record } = entry
+    const filePath = fileOf.get(entry)
     // A relocation into a new area folder needs the folder first.
     mkdirSync(dirname(filePath), { recursive: true })
     placeByUuid(ctx, record.$uuid, filePath)

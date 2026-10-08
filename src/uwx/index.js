@@ -91,6 +91,8 @@ export {
   // The file the author keeps a section in (`1-hero.md` holds `hero`) — what a section
   // unit's path names on disk, for a push recording what it delivered.
   existingSectionFile,
+  // …and the file a layout unit names on disk (`default/footer.md` holds the `footer.md` place).
+  layoutUnitFile,
 } from './site-project.js'
 export {
   createTranslationCollector,
