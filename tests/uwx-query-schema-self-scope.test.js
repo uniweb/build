@@ -234,8 +234,9 @@ describe('pull — the author’s `@/` comes back', () => {
     // CONTROL — the declaration was really projected, so the value above is not an
     // untouched file reading back what the fixture wrote.
     expect(written.members.limit).toBe(5)
-    // A name-defaulted schema stays unwritten: the terse file stays terse.
-    expect(written.people.schema).toBeUndefined()
+    // A name-defaulted schema is written out, in the author's `@/` form: one spelling per meaning
+    // (2026-10-08 — until then it stayed unwritten, and a clone could not tell which was written).
+    expect(written.people.schema).toBe('@/people')
     // Another org's Model is that org's; `@/` would be a lie.
     expect(written.partners.schema).toBe('@beta/partner')
   })
@@ -321,9 +322,9 @@ describe('round trip — push(pull(x)) is a fixed point', () => {
     const second = await siteProjectToDocument(SITE)
 
     expect(second.queries).toEqual(first.queries)
-    // And the author's file says what they wrote.
+    // And the author's file says what the site holds — `people: {}` written out, in the `@/` form.
     const written = pulledQueries()
     expect(written.members.schema).toBe('@/member')
-    expect(written.people.schema).toBeUndefined()
+    expect(written.people.schema).toBe('@/people')
   })
 })

@@ -23,6 +23,9 @@ const FILES = {
     'name: Site',
     'tags: [nonprofit, community]',
     'defaultLanguage: en',
+    // Stated: a pull writes the list the site holds (2026-10-08), so a copy that left it to its
+    // translation files gains this line on its first pull — the copy here already says it.
+    'languages: [en, es]',
     '',
     '# Foundation to use for this site',
     'foundation: "@acme/fnd@1.0.0"',

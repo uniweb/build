@@ -51,19 +51,25 @@ describe('push — the site’s languages', () => {
   })
 })
 
+// ⭐ ONE SPELLING PER MEANING [Diego, 2026-10-08]: the list the site holds is written, whether
+// `site.yml` stated it or its translation files made it. ⛔ Until then a pull held it back where the
+// translation files made the same list, so a clone of a site declaring `languages: [en, fr]` came
+// back with no list — following its files, where the site it came from had a fixed one.
 describe('pull — the list a push sent for a site that declares none', () => {
-  it('⭐ into the copy that pushed: site.yml is left as it was', async () => {
+  it('⭐ into the copy that pushed: the list is written — once, and then the pull changes nothing', async () => {
     const root = project()
-    const before = readFileSync(join(root, 'site.yml'), 'utf8')
     siteContentDocumentToProject({ document: await siteProjectToDocument(root), siteRoot: root })
-    expect(readFileSync(join(root, 'site.yml'), 'utf8')).toBe(before)
+    expect(siteYml(root).languages).toEqual(['en', 'es', 'fr'])
+    const after = readFileSync(join(root, 'site.yml'), 'utf8')
+    siteContentDocumentToProject({ document: await siteProjectToDocument(root), siteRoot: root })
+    expect(readFileSync(join(root, 'site.yml'), 'utf8')).toBe(after)
   })
 
-  it('⭐ into a clone: no list — its translation files make the same one', async () => {
+  it('⭐ into a clone: the list, as the copy that pushed has it', async () => {
     const clone = tmp()
     siteContentDocumentToProject({ document: await siteProjectToDocument(project()), siteRoot: clone })
     expect(readFileSync(join(clone, 'locales/es.json'), 'utf8')).toContain('Inicio')
-    expect(siteYml(clone).languages).toBeUndefined()
+    expect(siteYml(clone).languages).toEqual(['en', 'es', 'fr'])
   })
 
   it('a clone with `publishLanguages` gets the list — the build refuses one without a declared list', async () => {

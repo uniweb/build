@@ -18,6 +18,7 @@ import {
 import { collectUnitUuids, stampUnitUuids } from '../src/uwx/site-diff.js'
 import { computeHash } from '../src/i18n/hash.js'
 import { collectSiteContent } from '../src/site/content-collector.js'
+import { resolveQueriesConfig } from '../src/site/queries-config.js'
 
 let dir
 beforeEach(() => {
@@ -704,10 +705,11 @@ describe('collection declarations — round-trip against the real producer', () 
     const reproduced = await siteProjectToDocument(dest)
     expect(reproduced.queries).toEqual(document.queries)
 
-    // The projected file stays terse: the default-schema query gains no explicit
-    // schema, and the default-path query gains no path. A BARE map — no root key.
+    // ⭐ The projected file states the schema the site holds: `articles` was left to its name's
+    // default, and comes back with it written — one spelling per meaning (2026-10-08). The
+    // file-based query gains no path. A BARE map — no root key.
     const projected = yaml.load(readFileSync(join(dest, 'queries.yml'), 'utf8'))
-    expect(projected.articles.schema).toBeUndefined()
+    expect(projected.articles.schema).toBe('@/articles')
     expect(projected.articles.path).toBeUndefined()
     // ⭐ A REMOTE source is the one that still round-trips a `source`. A file-based
     // query emits none: `entities/{schema}/` is the pool and `schema:` addresses it,
@@ -727,9 +729,8 @@ describe('collection declarations — round-trip against the real producer', () 
     writeFileSync(join(site, 'queries.yml'), 'old:\n  schema: stale\n')
 
     const document = {
-      // `@/articles` IS the convention default for a query named `articles`
-      // (identity, not a singular guess), so the projection drops it as redundant —
-      // which is what this case is asserting. Same for the default pool path.
+      // `@/articles` is the default for a query named `articles`, and it is written all the
+      // same: the schema the site holds, in its one spelling. No pool path is written.
       queries: [{ $id: 'articles', name: 'articles', schema: '@/articles' }],
     }
     const report = declarationsToQueriesYml({ document, siteRoot: site })
@@ -737,7 +738,7 @@ describe('collection declarations — round-trip against the real producer', () 
 
     const out = yaml.load(readFileSync(join(site, 'queries.yml'), 'utf8'))
     // the incoming `articles` is added; the pre-existing `old` is left in place
-    expect(out.articles).toEqual({})
+    expect(out.articles).toEqual({ schema: '@/articles' })
     expect(out.old).toEqual({ schema: 'stale' })
   })
 
@@ -748,13 +749,11 @@ describe('collection declarations — round-trip against the real producer', () 
   const AUTHORED =
     "members:\n  schema: '@/member'\n  sort: name asc\n\n" +
     'featured:\n  schema: \'@/member\'\n  where: { featured: true }\n\n' +
-    "events: '@/event'\nteam:\n"
+    "events: '@/event'\n"
   const pulledBack = [
     { $id: 'members', name: 'members', schema: '@/member', sort: 'name asc' },
     { $id: 'featured', name: 'featured', schema: '@/member', where: { featured: true } },
     { $id: 'events', name: 'events', schema: '@/event' },
-    // `@/team` is the default for a query named `team`, so it is dropped: `{}`.
-    { $id: 'team', name: 'team', schema: '@/team' },
   ]
   const siteWith = (text) => {
     const site = join(dir, 'site')
@@ -763,11 +762,41 @@ describe('collection declarations — round-trip against the real producer', () 
     return site
   }
 
-  it('⛔ a pull that restates every query leaves queries.yml exactly as written — shorthands included', () => {
+  it('⛔ a pull that restates every query leaves queries.yml exactly as written — the shorthand included', () => {
     const site = siteWith(AUTHORED)
     const report = declarationsToQueriesYml({ document: { queries: pulledBack }, siteRoot: site })
     expect(report.queries).toBe('unchanged')
     expect(readFileSync(join(site, 'queries.yml'), 'utf8')).toBe(AUTHORED)
+  })
+
+  // ⭐ `team:` and `team: { schema: '@/team' }` read the same records, and a clone — no file of the
+  // author's to look at — cannot tell which was written. So a pull writes the one spelling, the
+  // schema the site holds (2026-10-08): the next pull into a copy holding the terse form states it.
+  const withTeam = [...pulledBack, { $id: 'team', name: 'team', schema: '@/team' }]
+
+  it("⭐ a query left to its name's default comes back with its schema — and only that entry moves", () => {
+    const site = siteWith(AUTHORED + 'team:\n')
+    const report = declarationsToQueriesYml({ document: { queries: withTeam }, siteRoot: site })
+    expect(report.queries).toBe('updated')
+    const text = readFileSync(join(site, 'queries.yml'), 'utf8')
+    expect(yaml.load(text).team).toEqual({ schema: '@/team' })
+    expect(text.startsWith(AUTHORED)).toBe(true)
+    // …and that is a fixed point: the pull after it writes nothing.
+    expect(declarationsToQueriesYml({ document: { queries: withTeam }, siteRoot: site }).queries).toBe('unchanged')
+  })
+
+  it('CONTROL — a clone declares what the copy that pushed declares after its pull', async () => {
+    const pushed = siteWith(AUTHORED + 'team:\n')
+    declarationsToQueriesYml({ document: { queries: withTeam }, siteRoot: pushed })
+    const cloned = join(dir, 'clone')
+    mkdirSync(cloned, { recursive: true })
+    declarationsToQueriesYml({ document: { queries: withTeam }, siteRoot: cloned })
+
+    // As the build reads them. The files differ only where the author's `events: '@/event'` —
+    // the shorthand, kept where it restates — is the long form in a clone.
+    const read = async (root) => (await resolveQueriesConfig(root, { siteYml: {} })).declarations
+    expect(await read(cloned)).toEqual(await read(pushed))
+    expect(yaml.load(readFileSync(join(cloned, 'queries.yml'), 'utf8')).team).toEqual({ schema: '@/team' })
   })
 
   it('a changed query replaces the shorthand whole — never spread into it', () => {

@@ -47,8 +47,7 @@ import { declarationsToQueriesYml } from './records-project.js'
 import { FILLED_SECTION_TYPE, buildRouteOf } from './site.js'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
-import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, localesDir } from './locale-sync.js'
-import { resolveLocaleList } from '../i18n/locales.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
@@ -214,7 +213,7 @@ function readAuthoredYaml(filePath) {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false, deferLanguages = false }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -325,18 +324,14 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
     }
   }
 
-  // ⭐ `languages` for a site whose `site.yml` declares none is judged once the pull has written the
-  // translation files (`deferLanguages`, `siteContentDocumentToProject`): a push sends the list those
-  // files make (`uwx/site.js::settingsNested`), and writing it back would turn "every translation
-  // file" into a fixed list.
-  let pendingLanguages
-  if (deferLanguages && siteChanges.languages !== undefined && !('languages' in (readAuthoredYaml(join(siteRoot, 'site.yml')) || {}))) {
-    pendingLanguages = siteChanges.languages
-    delete siteChanges.languages
-  }
-
+  // ⭐ `languages` IS WRITTEN AS THE SITE HOLDS IT — one spelling per meaning [Diego, 2026-10-08]:
+  // "It's definitely good for the case of languages." A site whose `site.yml` declared none sent the
+  // list its translation files make (`uwx/site.js::settingsNested`), and that list comes back stated,
+  // so a clone and the copy that pushed it say the same thing. ⛔ Until 2026-10-08 the list was held
+  // back where the translation files the pull wrote made the same one, so a clone of a site that
+  // declared `languages: [en, fr]` had no `languages:` at all — and followed its translation files
+  // where the site it came from had a fixed list.
   const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
-  if (pendingLanguages !== undefined) result.pendingLanguages = pendingLanguages
 
   // theme (whole object) → theme.yml.
   if (settingsSection.theme && typeof settingsSection.theme === 'object') {
@@ -1121,7 +1116,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
     backend ? readBackendState(siteRoot, backend).assets || {} : {}
   )
 
-  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, deferLanguages: true })
+  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
   report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
@@ -1162,18 +1157,6 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)
   // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
   report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
-  // The site's languages, for a site.yml that declares none (`siteInfoToConfig`) — written only where
-  // the translation files, now written, would not make the same list, or where `publishLanguages`
-  // needs a declared list to draw from: the build refuses one without it.
-  if (report.config?.pendingLanguages !== undefined) {
-    const pulled = report.config.pendingLanguages
-    delete report.config.pendingLanguages
-    const site = readAuthoredYaml(join(siteRoot, 'site.yml')) || {}
-    const source = site.defaultLanguage || sourceLocale
-    const made = new Set([source, ...resolveLocaleList(undefined, localesDir(siteRoot))])
-    const same = Array.isArray(pulled) && pulled.length === made.size && pulled.every((l) => made.has(l))
-    if (!same || site.publishLanguages !== undefined) writeSiteConfig(siteRoot, { languages: pulled })
-  }
   writePullIndex(siteRoot, ctx.newIndex)
   return report
 }

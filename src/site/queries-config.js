@@ -78,8 +78,10 @@ export const QUERIES_YML_RELPATH = 'queries.yml'
 // Identity has no boundary to get wrong, and an author wanting a different schema
 // name writes `schema:`, which is one line and says what it means.
 //
-// Exported so the inverse (projection) can drop a `schema:` that merely restates
-// this default, keeping a projected queries.yml as terse as the author left it.
+// ⛔ A pull does not drop a `schema:` equal to this default: it writes the schema the site holds,
+// in its one spelling (`uwx/records-project.js::declToFileShape`). Until 2026-10-08 it did, keeping
+// a projected queries.yml as terse as the author left it — and a clone, with no author's file to
+// look at, wrote `series: { schema: '@/series' }` back as `series: {}`.
 export function defaultSchema(name) {
   return `@/${name}`
 }

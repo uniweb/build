@@ -41,7 +41,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
-import { defaultSchema, foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
+import { foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -277,8 +277,8 @@ function setIf(obj, key, value) {
 //  - `path:` is written VERBATIM, and omitted entirely when it equals the default
 //    (the query's own name under the pool).
 //  - `url:` (remote source) and a bare `source:` object are carried as-is.
-//  - `schema:` is dropped when it only restates the query-name convention default,
-//    so a terse author file stays terse.
+//  - `schema:` is written as the site holds it — the query-name default included —
+//    except a query typed by a data key, kept short where its type can be read again.
 //
 // ⛔ THE `collections/`-PREFIX STRIP AND THE site.yml ROUTING ARE BOTH GONE, and
 // they went together. They existed because `collections.yml` sat INSIDE
@@ -342,24 +342,31 @@ function declToFileShape(wire, scope = null, own = null, keyTypes = null, author
     decl.source = source
   }
 
-  // The default is the query's name — or, when no data schema has that name, the type the
-  // foundation declares for the data key of that name (`data-key-types.js`), which is what a
-  // push sent in its place. Either one stays unwritten, so the terse file stays terse.
-  // ⛔ UNLESS THE AUTHOR WROTE IT: a `schema:` the local file already states for this query is
-  // written back as it is. Until 2026-09-25 a pull into a working copy dropped international's
-  // `articles: { schema: '@std/article' }`, because a section types `articles` as `@std/article`.
-  // ⭐ A CLONE GOES BY THE MARK. Where the key's type comes only from the registered foundation a
-  // project keeps (`markedOnly`: its foundation is a catalog ref), a query is written terse only when
-  // the push marked it `typed_by_data_key` — the author wrote no schema — or when the author's own
-  // file declares it with none. Unmarked, the schema was the author's, and it is written.
+  // ⭐ THE SCHEMA THE SITE HOLDS IS WRITTEN — one spelling per meaning [Diego, 2026-10-08]. A
+  // query left to its name's default (`series` → `@/series`) comes back with that schema stated:
+  // `series: {}` and `series: { schema: '@/series' }` read the same records, and a clone, with no
+  // file of the author's to look at, could not tell which was written. ⛔ Until 2026-10-08 a schema
+  // equal to the default stayed unwritten unless the local file stated it, so a clone turned an
+  // author's `series: { schema: '@/series' }` into `series: {}`.
+  //
+  // ⛔ EXCEPT A QUERY TYPED BY A DATA KEY, which is not a second spelling of anything: `team:` reads
+  // its own folder, `records/team/`, as the type the foundation's data key declares
+  // (`data-key-types.js`), where `team: { schema: '@/member' }` would read `records/member/`. It
+  // stays as written — short — but only where this project can read it as that type again: the
+  // foundation's types (its own, or the registered version a clone keeps) give its name the schema
+  // the site holds. Then the push's mark says so (`typed_by_data_key`), or the author's file
+  // declares it short, or — the foundation in this project — the file does not declare it. An
+  // author's stated schema is never taken for one. ⛔ With no types to read, short would mean
+  // `@/team`: the schema is written, and the records go to its folder, so the copy still pushes it.
   const written = name ? authored?.get(name) : undefined
-  const typedHere = !markedOnly || wire.typed_by_data_key === true || written === null
-  const keyType = name && !own?.has(name) && typedHere ? keyTypes?.get(name) : null
+  const keyType = name && !own?.has(name) ? keyTypes?.get(name) : null
   // In the author's form: the registered version names the type qualified (`@acme/member`).
   const keyDefault = keyType ? unresolveSelfScope(keyType, scope, own) : null
-  if (d.schema && (d.schema === written || (d.schema !== defaultSchema(name) && d.schema !== keyDefault))) {
-    decl.schema = d.schema
-  }
+  const typedByKey =
+    keyDefault !== null &&
+    d.schema === keyDefault &&
+    (wire.typed_by_data_key === true || written === null || (written === undefined && !markedOnly))
+  if (d.schema && !typedByKey) decl.schema = d.schema
   setIf(decl, 'sort', d.sort)
   setIf(decl, 'where', d.where)
   setIf(decl, 'limit', d.limit)

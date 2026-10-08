@@ -4,7 +4,6 @@
 export {
   resolveQueriesConfig,
   queriesYmlPath,
-  defaultSchema,
   foundationDataSchemas,
   foundationSchemaJson,
   QUERIES_YML_RELPATH,

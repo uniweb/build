@@ -88,10 +88,12 @@ describe('`deferred:` is retired', () => {
 // template, whose queries live in `site.yml`, wrote a `queries.yml` repeating them in the long form —
 // its bare `team:` as `team: {}`.
 describe('a pull over queries declared in site.yml', () => {
-  const SITE_YML = "name: Site\nfoundation: '@acme/fnd@1.0.0'\nqueries:\n  articles:\n    schema: '@std/article'\n    sort: date desc\n  events:\n"
-  const pullInto = (articles) => {
+  // `events` states its schema: since 2026-10-08 a pull writes a name-defaulted one out (one spelling
+  // per meaning), so the restated file is the one that already says so.
+  const SITE_YML = "name: Site\nfoundation: '@acme/fnd@1.0.0'\nqueries:\n  articles:\n    schema: '@std/article'\n    sort: date desc\n  events:\n    schema: '@/events'\n"
+  const pullInto = (articles, siteYml = SITE_YML) => {
     mkdirSync(SITE, { recursive: true })
-    writeFileSync(join(SITE, 'site.yml'), SITE_YML)
+    writeFileSync(join(SITE, 'site.yml'), siteYml)
     declarationsToQueriesYml({
       document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [articles, { name: 'events', schema: '@acme/events' }] },
       siteRoot: SITE,
@@ -102,6 +104,12 @@ describe('a pull over queries declared in site.yml', () => {
     pullInto({ name: 'articles', schema: '@std/article', sort: 'date desc', deferred: ['body'] })
     expect(existsSync(join(SITE, 'queries.yml'))).toBe(false)
     expect(readFileSync(join(SITE, 'site.yml'), 'utf8')).toBe(SITE_YML)
+  })
+
+  it('⭐ a bare query is written out where it lives — site.yml, never a new queries.yml', () => {
+    pullInto({ name: 'articles', schema: '@std/article', sort: 'date desc' }, SITE_YML.replace("  events:\n    schema: '@/events'\n", '  events:\n'))
+    expect(existsSync(join(SITE, 'queries.yml'))).toBe(false)
+    expect(yaml.load(readFileSync(join(SITE, 'site.yml'), 'utf8')).queries.events).toEqual({ schema: '@/events' })
   })
 
   it('a query that changed is written back where it lives', () => {
