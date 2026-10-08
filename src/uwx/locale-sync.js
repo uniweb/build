@@ -27,6 +27,7 @@ import { visitDataBlockStrings } from '../i18n/data-strings.js'
 import { resolveDocForLocale, translatedInline, linkLabels } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
+import { parseFrontmatter } from '../utils/frontmatter.js'
 
 const FREEFORM_MANIFEST = '.manifest.json'
 
@@ -389,6 +390,15 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null) {
   return addDataBlockStrings(map, sourceDoc, targetDoc, modelFor)
 }
 
+// Whether a free-form file says `target`, read as a push reads it — its body, as stored.
+function sameStoredFreeform(text, filePath, target) {
+  try {
+    return sameMarkdownDocument(parseFrontmatter(text, filePath).body, target)
+  } catch {
+    return false
+  }
+}
+
 // ⭐ A LINK'S LABEL, NOT THE LINK, when only its words were translated. The merge reads a label onto
 // the source's own link (`merge.js::translatedInline`), so it keeps following that link wherever the
 // source moves it, where `[Donar Ahora](/contact)` would keep `/contact`. Several links are a label a
@@ -564,7 +574,9 @@ export function writeFreeformTranslations(siteRoot, freeformPending) {
       }
       // ⭐ A file whose markdown already says this is left as the author wrote it — the writer's
       // markdown is not theirs (blank lines, line breaks), as for a section body (`writeSectionFile`).
-      if (current !== text && !(current !== null && sameMarkdownDocument(current.trim(), target))) {
+      // Compared as a push reads it (`i18n/freeform.js::loadFreeformTranslation`). ⛔ Until 2026-10-08 the
+      // file was trimmed first, so one whose last line ended in a space was rewritten by every pull.
+      if (current !== text && !(current !== null && sameStoredFreeform(current, filePath, target))) {
         mkdirSync(dirname(filePath), { recursive: true })
         writeFileSync(filePath, text)
         report.written.push(filePath)

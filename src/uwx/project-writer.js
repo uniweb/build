@@ -204,7 +204,10 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
   // only frontmatter — a parametric page's `type:` and `fetch:` — was re-serialized, and lost its
   // comments, on a pull that changed nothing. So is no document at all (a params-only update).
   const authoredBody = (existingBody || '').replace(/^\n+/, '').replace(/\s+$/, '')
-  const keepsBody = !content || sameMarkdownDocument(authoredBody, content)
+  // Compared as a push reads it: the body as stored (`content-collector.js::processMarkdownFile`).
+  // ⛔ Until 2026-10-08 the trimmed copy was compared, so a body whose last line ended in a space never
+  // matched what a push had sent from it, and every pull rewrote it — trailing blank lines and all.
+  const keepsBody = !content || sameMarkdownDocument(existingBody || '', content)
   if (existing && keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
   const body = keepsBody ? authoredBody : proseMirrorToMarkdown(content)
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))

@@ -204,3 +204,28 @@ describe('a layout comes back where the author keeps it', () => {
     expect(layoutUnitFile(base, 'left.md')).toBe(join(base, 'left.md')) // none of the author's: the placement
   })
 })
+
+// ⛔ Measured 2026-10-08: a section body and a free-form translation whose last line ended in a space
+// were rewritten by every pull — the pull compared a trimmed copy of the file, and a push parses it as
+// stored, so the two never matched.
+describe('a body whose last line ends in a space', () => {
+  it('⭐ a section comes back as written', async () => {
+    const text = '---\ntype: Section\n---\n\n# Title\n\nA line with a space. \n\nThe last one too. \n\n\n'
+    put({ 'pages/about/1-intro.md': text })
+    const document = await siteProjectToDocument(dir)
+    siteContentDocumentToProject({ document, siteRoot: dir })
+    expect(read('pages/about/1-intro.md')).toBe(text)
+  })
+
+  it('⭐ a free-form translation comes back as written', async () => {
+    writeFileSync(join(dir, 'site.yml'), "name: S\nfoundation: '@a/b'\nlanguages: [en, fr]\n")
+    const fr = '# Bonjour\n\nUn premier paragraphe.\n\nEt un second, qui finit par une espace. \n\n\n'
+    put({
+      'pages/about/1-intro.md': '---\ntype: Section\n---\n\n# Hello\n\nOne paragraph.\n',
+      'locales/freeform/fr/pages/about/intro.md': fr,
+    })
+    const document = await siteProjectToDocument(dir)
+    siteContentDocumentToProject({ document, siteRoot: dir })
+    expect(read('locales/freeform/fr/pages/about/intro.md')).toBe(fr)
+  })
+})
