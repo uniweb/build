@@ -503,6 +503,7 @@ export function sectionFileBase(record) {
 export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext }) {
   const written = []
   const files = [] // the top level's file names, in the document's order
+  const childFiles = [] // every nested section's file name
   let nested = false
   const buildEntries = (records, top) => {
     const entries = []
@@ -539,6 +540,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         context: pageContext ? translationContext({ stableId }, pageContext.route) : null,
       })
       written.push(filePath)
+      if (!top) childFiles.push(basename(filePath))
       const children = Array.isArray(record.$children) ? record.$children : []
       if (children.length > 0) nested = true
       // Listed by the name the build finds the file by — which is not the id for a file found by its `id:`.
@@ -552,8 +554,12 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
   ctx?.sectionFiles?.set(pageDir, new Set(written.map((f) => basename(f, extname(f)))))
   // ⭐ Whether the files give the document's order by themselves, as the build reads a page with no
   // `sections:` list — by name, numeric prefixes first — so the page needs no list to say it.
-  const filesGiveOrder = !nested && files.every((f) => !f.startsWith('@')) && [...files].sort(compareFilenames).join('\n') === files.join('\n')
-  return { sections, written, filesGiveOrder }
+  const topInOrder = files.every((f) => !f.startsWith('@')) && [...files].sort(compareFilenames).join('\n') === files.join('\n')
+  const filesGiveOrder = !nested && topInOrder
+  // …and, for a nested page, whether they give its top level, every child being an `@` file — which
+  // is all a `nest:` needs beside them (`pageRecordToYml`).
+  const filesGiveTopOrder = nested && topInOrder && childFiles.every((f) => f.startsWith('@'))
+  return { sections, written, filesGiveOrder, filesGiveTopOrder }
 }
 
 // The name the build reads a section file's section by: its file name without the `@` child mark and
@@ -585,8 +591,12 @@ function listedNames(list) {
 export function existingSectionFile(pageDir, fileBase, stableId, { child = false } = {}) {
   if (!existsSync(pageDir)) return null
   const entries = readdirSync(pageDir).filter((e) => isMarkdownFile(e) && (child || !e.startsWith('@')))
+  // A child is looked for as the build looks for a `nest:` child (`findSectionFile`): `name.md`, then
+  // `@name.md`, then a numbered one. ⛔ Until 2026-10-08 a child went to the first file of its name in
+  // directory order, so `@booking-form.md` came back into a top-level `1-booking-form.md` beside it.
   const found =
     entries.find((e) => basename(e, '.md') === fileBase) ||
+    (child && entries.find((e) => e === `@${fileBase}.md`)) ||
     entries.find((e) => fileSectionName(e) === fileBase) ||
     entries.find((e) => {
       try {
@@ -608,7 +618,7 @@ export function existingSectionFile(pageDir, fileBase, stableId, { child = false
 const PAGE_YML_MANAGED_KEYS = new Set([
   'id', 'title', 'description', 'label', 'keywords', 'index', 'hidden',
   'hideIn', 'knowledge', 'trackSections', 'redirect', 'rewrite', 'layout', 'seo',
-  'query', 'fetch', 'data', 'sections',
+  'query', 'fetch', 'data', 'sections', 'nest',
 ])
 
 // Keys a pull WRITES and never removes — kept out of the managed set on purpose. ⭐ `slug`, a page's
@@ -623,7 +633,7 @@ const PAGE_YML_KEPT_KEYS = new Set(['slug'])
 // entry names the directory; its other locales are the page's `slug:` map.
 // Identity (the backend uuid) is NOT written here — it lives in the gitignored
 // `.uniweb/` index so authored files stay clean.
-function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false, slug = null, filesGiveOrder = false } = {}) {
+function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, { isRoot = false, slug = null, filesGiveOrder = false, filesGiveTopOrder = false } = {}) {
   const y = {}
   if (record.stable_id !== undefined) y.id = record.stable_id
   // The page's localized URL segments, when the site keeps them here (`pageSlugToYml`).
@@ -671,20 +681,51 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, {
   // their nesting, and anything new is discovered and appended as it would be in a
   // page that was never pulled.
   // ⭐ The author's own list is kept when it gives the same order — its `...` stays where they put it.
-  // A page with no list gets none where its files' names give the order (`filesGiveOrder`).
+  // A page with no list gets none where its files' names give the order (`filesGiveOrder`) — nor where
+  // they give the top level and the author's `nest:` the nesting, the form the docs lead with.
   if (sectionsArray && sectionsArray.length > 0) {
     const authored = existing?.sections
     if (Array.isArray(authored)) {
       // Compared by the names the files are found by, so a list naming `1-hero` keeps naming it.
       const same = JSON.stringify(listedNames(authored.filter((e) => e !== '...'))) === JSON.stringify(sectionsArray)
       y.sections = same ? authored : [...sectionsArray, '...']
+    } else if (filesGiveTopOrder && nestSays(existing?.nest, sectionsArray)) {
+      // Nothing to list: the files and `nest:` say it, kept below.
     } else if (!filesGiveOrder) {
       y.sections = [...sectionsArray, '...']
     } else if (authored !== undefined) {
       y.sections = authored // `'*'`, which says what no list says
     }
   }
+  // ⭐ `nest:` stays as the author wrote it — unless this pull writes a list that nests: `nest:` wins
+  // over a list's nesting (`content-collector.js::processNesting`), so beside a new one it would put
+  // back the nesting the list carries. ⛔ Until 2026-10-08 a pull added a list to every page that
+  // nested with `nest:`, beside it, saying the same nesting twice — and a nesting changed in the app
+  // came back in the list, where the stale `nest:` overrode it.
+  const listed = y.sections !== undefined && y.sections !== existing?.sections && nestsIn(y.sections)
+  if (existing?.nest !== undefined && !listed) y.nest = existing.nest
   return y
+}
+
+// Whether a `sections:` list nests: an entry that is a parent with its children.
+function nestsIn(list) {
+  return Array.isArray(list) && list.some((entry) => isPlainRecord(entry))
+}
+
+// Whether a page's `nest:` gives exactly the nesting of the sections the pull wrote — each parent the
+// list nests, its children in order, one level down, as the build attaches them to top-level sections.
+function nestSays(nest, list) {
+  if (!isPlainRecord(nest)) return false
+  const parents = list.filter((entry) => isPlainRecord(entry))
+  if (parents.length !== Object.keys(nest).length) return false
+  return parents.every((entry) => {
+    const [parent, children] = Object.entries(entry)[0]
+    return (
+      Array.isArray(nest[parent]) &&
+      children.every((child) => typeof child === 'string') &&
+      JSON.stringify(nest[parent].map(String)) === JSON.stringify(children)
+    )
+  })
 }
 
 // ⛔ A PRUNE MAY ONLY DELETE WHAT A PUSH COULD HAVE SENT. An orphan is a file the
@@ -787,10 +828,12 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
 
     let sectionsArray = []
     let filesGiveOrder = false
+    let filesGiveTopOrder = false
     if (record.mode === 'page' && Array.isArray(record.page_sections)) {
       const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx, pageContext })
       sectionsArray = r.sections
       filesGiveOrder = r.filesGiveOrder
+      filesGiveTopOrder = r.filesGiveTopOrder
       report.sections.push(...r.written)
     }
 
@@ -800,7 +843,15 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // owns only PAGE_YML_MANAGED_KEYS.
     const existing = readAuthoredYaml(ymlPath)
     const pageSlug = pageSlugToYml(record, canon, existing, sourceLocale, ctx)
-    writeMergedYaml(ymlPath, pageRecordToYml(record, sectionsArray, sourceLocale, existing, { isRoot: !routePrefix, slug: pageSlug, filesGiveOrder }), PAGE_YML_MANAGED_KEYS)
+    const yml = pageRecordToYml(record, sectionsArray, sourceLocale, existing, { isRoot: !routePrefix, slug: pageSlug, filesGiveOrder, filesGiveTopOrder })
+    // ⭐ A `page.yml` with nothing to say is not created: the build reads an empty one as none
+    // (`content-collector.js::readFolderConfig`). ⛔ Until 2026-10-08 a pull wrote `{}` into every page
+    // whose folder had none. An empty `folder.yml` is written still — its presence is folder mode.
+    if (ymlName === 'page.yml' && Object.keys(yml).length === 0 && !existsSync(ymlPath)) {
+      writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)
+      continue
+    }
+    writeMergedYaml(ymlPath, yml, PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
     writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)

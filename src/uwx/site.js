@@ -513,10 +513,16 @@ function sectionToRecord(section, index) {
   return rec
 }
 
-// Resolve a section's logical name (`hero`, `card-a`) to its file in `mdFiles`,
-// matching the normal build's conventions: bare or `@`-prefixed, with or without
-// a numeric `N-` prefix. The stable name is the filename minus `@` and `N-`.
+// Resolve a section's logical name (`hero`, `card-a`) to its file in `mdFiles`, in the
+// normal build's order (`content-collector.js::findSectionFile`): `name.md`, then
+// `@name.md`, then the first file whose name is `name` once its `@` and `N-` prefixes
+// are off. ⛔ Until 2026-10-08 this took the first match in file order, so a child
+// `@booking-form.md` that `nest:` names beside a top-level `1-booking-form.md` resolved to
+// the top-level file — already placed, so skipped — and the child was pushed as an
+// orphan at the end of the page, where the build nests it.
 function findSectionFileName(mdFiles, sectionName) {
+  if (mdFiles.includes(`${sectionName}.md`)) return `${sectionName}.md`
+  if (mdFiles.includes(`@${sectionName}.md`)) return `@${sectionName}.md`
   for (const file of mdFiles) {
     const bare = stripAtPrefix(parse(file).name)
     if (parseNumericPrefix(bare).name === sectionName) return file

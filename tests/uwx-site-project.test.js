@@ -208,8 +208,9 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     expect(existsSync(join(dir, 'pages/blog/folder.yml'))).toBe(true)
     expect(existsSync(join(dir, 'pages/blog/page.yml'))).toBe(false)
 
-    // dynamic child page → [slug]/ directory
-    expect(existsSync(join(dir, 'pages/blog/[slug]/page.yml'))).toBe(true)
+    // dynamic child page → [slug]/ directory. Its record says nothing a page.yml would hold, so it gets
+    // none: the build reads an empty one as none (`readFolderConfig`).
+    expect(existsSync(join(dir, 'pages/blog/[slug]/page.yml'))).toBe(false)
     expect(existsSync(join(dir, 'pages/blog/[slug]/article.md'))).toBe(true)
 
     // layout (default layout) → layout/<area>.md
@@ -217,7 +218,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
 
     // and site.yml was written from info
     expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8'))).toMatchObject({ name: 'Site', foundation: '@a/base' })
-    expect(report.pages.length).toBe(3) // home, blog (folder), [slug]
+    expect(report.pages.length).toBe(2) // home, blog (folder) — [slug] has no page.yml to write
   })
 
   it('is idempotent across a second projection', () => {
