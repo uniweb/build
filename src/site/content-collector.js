@@ -22,7 +22,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { resolveQueriesConfig, toConfigQueries } from './queries-config.js'
+import { resolveQueriesConfig, toConfigQueries, dataKeyTyping } from './queries-config.js'
 import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
@@ -2511,13 +2511,17 @@ export async function collectSiteContent(sitePath, options = {}) {
   // merged both, so a declaration in the second file was invisible here: never
   // compiled, `data: <name>` delivering nothing, while sync pushed it fine.
   //
-  // ⭐ `config.queries` — framework's own payload key, framework's own readers.
-  // The backend's projector never emits it (their measurement: 17 `config` keys,
-  // not this one), and hosting renders with framework's code. There was nobody to
-  // coordinate with, which is exactly why it had no excuse to stay wrong.
-  const byQuery = toConfigQueries(
-    (await resolveQueriesConfig(sitePath, { siteYml: siteConfig })).declarations
-  )
+  // ⭐ `config.queries` — what a page's queries are, which a section's keys are filled by. A
+  // backend-served payload carries its own projection of each (`schema`, `where`, `sort`,
+  // `limit`, `scope`) since 2026-09-05. ⛔ This said the backend's projector never emitted it,
+  // which was true only before then.
+  //
+  // ⭐ A query a data key types carries the type, as a push names it (`dataKeyTyping`), so a key
+  // typed `@/post` fills from `articles:` on a static site as it does on a hosted one.
+  const { declarations } = await resolveQueriesConfig(sitePath, { siteYml: siteConfig })
+  const nameDefaulted = Object.values(declarations).some((d) => d?.schemaExplicit === false)
+  const typing = nameDefaulted ? await dataKeyTyping(sitePath, declarations, { siteYml: siteConfig }) : null
+  const byQuery = toConfigQueries(declarations, typing)
   if (byQuery) siteConfig.queries = byQuery
 
   // Record the RESOLVED base (--base > UNIWEB_BASE > site.yml::base) on the

@@ -65,8 +65,8 @@ import { readEntityPool, groupPoolBySchema, poolDirsForSchema } from './entity-p
 import { readRecordsConfig, resolveFolder, folderTreeOrder } from './records-config.js'
 import { isDraftRecord } from './record-draft.js'
 import { refuseNotOneRecord } from './record-file.js'
-import { resolveRecordSchemas, resolveQueriesConfig, foundationSections } from './queries-config.js'
-import { dataKeyTypes } from '../uwx/data-key-types.js'
+import { resolveRecordSchemas, resolveQueriesConfig, dataKeyTyping } from './queries-config.js'
+import { keyOfDefaultRef } from '../uwx/data-key-types.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { collectNestedRefs } from '@uniweb/schemas/format'
@@ -1197,10 +1197,24 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   const poolBySchema = groupPoolBySchema(pool.entities)
   const recordsRoot = resolve(siteDir, pool.dir)
 
+  // ⭐ A FOLDER NAMED FOR A DATA KEY HOLDS RECORDS OF THE KEY'S TYPE (ruled 2026-09-25 [Diego];
+  // `dataKeyTyping`): `records/articles/`, when no data schema has the name and the foundation types
+  // `articles` as `@/post`, holds `@/post` records — so they join that type's records, as a push
+  // sends them, and any query of `@/post` reads them, as a host answers one. ⛔ Until 2026-10-08 they
+  // stayed under `@/articles`: only a query named `articles` read them, and it carried `@/articles`
+  // on the payload where a push named `@/post`.
+  const typing = await recordTyping(siteDir, queriesConfig, poolBySchema)
+  for (const [ref, type] of typing) {
+    const held = poolBySchema.get(ref)
+    if (!held) continue
+    poolBySchema.delete(ref)
+    poolBySchema.set(type, [...(poolBySchema.get(type) || []), ...held])
+  }
+
   // ⭐ THE DATA SCHEMA EACH QUERY'S RECORDS ARE DELIVERED IN (`deliverRecord`) — resolved
   // from the foundation's source once for every query. A query with none compiles its
   // records as their files hold them.
-  const dataSchemas = options.dataSchemas ?? (await querySchemas(siteDir, queriesConfig))
+  const dataSchemas = options.dataSchemas ?? (await querySchemas(siteDir, queriesConfig, typing))
   const references = referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts })
 
   const results = {}
@@ -1211,6 +1225,9 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     // be an empty `/data/<name>.json` standing in for a live source.
     if (config && typeof config === 'object' && config.url !== undefined) continue
     const parsed = parseQueryConfig(name, config)
+    // A query that still names its folder (`@/articles`) is a query of the folder's type.
+    const folderRef = parsed.schema
+    if (parsed.schema && typing.has(parsed.schema)) parsed.schema = typing.get(parsed.schema)
     parsed.poolEntities = parsed.schema ? poolBySchema.get(parsed.schema) || [] : []
     parsed.placements = folder.placements
     parsed.folderRank = folderRank
@@ -1218,7 +1235,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     parsed.dataSchema = (parsed.schema && dataSchemas[parsed.schema]) || null
     parsed.references = references
     if (parsed.poolEntities.length === 0) {
-      const dirs = parsed.schema ? poolDirsForSchema(parsed.schema) : null
+      const dirs = folderRef ? poolDirsForSchema(folderRef) : null
       console.warn(
         `[query-processor] Query "${name}" matches no records — ` +
           (dirs
@@ -1240,12 +1257,12 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
  * its records are compiled as their files hold them, which is not the shape a
  * component receives from a host.
  */
-async function querySchemas(siteDir, queriesConfig) {
-  const refs = []
+async function querySchemas(siteDir, queriesConfig, typing = new Map()) {
+  const refs = [...typing.values()]
   for (const config of Object.values(queriesConfig)) {
     if (config && typeof config === 'object' && config.url !== undefined) continue
     const ref = typeof config === 'string' ? config : config?.schema
-    if (typeof ref === 'string') refs.push(ref)
+    if (typeof ref === 'string' && !typing.has(ref)) refs.push(ref)
   }
   const { schemas, failures } = await resolveRecordSchemas(siteDir, refs)
   for (const { ref, message } of failures) {
@@ -1254,28 +1271,25 @@ async function querySchemas(siteDir, queriesConfig) {
         `their files hold them rather than as a component receives them: ${message}`
     )
   }
-  await typeByDataKey(siteDir, queriesConfig, schemas)
   return schemas
 }
 
 /**
- * ⭐ A QUERY NAMED FOR A DATA KEY HOLDS RECORDS OF THE KEY'S TYPE (ruled 2026-09-25 [Diego],
- * `uwx/data-key-types.js`). `articles:` with no `schema:` names `@/articles`; when no data schema
- * has that name while the foundation's section types declare `data: { articles: '@/post' }`, its
- * records are `@/post` records — a push sends them as such, and they are delivered as such here,
- * where they still live and are keyed by the name (`records/articles/`). Never for a schema the
- * query asked for explicitly: that one is the author's, and does not resolve. ⛔ Until 2026-09-27
- * this lane compiled them as if they had no data schema, while a push typed them.
+ * ⭐ WHICH FOLDERS HOLD RECORDS OF A DATA KEY'S TYPE (ruled 2026-09-25 [Diego]): `@/articles` →
+ * `@/post` — `dataKeyTyping`, the rule a push applies, asked only when the site has a folder or a
+ * query it could apply to: a name-defaulted ref, `@/<name>`. ⛔ Until 2026-10-08 this lane typed a
+ * query's RECORDS by aliasing its `@/<name>` to the type's schema, while its query and its folder
+ * kept the name.
  *
  * @param {string} siteDir
- * @param {Object} queriesConfig
- * @param {Object} schemas - resolved data schemas by ref; a typed query's ref is added to it
+ * @param {Object} queriesConfig - what the build compiles (`config.queries`)
+ * @param {Map<string, Array>} poolBySchema - the records, by the ref their folder names
+ * @returns {Promise<Map<string, string>>} name-defaulted ref → the type
  */
-async function typeByDataKey(siteDir, queriesConfig, schemas) {
-  const untyped = Object.entries(queriesConfig).filter(
-    ([name, c]) => c && typeof c === 'object' && c.url === undefined && c.schema === `@/${name}` && !schemas[c.schema]
-  )
-  if (untyped.length === 0) return
+async function recordTyping(siteDir, queriesConfig, poolBySchema) {
+  const candidate = (ref) => typeof ref === 'string' && keyOfDefaultRef(ref) !== null
+  const queried = Object.values(queriesConfig).map((c) => (typeof c === 'string' ? c : c?.schema))
+  if (![...poolBySchema.keys(), ...queried].some(candidate)) return new Map()
   // `config.queries` carries no trace of whether its author wrote the schema; the declarations do.
   let declarations = {}
   try {
@@ -1283,17 +1297,11 @@ async function typeByDataKey(siteDir, queriesConfig, schemas) {
   } catch {
     // a declaration the build refuses is reported where the build reads it
   }
-  const pending = untyped.filter(([name]) => declarations[name]?.schemaExplicit !== true)
-  if (pending.length === 0) return
-  const keyTypes = dataKeyTypes(await foundationSections(siteDir))
-  const wanted = new Map()
-  for (const [name, c] of pending) {
-    const type = keyTypes.get(name)
-    if (type) wanted.set(c.schema, type)
+  try {
+    return await dataKeyTyping(siteDir, declarations)
+  } catch {
+    return new Map() // a foundation that does not read is reported by the build that reads it
   }
-  if (wanted.size === 0) return
-  const { schemas: types } = await resolveRecordSchemas(siteDir, wanted.values())
-  for (const [ref, type] of wanted) if (types[type]) schemas[ref] = types[type]
 }
 
 /**

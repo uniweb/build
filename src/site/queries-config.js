@@ -41,6 +41,7 @@ import { refuseQueryRoute, refuseLimit, refuseFilter } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
+import { dataKeyTypes } from '../uwx/data-key-types.js'
 
 // Read its own YAML rather than importing the site build's helper. That import
 // pointed the wrong way — a config resolver reaching into the collector that
@@ -320,19 +321,71 @@ function refuseMethod(method, where) {
  * held a key a declaration may want for something else [Diego, 2026-09-27]. Until then every
  * query on the payload read `{ name: 'articles', … }` under `articles`.
  *
+ * ⭐ A query that declares no `schema:` and whose records a data key types carries the TYPE —
+ * `articles` → `@/post` (`dataKeyTyping`) — which is what a push names it on the wire
+ * (`uwx/site.js::queriesNested`). The schema a page's query carries is what a section's key is
+ * filled by at render (automatic `as`), so the two lanes fill the same keys. ⛔ Until 2026-10-08 the
+ * static payload carried the name (`@/articles`), and a key typed `@/post` filled on a hosted site
+ * and stayed empty on a static one.
+ *
  * Returns undefined for a site with no queries, so `config.queries`
  * stays absent rather than becoming an empty object — an empty object reads as
  * "declared, and empty" to anything checking for presence.
+ *
+ * @param {object} declarations - `resolveQueriesConfig(…).declarations`
+ * @param {Map<string, string>|null} [typing] - `dataKeyTyping`: name-defaulted ref → its type
  */
-export function toConfigQueries(declarations) {
+export function toConfigQueries(declarations, typing = null) {
   const names = Object.keys(declarations || {})
   if (names.length === 0) return undefined
   const out = {}
   for (const key of names) {
     const { schemaExplicit, name, ...rest } = declarations[key]
-    out[key] = rest
+    const typed = schemaExplicit === false ? typing?.get(rest.schema) : null
+    out[key] = typed ? { ...rest, schema: typed } : rest
   }
   return out
+}
+
+/**
+ * ⭐ THE TYPE A DATA KEY GIVES A NAME — `@/articles` → `@/post` (ruled 2026-09-25 [Diego];
+ * `uwx/data-key-types.js`), decided for the static build as a push decides it
+ * (`uwx/records.js::typedFor`), so both lanes give a query one schema.
+ *
+ * A name-defaulted ref, `@/<name>`, stands for the type of the data key of that name when:
+ *
+ *   - no data schema has the name — `@/<name>` resolves to nothing;
+ *   - the foundation's section types declare the key `<name>` with one type, and it resolves;
+ *   - no query asks for `@/<name>` explicitly — that one is the author's, and fails loudly.
+ *
+ * Then `records/<name>/` holds records of the type, and a query named `<name>` that declares no
+ * schema is a query of it. ⚠️ Where the records live on disk and how their translations are keyed
+ * stay keyed by the name.
+ *
+ * @param {string} siteRoot
+ * @param {object} declarations - `resolveQueriesConfig(…).declarations`, for which refs are explicit
+ * @param {object} [opts]
+ * @param {object} [opts.siteYml] - an already-read site.yml
+ * @returns {Promise<Map<string, string>>} name-defaulted ref → the type; empty when none
+ */
+export async function dataKeyTyping(siteRoot, declarations, opts = {}) {
+  const typing = new Map()
+  const siteYml = opts.siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
+  const keyTypes = dataKeyTypes(await foundationSections(siteRoot, siteYml))
+  if (keyTypes.size === 0) return typing
+  const explicit = new Set(
+    Object.values(declarations || {})
+      .filter((d) => d && d.schemaExplicit === true)
+      .map((d) => d.schema)
+  )
+  const named = [...keyTypes.keys()].map(defaultSchema)
+  const { schemas } = await resolveRecordSchemas(siteRoot, [...named, ...keyTypes.values()], { siteYml })
+  for (const [key, type] of keyTypes) {
+    const ref = defaultSchema(key)
+    if (schemas[ref] || explicit.has(ref) || !schemas[type]) continue
+    typing.set(ref, type)
+  }
+  return typing
 }
 
 

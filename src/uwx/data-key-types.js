@@ -7,8 +7,10 @@
 // records folder (`records/team/`). When no data schema has that name, but the foundation's
 // section types declare the data key of that name with a type — `data: { team: '@/member' }` in a
 // `meta.js` — the records ARE of that type: a push sends them as its entities, and the query names
-// it on the wire. ⛔ Until 2026-09-25 they were read as having no data schema at all and went out
-// as static files, although the one section that reads them declared what they are.
+// it on the wire; the static build names it on the payload and reads them as the type's records
+// (`site/queries-config.js::dataKeyTyping`, since 2026-10-08 — until then the payload named the query
+// `@/team`). ⛔ Until 2026-09-25 they were read as having no data schema at all and went out as
+// static files, although the one section that reads them declared what they are.
 //
 // ⚠️ THIS DECIDES ONLY WHICH DATA SCHEMA THE RECORDS BELONG TO. Where they live on disk, how the
 // site builds them and how their translations are keyed stay keyed by the name (`team`), as the
