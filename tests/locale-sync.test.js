@@ -259,3 +259,76 @@ describe('a pull that changes one translation changes that line alone', () => {
     expect(readFileSync(file, 'utf8')).toBe(before.replace('"El Desafio"\n', '"El Reto",\n  "30000000": "Nuevo"\n'))
   })
 })
+
+// ⛔ Measured 2026-10-08 on the `international` template: a pull into the copy that pushed rewrote
+// `"Donar Ahora"` — the label of the button `[Donate Now](/contact)` — as `"[Donar Ahora](/contact)"`,
+// and split `"Apoyanos"`, which a page title and a button share, into a default and two overrides.
+// The merge reads a label onto the source's own link (`translatedInline`), so the pull writes the
+// label back — and the label keeps following the source's link, which the link written out would not.
+describe('a translation of only a link’s words comes back as its label', () => {
+  const para = (...content) => ({ type: 'doc', content: [{ type: 'paragraph', content }] })
+  const link = (text, href, more = []) => ({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }, ...more] })
+  const br = { type: 'hardBreak' }
+  const pulled = (en, es) => {
+    const collector = createTranslationCollector('en')
+    unwrapLocalizedContent({ en, es }, 'en', collector)
+    return collector.byLocale.es || {}
+  }
+  const BUTTON = para(link('Donate Now', '/contact'))
+
+  it('⭐ a button: the label, as a translator writes it', () => {
+    expect(pulled(BUTTON, para(link('Donar Ahora', '/contact')))).toEqual({ [computeHash('Donate Now')]: 'Donar Ahora' })
+  })
+
+  it('⭐ a push and a pull leave the label as written', () => {
+    const wire = localizeContentDoc(BUTTON, 'en', ['es'], { es: { [computeHash('Donate Now')]: 'Donar Ahora' } })
+    expect(JSON.stringify(wire.es)).toContain('/contact') // the push sends the button, link and all
+    const collector = createTranslationCollector('en')
+    unwrapLocalizedContent(wire, 'en', collector)
+    expect(collector.byLocale.es).toEqual({ [computeHash('Donate Now')]: 'Donar Ahora' })
+  })
+
+  it('…and the label keeps following the source’s link, where the link written out would not', () => {
+    const value = pulled(BUTTON, para(link('Donar Ahora', '/contact')))[computeHash('Donate Now')]
+    const moved = localizeContentDoc(para(link('Donate Now', '/donate')), 'en', ['es'], { es: { [computeHash('Donate Now')]: value } })
+    expect(JSON.stringify(moved.es)).toContain('/donate')
+    const pinned = localizeContentDoc(para(link('Donate Now', '/donate')), 'en', ['es'], {
+      es: { [computeHash('Donate Now')]: '[Donar Ahora](/contact)' },
+    })
+    expect(JSON.stringify(pinned.es)).not.toContain('/donate')
+  })
+
+  it('several links: a label a line', () => {
+    const en = para(link('Support', '/contact'), br, link('Learn More', '/about'))
+    const es = para(link('Apoyar', '/contact'), br, link('Saber Más', '/about'))
+    expect(Object.values(pulled(en, es))).toEqual(['Apoyar\nSaber Más'])
+  })
+
+  it('a mark the link carries is the link’s — the label is the words', () => {
+    const bold = [{ type: 'bold' }]
+    expect(Object.values(pulled(para(link('Donate', '/c', bold)), para(link('Donar', '/c', bold))))).toEqual(['Donar'])
+  })
+
+  it('CONTROL — a link the translator changed is written whole', () => {
+    expect(Object.values(pulled(BUTTON, para(link('Donar Ahora', '/es/donar'))))).toEqual(['[Donar Ahora](/es/donar)'])
+  })
+
+  it('CONTROL — words beside a link are written whole: which words a label covers is not known', () => {
+    const en = para({ type: 'text', text: 'See ' }, link('docs', '/d'))
+    const es = para({ type: 'text', text: 'Ver ' }, link('docs', '/d'))
+    expect(Object.values(pulled(en, es))).toEqual(['Ver [docs](/d)'])
+  })
+
+  it('⭐ a string a page title and a button share stays one entry', () => {
+    const root = mkdtempSync(join(tmpdir(), 'labels-'))
+    try {
+      const collector = createTranslationCollector('en')
+      unwrapLocalizedContent({ en: para({ type: 'text', text: 'Support Us' }), es: para({ type: 'text', text: 'Apoyanos' }) }, 'en', collector, null, null, { page: '/contact', section: 'hero' })
+      unwrapLocalizedContent({ en: para(link('Support Us', '/contact')), es: para(link('Apoyanos', '/contact')) }, 'en', collector, null, null, { page: '/', section: 'cta' })
+      writeLocaleTranslations(root, collector.byLocale)
+      expect(JSON.parse(readFileSync(join(root, 'locales', 'es.json'), 'utf8'))).toEqual({ [computeHash('Support Us')]: 'Apoyanos' })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

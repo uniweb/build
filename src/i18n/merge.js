@@ -443,13 +443,56 @@ function linkRuns(source) {
         runs.push({ link, marks: [...node.marks], before: gap })
       }
       gap = []
-    } else if (node.type === 'hardBreak' || (node.type === 'text' && !node.marks?.length && !node.text?.trim())) {
+    } else if (isGap(node)) {
       gap.push(node)
     } else {
       return null
     }
   }
   return runs.length ? runs : null
+}
+
+// What may sit between two links of an element made only of links: a line break, or spaces.
+function isGap(node) {
+  return node.type === 'hardBreak' || (node.type === 'text' && !node.marks?.length && !node.text?.trim())
+}
+
+/**
+ * The labels of a translated element made only of links — `asLinkLabels` the other way, for a
+ * pull: one run of the target's own nodes per link of the source's, each without the marks its
+ * link carries. Null when the source is not only links, or the target's links are not the source's
+ * own, one to one and in order.
+ *
+ * ⚠️ It does not ask whether the merge reads the labels back to the target — a caller does
+ * (`uwx/locale-sync.js`), since only then are they the same translation.
+ *
+ * @param {Array} source - the element's source inline content
+ * @param {Array} target - the element's translated inline content
+ * @returns {Array<Array>|null} each link's label, as inline nodes
+ */
+export function linkLabels(source, target) {
+  const links = linkRuns(source)
+  if (!links) return null
+  const labels = []
+  let current = null
+  for (const node of target || []) {
+    if (!node) continue
+    const link = linkMarkOf(node)
+    if (link) {
+      if (!current || !sameMark(current, link)) {
+        const next = links[labels.length]
+        if (!next || !sameMark(next.link, link)) return null
+        labels.push([])
+        current = link
+      }
+      labels[labels.length - 1].push(withoutMarks(node, links[labels.length - 1].marks))
+    } else if (isGap(node)) {
+      current = null
+    } else {
+      return null
+    }
+  }
+  return labels.length === links.length ? labels : null
 }
 
 function linkMarkOf(node) {
@@ -491,6 +534,13 @@ function trimInline(nodes) {
 function withMarks(node, marks) {
   const own = (node.marks || []).filter((mark) => !marks.some((linkMark) => linkMark.type === mark.type))
   return { ...node, marks: [...marks, ...own] }
+}
+
+// A label node without its link's marks — `withMarks` the other way.
+function withoutMarks(node, marks) {
+  const own = (node.marks || []).filter((mark) => !marks.some((linkMark) => linkMark.type === mark.type))
+  const { marks: _linkMarks, ...rest } = node
+  return own.length ? { ...rest, marks: own } : rest
 }
 
 /**

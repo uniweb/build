@@ -24,7 +24,7 @@ import { proseMirrorToMarkdown, serializeInlineContent } from '@uniweb/content-w
 import { computeHash } from '../i18n/hash.js'
 import { blockElements, elementText, dataBlockNodes } from '../i18n/extract.js'
 import { visitDataBlockStrings } from '../i18n/data-strings.js'
-import { resolveDocForLocale } from '../i18n/merge.js'
+import { resolveDocForLocale, translatedInline, linkLabels } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 
@@ -380,13 +380,29 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null) {
       const srcMd = serializeInlineContent(src[i].content || [])
       const tgtMd = serializeInlineContent(tgt[i].content || [])
       if (srcMd === tgtMd) continue // unchanged → untranslated → omit
-      map[key] = tgtMd
+      map[key] = labelsAlone(src[i].content || [], tgt[i].content || [], tgtMd) ?? tgtMd
     }
   } catch {
     // a mark we can't serialize → don't risk a lossy map; store as free-form
     return null
   }
   return addDataBlockStrings(map, sourceDoc, targetDoc, modelFor)
+}
+
+// ⭐ A LINK'S LABEL, NOT THE LINK, when only its words were translated. The merge reads a label onto
+// the source's own link (`merge.js::translatedInline`), so it keeps following that link wherever the
+// source moves it, where `[Donar Ahora](/contact)` would keep `/contact`. Several links are a label a
+// line, as a translator writes them. Written only when the merge reads it back to this very element;
+// a link a translator changed — the Spanish button pointed at a Spanish page — is written whole.
+// ⛔ Until 2026-10-08 the element was always written whole: once the merge read a label (2026-10-01),
+// a pull into the copy that pushed rewrote `"Donar Ahora"` as `"[Donar Ahora](/contact)"`, and split a
+// string a page title and a button share into a default and per-place overrides.
+function labelsAlone(source, target, whole) {
+  const labels = linkLabels(source, target)
+  if (!labels) return null
+  const value = labels.map((nodes) => serializeInlineContent(nodes)).join('\n')
+  const back = translatedInline(source, value)
+  return back && serializeInlineContent(back) === whole ? value : null
 }
 
 // ⭐ A TAGGED DATA BLOCK's translated strings, read pairwise — the strings the build translates
