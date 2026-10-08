@@ -119,3 +119,45 @@ describe('editYamlText — lists', () => {
     )
   })
 })
+
+// ⛔ Measured 2026-10-08: a pull that gave a bare `team:` its schema deleted the blank line and the
+// `# Build options` heading under it. The parser hangs every comment that follows an empty value
+// on that value, up to the next key; they belong to what follows.
+describe('editYamlText — a bare key', () => {
+  const SITE_QUERIES =
+    "queries:\n  articles:\n    schema: '@std/article'\n\n  # the team\n  team:\n\n# Build options\nbuild:\n  prerender: true\n"
+  const before = { queries: { articles: { schema: '@std/article' }, team: null }, build: { prerender: true } }
+  const withTeam = (team) => ({ ...before, queries: { ...before.queries, team } })
+
+  it('⭐ given a value, keeps the blank line and the comments under it', () => {
+    expect(editYamlText(SITE_QUERIES, before, withTeam({ schema: '@/team' }))).toBe(
+      SITE_QUERIES.replace('  team:\n', "  team:\n    schema: '@/team'\n")
+    )
+  })
+
+  it('keeps the comment on its own line, and the value goes under it', () => {
+    const text = 'queries:\n  team:   # the people\n  # next one\n  events:\n'
+    const was = { queries: { team: null, events: null } }
+    expect(editYamlText(text, was, { queries: { team: { schema: '@/team' }, events: null } })).toBe(
+      "queries:\n  team:   # the people\n    schema: '@/team'\n  # next one\n  events:\n"
+    )
+  })
+
+  it('removed, takes its own line and leaves the comments under it', () => {
+    expect(editYamlText(SITE_QUERIES, before, { ...before, queries: { articles: before.queries.articles } })).toBe(
+      SITE_QUERIES.replace('  team:\n', '')
+    )
+  })
+
+  it('a key added after it lands under it, above the comments that follow', () => {
+    const after = { ...before, queries: { ...before.queries, events: { limit: 3 } } }
+    expect(editYamlText(SITE_QUERIES, before, after)).toBe(
+      SITE_QUERIES.replace('  team:\n', '  team:\n  events:\n    limit: 3\n')
+    )
+  })
+
+  it('CONTROL — a value written out (`~`) is replaced on its line, as any scalar', () => {
+    const text = 'team: ~\n# next\nevents: 1\n'
+    expect(editYamlText(text, { team: null, events: 1 }, { team: 'x', events: 1 })).toBe('team: x\n# next\nevents: 1\n')
+  })
+})

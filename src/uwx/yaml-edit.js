@@ -45,9 +45,18 @@ function columnOf(text, key) {
   return /^ *$/.test(lead) ? lead.length : null
 }
 
-/** Where a pair's text ends: after its value, its trailing comment and its newline. */
+/**
+ * Where a pair's text ends: after its value, its trailing comment and its newline.
+ *
+ * ⛔ A SCALAR ENDS WHERE ITS OWN TEXT DOES — `range[1]`, then the rest of that line. Its
+ * `range[2]` also spans the comment lines that follow it, and for an empty value (`team:`)
+ * every comment and blank line up to the next key, at any indentation: those belong to what
+ * comes next. ⛔ Until 2026-10-08 this read `range[2]`, and a pull that gave a bare `team:` its
+ * schema deleted the blank line and the `# Build options` heading under it in `site.yml`.
+ */
 function pairEnd(text, pair) {
-  let end = (pair.value ?? pair.key).range[2]
+  const node = pair.value ?? pair.key
+  let end = isScalar(node) ? node.range[1] : node.range[2]
   if (text[end - 1] !== '\n') {
     const nl = text.indexOf('\n', end)
     const rest = nl === -1 ? text.slice(end) : text.slice(end, nl)
@@ -166,6 +175,17 @@ function editMap(text, map, before, after, edits, dump) {
       const now = scalarText(text, value, next, dump, false)
       if (now !== null) {
         edits.push({ start: value.range[0], end: value.range[1], text: now })
+        continue
+      }
+    }
+    // ⭐ A BARE KEY GIVEN A VALUE KEEPS ITS LINE — and any comment the author wrote on it — and
+    // the value goes under it: `team:  # the people` gains `  schema: '@/team'` beneath.
+    const bare = isScalar(value) && value.value === null && value.range[0] === value.range[1]
+    if (bare && (isPlainObject(next) || Array.isArray(next))) {
+      const whole = indented(dump({ [key]: next }), col, false)
+      const nl = whole.indexOf('\n')
+      if (nl !== -1 && nl < whole.length - 1) {
+        edits.push({ start: stop, end: stop, text: (text[stop - 1] === '\n' ? '' : '\n') + whole.slice(nl + 1) })
         continue
       }
     }
