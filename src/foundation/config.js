@@ -25,6 +25,7 @@
 
 import { resolve } from 'node:path'
 import { foundationPlugin } from '../vite-foundation-plugin.js'
+import { jsxExtensionGuard } from '../jsx-extension.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 // The ONE definition. This list used to be re-typed here, and again in
 // vite-foundation-plugin.js — three hand-synced copies of "what a foundation
@@ -107,6 +108,8 @@ export async function defineFoundationConfig(options = {}) {
   // foundationPlugin handles entry generation and schema building
   const plugins = [
     foundationPlugin({ srcDir, sections: sectionPaths }),
+    // JSX compiles only in .jsx files: a .js file holding it fails with that said.
+    jsxExtensionGuard(),
     tailwind && tailwindcss(),
     react(),
     svgr(),

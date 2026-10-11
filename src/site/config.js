@@ -30,6 +30,7 @@ import {
   getStructuralWatchPaths
 } from '../generate-entry.js'
 import { importMapPlugin } from '../import-map-plugin.js'
+import { jsxExtensionGuard } from '../jsx-extension.js'
 import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
@@ -317,6 +318,8 @@ export async function defineSiteConfig(options = {}) {
     ensureFoundationEntryPlugin,
 
     // Standard plugins
+    // JSX compiles only in .jsx files — a bundled foundation's too.
+    jsxExtensionGuard(),
     tailwind && tailwindcss(),
     react(),
     svgr(),

@@ -89,6 +89,33 @@ describe('loadFoundationConfig with a JSX import', () => {
     expect(Object.keys(cfg.defaultInsets)).toEqual(['Ref'])
   })
 
+  // ⭐ JSX compiles only in .jsx files (jsx-extension.js, ruled 2026-10-11). Each of these
+  // failed with esbuild's bare "The JSX syntax extension is not currently enabled".
+  it('refuses JSX in main.js itself, saying where it goes', async () => {
+    const dir = fixture({
+      'main.js': `const Ref = () => <i />\n${VARS}\nexport default { defaultInsets: { Ref } }`,
+    })
+
+    const { ok, message } = loadInRealNode(dir)
+
+    expect(ok).toBe(false)
+    expect(message).toMatch(/main\.js \(line 1\): JSX compiles only in \.jsx and \.tsx files/)
+    expect(message).toMatch(/main\.js is plain JavaScript: move the component into a \.jsx file and import it/)
+  })
+
+  it('refuses JSX in a .js module main.js imports, naming the file to rename', async () => {
+    const dir = fixture({
+      'insets/Ref.js': `export const Ref = () => <i />`,
+      'main.js': `import { Ref } from './insets/Ref.js'\n${VARS}\nexport default { defaultInsets: { Ref } }`,
+    })
+
+    const { ok, message } = loadInRealNode(dir)
+
+    expect(ok).toBe(false)
+    expect(message).toMatch(/insets\/Ref\.js \(line 1\): JSX compiles only in \.jsx and \.tsx files/)
+    expect(message).toMatch(/rename Ref\.js to Ref\.jsx/)
+  })
+
   it('leaves no temp artifact behind after the bundled fallback', async () => {
     const dir = fixture({
       'Ref.jsx': `export const Ref = () => <i />`,

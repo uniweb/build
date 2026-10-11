@@ -14,8 +14,9 @@ import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { isFontVar } from '@uniweb/theming'
-import { join, dirname, extname, basename } from 'node:path'
+import { join, dirname, extname, basename, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { jsxInJsMessage } from './jsx-extension.js'
 import { describeChildren, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
 import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
@@ -433,6 +434,16 @@ async function importFoundationConfig(filePath) {
         logLevel: 'silent',
       })
       return await import(`${pathToFileURL(outfile).href}?content=${content}`)
+    } catch (bundleError) {
+      // JSX in a `.js` file — `main.js` itself or a module it imports — compiles nowhere
+      // (jsx-extension.js): say so, rather than esbuild's "The JSX syntax extension is not
+      // currently enabled".
+      const jsx = bundleError?.errors?.find(
+        (e) => /JSX syntax extension/.test(e.text) && /\.m?js$/.test(e.location?.file ?? ''),
+      )
+      if (!jsx) throw bundleError
+      const file = relative(dirname(filePath), resolve(jsx.location.file))
+      throw new Error(`${file} (line ${jsx.location.line}): ${jsxInJsMessage(file)}`, { cause: bundleError })
     } finally {
       await rm(outfile, { force: true }).catch(() => {})
     }
@@ -482,13 +493,15 @@ export async function loadFoundationConfig(srcDir) {
       )
     }
     // ⛔ The same for `main.jsx`, which the entry used to import while this read nothing — the
-    // editor saw none of its declarations, the runtime all of them (until 2026-10-01). A main.js
-    // may hold JSX: `importFoundationConfig` transpiles it.
+    // editor saw none of its declarations, the runtime all of them (until 2026-10-01).
+    // ⛔ This said "rename it to main.js, which may hold JSX" until 2026-10-11, and main.js never
+    // could: JSX compiles only in .jsx files, here and in Vite (jsx-extension.js). A main.jsx's
+    // components move into a .jsx file the new main.js imports.
     const jsx = join(srcDir, 'main.jsx')
     if (existsSync(jsx)) {
       throw new Error(
-        `${jsx} is not read — rename it to main.js, which may hold JSX.\n` +
-          `  A foundation's declarations live in main.js; left as main.jsx, the build would continue with none of them.`,
+        `${jsx} is not read — rename it to main.js, and move any JSX it holds into a .jsx file it imports.\n` +
+          `  A foundation's declarations live in main.js, which is plain JavaScript; left as main.jsx, the build would continue with none of them.`,
       )
     }
     return {}

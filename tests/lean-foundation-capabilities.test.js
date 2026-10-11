@@ -126,8 +126,10 @@ export default {
     expect(source).toContain('vars: {"gap":{"default":"1rem"}}')
   })
 
-  it('a lone main.jsx is refused — main.js is the only name, and may hold JSX', async () => {
+  it('a lone main.jsx is refused — main.js is the only name, and plain JavaScript', async () => {
     write('main.jsx', `export default { defaultLayout: 'main' }\n`)
     await expect(entry()).rejects.toThrow(/main\.jsx is not read — rename it to main\.js/)
+    // ⛔ It said main.js "may hold JSX" until 2026-10-11; JSX compiles only in .jsx files.
+    await expect(entry()).rejects.toThrow(/move any JSX it holds into a \.jsx file it imports/)
   })
 })
