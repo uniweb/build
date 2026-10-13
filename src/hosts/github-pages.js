@@ -286,7 +286,7 @@ const adapter = {
     foundations = [],
     target = 'site',
     packageManager = 'pnpm',
-    nodeVersion = '20',
+    nodeVersion = '22',
     pnpmVersion,
     domain = null,
   }) {

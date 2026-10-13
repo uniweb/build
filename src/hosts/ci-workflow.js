@@ -41,7 +41,7 @@ const FALLBACK_PNPM_VERSION = '11'
 
 export function setupSteps({
   packageManager = 'pnpm',
-  nodeVersion = '20',
+  nodeVersion = '22',
   pnpmVersion = FALLBACK_PNPM_VERSION,
   checkout = true,
 } = {}) {

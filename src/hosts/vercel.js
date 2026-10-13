@@ -121,7 +121,7 @@ async function deploy({ distDir, deployConfig = {}, env = process.env, log = () 
 async function initCi({
   site,
   packageManager = 'pnpm',
-  nodeVersion = '20',
+  nodeVersion = '22',
   pnpmVersion,
   domain = null,
   previews = true,
