@@ -73,6 +73,13 @@ export {
   isExtensionUrl,
   isSiteRelativeExtensionUrl
 } from './uwx/site.js'
+// Where a site finds a workspace extension — one rule, which the build, prerender
+// and the dev server follow, for the CLI to ask rather than restate.
+export {
+  extensionCandidates,
+  extensionNameOf,
+  findSiteExtension
+} from './site/workspace-extension.js'
 
 // Foundation source root resolution (reads package.json::main)
 export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'

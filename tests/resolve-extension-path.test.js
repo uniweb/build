@@ -38,8 +38,17 @@ describe('resolveExtensionPath', () => {
     writeFileSync(full, 'export default {}\n')
     return full
   }
+  /** An extension package as the CLI scaffolds it — what the lookup accepts. */
+  const extensionPkg = (rel) => {
+    mkdirSync(join(root, rel), { recursive: true })
+    writeFileSync(
+      join(root, rel, 'package.json'),
+      JSON.stringify({ name: 'x', type: 'module', main: './_entry.generated.js' })
+    )
+  }
 
   it('resolves the extensions/<name>/ workspace layout', () => {
+    extensionPkg('extensions/effects')
     const built = writeFixture('extensions/effects/dist/entry.js')
     const distDir = join(root, 'site', 'dist')
     const projectRoot = root
@@ -47,11 +56,21 @@ describe('resolveExtensionPath', () => {
   })
 
   it('resolves the bare project-root layout (<name>/dist/)', () => {
+    extensionPkg('effects')
     const built = writeFixture('effects/dist/entry.js')
     expect(resolveExtensionPath('/effects/entry.js', join(root, 'site', 'dist'), root)).toBe(built)
   })
 
+  it('resolves a shared extension at the workspace root for a site in sites/ — the segregated layout', () => {
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages: []\n')
+    extensionPkg('extensions/effects')
+    const built = writeFixture('extensions/effects/dist/entry.js')
+    // The search starts in the folder the site is in — `sites/` — and climbs.
+    expect(resolveExtensionPath('/effects/entry.js', join(root, 'sites', 'main', 'dist'), join(root, 'sites'))).toBe(built)
+  })
+
   it("picks the extension's own build over the copy the site build emits into dist", () => {
+    extensionPkg('extensions/effects')
     const built = writeFixture('extensions/effects/dist/entry.js')
     writeFixture('site/dist/effects/entry.js')
     expect(resolveExtensionPath('/effects/entry.js', join(root, 'site', 'dist'), root)).toBe(built)
@@ -87,6 +106,7 @@ describe('resolveExtensionPath', () => {
    * the test runner the import is resolved by the runner and would pass anyway.
    */
   it('picks a file whose bare imports resolve, which the dist copy of the same bytes does not', () => {
+    extensionPkg('extensions/effects')
     const dep = join(root, 'extensions', 'effects', 'node_modules', 'uniweb-extension-probe-dep')
     mkdirSync(dep, { recursive: true })
     writeFileSync(join(dep, 'package.json'), '{"name":"uniweb-extension-probe-dep","type":"module","exports":"./index.js"}')
@@ -121,12 +141,14 @@ describe('resolveExtensionPath', () => {
    * of a subdirectory-deployed site without its extension sections.
    */
   it('strips the deployment base before mapping onto the build tree', () => {
+    extensionPkg('extensions/effects')
     const built = writeFixture('extensions/effects/dist/entry.js')
     const distDir = join(root, 'site', 'dist')
     expect(resolveExtensionPath('/docs/effects/entry.js', distDir, root, '/docs/')).toBe(built)
   })
 
   it('still resolves a URL that does NOT carry the base (payload built before the change)', () => {
+    extensionPkg('extensions/effects')
     const built = writeFixture('extensions/effects/dist/entry.js')
     const distDir = join(root, 'site', 'dist')
     expect(resolveExtensionPath('/effects/entry.js', distDir, root, '/docs/')).toBe(built)

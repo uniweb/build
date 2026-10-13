@@ -30,7 +30,7 @@
  * })
  */
 
-import { resolve, join } from 'node:path'
+import { resolve, join, relative, sep } from 'node:path'
 import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { resolveDefaultLocale, resolveFetchConfigs, DATA_DIR } from '@uniweb/core'
@@ -54,12 +54,37 @@ import { RECORDS_DIR, resolveRecordsDir } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { FONT_LINKS_MARKER } from './head-markers.js'
-import { collectExtensionAssets } from './emit-extensions.js'
+import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
+import { extensionNameOf, findSiteExtension } from './workspace-extension.js'
 
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
 
 const FAVICON_AUTODETECT = ['favicon.svg', 'favicon.ico', 'favicon.png']
+
+const EXTENSION_CONTENT_TYPES = {
+  js: 'text/javascript',
+  mjs: 'text/javascript',
+  css: 'text/css',
+  json: 'application/json',
+  svg: 'image/svg+xml',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+  otf: 'font/otf',
+  wasm: 'application/wasm'
+}
+
+/** The Content-Type the dev server answers an extension's built file with. */
+function extensionContentType(file) {
+  return EXTENSION_CONTENT_TYPES[file.split('.').pop()?.toLowerCase()] || 'application/octet-stream'
+}
 
 function faviconTypeFor(href) {
   const ext = href.split('?')[0].split('.').pop()?.toLowerCase()
@@ -1022,6 +1047,71 @@ export function siteContentPlugin(options = {}) {
         console.error(`[dev-api] ${err.message}`)
       }
 
+      // A site-relative workspace extension (`/effects/entry.js`) is served from
+      // the site's own origin: the build copies its built files there
+      // (`collectExtensionAssets`, in generateBundle). Dev serves the same set,
+      // from the same folder, found by the same rule (`./workspace-extension.js`),
+      // so `uniweb dev` and `uniweb build` cannot disagree about whether a site
+      // has its extension. Its bare imports (`react`, `@uniweb/core`) resolve
+      // through the import map a dev page with extensions carries (`./config.js`,
+      // `serveInDev`). ⚠️ Synchronous, like the mount above, so it runs before
+      // Vite's SPA fallback.
+      //
+      // ⛔ Until 2026-10-13 nothing served it in dev: the request reached the SPA
+      // fallback, which answered `index.html` with a 200, `import()` failed on
+      // it, and the runtime dropped the extension. Measured on the `extensions`
+      // template.
+      const warnedExtensions = new Set()
+      devServer.middlewares.use(async (req, res, next) => {
+        const declared = siteContent?.config?.extensions
+        const named = Array.isArray(declared) && declared.length ? extensionNameOf(req.url, basePath) : null
+        const entry =
+          named &&
+          declared
+            .map((d) => (typeof d === 'string' ? d : d?.url))
+            .find((url) => extensionNameOf(url, basePath)?.name === named.name)
+        if (!entry || !named.rest) return next()
+
+        const packageDir = findSiteExtension(named.name, resolvedSitePath)
+        if (packageDir) {
+          const distDir = join(packageDir, 'dist')
+          let rest = named.rest
+          try {
+            rest = decodeURIComponent(rest)
+          } catch {}
+          const file = resolve(distDir, rest)
+          if (file.startsWith(distDir + sep) && isBrowserAsset(rest) && existsSync(file)) {
+            try {
+              const body = await readFile(file)
+              res.setHeader('Content-Type', extensionContentType(file))
+              res.setHeader('Cache-Control', 'no-cache')
+              res.end(body)
+              return
+            } catch (err) {
+              return next(err)
+            }
+          }
+        }
+
+        // Only the declared entry is answered when its file is missing: the runtime
+        // drops an extension it cannot load either way, and a 404 says what the
+        // SPA's HTML would hide. Any other path under that name is left to Vite.
+        if (extensionNameOf(entry, basePath)?.rest !== named.rest) return next()
+        if (!warnedExtensions.has(entry)) {
+          warnedExtensions.add(entry)
+          console.warn(
+            packageDir
+              ? `[site-content] Extension '${entry}' is not built (${relative(resolvedSitePath, packageDir)}). ` +
+                  `Build it — \`uniweb build\` from the workspace root — and reload.`
+              : `[site-content] Extension '${entry}' is site-relative, and no workspace extension has its name. ` +
+                  `A site finds one in <name>/ or extensions/<name>/, in the folder the site is in or a folder ` +
+                  `above it, up to the workspace root.`
+          )
+        }
+        res.statusCode = 404
+        res.end()
+      })
+
       // Watch for content changes in dev mode
       if (shouldWatch) {
         // Debounce rebuilds. One that `queries.yml` or `site.yml` asked for also
@@ -1681,17 +1771,26 @@ export function siteContentPlugin(options = {}) {
       // Without this the build succeeds, prerender renders the extension's
       // sections from the workspace, and the browser then 404s and replaces
       // them with `Component not found` on hydration.
-      const { emit, unresolved } = collectExtensionAssets(
+      const { emit, unresolved, unbuilt } = collectExtensionAssets(
         finalContent.config?.extensions,
-        resolve(sitePath)
+        resolve(sitePath),
+        { base: finalContent.config?.base }
       )
       for (const asset of emit) {
         this.emitFile({ type: 'asset', fileName: asset.fileName, source: asset.source })
       }
       for (const url of unresolved) {
         this.warn(
-          `Extension '${url}' is site-relative but no built extension was found for it. ` +
-            `The site will 404 on it at runtime — build the extension, or reference it by URL.`
+          `Extension '${url}' is site-relative, and no workspace extension has its name. ` +
+            `A site finds one in <name>/ or extensions/<name>/, in the folder the site is in or a folder ` +
+            `above it, up to the workspace root. The site will 404 on it at runtime — move the extension ` +
+            `there, or reference it by URL.`
+        )
+      }
+      for (const { url, dir } of unbuilt) {
+        this.warn(
+          `Extension '${url}' is not built (${relative(resolve(sitePath), dir) || dir}), so the site will ` +
+            `404 on it at runtime. Run \`uniweb build\` from the workspace root, which builds extensions first.`
         )
       }
     },

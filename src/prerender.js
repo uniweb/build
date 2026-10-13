@@ -54,13 +54,20 @@ import { isSiteRelative, resolveExtensionDist } from './site/emit-extensions.js'
  * sections belonged until the page ran in the browser.
  *
  * Resolution order:
- * 1. The extension's own build — `<project>/<name>/dist/` or
- *    `<project>/extensions/<name>/dist/` — found by the emitter's lookup
- *    (`resolveExtensionDist`), so the two lanes find the same build.
+ * 1. The extension's own build — the `dist/` of the workspace extension with the
+ *    URL's name, `<name>/` or `extensions/<name>/` in the folder the site is in or
+ *    a folder above it, up to the workspace root (site/workspace-extension.js) —
+ *    found by the emitter's lookup (`resolveExtensionDist`), so the two lanes find
+ *    the same build.
  * 2. A file in the site's dist, for an extension no workspace package builds (a
  *    pre-built module placed in `public/`). Its bare imports resolve only where
  *    the site's own dependencies carry them.
  * 3. Original URL (absolute or remote — let import() handle it)
+ *
+ * @param {string} url - as the payload carries it
+ * @param {string} distDir - the site's `dist/`
+ * @param {string} projectRoot - the folder the site is in, where the search starts
+ * @param {string} [base] - the site's deployment base
  */
 export function resolveExtensionPath(url, distDir, projectRoot, base) {
   // The payload now carries FINAL, base-resolved URLs (see

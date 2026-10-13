@@ -421,7 +421,11 @@ export async function defineSiteConfig(options = {}) {
       // nothing else resolves them: the foundation dev plugin rewrites a LOCAL
       // foundation's imports, and a served one is not ours to rewrite. So the dev server
       // answers the import map a build writes, bridging to the site's own copies.
-      serveInDev: foundationInfo.type === 'url'
+      // ⭐ An extension is always loaded from a URL — a workspace one, served by the
+      // site plugin from its build, as much as a remote one — so a site with any
+      // extension gets the same bridge. ⛔ Until 2026-10-13 only a URL foundation did,
+      // and in dev an extension's `import 'react'` had nothing to resolve against.
+      serveInDev: foundationInfo.type === 'url' || hasExtensions
     }))
   }
 

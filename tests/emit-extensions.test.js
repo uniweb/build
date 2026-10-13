@@ -21,12 +21,20 @@ import {
 describe('collectExtensionAssets', () => {
   let root, siteDir
 
+  /** A foundation package (an extension is one), as the CLI scaffolds it. */
+  const extensionPackage = (dir) => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', main: './_entry.generated.js' }))
+    return dir
+  }
+
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'uw-ext-emit-'))
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages: []\n')
     siteDir = join(root, 'site')
     mkdirSync(siteDir, { recursive: true })
     // A built extension in the standard `extensions/<name>/` workspace layout.
-    const dist = join(root, 'extensions', 'effects', 'dist')
+    const dist = join(extensionPackage(join(root, 'extensions', 'effects')), 'dist')
     mkdirSync(join(dist, 'assets'), { recursive: true })
     mkdirSync(join(dist, 'meta'), { recursive: true })
     writeFileSync(join(dist, 'entry.js'), 'export const A = 1\n')
@@ -79,10 +87,67 @@ describe('collectExtensionAssets', () => {
   })
 
   it('resolves the bare project-root layout too', () => {
-    const alt = join(root, 'fx', 'dist')
+    const pkg = extensionPackage(join(root, 'fx'))
+    const alt = join(pkg, 'dist')
     mkdirSync(alt, { recursive: true })
     writeFileSync(join(alt, 'entry.js'), 'x')
-    expect(resolveExtensionDist('/fx/entry.js', root)).toEqual({ distDir: alt, urlBase: 'fx', rest: 'entry.js' })
+    expect(resolveExtensionDist('/fx/entry.js', root)).toEqual({
+      distDir: alt,
+      urlBase: 'fx',
+      rest: 'entry.js',
+      packageDir: pkg,
+      built: true
+    })
+  })
+
+  /**
+   * ⛔ Until 2026-10-13 the lookup stopped at the folder the site is in, so a
+   * site at `sites/main` never found the shared `extensions/effects` at the
+   * workspace root — the layout the docs recommend for extensions shared by
+   * several sites. The rule: `./workspace-extension.js`.
+   */
+  it('emits a shared extension for a site in sites/ — the segregated layout', () => {
+    const nested = join(root, 'sites', 'main')
+    mkdirSync(nested, { recursive: true })
+    expect(names(collectExtensionAssets(['/effects/entry.js'], nested))).toEqual([
+      'effects/assets/style.css',
+      'effects/entry.js'
+    ])
+  })
+
+  /**
+   * The payload's URLs carry the deployment base (`site/extension-urls.js`), and
+   * `dist/` does not. ⛔ Until 2026-10-13 the base was left on, so
+   * `/docs/effects/entry.js` named an extension `docs` and a site deployed under
+   * a subpath emitted none — and 404'd on its extension at runtime.
+   */
+  it('removes the deployment base before the URL names a folder', () => {
+    const r = collectExtensionAssets(['/docs/effects/entry.js'], siteDir, { base: '/docs/' })
+    expect(names(r)).toEqual(['effects/assets/style.css', 'effects/entry.js'])
+    expect(r.unresolved).toEqual([])
+
+    // CONTROL: the same URL with no base given names `docs`, which nothing builds.
+    expect(collectExtensionAssets(['/docs/effects/entry.js'], siteDir).unresolved).toEqual(['/docs/effects/entry.js'])
+  })
+
+  it('reports an extension that exists and is not built apart from one that does not exist', () => {
+    const fx = extensionPackage(join(root, 'fx'))
+    const r = collectExtensionAssets(['/fx/entry.js', '/missing/entry.js'], siteDir)
+    expect(r.emit).toEqual([])
+    expect(r.unbuilt).toEqual([{ url: '/fx/entry.js', dir: fx }])
+    expect(r.unresolved).toEqual(['/missing/entry.js'])
+  })
+
+  it('never emits a same-named folder that is not an extension — a built site has a dist/ too', () => {
+    const sameName = join(root, 'sites', 'effects')
+    mkdirSync(join(sameName, 'dist'), { recursive: true })
+    writeFileSync(join(sameName, 'site.yml'), 'name: s\n')
+    writeFileSync(join(sameName, 'dist', 'index.html'), '<!doctype html>')
+    const nested = join(root, 'sites', 'main')
+    mkdirSync(nested, { recursive: true })
+    const emitted = names(collectExtensionAssets(['/effects/entry.js'], nested))
+    expect(emitted).toContain('effects/entry.js')
+    expect(emitted).not.toContain('effects/index.html')
   })
 
   it('classifies declaration shapes', () => {

@@ -44,10 +44,17 @@
  * the extension from its own build (`resolveExtensionPath`), because the copy
  * sits under the site package, where the extension's bare imports
  * (`@uniweb/core`, `react`) do not resolve.
+ *
+ * ── Which folder is the extension ──
+ *
+ * Not decided here: `./workspace-extension.js` holds the rule, and the dev
+ * server, prerender and the CLI ask it too.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { extensionNameOf, findExtensionPackage } from './workspace-extension.js'
+import { stripBasePath } from './extension-urls.js'
 
 /** True for the `/effects/entry.js` form — the only one this site can serve. */
 export function isSiteRelative(decl) {
@@ -64,8 +71,8 @@ function walk(dir, base = dir) {
   })
 }
 
-/** Is this file part of what a browser fetches? */
-function isBrowserAsset(rel) {
+/** Is this file part of what a browser fetches? The dev server serves the same set. */
+export function isBrowserAsset(rel) {
   if (rel.endsWith('.map')) return false
   if (rel === 'runtime-pin.json') return false
   if (rel.startsWith('meta/') || rel.startsWith(`meta\\`)) return false
@@ -74,9 +81,9 @@ function isBrowserAsset(rel) {
 }
 
 /**
- * Locate the built `dist/` behind a site-relative extension URL:
- * `/effects/entry.js` → `<project>/effects/dist/` or
- * `<project>/extensions/effects/dist/`, with `rest` the path inside it.
+ * Locate the workspace extension behind a site-relative extension URL —
+ * `/effects/entry.js` → the folder `./workspace-extension.js` finds for
+ * `effects` — with `distDir` its build and `rest` the path inside it.
  *
  * One lookup for both lanes that need the extension's build: this emitter, which
  * copies it into the site's output, and prerender, which imports it from where it
@@ -84,48 +91,55 @@ function isBrowserAsset(rel) {
  * cannot, by construction rather than by two lists kept in step by hand.
  *
  * @param {string} url - a site-relative URL, with any deployment base removed
- * @param {string} projectRoot - the directory holding the site and its extensions
- * @returns {{ distDir: string, urlBase: string, rest: string }|null}
+ * @param {string} projectRoot - the folder the site is in; the search starts
+ *   there and climbs to the workspace root
+ * @returns {{ distDir: string, urlBase: string, rest: string, packageDir: string, built: boolean }|null}
+ *   null when no workspace extension has that name; `built: false` when one does
+ *   and has no `dist/` yet
  */
 export function resolveExtensionDist(url, projectRoot) {
-  const parts = url.replace(/^\//, '').split('/')
-  if (parts.length < 2) return null
-  const pkgName = parts[0]
-
-  for (const candidate of [
-    join(projectRoot, pkgName, 'dist'),
-    join(projectRoot, 'extensions', pkgName, 'dist')
-  ]) {
-    if (existsSync(candidate)) {
-      return { distDir: candidate, urlBase: pkgName, rest: parts.slice(1).join('/') }
-    }
-  }
-  return null
+  const named = extensionNameOf(url)
+  if (!named) return null
+  const packageDir = findExtensionPackage(named.name, projectRoot)
+  if (!packageDir) return null
+  const distDir = join(packageDir, 'dist')
+  return { distDir, urlBase: named.name, rest: named.rest, packageDir, built: existsSync(distDir) }
 }
 
 /**
  * Files to emit for a site's declared extensions.
  *
- * Returns `{ fileName, source }` pairs for Rollup's `emitFile`, plus the
- * declarations that could not be resolved — the caller warns about those rather
- * than failing, because an absolute-URL extension is legitimately not ours to
- * emit and a missing workspace build is a warning the developer can act on.
+ * Returns `{ fileName, source }` pairs for Rollup's `emitFile`, plus what could
+ * not be emitted, for the caller to warn about rather than fail on: an
+ * absolute-URL extension is legitimately not ours to emit, and a missing or
+ * unbuilt workspace extension is something the developer can act on.
  *
- * @param {Array} extensions - `site.yml::extensions`, as declared.
+ * @param {Array} extensions - the payload's `config.extensions`.
  * @param {string} siteDir - the site package directory.
+ * @param {{ base?: string }} [options] - `base`: the deployment base the payload's
+ *   URLs carry. `dist/` has no base segment, so it is removed before the URL names
+ *   a folder — with `/docs/` left on, `/docs/effects/entry.js` named an extension
+ *   `docs`, and a site deployed under a subpath emitted none.
+ * @returns {{ emit: Array<{ fileName: string, source: Buffer }>, unresolved: string[],
+ *   unbuilt: Array<{ url: string, dir: string }> }}
  */
-export function collectExtensionAssets(extensions, siteDir) {
+export function collectExtensionAssets(extensions, siteDir, { base } = {}) {
   const emit = []
   const unresolved = []
-  if (!Array.isArray(extensions)) return { emit, unresolved }
+  const unbuilt = []
+  if (!Array.isArray(extensions)) return { emit, unresolved, unbuilt }
   const projectRoot = resolve(siteDir, '..')
 
   for (const decl of extensions) {
     if (!isSiteRelative(decl)) continue // absolute URL or a ref — someone else serves it
     const url = typeof decl === 'string' ? decl : decl.url
-    const found = resolveExtensionDist(url, projectRoot)
+    const found = resolveExtensionDist(stripBasePath(url, base), projectRoot)
     if (!found) {
       unresolved.push(url)
+      continue
+    }
+    if (!found.built) {
+      unbuilt.push({ url, dir: found.packageDir })
       continue
     }
     for (const rel of walk(found.distDir)) {
@@ -136,5 +150,5 @@ export function collectExtensionAssets(extensions, siteDir) {
       })
     }
   }
-  return { emit, unresolved }
+  return { emit, unresolved, unbuilt }
 }
