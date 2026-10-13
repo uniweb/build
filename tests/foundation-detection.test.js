@@ -118,12 +118,33 @@ describe('detectFoundationType', () => {
     })
   })
 
+  /** A foundation package as the CLI scaffolds one: `main` names the generated entry. */
+  const foundationAt = async (dir) => {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'x', main: './_entry.generated.js' }))
+    return dir
+  }
+  /** A site package: a `site.yml`, and a `file:` dep on its foundation as `add site` writes one. */
+  const siteAt = async (dir, deps = {}) => {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'site.yml'), 'name: s\n')
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 's', dependencies: deps }))
+    return dir
+  }
+
   describe('local refs', () => {
     test('bare name matching a workspace sibling resolves to type: local', async () => {
-      await mkdir(join(workspaceDir, 'foundation'))
+      await foundationAt(join(workspaceDir, 'foundation'))
       const result = detectFoundationType('foundation', siteDir)
       expect(result.type).toBe('local')
       expect(result.path).toBe(join(workspaceDir, 'foundation'))
+    })
+
+    test('a sibling found by name counts with no package.json, from its declarations file', async () => {
+      // An unscaffolded folder — the classifier's fallback for one with no manifest yet.
+      await mkdir(join(workspaceDir, 'foundation', 'src'), { recursive: true })
+      await writeFile(join(workspaceDir, 'foundation', 'src', 'main.js'), 'export default {}\n')
+      expect(detectFoundationType('foundation', siteDir).path).toBe(join(workspaceDir, 'foundation'))
     })
 
     test('file: dep in the site package.json resolves to type: local', async () => {
@@ -148,6 +169,45 @@ describe('detectFoundationType', () => {
       const result = detectFoundationType('@uniweb/io', siteDir)
       expect(result.type).toBe('local')
       expect(result.path).toBe(fnDir)
+    })
+  })
+
+  /**
+   * A folder found by NAME is the foundation only if it is one. Until 2026-10-13
+   * any folder passed, and the sibling check runs before the `file:` dep — so in a
+   * workspace with `foundations/blog` and `sites/blog`, a site resolved its
+   * foundation to a SITE, while its own `file:` dep named the right folder.
+   */
+  describe('a folder found by name must be a foundation', () => {
+    test('the site itself, named like its foundation, is passed over for its file: dep', async () => {
+      const fn = await foundationAt(join(workspaceDir, 'foundations', 'blog'))
+      const site = await siteAt(join(workspaceDir, 'sites', 'blog'), { blog: 'file:../../foundations/blog' })
+      expect(detectFoundationType('blog', site).path).toBe(fn)
+    })
+
+    test('another site named like the foundation is passed over', async () => {
+      const fn = await foundationAt(join(workspaceDir, 'foundations', 'blog'))
+      await siteAt(join(workspaceDir, 'sites', 'blog'))
+      const site = await siteAt(join(workspaceDir, 'sites', 'main'), { blog: 'file:../../foundations/blog' })
+      expect(detectFoundationType('blog', site).path).toBe(fn)
+    })
+
+    test('foundations/<name> is found without a file: dep — and only when it is a foundation', async () => {
+      const site = await siteAt(join(workspaceDir, 'sites', 'main'))
+      await mkdir(join(workspaceDir, 'foundations', 'blog'), { recursive: true })
+      expect(() => detectFoundationType('blog', site)).toThrow(/exists, but not as a foundation package/)
+
+      // CONTROL: the same folder, made a foundation package.
+      await foundationAt(join(workspaceDir, 'foundations', 'blog'))
+      expect(detectFoundationType('blog', site).path).toBe(join(workspaceDir, 'foundations', 'blog'))
+    })
+
+    test('a file: dep names its folder outright, and is taken as written', async () => {
+      // No manifest at all at the target: explicit wiring is not second-guessed.
+      const fnDir = join(workspaceDir, 'anything')
+      await mkdir(fnDir)
+      await writeFile(join(siteDir, 'package.json'), JSON.stringify({ dependencies: { fn: 'file:../anything' } }))
+      expect(detectFoundationType('fn', siteDir).path).toBe(fnDir)
     })
   })
 
@@ -182,7 +242,7 @@ describe('detectFoundationType', () => {
 
     test('error explains what shapes ARE supported', () => {
       const fn = () => detectFoundationType('mystery', siteDir)
-      expect(fn).toThrow(/workspace-local sibling/)
+      expect(fn).toThrow(/a foundation next to the site/)
       expect(fn).toThrow(/file:' dep/)
       expect(fn).toThrow(/versioned registry ref/)
       expect(fn).toThrow(/full URL/)

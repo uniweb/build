@@ -13,8 +13,8 @@
  *
  * Three implementations of one question, none of which agreed, and the cause was
  * a pure function sitting behind a bundler import. So it moved here, with no
- * dependency beyond `node:fs` and `node:path`, the same reason `@uniweb/core`'s
- * `route-match` and `data-paths` are leaves.
+ * dependency beyond `node:fs`, `node:path` and the leaf package classifier, the
+ * same reason `@uniweb/core`'s `route-match` and `data-paths` are leaves.
  *
  * ## What it answers, and what it refuses
  *
@@ -30,6 +30,21 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { classifyPackage } from '../utils/classify-package.js'
+
+/**
+ * A folder found by NAME rather than named outright — a sibling of the site, or
+ * `foundations/<name>` — is the foundation only if it is one. A `file:` dep names
+ * its folder outright and is taken as written.
+ *
+ * ⛔ Until 2026-10-13 any folder of the right name passed. In a workspace holding
+ * `foundations/blog` and `sites/blog`, the site `sites/blog` resolved its
+ * foundation to ITSELF, and `sites/main` resolved it to the other site — while
+ * each site's `file:` dep named `foundations/blog` correctly, one check too late.
+ */
+function isFoundationDir(dir) {
+  return existsSync(dir) && classifyPackage(dir) === 'foundation'
+}
 
 /**
  * A catalog ref — `@org/name@version` — in its parts, or null for anything else.
@@ -174,7 +189,7 @@ export function detectFoundationType(foundation, siteRoot, { served = null } = {
 
   // Check if it's a local workspace sibling (directory name matches package name)
   const localPath = resolve(siteRoot, '..', name)
-  if (existsSync(localPath)) {
+  if (isFoundationDir(localPath)) {
     return {
       type: 'local',
       name,
@@ -201,7 +216,7 @@ export function detectFoundationType(foundation, siteRoot, { served = null } = {
 
   // Check in foundations/ directory (for multi-site projects)
   const foundationsPath = resolve(siteRoot, '..', '..', 'foundations', name)
-  if (existsSync(foundationsPath)) {
+  if (isFoundationDir(foundationsPath)) {
     return {
       type: 'local',
       name,
@@ -226,14 +241,18 @@ export function detectFoundationType(foundation, siteRoot, { served = null } = {
   // a registry ref, or a URL — none of the supported shapes. Fail with
   // guidance rather than fall through to a node_modules lookup that will
   // produce a confusing error later in the build.
+  const notFoundations = [localPath, foundationsPath].filter((dir) => existsSync(dir))
   throw new Error(
     `site.yml foundation: '${name}' did not resolve.\n` +
     `Foundations must be one of:\n` +
-    `  - a workspace-local sibling (a directory next to the site, named '${name}')\n` +
+    `  - a foundation next to the site, in a folder named '${name}'\n` +
     `  - a 'file:' dep in the site's package.json\n` +
-    `  - a directory in '../../foundations/${name}'\n` +
+    `  - a foundation in '../../foundations/${name}'\n` +
     `  - a versioned registry ref: '@org/${name}@<version>'\n` +
     `  - a full URL: 'https://...'\n` +
+    (notFoundations.length
+      ? `${notFoundations.join(' and ')} ${notFoundations.length > 1 ? 'exist' : 'exists'}, but not as a foundation package.\n`
+      : '') +
     `Foundations are runtime federated modules, not npm packages — there is no fall-through to node_modules.`
   )
 }
