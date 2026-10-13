@@ -23,7 +23,6 @@
     "./import-map-plugin": "./src/import-map-plugin.js",
     "./emit-surface": "./src/uwx/emit-surface.json"
   },
-  "bin": {},
   "files": [
     "src"
   ],
