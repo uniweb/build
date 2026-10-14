@@ -47,7 +47,8 @@ import { declarationsToQueriesYml } from './records-project.js'
 import { FILLED_SECTION_TYPE, buildRouteOf } from './site.js'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
-import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, isProseMirrorDoc } from './locale-sync.js'
+import { unwritableNodes } from '@uniweb/content-writer'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
@@ -1202,6 +1203,59 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
 }
 
 /**
+ * ⛔ A PULL THAT WOULD DROP CONTENT WRITES NOTHING.
+ *
+ * A node a markdown file cannot hold is left out of the file it is written to,
+ * and the push after the pull then deletes it from the site — with nobody told
+ * but a log line. So every section document the projection would write is asked
+ * first (`unwritableNodes`, `@uniweb/content-writer`), every locale's included,
+ * and the pull stops, naming each section and what it holds.
+ * ⛔ Until 2026-10-14 the writer logged one line per type and the pull went on:
+ * measured with a button an editor saved as a node, which a pull and a push then
+ * deleted.
+ *
+ * @param {object} document - the `@uniweb/site-content` document
+ * @param {string} sourceLocale
+ */
+function refuseContentFilesCannotHold(document, sourceLocale) {
+  const found = []
+  const name = (record, where) => {
+    const own = record?.slug !== undefined ? pageDirName(record, sourceLocale) : record?.stable_id || record?.$uuid
+    return own ? (where ? `${where}/${own}` : String(own)) : where
+  }
+  const visit = (value, where) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, where)
+      return
+    }
+    if (!value || typeof value !== 'object') return
+    const here = name(value, where)
+    for (const [key, field] of Object.entries(value)) {
+      if (key === 'content') {
+        const docs = isProseMirrorDoc(field)
+          ? [field]
+          : isPlainRecord(field)
+            ? Object.values(field).filter(isProseMirrorDoc)
+            : []
+        const types = [...new Set(docs.flatMap((doc) => unwritableNodes(doc)))]
+        if (types.length) found.push(`${here || 'a section'}: ${types.join(', ')}`)
+        if (docs.length) continue
+      }
+      visit(field, here)
+    }
+  }
+  visit(document?.pages, '')
+  visit(document?.layout_sections, 'layout')
+  if (found.length === 0) return
+  throw new Error(
+    'This pull would leave content out of your files — a file cannot hold it, so your next push would ' +
+      'delete it from the site. Nothing was written.\n' +
+      found.map((entry) => `  ${entry}`).join('\n') +
+      '\nChange or remove it where it was made, then pull again.'
+  )
+}
+
+/**
  * Project a whole `@uniweb/site-content` document to a site's files: `info` →
  * config (siteInfoToConfig), `collections[]` declarations →
  * `collections.yml::collections` (declarationsToQueriesYml), `pages[]` →
@@ -1226,6 +1280,9 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope, dataModel = null }) {
+  // Before anything is written: a pull that would leave content out of the files stops here.
+  refuseContentFilesCannotHold(document, sourceLocale)
+
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
