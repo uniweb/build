@@ -42,6 +42,7 @@ import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
+import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -1071,9 +1072,9 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   //
   // HTML in the markdown is not content: it shows as written, except `<br>`
   // (content-reader, since 2026-10-14). Say so with the file in hand.
-  const proseMirrorContent = markdownToProseMirror(markdown, {
-    onWarning: (message) => console.warn(`[content-collector] ${relative(siteRoot, filePath)}: ${message}`),
-  })
+  const warnHere = (message) => console.warn(`[content-collector] ${relative(siteRoot, filePath)}: ${message}`)
+  const proseMirrorContent = markdownToProseMirror(markdown, { onWarning: warnHere })
+  warnOutsideVocabulary(proseMirrorContent, warnHere)
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's

@@ -72,6 +72,7 @@ import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBo
 import { collectNestedRefs } from '@uniweb/schemas/format'
 import { labelIn } from './entry-label.js'
 import { fileRecordValue, makeFilePreview } from './file-records.js'
+import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 
 // Try to import content-reader for markdown parsing
 let markdownToProseMirror
@@ -565,9 +566,9 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
 
   // Parse markdown body to ProseMirror — HTML in it shows as written, except
   // `<br>`, and the author is told which file.
-  const content = markdownToProseMirror(body, {
-    onWarning: (message) => console.warn(`[records] ${relative(siteRoot, filepath)}: ${message}`),
-  })
+  const warnHere = (message) => console.warn(`[records] ${relative(siteRoot, filepath)}: ${message}`)
+  const content = markdownToProseMirror(body, { onWarning: warnHere })
+  warnOutsideVocabulary(content, warnHere)
 
   // Process assets (resolve paths, copy co-located files)
   // This modifies content in place, updating paths to site-root-relative

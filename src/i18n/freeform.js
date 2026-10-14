@@ -26,6 +26,7 @@ import { poolDirsForSchema, schemaForPoolDirs, RECORDS_DIR } from '../site/entit
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { computeSourceHash } from './freeform-manifest.js'
 import { layoutAreaRoute } from '../site/layout-folder.js'
+import { warnOutsideVocabulary } from '../site/vocabulary-warnings.js'
 
 // Try to import content-reader for markdown → ProseMirror conversion
 let markdownToProseMirror
@@ -46,17 +47,17 @@ try {
 }
 
 
+/** Report what a translation's markdown could not honour, naming the file. */
+function warnFor(filePath) {
+  return (message) => console.warn(`[i18n] ${relative(process.cwd(), filePath)}: ${message}`)
+}
+
 /**
  * Normalize route for filesystem path
  * Removes leading slash, replaces remaining slashes with path separators
  * @param {string} route - Page route (e.g., '/about/team')
  * @returns {string} Normalized path (e.g., 'about/team')
  */
-/** Report what a translation's markdown could not honour, naming the file. */
-function warnFor(filePath) {
-  return (message) => console.warn(`[i18n] ${relative(process.cwd(), filePath)}: ${message}`)
-}
-
 function normalizeRouteForPath(route) {
   if (route === '/') return ''
   return route.replace(/^\//, '').replace(/\//g, '/')
@@ -91,6 +92,7 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
       // Convert markdown body to ProseMirror — HTML in it shows as written,
       // except `<br>`, and the translator is told which file.
       const proseMirrorContent = markdownToProseMirror(body, { onWarning: warnFor(filePath) })
+      warnOutsideVocabulary(proseMirrorContent, warnFor(filePath))
 
       return {
         content: proseMirrorContent,
@@ -145,6 +147,7 @@ export async function loadFreeformRecord(item, schema, locale, localesDir) {
 
     // Convert markdown body to ProseMirror (if body exists)
     const proseMirrorContent = body.trim() ? markdownToProseMirror(body, { onWarning: warnFor(filePath) }) : null
+    if (proseMirrorContent) warnOutsideVocabulary(proseMirrorContent, warnFor(filePath))
 
     return {
       frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : null,
