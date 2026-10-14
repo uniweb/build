@@ -43,12 +43,11 @@ describe('validateAndNormalizeSchema — valid', () => {
     expect(out.fields.price.default).toBe(0)
   })
 
-  it('lowers the rich-content source aliases (markdown/html) to text + format', () => {
+  it('lowers the rich-content source alias (markdown) to text + format — and there is no html', () => {
     const out = validateAndNormalizeSchema(
       {
         fields: {
           md: { type: 'markdown' },
-          page: { type: 'html' },
           // an explicit text + format passes through verbatim
           explicit: { type: 'text', format: 'markdown' },
         },
@@ -56,8 +55,9 @@ describe('validateAndNormalizeSchema — valid', () => {
       '@/x'
     )
     expect(out.fields.md).toEqual({ type: 'text', format: 'markdown' })
-    expect(out.fields.page).toEqual({ type: 'text', format: 'html' })
     expect(out.fields.explicit).toEqual({ type: 'text', format: 'markdown' })
+    // Content is never markup; `html` was an alias until 2026-10-14.
+    expect(() => validateAndNormalizeSchema({ fields: { page: { type: 'html' } } }, '@/x')).toThrow(/is HTML/)
   })
 
   it('`richtext` is the rich-document alias → json + format: prosemirror', () => {

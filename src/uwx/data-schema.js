@@ -27,7 +27,8 @@ const TEXT_KINDS = new Set(['string', 'text'])
 // Rich-content `format` markers on a `text` field — the file-based body shape that
 // replaced the retired `richtext` kind (2026-06-02 / uwx-format.md). A `text` field
 // carrying one round-trips as the RAW source string (no ProseMirror conversion).
-const CONTENT_TEXT_FORMATS = new Set(['markdown', 'html'])
+// ⛔ `html` was one until 2026-10-14; `@uniweb/schemas` refuses it by name since.
+const CONTENT_TEXT_FORMATS = new Set(['markdown'])
 
 // The field an open map's key lowers into. `name` matches the idiom already in use
 // for this shape (the backend's site-content `collections` section), so an open map
