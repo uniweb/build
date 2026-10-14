@@ -494,6 +494,46 @@ describe('toDataSchemaDeclaration — brief & linkable', () => {
   })
 })
 
+describe('toDataSchemaDeclaration — grantable & readable_with (2026-10-14)', () => {
+  it('sends `grantable` only as an authored false', () => {
+    expect(lower({ fields: { name: 'string' } }, '@/x', '@acme/x')).not.toHaveProperty('grantable')
+    expect(lower({ grantable: true, fields: { name: 'string' } }, '@/x', '@acme/x')).not.toHaveProperty('grantable')
+    expect(lower({ grantable: false, fields: { name: 'string' } }, '@/x', '@acme/x').grantable).toBe(false)
+  })
+
+  it('carries `readable_with` on a reference, and on a list of them', () => {
+    const d = lower(
+      {
+        fields: {
+          title: 'string',
+          course: { ref: '@/course', readable_with: 'edit' },
+          reviewers: { ref: '@/person', many: true, readable_with: 'read' },
+          related: { ref: '@/course' },
+        },
+      },
+      '@/submission',
+      '@acme/submission'
+    )
+    const f = d.sections.brief.fields
+    expect(f.course).toEqual({ type: 'entity_ref', model: '@acme/course', readable_with: 'edit' })
+    expect(f.reviewers).toEqual({ type: 'entity_ref', model: '@acme/person', multiple: true, readable_with: 'read' })
+    expect(f.related).not.toHaveProperty('readable_with')
+  })
+
+  it('refuses `readable_with` off a reference, or at a level that is not one', () => {
+    expect(() => lower({ fields: { title: { type: 'string', readable_with: 'read' } } }, '@/x', '@acme/x')).toThrow(
+      /only a reference can/
+    )
+    expect(() => lower({ fields: { tags: { type: 'string', many: true, readable_with: 'read' } } }, '@/x', '@acme/x')).toThrow(
+      /only a reference can/
+    )
+    expect(() => lower({ fields: { course: { ref: '@/course', readable_with: 'write' } } }, '@/x', '@acme/x')).toThrow(
+      /must be read, edit or admin/
+    )
+    expect(() => lower({ grantable: 'no', fields: { name: 'string' } }, '@/x', '@acme/x')).toThrow(/'grantable' must be a boolean/)
+  })
+})
+
 describe('toDataSchemaDeclaration — nesting → type: section fields', () => {
   const decl = lower(
     {

@@ -114,7 +114,7 @@ export function isContentBodyField(field) {
  *   (item_ref) ref to its full `@org/model/<section>` path. Falls back to
  *   `resolveName` (model only) when not supplied.
  * @returns {Object} the declaration (`{ name, label?, plural?, icon?, description?,
- *          source_locale?, linkable?, sections }`).
+ *          source_locale?, linkable?, grantable?, sections }`).
  */
 export function toDataSchemaDeclaration(normalized, { name, resolveName, resolveOptions } = {}) {
   if (!name) throw new Error('toDataSchemaDeclaration: a registry name is required')
@@ -158,6 +158,10 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   // ⛔ And until 2026-09-30 this said a missing card "is not a reason to refuse" a
   // reference, which read as a promise that one is accepted. A backend refuses it.
   if (normalized.linkable === false) decl.linkable = false
+
+  // `grantable` — AUTHORED ONLY, like `linkable`: a model's entries may be shared one at a
+  // time unless it says `grantable: false` (omitted ⇒ true) [Diego, 2026-10-14].
+  if (normalized.grantable === false) decl.grantable = false
 
   decl.sections = sections
   return decl
@@ -425,6 +429,9 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
   if (leafType === 'ref') {
     out.type = 'entity_ref'
     if (field.ref) out.model = resolve(field.ref)
+    // The level on the entry it points to that opens this entry, for `read` — by link
+    // [Diego, 2026-10-14]. `@uniweb/schemas` admits it only here, as read, edit or admin.
+    if (field.readable_with) out.readable_with = field.readable_with
     return out
   }
 
