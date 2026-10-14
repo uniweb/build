@@ -1068,7 +1068,12 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // come through here (a free-form translation, a record body) kept raw references
   // nothing resolved, and the same section's content differed between a build and a
   // document stored as written.
-  const proseMirrorContent = markdownToProseMirror(markdown)
+  //
+  // HTML in the markdown is not content: it shows as written, except `<br>`
+  // (content-reader, since 2026-10-14). Say so with the file in hand.
+  const proseMirrorContent = markdownToProseMirror(markdown, {
+    onWarning: (message) => console.warn(`[content-collector] ${relative(siteRoot, filePath)}: ${message}`),
+  })
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's

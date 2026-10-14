@@ -52,6 +52,11 @@ try {
  * @param {string} route - Page route (e.g., '/about/team')
  * @returns {string} Normalized path (e.g., 'about/team')
  */
+/** Report what a translation's markdown could not honour, naming the file. */
+function warnFor(filePath) {
+  return (message) => console.warn(`[i18n] ${relative(process.cwd(), filePath)}: ${message}`)
+}
+
 function normalizeRouteForPath(route) {
   if (route === '/') return ''
   return route.replace(/^\//, '').replace(/\//g, '/')
@@ -83,8 +88,9 @@ export async function loadFreeformTranslation(section, page, locale, localesDir)
       const content = await readFile(filePath, 'utf-8')
       const { frontmatter, body } = parseFrontmatter(content, filePath)
 
-      // Convert markdown body to ProseMirror
-      const proseMirrorContent = markdownToProseMirror(body)
+      // Convert markdown body to ProseMirror — HTML in it shows as written,
+      // except `<br>`, and the translator is told which file.
+      const proseMirrorContent = markdownToProseMirror(body, { onWarning: warnFor(filePath) })
 
       return {
         content: proseMirrorContent,
@@ -138,7 +144,7 @@ export async function loadFreeformRecord(item, schema, locale, localesDir) {
     const { frontmatter, body } = parseFrontmatter(content, filePath)
 
     // Convert markdown body to ProseMirror (if body exists)
-    const proseMirrorContent = body.trim() ? markdownToProseMirror(body) : null
+    const proseMirrorContent = body.trim() ? markdownToProseMirror(body, { onWarning: warnFor(filePath) }) : null
 
     return {
       frontmatter: Object.keys(frontmatter).length > 0 ? frontmatter : null,

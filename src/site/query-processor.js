@@ -563,8 +563,11 @@ async function processContentItem(dir, filename, config, siteRoot, basePath, rec
   // record was published.
   await processDataItemAssets(frontmatter, filepath, siteRoot, recordsRoot, basePath)
 
-  // Parse markdown body to ProseMirror
-  const content = markdownToProseMirror(body)
+  // Parse markdown body to ProseMirror — HTML in it shows as written, except
+  // `<br>`, and the author is told which file.
+  const content = markdownToProseMirror(body, {
+    onWarning: (message) => console.warn(`[records] ${relative(siteRoot, filepath)}: ${message}`),
+  })
 
   // Process assets (resolve paths, copy co-located files)
   // This modifies content in place, updating paths to site-root-relative
