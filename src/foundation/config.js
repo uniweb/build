@@ -26,6 +26,7 @@
 import { resolve } from 'node:path'
 import { foundationPlugin } from '../vite-foundation-plugin.js'
 import { jsxExtensionGuard } from '../jsx-extension.js'
+import { nodeEnvDefine } from './node-env.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 // The ONE definition. This list used to be re-typed here, and again in
 // vite-foundation-plugin.js — three hand-synced copies of "what a foundation
@@ -35,6 +36,8 @@ import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 // `import-map-plugin.js` imports nothing, so this is a leaf import with no
 // cycle risk.
 import { DEFAULT_EXTERNALS } from '../import-map-plugin.js'
+
+export { nodeEnvDefine }
 
 /**
  * Create a complete Vite configuration for a Uniweb foundation
@@ -110,6 +113,7 @@ export async function defineFoundationConfig(options = {}) {
     foundationPlugin({ srcDir, sections: sectionPaths }),
     // JSX compiles only in .jsx files: a .js file holding it fails with that said.
     jsxExtensionGuard(),
+    nodeEnvDefine(),
     tailwind && tailwindcss(),
     react(),
     svgr(),

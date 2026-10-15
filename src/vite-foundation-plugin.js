@@ -17,6 +17,7 @@ import { generateFoundationVars } from './theme/index.js'
 import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
 import { deriveSupports } from './foundation/derive-supports.js'
 import { proseWithoutStyles, PROSE_WITHOUT_STYLES_WARNING } from './foundation/prose-styles.js'
+import { nodeEnvDefine } from './foundation/node-env.js'
 
 // Foundations already told that their prose has no stylesheet — once per process, so a dev
 // server's rebuild on every save does not repeat it.
@@ -347,7 +348,7 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
     }
     const react = (await import('@vitejs/plugin-react')).default
     const svgr = (await import('vite-plugin-svgr')).default
-    plugins.push(react(), svgr())
+    plugins.push(react(), svgr(), nodeEnvDefine())
 
     await viteBuild({
       root: foundationRoot,
