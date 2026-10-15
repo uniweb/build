@@ -430,3 +430,51 @@ describe('data schemas are listed referenced-first', () => {
     expect(names(cycle())).toEqual(names(cycle()))
   })
 })
+
+// ⭐ A register sends a picklist's `options` as `@scope/name/<section-path>` — a registry
+// refuses a path that names no section (2026-10-15). The section is the
+// one the author named, or the Model's one list for `'@/x'` alone. ⛔ Until 2026-10-15 the first
+// single-or-multi section was taken, so `discipline` below went up pointing at `countries`.
+describe('buildSchemaOnlyPackage — a picklist names the section of its choices', () => {
+  const norm = (ref, def) => validateAndNormalizeSchema(def, ref)
+  const lists = norm('@/lists', {
+    sections: {
+      countries: { many: true, fields: { label: 'string' }, sections: { subdivisions: { many: true, fields: { label: 'string' } } } },
+      disciplines: { many: true, fields: { label: 'string' } },
+    },
+  })
+  const fieldsOf = (cv) => {
+    const doc = buildSchemaOnlyPackage({ schemas: { '@/lists': lists, '@/cv': cv }, scope: '@acme', exportedAt: '2026-10-15T00:00:00Z' })
+    return doc.entities.find((e) => e.name === '@acme/cv').sections.brief.fields
+  }
+
+  it('sends the section each field names, a nested one by its path', () => {
+    const fields = fieldsOf(
+      norm('@/cv', {
+        fields: {
+          country: { options: '@/lists/countries' },
+          province: { options: '@/lists/countries/subdivisions' },
+          discipline: { options: '@/lists/disciplines', many: true },
+        },
+      })
+    )
+    expect(fields.country).toEqual({ type: 'item_ref', options: '@acme/lists/countries' })
+    expect(fields.province).toEqual({ type: 'item_ref', options: '@acme/lists/countries/subdivisions' })
+    expect(fields.discipline).toEqual({ type: 'item_ref', multiple: true, options: '@acme/lists/disciplines' })
+  })
+
+  it('refuses a Model with several lists named alone, naming the schema, the field and the lists', () => {
+    expect(() => fieldsOf(norm('@/cv', { fields: { discipline: { options: '@/lists' } } }))).toThrow(
+      /Data schema '@acme\/cv': field 'discipline' takes its choices from '@\/lists', which holds 2 lists at its top — name the one: '@\/lists\/countries', '@\/lists\/disciplines'/
+    )
+  })
+
+  it('a Model the package does not define must have its section named', () => {
+    const one = (options) => {
+      const doc = buildSchemaOnlyPackage({ schemas: { '@/cv': norm('@/cv', { fields: { c: { options } } }) }, scope: '@acme' })
+      return doc.entities[0].sections.brief.fields.c.options
+    }
+    expect(one('@std/lists/countries')).toBe('@std/lists/countries')
+    expect(() => one('@std/lists')).toThrow(/a Model this package does not define — name the section that holds them: '@std\/lists\/<section>'/)
+  })
+})

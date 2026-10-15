@@ -521,3 +521,34 @@ describe('a named data schema declares no default — ruled 2026-10-05', () => {
     expect(validateAndNormalizeSchema({ fields: { cpu: { type: 'string', default: 'quad' } } }, '@/inline').fields.cpu.default).toBe('quad')
   })
 })
+
+// ⭐ A picklist that names no list is refused where the schemas resolve — the foundation build and
+// `uniweb validate` — not first when the schema is registered (2026-10-15).
+describe('buildDataSchemaMap — a picklist names a list of its Model', () => {
+  let dir
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ds-'))
+    mkdirSync(join(dir, 'schemas'), { recursive: true })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  const write = (name, body) => writeFileSync(join(dir, 'schemas', `${name}.yml`), body)
+  const lists = 'name: lists\nsections:\n  countries: { many: true, fields: { label: { type: string } } }\n  disciplines: { many: true, fields: { label: { type: string } } }\n  groups:\n    sections:\n      a: { many: true, fields: { label: { type: string } } }\n'
+
+  it('resolves the Model a section path names', async () => {
+    write('cv', 'name: cv\nfields:\n  discipline: { options: "@/lists/disciplines" }\n')
+    write('lists', lists)
+    const map = await buildDataSchemaMap(new Set(['@/cv']), { srcDir: dir })
+    expect(Object.keys(map).sort()).toEqual(['@/cv', '@/lists'])
+  })
+
+  it.each([
+    ['@/lists', /field 'discipline' takes its choices from '@\/lists', which holds 2 lists at its top/],
+    ['@/lists/nope', /field 'discipline' takes its choices from '@\/lists\/nope', but '@\/lists' has no section 'nope'/],
+    ['@/lists/groups', /field 'discipline' takes its choices from '@\/lists\/groups', a section that holds only sections/],
+  ])('refuses %s, naming the schema and the field', async (options, message) => {
+    write('cv', `name: cv\nfields:\n  discipline: { options: "${options}" }\n`)
+    write('lists', lists)
+    await expect(buildDataSchemaMap(new Set(['@/cv']), { srcDir: dir })).rejects.toThrow(message)
+  })
+})

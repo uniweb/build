@@ -27,7 +27,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { normalizeFoundationSchema } from '@uniweb/schemas/foundation'
-import { toDataSchemaDeclaration, SHORTHAND_SECTION } from './data-schema.js'
+import { parseOptionsRef } from '@uniweb/schemas/format'
+import { toDataSchemaDeclaration, optionsSectionPath } from './data-schema.js'
 import { checkFoundationName, splitFoundationName } from '../foundation-name.js'
 
 const FOUNDATION_SCHEMA = '@uniweb/foundation-schema'
@@ -155,7 +156,8 @@ function buildDataSchemaEntities(dataSchemas, scope) {
     .map(([ref, normalized]) => ({
       model: DATA_SCHEMA,
       // `name` resolved to the concrete scope; entity_ref `models` resolve the same
-      // way; item_ref `options` get the full `@org/x/<section>` path (§10.1).
+      // way; item_ref `options` name the section whose items are the choices
+      // (`@org/x/<section-path>`, `makeOptionsResolver`).
       ...toDataSchemaDeclaration(normalized, { name: scoped(ref), resolveName: scoped, resolveOptions }),
     }))
   return { entities: referencedFirst(entities), scoped, org }
@@ -279,27 +281,23 @@ function buildRefs(dataSchemas, scoped) {
   return Object.keys(dataSchemas).sort().map((ref) => ({ name: scoped(ref) }))
 }
 
-// Resolve an item_ref `options: '@/x'` to the full `@/x/<section>` path the
-// backend needs (it splits on the last `/`; a bare model mis-resolves — §10.1).
-// The section is the options model's single item-bearing (single/multi) section.
+// An item_ref's `options` as a registry takes it: `@scope/name/<section-path>`. A registry
+// refuses a path that names no section, and picks none for us (2026-10-15). The section is
+// the one the author named, or — for `'@/x'` alone — the options Model's one list
+// (`optionsSectionPath`, which refuses a Model with several).
+// ⛔ Until 2026-10-15 this took the Model's FIRST single-or-multi section, and this comment said
+// the registry "splits on the last `/`" — it does not, and a two-segment path is refused.
 function makeOptionsResolver(dataSchemas, scoped) {
-  return (ref) => {
-    const model = dataSchemas[ref]
-    if (!model) return scoped(ref)
-    const section = itemBearingSectionName(model, ref)
-    return section ? `${scoped(ref)}/${section}` : scoped(ref)
+  return (options) => {
+    const { model, path } = parseOptionsRef(options)
+    const target = dataSchemas[model]
+    if (target) return `${scoped(model)}/${optionsSectionPath(options, target)}`
+    if (path) return `${scoped(model)}/${path}`
+    throw new Error(
+      `takes its choices from '${options}', a Model this package does not define — name the section ` +
+        `that holds them: '${options}/<section>'.`
+    )
   }
-}
-
-function itemBearingSectionName(normalized, ref) {
-  // fields-form → the shorthand's one section, always named `brief`
-  if (normalized.fields) return SHORTHAND_SECTION
-  // sections-form → the first item-bearing (single/multi) section
-  for (const [name, sec] of Object.entries(normalized.sections || {})) {
-    const kind = sec.kind || 'single'
-    if (kind === 'single' || kind === 'multi') return name
-  }
-  return null
 }
 
 // Per-locale sidecar map from `<foundationDir>/i18n/<locale>.json`. `{}` when none.

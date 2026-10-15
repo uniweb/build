@@ -21,6 +21,8 @@
  * Pure — IR in, declaration out; no I/O, no uuids.
  */
 
+import { parseOptionsRef } from '@uniweb/schemas/format'
+
 // Text kinds carry per-locale values when localized.
 const TEXT_KINDS = new Set(['string', 'text'])
 
@@ -110,9 +112,10 @@ export function isContentBodyField(field) {
  * @param {string} opts.name - the schema's registry name (`@org/x` or `@/x`).
  * @param {(ref: string) => string} [opts.resolveName] - maps a `ref` target name.
  *   Defaults to resolving `@/x` into the schema's own org, passing others through.
- * @param {(ref: string) => string} [opts.resolveOptions] - maps an `options`
- *   (item_ref) ref to its full `@org/model/<section>` path. Falls back to
- *   `resolveName` (model only) when not supplied.
+ * @param {(options: string, fieldPath: string) => string} [opts.resolveOptions] - maps an
+ *   `options` (item_ref) value to the `@org/model/<section-path>` the registry takes — a
+ *   register supplies it (`registry-package.js`), naming the section a short `'@/x'` means.
+ *   Falls back to `resolveName`, which resolves the scope and keeps the rest as written.
  * @returns {Object} the declaration (`{ name, label?, plural?, icon?, description?,
  *          source_locale?, linkable?, grantable?, sections }`).
  */
@@ -122,7 +125,15 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
     throw new Error('toDataSchemaDeclaration: a normalized schema is required')
   }
   const resolve = resolveName || defaultResolver(name)
-  const optResolve = resolveOptions || resolve
+  const resolveChoices = resolveOptions || resolve
+  // A picklist that names no list is refused naming the schema and the field.
+  const optResolve = (options, fieldPath) => {
+    try {
+      return resolveChoices(options, fieldPath)
+    } catch (err) {
+      throw new Error(`Data schema '${name}': field '${fieldPath}' ${err.message}`)
+    }
+  }
 
   const { sections, brief } = normalized.sections
     ? lowerSectionsForm(normalized.sections, resolve, optResolve)
@@ -386,17 +397,17 @@ function lowerField(rawField, resolve, optResolve, path = '') {
       { ...rest, ...items, type: items ? items.type : 'json' },
       resolve,
       optResolve,
-      { multiple: true }
+      { multiple: true, path }
     )
   }
 
-  return lowerLeaf(field, resolve, optResolve)
+  return lowerLeaf(field, resolve, optResolve, { path })
 }
 
 // Lower a LEAF-SHAPED field — a scalar, a reference (`entity_ref`), or a curated
 // picklist (`item_ref`) — with or without `multiple`. The single place field
 // attributes are emitted, so every leaf-shaped kind carries the same set.
-function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
+function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } = {}) {
   const leafType = field.type
 
   // `richtext` is NOT a kind — it is the author alias for a ProseMirror document
@@ -435,10 +446,11 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
     return out
   }
 
-  // A curated picklist is an item_ref (machine-ish — never localized).
+  // A curated picklist is an item_ref (machine-ish — never localized), naming the section whose
+  // items are its choices (`optionsSectionPath`).
   if (field.options !== undefined) {
     out.type = 'item_ref'
-    out.options = optResolve(field.options)
+    out.options = optResolve(field.options, path)
     return out
   }
 
@@ -467,6 +479,134 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false } = {}) {
   // pre-fill)" until then — but that blob leaves `dataSchemas` out, so a named schema's
   // default reached the runtime alone, and no editor.
   return out
+}
+
+// --- picklists ----------------------------------------------------------------
+
+/**
+ * ⭐ THE SECTION A PICKLIST'S CHOICES ARE IN — its path in the options Model, as the registry
+ * names it (2026-10-15). A field that picks from a list names the section holding the list:
+ * `options: '@/lists/countries'`, a nested one by its path (`'@/lists/countries/subdivisions'`).
+ * A Model whose top holds ONE list may be named alone — `'@/country'`, the `fields:` shorthand's
+ * one section, is the common case — and that list is the one meant.
+ *
+ * A register sends `@scope/name/<this path>` (`registry-package.js`): a registry takes an
+ * `item_ref`'s `options` as `@org/model/section-path` and refuses one that names no section
+ * (2026-10-15).
+ *
+ * ⛔ A Model with several lists at its top is refused when named alone: which one the author meant
+ * is not ours to guess. Until 2026-10-15 the first single-or-multi section was taken, and a path
+ * could not be written at all, so a Model's second list could never be a field's choices.
+ *
+ * @param {string} options - the field's `options:` as authored (`@/lists/countries`)
+ * @param {Object} target - the options Model, normalized
+ * @returns {string} the section's path in the Model (`countries`, `brief` for the shorthand)
+ * @throws when the path names no section, or a section that holds only sections, or is left out
+ *   of a Model whose top holds more than one list — naming the lists it has
+ */
+export function optionsSectionPath(options, target) {
+  const { model, path } = parseOptionsRef(options)
+  const sections = sectionPathsOf(target)
+  const lists = sections.filter((s) => s.holdsItems).map((s) => s.path)
+  const named = (paths) => paths.map((p) => `'${model}/${p}'`).join(', ')
+  if (path == null) {
+    const top = lists.filter((p) => !p.includes('/'))
+    if (top.length === 1) return top[0]
+    throw new Error(
+      top.length === 0
+        ? `takes its choices from '${options}', which holds no list at its top — name the section that holds them: ${named(lists) || '(it has none)'}.`
+        : `takes its choices from '${options}', which holds ${top.length} lists at its top — name the one: ${named(top)}.`
+    )
+  }
+  const found = sections.find((s) => s.path === path)
+  if (!found) {
+    throw new Error(`takes its choices from '${options}', but '${model}' has no section '${path}' — its lists: ${named(lists) || '(none)'}.`)
+  }
+  if (!found.holdsItems) {
+    const under = lists.filter((p) => p.startsWith(`${path}/`))
+    throw new Error(
+      `takes its choices from '${options}', a section that holds only sections, so it has no items to choose — ` +
+        `name a list under it: ${named(under) || '(it has none)'}.`
+    )
+  }
+  return path
+}
+
+/**
+ * Check every picklist in a closed map of normalized schemas against the Model it names, throwing
+ * for the first whose `options:` names no list (`optionsSectionPath`). A Model the map does not
+ * hold is skipped: resolving the graph fails on it first.
+ *
+ * @param {Object<string, Object>} dataSchemas - `{ [ref]: normalized }`, closed under references
+ */
+export function assertOptionsTargets(dataSchemas) {
+  for (const [ref, schema] of Object.entries(dataSchemas || {})) {
+    forEachOptionsField(schema, (fieldPath, options) => {
+      const target = dataSchemas[parseOptionsRef(options).model]
+      if (!target) return
+      try {
+        optionsSectionPath(options, target)
+      } catch (err) {
+        throw new Error(`Data schema '${ref}': field '${fieldPath}' ${err.message}`)
+      }
+    })
+  }
+}
+
+// Every field of a normalized schema that declares `options:`, with its dotted path — in any
+// section, nested object, list of records or open map.
+function forEachOptionsField(schema, fn) {
+  const visitField = (raw, path) => {
+    const field = asField(raw)
+    if (typeof field.options === 'string') fn(path, field.options)
+    if (field.items) visitField(field.items, path)
+    if (field.values) visitField(field.values, path)
+    for (const [key, child] of Object.entries(field.fields || {})) visitField(child, `${path}.${key}`)
+  }
+  const visitSection = (section, prefix) => {
+    for (const [key, field] of Object.entries(section?.fields || {})) visitField(field, `${prefix}${key}`)
+    for (const [name, child] of Object.entries(section?.sections || {})) visitSection(child, `${prefix}${name}.`)
+  }
+  if (schema?.fields) visitSection(schema, '')
+  for (const [name, section] of Object.entries(schema?.sections || {})) visitSection(section, `${name}.`)
+}
+
+// The sections of a normalized Model by the path the registry names each one by, and whether each
+// holds items — the lowering's own shapes (`lowerField`): a child in `sections:`, a nested object
+// (one record), a list of records, an open map (rows). A section holding only sections — a binder —
+// holds none.
+function sectionPathsOf(normalized) {
+  const out = []
+  const visit = (path, node) => {
+    out.push({ path, holdsItems: holdsItems(node) })
+    for (const [name, child] of Object.entries(node.sections || {})) visit(`${path}/${name}`, child)
+    for (const [name, field] of Object.entries(node.fields || {})) {
+      const nested = sectionOfField(field)
+      if (nested) visit(`${path}/${name}`, nested)
+    }
+  }
+  if (normalized?.fields) visit(SHORTHAND_SECTION, { kind: 'single', fields: normalized.fields })
+  for (const [name, section] of Object.entries(normalized?.sections || {})) visit(name, section)
+  return out
+}
+
+// The section a section-shaped FIELD lowers into (`lowerField`), or null for a leaf.
+function sectionOfField(raw) {
+  const field = asField(raw)
+  if (field.type === 'object') {
+    if (field.values !== undefined) return { kind: 'multi', fields: { [OPEN_MAP_KEY]: { type: 'string' }, ...asField(field.values).fields } }
+    return { kind: 'single', fields: field.fields }
+  }
+  if (field.type === 'array' && field.items && asField(field.items).type === 'object') {
+    return { kind: 'multi', fields: asField(field.items).fields }
+  }
+  return null
+}
+
+function holdsItems(section) {
+  if ((section.kind || 'single') === 'multi') return true
+  if (section.kind === 'binder') return false
+  return Object.values(section.fields || {}).some((field) => !sectionOfField(field))
 }
 
 // --- helpers -----------------------------------------------------------------

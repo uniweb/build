@@ -1,4 +1,4 @@
-import { toDataSchemaDeclaration } from '../src/uwx/data-schema.js'
+import { toDataSchemaDeclaration, optionsSectionPath } from '../src/uwx/data-schema.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 // Drive the lowering off the real normalized IR, so the translation and the
@@ -819,5 +819,74 @@ describe('model-level keys on the declaration', () => {
 
   it('honours an authored `linkable: false` on a brief-less model', () => {
     expect(briefless({ linkable: false }).linkable).toBe(false)
+  })
+})
+
+// ⭐ A picklist names the section whose items are its choices (2026-10-15). `'@/x'` alone means the
+// Model's ONE list; a Model with several must have one named. ⛔ Until then the first single-or-multi
+// section was taken and no other could be named.
+describe('optionsSectionPath — the section a picklist names', () => {
+  const lists = validateAndNormalizeSchema(
+    {
+      sections: {
+        countries: { many: true, fields: { code: 'string', label: 'string' }, sections: { subdivisions: { many: true, fields: { label: 'string' } } } },
+        disciplines: { many: true, tree: true, fields: { label: 'string' } },
+        groups: { sections: { a: { many: true, fields: { label: 'string' } } } },
+      },
+    },
+    '@/lists'
+  )
+
+  it('a named section, a nested one by its path', () => {
+    expect(optionsSectionPath('@/lists/disciplines', lists)).toBe('disciplines')
+    expect(optionsSectionPath('@/lists/countries/subdivisions', lists)).toBe('countries/subdivisions')
+  })
+
+  it("a Model's one list, named alone — the `fields:` shorthand's is `brief`", () => {
+    const country = validateAndNormalizeSchema({ fields: { code: 'string', label: 'string' } }, '@/country')
+    expect(optionsSectionPath('@/country', country)).toBe('brief')
+    const one = validateAndNormalizeSchema({ sections: { values: { many: true, fields: { label: 'string' } } } }, '@/colors')
+    expect(optionsSectionPath('@/colors', one)).toBe('values')
+  })
+
+  it('refuses a Model with several lists named alone, naming them', () => {
+    expect(() => optionsSectionPath('@/lists', lists)).toThrow(
+      /'@\/lists', which holds 2 lists at its top — name the one: '@\/lists\/countries', '@\/lists\/disciplines'/
+    )
+  })
+
+  it('refuses a section the Model does not have, naming its lists', () => {
+    expect(() => optionsSectionPath('@/lists/countrys', lists)).toThrow(/has no section 'countrys' — its lists: '@\/lists\/countries'/)
+  })
+
+  it('refuses a section that holds only sections, naming the lists under it', () => {
+    expect(() => optionsSectionPath('@/lists/groups', lists)).toThrow(/holds only sections[\s\S]*'@\/lists\/groups\/a'/)
+  })
+
+  it('a section-shaped field is a section too — a nested object, a list of records', () => {
+    const cv = validateAndNormalizeSchema(
+      { fields: { name: 'string', address: { type: 'object', fields: { city: 'string' } }, degrees: { type: 'object', many: true, fields: { title: 'string' } } } },
+      '@/cv'
+    )
+    expect(optionsSectionPath('@/cv/brief/address', cv)).toBe('brief/address')
+    expect(optionsSectionPath('@/cv/brief/degrees', cv)).toBe('brief/degrees')
+  })
+})
+
+describe('toDataSchemaDeclaration — a picklist keeps the section it names', () => {
+  it('resolves the scope and keeps the path', () => {
+    const d = lower({ fields: { country: { options: '@/lists/countries' }, other: { options: '@std/lists/x' } } }, '@/cv', '@acme/cv')
+    expect(d.sections.brief.fields.country).toEqual({ type: 'item_ref', options: '@acme/lists/countries' })
+    expect(d.sections.brief.fields.other).toEqual({ type: 'item_ref', options: '@std/lists/x' })
+  })
+
+  it("names the schema and the field when a resolver refuses", () => {
+    const norm = validateAndNormalizeSchema({ fields: { country: { options: '@/lists' } } }, '@/cv')
+    const refuse = () => {
+      throw new Error("takes its choices from '@/lists', which holds 2 lists")
+    }
+    expect(() => toDataSchemaDeclaration(norm, { name: '@acme/cv', resolveOptions: refuse })).toThrow(
+      /Data schema '@acme\/cv': field 'country' takes its choices from '@\/lists'/
+    )
   })
 })

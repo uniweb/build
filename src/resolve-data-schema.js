@@ -40,6 +40,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, isAbsolute, extname, basename } from 'node:path'
 import { dataRefOf } from '@uniweb/core/data-keys'
 import { SYSTEM_RECORD_SCHEMAS } from '@uniweb/schemas/system'
+import { assertOptionsTargets } from './uwx/data-schema.js'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
@@ -292,6 +293,9 @@ export async function buildDataSchemaMap(refs, { srcDir }) {
       if (!map[target]) queue.push(target)
     }
   }
+  // A picklist names a section of the Model holding its choices — refused here, at the author's
+  // screen, when it names none (`optionsSectionPath`), rather than when the schema is registered.
+  assertOptionsTargets(map)
   return map
 }
 
