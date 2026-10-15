@@ -332,11 +332,12 @@ describe('toDataSchemaDeclaration — a section-shaped field carries its constra
     ])
   })
 
-  it('a leaf drops them — the wire has no slot, and that is not an error', () => {
-    // Well-formed authoring the registry has no home for. Failing a build over it
-    // would break a project that never registers at all, so it is documented
-    // rather than enforced; a leaf narrows with `enum` / `format` instead.
-    expect(field({ type: 'string', constraints: MIN1 })).not.toHaveProperty('constraints')
+  it('a leaf refuses them — a section key, with no slot on a value', () => {
+    // A named schema refuses them first (`resolve-data-schema.js`); the lowering refuses them
+    // too rather than drop them, which it did until 2026-10-15.
+    expect(() => field({ type: 'string', constraints: MIN1 })).toThrow(
+      /Data schema '@acme\/x': field 'f' declares `constraints` on a value — they are a section's rules/
+    )
   })
 
   it('@std/publication declares min_items on its authors, and it reaches the wire', async () => {
@@ -887,6 +888,52 @@ describe('toDataSchemaDeclaration — a picklist keeps the section it names', ()
     }
     expect(() => toDataSchemaDeclaration(norm, { name: '@acme/cv', resolveOptions: refuse })).toThrow(
       /Data schema '@acme\/cv': field 'country' takes its choices from '@\/lists'/
+    )
+  })
+})
+
+// ⭐ A field's rules travel as its own keys (2026-10-15), as a registry keeps them.
+describe("toDataSchemaDeclaration — a field's rules are its own keys", () => {
+  const fields = (authored) => lower({ fields: authored }, '@/x', '@acme/x').sections.brief.fields
+
+  it('carries each as written', () => {
+    const f = fields({
+      title: { type: 'string', max_length: 250, required: true },
+      age: { type: 'integer', min: 0, max: 150 },
+      ratio: { type: 'number', min: 0, max: 1 },
+      photo: { type: 'image', mime_types: ['image/*'], max_size: 2000000 },
+      started: { type: 'date', format: 'year-month' },
+      price: { type: 'string', format: 'currency' },
+    })
+    expect(f.title).toEqual({ type: 'string', required: true, max_length: 250, localized: true })
+    expect(f.age).toEqual({ type: 'int', min: 0, max: 150 })
+    expect(f.ratio).toEqual({ type: 'decimal', min: 0, max: 1 })
+    expect(f.photo).toEqual({ type: 'file', mime_types: ['image/*'], max_size: 2000000 })
+    expect(f.started).toEqual({ type: 'date', format: 'year-month' })
+    expect(f.price).toEqual({ type: 'string', format: 'currency' })
+  })
+
+  it('a list of values carries them on the multi-valued field', () => {
+    expect(fields({ tags: { type: 'string', many: true, max_length: 40 } }).tags).toEqual({
+      type: 'string',
+      multiple: true,
+      max_length: 40,
+      localized: true,
+    })
+  })
+
+  it("a `fields:` schema's section rules land on its one section", () => {
+    const RULE = [{ kind: 'exclusive', fields: ['org', 'other_org'] }]
+    const decl = lower({ fields: { org: { type: 'string' }, other_org: { type: 'string' } }, constraints: RULE }, '@/x', '@acme/x')
+    expect(decl.sections.brief.constraints).toEqual(RULE)
+  })
+})
+
+describe('toDataSchemaDeclaration — a picklist cannot pick from its own schema', () => {
+  it('is refused, naming the field', () => {
+    const norm = validateAndNormalizeSchema({ sections: { brief: { brief: true, fields: { kind: { options: '@/x/kinds' } } }, kinds: { many: true, fields: { label: 'string' } } } }, '@/x')
+    expect(() => toDataSchemaDeclaration(norm, { name: '@acme/x' })).toThrow(
+      /Data schema '@acme\/x': field 'brief\/kind' takes its choices from a section of its own schema/
     )
   })
 })

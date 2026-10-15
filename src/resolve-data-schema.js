@@ -102,7 +102,7 @@ const packageForScope = (scope) => SCOPE_PACKAGE[scope] ?? `@${scope}/schemas`
  */
 function normalizeNamedSchema(schema, ref) {
   const normalized = validateAndNormalizeSchema(schema, ref)
-  const paths = fieldsWithDefaults(normalized)
+  const paths = fieldsWhere(normalized, (spec) => spec.default !== undefined)
   if (paths.length > 0) {
     throw new Error(
       `Data schema '${ref}': a named data schema declares no default — remove \`default:\` from ` +
@@ -110,11 +110,37 @@ function normalizeNamedSchema(schema, ref) {
         `renders as; an editor pre-fills from a component's own inline field map or form in \`data:\`.`
     )
   }
+  // ⛔ The same reason, two more keys (2026-10-15): nothing keeps them for a named schema. A
+  // registry has no slot for a field's `help` or for a leaf's `constraints` — it refuses the
+  // first, and a section key cannot sit on a leaf — and no reader of the build reads either.
+  // Until then both were dropped when the schema was registered, without a word.
+  const helped = fieldsWhere(normalized, (spec) => spec.help !== undefined)
+  if (helped.length > 0) {
+    throw new Error(
+      `Data schema '${ref}': a named data schema declares no \`help\` — write it as the field's ` +
+        `\`description\`, which a registry keeps: ${helped.map((p) => `'${p}'`).join(', ')}.`
+    )
+  }
+  const ruled = fieldsWhere(normalized, (spec) => spec.constraints !== undefined && !isSectionShaped(spec))
+  if (ruled.length > 0) {
+    throw new Error(
+      `Data schema '${ref}': ${ruled.map((p) => `'${p}'`).join(', ')} declare${ruled.length === 1 ? 's' : ''} ` +
+        `\`constraints\` on a value — they are a section's rules, naming its fields: declare them in the ` +
+        `\`constraints:\` of the section that holds the field (beside \`fields:\` in a \`fields:\` schema).`
+    )
+  }
   return normalized
 }
 
-/** The dotted paths of every field in a normalized schema that declares a `default`. */
-function fieldsWithDefaults(schema) {
+// A field that lowers into a section — a nested object, an open map, a list of records — and so
+// may carry a section's `constraints`.
+function isSectionShaped(spec) {
+  if (spec.type === 'object') return true
+  return spec.type === 'array' && spec.items?.type === 'object'
+}
+
+/** The dotted paths of every field in a normalized schema that `test` holds for. */
+function fieldsWhere(schema, test) {
   const found = []
   const walkFields = (fields, prefix) => {
     if (!fields || typeof fields !== 'object') return
@@ -122,7 +148,7 @@ function fieldsWithDefaults(schema) {
   }
   const walkSpec = (spec, path) => {
     if (!spec || typeof spec !== 'object') return
-    if (spec.default !== undefined) found.push(path)
+    if (test(spec)) found.push(path)
     walkFields(spec.fields, `${path}.`)
     if (spec.items) walkSpec(spec.items, `${path}[]`)
     if (spec.values) walkSpec(spec.values, `${path}{}`)

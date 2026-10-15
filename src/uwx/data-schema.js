@@ -21,7 +21,7 @@
  * Pure — IR in, declaration out; no I/O, no uuids.
  */
 
-import { parseOptionsRef } from '@uniweb/schemas/format'
+import { parseOptionsRef, FIELD_RULES } from '@uniweb/schemas/format'
 
 // Text kinds carry per-locale values when localized.
 const TEXT_KINDS = new Set(['string', 'text'])
@@ -126,18 +126,32 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   }
   const resolve = resolveName || defaultResolver(name)
   const resolveChoices = resolveOptions || resolve
-  // A picklist that names no list is refused naming the schema and the field.
+  // A picklist that names no list is refused naming the schema and the field — and so is one
+  // that picks from a section of its own schema (`OWN_SECTION`).
   const optResolve = (options, fieldPath) => {
+    let resolved
     try {
-      return resolveChoices(options, fieldPath)
+      resolved = resolveChoices(options, fieldPath)
     } catch (err) {
       throw new Error(`Data schema '${name}': field '${fieldPath}' ${err.message}`)
     }
+    if (typeof resolved === 'string' && resolved.startsWith(`${name}/`)) {
+      throw new Error(`Data schema '${name}': field '${fieldPath}' ${OWN_SECTION}`)
+    }
+    return resolved
   }
 
-  const { sections, brief } = normalized.sections
-    ? lowerSectionsForm(normalized.sections, resolve, optResolve)
-    : lowerFieldsForm(normalized.fields || {}, resolve, optResolve)
+  let lowered
+  try {
+    lowered = normalized.sections
+      ? lowerSectionsForm(normalized.sections, resolve, optResolve)
+      : lowerFieldsForm(normalized.fields || {}, resolve, optResolve, normalized.constraints)
+  } catch (err) {
+    // A field the lowering refuses is named with its schema.
+    if (err.fieldPath !== undefined) throw new Error(`Data schema '${name}': ${err.message}`)
+    throw err
+  }
+  const { sections, brief } = lowered
 
   // The model-level sort axis is inline: `sort_date: true` on the brief's named
   // date field (replaces the old schema-level `sort_date_field` back-reference).
@@ -192,9 +206,10 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
 // only the recommended name for its card.
 export const SHORTHAND_SECTION = 'brief'
 
-function lowerFieldsForm(fields, resolve, optResolve) {
+// A `fields:` schema's top-level `constraints:` are its one section's rules (2026-10-15).
+function lowerFieldsForm(fields, resolve, optResolve, constraints) {
   return {
-    sections: { [SHORTHAND_SECTION]: lowerSection({ kind: 'single', brief: true, fields }, resolve, optResolve) },
+    sections: { [SHORTHAND_SECTION]: lowerSection({ kind: 'single', brief: true, fields, constraints }, resolve, optResolve) },
     brief: SHORTHAND_SECTION,
   }
 }
@@ -427,11 +442,30 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
   }
   const leafFormat = field.format
 
+  // A section's rules on a value have nowhere to go: the wire's `constraints` is a section key.
+  // A named schema refuses them before this (`resolve-data-schema.js`); refused here too, rather
+  // than dropped, which they were until 2026-10-15.
+  if (field.constraints !== undefined) {
+    throw Object.assign(
+      new Error(
+        `field '${path}' declares \`constraints\` on a value — they are a section's rules: declare them ` +
+          `in the \`constraints:\` of the section that holds it.`
+      ),
+      { fieldPath: path }
+    )
+  }
+
   const out = { type: leafType }
   if (multiple) out.multiple = true
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
   if (field.required) out.required = true
+  // A field's rules, as written — `max_length`, `min`, `max`, `mime_types`, `max_size`
+  // (`FIELD_RULES`): a registry keeps each as the field's own key and checks it on every
+  // write. ⛔ Until 2026-10-15 the normalizer dropped them before this saw them.
+  for (const key of Object.keys(FIELD_RULES)) {
+    if (field[key] !== undefined) out[key] = field[key]
+  }
 
   // A reference to a whole entity, hydrating to the target's brief. It is a
   // FIELD, so it carries field attributes — the same ones `item_ref` below has
@@ -482,6 +516,12 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
 }
 
 // --- picklists ----------------------------------------------------------------
+
+// ⛔ A picklist cannot take its choices from a section of its own schema: a registry refuses it on
+// every register, whatever order the package lists its schemas in (measured 2026-10-15). Refused
+// here, at the author's screen, until a registry takes it.
+const OWN_SECTION =
+  'takes its choices from a section of its own schema, which a registry does not take — keep the list in a Model of its own.'
 
 /**
  * ⭐ THE SECTION A PICKLIST'S CHOICES ARE IN — its path in the options Model, as the registry
@@ -542,7 +582,9 @@ export function optionsSectionPath(options, target) {
 export function assertOptionsTargets(dataSchemas) {
   for (const [ref, schema] of Object.entries(dataSchemas || {})) {
     forEachOptionsField(schema, (fieldPath, options) => {
-      const target = dataSchemas[parseOptionsRef(options).model]
+      const { model } = parseOptionsRef(options)
+      if (model === ref) throw new Error(`Data schema '${ref}': field '${fieldPath}' ${OWN_SECTION}`)
+      const target = dataSchemas[model]
       if (!target) return
       try {
         optionsSectionPath(options, target)

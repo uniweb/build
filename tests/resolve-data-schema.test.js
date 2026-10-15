@@ -552,3 +552,37 @@ describe('buildDataSchemaMap — a picklist names a list of its Model', () => {
     await expect(buildDataSchemaMap(new Set(['@/cv']), { srcDir: dir })).rejects.toThrow(message)
   })
 })
+
+// ⭐ A named schema declares only what something keeps (2026-10-15): no `help` — a registry
+// refuses it and nothing reads it — and no `constraints` on a value, a section's rules.
+describe('a named data schema declares only what something keeps', () => {
+  let dir
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ds-'))
+    mkdirSync(join(dir, 'schemas'), { recursive: true })
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  const write = (name, body) => writeFileSync(join(dir, 'schemas', `${name}.yml`), body)
+  const resolve = () => buildDataSchemaMap(new Set(['@/cv']), { srcDir: dir })
+
+  it('refuses `help`, pointing at `description`', async () => {
+    write('cv', 'name: cv\nfields:\n  title: { type: string, help: "As on the diploma" }\n')
+    await expect(resolve()).rejects.toThrow(/declares no `help` — write it as the field's `description`[\s\S]*'title'/)
+  })
+
+  it('refuses `constraints` on a value, pointing at its section', async () => {
+    write('cv', 'name: cv\nfields:\n  title: { type: string, constraints: [{ kind: min_items, value: 1 }] }\n')
+    await expect(resolve()).rejects.toThrow(/'title' declares `constraints` on a value — they are a section's rules/)
+  })
+
+  it('CONTROL — a list of records keeps its section rules', async () => {
+    write('cv', 'name: cv\nfields:\n  degrees: { type: object, many: true, constraints: [{ kind: min_items, value: 1 }], fields: { title: { type: string } } }\n')
+    const map = await resolve()
+    expect(map['@/cv'].fields.degrees.constraints).toEqual([{ kind: 'min_items', value: 1 }])
+  })
+
+  it('refuses a picklist of its own sections', async () => {
+    write('cv', 'name: cv\nsections:\n  brief: { brief: true, fields: { kind: { options: "@/cv/kinds" } } }\n  kinds: { many: true, fields: { label: { type: string } } }\n')
+    await expect(resolve()).rejects.toThrow(/field 'brief\.kind' takes its choices from a section of its own schema/)
+  })
+})
