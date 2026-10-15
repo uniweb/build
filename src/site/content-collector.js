@@ -22,7 +22,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { resolveQueriesConfig, toConfigQueries, dataKeyTyping } from './queries-config.js'
+import { resolveQueriesConfig, toConfigQueries, dataKeyTyping, foundationSections } from './queries-config.js'
 import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
@@ -43,6 +43,7 @@ import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
+import { warnPlacementsNotOffered } from './placement-warnings.js'
 
 // Try to import content-reader, fall back to simplified parser
 let markdownToProseMirror
@@ -427,6 +428,15 @@ function buildVersionMetadata(detectedVersions, pageConfig = {}) {
  * mis-attribute a message. Do not read this as a general-purpose registry.
  */
 let yamlFailures = []
+
+/**
+ * The foundation's section types for the current collect — its schema, each
+ * type's entry by name (`foundationSections`) — so a section's file can be told
+ * when it asks for a placement its type does not honour
+ * (`./placement-warnings.js`). Null when the foundation is not at hand. Set once
+ * per collect, and module-scoped for the reason `yamlFailures` gives.
+ */
+let sectionTypes = null
 
 /**
  * Parse YAML, recording a failure against the file it came from.
@@ -1075,6 +1085,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const warnHere = (message) => console.warn(`[content-collector] ${relative(siteRoot, filePath)}: ${message}`)
   const proseMirrorContent = markdownToProseMirror(markdown, { onWarning: warnHere })
   warnOutsideVocabulary(proseMirrorContent, warnHere)
+  warnPlacementsNotOffered(proseMirrorContent, type || null, sectionTypes, warnHere)
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's
@@ -2505,9 +2516,13 @@ export async function collectSiteContent(sitePath, options = {}) {
   // function again, so without the reset a typo fixed three saves ago would
   // still be counted.
   yamlFailures = []
+  sectionTypes = null
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
+  // What each section type honours — read before any section is, so a file asking
+  // for a placement its type does not offer is told (`./placement-warnings.js`).
+  sectionTypes = await foundationSections(sitePath, siteConfig)
   refuseRetiredServiceKeys(siteConfig, configFile)
   refuseUnreadableServices(siteConfig, configFile)
 
