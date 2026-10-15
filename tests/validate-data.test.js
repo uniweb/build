@@ -73,9 +73,17 @@ describe('validateItem — format', () => {
     expect(validateItem(withFormats, { site: 'https://example.com/x', email: 'a@b.co' })).toEqual([])
   })
 
-  it('accepts lenient url shapes authors actually write', () => {
-    for (const site of ['example.com', '/local/path', '//cdn.site.io/a', 'sub.domain.io/path']) {
+  // A url is what a registry stores as one (2026-10-15): an address written without a scheme that
+  // starts with a host name passes — it is stored with https:// — and a path does not.
+  it('accepts an address written without a scheme', () => {
+    for (const site of ['example.com', '//cdn.site.io/a', 'sub.domain.io/path']) {
       expect(validateItem(withFormats, { site })).toEqual([])
+    }
+  })
+
+  it('flags a path and another scheme — not web addresses', () => {
+    for (const site of ['/local/path', 'mailto:a@b.co', 'ftp://files.example.com/a']) {
+      expect(rules(validateItem(withFormats, { site }))).toEqual(['format'])
     }
   })
 

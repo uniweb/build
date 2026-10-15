@@ -904,6 +904,7 @@ describe("toDataSchemaDeclaration — a field's rules are its own keys", () => {
       photo: { type: 'image', mime_types: ['image/*'], max_size: 2000000 },
       started: { type: 'date', format: 'year-month' },
       price: { type: 'string', format: 'currency' },
+      code: { type: 'string', translatable: false, pattern: '[A-Z]{2}\\d{4}' },
     })
     expect(f.title).toEqual({ type: 'string', required: true, max_length: 250, localized: true })
     expect(f.age).toEqual({ type: 'int', min: 0, max: 150 })
@@ -911,6 +912,7 @@ describe("toDataSchemaDeclaration — a field's rules are its own keys", () => {
     expect(f.photo).toEqual({ type: 'file', mime_types: ['image/*'], max_size: 2000000 })
     expect(f.started).toEqual({ type: 'date', format: 'year-month' })
     expect(f.price).toEqual({ type: 'string', format: 'currency' })
+    expect(f.code).toEqual({ type: 'string', pattern: '[A-Z]{2}\\d{4}' })
   })
 
   it('a list of values carries them on the multi-valued field', () => {

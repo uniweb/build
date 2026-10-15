@@ -460,9 +460,9 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
   if (field.required) out.required = true
-  // A field's rules, as written — `max_length`, `min`, `max`, `mime_types`, `max_size`
-  // (`FIELD_RULES`): a registry keeps each as the field's own key and checks it on every
-  // write. ⛔ Until 2026-10-15 the normalizer dropped them before this saw them.
+  // A field's rules, as written — `max_length`, `min`, `max`, `mime_types`, `max_size`,
+  // `pattern` (`FIELD_RULES`): a registry keeps each as the field's own key and checks it on
+  // every write. ⛔ Until 2026-10-15 the normalizer dropped them before this saw them.
   for (const key of Object.keys(FIELD_RULES)) {
     if (field[key] !== undefined) out[key] = field[key]
   }
