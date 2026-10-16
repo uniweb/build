@@ -392,7 +392,7 @@ function applyElementTranslation(node, context, translations, fallbackToSource) 
 export function translatedInline(source, value) {
   const fragment = inlineMarkdownToFragment(value)
   if (!fragment) return null
-  return asLinkLabels(source, fragment) || fragment
+  return asLinkLabels(source, fragment, value) || fragment
 }
 
 /**
@@ -410,13 +410,13 @@ export function translationKeepsMarkup(markup, value) {
 }
 
 // The source's links with the fragment as their labels — the whole fragment for one link, a line
-// each for several — or null: the fragment names a link of its own, the source is not only links,
-// or the lines do not match the links one to one.
-function asLinkLabels(source, fragment) {
+// of the value each for several — or null: the fragment names a link of its own, the source is not
+// only links, or the lines do not match the links one to one.
+function asLinkLabels(source, fragment, value) {
   if (fragment.some((node) => linkMarkOf(node))) return null
   const links = linkRuns(source)
   if (!links) return null
-  const labels = links.length === 1 ? [trimInline(fragment)] : inlineLines(fragment)
+  const labels = links.length === 1 ? [trimInline(fragment)] : valueLines(value)
   if (labels.length !== links.length || labels.some((label) => !label.length)) return null
   const out = []
   links.forEach((link, i) => {
@@ -501,6 +501,16 @@ function linkMarkOf(node) {
 
 function sameMark(a, b) {
   return Boolean(a && b) && a.type === b.type && JSON.stringify(a.attrs || {}) === JSON.stringify(b.attrs || {})
+}
+
+// A value's lines as the translator wrote them, each read as inline markdown and split again at a
+// line break written in it (`<br>`), each trimmed; blank lines dropped. ⭐ Split BEFORE it is read:
+// a plain newline inside a paragraph reads as a space (2026-10-16), so the value, read whole, has no
+// lines left. ⛔ Until then the read value was split, at the newlines it kept.
+function valueLines(value) {
+  return String(value ?? '')
+    .split('\n')
+    .flatMap((line) => inlineLines(inlineMarkdownToFragment(line) || []))
 }
 
 // A fragment's lines, split at line breaks, each trimmed; blank lines dropped.

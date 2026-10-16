@@ -42,13 +42,23 @@ describe('a value that names no link, for an element made only of links', () => 
     expect(linkOf(out[0])).toMatchObject({ href: '/create', role: 'primary' })
   })
 
-  it('buttons on consecutive lines take a label each, one per line, and keep the line between them', () => {
+  it('buttons on consecutive lines take a label each, one per line, and keep what is between them', () => {
     const out = translate(TWO_BUTTONS, "Lire le livre blanc\nAuditer l'architecture")
     const labels = out.filter((node) => linkOf(node))
     expect(labels.map((node) => node.text)).toEqual(['Lire le livre blanc', "Auditer l'architecture"])
     expect(linkOf(labels[0])).toMatchObject({ href: '/engine', role: 'primary', icon: 'lu-file-text' })
     expect(linkOf(labels[1])).toMatchObject({ href: '/transparency', role: 'secondary', icon: 'lu-code-xml' })
-    expect(out.map((node) => node.text)).toEqual(['Lire le livre blanc', '\n', "Auditer l'architecture"])
+    // The source's own line between them, which reads as a space (2026-10-16; a "\n" until then).
+    expect(out.map((node) => node.text)).toEqual(['Lire le livre blanc', ' ', "Auditer l'architecture"])
+  })
+
+  it('a line of the value is one label even where a newline reads as a space', () => {
+    // The value is split as the translator wrote it, before it is read as markdown.
+    const out = translate(TWO_BUTTONS, "  Lire le livre blanc  \n\nAuditer l'architecture\n")
+    expect(out.filter((node) => linkOf(node)).map((node) => node.text)).toEqual([
+      'Lire le livre blanc',
+      "Auditer l'architecture",
+    ])
   })
 
   it('emphasis in the label stays, inside the link', () => {
