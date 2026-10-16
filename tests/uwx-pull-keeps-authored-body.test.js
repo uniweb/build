@@ -47,6 +47,23 @@ describe('pull — a section it did not change', () => {
   })
 })
 
+describe('pull — a paragraph the author wrapped', () => {
+  // A plain newline inside a paragraph reads as a space (2026-10-16), so the document holds no
+  // wrapping — and a pull whose document says what the file says keeps the author's own lines.
+  const WRAPPED = 'Push to main and see it\nlive in seconds, on every\nbranch you open.'
+
+  it('⭐ is left as the author wrapped it when the pulled document is its meaning', () => {
+    DIR = mkdtempSync(join(tmpdir(), 'uwx-keeps-wrap-'))
+    const filePath = join(DIR, 'features.md')
+    const authored = `---\ntype: Features\nid: features\n---\n\n${WRAPPED}\n`
+    writeFileSync(filePath, authored)
+    const pulled = markdownToProseMirror('Push to main and see it live in seconds, on every branch you open.')
+    const status = writeSectionFile({ filePath, content: pulled, params: { type: 'Features', id: 'features' } })
+    expect(status).toBe('unchanged')
+    expect(readFileSync(filePath, 'utf8')).toBe(authored)
+  })
+})
+
 describe('pull — a section holding an inset', () => {
   it('⭐ is left as the author wrote it — the inset’s default kind does not make it differ', () => {
     // The pull re-inlines an inset without `embedKind: 'visual'`, the parser's default for `@Name`.
