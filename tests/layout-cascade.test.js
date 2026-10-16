@@ -145,3 +145,25 @@ describe('layout cascade — precedence is per field, nearest wins', () => {
     expect(layoutOf(content, '/other').hide).toEqual(['right']) // untouched by the folder
   })
 })
+
+describe('layout cascade — a tier that sets nothing leaves the inherited value', () => {
+  const site = 'name: T\nindex: home\nlayout:\n  name: DocsLayout\n  hide: [right]\n  params:\n    canvas: plain\n'
+  const inherited = { name: 'DocsLayout', hide: ['right'], params: { canvas: 'plain' } }
+
+  for (const [label, yml] of [
+    ['an empty object', 'layout: {}\n'],
+    ['unknown keys only', 'layout:\n  other: 1\n'],
+    ['an empty name', "layout:\n  name: ''\n"],
+    ['`hide` that is not a list', 'layout:\n  hide: right\n'],
+    ['`params` that is a list, not a map', 'layout:\n  params: [a]\n'],
+  ]) {
+    it(label, async () => {
+      const dir = await makeSite({
+        siteYml: site,
+        pages: { 'home/index.md': page('Home'), 'x/index.md': page('X'), 'x/page.yml': yml },
+      })
+      const content = await collectSiteContent(dir)
+      expect(layoutOf(content, '/x')).toEqual(inherited)
+    })
+  }
+})

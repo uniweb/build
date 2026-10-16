@@ -1321,7 +1321,9 @@ function normalizeLayoutConfig(raw) {
   const out = {}
   if (typeof raw.name === 'string' && raw.name) out.name = raw.name
   if (Array.isArray(raw.hide)) out.hide = raw.hide
-  if (raw.params && typeof raw.params === 'object') out.params = raw.params
+  // A map, never an array: `params: []` passed a bare `typeof` check and replaced the inherited
+  // params with a list nothing reads.
+  if (raw.params && typeof raw.params === 'object' && !Array.isArray(raw.params)) out.params = raw.params
   return out
 }
 
