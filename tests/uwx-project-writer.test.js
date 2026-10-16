@@ -97,15 +97,15 @@ describe('writeSectionFile', () => {
     expect(body.trim()).toBe('Hello world')
   })
 
-  it('preserves reserved framework keys against incoming params', () => {
+  it('preserves a reserved key and takes the backend’s `type`', () => {
     const f = join(dir, 'hero.md')
     writeFileSync(f, '---\ntype: Hero\nnest:\n  - "@card"\nalign: left\n---\n\nOld body\n')
-    // Incoming params try to overwrite `type`/`nest` (reserved) and change align.
-    writeSectionFile({ filePath: f, content, params: { type: 'Evil', nest: [], align: 'center' } })
+    writeSectionFile({ filePath: f, content, params: { type: 'Banner', nest: [], align: 'center' } })
     const { frontmatter } = splitFile(readFileSync(f, 'utf8'))
-    expect(frontmatter.type).toBe('Hero') // reserved — not overwritten
+    // ⛔ `type` was reserved until 2026-10-16, so a pull kept the file's over the backend's
+    expect(frontmatter.type).toBe('Banner')
     expect(frontmatter.nest).toEqual(['@card']) // reserved — not overwritten
-    expect(frontmatter.align).toBe('center') // non-reserved param applied
+    expect(frontmatter.align).toBe('center')
   })
 
   it('keeps the existing body on a params-only update (no content)', () => {

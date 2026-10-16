@@ -173,17 +173,19 @@ describe('a pull writes ONE declaration key back — the one the file uses', () 
     }
   })
 
-  it('a new section file gets `query:`; a section that declares its data locally keeps it', () => {
+  it('a new section file gets `query:`; one that typed `fetch:` keeps `fetch:`, holding the backend’s declaration', () => {
     const record = { type: 'Grid', content: null, params: { fetch: { query: 'team', path: '/data/team.json', as: 'team', prerender: true, merge: false } } }
     const fresh = join(ROOT, 'fresh.md')
     sectionRecordToFile({ filePath: fresh, record })
     expect(frontmatterOf(fresh)).toMatchObject({ type: 'Grid', query: 'team' })
     expect(frontmatterOf(fresh)).not.toHaveProperty('fetch')
 
+    // ⛔ Until 2026-10-16 the file's own declaration was kept — `limit: 3` here — over the backend's.
     const local = join(ROOT, 'local.md')
     writeFileSync(local, '---\ntype: Grid\nfetch:\n  query: team\n  limit: 3\n---\n# Local\n')
     sectionRecordToFile({ filePath: local, record })
-    expect(frontmatterOf(local).fetch).toEqual({ query: 'team', limit: 3 })
+    expect(frontmatterOf(local).fetch).toMatchObject({ query: 'team' })
+    expect(frontmatterOf(local).fetch).not.toHaveProperty('limit')
     expect(frontmatterOf(local)).not.toHaveProperty('query')
   })
 })

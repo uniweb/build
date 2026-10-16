@@ -405,20 +405,23 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // `params`, so one stored there counts when the field is absent.
   frontmatter.hidden = (typeof hidden === 'boolean' ? hidden : paramHidden === true) ? true : undefined
   Object.assign(frontmatter, paramsRest)
-  // Invert the build's resolution rather than copy it — see fetch-shapes.js. A new
-  // file gets `query:` for a declaration of names alone; a section that declares
-  // its data locally keeps it (`writeSectionFile`, the declaration keys).
-  // ⭐ From `params.fetch` — where a section carries its data since 2026-09-28.
-  if (paramFetch !== undefined) {
-    const { key, value } = authorableDeclaration(paramFetch)
-    frontmatter[key] = value
-  }
   // `id:` only where the file's name does not already give it (`writeId`, `pageSectionsToFiles`).
   if (stable_id !== undefined && writeId) frontmatter.id = stable_id
 
+  // ⭐ The data declaration, from `params.fetch` — where a section carries its data since
+  // 2026-09-28 — is the backend's: written under the key the file already uses, else `query:`
+  // for names alone (`authorableDeclaration`, the inverse of the build's resolution), and
+  // removed from the file of a section that declares none. ⛔ Until 2026-10-16 a file's own
+  // declaration was kept over the backend's, and the next edit to the section pushed it back.
   // ⛔ Not `type: Content` into a file that names no type: it is what the push sent for it, and
   // absent, the foundation's `defaultSection` renders it. Until 2026-09-26 a pull wrote it back.
-  return writeSectionFile({ filePath, content: sourceContent, params: frontmatter, implied: { type: FILLED_SECTION_TYPE } })
+  return writeSectionFile({
+    filePath,
+    content: sourceContent,
+    params: frontmatter,
+    declaration: paramFetch ?? null,
+    implied: { type: FILLED_SECTION_TYPE },
+  })
 }
 
 // ---------------------------------------------------------------------------

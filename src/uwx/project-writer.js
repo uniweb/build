@@ -23,27 +23,23 @@ import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
 import { editYamlText, YAML_DUMP_OPTS } from './yaml-edit.js'
-import { DECLARATION_KEYS } from '../site/fetch-shapes.js'
+import { isSectionKey } from '@uniweb/schemas/section'
+import { DECLARATION_KEYS, authorableDeclaration } from '../site/fetch-shapes.js'
 
-// Frontmatter keys that belong to the CCA framework / the developer's local
-// authoring, not to externally-editable params. On a section write an existing
-// reserved key is preserved and never overwritten by incoming params, so a
-// projection doesn't churn fields it didn't author (the surgical-update bar).
+// Frontmatter keys a section write keeps from the file when the file has them.
 //
-// ⭐ The declaration keys — `query`, `fetch`, and the retired `data` — are one
-// group: a section that declares its data locally, under any of them, keeps that
-// declaration, and an incoming one under a different key does not land beside it
-// (a file holding two is refused by the build).
+// ⛔ Not `type`, `query`, `fetch` or the retired `data`, kept here as the developer's own from
+// the start (2026-05-30) until 2026-10-16. A pull is a checkout: a teammate's push changes
+// them, and an editor changes a section's data declaration. A pull that kept the file's
+// value still recorded the backend's version as taken, so the next edit to the section
+// pushed the file's value back over the backend's, with no refusal (measured with a
+// section's `fetch:`). The declaration is written by `writeSectionFile`'s `declaration`.
+// ⛔ Not `hidden` either: an editor toggles it, so a pull must carry the store's value into
+// the file (2026-09-28).
 export const DEFAULT_RESERVED_FRONTMATTER = new Set([
-  'type',
   'preset',
   'input',
-  'query',
-  'fetch',
-  'data',
   'nest',
-  // ⛔ Not `hidden`, which was here from the start (2026-05-30) with no reason recorded: an
-  // editor toggles it, so a pull must carry the store's value into the file (2026-09-28).
 ])
 
 /**
@@ -154,22 +150,30 @@ function assembleSection(frontmatter, body) {
 }
 
 /**
- * Write a section's `.md` file: merge incoming `params` into the existing
- * frontmatter (preserving reserved keys), serialize `content` (ProseMirror) to
- * the markdown body, and write idempotently. When the file is new there is no
- * existing frontmatter/body to preserve. When `content` is omitted, the existing
+ * Write a section's `.md` file as the backend holds the section: its `params` and its
+ * data `declaration` replace the file's, `content` (ProseMirror) becomes the markdown
+ * body, and the file is written only when that changes it. When the file is new there
+ * is no existing frontmatter/body to preserve. When `content` is omitted, the existing
  * body is kept (a params-only update).
+ *
+ * ⭐ `params` is the section's whole set: a param the file holds and `params` does not —
+ * one a push would send (`isSectionKey`, the collector's own test) — is removed. ⛔ Until
+ * 2026-10-16 incoming params were merged into the file's, so a param removed elsewhere
+ * stayed in the file, and the next edit to the section pushed it back.
  *
  * @param {object} opts
  * @param {string} opts.filePath
  * @param {object} [opts.content] - ProseMirror document for the body
- * @param {object} [opts.params] - incoming frontmatter params to merge
+ * @param {object} [opts.params] - the section's frontmatter params as the backend holds them
+ * @param {object|object[]|null} [opts.declaration] - the section's `fetch` off the wire, written
+ *        under the declaration key the file uses (`authorableDeclaration`); `null` when the
+ *        section declares none, which removes the file's. Left out, the file's declaration stays
  * @param {Set<string>} [opts.reserved] - keys preserved when already present
  * @param {object} [opts.implied] - `{ key: value }` a file means by leaving `key` out; an incoming
  *        value equal to it is not written into an existing file that leaves the key out
  * @returns {'updated'|'unchanged'}
  */
-export function writeSectionFile({ filePath, content, params, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null }) {
+export function writeSectionFile({ filePath, content, params, declaration, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null }) {
   let existing = ''
   try {
     existing = readFileSync(filePath, 'utf8')
@@ -179,21 +183,29 @@ export function writeSectionFile({ filePath, content, params, reserved = DEFAULT
   const { frontmatter, body: existingBody } = parseFrontmatter(existing, filePath)
 
   const nextFrontmatter = { ...frontmatter }
-  const declaresLocally = DECLARATION_KEYS.some((k) => k in frontmatter)
   if (params) {
     for (const [key, value] of Object.entries(params)) {
-      // A reserved key is preserved only when it already exists locally (the
-      // developer owns it; an incoming edit must not clobber it). On a new file
-      // there is nothing to protect, so the incoming value fills it — that's
-      // how a newly-projected section gets its `type`/`nest`/etc.
+      // A reserved key is preserved only when it already exists locally. On a new file there is
+      // nothing to protect, so the incoming value fills it.
       if (reserved.has(key) && key in frontmatter) continue
-      if (reserved.has(key) && DECLARATION_KEYS.includes(key) && declaresLocally) continue
       // A value the file implies by leaving the key out (`implied`) is not written into a file that
       // exists — a new file has nothing to imply it with.
       if (implied && existing && !(key in frontmatter) && implied[key] === value) continue
       if (value === null || value === undefined) delete nextFrontmatter[key]
       else nextFrontmatter[key] = value
     }
+    for (const key of Object.keys(frontmatter)) {
+      if (key in params || reserved.has(key) || key === 'fetch' || isSectionKey(key)) continue
+      delete nextFrontmatter[key]
+    }
+  }
+  // ⭐ The declaration keys — `query`, `fetch`, and the retired `data` — are one group: exactly one
+  // is written, under the key the file already uses where it can say the declaration, and the
+  // others are removed (a file holding two is refused by the build).
+  if (declaration !== undefined) {
+    const incoming = declaration === null ? null : authorableDeclaration(declaration, frontmatter)
+    for (const key of DECLARATION_KEYS) if (key !== incoming?.key) delete nextFrontmatter[key]
+    if (incoming) nextFrontmatter[incoming.key] = incoming.value
   }
 
   // ⭐ AN UNCHANGED BODY KEEPS THE AUTHOR'S OWN TEXT. A body that parses to the document the pull brought
