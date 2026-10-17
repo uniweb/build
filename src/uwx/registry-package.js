@@ -28,6 +28,7 @@ import { join } from 'node:path'
 
 import { normalizeFoundationSchema } from '@uniweb/schemas/foundation'
 import { parseOptionsRef } from '@uniweb/schemas/format'
+import { qualifyRef } from '@uniweb/schemas/refs'
 import { toDataSchemaDeclaration, optionsSectionPath } from './data-schema.js'
 import { checkFoundationName, splitFoundationName } from '../foundation-name.js'
 
@@ -146,8 +147,7 @@ function buildDataSchemaEntities(dataSchemas, scope) {
   // `scope` ('@acme' or 'acme') resolves a defined schema's own `@/x` name to a
   // concrete `@acme/x`. With no scope, `@/x` passes through (local preview).
   const org = scope ? String(scope).replace(/^@/, '').replace(/\/.*$/, '') : null
-  const scoped = (ref) =>
-    org && typeof ref === 'string' && ref.startsWith('@/') ? `@${org}/${ref.slice(2)}` : ref
+  const scoped = (ref) => qualifyRef(ref, org)
 
   const resolveOptions = makeOptionsResolver(dataSchemas, scoped)
   const entities = Object.entries(dataSchemas)

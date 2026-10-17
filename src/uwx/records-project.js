@@ -46,7 +46,8 @@ import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
 import { folderYmlPath } from '../site/records-config.js'
 import { contentBodyTarget } from './record-layout.js'
-import { unresolveSelfScope, resolveSelfScope, ownSchemaNames, refuseOrgOption } from './self-scope.js'
+import { qualifyRef } from '@uniweb/schemas/refs'
+import { unresolveSelfScope, ownSchemaNames, refuseOrgOption } from './self-scope.js'
 import { parseCatalogRef } from '../site/foundation-ref.js'
 import { renderEntityDocument } from './backfill.js'
 import { labelForFile } from '../site/entry-label.js'
@@ -216,13 +217,13 @@ function recordDirsReadingAs(recordsRoot, model, scope, { own = null, keyTypes =
     const at = [first]
     const keyType = !own?.has(first) ? keyTypes?.get(first) : null
     if (
-      resolveSelfScope(schemaForPoolDirs(at), scope) === model ||
-      (keyType && resolveSelfScope(keyType, scope) === model)
+      qualifyRef(schemaForPoolDirs(at), scope) === model ||
+      (keyType && qualifyRef(keyType, scope) === model)
     ) {
       dirs.push(join(recordsRoot, first))
     }
     for (const second of visible(join(recordsRoot, first))) {
-      if (resolveSelfScope(schemaForPoolDirs([first, second]), scope) === model) {
+      if (qualifyRef(schemaForPoolDirs([first, second]), scope) === model) {
         dirs.push(join(recordsRoot, first, second))
       }
     }
@@ -452,7 +453,7 @@ function typedQueryFolders(siteRoot, recordsRoot, scope, own, keyTypes) {
   for (const [name, schema] of authoredQuerySchemas(siteRoot, siteYml)) {
     if (schema !== null || own?.has(name)) continue
     const type = keyTypes.get(name)
-    const model = type ? resolveSelfScope(type, scope) : null
+    const model = type ? qualifyRef(type, scope) : null
     if (model && !out.has(model)) out.set(model, join(recordsRoot, name))
   }
   return out

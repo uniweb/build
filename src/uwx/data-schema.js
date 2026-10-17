@@ -22,6 +22,7 @@
  */
 
 import { parseOptionsRef, FIELD_RULES } from '@uniweb/schemas/format'
+import { qualifyRef } from '@uniweb/schemas/refs'
 
 // Text kinds carry per-locale values when localized.
 const TEXT_KINDS = new Set(['string', 'text'])
@@ -690,9 +691,5 @@ function sectionAttrsFromField(field) {
 function defaultResolver(ownName) {
   const slash = ownName.indexOf('/')
   const org = ownName[0] === '@' && slash > 1 ? ownName.slice(1, slash) : ''
-  return (ref) => {
-    if (typeof ref !== 'string') return ref
-    if (ref.startsWith('@/')) return `@${org}/${ref.slice(2)}`
-    return ref
-  }
+  return (ref) => qualifyRef(ref, org)
 }

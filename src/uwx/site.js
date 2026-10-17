@@ -87,7 +87,8 @@ import {
   refuseUnreadableServices
 } from './services-request.js'
 import { resolveQueriesConfig } from './queries-config.js'
-import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
+import { qualifyRef } from '@uniweb/schemas/refs'
+import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { siteContentDirs } from './site-dirs.js'
 
 const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
@@ -1055,7 +1056,7 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     // and a store that checks a query's `schema` against the site's declared types refused the
     // whole content push for it. An explicit `schema:` that does not resolve never reaches here:
     // the records lane refuses it.
-    if (!schemaless?.has(name)) setIf(data, 'schema', resolveSelfScope(schema, scope))
+    if (!schemaless?.has(name)) setIf(data, 'schema', qualifyRef(schema, scope))
     // ⭐ …AND SAYS SO, so a pull can tell the author's form (`team:`, no schema) from an explicit
     // one — sent only where the deployment's `queries` Section declares the key (`GET /dev/config`
     // → `siteContent.queryFields`), since one that does not refuses a push carrying it.

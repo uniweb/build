@@ -59,7 +59,8 @@ import {
 import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isOpenMapSection, openMapEntries } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { resolveSelfScope, siteSelfScope, refuseOrgOption } from './self-scope.js'
+import { qualifyRef } from '@uniweb/schemas/refs'
+import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { isUuid } from './uuid.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
@@ -823,10 +824,7 @@ function resolveDeclaration(schema, modelName) {
   const dataSchemas = schema?.dataSchemas || {}
   const m = /^@([^/]+)\/(.+)$/.exec(modelName)
   const org = m ? m[1] : null
-  const resolveName = (ref) =>
-    typeof ref === 'string' && ref.startsWith('@/') && org
-      ? `@${org}/${ref.slice(2)}`
-      : ref
+  const resolveName = (ref) => qualifyRef(ref, org)
   for (const [ref, normalized] of Object.entries(dataSchemas)) {
     if (resolveName(ref) === modelName) {
       return toDataSchemaDeclaration(normalized, { name: modelName, resolveName })
@@ -973,7 +971,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     opts.scope !== undefined ? opts.scope : await siteSelfScope(siteRoot, { foundationDir: opts.foundationDir })
   const warnedUnscoped = new Set()
   const modelFor = (schema, where) => {
-    const modelName = resolveSelfScope(schema, scope)
+    const modelName = qualifyRef(schema, scope)
     // Unresolvable `@/` — the foundation has no scope yet. Ship it rather than
     // throwing (a `status` probe on a never-registered foundation must still count),
     // but say so: the backend's refusal names a missing Model and cannot name this cause.
@@ -1278,8 +1276,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       ? !unresolved.has(schema)
       : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema))))
     if (!resolved) {
-      if (decl.schemaExplicit) throw unresolvedExplicit(resolveSelfScope(schema, scope), name)
-      schemaless.push({ name, model: resolveSelfScope(schema, scope) })
+      if (decl.schemaExplicit) throw unresolvedExplicit(qualifyRef(schema, scope), name)
+      schemaless.push({ name, model: qualifyRef(schema, scope) })
       continue
     }
     if (!hasRecords) {

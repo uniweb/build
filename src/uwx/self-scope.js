@@ -7,7 +7,9 @@
 // the entity store at restore, and a records service answering a hosted page's
 // query.
 //
-// ⭐ ONE RULE FOR EVERY PATH THAT SHIPS A REF FROM ONE PUBLISH, and its inverse:
+// ⭐ ONE RULE FOR EVERY PATH THAT SHIPS A REF FROM ONE PUBLISH — `qualifyRef`
+// (`@uniweb/schemas/refs`, the rule `register` and a foundation's own calls to its
+// backend use too) with the scope `siteSelfScope` reads — and its inverse here:
 //
 //   - a record's `$schema`            `records.js::buildRecordEntities`
 //   - a query's `schema`              `site.js::queriesNested` (the `queries` Section)
@@ -51,24 +53,8 @@ export function bareOrg(scope) {
 }
 
 /**
- * `@/x` → `@<scope>/x`. Any other ref (`@std/x`, `@acme/x`) passes through, and so
- * does `@/x` when no scope is known — callers that ship an unresolved alias say so
- * themselves (`buildRecordEntities` warns per query).
- *
- * @param {unknown} ref
- * @param {unknown} scope - the site's foundation's scope (`siteSelfScope`)
- * @returns {unknown}
- */
-export function resolveSelfScope(ref, scope) {
-  const handle = bareOrg(scope)
-  return typeof ref === 'string' && ref.startsWith('@/') && handle
-    ? `@${handle}/${ref.slice(2)}`
-    : ref
-}
-
-/**
- * The inverse, for a pull: `@<scope>/x` → `@/x` — when `x` is one of the foundation's
- * OWN data schemas.
+ * The inverse of `qualifyRef`, for a pull: `@<scope>/x` → `@/x` — when `x` is one
+ * of the foundation's OWN data schemas.
  *
  * ⛔ WITHOUT THIS THE ROUND TRIP IS NOT A FIXED POINT, and the failure is silent
  * on both ends. A record authored under `records/article/` comes back as
