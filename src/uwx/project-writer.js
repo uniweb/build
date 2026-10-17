@@ -418,14 +418,16 @@ function restates(authored, decl) {
  * (`records/`, or wherever `site.yml::paths.records` puts it), as a LIST.
  *
  * ⛔ A FULL WRITE, NOT A MERGE, and that is the one place this differs from every
- * other projected config. The file mirrors the folder's sub-folders: concrete refs
- * on both sides, nothing to invert, so a pull is a mirror rather than an update.
- * There is also nothing a shallow merge could mean here — the file is a sequence,
- * and merging two lists either duplicates entries or silently drops them.
+ * other projected config: the file is a sequence, and merging two lists either
+ * duplicates entries or silently drops them.
  *
- * The caller decides whether there is anything to write: a folder with no
- * sub-folders is no file at all (`folderToFolderYml` removes it), since missing and
- * empty mean the same. ⚠️ *Until 2026-09-21 this said an empty file was destructive
+ * The caller decides whether there is anything to write: a file that already says
+ * what the pulled folder says — its patterns included — is left alone
+ * (`records-project.js::organizesAlike`), and a folder with no sub-folders is no file
+ * at all (`folderToFolderYml` removes it), since missing and empty mean the same.
+ * ⛔ *Until 2026-10-17 this called the file a mirror — "concrete refs on both sides,
+ * nothing to invert" — and every pull wrote the folder's paths over a developer's
+ * patterns.* ⚠️ *Until 2026-09-21 this said an empty file was destructive
  * on the next push; that stopped being true when the directory, not this file,
  * became what decides which records the folder holds.*
  *

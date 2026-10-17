@@ -53,8 +53,7 @@
 // there is no population to carry): a leftover `entities/` beside `records/` would
 // otherwise hold records nothing reads, silently.
 
-import { readdir } from 'node:fs/promises'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, extname, basename, resolve } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -263,6 +262,17 @@ export function poolPathReadings(dirs) {
  *   leaves the backend's folder alone for a site with no records directory.
  */
 export async function readEntityPool(siteRoot, opts = {}) {
+  return readEntityPoolSync(siteRoot, opts)
+}
+
+/**
+ * `readEntityPool`, for a caller that cannot wait — the pull's projection, which asks what a
+ * `folder.yml` already says (`records-project.js`). One walk, which the async form returns.
+ *
+ * @param {string} siteRoot
+ * @param {object} [opts] - as `readEntityPool`'s
+ */
+export function readEntityPoolSync(siteRoot, opts = {}) {
   let rel
   if (opts.dir) {
     rel = String(opts.dir).replace(/\/+$/, '')
@@ -280,10 +290,10 @@ export async function readEntityPool(siteRoot, opts = {}) {
   // A file record is named by its stem, so two files of one stem cannot both be one.
   const fileStems = new Map()
 
-  const walk = async (dir, dirs) => {
+  const walk = (dir, dirs) => {
     let listing
     try {
-      listing = await readdir(dir, { withFileTypes: true })
+      listing = readdirSync(dir, { withFileTypes: true })
     } catch {
       return
     }
@@ -304,7 +314,7 @@ export async function readEntityPool(siteRoot, opts = {}) {
           )
           continue
         }
-        await walk(full, [...dirs, e.name])
+        walk(full, [...dirs, e.name])
         continue
       }
       if (!e.isFile()) continue
@@ -356,7 +366,7 @@ export async function readEntityPool(siteRoot, opts = {}) {
     }
   }
 
-  await walk(base, [])
+  walk(base, [])
   return { entities, errors, exists: true, dir: rel }
 }
 

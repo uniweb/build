@@ -296,7 +296,13 @@ export function renderEntityDocument({ document, declaration, format, sourceLoca
   if (document?.$disabled === true) record.draft = true
 
   if (format === 'json') return JSON.stringify(record, null, 2) + '\n'
-  if (format === 'md') return `---\n${yaml.dump(record)}---\n${dec.body}`
+  if (format === 'md') {
+    // ⭐ Written as a section is (`project-writer.js::assembleSection`): a blank line after the front
+    // matter, and a final newline. ⛔ Until 2026-10-17 it had neither, so a pull that rewrote an
+    // edited record took both out of the author's file.
+    const body = String(dec.body ?? '').replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '')
+    return `---\n${yaml.dump(record)}---\n${body ? `\n${body}\n` : ''}`
+  }
   return yaml.dump(record) // yaml / yaml
 }
 

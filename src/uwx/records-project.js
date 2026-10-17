@@ -43,8 +43,9 @@ import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
-import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir } from '../site/entity-pool.js'
-import { folderYmlPath } from '../site/records-config.js'
+import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir, readEntityPoolSync } from '../site/entity-pool.js'
+import { folderYmlPath, resolveFolder } from '../site/records-config.js'
+import { canonicalJson } from './same-content.js'
 import { contentBodyTarget } from './record-layout.js'
 import { qualifyRef } from '@uniweb/schemas/refs'
 import { unresolveSelfScope, ownSchemaNames, refuseOrgOption } from './self-scope.js'
@@ -501,9 +502,14 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
  * Project a pulled `@uniweb/folder` document back to `folder.yml` in the records
  * directory (`records/folder.yml`, or under `site.yml::paths.records`).
  *
- * ⭐ THE FOLDER ROUND-TRIPS TRIVIALLY, and that is by design rather than luck:
- * `folder.yml` holds concrete paths on both sides, so there is nothing to invert.
- * The old shape put QUERY MACROS in the folder — a virtual `folders:` tree naming
+ * ⭐ A FILE THAT SAYS WHAT THE PULLED FOLDER SAYS IS LEFT AS WRITTEN — its patterns
+ * (`member/*.md`), its comments, its order (`organizesAlike`). Otherwise the folder
+ * is written as the paths the backend's folder places, which is what it says.
+ * ⛔ *This read "the folder round-trips trivially: `folder.yml` holds concrete paths
+ * on both sides, so there is nothing to invert" until 2026-10-17 — read as "the file
+ * holds no patterns", which it does — and every pull with a folder wrote its paths
+ * over the developer's patterns: a record added afterwards fell outside them.* The
+ * old shape put QUERY MACROS in the folder — a virtual `folders:` tree naming
  * collections — and inverting a macro is not possible in general. Taking queries
  * out of the folder is what dissolved that.
  *
@@ -600,12 +606,60 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
 
   const entries = walk(folderDoc.contents, false)
   if (unplaceable) return { status: 'skipped', entries: [], warnings, file }
+  if (existsSync(abs) && organizesAlike({ abs, entries, siteRoot, poolPathByUuid })) {
+    return { status: 'unchanged', entries, warnings, file }
+  }
   if (entries.length === 0) {
     if (!existsSync(abs)) return { status: 'unchanged', entries, warnings, file }
     unlinkSync(abs)
     return { status: 'removed', entries, warnings, file }
   }
   return { status: writeRecordsConfig(siteRoot, entries), entries, warnings, file }
+}
+
+/**
+ * Does the `folder.yml` on disk say what the pulled folder says — read by the rule a push reads it
+ * by (`resolveFolder`), over the records directory as this pull left it?
+ *
+ * ⭐ About the records the backend's folder holds, every word: the folders, by name, label and tags,
+ * in order; and each record's folder, its tags and label, and its place among the others. Records
+ * the backend does not hold yet — a file the developer added and has not pushed — are theirs, so a
+ * pattern placing one is not a difference; nor is a folder holding only those. So `member/*.md` is
+ * kept while it places exactly the members the backend's folder has there, and goes on placing the
+ * next one the developer adds.
+ *
+ * @returns {boolean}
+ */
+function organizesAlike({ abs, entries, siteRoot, poolPathByUuid }) {
+  let authored
+  try {
+    authored = yaml.load(readFileSync(abs, 'utf8'), YAML_OPTIONS)
+  } catch {
+    return false
+  }
+  if (!Array.isArray(authored)) return false
+  const pool = readEntityPoolSync(siteRoot).entities
+  const pulled = new Set(poolPathByUuid.values())
+  const held = new Set(pool.filter((e) => pulled.has(e.poolPath)).map((e) => e.id))
+  const mine = resolveFolder(authored, pool)
+  const theirs = resolveFolder(entries, pool)
+  if (mine.errors.length || theirs.errors.length) return false
+  const theirFolders = new Set()
+  const said = (n) => ({ ...(n.label != null ? { label: n.label } : {}), ...(n.tags ? { tags: n.tags } : {}) })
+  // A tree as it reads for the held records. `keep(path, holds)` decides whether a folder stays.
+  const shape = (nodes, at, keep) =>
+    (nodes || []).flatMap((n) => {
+      if (n.kind === 'ref') return held.has(n.$entityId) ? [{ record: n.$entityId, ...said(n) }] : []
+      if (n.kind !== 'branch') return []
+      const path = [...at, n.name]
+      const records = shape(n.$children, path, keep)
+      return keep(path.join('/'), records.length > 0) ? [{ folder: n.name, ...said(n), records }] : []
+    })
+  // Every folder the backend has stays, empty or not; one of the file's stays when it holds a held
+  // record or the backend has it too — else it is the developer's, not pushed yet.
+  const theirShape = shape(theirs.nodes, [], (path) => (theirFolders.add(path), true))
+  const myShape = shape(mine.nodes, [], (path, holds) => holds || theirFolders.has(path))
+  return canonicalJson(myShape) === canonicalJson(theirShape)
 }
 
 /**

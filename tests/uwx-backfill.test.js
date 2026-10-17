@@ -214,7 +214,7 @@ describe('renderEntityDocument — variant A (document → authoring file)', () 
       article: { title: { en: 'Soon' }, body: { en: 'Later.\n' } },
     }
     const md = renderEntityDocument({ document: doc, declaration: articleDecl, format: 'md' })
-    expect(md).toBe('---\n$uuid: E1\ntitle: Soon\ndraft: true\n---\nLater.\n')
+    expect(md).toBe('---\n$uuid: E1\ntitle: Soon\ndraft: true\n---\n\nLater.\n')
     const obj = yaml.load(renderEntityDocument({ document: doc, declaration: articleDecl, format: 'yaml' }))
     expect(obj).toEqual({ $uuid: 'E1', title: 'Soon', body: 'Later.\n', draft: true })
   })

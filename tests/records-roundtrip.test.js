@@ -250,6 +250,84 @@ describe('push → pull → push is a fixed point', () => {
   })
 })
 
+// ⭐ A DEVELOPER'S PATTERN IS KEPT WHILE IT SAYS WHAT THE FOLDER SAYS. Measured 2026-10-17 on a
+// published CLI: a pull after an author edited one record wrote `member/*.md` as the files there at
+// that moment, and a record added afterwards was pushed outside it — to the top of the folder — while
+// the file went on saying nothing about it.
+describe('a folder.yml written with a pattern', () => {
+  const PATTERN_YML = [
+    '# what the archive holds',
+    '- folder: archive',
+    '  label: The Archive',
+    '  records:',
+    '    - article/*.md',
+    '',
+  ].join('\n')
+  const seedPattern = () => {
+    const site = seed(ROOT)
+    w(ROOT)('site/records/folder.yml', PATTERN_YML)
+    return site
+  }
+  const pull = (site, folder, recordDocs) =>
+    recordsToProject({ folderDoc: folder, recordDocs, siteRoot: site, opts: { resolveDeclaration, backend: BACKEND, scope: SCOPE } })
+  const namesIn = (folder) => folder.document.contents[0].$children.map((n) => n.name)
+
+  it('⭐ is left as written by a pull whose folder places what it places', async () => {
+    const site = seedPattern()
+    const { col, folder } = await produce(site)
+    // CONTROL — the pattern placed both records in the archive.
+    expect(namesIn(folder)).toEqual(['hello', 'older'])
+    const report = pull(site, folder.document, col.entities.map((e) => e.document))
+    expect(report.records).toBe('unchanged')
+    expect(readFileSync(join(site, 'records', 'folder.yml'), 'utf8')).toBe(PATTERN_YML)
+  })
+
+  it('⭐ …so it places a record added after the pull', async () => {
+    const site = seedPattern()
+    const { col, folder } = await produce(site)
+    pull(site, folder.document, col.entities.map((e) => e.document))
+    w(ROOT)('site/records/article/newer.md', '---\ntitle: Newer\n---\n\nBody three.\n')
+    expect(namesIn((await produce(site)).folder)).toEqual(['hello', 'newer', 'older'])
+  })
+
+  it('a record added and not pushed yet is no difference: the backend does not hold it', async () => {
+    const site = seedPattern()
+    const { col, folder } = await produce(site)
+    w(ROOT)('site/records/article/newer.md', '---\ntitle: Newer\n---\n\nBody three.\n')
+    expect(pull(site, folder.document, col.entities.map((e) => e.document)).records).toBe('unchanged')
+    expect(readFileSync(join(site, 'records', 'folder.yml'), 'utf8')).toBe(PATTERN_YML)
+  })
+
+  it('CONTROL — a record the folder no longer places there is written as the folder places it', async () => {
+    const site = seedPattern()
+    const { col, folder } = await produce(site)
+    // An author moved `hello` out of the archive, to the top of the folder.
+    const [archive] = folder.document.contents
+    const hello = archive.$children.find((n) => n.name === 'hello')
+    const moved = { contents: [{ ...archive, $children: archive.$children.filter((n) => n !== hello) }, hello] }
+    expect(pull(site, moved, col.entities.map((e) => e.document)).records).toBe('updated')
+    expect(yaml.load(readFileSync(join(site, 'records', 'folder.yml'), 'utf8'))).toEqual([
+      { folder: 'archive', label: 'The Archive', records: ['article/older.md'] },
+    ])
+  })
+
+  it('an edited record keeps a blank line after its front matter, and ends with a newline', async () => {
+    const site = seedPattern()
+    const { col, folder } = await produce(site)
+    // CONTROL — a push sends the body as the file holds it, its newlines included, so a round
+    // trip through the CLI alone could never have lost them.
+    const hello = col.entities.find((e) => e.id === 'article/hello').document
+    expect(hello.brief.body).toEqual({ en: '\nBody one.\n' })
+    // The author edited `hello` in the app, which saves a body without them.
+    const edited = JSON.parse(JSON.stringify(hello).replace('"\\nBody one.\\n"', '"Body one, edited."'))
+    const docs = col.entities.map((e) => (e.id === 'article/hello' ? edited : e.document))
+    pull(site, folder.document, docs)
+    expect(readFileSync(join(site, 'records', 'article', 'hello.md'), 'utf8')).toBe(
+      '---\n$uuid: U1\ntitle: Hello\n---\n\nBody one, edited.\n'
+    )
+  })
+})
+
 // ⭐ A DRAFT ROUND-TRIPS. `draft: true` goes out as the entity's `$disabled: true` and
 // comes back as `draft: true`, so push → pull → push stays a fixed point with one in it.
 describe('a draft survives the round trip', () => {
