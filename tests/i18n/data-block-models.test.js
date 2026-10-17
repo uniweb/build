@@ -143,3 +143,51 @@ describe('the four walks agree', () => {
     expect(heuristic).toEqual(['FREE-FORM'])
   })
 })
+
+describe('a declared shape the translation step cannot read is said aloud', () => {
+  // ⛔ Until 2026-10-16 its blocks fell to the heuristic in silence, and a label named `email` or
+  // `time` was never offered for translation.
+  const declare = (name, data) => {
+    w(`fdn/sections/${name}/meta.js`, `export default { title: '${name}', data: ${data} }\n`)
+    w(`fdn/sections/${name}/index.jsx`, `export default function ${name}() { return null }\n`)
+  }
+  const said = (spy) => spy.mock.calls.map((call) => call.join(' ')).filter((m) => m.includes('the translation step cannot read'))
+
+  it('⭐ a key declared `{ type, values }` — read as a block with fields named `type` and `values`', async () => {
+    declare('Contact', "{ labels: { type: 'object', values: { type: 'string' } } }")
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const models = await dataBlockModels(SITE)
+    expect(models('Contact', 'labels')).toBeNull()
+    expect(said(spy)).toHaveLength(1)
+    expect(said(spy)[0]).toMatch(/the Contact section type declares data key "labels"/)
+    expect(said(spy)[0]).toMatch(/declares two fields, named "type" and "values"/)
+    spy.mockRestore()
+  })
+
+  it('an open map of plain values — a valid schema, which a push cannot lower', async () => {
+    declare('Hours', "{ office: { labels: { type: 'object', values: 'string' }, note: 'string' } }")
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const models = await dataBlockModels(SITE)
+    expect(models('Hours', 'office')).toBeNull()
+    expect(said(spy)).toHaveLength(1)
+    expect(said(spy)[0]).toMatch(/open map/)
+    expect(said(spy)[0]).toMatch(/values: \{ type: 'object', fields/)
+    spy.mockRestore()
+  })
+
+  it('once, however many steps read the declarations', async () => {
+    declare('Contact', "{ labels: { type: 'object', values: { type: 'string' } } }")
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await dataBlockModels(SITE)
+    await dataBlockModels(SITE)
+    expect(said(spy)).toHaveLength(1)
+    spy.mockRestore()
+  })
+
+  it('a shape it reads, or a key with none, says nothing', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await dataBlockModels(SITE)
+    expect(said(spy)).toEqual([])
+    spy.mockRestore()
+  })
+})

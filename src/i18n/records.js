@@ -187,11 +187,12 @@ function isFieldTranslatable(fieldDef) {
  * @param {string} ref - the ref it was resolved from
  * @returns {Object|null} the lowered declaration, or null when there is none
  */
-export function modelOf(schema, ref) {
+export function modelOf(schema, ref, onError = null) {
   if (!schema) return null
   try {
     return toDataSchemaDeclaration(schema, { name: ref || '@/record', resolveName: (r) => r })
-  } catch {
+  } catch (err) {
+    onError?.(err) // a caller that can say why — `data-models.js`, for a declared block shape
     return null // a schema a push refuses is refused there, and the build keeps its heuristic
   }
 }

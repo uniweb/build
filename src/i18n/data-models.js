@@ -11,6 +11,12 @@
  * normalizer (`@uniweb/schemas/foundation::normalizeData`); a ref resolves as a query's records
  * resolve theirs (`resolveRecordSchemas`). A key with no shape, or a ref that does not resolve, has
  * no model, and its blocks keep the heuristic.
+ *
+ * ⛔ A key that DOES declare a shape, which the translation step cannot read, is said aloud
+ * (`warnUnreadable`): its blocks fall back to the heuristic, which never offers a field named
+ * `email`, `time`, `href` and the like. ⛔ Until 2026-10-16 that fall was silent — measured on a
+ * block of contact labels declared `{ type: 'object', values: { type: 'string' } }`, whose `email`
+ * and `time` labels were never offered for translation.
  */
 import { normalizeData } from '@uniweb/schemas/foundation'
 import { foundationSections, resolveRecordSchemas } from '../site/queries-config.js'
@@ -27,6 +33,9 @@ export const NO_DATA_MODELS = () => null
  * @returns {Promise<(type: string, tag: string) => object|null>}
  */
 export async function dataBlockModels(siteRoot, siteYml = null) {
+  // Each key's declaration as written, to say what was meant when its shape cannot be read.
+  const raw = new Map()
+  const warn = (where, reason) => warnUnreadable(siteRoot, where, reason, raw.get(where))
   let sections
   try {
     sections = await foundationSections(siteRoot, siteYml)
@@ -39,7 +48,10 @@ export async function dataBlockModels(siteRoot, siteYml = null) {
   const declared = new Map()
   const declare = (owner, data) => {
     const normalized = normalizeData(data, { strict: false })
-    for (const [key, decl] of Object.entries(normalized || {})) declared.set(at(owner, key), decl)
+    for (const [key, decl] of Object.entries(normalized || {})) {
+      declared.set(at(owner, key), decl)
+      raw.set(at(owner, key), data?.[key])
+    }
   }
   for (const [name, entry] of Object.entries(sections)) {
     if (!entry || typeof entry !== 'object' || name === 'dataSchemas' || name === '_layouts') continue
@@ -62,8 +74,11 @@ export async function dataBlockModels(siteRoot, siteYml = null) {
   for (const [where, decl] of declared) {
     if (decl.kind === 'schema') models.set(where, modelOf(resolved[decl.schema] || null, decl.schema))
     else if (decl.kind === 'fields') {
-      const { kind: _kind, problems: _problems, ...schema } = decl
-      models.set(where, modelOf(schema, '@/inline'))
+      const { kind: _kind, problems, ...schema } = decl
+      let lowering = null
+      const model = modelOf(schema, '@/inline', (err) => (lowering = err))
+      if (problems?.length || !model) warn(where, problems?.length ? problems.join('; ') : lowering?.message || 'it lowers to no model')
+      models.set(where, model)
     } else models.set(where, null)
   }
 
@@ -75,3 +90,24 @@ export async function dataBlockModels(siteRoot, siteYml = null) {
 }
 
 const at = (owner, key) => `${owner}\u0000${key}`
+
+// Each unreadable shape once per site per process: extraction, the build, a push and a pull all
+// read the same declarations.
+const warned = new Set()
+
+function warnUnreadable(siteRoot, where, reason, declaration) {
+  const [owner, key] = where.split('\u0000')
+  const once = `${siteRoot}\u0000${where}\u0000${reason}`
+  if (warned.has(once)) return
+  warned.add(once)
+  const who = owner ? `the ${owner} section type` : 'the foundation (main.js)'
+  const fieldsCalledType = declaration && typeof declaration === 'object' && typeof declaration.type === 'string' && ('values' in declaration || 'fields' in declaration)
+  const hint = fieldsCalledType
+    ? ` A data key is declared as its block's fields: { type: '${declaration.type}', ${'values' in declaration ? 'values' : 'fields'}: … } declares two fields, named "type" and "${'values' in declaration ? 'values' : 'fields'}" — name the block's fields instead ({ email: 'string', time: 'string' }).`
+    : /open map/.test(reason)
+      ? " An open map is read when its values are records: values: { type: 'object', fields: { … } }."
+      : ''
+  console.warn(
+    `Warning: ${who} declares data key "${key}" with a shape the translation step cannot read (${reason}), so its blocks' strings are guessed — a field named email, time, href or the like is never offered for translation.${hint}`
+  )
+}
