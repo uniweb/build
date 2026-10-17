@@ -25,7 +25,7 @@ import { computeHash } from '../i18n/hash.js'
 import { blockElements, elementText, dataBlockNodes } from '../i18n/extract.js'
 import { visitDataBlockStrings } from '../i18n/data-strings.js'
 import { resolveDocForLocale, translatedInline, linkLabels, toPlainText } from '../i18n/merge.js'
-import { computeSourceHash } from '../i18n/freeform-manifest.js'
+import { computeSourceHash, manifestText } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 
@@ -550,11 +550,18 @@ function reconcileTranslation(existing, seen) {
 
 /**
  * Write captured target-locale FREE-FORM bodies to `locales/freeform/{locale}/<relpath>`
- * (markdown, body-only) and record each one's SOURCE hash in that locale's
+ * (markdown, body-only) and record the SOURCE hash of each one it writes in that locale's
  * `.manifest.json` for staleness tracking. Sync + idempotent: a body is rewritten
  * only when its markdown changes, and a manifest `recorded` date is (re)stamped only
  * when the source hash changes — so a no-op re-projection is byte-stable. Entries
  * with no `relpath` (unplaceable, e.g. a layout section) are surfaced as `skipped`.
+ *
+ * ⭐ A MANIFEST ENTRY SAYS WHICH SOURCE A TRANSLATION WAS MADE FROM, so it is stamped only with a
+ * translation this pull writes. One the pull leaves as it is keeps the author's entry, whatever it
+ * says: a translation the source has moved past stays stale. ⛔ Until 2026-10-17 every pull
+ * stamped the hash of the source it brought — the stale translation came back current, and a
+ * manifest recorded under another reading of an unchanged source was rewritten by a pull that
+ * changed nothing.
  *
  * @returns {{ written: string[], skipped: object[] }}
  */
@@ -600,12 +607,11 @@ export function writeFreeformTranslations(siteRoot, freeformPending) {
       // markdown is not theirs (blank lines, line breaks), as for a section body (`writeSectionFile`).
       // Compared as a push reads it (`i18n/freeform.js::loadFreeformTranslation`). ⛔ Until 2026-10-08 the
       // file was trimmed first, so one whose last line ended in a space was rewritten by every pull.
-      if (current !== text && !(current !== null && sameStoredFreeform(current, filePath, target))) {
-        mkdirSync(dirname(filePath), { recursive: true })
-        writeFileSync(filePath, text)
-        report.written.push(filePath)
-      }
-      // Staleness hash of the SOURCE; re-stamp `recorded` only when it changes.
+      if (current === text || (current !== null && sameStoredFreeform(current, filePath, target))) continue
+      mkdirSync(dirname(filePath), { recursive: true })
+      writeFileSync(filePath, text)
+      report.written.push(filePath)
+      // Staleness hash of the SOURCE this translation comes with; re-stamp `recorded` only when it changes.
       const hash = computeSourceHash(source)
       const existing = manifest[relpath]
       if (!existing || existing.hash !== hash) {
@@ -616,7 +622,7 @@ export function writeFreeformTranslations(siteRoot, freeformPending) {
 
     if (manifestChanged) {
       mkdirSync(localeDir, { recursive: true })
-      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+      writeFileSync(manifestPath, manifestText(manifest))
     }
   }
 

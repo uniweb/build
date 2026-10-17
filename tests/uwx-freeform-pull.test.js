@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { siteContentDocumentToProject } from '../src/uwx/index.js'
 import { computeHash } from '../src/i18n/hash.js'
+import { computeSourceHash, manifestText, saveManifest } from '../src/i18n/freeform-manifest.js'
 
 let ROOT
 afterEach(() => ROOT && rmSync(ROOT, { recursive: true, force: true }))
@@ -92,5 +93,63 @@ describe('pull — a free-form translation it did not change', () => {
       },
     })
     expect(readFileSync(join(ROOT, ...FREEFORM), 'utf8')).toBe(authored)
+  })
+})
+
+/**
+ * ⭐ A MANIFEST ENTRY SAYS WHICH SOURCE A TRANSLATION WAS MADE FROM, so a pull stamps one only with a
+ * translation it writes. ⛔ Until 2026-10-17 every pull stamped the hash of the source it brought: a
+ * translation the source had moved past came back current, and a manifest recorded under another
+ * reading of an unchanged source was rewritten by a pull that changed nothing.
+ */
+describe('pull — the manifest of a free-form translation', () => {
+  const MANIFEST = ['locales', 'freeform', 'es', '.manifest.json']
+  const STORY = 'pages/about/story.md'
+
+  // The author's copy: an English story, its Spanish free-form file, and the manifest entry recording
+  // the source that translation was made from — then a pull of a document whose Spanish is `es`.
+  function pullStory({ es, entry, manifestFile }) {
+    ROOT = mkdtempSync(join(tmpdir(), 'uwx-freeform-manifest-'))
+    const w = (rel, body) => {
+      const p = join(ROOT, ...rel)
+      mkdirSync(join(p, '..'), { recursive: true })
+      writeFileSync(p, body)
+    }
+    w(['site.yml'], 'name: Site\ndefaultLanguage: en\nfoundation: "@acme/fnd@1.0.0"\n')
+    w(FREEFORM, 'Hola mundo\n')
+    w(MANIFEST, manifestFile ?? JSON.stringify({ [STORY]: entry }, null, 2))
+    const before = readFileSync(join(ROOT, ...MANIFEST), 'utf8')
+    siteContentDocumentToProject({
+      siteRoot: ROOT,
+      document: {
+        info: { name: 'Site' },
+        pages: [{
+          stable_id: 'about', mode: 'page', slug: { en: 'about' }, title: { en: 'About' },
+          page_sections: [{ stable_id: 'story', type: 'Section', content: { en: docOf('Hello world'), es } }],
+        }],
+      },
+    })
+    return { before, after: readFileSync(join(ROOT, ...MANIFEST), 'utf8') }
+  }
+
+  it('⭐ a translation the pull leaves as it is keeps its entry — one made from another source stays stale', () => {
+    const entry = { hash: 'deadbeef', recorded: '2025-01-28' }
+    expect(computeSourceHash(docOf('Hello world'))).not.toBe(entry.hash)
+    const { before, after } = pullStory({ es: docOf('Hola mundo'), entry })
+    expect(after).toBe(before)
+  })
+
+  it('a translation the pull writes is stamped with the source it came with', () => {
+    const { after } = pullStory({ es: docOf('Hola mundo, editado'), entry: { hash: 'deadbeef', recorded: '2025-01-28' } })
+    expect(readFileSync(join(ROOT, ...FREEFORM), 'utf8')).toBe('Hola mundo, editado\n')
+    expect(JSON.parse(after)[STORY].hash).toBe(computeSourceHash(docOf('Hello world')))
+  })
+
+  it('one format for both writers — a manifest the pull changes is written as `saveManifest` writes it', async () => {
+    const { after } = pullStory({ es: docOf('Hola mundo, editado'), entry: { hash: 'deadbeef', recorded: '2025-01-28' } })
+    expect(after).toBe(manifestText(JSON.parse(after)))
+    const dir = join(ROOT, 'locales', 'freeform', 'fr')
+    await saveManifest(dir, JSON.parse(after))
+    expect(readFileSync(join(dir, '.manifest.json'), 'utf8')).toBe(after)
   })
 })

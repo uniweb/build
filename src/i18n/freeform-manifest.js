@@ -93,6 +93,19 @@ export async function loadManifest(localeDir) {
 }
 
 /**
+ * A manifest as its file holds it — the one format for its two writers, the CLI's
+ * (`saveManifest`) and a pull's (`uwx/locale-sync.js::writeFreeformTranslations`).
+ * ⛔ Until 2026-10-17 the CLI wrote no final newline and a pull wrote one, so a pull
+ * that changed one entry of a CLI-written manifest also changed its last line.
+ *
+ * @param {Object} manifest
+ * @returns {string}
+ */
+export function manifestText(manifest) {
+  return JSON.stringify(manifest, null, 2) + '\n'
+}
+
+/**
  * Save the manifest for a locale
  *
  * @param {string} localeDir - Path to locale's freeform directory
@@ -106,7 +119,7 @@ export async function saveManifest(localeDir, manifest) {
     await mkdir(localeDir, { recursive: true })
   }
 
-  await writeFile(manifestPath, JSON.stringify(manifest, null, 2))
+  await writeFile(manifestPath, manifestText(manifest))
 }
 
 /**
