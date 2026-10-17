@@ -207,9 +207,14 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
  *
  * ⛔ Do not add the field or the role to the hash. Genuine wording divergence by
  * context is what `overrides` is for (`lookupTranslation`); representation
- * divergence is this function's job.
+ * divergence is this function's job — and `translatedInline`'s, for an element whose
+ * source has no link.
+ *
+ * ⭐ One rule for both lanes: a push sends a plain-text slot's translations through it too
+ * (`uwx/locale-sync.js::plainTextTargets`). ⛔ Until 2026-10-16 only the build did, so a host
+ * was handed `[Sign in](/sign-in)` as a page's French title.
  */
-function toPlainText(value) {
+export function toPlainText(value) {
   if (typeof value !== 'string' || !value.includes('[') && !value.includes('*') && !value.includes('`') && !value.includes('_')) {
     return value
   }
@@ -239,7 +244,8 @@ function translateSiteMeta(config, translations, fallbackToSource) {
   if (!seo || typeof seo !== 'object') return
   for (const key of ['ogTitle', 'ogDescription']) {
     if (typeof seo[key] === 'string' && seo[key]) {
-      seo[key] = lookupTranslation(seo[key], SITE_META_CONTEXT, translations, fallbackToSource)
+      // A plain-text slot, as a page's are (`translatePageMeta`). ⛔ Not flattened until 2026-10-16.
+      seo[key] = toPlainText(lookupTranslation(seo[key], SITE_META_CONTEXT, translations, fallbackToSource))
     }
   }
 }
@@ -381,9 +387,19 @@ function applyElementTranslation(node, context, translations, fallbackToSource) 
  * its link: the button became a plain paragraph, or vanished from a section that renders only
  * links. Locale files keyed before whole-element keying hold exactly such labels.
  *
- * A value that writes a link is taken as written, re-targeted or not. So is a plain value for an
- * element that mixes words and links, since which words were linked cannot be known;
- * `uniweb i18n status` reports that loss (`translationKeepsMarkup`).
+ * ⭐ And a link is the SOURCE's to have: a value that writes one, given to an element whose source
+ * has none, gives it its words alone. One text is one unit wherever it appears (`hash.js`), so its
+ * value serves a heading that says it and a link that says it alike — `Faculty of Science` in a
+ * header, `[Faculty of Science](/)` in a list — and the link belongs to the place that has one.
+ * Representation is the consumer's, as a title's is (`toPlainText`). ⛔ Until 2026-10-16 the value
+ * was taken as written: `uniweb i18n init` seeds a unit with the markup of whichever occurrence
+ * carries some, so an untouched seeded locale turned the heading into a link — and the parser,
+ * which reads a heading made only of a link as a link, left its section without a title.
+ *
+ * A value that writes a link, given to an element whose source has one, is taken as written,
+ * re-targeted or not. So is a plain value for an element that mixes words and links, since which
+ * words were linked cannot be known; `uniweb i18n status` reports that loss
+ * (`translationKeepsMarkup`). Emphasis is the translator's: a value's bold or italic stays.
  *
  * @param {Array} source - the element's source inline content
  * @param {string} value - the translation, inline markdown
@@ -392,7 +408,36 @@ function applyElementTranslation(node, context, translations, fallbackToSource) 
 export function translatedInline(source, value) {
   const fragment = inlineMarkdownToFragment(value)
   if (!fragment) return null
-  return asLinkLabels(source, fragment, value) || fragment
+  const labels = asLinkLabels(source, fragment, value)
+  if (labels) return labels
+  return hasLink(source) ? fragment : withoutLinks(fragment)
+}
+
+// Whether inline content holds a link — on its text, or inside an inline wrapper.
+function hasLink(nodes) {
+  return (nodes || []).some((node) => Boolean(linkMarkOf(node)) || hasLink(node?.content))
+}
+
+// Inline content without its links: the words, and every other mark, kept — runs that end up
+// alike joined, as the reader would have written them.
+function withoutLinks(nodes) {
+  const out = []
+  for (const node of nodes) {
+    let next = node
+    if (node?.content) next = { ...node, content: withoutLinks(node.content) }
+    else if (linkMarkOf(node)) {
+      const { marks, ...rest } = node
+      const kept = marks.filter((mark) => mark.type !== 'link')
+      next = kept.length ? { ...rest, marks: kept } : rest
+    }
+    const last = out[out.length - 1]
+    if (last?.type === 'text' && next?.type === 'text' && JSON.stringify(last.marks || []) === JSON.stringify(next.marks || [])) {
+      out[out.length - 1] = { ...last, text: last.text + next.text }
+    } else {
+      out.push(next)
+    }
+  }
+  return out
 }
 
 /**
@@ -581,7 +626,7 @@ function translateDataBlocks(doc, context, translations, fallbackToSource, model
         const data = node.attrs?.data
         if (data && typeof data === 'object') {
           visitDataBlockStrings(data, (value) => {
-            const translated = lookupTranslation(value, context, translations, fallbackToSource)
+            const translated = asDataString(value, lookupTranslation(value, context, translations, fallbackToSource))
             if (translated !== value) changed = true
             return translated
           }, modelFor(node.attrs?.tag))
@@ -593,6 +638,18 @@ function translateDataBlocks(doc, context, translations, fallbackToSource, model
   }
   walk(doc?.content)
   return changed
+}
+
+/**
+ * ⭐ A data block's string written as TEXT takes its translation as text — the rule an element
+ * with no link follows (`translatedInline`), for a string a component renders as it is: the markup a
+ * translation carries for a link elsewhere is not this string's. ⛔ Until 2026-10-16 it was taken
+ * as written, and a label shared with a link rendered as `[Sign in](/sign-in)`. A string written
+ * with markdown keeps its translation as written.
+ */
+function asDataString(source, translated) {
+  if (typeof translated !== 'string' || translated === source) return translated
+  return toPlainText(source) === source ? toPlainText(translated) : translated
 }
 
 /**

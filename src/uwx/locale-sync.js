@@ -24,7 +24,7 @@ import { proseMirrorToMarkdown, serializeInlineContent } from '@uniweb/content-w
 import { computeHash } from '../i18n/hash.js'
 import { blockElements, elementText, dataBlockNodes } from '../i18n/extract.js'
 import { visitDataBlockStrings } from '../i18n/data-strings.js'
-import { resolveDocForLocale, translatedInline, linkLabels } from '../i18n/merge.js'
+import { resolveDocForLocale, translatedInline, linkLabels, toPlainText } from '../i18n/merge.js'
 import { computeSourceHash } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
@@ -250,6 +250,30 @@ export function contextKey(context) {
  * @param {string} sourceLocale
  * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
  */
+/**
+ * A localized PLAIN-TEXT value — a page's title, label, description, keywords and Open Graph
+ * texts, and the site's — with each translation as text, as the build renders it
+ * (`i18n/merge.js::toPlainText`). The source stays as the author wrote it, as the build leaves it.
+ * ⛔ Until 2026-10-16 a push sent a translation's markdown as it was, so a unit shared by a page's
+ * title and a link to the page reached a host as `[Sign in](/sign-in)`.
+ *
+ * @param {object|Array|undefined} value - a `{ locale: text }` map, or a list of them
+ * @param {string} sourceLocale
+ */
+export function plainTextTargets(value, sourceLocale) {
+  if (Array.isArray(value)) return value.map((item) => plainTextTargets(item, sourceLocale))
+  if (!value || typeof value !== 'object') return value
+  let out = value
+  for (const [locale, text] of Object.entries(value)) {
+    if (locale === sourceLocale || typeof text !== 'string') continue
+    const plain = toPlainText(text)
+    if (plain === text) continue
+    if (out === value) out = { ...value }
+    out[locale] = plain
+  }
+  return out
+}
+
 export function localizeScalarList(value, sourceLocale, translations, context = null) {
   if (value == null) return undefined
   if (!Array.isArray(value)) return localizeScalar(value, sourceLocale, translations, context)

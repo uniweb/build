@@ -73,7 +73,7 @@ import { readLayoutFolder, layoutAreaRoute } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent } from './locale-sync.js'
+import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
@@ -264,11 +264,13 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
 // build translates them (`i18n/merge.js::translatePageMeta`, `<route>:_meta`): an override for one
 // page applies there and nowhere else. ⛔ Until 2026-09-26 they were resolved with no page, so an
 // override never reached a backend — nor, until the same day, an entry's default.
+// ⭐ Each is a plain-text slot, so a translation reaches it as text, as the build renders it
+// (`plainTextTargets`).
 function localizePageMeta(page, route, sourceLocale, translations) {
   const context = { page: route, section: '_meta' }
   const again = (value) =>
     value && typeof value === 'object' && typeof value[sourceLocale] === 'string'
-      ? localizeScalar(value[sourceLocale], sourceLocale, translations, context)
+      ? plainTextTargets(localizeScalar(value[sourceLocale], sourceLocale, translations, context), sourceLocale)
       : value
   for (const key of ['title', 'label', 'description', 'og_title', 'og_description']) {
     if (page[key] !== undefined) page[key] = again(page[key])
@@ -1306,14 +1308,15 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // The site's Open Graph title and description per language, where the deployment's `settings`
   // takes them (`uwx/open-graph.js`), in the site's context (`SITE_META_CONTEXT`).
   // (Each read inline from `siteYml.seo`, so the emit surface names its source.)
-  setIf(settings, 'og_title', openGraphValue(siteYml.seo, 'og_title', settingsFields, sourceLocale, translations, SITE_META_CONTEXT))
-  setIf(settings, 'og_description', openGraphValue(siteYml.seo, 'og_description', settingsFields, sourceLocale, translations, SITE_META_CONTEXT))
+  // Plain-text slots, each translation as text (`plainTextTargets`).
+  setIf(settings, 'og_title', plainTextTargets(openGraphValue(siteYml.seo, 'og_title', settingsFields, sourceLocale, translations, SITE_META_CONTEXT), sourceLocale))
+  setIf(settings, 'og_description', plainTextTargets(openGraphValue(siteYml.seo, 'og_description', settingsFields, sourceLocale, translations, SITE_META_CONTEXT), sourceLocale))
   setIf(settings, 'seo', seoBesideOpenGraph(siteYml.seo, settingsFields))
   // ⭐ `keywords` IS seo by function — it renders into `<meta name="keywords">`
   // (`runtime/src/ssr-renderer.js`). It is top-level in site.yml for authoring
   // convenience, not because it is a different kind of thing. Localized, so it
   // carries the translation collector with it.
-  setIf(settings, 'keywords', localizeScalarList(siteYml.keywords, sourceLocale, translations))
+  setIf(settings, 'keywords', plainTextTargets(localizeScalarList(siteYml.keywords, sourceLocale, translations), sourceLocale))
 
   // ⛔ NO SERVICE IS HERE. A service's address and options ride its row in the
   // `services` Section, whole (`requestedServices`) [Diego, 2026-10-06: "If it's on and
@@ -1431,7 +1434,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // a localized `{lang:value}` map. Genuine content fields (`description` below, page
   // title/slug/label/keywords, the body) stay localized. (uwx-format.md → identity-label names.)
   info.name = siteYml.name
-  setIf(info, 'description', localizeScalar(siteYml.description, sourceLocale, translations))
+  setIf(info, 'description', plainTextTargets(localizeScalar(siteYml.description, sourceLocale, translations), sourceLocale))
   // Publish intent (site.yml `publishLanguages:`) rides VERBATIM — dangling
   // codes included. Sync carries the full working set; only *publish* filters
   // (backend projection / static-build filter). The verbatim carry is what
