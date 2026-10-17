@@ -224,7 +224,8 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // Localized text fields → unwrapped to the source locale (the target locales are
   // captured into the locales/ collector when one is supplied).
   collector?.add(info.name)
-  collector?.add(info.description)
+  // A plain-text field: the push sends a translation's words (`plainTextTargets`).
+  collector?.add(info.description, null, { plainText: true })
   const name = unwrapLocalized(info.name, sourceLocale)
   if (name !== undefined) siteChanges.name = name
   const description = unwrapLocalized(info.description, sourceLocale)
@@ -273,7 +274,7 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
 
   // `settings.keywords` is a LOCALIZED list (it renders into `<meta name="keywords">`)
   // → unwrap to the source locale; the target locales go to the collector.
-  if (Array.isArray(settingsSection.keywords)) settingsSection.keywords.forEach((kw) => collector?.add(kw))
+  if (Array.isArray(settingsSection.keywords)) settingsSection.keywords.forEach((kw) => collector?.add(kw, null, { plainText: true }))
   const settingsKeywords = unwrapLocalizedList(settingsSection.keywords, sourceLocale)
   if (settingsKeywords !== undefined) siteChanges.keywords = settingsKeywords
 
@@ -816,15 +817,17 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // Capture target-locale translations of the page's localized scalars; the
     // source value goes inline into page.yml below (pageRecordToYml unwraps it). In the page's
     // context, as the build translates them (`<route>:_meta`), so an override for one page comes back.
+    // Each a plain-text field: the push sends a translation's words (`site.js::localizePageMeta`).
     const meta = { page: canon, section: '_meta' }
-    ctx.collector?.add(record.title, meta)
-    ctx.collector?.add(record.label, meta)
-    ctx.collector?.add(record.description, meta)
-    ctx.collector?.add(record.og_title, meta)
-    ctx.collector?.add(record.og_description, meta)
+    const text = { plainText: true }
+    ctx.collector?.add(record.title, meta, text)
+    ctx.collector?.add(record.label, meta, text)
+    ctx.collector?.add(record.description, meta, text)
+    ctx.collector?.add(record.og_title, meta, text)
+    ctx.collector?.add(record.og_description, meta, text)
     // keywords is a localized ARRAY — capture each element's target locales.
-    if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw, meta))
-    else ctx.collector?.add(record.keywords, meta)
+    if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw, meta, text))
+    else ctx.collector?.add(record.keywords, meta, text)
 
     const route = routePrefix ? `${routePrefix}/${slug}` : slug
     // Addressed as the push addresses it: its free-form translations and its translations' contexts
@@ -1347,7 +1350,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   }
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
-  report.locales = writeLocaleTranslations(siteRoot, collector.byLocale)
+  report.locales = writeLocaleTranslations(siteRoot, collector.byLocale, '', collector.says)
   // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
   report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
   writePullIndex(siteRoot, ctx.newIndex)

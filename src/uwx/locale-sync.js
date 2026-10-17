@@ -304,12 +304,23 @@ export function isLocalizedContent(value) {
  */
 export function createTranslationCollector(sourceLocale, { siteRoot = null } = {}) {
   const byLocale = {} // { locale: { hash: target } }
+  // ⭐ What says each value read, in the place it was read — the push's own rule there — so the
+  // writer keeps an author's entry that says the same thing in another spelling (`reconcileTranslation`).
+  const says = {} // { locale: { hash: { plain?: (value) => boolean, values: { [contextKey]: (value) => boolean } } } }
   const freeformPending = [] // [{ locale, content }] — target-locale free-form bodies
+
+  function noteSays(locale, hash, context, check) {
+    const entry = ((says[locale] ||= {})[hash] ||= { plain: undefined, values: {} })
+    if (context) entry.values[contextKey(context)] = check
+    else entry.plain = check
+  }
 
   // Record a localized SCALAR field's target locales (hash of the source scalar). ⭐ With `context`
   // — the record it was read in (`{ key: '<pool>/<handle>' }`) — a translation that differs from one
   // record to another comes back as the author's `{ default, overrides }`, as a page section's does.
-  function add(localizedValue, context = null) {
+  // ⭐ `plainText` for a field the push sends as text (`plainTextTargets`): any value with those words
+  // says it.
+  function add(localizedValue, context = null, { plainText = false } = {}) {
     if (!isLocalizedMap(localizedValue)) return
     const source = localizedValue[sourceLocale]
     if (typeof source !== 'string' || source.length === 0) return
@@ -318,6 +329,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
       if (locale === sourceLocale) continue
       if (typeof value !== 'string') continue
       const table = (byLocale[locale] ||= {})
+      noteSays(locale, hash, context, plainText ? saysAsText(value) : saysAsIs(value))
       if (!context) {
         if (table[hash] instanceof SeenInContexts) table[hash].plain = value
         else table[hash] = value
@@ -335,12 +347,14 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
   // from one section to another is kept per section, and comes back as the author's
   // context-specific overrides (`writeLocaleTranslations`). ⛔ Until 2026-09-26 the last section
   // read won, and a pull wrote that one string over the author's `{ default, overrides }`.
-  function addStructuralMap(locale, map, context = null) {
+  // `checks` — what says each element's translation (`deriveStructuralMap`); a value as read, else.
+  function addStructuralMap(locale, map, context = null, checks = null) {
     if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map)) return
     const table = (byLocale[locale] ||= {})
     for (const [src, target] of Object.entries(map)) {
       if (typeof src !== 'string' || typeof target !== 'string') continue
       const hash = computeHash(src)
+      noteSays(locale, hash, context, checks?.[src] ?? saysAsIs(target))
       if (!context) {
         if (table[hash] instanceof SeenInContexts) table[hash].plain = target
         else table[hash] = target
@@ -375,7 +389,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
     return null
   }
 
-  return { add, addStructuralMap, noteFreeform, keptFreeform, byLocale, freeformPending }
+  return { add, addStructuralMap, noteFreeform, keptFreeform, byLocale, says, freeformPending }
 }
 
 /**
@@ -391,7 +405,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
  * per-locale link hrefs survive. Keyed by the source element's cleaned text, so
  * `computeHash(key)` matches the extractor's unit hash — closing the round trip.
  */
-function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null) {
+function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks = {}) {
   if (!isProseMirrorDoc(sourceDoc) || !isProseMirrorDoc(targetDoc)) return null
   const src = blockElements(sourceDoc)
   const tgt = blockElements(targetDoc)
@@ -406,12 +420,47 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null) {
       const tgtMd = serializeInlineContent(tgt[i].content || [])
       if (srcMd === tgtMd) continue // unchanged → untranslated → omit
       map[key] = labelsAlone(src[i].content || [], tgt[i].content || [], tgtMd) ?? tgtMd
+      checks[key] = saysElement(src[i].content || [], tgtMd)
     }
   } catch {
     // a mark we can't serialize → don't risk a lossy map; store as free-form
     return null
   }
-  return addDataBlockStrings(map, sourceDoc, targetDoc, modelFor)
+  return addDataBlockStrings(map, sourceDoc, targetDoc, modelFor, checks)
+}
+
+// ⭐ WHAT SAYS A TRANSLATION, WHERE A PULL READ IT — the push's own rule for that place. A pull reads
+// one spelling back, and an author's entry may say the same thing in another: `[Faire un don](/contact)`
+// where the merge reads the label onto the source's own link, or `[Se connecter](/sign-in)` for a page
+// title, which the push sends as its words.
+//   - an element of a section: what `merge.js::translatedInline` makes of a value there;
+//   - a plain-text field (`plainTextTargets`): a value's words;
+//   - anything else: the value as read.
+function saysElement(source, pushed) {
+  return (value) => {
+    if (typeof value !== 'string') return false
+    try {
+      const back = translatedInline(source, value)
+      return !!back && serializeInlineContent(back) === pushed
+    } catch {
+      return false
+    }
+  }
+}
+
+function saysAsText(read) {
+  return (value) => {
+    if (typeof value !== 'string') return false
+    try {
+      return toPlainText(value) === read
+    } catch {
+      return false
+    }
+  }
+}
+
+function saysAsIs(read) {
+  return (value) => value === read
 }
 
 // Whether a free-form file says `target`, read as a push reads it — its body, as stored.
@@ -447,7 +496,7 @@ function labelsAlone(source, target, whole) {
 // A target that is not the source with only those strings changed — another shape, another `href` —
 // cannot be said per string, and the whole translation is free-form. ⛔ Until 2026-09-26 a data block
 // was not read here at all, and its translations were not sent (`merge.js::translateDataBlocks`).
-function addDataBlockStrings(map, sourceDoc, targetDoc, modelFor = () => null) {
+function addDataBlockStrings(map, sourceDoc, targetDoc, modelFor = () => null, checks = null) {
   const srcBlocks = dataBlockNodes(sourceDoc)
   const tgtBlocks = dataBlockNodes(targetDoc)
   if (srcBlocks.length !== tgtBlocks.length) return null
@@ -476,7 +525,10 @@ function addDataBlockStrings(map, sourceDoc, targetDoc, modelFor = () => null) {
     const rebuilt = JSON.parse(JSON.stringify(s.data))
     visitDataBlockStrings(rebuilt, (value) => pairs.get(value) ?? value, modelFor(s.tag))
     if (canonicalJson(rebuilt) !== canonicalJson(t.data)) return null
-    for (const [from, to] of pairs) map[from.trim()] = to
+    for (const [from, to] of pairs) {
+      map[from.trim()] = to
+      if (checks) checks[from.trim()] = saysAsIs(to)
+    }
   }
   return map
 }
@@ -501,8 +553,9 @@ export function unwrapLocalizedContent(content, sourceLocale, collector, freefor
     if (isProseMirrorDoc(value)) {
       // A translation the site keeps as a free-form file stays one, even when it lines up.
       const kept = collector?.keptFreeform?.(locale, freeformCandidates || freeformRelPath) || null
-      const map = kept ? null : deriveStructuralMap(source, value, modelFor)
-      if (map) collector?.addStructuralMap?.(locale, map, context)
+      const checks = {}
+      const map = kept ? null : deriveStructuralMap(source, value, modelFor, checks)
+      if (map) collector?.addStructuralMap?.(locale, map, context, checks)
       else collector?.noteFreeform?.(locale, value, source, kept || freeformRelPath)
     } else {
       collector?.addStructuralMap?.(locale, value, context)
@@ -525,25 +578,39 @@ class SeenInContexts {
 // still hold. The default is what the places without an override of their own say (the most of
 // them; the author's default when tied, else the first read). An override for a place this pull did
 // not see is kept, and one that now says the default is dropped.
-function reconcileTranslation(existing, seen) {
+// ⭐ A value AGREES with a place when, pushed there, it says what the pull read (`check`, from the
+// collector — the read value itself, where none was noted). So the author's entry is kept as written
+// wherever it still says what every place read: a pull that changes nothing writes nothing.
+// ⛔ Until 2026-10-17 values agreed only when spelled alike, and a pull rewrote an entry that says the
+// same thing another way: `[Faire un don](/contact)` to its label, a string a heading and a link
+// share into per-place overrides, a page title's `[Se connecter](/sign-in)` to its words.
+function reconcileTranslation(existing, seen, check = null) {
   const own = existing && typeof existing === 'object' && existing.overrides && typeof existing.overrides === 'object' ? existing.overrides : {}
   const authoredDefault = typeof existing === 'string' ? existing : existing && typeof existing === 'object' ? existing.default : undefined
-  const contexts = Object.entries(seen.values)
-  const candidates = [...(seen.plain !== undefined ? [seen.plain] : []), ...contexts.filter(([k]) => !(k in own)).map(([, v]) => v)]
+  // Each place read: its context's key (null where it has none), what it read, and what says that.
+  const places = [
+    ...(seen.plain !== undefined ? [[null, seen.plain, check?.plain ?? saysAsIs(seen.plain)]] : []),
+    ...Object.entries(seen.values).map(([k, v]) => [k, v, check?.values?.[k] ?? saysAsIs(v)]),
+  ]
+  const at = (k) => (k !== null && k in own ? own[k] : authoredDefault)
+  if (existing !== undefined && places.length && places.every(([k, , says]) => says(at(k)))) return existing
+  // The places the default speaks for: those with no override of the author's own.
+  const free = places.filter(([k]) => k === null || !(k in own))
   let def = authoredDefault
-  if (candidates.length) {
-    const counts = new Map()
-    for (const v of candidates) counts.set(v, (counts.get(v) || 0) + 1)
-    const most = Math.max(...counts.values())
-    const top = [...counts].filter(([, n]) => n === most).map(([v]) => v)
-    def = top.includes(authoredDefault) ? authoredDefault : top[0]
+  if (free.length) {
+    let most = -1
+    for (const candidate of [...(authoredDefault !== undefined ? [authoredDefault] : []), ...free.map(([, read]) => read)]) {
+      const agree = free.filter(([, , says]) => says(candidate)).length
+      if (agree > most) [def, most] = [candidate, agree]
+    }
   } else if (def === undefined) {
-    def = contexts[0]?.[1]
+    def = places.find(([k]) => k !== null)?.[1]
   }
   const overrides = { ...own }
-  for (const [k, v] of contexts) {
-    if (v === def) delete overrides[k]
-    else overrides[k] = v
+  for (const [k, read, says] of places) {
+    if (k === null) continue
+    if (says(def)) delete overrides[k]
+    else if (!(k in own && says(own[k]))) overrides[k] = read
   }
   return Object.keys(overrides).length ? { default: def, overrides } : def
 }
@@ -670,9 +737,14 @@ function jsonObjectText(entries) {
  * in the file, and new ones follow it, sorted, so a pull that changes nothing writes
  * nothing. Creates `locales/` if absent.
  *
+ * @param {string} siteRoot
+ * @param {object} byLocale - the collector's `byLocale`
+ * @param {string} [subdir] - `records` for record translations
+ * @param {object} [says] - the collector's `says`: what says each value read, in its place
+ *   (`reconcileTranslation`). Without it, a value says only itself.
  * @returns {{ [locale: string]: 'updated' | 'unchanged' }}
  */
-export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
+export function writeLocaleTranslations(siteRoot, byLocale, subdir = '', says = null) {
   const report = {}
   for (let [locale, entries] of Object.entries(byLocale || {})) {
     if (!entries || Object.keys(entries).length === 0) continue
@@ -698,9 +770,13 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '') {
     // whole file by hash — measured on the `international` template, whose `es.json` runs in page
     // order: a pull that changed no translation rewrote all 77 lines.
     // A translation read in several sections becomes the string or the `{ default, overrides }` the
-    // author keeps (`reconcileTranslation`).
+    // author keeps (`reconcileTranslation`) — and one read in one place too, which keeps an entry
+    // that says it in another spelling, and an override for a place the pull did not see.
     entries = Object.fromEntries(
-      Object.entries(entries).map(([key, value]) => [key, value instanceof SeenInContexts ? reconcileTranslation(existing[key], value) : value])
+      Object.entries(entries).map(([key, value]) => [
+        key,
+        reconcileTranslation(existing[key], value instanceof SeenInContexts ? value : new SeenInContexts(value), says?.[locale]?.[key]),
+      ])
     )
     const fresh = Object.keys(entries).filter((key) => !(key in existing)).sort()
     if (fresh.length === 0 && Object.entries(entries).every(([key, value]) => canonicalJson(existing[key]) === canonicalJson(value))) {

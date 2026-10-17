@@ -900,7 +900,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
 
   // Flush localized record-field translations to locales/records/{locale}.json,
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
-  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'records')
+  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'records', collector.says)
   const freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
 
   if (opts.backend && Object.keys(learned).length) {

@@ -61,7 +61,8 @@ export function foldOpenGraph(holder, seo, sourceLocale, collector = null, conte
   for (const [wire, key] of OPEN_GRAPH_KEYS) {
     const value = holder?.[wire]
     if (value === undefined) continue
-    collector?.add(value, context)
+    // A plain-text field: the push sends a translation's words (`plainTextTargets`).
+    collector?.add(value, context, { plainText: true })
     const source = unwrapLocalized(value, sourceLocale)
     if (typeof source === 'string' && source !== '') out[key] = source
   }
