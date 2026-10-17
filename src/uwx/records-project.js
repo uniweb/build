@@ -609,6 +609,13 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
   if (existsSync(abs) && organizesAlike({ abs, entries, siteRoot, poolPathByUuid })) {
     return { status: 'unchanged', entries, warnings, file }
   }
+  // Said when it replaces a developer's pattern: a record they add from here is placed by nothing.
+  if (existsSync(abs) && holdsPattern(abs)) {
+    warnings.push(
+      `${file}: the folder no longer places its records as its patterns say, so it was written as their ` +
+        `paths. A record you add from here sits at the top of the folder until ${file} places it.`
+    )
+  }
   if (entries.length === 0) {
     if (!existsSync(abs)) return { status: 'unchanged', entries, warnings, file }
     unlinkSync(abs)
@@ -660,6 +667,22 @@ function organizesAlike({ abs, entries, siteRoot, poolPathByUuid }) {
   const theirShape = shape(theirs.nodes, [], (path) => (theirFolders.add(path), true))
   const myShape = shape(mine.nodes, [], (path, holds) => holds || theirFolders.has(path))
   return canonicalJson(myShape) === canonicalJson(theirShape)
+}
+
+// Does the `folder.yml` on disk place records by a pattern (`member/*.md`) anywhere?
+function holdsPattern(abs) {
+  let authored
+  try {
+    authored = yaml.load(readFileSync(abs, 'utf8'), YAML_OPTIONS)
+  } catch {
+    return false
+  }
+  const has = (entries) =>
+    (Array.isArray(entries) ? entries : []).some((entry) => {
+      const path = typeof entry === 'string' ? entry : entry?.path
+      return (typeof path === 'string' && /[*?]/.test(path)) || has(entry?.records)
+    })
+  return has(authored)
 }
 
 /**

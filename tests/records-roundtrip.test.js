@@ -305,10 +305,13 @@ describe('a folder.yml written with a pattern', () => {
     const [archive] = folder.document.contents
     const hello = archive.$children.find((n) => n.name === 'hello')
     const moved = { contents: [{ ...archive, $children: archive.$children.filter((n) => n !== hello) }, hello] }
-    expect(pull(site, moved, col.entities.map((e) => e.document)).records).toBe('updated')
+    const report = pull(site, moved, col.entities.map((e) => e.document))
+    expect(report.records).toBe('updated')
     expect(yaml.load(readFileSync(join(site, 'records', 'folder.yml'), 'utf8'))).toEqual([
       { folder: 'archive', label: 'The Archive', records: ['article/older.md'] },
     ])
+    // ⭐ And it says so: a record added from here is placed by nothing.
+    expect(report.warnings.some((w) => w.includes('written as their paths'))).toBe(true)
   })
 
   it('an edited record keeps a blank line after its front matter, and ends with a newline', async () => {
