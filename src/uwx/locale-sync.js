@@ -240,17 +240,6 @@ export function contextKey(context) {
 }
 
 /**
- * Wrap a `multiple: true` + `localized: true` field (e.g. page `keywords` — "array
- * of localized strings") into per-locale form by localizing each element. Container
- * shape is preserved so the round-trip is a fixed point: an array authored as an
- * array stays an array of `{ <lang>: value }` maps; a bare scalar (the degenerate
- * single-value authoring) wraps as one localized scalar. null/undefined → undefined.
- *
- * @param {*} value
- * @param {string} sourceLocale
- * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
- */
-/**
  * A localized PLAIN-TEXT value — a page's title, label, description, keywords and Open Graph
  * texts, and the site's — with each translation as text, as the build renders it
  * (`i18n/merge.js::toPlainText`). The source stays as the author wrote it, as the build leaves it.
@@ -274,6 +263,17 @@ export function plainTextTargets(value, sourceLocale) {
   return out
 }
 
+/**
+ * Wrap a `multiple: true` + `localized: true` field (e.g. page `keywords` — "array
+ * of localized strings") into per-locale form by localizing each element. Container
+ * shape is preserved so the round-trip is a fixed point: an array authored as an
+ * array stays an array of `{ <lang>: value }` maps; a bare scalar (the degenerate
+ * single-value authoring) wraps as one localized scalar. null/undefined → undefined.
+ *
+ * @param {*} value
+ * @param {string} sourceLocale
+ * @param {object} [translations] - `{ locale: { hash: tgt } }` from loadLocaleTranslations
+ */
 export function localizeScalarList(value, sourceLocale, translations, context = null) {
   if (value == null) return undefined
   if (!Array.isArray(value)) return localizeScalar(value, sourceLocale, translations, context)

@@ -184,6 +184,26 @@ describe('a declared shape the translation step cannot read is said aloud', () =
     spy.mockRestore()
   })
 
+  it('a declaration that is no shape at all — a list of field names — is said too', async () => {
+    // (A retired `'@x/y/*'` ref never gets here: the foundation's own build refuses it.)
+    declare('Roster', "{ labels: ['email', 'time'] }")
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const models = await dataBlockModels(SITE)
+    expect(models('Roster', 'labels')).toBeNull()
+    expect(said(spy)).toHaveLength(1)
+    expect(said(spy)[0]).toMatch(/the Roster section type declares data key "labels".*is not a schema/)
+    spy.mockRestore()
+  })
+
+  it('`{ type, fields }` is the whole-schema form, read as its fields — its own problem is said, with no hint about `type`', async () => {
+    declare('Card', "{ card: { type: 'object', fields: { email: 'string', when: 'bogus' } } }")
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await dataBlockModels(SITE)
+    expect(said(spy)).toHaveLength(1)
+    expect(said(spy)[0]).not.toMatch(/two fields/)
+    spy.mockRestore()
+  })
+
   it('a shape it reads, or a key with none, says nothing', async () => {
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await dataBlockModels(SITE)

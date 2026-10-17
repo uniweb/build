@@ -480,6 +480,11 @@ function addUnit(units, source, field, context, markup = null) {
     // Two elements can share a key and differ in markup ("Learn more" plain in one
     // place, linked in another). The first occurrence wins the field and the order,
     // but a later one may be the only carrier of markup, so fill it rather than drop it.
+    // ⭐ And say that the places disagree (`markupVaries`): one value serves them all, so
+    // `uniweb i18n init` starts such a unit with its plain words, which a plain place takes as
+    // they are and a link takes as its label (`merge.js::translatedInline`). ⛔ Until 2026-10-16
+    // nothing said so, and init seeded the markup everywhere — a header's heading became a link.
+    if ((markup || null) !== (units[hash].markup || null)) units[hash].markupVaries = true
     if (markup && !units[hash].markup) units[hash].markup = markup
     const existingContexts = units[hash].contexts
     const contextKey = `${context.page}:${context.section}`

@@ -79,7 +79,12 @@ export async function dataBlockModels(siteRoot, siteYml = null) {
       const model = modelOf(schema, '@/inline', (err) => (lowering = err))
       if (problems?.length || !model) warn(where, problems?.length ? problems.join('; ') : lowering?.message || 'it lowers to no model')
       models.set(where, model)
-    } else models.set(where, null)
+    } else {
+      // A declaration the normalizer could not take at all — a retired `'@x/y/*'` ref, a value that
+      // is no shape — is a shape declared and not read, as much as a field map that fails.
+      if (decl?.problems?.length) warn(where, decl.problems.join('; '))
+      models.set(where, null)
+    }
   }
 
   return (type, tag) => {
@@ -101,9 +106,10 @@ function warnUnreadable(siteRoot, where, reason, declaration) {
   if (warned.has(once)) return
   warned.add(once)
   const who = owner ? `the ${owner} section type` : 'the foundation (main.js)'
-  const fieldsCalledType = declaration && typeof declaration === 'object' && typeof declaration.type === 'string' && ('values' in declaration || 'fields' in declaration)
+  // ⚠️ `values` only: `{ type: 'object', fields: { … } }` is the whole-schema form, read as its fields.
+  const fieldsCalledType = declaration && typeof declaration === 'object' && typeof declaration.type === 'string' && 'values' in declaration && !('fields' in declaration)
   const hint = fieldsCalledType
-    ? ` A data key is declared as its block's fields: { type: '${declaration.type}', ${'values' in declaration ? 'values' : 'fields'}: … } declares two fields, named "type" and "${'values' in declaration ? 'values' : 'fields'}" — name the block's fields instead ({ email: 'string', time: 'string' }).`
+    ? ` A data key is declared as its block's fields: { type: '${declaration.type}', values: … } declares two fields, named "type" and "values" — name the block's fields instead ({ email: 'string', time: 'string' }).`
     : /open map/.test(reason)
       ? " An open map is read when its values are records: values: { type: 'object', fields: { … } }."
       : ''
