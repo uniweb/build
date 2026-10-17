@@ -346,8 +346,8 @@ function freeformSections(siteContent) {
 
 /**
  * What a site's content says about its free-form translations — the ONE index for the
- * build's stale and orphan check and for the CLI's `status --freeform`, `update-hash` and
- * `prune --freeform`, so no two of them can judge a file differently.
+ * build's stale and orphan check and for the CLI's `status --freeform`, `init-freeform`,
+ * `update-hash` and `prune --freeform`, so no two of them judge a file by different rules.
  *
  *   - `validPaths` — every path the renderer reads a section's translation from
  *     (`freeformPathsFor`), for every section it translates;
@@ -355,12 +355,19 @@ function freeformSections(siteContent) {
  *     translates, which a recorded hash is compared with;
  *   - `canJudge(path)` — whether this content can say a translation at `path` is
  *     orphaned. ⛔ Only a page section's (`pages/…`, `page-ids/…`), and not one for a page
- *     whose sections the content does not carry — a prerendered site with split content
- *     rewrites `site-content.json` without them. A record's (`records/…`) is read from
- *     records this content does not hold. A check that cannot see the source must never
- *     call its translation orphaned: `prune --freeform` deletes what it is told is.
+ *     whose sections the content does not carry — as a prerendered site's split
+ *     `site-content.json` does not. A record's (`records/…`) is read from records this
+ *     content does not hold. A check that cannot see the source must never call its
+ *     translation orphaned: `prune --freeform` deletes what it is told is.
  *
- * @param {Object} siteContent - collected site content, as `dist/site-content.json` holds it
+ * ⚠️ The rules are one; the content is the caller's. The CLI's commands pass the site's
+ * SOURCE, collected as `uniweb i18n extract` collects it, `hidden:` pages and sections
+ * included (`cli/src/commands/i18n.js::collectSourceContent`) — ⛔ until 2026-10-17 they read
+ * `dist/site-content.json`, split or not. The build passes what it publishes, before its
+ * prerender splits it: no `hidden:` page or section, so it warns of their translations as
+ * orphaned (a warning only — it deletes nothing).
+ *
+ * @param {Object} siteContent - collected site content
  * @returns {{ validPaths: Set<string>, sourceHashes: Object<string, string>, canJudge: (path: string) => boolean }}
  */
 export function freeformSourceIndex(siteContent) {
