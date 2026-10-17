@@ -18,6 +18,8 @@ import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
 import { deriveSupports } from './foundation/derive-supports.js'
 import { proseWithoutStyles, PROSE_WITHOUT_STYLES_WARNING } from './foundation/prose-styles.js'
 import { nodeEnvDefine } from './foundation/node-env.js'
+import { foundationScopeDefine } from './foundation/scope-define.js'
+import { DEV_REBUILD_MARKER, hasDevRebuildMarker } from './foundation/dev-rebuild.js'
 
 // Foundations already told that their prose has no stylesheet — once per process, so a dev
 // server's rebuild on every save does not repeat it.
@@ -348,7 +350,7 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
     }
     const react = (await import('@vitejs/plugin-react')).default
     const svgr = (await import('vite-plugin-svgr')).default
-    plugins.push(react(), svgr(), nodeEnvDefine())
+    plugins.push(react(), svgr(), nodeEnvDefine(), foundationScopeDefine({ foundationDir: foundationRoot }))
 
     await viteBuild({
       root: foundationRoot,
@@ -389,21 +391,8 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
   }
 }
 
-/**
- * Marks a foundation build as a DEV-server rebuild.
- *
- * The dev server runs a real Vite `build()` of the foundation on every watched
- * change (`dev/plugin.js`), so `command`, `mode` and `isProduction` cannot tell
- * a dev rebuild from a shipping build — all of them say "build". An injected
- * marker plugin can, and it survives the foundation's own `vite.config.js`
- * being merged in, which a plugin *option* would not (the dev server does not
- * construct the foundation plugin — the foundation's config file does).
- *
- * Used to skip the `entry-ssr.js` sub-build in dev: it is a second full Vite
- * pass per save, and nothing in the dev loop reads it (dev never ships, and the
- * SSR lanes that run locally — SSG prerender and unipress — load `entry.js`).
- */
-export const DEV_REBUILD_MARKER = 'uniweb:dev-foundation-rebuild'
+// The dev-rebuild marker lives in a leaf (`foundation/dev-rebuild.js`); exported here as before.
+export { DEV_REBUILD_MARKER }
 
 /**
  * Vite plugin for foundation builds
@@ -440,7 +429,7 @@ export function foundationBuildPlugin(options = {}) {
       resolvedOutDir = config.build.outDir
       resolvedRoot = config.root
       isProduction = config.mode === 'production'
-      isDevRebuild = (config.plugins || []).some((p) => p?.name === DEV_REBUILD_MARKER)
+      isDevRebuild = hasDevRebuildMarker(config)
     },
 
     async writeBundle(_options, bundle) {

@@ -26,7 +26,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import { build } from 'vite'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
-import { DEV_REBUILD_MARKER } from '../vite-foundation-plugin.js'
+import { DEV_REBUILD_MARKER } from '../foundation/dev-rebuild.js'
 import { shouldRegenerateForFile } from '../generate-entry.js'
 
 /** Directories that never hold foundation source and must never be walked. */

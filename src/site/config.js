@@ -31,6 +31,7 @@ import {
 } from '../generate-entry.js'
 import { importMapPlugin } from '../import-map-plugin.js'
 import { jsxExtensionGuard } from '../jsx-extension.js'
+import { foundationScopeDefine } from '../foundation/scope-define.js'
 import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
@@ -332,6 +333,11 @@ export async function defineSiteConfig(options = {}) {
       search,
       foundationPath: foundationInfo.path // For loading foundation theme vars
     }),
+
+    // A bundled foundation is compiled here, so its `__FOUNDATION_SCOPE__` is set here: its
+    // scope in a build, null under `uniweb dev` (`foundation/scope-define.js`). A foundation
+    // loaded by URL carries its own, set by its build.
+    !isRuntimeMode && foundationInfo.path && foundationScopeDefine({ foundationDir: foundationInfo.path }),
 
     // Foundation dev server (only in runtime mode with local foundation)
     isRuntimeMode &&

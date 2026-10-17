@@ -27,6 +27,7 @@ import { resolve } from 'node:path'
 import { foundationPlugin } from '../vite-foundation-plugin.js'
 import { jsxExtensionGuard } from '../jsx-extension.js'
 import { nodeEnvDefine } from './node-env.js'
+import { foundationScopeDefine } from './scope-define.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 // The ONE definition. This list used to be re-typed here, and again in
 // vite-foundation-plugin.js — three hand-synced copies of "what a foundation
@@ -114,6 +115,8 @@ export async function defineFoundationConfig(options = {}) {
     // JSX compiles only in .jsx files: a .js file holding it fails with that said.
     jsxExtensionGuard(),
     nodeEnvDefine(),
+    // `__FOUNDATION_SCOPE__` — the scope the foundation's own `@/x` names (`scope-define.js`).
+    foundationScopeDefine({ foundationDir: foundationRoot }),
     tailwind && tailwindcss(),
     react(),
     svgr(),
