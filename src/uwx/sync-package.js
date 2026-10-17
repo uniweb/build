@@ -25,6 +25,7 @@ import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { fileRecordUploads } from './file-records.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
+import { siteSourceLocale } from './source-locale.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
 import { emitEntitySyncPackage } from './entity-document.js'
@@ -299,7 +300,10 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
  */
 export async function emitSyncPackages(siteRoot, opts = {}) {
   const includeSite = opts.includeSite !== false
-  const sourceLocale = opts.sourceLocale
+  // ⭐ ONE LANGUAGE FOR THE WHOLE EMIT — the site's (`./source-locale.js`): its pages, its records,
+  // its folder's labels and the paths its units are keyed by. ⛔ Until 2026-10-16 only the pages asked
+  // the site; the rest assumed `en`.
+  const sourceLocale = opts.sourceLocale || siteSourceLocale(siteRoot)
   const priorHashes = opts.priorHashes || {}
   const sendAll = !!opts.sendAll
   const stamp = withBaseVersion(opts.baseVersions || {}, opts.itemBaseVersions || {})

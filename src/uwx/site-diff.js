@@ -48,7 +48,7 @@
 
 import { entityContentHash } from './records.js'
 import { sectionFileBase, pageDirName, layoutSectionPaths } from './site-project.js'
-import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+import { documentSourceLocale } from './source-locale.js'
 
 // A unit's own content, with the nested collections that are their own units
 // removed — so editing a section never also marks its page (or its parent
@@ -70,7 +70,7 @@ const ownContent = (record, ...childKeys) => {
  *
  * @returns {Map<string, object>} path → the unit's own record
  */
-export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
+export function collectSiteUnits(doc, sourceLocale = documentSourceLocale(doc)) {
   const units = new Map()
   walkSiteUnits(doc, (path, record, kind) => {
     units.set(
@@ -93,7 +93,7 @@ export function collectSiteUnits(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.
  *
  * @param {(path: string, record: object, kind: 'info'|'page'|'section') => void} cb
  */
-export function walkSiteUnits(doc, cb, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
+export function walkSiteUnits(doc, cb, sourceLocale = documentSourceLocale(doc)) {
   const walkSections = (sections, dir) => {
     for (const record of sections || []) {
       // The projector's own file rule — including an app-created section named from its
@@ -353,7 +353,7 @@ const KEYED_SECTIONS = {
  *
  * @returns {Map<string, { uuid: string|null, record: object }>}
  */
-export function siteItemsByKey(doc, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale) {
+export function siteItemsByKey(doc, sourceLocale = documentSourceLocale(doc)) {
   const out = new Map()
   const uuidOf = (record) => (typeof record?.$uuid === 'string' && record.$uuid ? record.$uuid : null)
   const units = collectSiteUnits(doc, sourceLocale)

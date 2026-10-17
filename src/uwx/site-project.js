@@ -52,6 +52,7 @@ import { unwritableNodes } from '@uniweb/content-writer'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+import { documentSourceLocale } from './source-locale.js'
 import { siteContentDirs } from './site-dirs.js'
 import { layoutAreaRoute, readLayoutFolderSync, DEFAULT_LAYOUT } from '../site/layout-folder.js'
 import { layoutNameKey } from '@uniweb/core/layout-name'
@@ -215,7 +216,7 @@ function readAuthoredYaml(filePath) {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, keepAuthoredFoundation = false }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -1272,7 +1273,8 @@ function refuseContentFilesCannotHold(document, sourceLocale) {
  * @param {object} params
  * @param {object} params.document - the `@uniweb/site-content` `$`-document
  * @param {string} params.siteRoot
- * @param {string} [params.sourceLocale]
+ * @param {string} [params.sourceLocale] - the language the document is written in; by default its
+ *        own `settings`, by the rule its push wrapped it with (`documentSourceLocale`)
  * @param {boolean} [params.prune=false] - delete orphaned pages/sections/layout
  *        files that have no corresponding incoming item (git-pull-like). Off by
  *        default; `uniweb pull` opts in. Guarded against wiping a level on an
@@ -1282,7 +1284,7 @@ function refuseContentFilesCannotHold(document, sourceLocale) {
  *        `declarationsToQueriesYml`, whose default it overrides.
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, prune = false, keepAuthoredFoundation = false, scope, dataModel = null }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null }) {
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 

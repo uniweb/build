@@ -64,6 +64,7 @@ import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { isUuid } from './uuid.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
+import { siteSourceLocale } from './source-locale.js'
 import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
@@ -1031,7 +1032,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   }
 
   const sourceLocale =
-    opts.sourceLocale || LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale
+    opts.sourceLocale || siteSourceLocale(siteRoot)
 
   // Target locales for wrapping localized record fields per-locale: those with a
   // structural-translation file (locales/records/{locale}.json) UNIONED with

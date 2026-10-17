@@ -54,6 +54,7 @@ import { LINK_MODEL, writeLinkRecords } from './link-records.js'
 import { FILE_MODEL, filesToPull } from './file-records.js'
 import { parseBibtex } from '@citestyle/bibtex'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
+import { siteSourceLocale } from './source-locale.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
 // Single-record source extensions we scan + place (BibTeX is multi-record → out).
@@ -527,7 +528,7 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
  * @returns {{ status: 'updated'|'unchanged'|'removed'|'skipped', entries: Array, warnings: string[], file: string }}
  *   `file` is where the organization lives, as the author would write it
  */
-export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale = 'en' }) {
+export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale = siteSourceLocale(siteRoot) }) {
   const warnings = []
   const { abs, rel: file } = folderYmlPath(siteRoot)
   if (!folderDoc) return { status: 'skipped', entries: [], warnings, file }
@@ -625,7 +626,9 @@ export function folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceL
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
-  const { resolveDeclaration, sourceLocale = 'en' } = opts
+  // The site's language, as its `site.yml` says it — written by the pull of the site's content, which
+  // runs first (`./source-locale.js`).
+  const { resolveDeclaration, sourceLocale = siteSourceLocale(siteRoot) } = opts
   refuseOrgOption(opts, 'recordsToProject')
   // The scope the push qualified `@/x` with — the site's foundation's — so a
   // `@scope/x` model is placed back where the author wrote it. ⛔ It was the site
