@@ -407,7 +407,7 @@ describe('renderEntityDocument — a record written by section comes back whole'
       article: { brief: true, fields: { title: { type: 'string', localized: true }, date: { type: 'date' } } },
       article_body: {
         fields: {
-          content: { type: 'json', format: 'prosemirror', localized: true },
+          content: { type: 'json', format: 'richtext', localized: true },
           status: { type: 'string' },
           seo: { type: 'section', fields: { title: { type: 'string', localized: true } } },
         },

@@ -172,7 +172,7 @@ describe('toDataSchemaDeclaration — a multi-valued leaf keeps its attributes',
 
   it('refuses a stale `richtext` kind even when it is a list', () => {
     // Bypasses the normalizer deliberately, as the sibling guard test does: the
-    // resolver folds `richtext` to json + format: prosemirror, so a raw kind only
+    // resolver folds `richtext` to json + format: richtext, so a raw kind only
     // survives in a stale PREBUILT schema.json handed straight to the lowering.
     //
     // The single-value case was already guarded. The list case was not — the old
@@ -399,12 +399,12 @@ describe('toDataSchemaDeclaration — a section-shaped field carries tree and ap
   })
 })
 
-describe('toDataSchemaDeclaration — json + format: prosemirror (content fields)', () => {
+describe('toDataSchemaDeclaration — json + format: richtext (content fields)', () => {
   const decl = lower(
     {
       name: 'doc',
       fields: {
-        body: { type: 'json', format: 'prosemirror' }, // rich content
+        body: { type: 'json', format: 'richtext' }, // rich content
         meta: { type: 'json' }, // plain structured json
         site: { type: 'url' }, // string + format: url (machine-ish)
       },
@@ -414,12 +414,12 @@ describe('toDataSchemaDeclaration — json + format: prosemirror (content fields
   )
   const f = () => decl.sections.brief.fields
 
-  it('marks a format: prosemirror json field localized (content, not machine-ish)', () => {
+  it('marks a format: richtext json field localized (content, not machine-ish)', () => {
     // Like url/email, `format` rides on the field — but prosemirror is a MARKER,
     // not a validator: the backend carries it and surfaces it in schema reads (so
     // the app mounts a rich-text editor), it does NOT relocate it to a section
     // constraint the way it does the email/url/enum validators.
-    expect(f().body).toEqual({ type: 'json', format: 'prosemirror', localized: true })
+    expect(f().body).toEqual({ type: 'json', format: 'richtext', localized: true })
   })
 
   it('leaves a plain json field non-localized', () => {
@@ -621,7 +621,7 @@ describe('toDataSchemaDeclaration — guards', () => {
   })
 
   it('rejects a stale raw `richtext` kind (a pre-migration prebuilt schema needs a rebuild)', () => {
-    // `richtext` is the resolver alias for json + format: prosemirror; a raw `richtext`
+    // `richtext` is the resolver alias for json + format: richtext; a raw `richtext`
     // kind only survives in a stale prebuilt schema.json, which must be rebuilt.
     expect(() =>
       toDataSchemaDeclaration({ fields: { body: { type: 'richtext' } } }, { name: '@acme/x' })

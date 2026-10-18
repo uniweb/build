@@ -269,7 +269,7 @@ export function recordsToEntities({
   if (bodyFields > 1) {
     warnings.push(
       `${label}: ${declaration.name} has more than one content ` +
-        `(markdown / html / prosemirror) field — the markdown body maps to ` +
+        `(markdown / richtext) field — the markdown body maps to ` +
         `"${bodyTarget.section}.${bodyTarget.key}"`
     )
   }
@@ -660,7 +660,7 @@ function missingIn(def, record, path, missing) {
 // Post-pass: override a collection record's localized CONTENT body with a per-locale
 // FREE-FORM body when `locales/freeform/{locale}/records/<schema>/<slug>.md` exists
 // — the override wins over the structural map, exactly like site-content sections
-// (site.js localizeContentTree). Only a `format: prosemirror` localized field can
+// (site.js localizeContentTree). Only a `format: richtext` localized field can
 // take it (it is a PM doc on the wire; a markup `text` body stays a raw string).
 // Mutates the entity documents in place. Async — the free-form read hits the disk.
 async function applyFreeformRecordOverrides({

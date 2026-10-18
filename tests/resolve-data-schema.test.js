@@ -60,10 +60,10 @@ describe('validateAndNormalizeSchema — valid', () => {
     expect(() => validateAndNormalizeSchema({ fields: { page: { type: 'html' } } }, '@/x')).toThrow(/is HTML/)
   })
 
-  it('`richtext` is the rich-document alias → json + format: prosemirror', () => {
+  it('`richtext` is the rich-document alias → json + format: richtext', () => {
     const out = validateAndNormalizeSchema({ fields: { body: 'richtext', note: { type: 'richtext' } } }, '@/x')
-    expect(out.fields.body).toEqual({ type: 'json', format: 'prosemirror' })
-    expect(out.fields.note).toEqual({ type: 'json', format: 'prosemirror' })
+    expect(out.fields.body).toEqual({ type: 'json', format: 'richtext' })
+    expect(out.fields.note).toEqual({ type: 'json', format: 'richtext' })
   })
 
   it('drops the retired `prose` alias (unknown type)', () => {
@@ -229,8 +229,8 @@ describe('validateAndNormalizeSchema — errors', () => {
     expect(bad({ fields: { x: { type: 'string', format: 'markdown' } } })).toThrow(
       /format 'markdown', valid only on a 'text' field/
     )
-    expect(bad({ fields: { x: { type: 'string', format: 'prosemirror' } } })).toThrow(
-      /format 'prosemirror', valid only on a 'json' field/
+    expect(bad({ fields: { x: { type: 'string', format: 'richtext' } } })).toThrow(
+      /format 'richtext', valid only on a 'json' field/
     )
   })
   it('requires nested fields on an object', () => {

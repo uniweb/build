@@ -606,7 +606,7 @@ describe('recordsToEntities — markdown body → content body field', () => {
 })
 
 describe('recordsToEntities — markdown body → prosemirror content field (B)', () => {
-  // The declaration form a `format: prosemirror` constraint lowers to. Hand-built —
+  // The declaration form a `format: richtext` constraint lowers to. Hand-built —
   // the producer consumes the declaration, independent of the authoring sugar.
   const decl = {
     name: '@acme/article',
@@ -615,7 +615,7 @@ describe('recordsToEntities — markdown body → prosemirror content field (B)'
         brief: true,
         fields: {
           title: { type: 'string', localized: true },
-          body: { type: 'json', format: 'prosemirror', localized: true },
+          body: { type: 'json', format: 'richtext', localized: true },
         },
       },
     },
@@ -1035,7 +1035,7 @@ describe('buildRecordEntities — free-form collection body override (B-1)', () 
       _self: { name: '@acme/blog', version: '1.0.0', role: 'foundation' },
       dataSchemas: {
         '@/article': validateAndNormalizeSchema(
-          { name: 'article', fields: { title: { type: 'string' }, body: { type: 'json', format: 'prosemirror' } } },
+          { name: 'article', fields: { title: { type: 'string' }, body: { type: 'json', format: 'richtext' } } },
           '@/article'
         ),
       },

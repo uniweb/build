@@ -592,7 +592,7 @@ export const WHOLE_RECORD = Symbol.for('uniweb.query.whole')
  * ⭐ THE SHAPE A HOST'S RECORDS SERVICE ANSWERS — measured 2026-09-24 on a local
  * backend: the brief's fields at the top and every other section under its own name
  * (`@uniweb/schemas/conform`'s `toDeliveredRecord`), with a markdown body in the
- * schema's content body field — the ProseMirror document for a `format: prosemirror`
+ * schema's content body field — the ProseMirror document for a `format: richtext`
  * field (`body.content`, for `@std/article`), the markdown source for a markup
  * `text` one. A component is written against one shape, so both lanes deliver the same
  * one — ruled 2026-09-24 [Diego] as a requirement that the shape be one AND a good one,

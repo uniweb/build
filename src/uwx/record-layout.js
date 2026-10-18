@@ -38,7 +38,7 @@ export function recordFileLayout(declaration) {
 
 /**
  * The schema's CONTENT body field — the one a `.md` record's markdown body fills: a
- * markup `text` field (`format: markdown|html`) or a `format: prosemirror` json field,
+ * markup `text` field (`format: markdown`) or a `format: richtext` json field,
  * declared directly on a top-level single section — the brief or another, like
  * `@std/article`'s `body.content`. The first in declared order.
  *

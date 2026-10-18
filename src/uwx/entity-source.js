@@ -17,7 +17,7 @@
 // A collection `.md` is NOT a page-section `.md`: its frontmatter is structured
 // DATA whose schema is the collection type's data schema (the `model:` Model), and
 // its body is the value of the Model's content body field (a markup `text` field,
-// or a `format: prosemirror` json field) — not foundation/runtime config. See
+// or a `format: richtext` json field) — not foundation/runtime config. See
 // docs/reference/entity-content.md §"Markdown (frontmatter + body)".
 
 import { readFile } from 'node:fs/promises'

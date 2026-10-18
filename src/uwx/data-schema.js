@@ -85,21 +85,22 @@ export function isMarkupTextField(field) {
 }
 
 /**
- * A `json` field constrained to ProseMirror content (`format: prosemirror`):
+ * A `json` field holding rich text (`format: richtext`, a ProseMirror document):
  * authored as markdown on the file side, carried as a ProseMirror document on the
  * sync wire (the common language with the visual app). The single predicate the
  * sync producer/projector use to decide md⇄ProseMirror conversion + structural-map
  * localization. See framework/CLAUDE.md gotcha #21 and uwx-format.md.
  */
 export function isProseMirrorField(field) {
-  return field?.type === 'json' && field?.format === 'prosemirror'
+  return field?.type === 'json' && field?.format === 'richtext'
 }
 
 /**
  * A content BODY field — the markdown-body target of a `.md` record: a markup
- * `text` field (raw source string on the wire) or a `format: prosemirror` json
- * field (a ProseMirror doc on the wire). Replaces the old `richtext`-or-prosemirror
- * test now that `richtext` is retired (2026-06-02).
+ * `text` field (raw source string on the wire) or a `format: richtext` json
+ * field (a ProseMirror doc on the wire). Replaced the old `richtext`-kind-or-format
+ * test when `richtext` stopped being a kind (2026-06-02); it is the format's name
+ * since 2026-10-18.
  */
 export function isContentBodyField(field) {
   return isMarkupTextField(field) || isProseMirrorField(field)
@@ -427,7 +428,7 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
   const leafType = field.type
 
   // `richtext` is NOT a kind — it is the author alias for a ProseMirror document
-  // (`json` + `format: prosemirror`), normalized upstream in resolve-data-schema.js,
+  // (`json` + `format: richtext`), normalized upstream in resolve-data-schema.js,
   // so normalized IR never carries a raw `richtext` kind. The only way one reaches
   // here is a STALE prebuilt schema.json (a foundation built before the 2026-06-02
   // kind retirement and loaded from dist/meta/schema.json without re-resolving).
@@ -438,7 +439,7 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
   if (leafType === 'richtext') {
     throw new Error(
       'This foundation carries the retired `richtext` kind in its built schema — ' +
-        'rebuild it (`richtext` is now json + format: prosemirror).'
+        'rebuild it (`type: richtext` is now json + format: richtext).'
     )
   }
   const leafFormat = field.format
@@ -489,8 +490,8 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
     return out
   }
 
-  // A CONTENT field — a markup `text` (format markdown|html) or a `format:
-  // prosemirror` json — is rich CONTENT (authored as markdown; carried as a raw
+  // A CONTENT field — a markup `text` (format markdown) or a `format:
+  // richtext` json — is rich CONTENT (authored as markdown; carried as a raw
   // source string or a ProseMirror doc on sync). Localizable like a text kind, NOT
   // a machine-ish value-validator format-string (email/url).
   const isContent = isContentBodyField({ type: leafType, format: leafFormat })
@@ -502,10 +503,10 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
 
   // Field-narrowing attributes ride on the field. The backend treats them by kind:
   // `enum` and a value-validator string `format` (email/url) it relocates to the
-  // owning section's constraint records at ingest; a content format (`markdown`/
-  // `html` on text, `prosemirror` on json) it carries as a durable type marker
-  // surfaced in schema reads (NOT a validator, NOT relocated — it tells the app to
-  // render a rich-text editor).
+  // owning section's constraint records at ingest; a content format (`markdown` on
+  // text, `richtext` on json) it carries as a durable type marker surfaced in schema
+  // reads (NOT relocated — it tells the app to render a rich-text editor, and a
+  // `richtext` value is held to the rich-text vocabulary).
   if (Array.isArray(field.enum)) out.enum = field.enum
   if (leafFormat) out.format = leafFormat
 

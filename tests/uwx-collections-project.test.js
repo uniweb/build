@@ -275,7 +275,7 @@ describe('recordsToProject — prosemirror content field (B)', () => {
         brief: true,
         fields: {
           title: { type: 'string', localized: true },
-          body: { type: 'json', format: 'prosemirror', localized: true },
+          body: { type: 'json', format: 'richtext', localized: true },
         },
       },
     },
@@ -322,7 +322,7 @@ describe('recordsToProject — localized record scalars (B)', () => {
 })
 
 describe('recordsToProject — prosemirror body free-form override (B-1)', () => {
-  // A Model whose brief body is a `format: prosemirror` json field (a PM doc on the
+  // A Model whose brief body is a `format: richtext` json field (a PM doc on the
   // wire), so a target locale can carry a full free-form body, not just a map.
   const pmDecl = {
     name: '@acme/pmarticle',
@@ -331,7 +331,7 @@ describe('recordsToProject — prosemirror body free-form override (B-1)', () =>
         brief: true,
         fields: {
           title: { type: 'string', localized: true },
-          body: { type: 'json', format: 'prosemirror', localized: true },
+          body: { type: 'json', format: 'richtext', localized: true },
         },
       },
     },
