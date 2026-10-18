@@ -144,6 +144,8 @@ export {
   siteItemsByKey,
   stampUnitUuids,
 } from './site-diff.js'
+// What a backend that cleans rich text at write removed from a push, read against what was sent.
+export { siteContentRemovals, recordRemovals, cleanedRecord } from './cleaned.js'
 export {
   recordsToEntities,
   buildRecordEntities,
