@@ -70,9 +70,11 @@ export function parseCatalogRef(value) {
  *   - `'local'` — workspace-local source (sibling directory, file: dep, or
  *     `../../foundations/<name>/`). The build inlines or runtime-links it
  *     depending on the operating mode.
- *   - `'url'`  — loaded by URL at runtime. Two URL shapes:
- *       - `@org/name@ver`   → catalog ref (resolves against the registry CDN)
- *       - `https://...`    → arbitrary URL
+ *   - `'url'`  — loaded by URL at runtime: an `https://…` URL, or the object
+ *     form's `url`. A catalog ref (`@org/name@ver`) is refused, since where one
+ *     is served is the host's to say — except under `uniweb dev`, which is
+ *     handed the answer (`served`). ⛔ *Until 2026-10-19 this listed a catalog
+ *     ref as a URL shape, "resolved against the registry CDN".*
  *
  * Versionless registry refs (`@org/name`) are rejected with a specific error —
  * they were a silent fall-through before. Versionless names that don't match

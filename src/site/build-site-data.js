@@ -2,11 +2,15 @@
  * Site data builder — runs the data pipeline without vite.
  *
  * `siteContentPlugin` (`./plugin.js`) emits site data inside vite's
- * `generateBundle` hook because today's `uniweb build` always goes through
- * vite (to produce a static-host JS bundle). For `uniweb build --link`,
- * the JS bundle is wasted CPU — the deployed Uniweb-hosted site is rendered
- * by the worker using its own runtime + the foundation served from the
- * registry; nothing from the site's vite output reaches the browser.
+ * `generateBundle` hook, on the bundle lane, where vite builds a JS bundle for
+ * a static host. `uniweb build --link`, which `uniweb publish` runs, needs no
+ * bundle: what `publish` sends a backend carries no JS. The content goes over
+ * the sync wire, read from the site's source files (`../uwx/`), and the site
+ * names its foundation by registered version.
+ *
+ * ⛔ *Until 2026-10-19 this said a Uniweb-hosted site "is rendered by the worker
+ * using its own runtime" — a statement about a host, which framework cannot
+ * make (the note under `site-content.json` below).*
  *
  * This function is the shared data-emission core used by the link-mode
  * pipeline. The vite plugin keeps its own emission for the bundle-mode
@@ -39,11 +43,17 @@ import {
 } from '@uniweb/projections'
 
 /**
- * Build the site data outputs needed by `uniweb deploy` (link-mode).
+ * Build the site data for `uniweb build --link`, which `uniweb publish` runs.
+ * `publish` reads two things back from `distDir`: the files of the queries that
+ * have no data schema, which it uploads, and the languages to make live.
  *
  * Emits to `distDir`:
  *   - `site-content.json` — full content tree, sections always inlined.
- *     The deploy CLI reads this and ships it as `payload.locales[default]`.
+ *     `publish` reads the languages to make live from it and from the
+ *     `<locale>/site-content.json` files beside it (`languagesFromContent`);
+ *     the content itself goes over the sync wire, built from source.
+ *     ⛔ *Until 2026-10-19 this said the deploy CLI shipped this file as
+ *     `payload.locales[default]`.*
  *
  *     ⛔ Ship FULL sections; never strip them per the split-content rule.
  *     A stripped manifest is what prerender emits for static-host bundles,
@@ -60,12 +70,15 @@ import {
  *
  *     ⇒ The rule stands on its own: we do not know which consumers
  *     re-derive, so we always ship enough for the ones that do.
- *   - `data/<collection>.json` (+ each record's own file,
- *     `data/<collection>/<$name>.json`) — same shape `processQueries` produces today.
+ *   - `data/<query>.json` (+ each record's own file, `data/<query>/<$name>.json`) —
+ *     same shape `processQueries` produces today. `publish` uploads the files of
+ *     the queries that have no data schema (`collectSchemalessData`).
  *   - `records/<path under the records directory>` — the records' co-located assets, where
  *     the compiled records point.
- *   - `assets/<media>` — processed images / video posters / PDF
- *     thumbnails. Filtered by the deploy CLI to MEDIA only at upload time.
+ *   - `assets/<media>` — processed images / video posters / PDF thumbnails, the
+ *     paths `site-content.json`'s refs are rewritten to. ⛔ *Until 2026-10-19 this
+ *     said the deploy CLI uploaded them; `publish` uploads a site's media from
+ *     the site's own files (the CLI's `uploadSiteMedia`).*
  *
  * Does NOT emit:
  *   - HTML, JS, CSS, source maps, `_importmap/*` — static-host bundle
@@ -127,8 +140,8 @@ export async function buildSiteData({
 
   // 1. Collect content (pages, sections, theme, config, assets manifest).
   //    No vite needed — collectSiteContent is a plain async function.
-  //    dropUnpublished: link mode is always a published deploy — prune hidden
-  //    pages + their subtree so drafts never reach the served site.
+  //    dropUnpublished: link mode is the build `publish` runs, so it reads
+  //    the site as published — hidden pages and their subtree pruned.
   let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true, base: basePath, strict: true })
 
   // 2. Compile content collections (file-based markdown/yaml/json).
@@ -223,12 +236,14 @@ export async function buildSiteData({
 
   // ⛔ `config.icons` is a HOST-owned slot on this lane — drop it.
   //
-  // This payload only ever goes to a backend (link mode is what `uniweb deploy`
-  // runs), and `config` is site.yml spread whole, so an author's
-  // `icons.cdnUrl` would otherwise ride along and land in a slot the host is
-  // supposed to fill. The icon base is a property of the DEPLOYMENT, identical
-  // for every site a given backend serves — not something one site gets to
-  // choose [Diego, 2026-08-17].
+  // This is the build for a backend (link mode is what `uniweb publish` runs),
+  // and `config` is site.yml spread whole, so an author's `icons.cdnUrl` would
+  // otherwise sit in a slot the host is supposed to fill. The icon base is a
+  // property of the DEPLOYMENT, identical for every site a given backend
+  // serves — not something one site gets to choose [Diego, 2026-08-17].
+  // ⛔ *Until 2026-10-19 this said the payload "only ever goes to a backend":
+  // `publish` reads it for its languages, and sends the content over the sync
+  // wire, which never had this exposure (below).*
   //
   // The reason it cannot be a site's call is that the base and the NAMESPACE
   // are coupled: icon filenames are minted by whoever built the corpus, so
