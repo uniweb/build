@@ -51,8 +51,8 @@ describe('when a foundation build warns', () => {
     expect(proseWithoutStyles(bundleOf({ modules: rendered }))).toBe(true)
   })
 
-  test('Prose rendered, and the typography plugin’s rules in the CSS — silent', () => {
-    const css = '.prose{color:var(--tw-prose-body)}.prose :where(ul):not(:where([class~="not-prose"] *)){list-style-type:disc}'
+  test('Prose rendered, and kit’s prose rules in the CSS — silent', () => {
+    const css = '@layer components{.prose{color:var(--body)}.prose :where(ul):not(:where(.not-prose,.not-prose *)){list-style-type:disc}}'
     expect(proseWithoutStyles(bundleOf({ modules: rendered, css: ['.flex{display:flex}', css] }))).toBe(false)
   })
 

@@ -1,9 +1,9 @@
 /**
  * Prose without its stylesheet — the one foundation mistake that renders fine and looks wrong.
  *
- * kit's `<Prose>` (and `<Article>`, which is `<Prose>` in an `<article>`) draws content inside
- * Tailwind Typography's `prose` classes. Those classes style nothing unless the foundation's
- * stylesheet brings the plugin, which is one line:
+ * kit's `<Prose>` (and `<Article>`, which is `<Prose>` in an `<article>`) draws content inside a
+ * `prose` container. The class styles nothing unless the foundation's stylesheet imports kit's
+ * prose layer, which is one line:
  *
  *     @import "@uniweb/kit/prose-tokens.css";
  *
@@ -20,7 +20,7 @@
 /** kit's Prose module, wherever kit resolves from — the workspace or node_modules. */
 const PROSE_MODULE = /[\\/]kit[\\/]src[\\/]styled[\\/]Prose[\\/]index\.jsx$/
 
-/** A rule of the typography plugin's, which every one of its selectors starts with. */
+/** A rule of kit's prose layer, which every one of its selectors starts with. ⛔ Tailwind Typography's until 2026-10-19. */
 const PROSE_RULE = /\.prose\b/
 
 /**
