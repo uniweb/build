@@ -431,8 +431,7 @@ describe('resolveSchemaRef — org scope resolution', () => {
    *
    * ⚠️ Measured 2026-08-28: the first version of this test passed IDENTICALLY
    * with and without the fallback implemented. It asserted "the package happened
-   * to be available", which is exactly the failure `_contracts/
-   * template-schema-deps.test.js` documents for workspace sandboxes — the same
+   * to be available", which is the failure a workspace sandbox hides — the same
    * trap by a different mechanism.
    *
    * A child process with NODE_PATH cleared is what a real foundation build sees.
