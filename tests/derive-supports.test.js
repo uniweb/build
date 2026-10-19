@@ -17,10 +17,10 @@
  */
 
 import { describe, test, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseAst } from 'vite'
+import { parseAst, build } from 'vite'
 import {
   deriveSupports,
   composeSupports,
@@ -30,24 +30,33 @@ import {
 
 const FRAMEWORK = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-/** A real framework module, parsed as Rollup would hand it to the hook. */
+/** A real framework module, read from disk. */
 function realModule(relPath) {
   const id = join(FRAMEWORK, relPath)
-  const code = readFileSync(id, 'utf8')
-  return { id, code, ast: parseAst(code) }
+  return { id, code: readFileSync(id, 'utf8') }
 }
 
-/** Stand in for Rollup's bundle + plugin context over a set of real modules. */
+/**
+ * Stand in for Rollup's bundle + plugin context over a set of real modules, each kept WHOLE:
+ * its rendered code is its source. (What a module keeps when only part of it is used is
+ * what Rollup alone can say — the build test below.)
+ */
 function graphOf(modules, { renderedLength = 100 } = {}) {
-  const byId = new Map(modules.map((m) => [m.id, m]))
   const bundle = {
     'entry.js': {
       type: 'chunk',
-      modules: Object.fromEntries(modules.map((m) => [m.id, { renderedLength }])),
+      modules: Object.fromEntries(modules.map((m) => [m.id, { renderedLength, code: m.code }])),
     },
   }
-  const ctx = { getModuleInfo: (id) => byId.get(id) ?? null }
-  return { bundle, ctx }
+  return { bundle, ctx: { parse: parseAst } }
+}
+
+/** One survivor with the given rendered code — for the cases no real module has. */
+function oneModule(id, code) {
+  return {
+    bundle: { 'e.js': { type: 'chunk', modules: { [id]: { renderedLength: 50, code } } } },
+    ctx: { parse: parseAst },
+  }
 }
 
 /** A derivation result, as `deriveSupports` returns one. */
@@ -136,24 +145,68 @@ describe('deriveSupports — the tree-shaking boundary', () => {
     // operator a service the site never draws.
     const submit = realModule('kit/src/utils/submitTarget.js')
     const search = realModule('kit/src/search/client.js')
-    const byId = new Map([submit, search].map((m) => [m.id, m]))
 
     const bundle = {
       'entry.js': {
         type: 'chunk',
         modules: {
-          [submit.id]: { renderedLength: 1925 },
-          [search.id]: { renderedLength: 0 }, // parsed, then shaken out
+          [submit.id]: { renderedLength: 1925, code: submit.code },
+          [search.id]: { renderedLength: 0, code: null }, // parsed, then shaken out
         },
       },
     }
-    const ctx = { getModuleInfo: (id) => byId.get(id) ?? null }
 
-    const { services } = deriveSupports(bundle, ctx)
+    const { services } = deriveSupports(bundle, { parse: parseAst })
     expect(services).toEqual(['submit'])
     expect(services).not.toContain('search')
   })
+
+  // ⛔ THE OVER-REPORT OF 2026-10-19. A module survives for ONE of its exports, and Rollup keeps
+  // only that one — so the source of a survivor is not what it contributed. `@std/academic` reached
+  // only `isSearchEnabled()`, kit's predicates module survived for it, and the foundation published
+  // `assistant, backend, search, submit`. Built for real here, because only Rollup can say what a
+  // partly used module keeps.
+  test('⛔ a module kept for one export contributes only that export', async () => {
+    expect(await derivedFromBuild('isSearchEnabled')).toEqual(['search'])
+  })
+
+  test('control: two predicates reached, two services — the matcher still reads every survivor', async () => {
+    expect(await derivedFromBuild('isSearchEnabled', 'isSubmitEnabled')).toEqual(['search', 'submit'])
+  })
 })
+
+/**
+ * Build an entry that calls the named kit predicates, as a foundation builds (library mode, ES,
+ * `@uniweb/core` external), and derive from the bundle Rollup hands the hook.
+ */
+async function derivedFromBuild(...predicates) {
+  const dir = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), '.tmp-supports-'))
+  try {
+    const kit = join(FRAMEWORK, 'kit/src/utils/servicePredicates.js')
+    writeFileSync(
+      join(dir, 'entry.js'),
+      `import { ${predicates.join(', ')} } from ${JSON.stringify(kit)}\n` +
+        `export const draws = () => [${predicates.map((p) => `${p}()`).join(', ')}]\n`
+    )
+    let result = null
+    await build({
+      root: dir,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [{ name: 'derive', generateBundle(_, bundle) { result = deriveSupports(bundle, this) } }],
+      build: {
+        lib: { entry: join(dir, 'entry.js'), formats: ['es'], fileName: 'entry' },
+        rollupOptions: { external: ['@uniweb/core'] },
+        write: false,
+        minify: false,
+      },
+    })
+    expect(result.blind).toBe(false)
+    return result.services
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 describe('deriveSupports — blindness', () => {
   test('a computed service name is reported as blind, not guessed at', () => {
@@ -164,13 +217,26 @@ describe('deriveSupports — blindness', () => {
       }
     `
     const id = '/virtual/computed.js'
-    const bundle = { 'e.js': { type: 'chunk', modules: { [id]: { renderedLength: 50 } } } }
-    const ctx = { getModuleInfo: () => ({ id, code, ast: parseAst(code) }) }
+    const { bundle, ctx } = oneModule(id, code)
 
     const { services, blind, blindAt } = deriveSupports(bundle, ctx)
     expect(services).toEqual([])
     expect(blind).toBe(true)
     expect(blindAt).toEqual([id])
+  })
+
+  test('a survivor whose rendered code cannot be read is blind — never read from its source instead', () => {
+    const id = '/virtual/unreadable.js'
+    const { bundle, ctx } = oneModule(id, 'this is not ( javascript')
+    const { services, blind, blindAt } = deriveSupports(bundle, ctx)
+    expect(services).toEqual([])
+    expect(blind).toBe(true)
+    expect(blindAt).toEqual([id])
+  })
+
+  test('a call Rollup renamed apart in the chunk (`resolveService$1`) is still read', () => {
+    const { bundle, ctx } = oneModule('/virtual/renamed.js', `const book = (w) => resolveService$1(w, 'booking')\n`)
+    expect(deriveSupports(bundle, ctx).services).toEqual(['booking'])
   })
 
   test('a nested const does not resolve — shadowing must not name a service', () => {
@@ -181,9 +247,7 @@ describe('deriveSupports — blindness', () => {
         return resolveService(website, NAME)
       }
     `
-    const id = '/virtual/nested.js'
-    const bundle = { 'e.js': { type: 'chunk', modules: { [id]: { renderedLength: 50 } } } }
-    const ctx = { getModuleInfo: () => ({ id, code, ast: parseAst(code) }) }
+    const { bundle, ctx } = oneModule('/virtual/nested.js', code)
 
     const { services, blind } = deriveSupports(bundle, ctx)
     expect(services).toEqual([])
@@ -195,9 +259,7 @@ describe('deriveSupports — blindness', () => {
       import { resolveService } from '@uniweb/core/services'
       export const book = (w) => resolveService(w, 'booking')
     `
-    const id = '/virtual/booking.js'
-    const bundle = { 'e.js': { type: 'chunk', modules: { [id]: { renderedLength: 50 } } } }
-    const ctx = { getModuleInfo: () => ({ id, code, ast: parseAst(code) }) }
+    const { bundle, ctx } = oneModule('/virtual/booking.js', code)
 
     expect(deriveSupports(bundle, ctx).services).toEqual(['booking'])
   })

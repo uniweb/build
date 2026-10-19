@@ -34,6 +34,17 @@
  * which is exactly the invisible failure this whole mechanism exists to stop.
  * Never widen the scan set to "everything Rollup saw".
  *
+ * ⛔ **And within a survivor, read only the code it kept.** A module survives
+ * when ONE of its exports is used, and Rollup drops the rest of it — so walking
+ * the module's ORIGINAL source counts every function in it. Measured 2026-10-19
+ * on `@std/academic`, whose code reaches only `isSearchEnabled()`: kit's
+ * `servicePredicates.js` survived for that one predicate, its source holds all
+ * five, and the foundation published `assistant, backend, search, submit` — a
+ * bundle with one `isServiceEnabled('search')` and none of the other three. ⇒
+ * Each survivor's RENDERED code (`chunk.modules[id].code`) is what is parsed and
+ * walked. A survivor whose rendered code cannot be read is blindness, never a
+ * fall back to its source.
+ *
  * ## ⭐ The service name travels with the code, so there is almost no map
  *
  * `kit/src/utils/submitTarget.js` contains `resolveService(website, 'submit')`
@@ -172,11 +183,17 @@ function readModuleConsts(ast) {
   return consts
 }
 
-/** `resolveService(...)`, called bare or through a namespace. */
+/**
+ * `resolveService(...)`, called bare or through a namespace.
+ *
+ * The bare form is read from RENDERED code, where Rollup may have renamed an
+ * imported binding to keep it apart from another of the same name in the chunk
+ * (`resolveService$1`) — so the suffix it adds is accepted.
+ */
 function isResolveServiceCall(node) {
   if (node.type !== 'CallExpression') return false
   const callee = node.callee
-  if (callee?.type === 'Identifier') return callee.name === 'resolveService'
+  if (callee?.type === 'Identifier') return /^resolveService(\$\d+)?$/.test(callee.name)
   if (callee?.type === 'MemberExpression' && !callee.computed) {
     return callee.property?.name === 'resolveService'
   }
@@ -218,21 +235,36 @@ function isSearchEnabledCall(node) {
 }
 
 /**
- * The set of modules that contributed code to the written bundle.
+ * The modules that contributed code to the written bundle, each with the code
+ * it contributed.
  *
  * `renderedLength > 0` is the discriminator: a module whose every binding was
  * shaken out contributes nothing, and counting it would reintroduce exactly the
- * over-reporting this module exists to avoid.
+ * over-reporting this module exists to avoid. ⛔ And what a survivor contributed
+ * is its RENDERED code (`code`), not its source: a module kept for one export
+ * keeps only that export (header, *Post-tree-shake only*).
+ *
+ * @returns {Map<string, string|null>} module id → its rendered code
  */
 function collectSurvivors(bundle) {
-  const survivors = new Set()
+  const survivors = new Map()
   for (const chunk of Object.values(bundle || {})) {
     if (chunk?.type !== 'chunk' || !chunk.modules) continue
     for (const [id, mod] of Object.entries(chunk.modules)) {
-      if (mod?.renderedLength > 0) survivors.add(id)
+      if (mod?.renderedLength > 0) survivors.set(id, typeof mod.code === 'string' ? mod.code : null)
     }
   }
   return survivors
+}
+
+/** A survivor's rendered code as an ESTree tree, or null when it cannot be read. */
+function renderedAst(code, ctx) {
+  if (typeof code !== 'string' || typeof ctx?.parse !== 'function') return null
+  try {
+    return ctx.parse(code)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -245,22 +277,26 @@ function collectSurvivors(bundle) {
  * `isSearchEnabled()`. Names in `NEVER_EMITTED` are dropped from the result.
  *
  * @param {object} bundle - Rollup's bundle, as handed to `writeBundle`
- * @param {object} ctx - the Rollup plugin context (`this` in the hook)
+ * @param {object} ctx - the Rollup plugin context (`this` in the hook): its
+ *   `parse` reads each survivor's rendered code
  * @returns {{services: string[], blind: boolean, blindAt: string[]}}
  *   `services` is sorted and de-duplicated, and is a **lower bound**.
  *   `blind` is true when a `resolveService` call names its service with
- *   something this cannot read — the one case where the lower bound is known to
- *   be incomplete, and the caller must not report an empty result as a proven
- *   "none". `blindAt` names the modules, for the warning.
+ *   something this cannot read, or a survivor's rendered code cannot be read at
+ *   all — the cases where the lower bound is known to be incomplete, and the
+ *   caller must not report an empty result as a proven "none". `blindAt` names
+ *   the modules, for the warning.
  */
 export function deriveSupports(bundle, ctx) {
   const services = new Set()
   const blindAt = new Set()
 
-  for (const id of collectSurvivors(bundle)) {
-    const info = ctx?.getModuleInfo?.(id)
-    const ast = info?.ast
-    if (!ast) continue
+  for (const [id, code] of collectSurvivors(bundle)) {
+    const ast = renderedAst(code, ctx)
+    if (!ast) {
+      blindAt.add(id)
+      continue
+    }
 
     const consts = readModuleConsts(ast)
 
