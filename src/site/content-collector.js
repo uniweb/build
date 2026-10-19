@@ -39,6 +39,7 @@ import { resolveExtensionUrls } from './extension-urls.js'
 import { buildTheme, extractFoundationVars } from '../theme/index.js'
 import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig, pageRouteQuery, currentFor } from '@uniweb/core'
 import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
+import { parentRouteOf } from '@uniweb/core/route-match'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
@@ -2719,8 +2720,10 @@ export async function collectSiteContent(sitePath, options = {}) {
     }
   }
 
-  // Compute parent route for each page (hierarchy declaration)
-  // This runs once at build time so runtime doesn't need to re-derive hierarchy
+  // Compute parent route for each page (hierarchy declaration), by the one parent rule
+  // (`parentRouteOf`) — so the parent declared here is the one every lane derives, past a
+  // version folder included. This runs once at build time so runtime doesn't need to
+  // re-derive hierarchy.
   const pageRouteMap = new Map()
   for (const page of pages) {
     pageRouteMap.set(page.route, page)
@@ -2728,15 +2731,10 @@ export async function collectSiteContent(sitePath, options = {}) {
       pageRouteMap.set(page.sourcePath, page)
     }
   }
+  const hasPage = (route) => pageRouteMap.has(route)
   for (const page of pages) {
-    const segments = page.route.split('/').filter(Boolean)
-    if (segments.length <= 1) {
-      page.parent = null
-      continue
-    }
-    const parentRoute = '/' + segments.slice(0, -1).join('/')
-    const parentPage = pageRouteMap.get(parentRoute)
-    page.parent = parentPage ? parentPage.route : null
+    const parentRoute = parentRouteOf(page.route, { has: hasPage })
+    page.parent = parentRoute ? pageRouteMap.get(parentRoute).route : null
   }
 
   const siteFetch = parseFetchConfig(...fetchIn(siteConfig, 'site.yml', 'site'))
