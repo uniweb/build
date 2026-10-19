@@ -15,9 +15,8 @@
  * document shows only the keys that one site happened to declare.
  *
  * ⭐ DERIVED FROM THE PRODUCER SOURCE, never hand-written. Static extraction is
- * exhaustive where a fixture-derived contract is not: `_contracts/surface`
- * derives its `wire.json` by walking a real document, so it states only what
- * the fixture exercises — measured 2026-09-09 at 6 of 19 `settings` keys. That
+ * exhaustive where a fixture-derived contract is not: one derived by walking a
+ * real document states only what the fixture exercises — measured 2026-09-09 at 6 of 19 `settings` keys. That
  * is the failure this file exists to avoid, so it must not be reintroduced by
  * generating from a sample.
  *
@@ -26,7 +25,7 @@
  * guards, and neither is optional:
  *   - `build/tests/emit-surface.test.js` regenerates and diffs (this file is
  *     checked in, so drift fails the suite).
- *   - `_contracts/emit-surface-covers-the-wire.test.js` walks a REAL document
+ *   - a cross-package test walks a REAL document
  *     and asserts this file is a SUPERSET of it — the runtime check that
  *     catches a pattern this script cannot see.
  *

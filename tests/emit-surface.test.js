@@ -18,8 +18,8 @@ const SURFACE = join(PKG, 'src/uwx/emit-surface.json')
  * 19 `settings` keys without anything going red.
  *
  * These are the drift half. The coverage half — that this file is a SUPERSET
- * of a real document's keys — is `_contracts/emit-surface-covers-the-wire.test.js`,
- * because it needs a fixture from outside this package.
+ * of a real document's keys — is a cross-package test, because it needs a
+ * fixture from outside this package.
  */
 describe('emit-surface.json cannot drift from the producer', () => {
   it('is exactly what the generator produces right now', () => {
