@@ -100,7 +100,7 @@ async function rendered(siteRoot) {
   const quiet = [console.log, console.warn]
   console.log = console.warn = () => {}
   try {
-    await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null, assets: { process: false } })
+    await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null })
     if (locales.length) await buildLocalizedContent(root, { locales, localesDir, generateSearchIndexes: false })
   } finally {
     ;[console.log, console.warn] = quiet

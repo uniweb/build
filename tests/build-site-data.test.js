@@ -9,13 +9,13 @@ import { DATA_DIR } from '@uniweb/core'
 
 // Pins the contract for the link-mode data pipeline:
 //   - `dist/site-content.json` always emitted, sections always inlined
-//     (never stripped per the split-content rule — that job belongs to
-//     the worker, which does its own splitting from the full payload).
-//   - `dist/data/<collection>.json` emitted when collections are declared.
+//     (never stripped per the split-content rule).
+//   - `dist/data/<query>.json` emitted when queries are declared.
 //   - HTML, JS, CSS, _importmap/, _pages/, sitemap, robots, search-index
-//     are NEVER emitted (those are static-host-bundle concerns).
+//     are NEVER emitted (those are static-host-bundle concerns), and no media
+//     is processed (no `dist/assets/`).
 //
-// See `framework/build/src/site/build-site-data.js` for the why.
+// See `src/site/build-site-data.js` for the why.
 
 describe('buildSiteData', () => {
   let siteRoot
@@ -61,8 +61,8 @@ A short tagline.
     expect(content.pages.length).toBeGreaterThan(0)
 
     // CRITICAL: sections must be inlined. Stripping here would silently
-    // break split-mode sites because the worker can't re-derive _pages/
-    // files from a payload it doesn't have sections for.
+    // break any reader that re-derives split content (`_pages/` files)
+    // from this file: it needs the sections to do it.
     const homePage = content.pages.find(p => p.route === '/')
     expect(homePage).toBeTruthy()
     expect(homePage.sections).toBeTruthy()
@@ -181,6 +181,29 @@ Body text.
     expect(readFileSync(join(distDir, 'records', 'article', 'img', 'diagram.png'), 'utf8')).toBe('PNG')
   })
 
+  // ⛔ THE LINK BUILD PROCESSES NO MEDIA (2026-10-19). `uniweb publish` uploads a site's
+  // media from the site's own files, so the WebP copies, video posters and PDF
+  // thumbnails this lane made on every publish were built for nothing. Media
+  // processing is the bundle lane's.
+  it('processes no media: no dist/assets/, and a media ref stays the site\'s own path', async () => {
+    // A real image (1×1 PNG): one a processor can decode, so its absence below is a decision.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+    mkdirSync(join(siteRoot, 'public', 'images'), { recursive: true })
+    writeFileSync(join(siteRoot, 'public', 'images', 'hero.png'), Buffer.from(png, 'base64'))
+    writeFileSync(join(siteRoot, 'pages', 'home', '1-hero.md'), `---\ntype: Hero\n---\n\n# Welcome\n\n![Hero](/images/hero.png)\n`)
+
+    const { siteContent } = await buildSiteData({ siteRoot, distDir })
+    const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
+
+    // Control: the section does reference the image, so there was media to process.
+    expect(JSON.stringify(content.pages)).toContain('/images/hero.png')
+    expect(existsSync(join(distDir, 'assets'))).toBe(false)
+    expect(content._assetMeta).toBeUndefined()
+    // The collector's internal asset manifest stays out of the file, as before.
+    expect(content.assets).toBeUndefined()
+    expect(siteContent.assets).toBeUndefined()
+  })
+
   it('skips collections when not declared', async () => {
     await buildSiteData({ siteRoot, distDir })
     // No collections declared → no data dir.
@@ -192,15 +215,14 @@ Body text.
     expect(siteContent).toBeTruthy()
     expect(siteContent.pages).toBeTruthy()
     // Internal-only properties are stripped before returning (and before
-    // serialization); they don't JSON-roundtrip and have no place in the
-    // payload the deploy CLI ships.
+    // serialization); they don't JSON-roundtrip and have no place in the file.
     expect(siteContent.hasExplicitPoster).toBeUndefined()
     expect(siteContent.hasExplicitPreview).toBeUndefined()
   })
 
   // ── the icon base is the HOST's slot on this lane ──────────────────────────
   //
-  // This payload only goes to a backend, and the icon base is a property of the
+  // This is the build for a backend, and the icon base is a property of the
   // deployment — one value for every site a backend serves. It is not a site's
   // call, because the base and the icon NAMESPACE are coupled: names minted
   // against one corpus 404 wholesale against another base.

@@ -75,7 +75,7 @@ async function rendered(siteRoot) {
   const config = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8')) || {}
   const locales = resolveLocaleList(config.languages, join(root, 'locales'))
   await quiet(async () => {
-    await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null, assets: { process: false } })
+    await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null })
     if (locales.length) await buildLocalizedContent(root, { locales, localesDir: 'locales', generateSearchIndexes: false })
   })
   const own = siteSourceLocale(root)

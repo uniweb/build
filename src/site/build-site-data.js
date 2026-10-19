@@ -17,8 +17,9 @@
  * path (where the static-host extras — sitemap, robots, search-index,
  * `_pages/*` for split content — are actually consumed). Both paths use
  * the same underlying building blocks (`collectSiteContent`,
- * `processQueries`, `processAssets`, etc.), so behavior stays
- * consistent without forcing one path through the other's lifecycle.
+ * `processQueries`, etc.), so behavior stays consistent without forcing
+ * one path through the other's lifecycle. Media processing — WebP copies,
+ * video posters, PDF thumbnails — is the bundle path's alone (below).
  */
 
 import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
@@ -29,8 +30,6 @@ import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
 import { resolveRecordsDir } from './entity-pool.js'
-import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
-import { processAdvancedAssets } from './advanced-processors.js'
 import {
   renderSiteIndex,
   renderPageMarkdown,
@@ -75,12 +74,14 @@ import {
  *     the queries that have no data schema (`collectSchemalessData`).
  *   - `records/<path under the records directory>` — the records' co-located assets, where
  *     the compiled records point.
- *   - `assets/<media>` — processed images / video posters / PDF thumbnails, the
- *     paths `site-content.json`'s refs are rewritten to. ⛔ *Until 2026-10-19 this
- *     said the deploy CLI uploaded them; `publish` uploads a site's media from
- *     the site's own files (the CLI's `uploadSiteMedia`).*
  *
  * Does NOT emit:
+ *   - `assets/<media>` — no media is processed here, and a media ref in
+ *     `site-content.json` stays the site's own path. `publish` uploads a
+ *     site's media from the site's own files (the CLI's `uploadSiteMedia`), so
+ *     processed copies would be built for nothing. ⛔ *Until 2026-10-19 this
+ *     lane made WebP copies, video posters and PDF thumbnails into
+ *     `dist/assets/` on every publish, and rewrote the refs to them.*
  *   - HTML, JS, CSS, source maps, `_importmap/*` — static-host bundle
  *     artifacts; a host on this lane renders pages itself.
  *   - `_pages/<route>.json` — only meaningful for static-host bundles,
@@ -104,14 +105,7 @@ import {
  * @param {string} params.distDir - Absolute path to the dist output directory.
  * @param {string} [params.foundationPath] - Absolute path to the foundation
  *   directory, when one exists locally. Used by `collectSiteContent` to
- *   resolve theme variable defaults from `foundation.js::theme.vars`.
- * @param {Object} [params.assets] - Asset processing options.
- * @param {boolean} [params.assets.process=true]
- * @param {boolean} [params.assets.convertToWebp=true]
- * @param {number} [params.assets.quality=80]
- * @param {string} [params.assets.outputDir='assets']
- * @param {boolean} [params.assets.videoPosters=true]
- * @param {boolean} [params.assets.pdfThumbnails=true]
+ *   resolve the defaults of the theme variables it declares (its `main.js` `vars`).
  * @param {string} [params.basePath='/'] - Base path prefix for collection URLs.
  * @returns {Promise<{ siteContent: Object, distDir: string }>}
  */
@@ -119,7 +113,6 @@ export async function buildSiteData({
   siteRoot,
   distDir,
   foundationPath,
-  assets = {},
   basePath = '/',
 }) {
   if (!siteRoot) throw new Error('buildSiteData: siteRoot is required')
@@ -127,14 +120,6 @@ export async function buildSiteData({
 
   const resolvedSiteRoot = resolve(siteRoot)
   const resolvedDistDir = resolve(distDir)
-  const assetsOpts = {
-    process: assets.process !== false,
-    convertToWebp: assets.convertToWebp !== false,
-    quality: assets.quality || 80,
-    outputDir: assets.outputDir || 'assets',
-    videoPosters: assets.videoPosters !== false,
-    pdfThumbnails: assets.pdfThumbnails !== false,
-  }
 
   await mkdir(resolvedDistDir, { recursive: true })
 
@@ -179,58 +164,14 @@ export async function buildSiteData({
     }
   }
 
-  // 3. Process media assets — images, optional video posters and PDF
-  //    thumbnails — and rewrite the in-memory content tree so its image/
-  //    video/document references point at the processed paths.
-  let finalContent = siteContent
-  if (assetsOpts.process && siteContent?.assets) {
-    const assetCount = Object.keys(siteContent.assets).length
-    if (assetCount > 0) {
-      const { pathMapping, files } = await processAssets(siteContent.assets, {
-        outputDir: resolvedDistDir,
-        assetsSubdir: assetsOpts.outputDir,
-        convertToWebp: assetsOpts.convertToWebp,
-        quality: assetsOpts.quality,
-        basePath,
-      })
+  // 3. No media processing (header, "Does NOT emit"). The collector's asset
+  //    manifest is internal, so it is dropped — as the vite plugin drops it
+  //    when processing is off.
+  let finalContent = { ...siteContent }
+  delete finalContent.assets
 
-      const advancedEnabled = assetsOpts.videoPosters || assetsOpts.pdfThumbnails
-      if (advancedEnabled) {
-        const { posterMapping, thumbnailMapping } = await processAdvancedAssets(
-          siteContent.assets,
-          {
-            outputDir: resolvedDistDir,
-            assetsSubdir: assetsOpts.outputDir,
-            videoPosters: assetsOpts.videoPosters,
-            pdfThumbnails: assetsOpts.pdfThumbnails,
-            quality: assetsOpts.quality,
-            basePath,
-            hasExplicitPoster: siteContent.hasExplicitPoster || new Set(),
-            hasExplicitPreview: siteContent.hasExplicitPreview || new Set(),
-          }
-        )
-
-        finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
-        if (Object.keys(posterMapping).length > 0 || Object.keys(thumbnailMapping).length > 0) {
-          finalContent._assetMeta = {
-            posters: posterMapping,
-            thumbnails: thumbnailMapping,
-          }
-        }
-      } else {
-        finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
-      }
-    }
-  } else {
-    // Drop the assets manifest from the output when processing is off
-    // (matches the vite plugin's behavior — manifest is internal).
-    finalContent = { ...siteContent }
-    delete finalContent.assets
-  }
-
-  // Strip internal-only properties that don't serialize and have no
-  // place in the published payload (Sets don't JSON-roundtrip; the
-  // build's split-content emit consumed them already).
+  // Strip internal-only properties that don't serialize (Sets don't
+  // JSON-roundtrip): the collector records them for media processing.
   delete finalContent.hasExplicitPoster
   delete finalContent.hasExplicitPreview
 

@@ -111,7 +111,7 @@ async function rendered(siteRoot) {
   const root = join(tmp(), 'site')
   cpSync(siteRoot, root, { recursive: true })
   await quiet(async () => {
-    await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null, assets: { process: false } })
+    await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null })
     await buildLocalizedContent(root, { locales: ['fr'], localesDir: 'locales', generateSearchIndexes: false })
   })
   return { en: view(join(root, 'dist/site-content.json')), fr: view(join(root, 'dist/fr/site-content.json')) }
@@ -123,7 +123,7 @@ const starter = (unit) => (unit.markupVaries ? unit.source : unit.markup || unit
 async function seeded(root) {
   const built = join(tmp(), 'site')
   cpSync(root, built, { recursive: true })
-  await quiet(() => buildSiteData({ siteRoot: built, distDir: join(built, 'dist'), foundationPath: null, assets: { process: false } }))
+  await quiet(() => buildSiteData({ siteRoot: built, distDir: join(built, 'dist'), foundationPath: null }))
   const content = JSON.parse(readFileSync(join(built, 'dist/site-content.json'), 'utf8'))
   const { manifest } = await quiet(() => extractManifest(built, content))
   write(root, { 'locales/fr.json': Object.fromEntries(Object.entries(manifest.units).map(([hash, u]) => [hash, starter(u)])) })
