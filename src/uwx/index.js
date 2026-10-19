@@ -106,7 +106,6 @@ export { emitSyncPackages } from './sync-package.js'
 export { restoreAssetRefs, servedFingerprint } from './asset-map.js'
 // `sync.json` — what each backend minted, keyed by origin. Absorbs `assets.json`
 // above, `site.yml`'s identity keys and three maps out of the sync cache.
-// Spec: kb/framework/reference/sync-json.md
 export {
   SYNC_STORE_FILE,
   readSyncStore,
@@ -122,7 +121,6 @@ export {
   normalizeOrigin as normalizeBackendOrigin,
 } from './sync-store.js'
 // A site's services request — `site.yml::services`, applied over the site's own rows.
-// Spec: kb/framework/reference/site-services-request.md
 export {
   RUNTIME_KEYS,
   readServicesRequest,

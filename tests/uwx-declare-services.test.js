@@ -6,8 +6,7 @@
  * copy holds — `sync.json`, `{ name: $uuid }`, written by pull and push — that the file
  * no longer lists goes OFF, with no settings. A service this copy never saw is not sent,
  * and the backend keeps it. The backend decides per service from the versions the push
- * sends (spec: kb/framework/reference/site-services-request.md; the exchange:
- * kb/framework/plans/services-exchange.md).
+ * sends.
  *
  * ⛔ Until 2026-10-07 the Section was a FULL LIST — the site's rows with the file's asks
  * applied — because the backend replaced it with what it was sent.

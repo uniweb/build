@@ -8,7 +8,7 @@ import { resolveQueriesConfig } from '../src/uwx/queries-config.js'
 //
 // Reached through the `uwx/` re-export on purpose — that shim is an explicit
 // allowlist, and a rename that misses it makes the symbol silently absent rather
-// than failing at the definition. See the framework CLAUDE.md trap list.
+// than failing at the definition.
 
 let ROOT
 function w(rel, body) {

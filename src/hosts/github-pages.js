@@ -35,7 +35,7 @@
  *     the branch history stays intact and revertible.
  *
  * UNIWEB_BASE is decided at workflow scaffold time based on the deploy
- * target (per gotcha #15 for the base-path flow):
+ * target, and becomes the site's base path:
  *
  *   - With `domain`: bakes `UNIWEB_BASE: /` and emits a CNAME file under
  *     `<sitePath>/public/`. GitHub Pages serves the custom domain at

@@ -90,10 +90,9 @@ describe('detectFoundationType', () => {
      * doc's list of fake constraints.
      *
      * Ordering is asserted rather than described because framing is what quietly
-     * rots: `framework/CLAUDE.md` records the same call for the deploy wizard —
-     * the platform is listed among the hosts and deliberately not first, since
-     * leading a generic path with the paid product reads as an upsell and the
-     * framework is standalone-first.
+     * rots. The deploy wizard makes the same call: the platform is listed among
+     * the hosts and deliberately not first, since the framework is
+     * standalone-first.
      */
     test('the guidance names every lane and does not lead with the paid one', () => {
       let message = ''
@@ -159,8 +158,8 @@ describe('detectFoundationType', () => {
     })
 
     test('@org/name (no version) resolves via file: dep — the canonical local-dev shape', async () => {
-      // Tianyu's uniweb.io workflow: site.yml says '@uniweb/io', package.json
-      // maps that name to a workspace foundation directory via file: dep.
+      // site.yml names '@uniweb/io', and package.json maps that name to a
+      // workspace foundation directory via a file: dep.
       const fnDir = join(workspaceDir, 'foundations', 'io')
       await mkdir(fnDir, { recursive: true })
       await writeFile(join(siteDir, 'package.json'), JSON.stringify({

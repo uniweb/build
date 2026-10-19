@@ -43,8 +43,6 @@
  * Pure functions, shared by the static build (`content-collector.js`), the producer
  * (`site.js`), pull (`site-project.js`) and the CLI's push, publish and doctor.
  *
- * Spec: kb/framework/reference/site-services-request.md
- *
  * @module
  */
 
@@ -456,8 +454,8 @@ export function servicesFromDocument({ rows, local } = {}) {
  * The `services` Section a push sends: every service `site.yml` lists, as it says it, and
  * OFF for every service this copy holds that the file does not list.
  *
- * ⭐ A PUSH STATES, AND THE BACKEND DECIDES PER SERVICE [Diego, 2026-10-07 —
- * kb/framework/plans/services-exchange.md]. Every service is on or off, off by default.
+ * ⭐ A PUSH STATES, AND THE BACKEND DECIDES PER SERVICE [Diego, 2026-10-07]. Every
+ * service is on or off, off by default.
  *
  *   - A service the file lists goes WHOLE — its switch, and the entry as its `config` — so
  *     a setting removed from the file is removed.

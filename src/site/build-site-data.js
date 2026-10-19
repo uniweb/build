@@ -63,9 +63,9 @@ import {
  *     does with the payload. Removed 2026-08-18: the description was
  *     accurate about one deployment and false about another, and both were
  *     live at once — so naming "the worker" was wrong even though the
- *     sentence was true somewhere. Framework has no host client and no host
- *     knowledge (root CLAUDE.md, THE LANE CHAIN); we cannot tell consumers
- *     apart and must not write as though we can.
+ *     sentence was true somewhere. The framework has no host client and no
+ *     knowledge of hosts; we cannot tell consumers apart and must not write
+ *     as though we can.
  *
  *     ⇒ The rule stands on its own: we do not know which consumers
  *     re-derive, so we always ship enough for the ones that do.
@@ -86,9 +86,7 @@ import {
  *     artifacts; a host on this lane renders pages itself.
  *   - `_pages/<route>.json` — only meaningful for static-host bundles,
  *     where they are served as files.
- *   - `sitemap.xml`, `robots.txt` — static-host bundle territory. Note these
- *     are simply absent from Uniweb-hosted sites today: nothing in platform
- *     generates them, at publish time or at request time.
+ *   - `sitemap.xml`, `robots.txt` — static-host bundle territory.
  *   - ANY search index — neither the single-file `search-index.json` nor the
  *     split `_search/{locale}/*.json`. This lane emitted both until
  *     2026-08-01 and emits neither now; see step 5 for why. A host that

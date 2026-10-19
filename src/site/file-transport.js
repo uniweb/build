@@ -5,8 +5,7 @@
  * (`@uniweb/runtime/ssr::loadPageData`) asks for what a page's render will read, by the rule the
  * render itself uses, and dispatches every request through one function the caller supplies. A host
  * gives it the network; this lane gives it `dist/` and `public/`. So the build asks the same
- * question as every other lane and only the answering differs — which is the whole point of
- * `kb/framework/plans/what-a-page-needs.md`.
+ * question as every other lane, and only the answering differs.
  *
  * ⛔ **A remote `url:` is still the browser's lane by default.** Nothing here decides that: the
  * author's `prerender:` does, and the step is run with `prerender: 'author'` so a deferred request

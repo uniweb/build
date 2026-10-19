@@ -1,7 +1,5 @@
 /**
- * `site.yml::services` — the owner's request, what a push states, and what a pull writes
- * (kb/framework/reference/site-services-request.md; the exchange with the backend:
- * kb/framework/plans/services-exchange.md).
+ * `site.yml::services` — the owner's request, what a push states, and what a pull writes.
  *
  * ⭐ The cases that matter most are the silent ones: a service this copy never saw
  * switched off by a push, a deleted line whose settings stay live, and a pull that fills

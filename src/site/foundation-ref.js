@@ -183,9 +183,9 @@ export function detectFoundationType(foundation, siteRoot, { served = null } = {
   // resolve through the local checks below (file: dep,
   // workspace sibling) when the developer is iterating locally on a
   // foundation that will eventually be published as `@org/name@ver`.
-  // Tianyu's uniweb.io site uses this shape:
-  //   site.yml:     foundation: '@uniweb/io'
-  //   package.json: "@uniweb/io": "file:../../foundations/io"
+  // For example:
+  //   site.yml:     foundation: '@acme/marketing'
+  //   package.json: "@acme/marketing": "file:../../foundations/marketing"
   // The file: dep check below picks it up. If no local resolution exists
   // either, the function throws below with a "missing version" hint.
 

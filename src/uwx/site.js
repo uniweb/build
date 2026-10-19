@@ -1104,13 +1104,13 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
 // ── `services` + `secrets` — what a site asks of its host ─────────────────────────
 //
 // ⭐ THE `services` SECTION IS THE OWNER'S REQUEST, AUTHORED IN `site.yml::services` — a
-// map from service name to `true`, `false` or the service's settings (spec:
-// kb/framework/reference/site-services-request.md). A push STATES: every service the
+// map from service name to `true`, `false` or the service's settings. A push STATES:
+// every service the
 // file lists, as it says it, and OFF for every service this copy holds that the file no
 // longer lists (`statedServices`). The services it holds are named in that backend's
 // entry in `sync.json`, `{ name: $uuid }`, written by pull and by a push that succeeded;
 // one it never saw is not sent, and the site keeps it. The backend decides per service
-// from the versions the push sends [Diego, 2026-10-07 — kb/framework/plans/services-exchange.md].
+// from the versions the push sends [Diego, 2026-10-07].
 // ⛔ *Until then the Section went as a FULL LIST — the site's rows, read just before the
 // push, with the file's changed asks applied — because the backend replaced the Section
 // with what it was sent; and from 2026-09-20 to 2026-10-06 the rows lived only in
@@ -1734,5 +1734,5 @@ export function writeSiteEntityUuid(siteRoot, backend, uuid) {
 // ⛔ `writeSiteBackend` and `site.yml::$backend` are GONE (2026-09-20). The scope is
 // no longer a value recorded beside the uuid — it is the KEY the identity is stored
 // under (`sync.json::backends.<origin>`), so there is nothing to record and nothing
-// that can disagree with it. `kb/framework/reference/sync-json.md`.
+// that can disagree with it.
 

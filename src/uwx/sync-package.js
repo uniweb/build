@@ -53,7 +53,7 @@ const withBaseVersion = (baseVersions, itemBaseVersions, { every = false } = {})
   // present AND for items the files dropped. A push deletes only the items it holds a
   // version for, and only while the site left them unchanged — so a dropped item's
   // version is what makes leaving it out a deletion, and without it the item is kept
-  // [Diego, 2026-10-07; backend's gate, kb/framework/plans/services-exchange.md]. The
+  // [Diego, 2026-10-07; backend's gate]. The
   // caller holds a version only for an item it has seen (`heldTokens`, cli), so none is
   // ever sent for an item the backend holds and this copy does not.
   // ⛔ Until then this narrowed to the units the document carried: a dropped page was

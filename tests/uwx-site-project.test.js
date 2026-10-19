@@ -1077,8 +1077,7 @@ describe('info.favicon / info.assets (A5)', () => {
 describe('services — the request in site.yml, what this copy holds in sync.json', () => {
   // ⭐ `site.yml::services` is the owner's request — a map by service name — and
   // `sync.json` holds, per backend, the services this copy has seen, `{ name: $uuid }`,
-  // which a pull and a push write and a push states off when the file does not list them
-  // (kb/framework/reference/site-services-request.md).
+  // which a pull and a push write and a push states off when the file does not list them.
   const ORIGIN = 'http://backend.test'
   const write = (yml, record = null) => {
     const src = join(dir, 'src')

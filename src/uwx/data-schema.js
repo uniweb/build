@@ -78,7 +78,7 @@ export function openMapFromRows(rows) {
 /**
  * A `text` field marked as rich content (`format: markdown` or `html`): the
  * file-based body target. Round-trips as the raw source string — what the retired
- * `richtext` kind used to be. See framework/CLAUDE.md gotcha #21 and uwx-format.md.
+ * `richtext` kind used to be.
  */
 export function isMarkupTextField(field) {
   return field?.type === 'text' && CONTENT_TEXT_FORMATS.has(field?.format)
@@ -89,7 +89,7 @@ export function isMarkupTextField(field) {
  * authored as markdown on the file side, carried as a ProseMirror document on the
  * sync wire (the common language with the visual app). The single predicate the
  * sync producer/projector use to decide md⇄ProseMirror conversion + structural-map
- * localization. See framework/CLAUDE.md gotcha #21 and uwx-format.md.
+ * localization.
  */
 export function isProseMirrorField(field) {
   return field?.type === 'json' && field?.format === 'richtext'

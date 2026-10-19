@@ -75,7 +75,7 @@ export const FOLDER_ENTITY_KEY = '@folder'
 // registry of the backend we talk to. ⛔ Neither is an identity across backends: each
 // has its own registry [Diego, 2026-09-24]. (A TODO here asked
 // for the id until then; the agreement settled it the other way.) The key was `model`
-// until the same date. Record: `kb/framework/build/uwx-format.md` § 8.
+// until the same date.
 function refLeaf(entity) {
   const leaf = { kind: 'ref', name: entity.slug }
   if (entity.uuid) leaf.entry = { schema: entity.model, entity: entity.uuid }

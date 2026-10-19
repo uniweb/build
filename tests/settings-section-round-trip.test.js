@@ -1,7 +1,7 @@
 /**
  * The `info` / `settings` split, and the round-trip law that governs it.
  *
- * ⭐ **THE LAW** (`kb/framework/build/uwx-format.md`): an AUTHORED value must survive
+ * ⭐ **THE LAW**: an AUTHORED value must survive
  * pull → push unchanged. The backend is a git-style remote; a value that reaches the
  * server and cannot come back is data loss with a delay on it. Derived values are the
  * exception — there is no authored source to restore.

@@ -5,7 +5,7 @@
  * by name. Read-only — never writes. See deploy-config-writer.js for
  * the write path.
  *
- * On-disk shape (spec: kb/framework/reference/deploy-yml.md):
+ * On-disk shape:
  *   default: production
  *   targets:
  *     production: { host, backend?, ...host-specific config }

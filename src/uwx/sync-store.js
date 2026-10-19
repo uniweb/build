@@ -11,9 +11,6 @@
  * ⭐ **If it changed, something got synced.** Nothing else writes it — which is the
  * whole reason it is separate from `deploy.yml`, whose diff means "a target changed".
  *
- * Spec: `kb/framework/reference/sync-json.md`. Why it exists at all:
- * `kb/framework/plans/backend-scoped-project-state.md`.
- *
  * ## Why it is keyed by ORIGIN, all the way down
  *
  * A project may sync with any number of backends. Nothing can be shared between

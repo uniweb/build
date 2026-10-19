@@ -36,7 +36,6 @@ import {
  * then, and ⛔ nothing reads that spelling — no production backend existed to keep a
  * window for [Diego, 2026-09-24]. The value comes back as it is, so a caller can still
  * tell an id from a name and say which it met.
- * Record: `kb/framework/build/uwx-format.md` § *The data schema an entity names*.
  *
  * @param {object} doc - an entity `$`-document
  * @returns {string|null}

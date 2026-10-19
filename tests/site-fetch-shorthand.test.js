@@ -19,8 +19,7 @@
  *      carried a bare string or a full config depending on which key was typed;
  *   3. the PROJECTOR wrote it back verbatim as the shorthand, so an author who
  *      typed `fetch:` pushed, pulled, and got the shorthand back — the value
- *      survived and the authored key did not, which the round-trip law forbids
- *      (`kb/framework/build/uwx-format.md`).
+ *      survived and the authored key did not, which the round-trip law forbids.
  */
 
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'

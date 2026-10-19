@@ -4,8 +4,8 @@
  *
  * Two authored features the build supports in full and this lane does not map at
  * all — folder-mode `.md`-as-pages, and `paths: { pages/<segment>: … }` sub-mounts.
- * Both are named as v0 mapper gaps in `kb/framework/plans/bidirectional-sync.md`
- * and in `src/uwx/site.js`'s own header, so neither is a surprise. What WAS a
+ * Both are named as v0 mapper gaps in `src/uwx/site.js`'s own header, so neither is
+ * a surprise. What WAS a
  * surprise is that a site hitting them pushes a fraction of itself with every CLI
  * instrument reporting success.
  *
