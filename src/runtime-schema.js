@@ -5,6 +5,7 @@
  * reads to render, and nothing else:
  *
  * - background: 'self' when component handles its own background
+ * - sticky: { default, top? } — whether the section stays in view unless its author says
  * - data: { <key>: <schema ref> | { schema, single?, whole? } | null } — every `content.data`
  *     key the component declares, in order, with its schema ref and the flags set on it (null for
  *     an inline shape)
@@ -36,6 +37,35 @@
 
 import { lowerData } from '@uniweb/schemas/content'
 import { schemaDeclarationOf } from '@uniweb/schemas/foundation'
+
+/**
+ * A section type's `sticky`, checked: `true` or `false`, or `{ default, top }`. `top` is how far
+ * below the top the section stays — one CSS value, `4rem` or `var(--header-height)` — and is
+ * written into the style of the box that sticks, so a declaration (`;`, a brace) is refused.
+ *
+ * @param {*} declared - `meta.js`'s `sticky`
+ * @returns {{ default: boolean, top?: string }}
+ * @throws {Error} for any other shape
+ */
+export function stickyDeclaration(declared) {
+  if (typeof declared === 'boolean') return { default: declared }
+  if (!declared || typeof declared !== 'object' || Array.isArray(declared)) {
+    throw new Error(`[uniweb] Invalid 'sticky': write true, false or { default, top } — got ${JSON.stringify(declared)}`)
+  }
+  const unknown = Object.keys(declared).filter((key) => key !== 'default' && key !== 'top')
+  if (unknown.length) throw new Error(`[uniweb] Invalid 'sticky': ${unknown.join(', ')} — it takes default and top`)
+  if (declared.default !== undefined && typeof declared.default !== 'boolean') {
+    throw new Error(`[uniweb] Invalid 'sticky.default': write true or false`)
+  }
+  const out = { default: declared.default === true }
+  if (declared.top !== undefined) {
+    if (typeof declared.top !== 'string' || !declared.top.trim() || /[;{}]/.test(declared.top)) {
+      throw new Error(`[uniweb] Invalid 'sticky.top': one CSS length, such as '4rem' or 'var(--header-height)'`)
+    }
+    out.top = declared.top.trim()
+  }
+  return out
+}
 
 /**
  * A `data:` entry as the runtime reads it: its schema ref, with the flags set on it — or null for an
@@ -130,6 +160,12 @@ export function extractRuntimeSchema(fullMeta) {
   // layer (solid colors, insets, effects), so the runtime skips its Background.
   if (fullMeta.background) {
     runtime.background = fullMeta.background
+  }
+
+  // Whether the section stays in view by default: core reads it, and the author's
+  // `sticky:` wins (`Block#initComponent`). The runtime makes sticky the box that can.
+  if (fullMeta.sticky !== undefined) {
+    runtime.sticky = stickyDeclaration(fullMeta.sticky)
   }
 
   // Data. `data:` is the single declaration surface for a section's structured

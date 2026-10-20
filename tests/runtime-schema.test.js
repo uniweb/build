@@ -369,3 +369,22 @@ describe('extractAllRuntimeSchemas', () => {
     expect(extractAllRuntimeSchemas({})).toEqual({})
   })
 })
+
+describe('`sticky` — whether a section type stays in view by default (2026-10-19)', () => {
+  it('carries `true`, `false` and `{ default, top }` as one shape', () => {
+    expect(extractRuntimeSchema({ sticky: true }).sticky).toEqual({ default: true })
+    expect(extractRuntimeSchema({ sticky: false }).sticky).toEqual({ default: false })
+    expect(extractRuntimeSchema({ sticky: { default: true, top: ' var(--header-height) ' } }).sticky).toEqual({ default: true, top: 'var(--header-height)' })
+  })
+
+  it('CONTROL — a type that declares none carries none', () => {
+    expect(extractRuntimeSchema({ background: 'self' }).sticky).toBeUndefined()
+  })
+
+  it('refuses any other shape, and a `top` that is more than one CSS value', () => {
+    expect(() => extractRuntimeSchema({ sticky: 'yes' })).toThrow(/Invalid 'sticky'/)
+    expect(() => extractRuntimeSchema({ sticky: { default: true, offset: '4rem' } })).toThrow(/offset/)
+    expect(() => extractRuntimeSchema({ sticky: { default: 'yes' } })).toThrow(/sticky\.default/)
+    expect(() => extractRuntimeSchema({ sticky: { top: '0; background: red' } })).toThrow(/sticky\.top/)
+  })
+})

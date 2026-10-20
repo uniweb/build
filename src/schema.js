@@ -22,6 +22,7 @@ import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { rootListSection } from '@uniweb/schemas/conform'
 import { SECTION_PARAMS, SECTION_KEYS } from '@uniweb/schemas/section'
+import { stickyDeclaration } from './runtime-schema.js'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -652,10 +653,27 @@ function buildComponentEntry(name, relativePath, meta) {
 
   if (meta.data !== undefined) entry.data = lowerData(meta.data)
   refuseDataDeclarations(`${name} (meta.js)`, entry.data)
+  refuseStickyDeclaration(`${name} (meta.js)`, meta.sticky)
 
   const problems = [...content.problems, ...describeChildren(meta).problems]
   if (problems.length > 0) loweringProblems.set(entry, problems)
   return entry
+}
+
+/**
+ * Refuse a `sticky` that is not `true`, `false` or `{ default, top }` (`stickyDeclaration`), naming
+ * the component — the lean runtime schema checks it too, without the name.
+ *
+ * @param {string} owner - who declares it, for the message
+ * @param {*} sticky - `meta.js`'s `sticky`
+ */
+function refuseStickyDeclaration(owner, sticky) {
+  if (sticky === undefined) return
+  try {
+    stickyDeclaration(sticky)
+  } catch (err) {
+    throw new Error(`[uniweb] ${owner}: ${err.message.replace(/^\[uniweb\] /, '')}`)
+  }
 }
 
 /**
