@@ -21,8 +21,7 @@ import { describeChildren, describeVisuals, lowerChildren } from '@uniweb/schema
 import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { rootListSection } from '@uniweb/schemas/conform'
-import { SECTION_PARAMS, SECTION_KEYS } from '@uniweb/schemas/section'
-import { stickyDeclaration } from './runtime-schema.js'
+import { SECTION_PARAMS, SECTION_KEYS, stickyDeclaration } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -661,8 +660,9 @@ function buildComponentEntry(name, relativePath, meta) {
 }
 
 /**
- * Refuse a `sticky` that is not `true`, `false` or `{ default, top }` (`stickyDeclaration`), naming
- * the component — the lean runtime schema checks it too, without the name.
+ * Refuse a `sticky` that is not `true`, `false` or `{ default, top }` (`stickyDeclaration`,
+ * `@uniweb/schemas/section`), naming the component — the lean runtime schema checks it too,
+ * without the name. The entry keeps it as written; `register` writes it in one shape (format 3).
  *
  * @param {string} owner - who declares it, for the message
  * @param {*} sticky - `meta.js`'s `sticky`
@@ -672,7 +672,7 @@ function refuseStickyDeclaration(owner, sticky) {
   try {
     stickyDeclaration(sticky)
   } catch (err) {
-    throw new Error(`[uniweb] ${owner}: ${err.message.replace(/^\[uniweb\] /, '')}`)
+    throw new Error(`[uniweb] ${owner}: ${err.message}`)
   }
 }
 

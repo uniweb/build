@@ -199,6 +199,17 @@ describe('the foundation schema, as register sends it — format 3', () => {
     expect(blob(built()).Feed.content).toEqual([])
   })
 
+  it("writes a section type's `sticky` as { default }, with `top` when it has one", () => {
+    const b = blob({
+      ...built(),
+      Header: { name: 'Header', path: 'sections/Header', sticky: true },
+      Subnav: { name: 'Subnav', path: 'sections/Subnav', sticky: { top: ' 4rem ' } },
+    })
+    expect(b.Header.sticky).toEqual({ default: true })
+    expect(b.Subnav.sticky).toEqual({ default: false, top: '4rem' })
+    expect('sticky' in b.Team).toBe(false)
+  })
+
   it('refuses an inline field map that is not a data schema, naming the component and the key', () => {
     const schema = { ...built(), Article: { name: 'Article', data: { articles: { content: { type: 'object' } } } } }
     expect(() => buildRegistryPackage({ schema })).toThrow(/Article: data\.articles is an inline field map that is not a valid data schema/)

@@ -37,35 +37,7 @@
 
 import { lowerData } from '@uniweb/schemas/content'
 import { schemaDeclarationOf } from '@uniweb/schemas/foundation'
-
-/**
- * A section type's `sticky`, checked: `true` or `false`, or `{ default, top }`. `top` is how far
- * below the top the section stays — one CSS value, `4rem` or `var(--header-height)` — and is
- * written into the style of the box that sticks, so a declaration (`;`, a brace) is refused.
- *
- * @param {*} declared - `meta.js`'s `sticky`
- * @returns {{ default: boolean, top?: string }}
- * @throws {Error} for any other shape
- */
-export function stickyDeclaration(declared) {
-  if (typeof declared === 'boolean') return { default: declared }
-  if (!declared || typeof declared !== 'object' || Array.isArray(declared)) {
-    throw new Error(`[uniweb] Invalid 'sticky': write true, false or { default, top } — got ${JSON.stringify(declared)}`)
-  }
-  const unknown = Object.keys(declared).filter((key) => key !== 'default' && key !== 'top')
-  if (unknown.length) throw new Error(`[uniweb] Invalid 'sticky': ${unknown.join(', ')} — it takes default and top`)
-  if (declared.default !== undefined && typeof declared.default !== 'boolean') {
-    throw new Error(`[uniweb] Invalid 'sticky.default': write true or false`)
-  }
-  const out = { default: declared.default === true }
-  if (declared.top !== undefined) {
-    if (typeof declared.top !== 'string' || !declared.top.trim() || /[;{}]/.test(declared.top)) {
-      throw new Error(`[uniweb] Invalid 'sticky.top': one CSS length, such as '4rem' or 'var(--header-height)'`)
-    }
-    out.top = declared.top.trim()
-  }
-  return out
-}
+import { stickyDeclaration } from '@uniweb/schemas/section'
 
 /**
  * A `data:` entry as the runtime reads it: its schema ref, with the flags set on it — or null for an
@@ -164,8 +136,13 @@ export function extractRuntimeSchema(fullMeta) {
 
   // Whether the section stays in view by default: core reads it, and the author's
   // `sticky:` wins (`Block#initComponent`). The runtime makes sticky the box that can.
+  // `{ default }`, with `top` when the type has one — the shape a registered entry holds too.
   if (fullMeta.sticky !== undefined) {
-    runtime.sticky = stickyDeclaration(fullMeta.sticky)
+    try {
+      runtime.sticky = stickyDeclaration(fullMeta.sticky)
+    } catch (err) {
+      throw new Error(`[uniweb] ${err.message}`)
+    }
   }
 
   // Data. `data:` is the single declaration surface for a section's structured
