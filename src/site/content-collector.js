@@ -2622,11 +2622,15 @@ export async function collectSiteContent(sitePath, options = {}) {
   // `base` reaches the theme because self-hosted font faces are authored
   // root-relative (`/fonts/x.woff2`) and the emitted @font-face lives in an
   // inline <style> — under a subdirectory deployment it must carry the base.
-  const { config: processedTheme, css: themeCSS, links: themeLinks, warnings } = buildTheme(rawThemeConfig, { foundationVars, base })
+  const { config: processedTheme, css: themeCSS, links: themeLinks, warnings, errors } = buildTheme(rawThemeConfig, { foundationVars, base })
 
-  // Log theme warnings
-  if (warnings?.length > 0) {
-    warnings.forEach(w => console.warn(`[theme] ${w}`))
+  // Log what theme.yml gets wrong — the check's findings (`errors`: a colour that
+  // is not one, a key nothing reads) and what processing left out (`warnings`).
+  // Neither stops the build: the theme renders with what could be used. ⛔ Until
+  // 2026-10-19 the findings were dropped here, so a misspelled `code:` key or an
+  // invalid colour reached no one.
+  for (const message of [...(errors || []), ...(warnings || [])]) {
+    console.warn(`[theme] ${message}`)
   }
 
   // Check if pages directory exists
