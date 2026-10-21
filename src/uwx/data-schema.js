@@ -479,6 +479,9 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
     // The level on the entry it points to that opens this entry, for `read` — by link
     // [Diego, 2026-10-14]. `@uniweb/schemas` admits it only here, as read, edit or admin.
     if (field.readable_with) out.readable_with = field.readable_with
+    // A reference a purchase travels along, to what it names [backend, 2026-10-21]. Only `true`
+    // is sent: `@uniweb/schemas` drops `false`, which says what leaving it out says.
+    if (field.sold_with === true) out.sold_with = true
     return out
   }
 

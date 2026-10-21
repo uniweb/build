@@ -533,6 +533,27 @@ describe('toDataSchemaDeclaration — grantable & readable_with (2026-10-14)', (
     )
     expect(() => lower({ grantable: 'no', fields: { name: 'string' } }, '@/x', '@acme/x')).toThrow(/'grantable' must be a boolean/)
   })
+
+  it('carries `sold_with: true` on a reference, and on a list of them (2026-10-21)', () => {
+    const d = lower(
+      {
+        fields: {
+          syllabus: { ref: '@/doc', sold_with: true },
+          lessons: { ref: '@/lesson', many: true, sold_with: true },
+          mentor: { ref: '@/person', sold_with: false },
+          related: { ref: '@/course' },
+        },
+      },
+      '@/course',
+      '@acme/course'
+    )
+    const f = d.sections.brief.fields
+    expect(f.syllabus).toEqual({ type: 'entity_ref', model: '@acme/doc', sold_with: true })
+    expect(f.lessons).toEqual({ type: 'entity_ref', model: '@acme/lesson', multiple: true, sold_with: true })
+    expect(f.mentor).toEqual({ type: 'entity_ref', model: '@acme/person' })
+    expect(f.related).not.toHaveProperty('sold_with')
+    expect(() => lower({ fields: { title: { type: 'string', sold_with: true } } }, '@/x', '@acme/x')).toThrow(/only a reference can/)
+  })
 })
 
 describe('toDataSchemaDeclaration — nesting → type: section fields', () => {
