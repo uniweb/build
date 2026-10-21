@@ -17,8 +17,10 @@
  * - `context` - Static capabilities for cross-block coordination
  * - `initialState` - Initial values for mutable block state
  *
- * Full component metadata lives in schema.json (for the visual editor).
- * Foundation identity (name, description) comes from package.json in the editor schema.
+ * Full component metadata lives in schema.json (for the visual editor), and so does the
+ * foundation's identity, as `_self` (`buildSchema`): its name by `foundationNameOf`
+ * (`foundation-name.js`) — `main.js`'s `name`, else `package.json`'s — and its description
+ * `main.js`'s, else `package.json`'s. ⛔ *Until 2026-10-20 this said both came from package.json.*
  */
 
 import { writeFile, readFile, mkdir } from 'node:fs/promises'
