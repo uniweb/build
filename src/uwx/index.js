@@ -83,6 +83,9 @@ export { matchStoredRecords } from './record-identity.js'
 export { siteSelfScope } from './self-scope.js'
 // What each section type declares its data blocks are — a pull reads a translated block back by it.
 export { dataBlockModels } from '../i18n/data-models.js'
+// The type a section that names none renders with — a push fills it in, and a pull, handed it up
+// front like the scope above, leaves it out of the section's file.
+export { siteDefaultSectionType } from '../site/queries-config.js'
 export {
   siteInfoToConfig,
   sectionRecordToFile,

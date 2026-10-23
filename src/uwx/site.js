@@ -75,6 +75,7 @@ import {
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder, layoutAreaRoute } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
+import { siteDefaultSectionType } from '../site/queries-config.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
@@ -116,10 +117,6 @@ function scalarString(value) {
 // processMarkdownFile takes only type/hidden/props/fetch/query/data/id out of the
 // frontmatter (and drops preset/input), so `background:` and `theme:` stay
 // inside section.params — and ride there on the wire too (`mapSectionData`).
-// The `type` a push sends for a section whose file names none — the Model requires one. A pull does
-// not write it back into a file that names none (`sectionRecordToFile`): absent, the foundation's
-// `defaultSection` renders it, which is not always `Content`.
-export const FILLED_SECTION_TYPE = 'Content'
 
 const AUTHORED_SLUG = Symbol('authoredSlug')
 const isPlainRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -291,7 +288,8 @@ function mapSectionData(section) {
   // the `fetch` field beside the params, equal; a pull still reads a stored field where `params`
   // has no `fetch` (`sectionRecordToFile`). uwx-format.md § A page section's fields.
   if (section.fetch) params.fetch = section.fetch
-  const data = { type: section.type || FILLED_SECTION_TYPE } // entity type requires `type`
+  // A section whose file names no type gets one once the tree is collected (`fillSectionTypes`).
+  const data = { type: section.type }
   setIf(data, 'stable_id', section.stableId ?? undefined)
   // ⭐ A draft section — the store's own `hidden`, which an editor also writes [2026-09-28].
   if (section.hidden === true) data.hidden = true
@@ -520,6 +518,26 @@ const SITE_MODEL_NAME = '@uniweb/site-content'
 // the file header.
 function withIdentity(id, fields) {
   return Object.assign({ $id: id }, fields)
+}
+
+// ⭐ A SECTION WHOSE FILE NAMES NO TYPE IS SENT THE TYPE IT RENDERS WITH — the site's foundation's
+// `defaultSection`, else `Section` (`siteDefaultSectionType`, by `@uniweb/core/section-type`, the
+// rule the site's own render asks). The store requires a type, and a host renders what the store
+// holds. ⛔ Until 2026-10-23 this sent `Content`, which no starter template's foundation has: every
+// such section — every page of a mounted docs folder among them — read "Component not found:
+// Content" on a hosted site while the files rendered `Section`.
+function fillSectionTypes(records, type) {
+  for (const record of records || []) {
+    if (!record.type) record.type = type // the collector says `null` for a file that names none
+    fillSectionTypes(record.$children, type)
+  }
+}
+
+function fillPageSectionTypes(pages, type) {
+  for (const page of pages || []) {
+    fillSectionTypes(page.page_sections, type)
+    fillPageSectionTypes(page.$children, type)
+  }
 }
 
 // One collected section → its `$`-record, recursing `subsections` into `$children`
@@ -1596,6 +1614,10 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   }
 
   const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
+  // Before anything reads a section's type — localizing a data block asks it for the block's model.
+  const sectionType = await siteDefaultSectionType(siteRoot, siteYml)
+  fillPageSectionTypes(pages, sectionType)
+  fillSectionTypes(layoutSections, sectionType)
 
   // Wrap each section's content into its per-locale form (source doc + target
   // structural maps from locales/{locale}.json, or a free-form body override from

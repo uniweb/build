@@ -36,7 +36,8 @@ import { detectFoundationType, parseCatalogRef } from './foundation-ref.js'
 import { readRegisteredFoundation } from './registered-foundation.js'
 import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
-import { buildSchema } from '../schema.js'
+import { buildSchema, loadFoundationConfig } from '../schema.js'
+import { defaultSectionType } from '@uniweb/core/section-type'
 import { refuseQueryRoute, refuseLimit, refuseFilter } from './data-fetcher.js'
 import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
@@ -464,6 +465,30 @@ export async function foundationSections(siteRoot, siteYml = null) {
     }
   }
   return foundationSchemaJson(siteRoot, yml)
+}
+
+/**
+ * The type a section that names none renders with on this site — its foundation's
+ * `defaultSection`, else `Section` (`@uniweb/core/section-type`, the rule the site's render
+ * asks). A push fills it into such a section, since a store requires a type, and a pull leaves it
+ * out of the section's file again. Read like `foundationSections`: from the foundation's source
+ * when it is local, else from its built or registered `schema.json`, else `Section`.
+ *
+ * @param {string} siteRoot
+ * @param {object} [siteYml] - an already-read site.yml
+ * @returns {Promise<string>}
+ */
+export async function siteDefaultSectionType(siteRoot, siteYml = null) {
+  const yml = siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
+  const srcDir = localFoundationSrcDir(siteRoot, yml)
+  if (srcDir) {
+    try {
+      return defaultSectionType(await loadFoundationConfig(srcDir))
+    } catch {
+      // a foundation whose source does not read is reported by the build that builds it
+    }
+  }
+  return defaultSectionType(foundationSchemaJson(siteRoot, yml)?._self)
 }
 
 /** The data schemas a site's foundation declares, or null when unresolvable. */

@@ -44,7 +44,8 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
-import { FILLED_SECTION_TYPE, buildRouteOf } from './site.js'
+import { buildRouteOf } from './site.js'
+import { DEFAULT_SECTION_TYPE } from '@uniweb/core/section-type'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, isProseMirrorDoc } from './locale-sync.js'
@@ -381,9 +382,11 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  *        field to (its source doc → the `.md` body)
  * @param {object} [params.collector] - translation collector; target-locale
  *        structural maps on a localized `content` field are captured into it
+ * @param {string} [params.impliedType] - the type a section that names none renders with on this
+ *        site (`siteDefaultSectionType`), which a file leaves out
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
   // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
@@ -416,14 +419,15 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   // for names alone (`authorableDeclaration`, the inverse of the build's resolution), and
   // removed from the file of a section that declares none. ⛔ Until 2026-10-16 a file's own
   // declaration was kept over the backend's, and the next edit to the section pushed it back.
-  // ⛔ Not `type: Content` into a file that names no type: it is what the push sent for it, and
-  // absent, the foundation's `defaultSection` renders it. Until 2026-09-26 a pull wrote it back.
+  // ⛔ Not the implied type into a file that names no type: it is what the push sent for it, and
+  // absent, the same type renders it (`siteDefaultSectionType`). Until 2026-09-26 a pull wrote it
+  // back; until 2026-10-23 the type was `Content`, which the push sent and no foundation rendered.
   return writeSectionFile({
     filePath,
     content: sourceContent,
     params: frontmatter,
     declaration: paramFetch ?? null,
-    implied: { type: FILLED_SECTION_TYPE },
+    implied: { type: impliedType },
   })
 }
 
@@ -542,6 +546,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         sourceLocale: ctx?.sourceLocale,
         collector: ctx?.collector,
         dataModel: ctx?.dataModel,
+        impliedType: ctx?.sectionType,
         freeformRelPath,
         freeformCandidates,
         writeId: fileSectionName(filePath) !== stableId,
@@ -1242,6 +1247,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
       sourceLocale: ctx?.sourceLocale,
       collector: ctx?.collector,
       dataModel: ctx?.dataModel,
+      impliedType: ctx?.sectionType,
       writeId: fileSectionName(filePath) !== stableId,
       freeformRelPath: stableId ? buildFreeformPath({ stableId }, page) : null,
       freeformCandidates: stableId ? freeformPathsFor({ stableId }, page) : null,
@@ -1329,9 +1335,12 @@ function refuseContentFilesCannotHold(document, sourceLocale) {
  * @param {string|null} [params.scope] - the scope the push qualified a query's
  *        `@/x` schema with, so it is written back as `@/x` — see
  *        `declarationsToQueriesYml`, whose default it overrides.
+ * @param {string} [params.sectionType] - the type a section that names none renders with on this
+ *        site, which the push filled in and a section's file leaves out — `siteDefaultSectionType`,
+ *        read by the caller since it reads the foundation's source
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null, sectionType = DEFAULT_SECTION_TYPE }) {
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
@@ -1363,7 +1372,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // rename detection, build a fresh one as we project, then persist it. Items not
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
-  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map(), dataModel }
+  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map(), dataModel, sectionType }
   // Where the site keeps its localized URLs — `site.yml`'s map, when it has one (`pageSlugToYml`).
   const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
   ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }
