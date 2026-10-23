@@ -54,6 +54,8 @@ import { RECORDS_DIR, resolveRecordsDir } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { jsonForScript } from '@uniweb/core/data-script'
+// A favicon's MIME type by its extension — the rule a host's page shell types it by too.
+import { faviconType } from '@uniweb/core/page-shell'
 import { FONT_LINKS_MARKER } from './head-markers.js'
 import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
 import { extensionNameOf, findSiteExtension } from './workspace-extension.js'
@@ -85,14 +87,6 @@ const EXTENSION_CONTENT_TYPES = {
 /** The Content-Type the dev server answers an extension's built file with. */
 function extensionContentType(file) {
   return EXTENSION_CONTENT_TYPES[file.split('.').pop()?.toLowerCase()] || 'application/octet-stream'
-}
-
-function faviconTypeFor(href) {
-  const ext = href.split('?')[0].split('.').pop()?.toLowerCase()
-  if (ext === 'svg') return 'image/svg+xml'
-  if (ext === 'ico') return 'image/x-icon'
-  if (ext === 'png') return 'image/png'
-  return null
 }
 
 /**
@@ -1573,7 +1567,7 @@ export function siteContentPlugin(options = {}) {
       // Source 2: auto-detect public/favicon.{ico,svg,png}
       const faviconHref = resolveFaviconHref(contentToInject?.config?.favicon, resolvedPublicDir, basePath)
       if (faviconHref) {
-        const type = faviconTypeFor(faviconHref)
+        const type = faviconType(faviconHref)
         const typeAttr = type ? ` type="${type}"` : ''
         headInjection += `    <link rel="icon"${typeAttr} href="${faviconHref}">\n`
       }
