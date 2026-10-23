@@ -1,29 +1,40 @@
 // Minimal, zero-dependency ZIP writer/reader for .uwx containers.
 //
-// DESIGN DECISION: our WRITER (`createZip`) emits Stored only (compression
-// method 0), no Deflate. A .uwx container is a ZIP; compression is an
-// optimization, not part of the contract, and every standard ZIP reader
-// handles Stored entries. Staying Stored-only on write removes a class of
-// cross-tool byte asymmetry. The READER (`readZip`) additionally inflates
-// Deflate (method 8) entries — the backend's pull `.uwx` Deflates larger
-// entities, and the framework must read what the backend produces.
+// DESIGN DECISION: our WRITER (`createZip`) Deflates (compression method 8)
+// every entry that Deflate makes smaller, and Stores (method 0) the rest — an
+// empty or tiny one. A .uwx travels as a request body, and a backend measures
+// a request by its size AS SENT, so the container's own compression is what
+// carries a large site: a 3.6 MB page tree Deflates to about 0.5 MB. It is the
+// container's job and not the transport's — the backend reads the ZIP and
+// decodes no HTTP `Content-Encoding` (backend, 2026-10-23). ⛔ Until 2026-10-23
+// this writer emitted Stored only ("compression is an optimization, not part of
+// the contract"), and a documentation site's push was refused `413` for its
+// size. The READER (`readZip`) inflates both methods, mixed freely in one
+// archive — the backend's pull `.uwx` Deflates its entities and Stores its
+// `manifest.json`, and the framework must read what the backend produces.
 //
 // No Zip64: per-record JSON files are far below 4 GiB and entry counts far
 // below 65535. The format is otherwise the classic APPNOTE layout, all
 // multi-byte fields little-endian.
 //
-// Determinism: mod time/date are fixed to 0. The .uwx content key is
-// `manifest.package_sha256` (computed over the manifest, NOT the ZIP bytes),
-// so ZIP framing never participates in dedupe; fixing the timestamp just
-// makes byte output reproducible for a given input.
+// Determinism: mod time/date are fixed to 0 and Deflate runs at one fixed
+// level, so a given input gives the same bytes under the same zlib. The .uwx
+// content key is `manifest.package_sha256` (computed over the manifest, NOT the
+// ZIP bytes), so ZIP framing — compression included — never participates in
+// dedupe.
 
 import { crc32 } from './crc32.js'
-import { inflateRawSync } from 'node:zlib'
+import { deflateRawSync, inflateRawSync } from 'node:zlib'
 
 const LOCAL_SIG = 0x04034b50
 const CENTRAL_SIG = 0x02014b50
 const EOCD_SIG = 0x06054b50
-const VERSION = 20 // 2.0 — the minimum that supports Stored with a CRC
+const VERSION = 20 // 2.0 — the minimum that supports Deflate, and Stored with a CRC
+const STORED = 0
+const DEFLATE = 8
+// Measured 2026-10-23 on a 3.6 MB page tree: level 9 → 533 KB in 38 ms, the
+// default 6 → 540 KB in 25 ms. A push is measured compressed, so take the bytes.
+const DEFLATE_LEVEL = 9
 
 /**
  * @param {{name: string, data: Buffer}[]} files
@@ -38,31 +49,34 @@ export function createZip(files) {
     const nameBuf = Buffer.from(file.name, 'utf8')
     const data = file.data
     const crc = crc32(data)
+    const deflated = deflateRawSync(data, { level: DEFLATE_LEVEL })
+    const method = deflated.length < data.length ? DEFLATE : STORED
+    const body = method === DEFLATE ? deflated : data
 
     const local = Buffer.alloc(30)
     local.writeUInt32LE(LOCAL_SIG, 0)
     local.writeUInt16LE(VERSION, 4)
     local.writeUInt16LE(0, 6) // general purpose bit flag
-    local.writeUInt16LE(0, 8) // compression method: 0 = Stored
+    local.writeUInt16LE(method, 8) // compression method: 8 = Deflate, 0 = Stored
     local.writeUInt16LE(0, 10) // mod time (fixed)
     local.writeUInt16LE(0, 12) // mod date (fixed)
-    local.writeUInt32LE(crc, 14)
-    local.writeUInt32LE(data.length, 18) // compressed size == uncompressed
-    local.writeUInt32LE(data.length, 22)
+    local.writeUInt32LE(crc, 14) // over the uncompressed data
+    local.writeUInt32LE(body.length, 18) // compressed size
+    local.writeUInt32LE(data.length, 22) // uncompressed size
     local.writeUInt16LE(nameBuf.length, 26)
     local.writeUInt16LE(0, 28) // extra field length
-    localParts.push(local, nameBuf, data)
+    localParts.push(local, nameBuf, body)
 
     const central = Buffer.alloc(46)
     central.writeUInt32LE(CENTRAL_SIG, 0)
     central.writeUInt16LE(VERSION, 4) // version made by
     central.writeUInt16LE(VERSION, 6) // version needed
     central.writeUInt16LE(0, 8)
-    central.writeUInt16LE(0, 10)
+    central.writeUInt16LE(method, 10)
     central.writeUInt16LE(0, 12)
     central.writeUInt16LE(0, 14)
     central.writeUInt32LE(crc, 16)
-    central.writeUInt32LE(data.length, 20)
+    central.writeUInt32LE(body.length, 20)
     central.writeUInt32LE(data.length, 24)
     central.writeUInt16LE(nameBuf.length, 28)
     central.writeUInt16LE(0, 30) // extra
@@ -73,7 +87,7 @@ export function createZip(files) {
     central.writeUInt32LE(offset, 42) // local header offset
     centralParts.push(central, nameBuf)
 
-    offset += local.length + nameBuf.length + data.length
+    offset += local.length + nameBuf.length + body.length
   }
 
   const centralDir = Buffer.concat(centralParts)
@@ -91,9 +105,10 @@ export function createZip(files) {
 }
 
 /**
- * Reader for `.uwx` containers. Handles Stored (method 0 — what our writer emits)
- * and Deflate (method 8 — what the backend's pull `.uwx` uses); any other method
- * throws. Not otherwise a general-purpose unzip (no Zip64, no encryption).
+ * Reader for `.uwx` containers. Handles Stored (method 0) and Deflate (method 8),
+ * mixed freely — both are what our writer and the backend's pull `.uwx` emit;
+ * any other method throws. Not otherwise a general-purpose unzip (no Zip64, no
+ * encryption).
  *
  * @param {Buffer} buf
  * @returns {Map<string, Buffer>} name -> uncompressed data
