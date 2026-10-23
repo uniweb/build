@@ -694,8 +694,13 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, {
   if (sectionsArray && sectionsArray.length > 0) {
     const authored = existing?.sections
     if (Array.isArray(authored)) {
-      // Compared by the names the files are found by, so a list naming `1-hero` keeps naming it.
-      const same = JSON.stringify(listedNames(authored.filter((e) => e !== '...'))) === JSON.stringify(sectionsArray)
+      // Compared by the names the files are found by, so a list naming `1-hero` keeps naming it —
+      // and with the author's `nest:` applied, as the build reads the two together: a list beside a
+      // `nest:` that gives the incoming nesting is kept, its `nest:` with it. ⛔ Until 2026-10-23 the
+      // list was compared alone, so a page that lists its sections and nests with `nest:` had both
+      // rewritten into one inclusive list on every pull.
+      const said = withNest(listedNames(authored.filter((e) => e !== '...')), existing?.nest)
+      const same = JSON.stringify(said) === JSON.stringify(sectionsArray)
       y.sections = same ? authored : [...sectionsArray, '...']
     } else if (filesGiveTopOrder && nestSays(existing?.nest, sectionsArray)) {
       // Nothing to list: the files and `nest:` say it, kept below.
@@ -713,6 +718,17 @@ function pageRecordToYml(record, sectionsArray, sourceLocale, existing = null, {
   const listed = y.sections !== undefined && y.sections !== existing?.sections && nestsIn(y.sections)
   if (existing?.nest !== undefined && !listed) y.nest = existing.nest
   return y
+}
+
+// A `sections:` list's entries with a page's `nest:` applied, as the build applies it after the list
+// (`content-collector.js::processNesting`): a top-level parent `nest:` names takes the children it
+// lists, in place of any the list gives it.
+function withNest(list, nest) {
+  if (!isPlainRecord(nest)) return list
+  return list.map((entry) => {
+    const name = typeof entry === 'string' ? entry : isPlainRecord(entry) ? Object.keys(entry)[0] : null
+    return name && Array.isArray(nest[name]) ? { [name]: nest[name].map((c) => fileSectionName(String(c))) } : entry
+  })
 }
 
 // Whether a `sections:` list nests: an entry that is a parent with its children.

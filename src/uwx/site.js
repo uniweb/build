@@ -591,7 +591,7 @@ function isExplicitWithRest(sectionsConfig) {
 // a section name (string) or `{ name: [children…] }`, resolved to its file by
 // name (bare / `@` / numeric-prefix tolerant) and recursed. Order and nesting
 // come from the array, not the directory.
-async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { appendRest = false } = {}) {
+async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { appendRest = false, nest = null } = {}) {
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const seen = new Set()
 
@@ -633,15 +633,37 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { 
       sections.push(section)
     }
   }
+
+  // ⭐ `nest:` OVER THE LIST, as the build applies it after one (`processNesting`,
+  // `site/content-collector.js`): each top-level parent it names gets the children it lists, in
+  // that order, replacing any the list nested — "`nest:` wins" (`docs/reference/page-configuration.md`).
+  // ⛔ Until 2026-10-23 an explicit list ignored `nest:` here, so a page listing its sections and
+  // nesting a figure under each pushed none of the figures, which the build renders — and a pull
+  // then deleted their `@` files, absent from the document.
+  if (nest && typeof nest === 'object') {
+    for (const [parentName, childNames] of Object.entries(nest)) {
+      if (!Array.isArray(childNames)) continue
+      const parent = sections.find((s) => s.stableId === parentName)
+      if (!parent) continue
+      parent.subsections = []
+      for (const childName of childNames) {
+        const file = findSectionFileName(mdFiles, childName)
+        if (!file) continue
+        const { section } = await processMarkdownFile(join(pageDir, file), String(parent.subsections.length + 1), siteRoot, childName)
+        section.subsections = []
+        parent.subsections.push(section)
+      }
+    }
+  }
   return sections.map((s, i) => sectionToRecord(s, i))
 }
 
 async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   if (isFullyExplicitSections(pageConfig?.sections)) {
-    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections)
+    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { nest: pageConfig.nest })
   }
   if (isExplicitWithRest(pageConfig?.sections)) {
-    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { appendRest: true })
+    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { appendRest: true, nest: pageConfig.nest })
   }
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const nest = pageConfig?.nest && typeof pageConfig.nest === 'object' ? pageConfig.nest : {}
