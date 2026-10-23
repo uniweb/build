@@ -540,18 +540,32 @@ function getContentProfile(configFile) {
  */
 async function readFolderConfig(dirPath, inheritedMode) {
   const folderYml = await readYamlFile(join(dirPath, 'folder.yml'))
-  if (Object.keys(folderYml).length > 0) {
-    return { config: folderYml, mode: 'pages', source: 'folder.yml' }
-  }
-  const pageYml = await readYamlFile(join(dirPath, 'page.yml'))
-  if (Object.keys(pageYml).length > 0) {
-    return { config: pageYml, mode: 'sections', source: 'page.yml' }
-  }
-  // Check for empty folder.yml (presence signals folder mode even if empty)
-  if (existsSync(join(dirPath, 'folder.yml'))) {
-    return { config: {}, mode: 'pages', source: 'folder.yml' }
-  }
-  return { config: {}, mode: inheritedMode, source: 'inherited' }
+  const pageYml = Object.keys(folderYml).length > 0 ? {} : await readYamlFile(join(dirPath, 'page.yml'))
+  const { mode, source } = folderContentMode(folderYml, pageYml, existsSync(join(dirPath, 'folder.yml')), inheritedMode)
+  return { config: source === 'folder.yml' ? folderYml : source === 'page.yml' ? pageYml : {}, mode, source }
+}
+
+/**
+ * A folder's content mode from its two config files — `readFolderConfig`'s rule, as a pure
+ * function, so a synchronous reader applies the same one: the pull, which must know which pages
+ * a folder's `.md` files are (`uwx/git-authored.js`).
+ *
+ * - a `folder.yml` with keys → folder mode
+ * - else a `page.yml` with keys → page mode
+ * - else an empty `folder.yml` → folder mode (its presence is the declaration)
+ * - else the parent's mode
+ *
+ * @param {object|null} folderYml - the parsed `folder.yml`, or empty
+ * @param {object|null} pageYml - the parsed `page.yml`, or empty
+ * @param {boolean} hasFolderYml - whether a `folder.yml` exists at all
+ * @param {string} inheritedMode - 'sections' or 'pages'
+ * @returns {{ mode: string, source: string }}
+ */
+export function folderContentMode(folderYml, pageYml, hasFolderYml, inheritedMode) {
+  if (folderYml && Object.keys(folderYml).length > 0) return { mode: 'pages', source: 'folder.yml' }
+  if (pageYml && Object.keys(pageYml).length > 0) return { mode: 'sections', source: 'page.yml' }
+  if (hasFolderYml) return { mode: 'pages', source: 'folder.yml' }
+  return { mode: inheritedMode, source: 'inherited' }
 }
 
 /**
@@ -715,6 +729,63 @@ function resolveMounts(pathsConfig, sitePath, pagesPath, { strict = false } = {}
   }
 
   return resolved.size > 0 ? resolved : null
+}
+
+/**
+ * How a route read from a mount, a local folder of the same name, or both, is shaped: the two
+ * configs layered, the mode it is read in, and the mode its children are walked in. ONE rule, for
+ * the build's walk (`collectPagesRecursive`) and the push's (`uwx/site.js::orderedSubfolders`), so
+ * a mounted route is the same page tree on both lanes.
+ *
+ * The configs LAYER rather than one replacing the other: the mounted repo declares what its content
+ * is (ordering, title, how it nests), the local folder how this site presents it (layout, SEO, menu
+ * visibility). Mode is not a config key — it comes from which config file exists — so it is not
+ * spread: an explicit local declaration wins (a `page.yml` stub with its own markdown is a real
+ * landing page above mounted children); otherwise the mount decides, because it owns the content.
+ * A folder-mode route's children are walked in folder mode; a page-mode route's in the mount's own
+ * mode when they come from one — it is the mount's tree — else in the route's.
+ *
+ * @param {string} name - the route segment
+ * @param {{ config: object, mode: string, source: string }|null} local - the local folder's
+ *   `readFolderConfig`, or null
+ * @param {{ config: object, mode: string, source: string }|null} mounted - the mount target's
+ *   `readFolderConfig`, or null
+ * @param {string} contentMode - the mode of the level the route is on
+ * @returns {{ dirConfig: object, dirMode: string, childMode: string }}
+ */
+export function layerMountedFolder(name, local, mounted, contentMode) {
+  const dirConfig = mounted
+    ? { title: mounted.config.title || name, ...mounted.config, ...local?.config }
+    : local.config
+  const dirMode = local && local.source !== 'inherited'
+    ? local.mode
+    : mounted?.mode ?? local?.mode ?? contentMode
+  const childMode = dirMode === 'pages' ? 'pages' : mounted?.mode ?? dirMode
+  return { dirConfig, dirMode, childMode }
+}
+
+/**
+ * A folder-mode folder's `.md` pages, in the order the build lists them: by filename (numeric
+ * prefix first), then by the folder's own `pages:`. Each name is the page's slug — the filename
+ * without its numeric prefix. Shared by the build's walk and the push's, so the sync lane sends the
+ * pages the build makes, in the build's order.
+ *
+ * @param {string[]} entries - the folder's directory listing
+ * @param {{ pages?: Array }} [orderConfig] - the folder's own config
+ * @returns {{ files: Array<{ file: string, name: string }>, strict: Set<string>|null }} the pages
+ *   in order, and the names a strict `pages:` lists (null when it is not strict)
+ */
+export function folderModePageFiles(entries, orderConfig) {
+  const items = entries.filter(isMarkdownFile).sort(compareFilenames).map((file) => {
+    const { name } = parse(file)
+    return { file, name: parseNumericPrefix(name).name || name }
+  })
+  const parsed = Array.isArray(orderConfig?.pages) ? parseWildcardArray(orderConfig.pages) : null
+  if (!parsed || parsed.mode === 'all') return { files: items, strict: null }
+  return {
+    files: applyWildcardOrder(items, parsed),
+    strict: parsed.mode === 'strict' ? new Set(parsed.before.map(extractItemName).filter(Boolean)) : null
+  }
 }
 
 /**
@@ -1885,21 +1956,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const mountPath = mounts?.get(name) ?? null
     const localPath = localDirs.has(name) ? join(dirPath, name) : null
 
-    // The content's declaration about itself, then the site's about presenting it.
     const mounted = mountPath ? await readFolderConfig(mountPath, 'pages') : null
     const local = localPath ? await readFolderConfig(localPath, contentMode) : null
-
-    const dirConfig = mounted
-      ? { title: mounted.config.title || name, ...mounted.config, ...local?.config }
-      : local.config
-
-    // Mode is not a config key — it comes from which config file exists, so it
-    // cannot be spread. An explicit local declaration wins (a `page.yml` stub
-    // with its own markdown is a real landing page above mounted children);
-    // otherwise the mount decides, because it owns the content being read.
-    const dirMode = local && local.source !== 'inherited'
-      ? local.mode
-      : mounted?.mode ?? local?.mode ?? contentMode
+    const { dirConfig, dirMode, childMode } = layerMountedFolder(name, local, mounted, contentMode)
 
     const folderLayout = normalizeLayoutConfig(dirConfig.layout)
 
@@ -1909,11 +1968,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined,
       dirConfig,
       dirMode,
-      // The mode the mounted subtree is walked in belongs to the mount: it is
-      // the mount's tree. Without this a `page.yml` stub silently imposed page
-      // mode on a mounted folder of pages, and only every mounted subfolder
-      // carrying its own folder.yml kept that from collapsing them into one page.
-      mountedContentMode: mounted?.mode ?? null,
+      childMode,
       childOrderConfig: {
         pages: dirConfig.pages,
         index: dirConfig.index
@@ -1998,32 +2053,13 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // --- Pages mode: .md files are child pages ---
   if (contentMode === 'pages') {
-    // Collect and process .md files as individual pages
-    const mdFiles = entries.filter(isMarkdownFile).sort(compareFilenames)
-    const mdPageItems = []
-
-    for (const file of mdFiles) {
-      const { name } = parse(file)
-      const { name: stableName } = parseNumericPrefix(name)
+    // Each .md file is a page, in the order `folderModePageFiles` gives — the one the push sends
+    // them in (`uwx/site.js`): by filename, then by this folder's `pages:`.
+    const { files: mdFiles, strict: strictPageNamesFM } = folderModePageFiles(entries, orderConfig)
+    const orderedMdPages = []
+    for (const { file, name } of mdFiles) {
       const result = await processFileAsPage(join(dirPath, file), file, siteRoot, parentRoute)
-      if (result) {
-        mdPageItems.push({ name: stableName || name, result })
-      }
-    }
-
-    // Apply ordering: pages: (wildcard-aware) > order: [array] (backward compat) > default
-    let orderedMdPages
-    let strictPageNamesFM = null
-
-    const pagesParsedFM = Array.isArray(orderConfig?.pages) ? parseWildcardArray(orderConfig.pages) : null
-
-    if (pagesParsedFM && pagesParsedFM.mode !== 'all') {
-      orderedMdPages = applyWildcardOrder(mdPageItems, pagesParsedFM)
-      if (pagesParsedFM.mode === 'strict') {
-        strictPageNamesFM = new Set(pagesParsedFM.before.map(extractItemName).filter(Boolean))
-      }
-    } else {
-      orderedMdPages = mdPageItems
+      if (result) orderedMdPages.push({ name, result })
     }
 
     // In folder mode, determine index page (homepage only).
@@ -2064,7 +2100,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
     // Process subdirectories
     for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayout } = folder
+      const { name: entry, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = folder
       assertRouteFolder(entry, parentRoute)
       const isIndex = entry === indexName
       const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
@@ -2102,7 +2138,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           const childDirPath = mounts?.get(entry) || entryPath
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
-          const childContentMode = mountedContentMode ?? 'sections'
+          const childContentMode = childMode
           const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, childContentMode, null, effectiveLayout)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
@@ -2160,7 +2196,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         // Recurse in folder mode — pass container's own fetch config (or fall back to parent's)
         const childDirPath = mounts?.get(entry) || entryPath
         const containerFetch = containerPage.fetch || parentFetch
-        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, versionContext, 'pages', null, effectiveLayout)
+        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, versionContext, childMode, null, effectiveLayout)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2202,7 +2238,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
-    const { name: entry, path: entryPath, dirConfig, dirMode, mountedContentMode, childOrderConfig, childLayout } = folder
+    const { name: entry, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = folder
     assertRouteFolder(entry, parentRoute)
     const isIndex = entry === indexPageName
     const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
@@ -2262,7 +2298,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       // container above passes it.
       const childDirPath = mounts?.get(entry) || entryPath
       const containerFetch = containerPage.fetch || parentFetch
-      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, versionContext, 'pages', null, effectiveLayout)
+      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, versionContext, childMode, null, effectiveLayout)
       pages.push(...subResult.pages)
       assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
       iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2304,7 +2340,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
             : page.route
           const childFetch = page.fetch || parentFetch
-          const childContentMode = mountedContentMode ?? dirMode
+          const childContentMode = childMode
           const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, versionContext, childContentMode, null, effectiveLayout)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
@@ -3099,6 +3135,8 @@ export {
   parseNumericPrefix,
   compareFilenames,
   processMarkdownFile,
+  processFileAsPage,
+  resolveMounts,
   findSectionFile,
   processNesting,
 }

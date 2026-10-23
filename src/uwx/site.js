@@ -40,9 +40,10 @@
 // they ride under their parent section's `$children` (page_sections is
 // self_nesting), via the same `processNesting` the normal build uses.
 //
-// v0 scope (stated, not silent): folder-mode `.md`-as-pages (document/blog-list
-// profile), `paths:` mounts, versioned scopes, and media/asset bytes
-// (favicon/assets — carried out of band).
+// v0 scope (stated, not silent): versioned scopes, and media/asset bytes
+// (favicon/assets — carried out of band). Folder-mode `.md`-as-pages and
+// `paths: { pages/<segment> }` mounts are carried since 2026-10-23, read by the
+// build's own rules; a pull leaves those pages alone (`git-authored.js`).
 
 import { readdir, readFile } from 'node:fs/promises'
 import { dataBlockModels } from '../i18n/data-models.js'
@@ -59,11 +60,14 @@ import {
   compareFilenames,
   orderFolders,
   processMarkdownFile,
+  processFileAsPage,
   declaredFetch,
   checkDeclaration,
   fetchFromQueryShorthand,
   assertRouteFolder,
-  mountEntriesOf,
+  resolveMounts,
+  layerMountedFolder,
+  folderModePageFiles,
   rootOrderConfig,
   composeLocalizedRoute,
   isValidSlugSegment,
@@ -427,24 +431,37 @@ function buildPageData(config, ctx) {
   return data
 }
 
-async function orderedSubfolders(dirPath, inheritedMode, parentConfig) {
+// A level's child folders, each with the config and mode the build reads it with. At the root,
+// `mounts` adds every `paths: { pages/<segment>: … }` route, shaped by the build's own rule
+// (`layerMountedFolder`): the mount's config under the local folder's, the mode the mount gives
+// unless the local folder declares one, and the children read from the mount. ⛔ Until 2026-10-23
+// this lane read no mount, so a mounted route was pushed as an empty container (a local stub) or
+// not at all (none) — measured 2026-09-18 on a documentation site: 49 pages built, 2 pushed.
+async function orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts = null) {
   const entries = await readdir(dirPath, { withFileTypes: true })
-  const folders = []
+  const local = new Map()
   for (const e of entries) {
-    if (!e.isDirectory() || isIgnoredFolder(e.name)) continue
-    const path = join(dirPath, e.name)
-    const { config, mode, source } = await readFolderConfig(
-      path,
-      inheritedMode
-    )
+    if (e.isDirectory() && !isIgnoredFolder(e.name)) local.set(e.name, join(dirPath, e.name))
+  }
+  const folders = []
+  for (const dirName of new Set([...local.keys(), ...(mounts?.keys() ?? [])])) {
+    const localPath = local.get(dirName) ?? null
+    const mountPath = mounts?.get(dirName) ?? null
+    const localConfig = localPath ? await readFolderConfig(localPath, inheritedMode) : null
+    const mountedConfig = mountPath ? await readFolderConfig(mountPath, 'pages') : null
+    const { dirConfig, dirMode, childMode } = layerMountedFolder(dirName, localConfig, mountedConfig, inheritedMode)
     folders.push({
-      dirName: e.name,
-      name: parseNumericPrefix(e.name).name,
-      path,
-      config,
-      internalMode: mode,
-      source,
-      order: typeof config.order === 'number' ? config.order : undefined,
+      dirName,
+      name: parseNumericPrefix(dirName).name,
+      // Where the page's own sections are — the local folder, as the build reads them — and
+      // where its child pages are: the mount's tree, when it has one.
+      path: localPath ?? mountPath,
+      childrenPath: mountPath ?? localPath,
+      config: dirConfig,
+      internalMode: dirMode,
+      childMode,
+      source: (localConfig ?? mountedConfig).source,
+      order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined,
     })
   }
   // Explicit order, then numeric-prefix filename order, then the parent's `pages:` wildcard —
@@ -487,9 +504,10 @@ const CATCH_ALL_MARKER = '...path'
 //     `multi` section is read as new (inserted, stored counterpart deleted). See
 //     the IDENTITY note in the file header and `site-diff.js`.
 //
-// v0 deferrals: folder-mode `.md`-as-pages, `paths:` mounts, versioned scopes, and
-// media/asset bytes (favicon/assets, carried out of band). `@`-prefix `nest:`
-// hierarchy is NOT deferred — it is reconstructed here, same as a normal build.
+// v0 deferrals: versioned scopes, and media/asset bytes (favicon/assets, carried
+// out of band). `@`-prefix `nest:` hierarchy, folder-mode `.md`-as-pages and
+// `paths: { pages/<segment> }` mounts are NOT deferred — each is read here by the
+// build's own rule (folder-mode pages and mounts since 2026-10-23).
 // ===========================================================================
 
 const SITE_MODEL_NAME = '@uniweb/site-content'
@@ -678,56 +696,45 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   return sections.map((s, i) => sectionToRecord(s, i))
 }
 
-// A folder-mode folder's `.md` files are pages to the build and nothing to this
-// lane. Name every one of them, so the shortfall is visible at push time rather
-// than by reading the backend's store or opening the published site.
-//
-// `source` is `readFolderConfig`'s: a folder with no config of its own is in folder
-// mode because a `folder.yml` above it put it there, and the message says so —
-// "it is a folder-mode folder (`folder.yml`)" over a folder that has none would send
-// the author looking for a file that does not exist.
-async function warnFolderModePagesSkipped(dirPath, siteRoot, source = 'folder.yml') {
-  let files
-  try {
-    files = (await readdir(dirPath)).filter(isMarkdownFile)
-  } catch {
-    return
+// A folder-mode folder's `.md` files, as the pages the build makes of them (`processFileAsPage`):
+// each a page whose one section is the file, titled by its first heading, a draft when the file
+// says `hidden: true`, slugged by the filename without its numeric prefix — and in the build's
+// order (`folderModePageFiles`). ⛔ Until 2026-10-23 this lane sent none of them and warned instead;
+// a documentation site — folder-mode pages in a mounted repo — published 2 of its 49 pages.
+async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
+  const { siteRoot, siteIndex, sourceLocale, translations, pageFields } = ctx
+  const { files } = folderModePageFiles(await readdir(dirPath), orderConfig)
+  const records = []
+  for (const { file, name } of files) {
+    const filePath = join(dirPath, file)
+    const { page } = await processFileAsPage(filePath, file, siteRoot, '/')
+    const config = { title: page.title }
+    if (page.hidden) config.hidden = true
+    const data = buildPageData(config, {
+      where: relative(siteRoot, filePath),
+      slug: name,
+      mode: 'page',
+      isDynamic: false,
+      isRoot,
+      siteIndex,
+      sourceLocale,
+      translations,
+      pageFields,
+    })
+    const record = withIdentity(data.stable_id || name, data)
+    record.page_sections = page.sections.map((s, i) => sectionToRecord(s, i))
+    records.push(record)
   }
-  if (files.length === 0) return
-  const where = relative(siteRoot, dirPath)
-  const why = source === 'inherited'
-    ? 'it is a folder-mode folder (it has no `folder.yml` or `page.yml` of its own, so it inherits folder mode from the `folder.yml` above it)'
-    : 'it is a folder-mode folder (`folder.yml`)'
-  console.warn(
-    `uwx/site: ${files.length} page(s) in \`${where}\` will NOT be pushed — ` +
-      `${why}, and pushing \`.md\`-as-pages ` +
-      `is not implemented on the sync lane. A build renders them; the backend ` +
-      `will not have them.\n` +
-      files.map((f) => `  - ${where}/${f}`).join('\n') +
-      `\n  To publish them, make each one a page-mode directory ` +
-      `(\`<name>/page.yml\` + its section files). To ship them as they are, ` +
-      `use \`uniweb export\` or \`uniweb deploy --host <adapter>\`.` +
-      REPUBLISH_CLAUSE
-  )
+  return records
 }
 
-// A push sends the page tree as ONE entity (see site-diff.js), so a republish does
-// not merge: the shorter document becomes the whole tree. Measured by the backend
-// lane 2026-09-18 against a current `uniwebd` — 49 stored pages replaced by 2, the
-// publish reporting success. Both skip warnings carry this, because "will not be
-// pushed" reads as "you publish short" when the real cost on an already-published
-// site is that live pages are REMOVED.
-const REPUBLISH_CLAUSE =
-  `\n  ⚠ If this site has been published before, a push REPLACES its whole page ` +
-  `tree — pages already live that are missing here are REMOVED, and the publish ` +
-  `still reports success.`
-
 // Recursively build the `pages` tree: each record carries its fields, its inline
-// `page_sections` (page mode only), and its child pages under `$children`.
-async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot) {
+// `page_sections` (page mode only), and its child pages under `$children`. A folder-mode level's
+// own `.md` pages come first, then its folders, as the build lists them.
+async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot, mounts = null) {
   const { siteRoot, siteIndex, sourceLocale, translations, pageFields } = ctx
-  const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig)
-  const out = []
+  const out = inheritedMode === 'pages' ? await folderModePageRecords(ctx, dirPath, parentConfig, isRoot) : []
+  const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts)
   // A folder inside a `[...path]` folder can never be reached, and `[dir]` /
   // `[path]` would name a route variable — refused here as the collector refuses
   // them, so a site that cannot build cannot sync either (ruled 2026-09-11).
@@ -775,26 +782,13 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
       record.slug = { ...record.slug, [sourceLocale]: f.config.slug }
     }
 
+    // A folder-mode folder has no sections: its `.md` files are pages, sent among its children.
     if (mode === 'page') {
       const sections = await collectPageSectionsNested(f.path, siteRoot, f.config)
       if (sections.length > 0) record.page_sections = sections
-    } else {
-      // ⛔ FOLDER MODE: the build makes each `.md` file here a PAGE; this lane
-      // makes it nothing. It is a v0 mapper gap (bidirectional-sync.md §"Other
-      // v0 mapper gaps"), and until it closes the ONLY thing standing between an
-      // author and a site that publishes a fraction of itself is this warning.
-      //
-      // ⭐ It has to be here, not in `status` or `push`. Those compare the built
-      // document against what was last sent, so with the pages already absent
-      // from the document both correctly report "Synced" / "Nothing to push".
-      // The loss happens upstream of every diff, which is why it was invisible:
-      // measured 2026-09-18, a 49-page documentation site published 2 pages with
-      // every CLI instrument reporting success [measured:backend, channel with
-      // backend, and reproduced here against the same site].
-      await warnFolderModePagesSkipped(f.path, siteRoot, f.source)
     }
 
-    const children = await walkPagesNested(ctx, f.path, slugPath, f.internalMode, f.config, false)
+    const children = await walkPagesNested(ctx, f.childrenPath, slugPath, f.childMode, f.config, false)
     if (children.length > 0) record.$children = children
 
     out.push(record)
@@ -1557,50 +1551,25 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // `siteIndex` — the homepage — joins below, once the pages directory's own config is read.
   // …and the keys this deployment's page takes (`siteContent.pageFields`), for its Open Graph texts.
   const ctx = { siteRoot, sourceLocale, translations, pageFields: opts.pageFields }
-  // ⛔ ONE `paths:` CONVENTION, TWO READERS, AND THIS ONE IS A STRICT SUBSET.
-  // The build honours sub-mounts — `paths: { pages/<segment>: <dir> }`, through
-  // `resolveMounts`/`mountEntriesOf` in `site/content-collector.js` — and this
-  // lane reads `paths.pages` alone. A sub-mounted folder therefore syncs as an
-  // EMPTY container: its directory on disk holds only the `folder.yml`, so it
-  // emits with no children and nothing anywhere says so. Measured 2026-09-18 on
-  // a site whose entire corpus was one sub-mount: 49 pages built, 2 pushed.
-  // Deferred by design for now (bidirectional-sync.md); warned about here so it
-  // is not also silent.
-  //
   // The same two directories the pull writes back to — see `siteContentDirs`.
   const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
-  for (const [segment] of mountEntriesOf(siteYml.paths)) {
-    // Only a LOCAL stub (`pages/<segment>/`, the folder that gives a mounted route its
-    // layout) is walked, so the route arrives as an empty container; with no stub,
-    // nothing here stands for the route and it is not sent at all. ⚠️ The message
-    // said "empty container" in both cases until 2026-09-19.
-    const fate = existsSync(join(pagesPath, segment))
-      ? 'will be pushed as an empty container'
-      : 'will not be pushed at all'
-    console.warn(
-      `uwx/site: \`paths: { pages/${segment}: … }\` is NOT read on the sync lane — ` +
-        `\`${segment}\` ${fate} and none of the mounted ` +
-        `pages will reach the backend. A build mounts it normally. Inline the ` +
-        `directory under \`pages/${segment}/\` to push it, or ship the site with ` +
-        `\`uniweb export\` / \`uniweb deploy --host <adapter>\`.` +
-        REPUBLISH_CLAUSE
-    )
-  }
   let pages = []
   if (existsSync(pagesPath)) {
-    // The root has a mode too, read as the build reads it (`rootContentMode`):
-    // `pages/folder.yml` puts the whole site in folder mode, and every folder with no
-    // config of its own inherits it. ⛔ This walk started in page mode unconditionally
-    // until 2026-09-19, so such a site's top-level `.md` pages were dropped without a
-    // word and its top-level folders were pushed as pages of sections.
-    const { mode: rootMode, source: rootSource, config: rootConfig } = await readFolderConfig(pagesPath, 'sections')
-    if (rootMode === 'pages') await warnFolderModePagesSkipped(pagesPath, siteRoot, rootSource)
+    // ⭐ SUB-MOUNTS, AS THE BUILD READS THEM — `paths: { pages/<segment>: <dir> }`, through its own
+    // `resolveMounts`, and STRICT as a production build is: a mount with nothing in it (a git
+    // submodule never fetched) stops the push. A push replaces the site's whole page tree, so a
+    // mount read as empty would remove every page it holds from a published site.
+    const mounts = resolveMounts(siteYml.paths, siteRoot, pagesPath, { strict: true })
+    // The root has a mode too, read as the build reads it (`rootContentMode`): `pages/folder.yml`
+    // puts the whole site in folder mode, its `.md` files pages and every folder with no config of
+    // its own in folder mode too.
+    const { mode: rootMode, config: rootConfig } = await readFolderConfig(pagesPath, 'sections')
     // The top level's order and homepage, decided by the build's own function: the
     // site's `pages:` / `index:` over the pages directory's own. ⛔ The homepage read
     // `index:` alone until 2026-09-19, so a site naming it by its first `pages:` entry
     // — as the build does — pushed no homepage at all.
     const top = rootOrderConfig({ pages: siteYml.pages, index: siteYml.index }, rootConfig)
-    pages = await walkPagesNested({ ...ctx, siteIndex: top.homepage }, pagesPath, '', rootMode, { pages: top.pages }, true)
+    pages = await walkPagesNested({ ...ctx, siteIndex: top.homepage }, pagesPath, '', rootMode, { pages: top.pages }, true, mounts)
     localizeRouteSlugs(pages, siteYml, sourceLocale)
   }
 

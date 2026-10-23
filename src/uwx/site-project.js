@@ -54,6 +54,7 @@ import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { documentSourceLocale } from './source-locale.js'
 import { siteContentDirs } from './site-dirs.js'
+import { gitAuthoredPages } from './git-authored.js'
 import { layoutAreaRoute, readLayoutFolderSync, DEFAULT_LAYOUT } from '../site/layout-folder.js'
 import { layoutNameKey } from '@uniweb/core/layout-name'
 import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames } from '../site/content-collector.js'
@@ -805,8 +806,17 @@ export function pageDirName(record, sourceLocale) {
 // accumulates the slug-path route (for the free-form translation path; matches the
 // producer's slugPath, normalizeRouteForPath strips any leading slash on both).
 function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null, canonParent = '/') {
+  let leftAlone = false
   for (const record of pages || []) {
     const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
+    const route = routePrefix ? `${routePrefix}/${slug}` : slug
+    // ⭐ A PAGE AUTHORED IN A FILE THE PULL CANNOT WRITE BACK IS LEFT ALONE — a mount's, or a
+    // folder-mode `.md` page (`git-authored.js`). Its children too: a mount's are the mount's.
+    if (ctx.leave?.has(route)) {
+      report.leftAlone?.push(...subtreeRoutes(record, route, sourceLocale))
+      leftAlone = true
+      continue
+    }
     // The route the build gives the page (`buildRouteOf`, the push's rule): an index page takes its
     // parent's, a parametric one is `:<param>`.
     const canon = buildRouteOf(record, canonParent, sourceLocale)
@@ -829,7 +839,6 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     if (Array.isArray(record.keywords)) record.keywords.forEach((kw) => ctx.collector?.add(kw, meta, text))
     else ctx.collector?.add(record.keywords, meta, text)
 
-    const route = routePrefix ? `${routePrefix}/${slug}` : slug
     // Addressed as the push addresses it: its free-form translations and its translations' contexts
     // are keyed by the build's route. ⛔ Until 2026-09-26 this was the slug path — `home` for a
     // homepage the build reads at `/`.
@@ -865,7 +874,18 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
 
     writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)
   }
-  reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage })
+  // A level holding a page left alone keeps the order its files give: reconciling it would write an
+  // `order:` into a page folder that does not exist, or rewrite a `pages:` list the author keeps.
+  if (!leftAlone) reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage })
+}
+
+// A page's route and each of its descendants', as `writePagesTree` composes them.
+function subtreeRoutes(record, route, sourceLocale) {
+  const out = [route]
+  for (const child of record.$children || []) {
+    out.push(...subtreeRoutes(child, `${route}/${unwrapLocalized(child.slug, sourceLocale)}`, sourceLocale))
+  }
+  return out
 }
 
 // ⭐ A PAGE'S LOCALIZED URL SEGMENTS — the other locales of its `slug` (`localizeRouteSlugs`, the push) —
@@ -1010,19 +1030,27 @@ function collectSectionFileBases(pageSections) {
 
 // Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per
 // level), AFTER every relocation in pass 1. Guarded against wiping an empty level.
-function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null) {
+function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null, routePrefix = '') {
   const incomingDirs = new Set()
   for (const record of pages || []) {
     incomingDirs.add(pageDirName(record, sourceLocale))
+    const slug = unwrapLocalized(record.slug, sourceLocale)
+    const route = routePrefix ? `${routePrefix}/${slug}` : slug
+    // Left alone by pass 1, so nothing of it is pruned either (`git-authored.js`).
+    if (ctx?.leave?.has(route)) continue
     const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
     if (record.mode === 'page') {
       // The files pass 1 wrote into — the author's own names among them — else the names it would give.
       const keep = ctx?.sectionFiles?.get(pageDir) || collectSectionFileBases(record.page_sections)
       if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
-    prunePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx)
+    prunePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route)
   }
-  if (incomingDirs.size > 0) pruneOrphanPageDirs(pagesDir, incomingDirs, report)
+  if (incomingDirs.size === 0) return
+  // A mounted route's local folder is never an orphan, whatever the document holds: what it
+  // presents is another repository's (`git-authored.js`).
+  if (!routePrefix) for (const segment of ctx?.leave?.mounted ?? []) incomingDirs.add(segment)
+  pruneOrphanPageDirs(pagesDir, incomingDirs, report)
 }
 
 /**
@@ -1291,7 +1319,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
-  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [] }
+  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).
@@ -1327,7 +1355,11 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // Where the tree goes is what `site.yml` says NOW — `siteInfoToConfig` above has
   // written the document's `settings.paths` into it — because that is the file the
   // next push and the build read. See `siteContentDirs`.
-  const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, readAuthoredYaml(join(siteRoot, 'site.yml')))
+  const siteYml = readAuthoredYaml(join(siteRoot, 'site.yml'))
+  const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, siteYml)
+  // ⭐ The pages authored in files a pull cannot write back — a mount's, a folder-mode folder's
+  // `.md` pages — are neither written nor pruned (`git-authored.js`).
+  ctx.leave = gitAuthoredPages(siteYml, pagesDir)
   // The root page the backend marks as the homepage, by the directory it is written to.
   const home = (document?.pages || []).find((p) => p?.is_index)
   ctx.homepage = home ? pageDirName(home, sourceLocale) : null
