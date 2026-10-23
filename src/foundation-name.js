@@ -24,9 +24,36 @@
 // ⛔ `package.json::uniweb.scope` held it until then, a second home for half of one
 // fact, and the halves disagreed: a foundation named `@acme/fnd` registered its data
 // schemas under whatever `uniweb.scope` said (measured: `@proximify/member`).
+//
+// ⛔ `@uniweb` IS RESERVED (2026-10-23 [Diego]) — on npm it is the framework's own
+// packages, and on every Uniweb backend it is a system-level account. A foundation
+// named `@uniweb/…` reads as the framework's, and no one may publish into it, so it is
+// refused here, where every name is checked, rather than by a backend after a build.
 
 /** Names that say where the code lives, not what the foundation is. */
 export const FORBIDDEN_FOUNDATION_NAMES = new Set(['src', 'foundation'])
+
+/** Scopes nothing registers under: neither a foundation nor a data schema. */
+export const RESERVED_SCOPES = new Set(['uniweb'])
+
+const RESERVED_SCOPE_WHY =
+  "it names the Uniweb framework's own packages and the system account of every Uniweb " +
+  'backend, so nothing registers under it'
+
+/**
+ * Can anything register under this scope? `@acme`, `acme` or `@acme/…`.
+ *
+ * @param {unknown} scope
+ * @returns {string|null} why it cannot, or null when it can
+ */
+export function checkRegistrationScope(scope) {
+  const handle = String(scope ?? '')
+    .trim()
+    .replace(/^@/, '')
+    .replace(/\/.*$/, '')
+    .toLowerCase()
+  return RESERVED_SCOPES.has(handle) ? `@${handle} is reserved: ${RESERVED_SCOPE_WHY}` : null
+}
 
 // One segment of a name: lowercase letters, digits and inner hyphens.
 const SEGMENT = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
@@ -62,6 +89,9 @@ export function checkFoundationName(name) {
   const [scope, bare] = scoped ? [scoped[1], scoped[2]] : [null, name]
   if (FORBIDDEN_FOUNDATION_NAMES.has(bare)) {
     return `"${bare}" names the folder, not the foundation — and every project in an org would register the same one`
+  }
+  if (scope !== null && checkRegistrationScope(scope)) {
+    return `"${name}" is named under @${scope.toLowerCase()}, which is reserved: ${RESERVED_SCOPE_WHY}`
   }
   if (!SEGMENT.test(bare) || (scope !== null && !SEGMENT.test(scope))) {
     return `"${name}" is not a foundation name — use lowercase letters, digits and hyphens (like "marketing")`

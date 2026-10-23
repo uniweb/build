@@ -9,11 +9,14 @@ import { join } from 'node:path'
 import {
   foundationNameOf,
   checkFoundationName,
+  checkRegistrationScope,
   splitFoundationName,
   FORBIDDEN_FOUNDATION_NAMES,
+  RESERVED_SCOPES,
 } from '../src/foundation-name.js'
 import { readFoundationName, buildSchema } from '../src/schema.js'
-import { buildRegistryPackage } from '../src/uwx/registry-package.js'
+import { buildRegistryPackage, buildSchemaOnlyPackage } from '../src/uwx/registry-package.js'
+import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 const dirs = []
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })))
@@ -84,6 +87,46 @@ describe('⛔ src and foundation are not foundation names', () => {
     )
     const ok = buildRegistryPackage({ schema: schema('marketing'), scope: '@acme' })
     expect(ok.entities.find((e) => e.model === '@uniweb/foundation-schema').info.name).toBe('@acme/marketing')
+  })
+})
+
+// ⛔ `@uniweb` names the framework's own packages and a system account on every Uniweb
+// backend [Diego, 2026-10-23], so nothing registers under it — refused by the name rule,
+// before a build or a backend gets the chance.
+describe('⛔ the @uniweb scope is reserved', () => {
+  it('refuses a foundation named under it, in any case, and says why', () => {
+    expect([...RESERVED_SCOPES]).toEqual(['uniweb'])
+    for (const name of ['@uniweb/marketing', '@Uniweb/marketing', '@UNIWEB/book']) {
+      expect(checkFoundationName(name), name).toMatch(/is named under @uniweb, which is reserved/)
+      expect(checkFoundationName(name), name).toMatch(/the Uniweb framework's own packages/)
+    }
+  })
+
+  it('refuses the scope itself, in each spelling register reads', () => {
+    for (const scope of ['@uniweb', 'uniweb', '@UniWeb', '@uniweb/x']) {
+      expect(checkRegistrationScope(scope), scope).toMatch(/^@uniweb is reserved: /)
+    }
+  })
+
+  it('CONTROL — other scopes pass, the standard one and look-alikes included', () => {
+    for (const scope of ['@acme', 'acme', '@std', '@uniweb-fans', '@my-uniweb', null, undefined, '']) {
+      expect(checkRegistrationScope(scope), String(scope)).toBeNull()
+    }
+    for (const name of ['@std/docs', '@uniweb-fans/marketing', 'uniweb', 'uniweb-book']) {
+      expect(checkFoundationName(name), name).toBeNull()
+    }
+  })
+
+  it('the registry packages refuse it too, whoever builds them', () => {
+    const schema = (name) => ({ _self: { name, version: '0.1.0' } })
+    expect(() => buildRegistryPackage({ schema: schema('@uniweb/marketing') })).toThrow(/reserved/)
+    // a bare name given the scope at build time is the same name
+    expect(() => buildRegistryPackage({ schema: schema('marketing'), scope: '@uniweb' })).toThrow(/reserved/)
+    const schemas = {
+      '@/person': validateAndNormalizeSchema({ fields: { name: { type: 'string' } } }, '@/person'),
+    }
+    expect(() => buildSchemaOnlyPackage({ schemas, scope: '@uniweb' })).toThrow(/reserved/)
+    expect(buildSchemaOnlyPackage({ schemas, scope: '@std' }).entities.length).toBe(1)
   })
 })
 

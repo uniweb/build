@@ -18,8 +18,10 @@ export {
 export {
   foundationNameOf,
   checkFoundationName,
+  checkRegistrationScope,
   splitFoundationName,
   FORBIDDEN_FOUNDATION_NAMES,
+  RESERVED_SCOPES,
 } from './foundation-name.js'
 
 // Data-conformance checking (your content vs the schemas your foundation declares)

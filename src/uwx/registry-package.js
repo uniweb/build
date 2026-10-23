@@ -30,7 +30,7 @@ import { normalizeFoundationSchema } from '@uniweb/schemas/foundation'
 import { parseOptionsRef } from '@uniweb/schemas/format'
 import { qualifyRef } from '@uniweb/schemas/refs'
 import { toDataSchemaDeclaration, optionsSectionPath } from './data-schema.js'
-import { checkFoundationName, splitFoundationName } from '../foundation-name.js'
+import { checkFoundationName, checkRegistrationScope, splitFoundationName } from '../foundation-name.js'
 
 const FOUNDATION_SCHEMA = '@uniweb/foundation-schema'
 const DATA_SCHEMA = '@uniweb/data-schema'
@@ -110,6 +110,10 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
  * @returns {Object} the `.uwx` document (uwx/1; only data-schema entities, no uuids).
  */
 export function buildSchemaOnlyPackage({ schemas, scope, exporter, exportedAt } = {}) {
+  // ⛔ The producer's own guard, as `buildInfo`'s name check is for a foundation:
+  // `uniweb register` refuses a reserved scope before it gets here.
+  const reserved = checkRegistrationScope(scope)
+  if (reserved) throw new Error(`buildSchemaOnlyPackage: ${reserved}`)
   const { entities } = buildDataSchemaEntities(schemas || {}, scope)
   if (entities.length === 0) {
     throw new Error('buildSchemaOnlyPackage: no data schemas to register (expected a map of "@/<name>" -> schema).')
