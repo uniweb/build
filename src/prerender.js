@@ -28,6 +28,7 @@ import DataStore from '@uniweb/core/datastore'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { createFileTransport } from './site/file-transport.js'
 import { shouldSplitContent } from './site/split-content.js'
+import { jsonForScript, splitPageSections } from '@uniweb/core/data-script'
 import { FONT_LINKS_MARKER } from './site/head-markers.js'
 import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
@@ -724,18 +725,10 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
     delete contentForJson.theme.links
   }
 
-  // Split mode: strip sections from all pages except the current one.
-  // Dynamic templates (isDynamic) keep their sections — needed by _createDynamicPage().
+  // Split mode: sections for the current page and every dynamic template only — the rule a host
+  // writes its `__DATA__` by too (`@uniweb/core/data-script`). Every other page's are in `_pages/`.
   if (splitContent) {
-    contentForJson = {
-      ...contentForJson,
-      pages: contentForJson.pages.map(page => {
-        if (page.route === currentRoute) return page
-        if (page.isDynamic) return page
-        const { sections, ...metadata } = page
-        return metadata
-      })
-    }
+    contentForJson = { ...contentForJson, pages: splitPageSections(contentForJson.pages, currentRoute) }
   }
 
   // Scope fetched (collection / API) data to this page's cascade in split mode,
@@ -748,7 +741,7 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
     }
   }
 
-  const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${JSON.stringify(contentForJson).replace(/</g, '\\u003c')}</script>`
+  const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${jsonForScript(contentForJson)}</script>`
   if (result.includes('__SITE_CONTENT__')) {
     // Replace existing site content with updated version (includes expanded dynamic routes)
     result = result.replace(
@@ -764,7 +757,7 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
 
   // Inject icon cache so client can render icons immediately without CDN fetches
   if (siteContent._iconCache) {
-    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${JSON.stringify(siteContent._iconCache).replace(/</g, '\\u003c')}</script>`
+    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${jsonForScript(siteContent._iconCache)}</script>`
     if (result.includes('__ICON_CACHE__')) {
       result = result.replace(
         /<script[^>]*id="__ICON_CACHE__"[^>]*>[\s\S]*?<\/script>/,

@@ -53,6 +53,7 @@ import { processQueries, writeQueryFiles } from './query-processor.js'
 import { RECORDS_DIR, resolveRecordsDir } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
+import { jsonForScript } from '@uniweb/core/data-script'
 import { FONT_LINKS_MARKER } from './head-markers.js'
 import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
 import { extensionNameOf, findSiteExtension } from './workspace-extension.js'
@@ -1579,7 +1580,7 @@ export function siteContentPlugin(options = {}) {
 
       // Inject content as JSON script tag
       if (inject) {
-        headInjection += `    <script type="application/json" id="${variableName}">${JSON.stringify(contentToInject).replace(/</g, '\\u003c')}</script>\n`
+        headInjection += `    <script type="application/json" id="${variableName}">${jsonForScript(contentToInject)}</script>\n`
       }
 
       let result = html
