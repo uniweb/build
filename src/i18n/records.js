@@ -1011,11 +1011,12 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
         }
 
         // ⭐ AND THE QUERY'S PER-RECORD FILES, beside the translated list and with the
-        // same translations — `/<locale>/data/<query>/<slug>.json`. A query with
-        // `deferred:` fields writes each record whole there, and a parametric page reads
-        // its record from that file. ⛔ Until 2026-09-14 they were not written for any
-        // locale, so a localized site's records showed their deferred fields — an
-        // article's body — in the source language under a translated list.
+        // same translations — `/<locale>/data/<query>/<$name>.json`. Every query writes each
+        // record whole there (2026-09-27), and a parametric page reads its record from that
+        // file. ⛔ Until 2026-09-14 they were not written for any locale, so a localized
+        // site's records showed their whole fields — an article's body — in the source
+        // language under a translated list. ⛔ *This said only a `deferred:` query had them
+        // until 2026-10-24; `deferred:` was removed on 2026-09-27.*
         // They are translated first: a lean list's derived excerpt is derived from its record's
         // translated body (`EXCERPT`).
         const localeRecordsDir = join(localeDataDir, queryName)
