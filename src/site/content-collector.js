@@ -242,6 +242,22 @@ function detectVersions(folderNames) {
 }
 
 /**
+ * An id an author wrote — a page's `id:` in `page.yml`, a section's in its frontmatter — as the
+ * string it names. YAML reads `id: 404` as a number, and an id is never one: a `page:404` link
+ * names the string, and a store holds a stable id as text.
+ *
+ * ⛔ *Until 2026-10-24 the parsed value was kept, so a page with `id: 404` matched no `page:`
+ * link, and a push sent its stable id as a number, which a backend refuses (measured that day:
+ * HTTP 400, "item.data.stable_id must be a string").*
+ *
+ * @param {*} value
+ * @returns {string|null} null for an id not written, or written empty
+ */
+export function authoredId(value) {
+  return value === undefined || value === null || value === '' ? null : String(value)
+}
+
+/**
  * `query:` — the shorthand for `fetch: { query }`, at every level that declares
  * data: a section's frontmatter, `page.yml`, `folder.yml` and `site.yml`, on the
  * build and on the sync push alike. It names a query, or a list of them — "fetch
@@ -1168,7 +1184,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
 
   // Stable ID for scroll targeting: frontmatter id > filename-derived > null
   // This ID is stable across reordering (unlike the positional id)
-  const stableId = frontmatterId || defaultStableId || null
+  const stableId = authoredId(frontmatterId) || defaultStableId || null
 
   const section = {
     id,
@@ -1434,7 +1450,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       page: {
         route,
         sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
-        id: pageConfig.id || null,
+        id: authoredId(pageConfig.id),
         isIndex,
         title: resolveDisplayTitle(pageConfig.title, pageName, null),
         description: pageConfig.description || '',
@@ -1460,7 +1476,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       page: {
         route,
         sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
-        id: pageConfig.id || null,
+        id: authoredId(pageConfig.id),
         isIndex,
         title: resolveDisplayTitle(pageConfig.title, pageName, null),
         description: pageConfig.description || '',
@@ -1731,7 +1747,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     page: {
       route,
       sourcePath, // Original folder-based path (for ancestor checking in navigation)
-      id: pageConfig.id || null, // Stable page ID for page: links (survives reorganization)
+      id: authoredId(pageConfig.id), // Stable page ID for page: links (survives reorganization)
       isIndex, // Marks this page as the index for its parent route
       title: resolveDisplayTitle(pageConfig.title, pageName, hierarchicalSections),
       description: pageConfig.description || '',

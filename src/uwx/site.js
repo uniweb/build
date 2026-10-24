@@ -71,6 +71,7 @@ import {
   rootOrderConfig,
   composeLocalizedRoute,
   isValidSlugSegment,
+  authoredId,
 } from '../site/content-collector.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder, layoutAreaRoute } from '../site/layout-folder.js'
@@ -312,7 +313,8 @@ function buildPageData(config, ctx) {
   // `localizeRouteSlugs`, once the whole tree is known. `mode` is the plain
   // delivery mode.
   const data = { slug: { [sourceLocale]: slug }, mode } // both required by the entity type
-  setIf(data, 'stable_id', config.id)
+  // An authored id is a string (`authoredId`): `id: 404` reads as a number, which a store refuses.
+  setIf(data, 'stable_id', authoredId(config.id) ?? undefined)
   setIf(data, 'title', localizeScalar(config.title, sourceLocale, translations))
   setIf(data, 'description', localizeScalar(config.description, sourceLocale, translations))
   setIf(data, 'label', localizeScalar(config.label, sourceLocale, translations))
