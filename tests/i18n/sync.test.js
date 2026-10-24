@@ -226,6 +226,50 @@ describe('syncManifests', () => {
     expect(report.removed).toHaveLength(1) // willremove
     expect(report.added).toHaveLength(1) // brandnew
   })
+
+  // ⛔ Until 2026-10-24 a new unit was paired with the first previous unit in its section,
+  // still there or not: removing a hero's second button said its unchanged title had become
+  // the remaining button, and called the button paragraph it replaced removed.
+  it('pairs a new unit with the one it replaced, not with a neighbour still there', () => {
+    const hero = [{ page: '/', section: 'hero' }]
+    const previous = {
+      units: {
+        title: { source: 'For Content Authors', field: 'pretitle', contexts: hero },
+        buttons: { source: 'Start from a Template Desktop App', field: 'paragraph', contexts: hero },
+      },
+    }
+    const current = {
+      units: {
+        title: { source: 'For Content Authors', field: 'pretitle', contexts: hero },
+        button: { source: 'Start from a Template', field: 'paragraph', contexts: hero },
+      },
+    }
+
+    const report = syncManifests(previous, current)
+
+    expect(report.unchanged.map((u) => u.hash)).toEqual(['title'])
+    expect(report.changed).toEqual([
+      expect.objectContaining({ hash: 'button', previousHash: 'buttons', previousSource: 'Start from a Template Desktop App' }),
+    ])
+    expect(report.removed).toEqual([])
+  })
+
+  it('says one replaced unit became one new unit, and the next is added', () => {
+    const intro = [{ page: '/', section: 'intro' }]
+    const previous = { units: { old: { source: 'Old', field: 'paragraph', contexts: intro } } }
+    const current = {
+      units: {
+        first: { source: 'First', field: 'paragraph', contexts: intro },
+        second: { source: 'Second', field: 'paragraph', contexts: intro },
+      },
+    }
+
+    const report = syncManifests(previous, current)
+
+    expect(report.changed.map((c) => [c.hash, c.previousHash])).toEqual([['first', 'old']])
+    expect(report.added.map((a) => a.hash)).toEqual(['second'])
+    expect(report.removed).toEqual([])
+  })
 })
 
 describe('formatSyncReport', () => {

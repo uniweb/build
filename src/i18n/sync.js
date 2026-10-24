@@ -26,6 +26,8 @@ export function syncManifests(previous, current) {
 
   const previousHashes = new Set(Object.keys(previousUnits))
   const currentHashes = new Set(Object.keys(currentUnits))
+  // Previous units a new one replaced, so that no two new units claim the same one.
+  const replaced = new Set()
 
   // Check each current unit
   for (const hash of currentHashes) {
@@ -66,10 +68,11 @@ export function syncManifests(previous, current) {
     } else {
       // New hash - could be new content or changed content
       // Check if any previous context now has this new hash
-      const matchingContext = findMatchingContext(currentUnit.contexts, previousUnits)
+      const matchingContext = findMatchingContext(currentUnit.contexts, previousUnits, currentHashes, replaced)
 
       if (matchingContext) {
         // Same context, different hash = content changed
+        replaced.add(matchingContext.hash)
         report.changed.push({
           hash,
           previousHash: matchingContext.hash,
@@ -94,8 +97,7 @@ export function syncManifests(previous, current) {
     if (!currentHashes.has(hash)) {
       const prevUnit = previousUnits[hash]
       // Only mark as removed if not detected as changed above
-      const wasChanged = report.changed.some(c => c.previousHash === hash)
-      if (!wasChanged) {
+      if (!replaced.has(hash)) {
         report.removed.push({
           hash,
           source: prevUnit.source,
@@ -128,16 +130,22 @@ function contextsEqual(contexts1, contexts2) {
 }
 
 /**
- * Find if any context in the current unit matches a context in previous units
- * Returns the previous unit info if found
+ * The previous unit a new one replaced: one in a context of the new unit that is gone from the
+ * current manifest and not yet replaced. Returns its info, or null.
+ *
+ * ⛔ Until 2026-10-24 it was the first previous unit in such a context, gone or not. Removing a
+ * hero's second button then reported the hero's unchanged title as changed into the remaining
+ * button, and the button paragraph it did replace as removed (measured that day on a site's
+ * `uniweb i18n extract`).
  */
-function findMatchingContext(currentContexts, previousUnits) {
+function findMatchingContext(currentContexts, previousUnits, currentHashes, replaced) {
   // One key shape for both lanes: a page/section pair, or a record's identity.
   const key = (c) => (c.record ? `record:${c.record}` : `${c.page}:${c.section}`)
   for (const context of currentContexts) {
     const contextKey = key(context)
 
     for (const [hash, unit] of Object.entries(previousUnits)) {
+      if (currentHashes.has(hash) || replaced.has(hash)) continue
       const unitContexts = unit.contexts || []
       const hasContext = unitContexts.some((c) => key(c) === contextKey)
       if (hasContext) {
