@@ -17,19 +17,16 @@ import { loadFreeformTranslation } from './freeform.js'
 import { elementText, blockElements, translationContext, SITE_META_CONTEXT } from './extract.js'
 import { visitDataBlockStrings } from './data-strings.js'
 
-// Inline-markdown → ProseMirror inline fragment, for resolving a whole-element
+// Inline markdown → ProseMirror inline nodes, for resolving a whole-element
 // translation VALUE (which carries marks/links/icons as inline markdown). Same
 // lazy-import-with-fallback pattern as freeform.js / collection-processor.js, so
 // the synchronous merge path has the converter ready at call time.
-let markdownToProseMirror
+let inlineMarkdownToProseMirror
 try {
   const contentReader = await import('@uniweb/content-reader')
-  markdownToProseMirror = contentReader.markdownToProseMirror
+  inlineMarkdownToProseMirror = contentReader.inlineMarkdownToProseMirror
 } catch {
-  markdownToProseMirror = (markdown) => ({
-    type: 'doc',
-    content: [{ type: 'paragraph', content: [{ type: 'text', text: markdown.trim() }] }]
-  })
+  inlineMarkdownToProseMirror = (markdown) => [{ type: 'text', text: markdown.trim() }]
 }
 
 /**
@@ -183,9 +180,6 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
   return translated
 }
 
-// The blocks that hold words, which `toPlainText` reads as one run each.
-const TEXT_BLOCKS = new Set(['paragraph', 'heading', 'codeBlock'])
-
 /**
  * ⭐ A TRANSLATION VALUE IS INLINE MARKDOWN, AND A PLAIN-TEXT SLOT RENDERS ITS TEXT.
  *
@@ -221,17 +215,19 @@ export function toPlainText(value) {
     return value
   }
   try {
-    const doc = markdownToProseMirror(value)
-    // A block's words run together; blocks are apart. ⛔ Until 2026-10-16 every level joined with
-    // nothing, so a value of two paragraphs read as one word at the seam ("…17hFermé…").
+    // Each paragraph's words, read as inline markdown and never as blocks, so `1. *Introduction*`
+    // keeps its number; paragraphs are apart. ⛔ Until 2026-10-16 every level joined with nothing,
+    // so a value of two paragraphs read as one word at the seam ("…17hFermé…"). ⛔ Until 2026-10-24
+    // the value was read as a document, and one that began like a block lost its marker: an ordered
+    // list's number, a bullet, a `#`.
     const inline = (nodes) =>
       (nodes || []).map((n) => (n.type === 'text' ? n.text || '' : n.type === 'hardBreak' ? ' ' : inline(n.content))).join('')
-    const blocks = (nodes) =>
-      (nodes || [])
-        .map((n) => (TEXT_BLOCKS.has(n.type) ? inline(n.content) : n.type === 'text' ? n.text || '' : blocks(n.content)))
-        .filter((t) => t.trim())
-        .join(' ')
-    const text = blocks(doc?.content).trim()
+    const text = value
+      .split(/\n[ \t]*\n/)
+      .map((paragraph) => inline(inlineMarkdownToProseMirror(paragraph.trim())))
+      .filter((t) => t.trim())
+      .join(' ')
+      .trim()
     return text || value
   } catch {
     return value
@@ -639,17 +635,15 @@ export function resolveDocForLocale(sourceDoc, table, context = { page: '', sect
   return elements || data ? doc : null
 }
 
-// Parse an inline-markdown translation value into a ProseMirror inline fragment.
-// A value is expected to be one element's inline content (one paragraph once
-// parsed); take that paragraph's inline children. If the converter yields
-// several blocks, flatten their inline content rather than drop any.
+// Parse an inline-markdown translation value into a ProseMirror inline fragment: one element's
+// words, read as inline markdown and never as blocks (`inlineMarkdownToProseMirror`).
+// ⛔ Until 2026-10-24 it was read as a document and each block's content taken, so a value that
+// began like a block — `1. Informations que nous collectons`, the French of a numbered heading —
+// was an ordered list, and the heading was handed its list item. It rendered empty, and a pull
+// refused the site, since no file can say a heading holds a list item.
 function inlineMarkdownToFragment(value) {
   if (typeof value !== 'string' || value.trim() === '') return null
-  const doc = markdownToProseMirror(value)
-  const inline = []
-  for (const block of doc?.content || []) {
-    if (Array.isArray(block.content)) inline.push(...block.content)
-  }
+  const inline = inlineMarkdownToProseMirror(value.trim())
   return inline.length ? inline : [{ type: 'text', text: value.trim() }]
 }
 
