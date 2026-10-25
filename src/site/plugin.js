@@ -305,7 +305,6 @@ import { mountDevApi } from '../dev/api-mount.js'
  * @param {boolean} [options.assets.pdfThumbnails=true] - Generate thumbnails for PDFs (requires pdf-lib)
  * @param {Object} [options.search] - Search index configuration
  * @param {boolean} [options.search.enabled=true] - Generate search index (uses site.yml config by default)
- * @param {string} [options.search.filename='search-index.json'] - Search index filename
  * @param {string} [options.foundationPath] - Path to foundation directory (for loading theme vars)
  */
 export function siteContentPlugin(options = {}) {
@@ -1080,7 +1079,10 @@ export function siteContentPlugin(options = {}) {
         // ⛔ No sitemap.xml or robots.txt here: the prerender writes them from the pages it
         // renders (`./seo-files.js`), and a dev server renders none ahead of a visit.
 
-        // Serve search-index.json in dev mode (supports locale prefixes)
+        // Serve search-index.json in dev mode, under a language's prefix too.
+        // ⚠️ Made from the default language's content whatever the prefix, and with no records for
+        // another language: the build's `/fr/search-index.json` is in French, this one is not
+        // (measured 2026-10-25).
         const searchIndexMatch = req.url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/search-index\\.json$`))
         if (searchIndexMatch && siteContent) {
           const searchEnabled = searchPluginConfig.enabled !== false && searchDeclaredOn(siteContent)
@@ -1111,7 +1113,10 @@ export function siteContentPlugin(options = {}) {
         // Without this the artifacts can only be inspected by deploying, and
         // `uniweb doctor`'s address warning describes something invisible
         // locally. Both routes reuse the build's generators, so what a
-        // developer sees here is what ships.
+        // developer sees here is what ships — for the default language.
+        // ⚠️ Not for another one (measured 2026-10-25): the build writes it no `llms.txt` or `.md`,
+        // and the `.md` route below finds a page by its source route, so the translated links this
+        // `llms.txt` gives (`/fr/a-propos.md`) are answered with the page shell.
         if (siteContent) {
           const agents = resolveAgentsConfig(siteContent.config)
           const url = req.url.split('?')[0]

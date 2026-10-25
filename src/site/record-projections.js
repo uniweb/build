@@ -8,6 +8,10 @@
  * ⛔ Until 2026-10-25 the static build made its projections from the site's pages alone: llms.txt
  * and the search index held none of a site's books, talks or posts, while a host's held all of them
  * (measured on a site with 16 record pages: 0 in llms.txt, 0 in the search index).
+ *
+ * ⚠️ For the default language only. Another language's search index is still made from its pages
+ * alone, before its records are translated (`i18n/index.js::buildLocalizedContent`), and the build
+ * writes that language no llms.txt or `.md` (measured 2026-10-25 on a site in three languages).
  */
 
 import { readFileSync } from 'node:fs'
