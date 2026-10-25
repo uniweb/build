@@ -9,92 +9,13 @@
  * parametric pages were expanded: it listed `/books/:slug` and no book, at URLs that left the base
  * path out.
  *
- * ⭐ `robots.txt` IS READ ONLY AT A HOST'S ROOT. A site served under a base path — a GitHub project
- * site — cannot have one; it is not written there, and the build says so, rather than shipping a file
- * no crawler reads that points at a sitemap where none is.
+ * ⭐ `robots.txt` IS `@uniweb/projections`' (`renderRobotsTxt`), made from the site's content
+ * alone, so a host serving the site from its content serves the same file. A site served under a
+ * base path — a GitHub project site — gets none, since a crawler reads it only at a host's root, and
+ * the build says so.
  */
 
-/** The three defined Content Signals, in the order they are emitted. */
-const CONTENT_SIGNAL_KEYS = ['search', 'ai-input', 'ai-train']
-
-/**
- * Format the `Content-Signal:` directive from `seo.robots.contentSignals`.
- *
- * Content Signals express what a site permits its content to be *used for*,
- * which is a different axis from `Disallow:` — that governs fetching, this
- * governs use after fetching. The three defined signals:
- *
- * - `search`    — appear in search results
- * - `ai-input`  — be retrieved at inference time (RAG, grounding)
- * - `ai-train`  — be used to train a model
- *
- * **Emitted only when declared.** There is no default: a preference the site
- * owner did not state is not ours to assert, in either direction. An absent
- * signal means "unstated", which is not the same as `no`.
- *
- * Unknown keys are ignored rather than passed through — the vocabulary is a
- * closed set, and forwarding an invented signal would produce a directive no
- * crawler honors while reading as though it were doing something.
- *
- * @param {Object|null} signals - e.g. `{ search: true, 'ai-input': true, 'ai-train': false }`
- * @returns {string} The directive line, or `''` when nothing is declared
- */
-export function formatContentSignals(signals) {
-  if (!signals || typeof signals !== 'object') return ''
-
-  const parts = []
-  for (const key of CONTENT_SIGNAL_KEYS) {
-    if (!(key in signals)) continue
-    const value = signals[key]
-    const yes = value === true || value === 'yes'
-    const no = value === false || value === 'no'
-    if (!yes && !no) continue
-    parts.push(`${key}=${yes ? 'yes' : 'no'}`)
-  }
-
-  return parts.length ? `Content-Signal: ${parts.join(', ')}` : ''
-}
-
-/**
- * `robots.txt` — the site's rules, and where its sitemap is.
- *
- * @param {Object} [robots] - `seo.robots`: `allow`, `disallow`, `crawlDelay`, `additionalSitemaps`,
- *   `contentSignals`
- * @param {Object} [options]
- * @param {string|null} [options.sitemap] - the sitemap's absolute URL, when there is one
- * @returns {string}
- */
-export function generateRobotsTxt(robots = {}, { sitemap = null } = {}) {
-  const { disallow = [], allow = [], crawlDelay = null, additionalSitemaps = [], contentSignals = null } = robots || {}
-
-  let content = 'User-agent: *\n'
-
-  const signals = formatContentSignals(contentSignals)
-  if (signals) {
-    // Inside the User-agent group, before the rules — the directive applies to
-    // the group it sits in.
-    content += `${signals}\n`
-  }
-  for (const path of allow) content += `Allow: ${path}\n`
-  for (const path of disallow) content += `Disallow: ${path}\n`
-  if (crawlDelay) content += `Crawl-delay: ${crawlDelay}\n`
-
-  const sitemaps = [sitemap, ...additionalSitemaps].filter(Boolean)
-  if (sitemaps.length) content += `\n${sitemaps.map((url) => `Sitemap: ${url}`).join('\n')}\n`
-  return content
-}
-
-/** Whether `seo.robots` says anything a crawler would act on. */
-function hasRules(robots) {
-  if (!robots || typeof robots !== 'object') return false
-  return Boolean(
-    robots.allow?.length ||
-      robots.disallow?.length ||
-      robots.crawlDelay ||
-      robots.additionalSitemaps?.length ||
-      formatContentSignals(robots.contentSignals)
-  )
-}
+import { renderRobotsTxt } from '@uniweb/projections'
 
 /**
  * A rendered page's sitemap entry — its canonical URL, with its alternates — or null when it is not
@@ -154,18 +75,18 @@ export function renderSitemap(entries) {
 
 /**
  * The site's crawler files, for what this build serves: the sitemap when the site's address is
- * known and it has pages to list, `robots.txt` when the site is at its host's root and has rules or a
- * sitemap to name.
+ * known and it has pages to list, and `robots.txt` (`renderRobotsTxt`), naming that sitemap.
  *
  * @param {Object} options
- * @param {string|null} options.address - the site's address (`config.url`)
- * @param {string} [options.base] - the base the site is built for
+ * @param {Object} options.content - the site's content: its address (`config.url`), the base it is
+ *   built for (`config.base`) and its rules (`config.seo.robots`)
  * @param {Array} options.entries - `sitemapEntry` results
- * @param {Object} [options.robots] - `seo.robots`
  * @returns {{ sitemap: string|null, robots: string|null, notes: string[] }} what to write, and why
  *   anything was not
  */
-export function crawlerFiles({ address, base = '/', entries = [], robots = {} }) {
+export function crawlerFiles({ content, entries = [] }) {
+  const config = content?.config || {}
+  const address = config.url || null
   const notes = []
   let sitemap = null
   if (!address) {
@@ -175,16 +96,14 @@ export function crawlerFiles({ address, base = '/', entries = [], robots = {} })
   } else {
     sitemap = renderSitemap(entries)
   }
-  const atRoot = !base || base === '/'
-  const sitemapUrl = sitemap ? new URL('sitemap.xml', address).href : null
-  let robotsTxt = null
-  if (atRoot) {
-    if (sitemapUrl || hasRules(robots)) robotsTxt = generateRobotsTxt(robots, { sitemap: sitemapUrl })
-  } else {
+  const robots = renderRobotsTxt(content, { sitemap: Boolean(sitemap) })
+  const base = config.base || '/'
+  if (base !== '/') {
+    const sitemapUrl = sitemap ? new URL('sitemap.xml', address).href : null
     notes.push(
       `No robots.txt: crawlers read it only at a host's root, and this site is served under ${base}.` +
         (sitemapUrl ? ` Submit ${sitemapUrl} to search engines directly.` : '')
     )
   }
-  return { sitemap, robots: robotsTxt, notes }
+  return { sitemap, robots, notes }
 }

@@ -1212,12 +1212,7 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // ⭐ The crawler files, from the pages just written (`./site/seo-files.js`). A site's own
   // `public/robots.txt` or `public/sitemap.xml` is its author's, and is left as it is.
-  const crawl = crawlerFiles({
-    address: defaultSiteContent.config?.url || null,
-    base: defaultSiteContent.config?.base || '/',
-    entries: sitemapEntries,
-    robots: defaultSiteContent.config?.seo?.robots,
-  })
+  const crawl = crawlerFiles({ content: defaultSiteContent, entries: sitemapEntries })
   for (const [file, body] of [['sitemap.xml', crawl.sitemap], ['robots.txt', crawl.robots]]) {
     if (!body) continue
     if (existsSync(join(siteDir, 'public', file))) {

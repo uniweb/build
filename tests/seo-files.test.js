@@ -3,6 +3,7 @@
  * the pages the prerender wrote, at the URLs their heads state.
  */
 import { Website } from '@uniweb/core'
+import { renderRobotsTxt } from '@uniweb/projections'
 import { sitemapEntry, renderSitemap, crawlerFiles } from '../src/site/seo-files.js'
 
 const ADDRESS = 'https://octocat.github.io/handbook/'
@@ -80,26 +81,34 @@ describe('renderSitemap', () => {
 
 describe('crawlerFiles', () => {
   const entries = [{ loc: 'https://example.com/', alternates: [] }]
+  /** The site's content, as the prerender hands it in: its address, base and rules. */
+  const content = (config) => ({ config: { name: 'Site', ...config } })
 
   test('at a host’s root: a sitemap, and robots.txt naming it absolutely', () => {
-    const files = crawlerFiles({ address: 'https://example.com/', base: '/', entries, robots: { disallow: ['/private'] } })
+    const files = crawlerFiles({ content: content({ url: 'https://example.com/', base: '/', seo: { robots: { disallow: ['/private'] } } }), entries })
     expect(files.sitemap).toContain('<loc>https://example.com/</loc>')
     expect(files.robots).toBe('User-agent: *\nDisallow: /private\n\nSitemap: https://example.com/sitemap.xml\n')
     expect(files.notes).toEqual([])
   })
 
   test('⭐ under a base path: the sitemap, and no robots.txt — no crawler reads one there', () => {
-    const files = crawlerFiles({ address: ADDRESS, base: '/handbook/', entries, robots: { disallow: ['/private'] } })
+    const files = crawlerFiles({ content: content({ url: ADDRESS, base: '/handbook/', seo: { robots: { disallow: ['/private'] } } }), entries })
     expect(files.sitemap).not.toBeNull()
     expect(files.robots).toBeNull()
     expect(files.notes.join('\n')).toMatch(/crawlers read it only at a host's root.*Submit https:\/\/octocat\.github\.io\/handbook\/sitemap\.xml/)
   })
 
   test('with no address: no sitemap, and robots.txt still carries rules a site set', () => {
-    const files = crawlerFiles({ address: null, base: '/', entries, robots: { disallow: ['/private'] } })
+    const files = crawlerFiles({ content: content({ base: '/', seo: { robots: { disallow: ['/private'] } } }), entries })
     expect(files.sitemap).toBeNull()
     expect(files.robots).toBe('User-agent: *\nDisallow: /private\n')
     expect(files.notes.join('\n')).toMatch(/seo\.origin/)
-    expect(crawlerFiles({ address: null, base: '/', entries }).robots).toBeNull()
+    expect(crawlerFiles({ content: content({ base: '/' }), entries }).robots).toBeNull()
+  })
+
+  test('⭐ robots.txt is the one a host serving the site from its content serves', () => {
+    const site = content({ url: 'https://example.com/', seo: { robots: { contentSignals: { 'ai-train': false }, disallow: ['/x'] } } })
+    expect(crawlerFiles({ content: site, entries }).robots).toBe(renderRobotsTxt(site, { sitemap: true }))
+    expect(crawlerFiles({ content: site, entries: [] }).robots).toBe(renderRobotsTxt(site, { sitemap: false }))
   })
 })
