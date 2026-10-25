@@ -988,19 +988,29 @@ export async function prerenderSite(siteDir, options = {}) {
     })
     const buildDataCache = new DataStore()
 
-    // Build-specific: pre-populate DataStore so EntityStore can resolve data during prerender.
-    // hydrateDataStore handles cache-key derivation + value-shape wrapping
-    // — same helper used by the browser SPA boot and by the Cloudflare
-    // Worker SSR isolate, so all three render paths agree on shape.
-    // ⛔ `siteContent.fetchedData`, not the raw list: only it holds the route-bound
-    // views, and an expanded page rendered without them paints "not found" (measured).
-    hydrateDataStore(uniweb.activeWebsite, siteContent.fetchedData)
-
     // Pre-fetch icons for SSR embedding
     await prefetchIcons(siteContent, uniweb, onProgress)
 
     // Pre-render each page
     const website = uniweb.activeWebsite
+
+    /**
+     * ⭐ A PAGE RENDERS AGAINST WHAT IT CARRIES — the entries its HTML embeds, which are all the
+     * browser's store holds when it boots on that page (`initUniweb` hydrates from them). The
+     * browser renders over the prerendered page, so a render that reads more paints content the
+     * browser does not have, and the browser replaces it with a loading state at boot.
+     *
+     * ⛔ Until 2026-10-25 the store was hydrated once for the whole locale and then took every
+     * page's answers in turn, so a page could render data that only other pages carried. A
+     * section can read the store directly (kit's `useFetched`, `useWholeRecord`), beyond what its
+     * page declares: a page showing records whole through `useWholeRecord` prerendered the ones
+     * the record pages before it had fetched, carried none of them, and showed "loading…" at
+     * boot (measured).
+     */
+    const holdOnly = (carried) => {
+      website.dataStore.clear()
+      hydrateDataStore(website, carried)
+    }
 
     for (const page of website.pages) {
       // Skip dynamic template pages — they exist in the content for runtime
@@ -1085,13 +1095,21 @@ export async function prerenderSite(siteDir, options = {}) {
         prerender: 'author',
         cache: buildDataCache,
       })
-      hydrateDataStore(website, asked)
       // Filed under this page, the way a route-bound view always has been: `scopeFetchedData`
       // embeds it in this page's HTML and nowhere else, and one address embedded twice collapses.
       for (const entry of asked) {
         if (entry.outcome !== 'fetched') continue
         siteContent.fetchedData.push({ ...entry, _scope: page.route, _routeBound: true })
       }
+
+      // scopeRoutes mirrors the runtime data cascade (page → page.parent → site)
+      // so split-mode pages embed only the collection data their first render reads.
+      // An expanded page's own fetch was read under its TEMPLATE's route — the
+      // route it had when the fetches ran — so that route is in its cascade too.
+      const scopeRoutes = new Set([page.route, page.parent?.route, page.dynamicContext?.templateRoute].filter(Boolean))
+      // The same call `injectBuildData` makes below for this page's HTML, so the render holds what
+      // the HTML embeds — the page's own data step's answers among them.
+      holdOnly(scopeFetchedData(siteContent.fetchedData, splitContent ? scopeRoutes : null, page.route))
 
       onProgress(`Rendering ${outputRoute}...`)
 
@@ -1133,11 +1151,6 @@ export async function prerenderSite(siteDir, options = {}) {
       let html = result.html
 
       // Build-specific: theme CSS, __SITE_CONTENT__, icon cache.
-      // scopeRoutes mirrors the runtime data cascade (page → page.parent → site)
-      // so split-mode pages embed only the collection data their first render reads.
-      // An expanded page's own fetch was read under its TEMPLATE's route — the
-      // route it had when the fetches ran — so that route is in its cascade too.
-      const scopeRoutes = new Set([page.route, page.parent?.route, page.dynamicContext?.templateRoute].filter(Boolean))
       html = injectBuildData(html, siteContent, {
         splitContent,
         currentRoute: page.route,
@@ -1162,6 +1175,8 @@ export async function prerenderSite(siteDir, options = {}) {
       currentRoute: null,  // 404 has no current page — manifest only
       scopeRoutes: new Set(),  // SPA fallback carries site-level fetched data only
     })
+    // The 404 page renders against what 404.html carries, as every page above does.
+    holdOnly(scopeFetchedData(siteContent.fetchedData, splitContent ? new Set() : null, null))
     const { html: notFoundHtml, hasNotFoundPage } = generate404Html({
       baseHtml: fallbackBaseHtml,
       website,

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import DataStore from '@uniweb/core/datastore'
 import { initPrerender, hydrateDataStore, loadPageData, prepareProps } from '@uniweb/runtime/ssr'
-import { executeAllFetches, expandDynamicPages } from '../src/prerender.js'
+import { executeAllFetches, expandDynamicPages, scopeFetchedData } from '../src/prerender.js'
 import { createFileTransport } from '../src/site/file-transport.js'
 
 const POSTS = ['a', 'b', 'c', 'd', 'e'].map((slug) => ({ slug, $name: slug, title: slug.toUpperCase() }))
@@ -58,7 +58,6 @@ async function prerender(content, root, localeInfo = { locale: 'en', defaultLoca
   // declares (2026-09-14) and the build's data step honours that, so a fixture with no metas is a
   // site whose components declare nothing — where asking for nothing is the right answer.
   const website = initPrerender(content, { default: { meta: { X: META } } }, []).activeWebsite
-  hydrateDataStore(website, content.fetchedData)
   // ⭐ Then the render loop's own step, page by page: the build asks what each page's render will
   // read, by the rule the render uses, and answers it from its own files (2026-09-20). What a page
   // asked for is filed under it, as a route-bound view always was.
@@ -67,14 +66,22 @@ async function prerender(content, root, localeInfo = { locale: 'en', defaultLoca
   for (const page of website.pages) {
     if (page.route.includes(':')) continue
     const asked = await loadPageData({ website, route: page, fetch, prerender: 'author', cache })
-    hydrateDataStore(website, asked)
     for (const entry of asked) {
       if (entry.outcome === 'fetched') content.fetchedData.push({ ...entry, _scope: page.route, _routeBound: true })
     }
   }
+  // ⭐ A page renders against what it carries — what its HTML embeds (`scopeFetchedData`), and so
+  // what the browser's store holds when it boots on it (2026-10-25). Each read below holds the
+  // page's own first, as the build's loop does before it renders the page.
+  const holdFor = (route) => {
+    website.dataStore.clear()
+    hydrateDataStore(website, scopeFetchedData(content.fetchedData, null, route))
+  }
   const delivered = (route, index = 0) => {
     const page = website.pages.find((p) => p.route === route)
-    return page ? website.entityStore.resolve(page.bodyBlocks[index], META) : null
+    if (!page) return null
+    holdFor(route)
+    return website.entityStore.resolve(page.bodyBlocks[index], META)
   }
   // What the block already holds under each key. It OUTRANKS the store's answer: a declared
   // key the block holds is filled from it (`prepareProps`).
@@ -82,11 +89,12 @@ async function prerender(content, root, localeInfo = { locale: 'en', defaultLoca
   // What the component receives: its declared keys, from what the block holds, else the store's answer.
   const prerendered = (route, index = 0, meta = META) => {
     const block = website.pages.find((p) => p.route === route)?.bodyBlocks[index]
+    holdFor(route)
     const answer = website.entityStore.resolve(block, meta)
     return prepareProps(block, meta, answer.status === 'ready' ? answer.data : null).content.data
   }
   const rendered = (route, index = 0) => prerendered(route, index)
-  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, prerendered, website, fetchedData: content.fetchedData }
+  return { routes: content.pages.map((p) => p.route), delivered, held, rendered, prerendered, holdFor, website, fetchedData: content.fetchedData }
 }
 
 describe('a count is how many a list shows — never which records have a page', () => {
@@ -359,8 +367,9 @@ describe('⭐ a LAYOUT section\'s data is fetched too (2026-09-20)', () => {
 
   it('a page that asks for nothing itself still has its header\'s data', async () => {
     const root = site({ 'public/data/posts.json': POSTS })
-    const { website, fetchedData } = await prerender(content(), root)
+    const { website, fetchedData, holdFor } = await prerender(content(), root)
     const header = website.pages.find((p) => p.route === '/about').getLayoutAreas().header[0]
+    holdFor('/about')
     expect(website.entityStore.resolve(header, META)).toEqual({ status: 'ready', data: { posts: POSTS } })
     // and it rides in that page's payload, so the browser does not ask again
     expect(fetchedData.some((e) => e.config.path === '/data/posts.json')).toBe(true)
@@ -369,8 +378,9 @@ describe('⭐ a LAYOUT section\'s data is fetched too (2026-09-20)', () => {
 
   it('CONTROL — nothing reaches the page\'s own body block, which declares the same key', async () => {
     const root = site({ 'public/data/posts.json': POSTS })
-    const { website } = await prerender(content(), root)
+    const { website, holdFor } = await prerender(content(), root)
     const body = website.pages.find((p) => p.route === '/about').bodyBlocks[0]
+    holdFor('/about')
     expect(website.entityStore.resolve(body, META).status).toBe('none')
     rmSync(root, { recursive: true, force: true })
   })
