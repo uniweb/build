@@ -36,7 +36,14 @@
  * @property {string|null} sha
  * @property {boolean|null} isProduction Tri-state: true / false / null (unknown).
  * @property {string|null} publicUrl     Host-assigned URL for this deploy, when
- *                                       known. Useful for sitemap / canonical.
+ *                                       known — a preview's own, not the site's.
+ * @property {string|null} origin        The origin the host serves the site's
+ *                                       PRODUCTION at, when it says — its custom
+ *                                       domain if one is set — even on a preview,
+ *                                       so a preview names production as its
+ *                                       canonical. A canonical is made on it
+ *                                       (`../site/site-address.js`); `publicUrl`
+ *                                       is no address for one.
  * @property {string|null} deploymentId
  */
 
@@ -53,6 +60,9 @@ export function detectCiContext(env = process.env) {
       sha: env.VERCEL_GIT_COMMIT_SHA || null,
       isProduction: env.VERCEL_ENV ? env.VERCEL_ENV === 'production' : null,
       publicUrl: env.VERCEL_URL ? `https://${env.VERCEL_URL}` : null,
+      // "The shortest production custom domain, or vercel.app domain … always set, even in
+      // preview deployments", with no scheme (Vercel's system environment variables).
+      origin: env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : null,
       deploymentId: env.VERCEL_DEPLOYMENT_ID || null,
     }
   }
@@ -68,6 +78,8 @@ export function detectCiContext(env = process.env) {
       // can falsify; leave it null.
       isProduction: null,
       publicUrl: env.CF_PAGES_URL || null,
+      // A deploy's own URL is all CF Pages states; its production domain it does not.
+      origin: null,
       deploymentId: null,
     }
   }
@@ -82,6 +94,8 @@ export function detectCiContext(env = process.env) {
       sha: env.COMMIT_REF || null,
       isProduction: env.CONTEXT ? env.CONTEXT === 'production' : null,
       publicUrl: env.DEPLOY_PRIME_URL || env.URL || null,
+      // "The main address to your site … your own custom domain if you set one" (Netlify).
+      origin: env.URL || null,
       deploymentId: env.DEPLOY_ID || null,
     }
   }
@@ -95,6 +109,8 @@ export function detectCiContext(env = process.env) {
       sha: env.GITHUB_SHA || null,
       isProduction: null,
       publicUrl: null,
+      // The Pages workflow passes what GitHub states (`UNIWEB_ORIGIN`); a runner implies no site.
+      origin: null,
       deploymentId: env.GITHUB_RUN_ID || null,
     }
   }

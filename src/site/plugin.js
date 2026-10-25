@@ -4,11 +4,10 @@
  * Collects site content from pages/ directory and injects it into HTML.
  * Watches for changes in development mode.
  *
- * SEO Features:
- * - Generates sitemap.xml from collected pages
- * - Generates robots.txt
- * - Injects Open Graph, Twitter, and canonical meta tags
- * - Supports hreflang for multi-locale sites
+ * States where the site lives (`config.url`, `./site-address.js`) and its effective `seo`, which
+ * the runtime writes every page's head tags from. No page's tags are written here: the shell is
+ * the same for every page, and the prerender writes each page's own (`injectPageContent`). The
+ * sitemap and `robots.txt` are the prerender's too, from the pages it wrote (`./seo-files.js`).
  *
  * @module @uniweb/build/site
  *
@@ -20,11 +19,8 @@
  *     siteContentPlugin({
  *       sitePath: './site',
  *       inject: true,
- *       seo: {
- *         baseUrl: 'https://example.com',
- *         defaultImage: '/og-image.png',
- *         twitterHandle: '@example'
- *       }
+ *       // Over `site.yml::seo`, key by key — a staging build's origin, say.
+ *       seo: { origin: 'https://staging.example.com' }
  *     })
  *   ]
  * })
@@ -57,6 +53,7 @@ import { jsonForScript } from '@uniweb/core/data-script'
 // A favicon's MIME type by its extension — the rule a host's page shell types it by too.
 import { faviconType } from '@uniweb/core/page-shell'
 import { FONT_LINKS_MARKER } from './head-markers.js'
+import { effectiveSeo, resolveSiteAddress } from './site-address.js'
 import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
 import { extensionNameOf, findSiteExtension } from './workspace-extension.js'
 
@@ -269,7 +266,8 @@ async function processDevSectionFetches(sections, fetchOptions, resolve) {
     }
   }
 }
-import { generateSearchIndex, getSearchIndexFilename } from '@uniweb/projections'
+import { generateSearchIndex, getSearchIndexFilename, mergeSearchIndexes } from '@uniweb/projections'
+import { recordProjections, routeOnDisk } from './record-projections.js'
 import { mergeTranslations } from '../i18n/merge.js'
 import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { searchDeclaredOn } from './search-declared.js'
@@ -283,285 +281,6 @@ import { mountDevApi } from '../dev/api-mount.js'
  */
 
 /**
- * Restrict authored `seo.locales` hreflang entries to locales the payload
- * actually serves. `config.languages` is the publishable intersection on
- * production builds (the collector filters by publishLanguages), so draft
- * locales never get advertised in sitemap/meta hreflang. The default-locale
- * entry always survives (it's served at the root regardless).
- */
-function filterSeoLocales(seoLocales, config) {
-  if (!Array.isArray(seoLocales) || seoLocales.length === 0) return seoLocales || []
-  const langs = Array.isArray(config?.languages) ? config.languages : null
-  if (!langs) return seoLocales
-  const served = new Set(langs)
-  return seoLocales.filter((l) => l.default || served.has(l.code))
-}
-
-/**
- * Generate sitemap.xml content
- */
-function generateSitemap(pages, baseUrl, locales = [], routeTranslations = {}) {
-  const urls = []
-
-  for (const page of pages) {
-    // Skip pages marked as noindex
-    if (page.seo?.noindex) continue
-
-    const loc = baseUrl + (page.route === '/' ? '' : page.route)
-    const lastmod = page.lastModified || new Date().toISOString().split('T')[0]
-    const changefreq = page.seo?.changefreq || 'weekly'
-    const priority = page.seo?.priority ?? (page.route === '/' ? '1.0' : '0.8')
-
-    let urlEntry = `  <url>\n    <loc>${escapeXml(loc)}</loc>\n    <lastmod>${lastmod.split('T')[0]}</lastmod>\n    <changefreq>${changefreq}</changefreq>\n    <priority>${priority}</priority>`
-
-    // Add hreflang entries for multi-locale sites
-    if (locales.length > 1) {
-      for (const locale of locales) {
-        let localeLoc
-        if (locale.default) {
-          localeLoc = loc
-        } else {
-          const translatedRoute = page.route === '/' ? '' : applyRouteTranslation(page.route, locale.code, routeTranslations)
-          localeLoc = `${baseUrl}/${locale.code}${translatedRoute}`
-        }
-        urlEntry += `\n    <xhtml:link rel="alternate" hreflang="${locale.code}" href="${escapeXml(localeLoc)}" />`
-      }
-      // Add x-default pointing to default locale
-      urlEntry += `\n    <xhtml:link rel="alternate" hreflang="x-default" href="${escapeXml(loc)}" />`
-    }
-
-    urlEntry += '\n  </url>'
-    urls.push(urlEntry)
-  }
-
-  const xmlnsExtra = locales.length > 1 ? ' xmlns:xhtml="http://www.w3.org/1999/xhtml"' : ''
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${xmlnsExtra}>
-${urls.join('\n')}
-</urlset>`
-}
-
-/**
- * Escape special characters for XML
- */
-function escapeXml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
-
-/** The three defined Content Signals, in the order they are emitted. */
-const CONTENT_SIGNAL_KEYS = ['search', 'ai-input', 'ai-train']
-
-/**
- * Format the `Content-Signal:` directive from `seo.robots.contentSignals`.
- *
- * Content Signals express what a site permits its content to be *used for*,
- * which is a different axis from `Disallow:` — that governs fetching, this
- * governs use after fetching. The three defined signals:
- *
- * - `search`    — appear in search results
- * - `ai-input`  — be retrieved at inference time (RAG, grounding)
- * - `ai-train`  — be used to train a model
- *
- * **Emitted only when declared.** There is no default: a preference the site
- * owner did not state is not ours to assert, in either direction. An absent
- * signal means "unstated", which is not the same as `no`.
- *
- * Unknown keys are ignored rather than passed through — the vocabulary is a
- * closed set, and forwarding an invented signal would produce a directive no
- * crawler honors while reading as though it were doing something.
- *
- * @param {Object|null} signals - e.g. `{ search: true, 'ai-input': true, 'ai-train': false }`
- * @returns {string} The directive line, or `''` when nothing is declared
- */
-export function formatContentSignals(signals) {
-  if (!signals || typeof signals !== 'object') return ''
-
-  const parts = []
-  for (const key of CONTENT_SIGNAL_KEYS) {
-    if (!(key in signals)) continue
-    const value = signals[key]
-    const yes = value === true || value === 'yes'
-    const no = value === false || value === 'no'
-    if (!yes && !no) continue
-    parts.push(`${key}=${yes ? 'yes' : 'no'}`)
-  }
-
-  return parts.length ? `Content-Signal: ${parts.join(', ')}` : ''
-}
-
-/**
- * Generate robots.txt content
- */
-export function generateRobotsTxt(baseUrl, options = {}) {
-  const {
-    disallow = [],
-    allow = [],
-    crawlDelay = null,
-    additionalSitemaps = [],
-    contentSignals = null
-  } = options
-
-  let content = 'User-agent: *\n'
-
-  const signals = formatContentSignals(contentSignals)
-  if (signals) {
-    // Inside the User-agent group, before the rules — the directive applies to
-    // the group it sits in.
-    content += `${signals}\n`
-  }
-
-  for (const path of allow) {
-    content += `Allow: ${path}\n`
-  }
-
-  for (const path of disallow) {
-    content += `Disallow: ${path}\n`
-  }
-
-  if (crawlDelay) {
-    content += `Crawl-delay: ${crawlDelay}\n`
-  }
-
-  content += `\nSitemap: ${baseUrl}/sitemap.xml\n`
-
-  for (const sitemap of additionalSitemaps) {
-    content += `Sitemap: ${sitemap}\n`
-  }
-
-  return content
-}
-
-/**
- * Generate meta tags for SEO
- */
-function generateMetaTags(siteContent, seoOptions) {
-  const { baseUrl, defaultImage, twitterHandle } = seoOptions
-  const locales = filterSeoLocales(seoOptions.locales, siteContent.config)
-  const siteConfig = siteContent.config || {}
-  const tags = []
-
-  const siteName = siteConfig.name || siteConfig.title || ''
-  const siteDescription = siteConfig.description || ''
-  const ogImage = siteConfig.image || defaultImage
-
-  // Basic meta
-  if (siteDescription) {
-    tags.push(`<meta name="description" content="${escapeHtml(siteDescription)}">`)
-  }
-
-  // Canonical URL (for homepage)
-  if (baseUrl) {
-    tags.push(`<link rel="canonical" href="${baseUrl}/">`)
-  }
-
-  // Open Graph
-  tags.push(`<meta property="og:type" content="website">`)
-  if (siteName) {
-    tags.push(`<meta property="og:site_name" content="${escapeHtml(siteName)}">`)
-    tags.push(`<meta property="og:title" content="${escapeHtml(siteName)}">`)
-  }
-  if (siteDescription) {
-    tags.push(`<meta property="og:description" content="${escapeHtml(siteDescription)}">`)
-  }
-  if (baseUrl) {
-    tags.push(`<meta property="og:url" content="${baseUrl}/">`)
-  }
-  if (ogImage) {
-    const imageUrl = ogImage.startsWith('http') ? ogImage : `${baseUrl}${ogImage}`
-    tags.push(`<meta property="og:image" content="${imageUrl}">`)
-  }
-
-  // Twitter Card
-  tags.push(`<meta name="twitter:card" content="summary_large_image">`)
-  if (twitterHandle) {
-    tags.push(`<meta name="twitter:site" content="${twitterHandle}">`)
-  }
-  if (siteName) {
-    tags.push(`<meta name="twitter:title" content="${escapeHtml(siteName)}">`)
-  }
-  if (siteDescription) {
-    tags.push(`<meta name="twitter:description" content="${escapeHtml(siteDescription)}">`)
-  }
-  if (ogImage) {
-    const imageUrl = ogImage.startsWith('http') ? ogImage : `${baseUrl}${ogImage}`
-    tags.push(`<meta name="twitter:image" content="${imageUrl}">`)
-  }
-
-  // Hreflang for multi-locale sites
-  if (baseUrl && locales.length > 1) {
-    for (const locale of locales) {
-      const href = locale.default ? `${baseUrl}/` : `${baseUrl}/${locale.code}/`
-      tags.push(`<link rel="alternate" hreflang="${locale.code}" href="${href}">`)
-    }
-    tags.push(`<link rel="alternate" hreflang="x-default" href="${baseUrl}/">`)
-  }
-
-  return tags.join('\n    ')
-}
-
-/**
- * Escape HTML special characters
- */
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-/**
- * The effective `seo` block for a collected site.
- *
- * ⛔ **`site.yml::seo` IS THE SOURCE. The plugin option is an OVERRIDE.**
- * This plugin read `options.seo` alone until 2026-09-17, and nothing ever put
- * `site.yml`'s block there: `defineSiteConfig` passes its own `seo` option
- * straight through and defaults it to `{}`, while the scaffolded
- * `vite.config.js` calls `defineSiteConfig()` with no arguments. So on the
- * bundle lane `seo.baseUrl` and `seo.robots` were authored, documented
- * (`cli/partials/agents.md`), read by `uniweb doctor` — and dead. The symptom,
- * reported from a real site: `seo.baseUrl` set, doctor's
- * `agents-index-relative-links` warning cleared, and `uniweb build` / `uniweb
- * export` emitting neither `sitemap.xml` nor `robots.txt` while `llms.txt`
- * links stayed root-relative.
- *
- * ⭐ **The data-only path was never wrong** — `build-site-data.js::writeProjections`
- * reads `siteContent.config.seo.baseUrl`. Reading the same place here is what
- * makes the two lanes unable to disagree, which is the whole reason
- * `projectionOptions` exists.
- *
- * ⚠️ The generators were unit-tested throughout (`tests/robots-content-signals.test.js`
- * calls `generateRobotsTxt` directly), which is why a green suite proved
- * nothing: the tests supplied the input the wiring never delivered. That is why
- * this is an exported function rather than a closure — the RESOLUTION is the
- * part that was missing, so it is the part that gets asserted.
- *
- * A site's `vite.config.js` is CLI scaffolding — strip it and the site is
- * unchanged — so a site's SEO must not depend on what it passes. An explicit
- * override still wins, key by key, the way `base` does.
- *
- * @param {Object} [content] - Collected site content (reads `content.config.seo`)
- * @param {Object} [overrides] - Caller overrides, merged OVER the site's block
- * @returns {{ baseUrl: string, defaultImage: ?string, twitterHandle: ?string, locales: Array, robots: Object }}
- */
-export function resolveEffectiveSeo(content, overrides = {}) {
-  const merged = { ...(content?.config?.seo || {}), ...overrides }
-  return {
-    baseUrl: merged.baseUrl?.replace(/\/$/, '') || '', // Remove trailing slash
-    defaultImage: merged.defaultImage || null,
-    twitterHandle: merged.twitterHandle || null,
-    locales: merged.locales || [],
-    robots: merged.robots || {}
-  }
-}
-
-/**
  * Create the site content plugin
  *
  * @param {Object} options
@@ -571,18 +290,12 @@ export function resolveEffectiveSeo(content, overrides = {}) {
  * @param {boolean} [options.inject=true] - Inject content into HTML
  * @param {string} [options.filename='site-content.json'] - Output filename
  * @param {boolean} [options.watch=true] - Watch for changes in dev mode
- * @param {Object} [options.seo] - SEO OVERRIDES, merged OVER `site.yml::seo`
- *   key by key. The site's own block is the source; this is for a caller that
+ * @param {Object} [options.seo] - SEO OVERRIDES, merged OVER `site.yml::seo` key by
+ *   key into the site's `config.seo`, so the page heads, the sitemap and the agent
+ *   index all read them. Its keys are `site.yml::seo`'s (`origin`, `image`, `robots`,
+ *   `twitterHandle`…). The site's own block is the source; this is for a caller that
  *   must override it (a preview build pointing at a staging origin, say).
  *   ⛔ Do not reach for this to make `site.yml::seo` work — it already does.
- * @param {string} [options.seo.baseUrl] - Base URL for sitemap and canonical URLs
- * @param {string} [options.seo.defaultImage] - Default OG image path
- * @param {string} [options.seo.twitterHandle] - Twitter handle for cards
- * @param {Array} [options.seo.locales] - Locales for hreflang [{code: 'en', default: true}, {code: 'es'}]
- * @param {Object} [options.seo.robots] - robots.txt configuration
- * @param {Array} [options.seo.robots.disallow] - Paths to disallow
- * @param {Array} [options.seo.robots.allow] - Paths to explicitly allow
- * @param {number} [options.seo.robots.crawlDelay] - Crawl delay in seconds
  * @param {Object} [options.assets] - Asset processing configuration
  * @param {boolean} [options.assets.process=true] - Process assets in production builds
  * @param {boolean} [options.assets.convertToWebp=true] - Convert images to WebP
@@ -619,8 +332,22 @@ export function siteContentPlugin(options = {}) {
     pdfThumbnails: assetsConfig.pdfThumbnails !== false // Default true
   }
 
-  /** This plugin's SEO resolution — `site.yml::seo`, with `options.seo` over it. */
-  const resolveSeo = content => resolveEffectiveSeo(content, seo)
+  /**
+   * The collected site with its effective `seo` — `site.yml::seo`, with `options.seo` over it — and
+   * the address this build states for it (`config.url`, `./site-address.js`), which the runtime
+   * reads every absolute URL from, so a page's head, the sitemap and the agent index state the same
+   * ones. ⭐ `config.trailingSlash`: this lane writes each page as `<route>/index.html`, which a
+   * static host answers at `<route>/` — and at `<route>` with a redirect to it.
+   */
+  const locate = (content) => {
+    const config = content?.config
+    if (!config) return content
+    config.seo = effectiveSeo(config.seo, seo)
+    const url = resolveSiteAddress({ config, base: basePath })
+    if (url) config.url = url
+    config.trailingSlash = true
+    return content
+  }
 
   // Warn once per build, not once per collection — the dev server re-collects
   // on every content change and would otherwise repeat this on every keystroke.
@@ -839,7 +566,8 @@ export function siteContentPlugin(options = {}) {
   function projectionOptions(content) {
     const defaultLocale = resolveDefaultLocale(content.config)
     return {
-      baseUrl: resolveSeo(content).baseUrl,
+      // Absolute on the site's address when it is known, else from the base (`buildPageUrl`).
+      address: content.config?.url || null,
       basePath,
       locale: content.config?.activeLocale || defaultLocale,
       defaultLocale
@@ -853,15 +581,16 @@ export function siteContentPlugin(options = {}) {
    * Sits beside the sitemap and search-index emits because it is the same kind
    * of thing: an artifact derived from the site's content alone.
    *
-   * Unlike the SEO artifacts, this does NOT silently skip when `seo.baseUrl`
-   * is unset — it falls back to root-relative links and `uniweb doctor` warns.
+   * Unlike the sitemap, this does NOT skip when the site's address is unknown
+   * — it falls back to root-relative links and `uniweb doctor` warns.
    * An agent that arrived via the index can still follow a relative link, and
    * a silently-absent index is the failure mode the whole feature exists to
    * prevent.
    *
    * @param {Object} content - Final site content for this locale
+   * @param {Object} [records] - its record pages (`recordProjections`), listed and written as pages
    */
-  function emitProjections(content) {
+  function emitProjections(content, records = recordProjections(content, { dataRoot: resolvedPublicDir })) {
     const agents = resolveAgentsConfig(content?.config)
     if (!agents.index && !agents.markdown) return
     if (!content?.pages?.length) return
@@ -876,7 +605,7 @@ export function siteContentPlugin(options = {}) {
       this.emitFile({
         type: 'asset',
         fileName: `${localeDir}${INDEX_FILENAME}`,
-        source: renderSiteIndex(content, { ...options, exclude: agents.exclude })
+        source: renderSiteIndex(content, { ...options, exclude: agents.exclude, records: records.entries })
       })
       console.log(`[site-content] Generated ${localeDir}${INDEX_FILENAME}`)
 
@@ -895,6 +624,7 @@ export function siteContentPlugin(options = {}) {
             source: renderSiteIndex(content, {
               ...options,
               exclude: agents.exclude,
+              records: records.entries,
               branch: branch.route
             })
           })
@@ -919,6 +649,17 @@ export function siteContentPlugin(options = {}) {
         this.emitFile({
           type: 'asset',
           fileName: `${localeDir}${pageMarkdownFilename(route)}`,
+          source: markdown
+        })
+        emitted++
+      }
+      // Each record's page, under the exclusions a page is held to.
+      const listed = new Set(selectIndexablePages(records.pages, { exclude: agents.exclude }).map((page) => page.route))
+      for (const { route, markdown } of records.pages) {
+        if (!listed.has(route)) continue
+        this.emitFile({
+          type: 'asset',
+          fileName: `${localeDir}${pageMarkdownFilename(routeOnDisk(route))}`,
           source: markdown
         })
         emitted++
@@ -987,7 +728,7 @@ export function siteContentPlugin(options = {}) {
         // pages stay in the graph so in-progress drafts remain previewable.
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
-        siteContent = withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction }))
+        siteContent = locate(withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })))
         dataModelPromise = null
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
@@ -1123,7 +864,7 @@ export function siteContentPlugin(options = {}) {
             rebuildQueries = false
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath }))
+              siteContent = locate(withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })))
               dataModelPromise = null
               headHtml = await loadHeadHtml()
               if (materialize) {
@@ -1336,24 +1077,8 @@ export function siteContentPlugin(options = {}) {
           // If no translations, fall through to serve default content
         }
 
-        // Dev serves the same two SEO artifacts the build emits, off the same
-        // resolution — so `uniweb dev` and `uniweb build` cannot disagree about
-        // whether a site has them.
-        const devSeo = resolveSeo(siteContent)
-
-        // Serve sitemap.xml in dev mode
-        if (req.url === '/sitemap.xml' && devSeo.baseUrl && siteContent?.pages) {
-          res.setHeader('Content-Type', 'application/xml')
-          res.end(generateSitemap(siteContent.pages, devSeo.baseUrl, filterSeoLocales(devSeo.locales, siteContent.config), siteContent.config?.i18n?.routeTranslations))
-          return
-        }
-
-        // Serve robots.txt in dev mode
-        if (req.url === '/robots.txt' && devSeo.baseUrl) {
-          res.setHeader('Content-Type', 'text/plain')
-          res.end(generateRobotsTxt(devSeo.baseUrl, devSeo.robots))
-          return
-        }
+        // ⛔ No sitemap.xml or robots.txt here: the prerender writes them from the pages it
+        // renders (`./seo-files.js`), and a dev server renders none ahead of a visit.
 
         // Serve search-index.json in dev mode (supports locale prefixes)
         const searchIndexMatch = req.url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/search-index\\.json$`))
@@ -1366,10 +1091,14 @@ export function siteContentPlugin(options = {}) {
             const requestedLocale = searchIndexMatch[1]
             const activeLocale = requestedLocale || siteContent.config?.activeLocale || defaultLocale
 
-            const searchIndex = generateSearchIndex(siteContent, {
+            const pagesIndex = generateSearchIndex(siteContent, {
               locale: activeLocale,
               search: searchConfig
             })
+            // The record pages, as the build lists them — the default locale's, whose records these are.
+            const searchIndex = activeLocale === defaultLocale
+              ? mergeSearchIndexes(pagesIndex, recordProjections(siteContent, { dataRoot: resolvedPublicDir, locale: activeLocale }).indexes)
+              : pagesIndex
 
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify(searchIndex, null, 2))
@@ -1380,7 +1109,7 @@ export function siteContentPlugin(options = {}) {
         // Serve the agent projections in dev mode.
         //
         // Without this the artifacts can only be inspected by deploying, and
-        // `uniweb doctor`'s baseUrl warning describes something invisible
+        // `uniweb doctor`'s address warning describes something invisible
         // locally. Both routes reuse the build's generators, so what a
         // developer sees here is what ships.
         if (siteContent) {
@@ -1409,12 +1138,17 @@ export function siteContentPlugin(options = {}) {
                 }).some(b => b.route === branch))
 
             if (served) {
+              // The record pages, as the build lists them — the default locale's, whose records these are.
+              const records = localized === siteContent
+                ? recordProjections(siteContent, { dataRoot: resolvedPublicDir }).entries
+                : undefined
               res.setHeader('Content-Type', 'text/plain; charset=utf-8')
               res.end(
                 renderSiteIndex(localized, {
                   ...projectionOptions(localized),
                   locale: indexMatch[1] || projectionOptions(localized).locale,
                   exclude: agents.exclude,
+                  records,
                   branch
                 })
               )
@@ -1428,13 +1162,16 @@ export function siteContentPlugin(options = {}) {
             const requested = markdownMatch[2] === 'index' ? '/' : `/${markdownMatch[2]}`
             const pages = selectIndexablePages(localized.pages, { exclude: agents.exclude })
             const page = pages.find(p => p.route === requested)
-            if (page) {
-              const markdown = renderPageMarkdown(page)
-              if (markdown) {
-                res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-                res.end(markdown)
-                return
-              }
+            const markdown = page
+              ? renderPageMarkdown(page)
+              : localized === siteContent
+                ? selectIndexablePages(recordProjections(siteContent, { dataRoot: resolvedPublicDir }).pages, { exclude: agents.exclude })
+                  .find((record) => routeOnDisk(record.route) === routeOnDisk(requested))?.markdown
+                : null
+            if (markdown) {
+              res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+              res.end(markdown)
+              return
             }
           }
         }
@@ -1553,14 +1290,9 @@ export function siteContentPlugin(options = {}) {
         headInjection += `    <style id="uniweb-theme">\n${contentToInject.theme.css}\n    </style>\n`
       }
 
-      // Inject SEO meta tags
-      const injectSeo = resolveSeo(contentToInject)
-      if (injectSeo.baseUrl) {
-        const metaTags = generateMetaTags(contentToInject, injectSeo)
-        if (metaTags) {
-          headInjection += `    ${metaTags}\n`
-        }
-      }
+      // ⛔ No page's head tags — canonical, Open Graph, hreflang — go into the shell, which every
+      // page is rendered into: the prerender writes each page's own (`injectPageContent`), and the
+      // browser keeps them (`useHeadMeta`). Until 2026-10-25 the home page's were written here.
 
       // Inject favicon link
       // Source 1: contentToInject.config.favicon (matches Cloudflare publish schema)
@@ -1711,27 +1443,15 @@ export function siteContentPlugin(options = {}) {
         source: JSON.stringify(finalContent, null, 2)
       })
 
-      // Generate SEO files if enabled
-      const buildSeo = resolveSeo(finalContent)
-      if (buildSeo.baseUrl && finalContent?.pages) {
-        // Generate sitemap.xml
-        const sitemap = generateSitemap(finalContent.pages, buildSeo.baseUrl, filterSeoLocales(buildSeo.locales, finalContent.config), finalContent.config?.i18n?.routeTranslations)
-        this.emitFile({
-          type: 'asset',
-          fileName: 'sitemap.xml',
-          source: sitemap
-        })
-        console.log('[site-content] Generated sitemap.xml')
+      // sitemap.xml and robots.txt are the prerender's: it writes them from the pages it wrote,
+      // record pages included (`./seo-files.js`).
 
-        // Generate robots.txt
-        const robotsTxt = generateRobotsTxt(buildSeo.baseUrl, buildSeo.robots)
-        this.emitFile({
-          type: 'asset',
-          fileName: 'robots.txt',
-          source: robotsTxt
-        })
-        console.log('[site-content] Generated robots.txt')
-      }
+      // The site's record pages — each record of a parametric page — for its search index and its
+      // agent projections, as a host makes them (`./record-projections.js`).
+      const records = recordProjections(finalContent, {
+        dataRoot: resolvedPublicDir,
+        locale: finalContent.config?.activeLocale || resolveDefaultLocale(finalContent.config)
+      })
 
       // Generate search index if enabled
       const searchEnabled = searchPluginConfig.enabled !== false && searchDeclaredOn(finalContent)
@@ -1740,11 +1460,11 @@ export function siteContentPlugin(options = {}) {
         const defaultLocale = resolveDefaultLocale(finalContent.config)
         const activeLocale = finalContent.config?.activeLocale || defaultLocale
 
-        // Generate search index for current locale
-        const searchIndex = generateSearchIndex(finalContent, {
-          locale: activeLocale,
-          search: searchConfig
-        })
+        // Generate search index for current locale — its pages, and its records' pages
+        const searchIndex = mergeSearchIndexes(
+          generateSearchIndex(finalContent, { locale: activeLocale, search: searchConfig }),
+          records.indexes
+        )
 
         const searchFilename = getSearchIndexFilename(activeLocale, defaultLocale)
         this.emitFile({
@@ -1759,7 +1479,7 @@ export function siteContentPlugin(options = {}) {
       // Agent-readable projections: the index (discovery) and per-page
       // markdown (retrieval). Free and on by default; a site opts out under
       // `agents:` in site.yml.
-      emitProjections.call(this, finalContent)
+      emitProjections.call(this, finalContent, records)
 
       // A site-relative extension (`/effects/entry.js`) is served from the
       // site's OWN origin, so the site's build is what has to put it there.

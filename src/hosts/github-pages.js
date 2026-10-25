@@ -34,18 +34,21 @@
  *     working tree is never touched, and a normal (non-force) commit so
  *     the branch history stays intact and revertible.
  *
- * UNIWEB_BASE is decided at workflow scaffold time based on the deploy
- * target, and becomes the site's base path:
+ * ⭐ GITHUB SAYS WHERE IT SERVES THE SITE, and the workflow hands that to the
+ * build: the site's origin (`UNIWEB_ORIGIN`) and base path (`UNIWEB_BASE`),
+ * which every absolute URL the site states is made from — a page's canonical,
+ * its sitemap entry, its agent index link (`../site/site-address.js`):
  *
- *   - With `domain`: bakes `UNIWEB_BASE: /` and emits a CNAME file under
- *     `<sitePath>/public/`. GitHub Pages serves the custom domain at
- *     root, so no `/repo/` prefix.
- *   - Without `domain`: derives UNIWEB_BASE from the GitHub repo name at
- *     workflow runtime. A small bash block special-cases the
- *     `<user>.github.io` profile-repo shape (served at root).
+ *   - Without `domain`: from `actions/configure-pages`, which reports the Pages
+ *     site's origin and base path — `<owner>.github.io` and `/<repo>`, or a
+ *     custom domain set in Settings → Pages at its root. ⛔ Until 2026-10-25 a
+ *     bash block guessed the base from the repo name and nothing stated the
+ *     origin, so a site under `/<repo>/` had no address to state its URLs on.
+ *   - With `domain`: the domain the developer named, at its root, and a CNAME
+ *     file under `<sitePath>/public/` — stated, because GitHub reports a custom
+ *     domain only once a deploy has configured it.
  *
- * site.yml stays clean either way — UNIWEB_BASE only kicks in for this
- * deploy target.
+ * site.yml stays clean either way — it needs neither a base nor `seo.origin`.
  */
 
 import { writeFile, mkdtemp, rm, cp, readdir } from 'node:fs/promises'
@@ -322,9 +325,10 @@ const adapter = {
           `On GitHub: Settings → Pages → Source: GitHub Actions.`,
           `The deploy runs automatically on every push to that branch.`,
           ``,
-          `Note: the workflow derives UNIWEB_BASE from the repo name at build`,
-          `time (e.g., /<repo>/) so site.yml stays clean. For a custom domain,`,
-          `re-run with --domain=<your-domain.com> to switch to root-served mode.`,
+          `Note: the workflow takes the site's address from GitHub at build time`,
+          `(<owner>.github.io/<repo>/, or a custom domain set in Settings → Pages),`,
+          `so site.yml needs neither a base nor seo.origin. To name a custom domain`,
+          `here instead, re-run with --domain=<your-domain.com>.`,
         ]
 
     // Adapter-specific config persisted into deploy.yml under
@@ -478,25 +482,22 @@ function renderWorkflow({ sitePath, packageManager, nodeVersion, pnpmVersion, do
   const setup = setupSteps({ packageManager, nodeVersion, pnpmVersion })
   const buildCmd = uniwebBuildCommand({ packageManager, host: 'github-pages' })
 
-  // Two shapes:
-  //   - Custom domain: UNIWEB_BASE is hardcoded to '/' (GH Pages serves
-  //     the custom domain at root).
-  //   - Project repo: derive UNIWEB_BASE from the repo name. The bash
-  //     block special-cases the <user>.github.io profile-repo shape
-  //     (also served at root).
-  const baseStep = domain
-    ? `      - run: ${buildCmd}
+  // Where GitHub serves the site, for the build to state its URLs on (`UNIWEB_ORIGIN`,
+  // `UNIWEB_BASE`): the domain the developer named, at its root — or what GitHub reports.
+  const pagesStep = domain
+    ? `      - uses: actions/configure-pages@v5
+      - run: ${buildCmd}
         env:
+          UNIWEB_ORIGIN: https://${domain}
           UNIWEB_BASE: /`
-    : `      - name: Resolve UNIWEB_BASE for this repo shape
-        run: |
-          REPO='\${{ github.event.repository.name }}'
-          if [[ "$REPO" == *.github.io ]]; then
-            echo "UNIWEB_BASE=/" >> $GITHUB_ENV
-          else
-            echo "UNIWEB_BASE=/$REPO/" >> $GITHUB_ENV
-          fi
-      - run: ${buildCmd}`
+    : `      # GitHub reports where it serves the site: <owner>.github.io/<repo>, or a
+      # custom domain set in Settings → Pages. The build states its URLs on that.
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: ${buildCmd}
+        env:
+          UNIWEB_ORIGIN: \${{ steps.pages.outputs.origin }}
+          UNIWEB_BASE: \${{ steps.pages.outputs.base_path }}/`
 
   return `${workflowHeader({
     title: 'Deploy to GitHub Pages',
@@ -524,8 +525,7 @@ jobs:
       url: \${{ steps.deployment.outputs.page_url }}
     steps:
 ${setup}
-${baseStep}
-      - uses: actions/configure-pages@v5
+${pagesStep}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ${sitePath}/dist

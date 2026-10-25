@@ -18,6 +18,7 @@ describe('detectCiContext', () => {
         VERCEL_GIT_COMMIT_SHA: 'abc123',
         VERCEL_GIT_COMMIT_REF: 'main',
         VERCEL_URL: 'mysite.vercel.app',
+        VERCEL_PROJECT_PRODUCTION_URL: 'mysite.com',
         VERCEL_DEPLOYMENT_ID: 'dpl_xyz',
       })
       expect(ctx).toEqual({
@@ -27,8 +28,15 @@ describe('detectCiContext', () => {
         sha: 'abc123',
         isProduction: true,
         publicUrl: 'https://mysite.vercel.app',
+        origin: 'https://mysite.com',
         deploymentId: 'dpl_xyz',
       })
+    })
+
+    test('⭐ a preview states production as the site’s origin — its own URL is no canonical', () => {
+      const ctx = detectCiContext({ VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_URL: 'x-abc.vercel.app', VERCEL_PROJECT_PRODUCTION_URL: 'mysite.com' })
+      expect(ctx.origin).toBe('https://mysite.com')
+      expect(detectCiContext({ VERCEL: '1' }).origin).toBeNull()
     })
 
     test('isProduction is false on a preview build', () => {
@@ -84,6 +92,7 @@ describe('detectCiContext', () => {
         sha: 'abc123',
         isProduction: true,
         publicUrl: 'https://main--mysite.netlify.app',
+        origin: 'https://mysite.netlify.app',
         deploymentId: 'deploy_xyz',
       })
     })

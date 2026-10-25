@@ -22,6 +22,7 @@
  * video posters, PDF thumbnails — is the bundle path's alone (below).
  */
 
+import { recordProjections, routeOnDisk } from './record-projections.js'
 import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
@@ -240,7 +241,7 @@ export async function buildSiteData({
   //
   //    Ungated by `features:` — projections are free, so they carry no
   //    billing intent and no entitlement to check downstream.
-  await writeProjections(finalContent, resolvedDistDir)
+  await writeProjections(finalContent, resolvedDistDir, join(resolvedSiteRoot, 'public'))
 
   return { siteContent: finalContent, distDir: resolvedDistDir }
 }
@@ -255,22 +256,27 @@ export async function buildSiteData({
  *
  * @param {Object} siteContent - Final site content for the default locale
  * @param {string} distDir - Resolved output directory
+ * @param {string} dataRoot - where the compiled `/data/…` files are, for the record pages
  * @returns {Promise<void>}
  */
-async function writeProjections(siteContent, distDir) {
+async function writeProjections(siteContent, distDir, dataRoot) {
   const agents = resolveAgentsConfig(siteContent?.config)
   if (!agents.index && !agents.markdown) return
   if (!siteContent?.pages?.length) return
 
   const defaultLocale = resolveDefaultLocale(siteContent.config)
+  // ⭐ No address is assumed here: this lane builds for a host that serves the site, and states where
+  // (`config.url`). An author's static origin would send an agent to another copy of the site.
   const options = {
-    baseUrl: siteContent.config?.seo?.baseUrl || '',
+    address: siteContent.config?.url || null,
     locale: siteContent.config?.activeLocale || defaultLocale,
     defaultLocale
   }
+  // Each record of a parametric page is a page, as a host lists them (`./record-projections.js`).
+  const records = recordProjections(siteContent, { dataRoot, locale: options.locale })
 
   if (agents.index) {
-    const index = renderSiteIndex(siteContent, { ...options, exclude: agents.exclude })
+    const index = renderSiteIndex(siteContent, { ...options, exclude: agents.exclude, records: records.entries })
     await writeFile(join(distDir, INDEX_FILENAME), index)
 
     // Additive scoped indexes; the root one above stays complete. See
@@ -285,7 +291,7 @@ async function writeProjections(siteContent, distDir) {
         await mkdir(dirname(target), { recursive: true })
         await writeFile(
           target,
-          renderSiteIndex(siteContent, { ...options, exclude: agents.exclude, branch: branch.route })
+          renderSiteIndex(siteContent, { ...options, exclude: agents.exclude, records: records.entries, branch: branch.route })
         )
       }
     }
@@ -297,6 +303,11 @@ async function writeProjections(siteContent, distDir) {
     const markdown = renderPageMarkdown(page)
     if (!markdown) continue
     const target = join(distDir, pageMarkdownFilename(page.route))
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(target, markdown)
+  }
+  for (const { route, markdown } of selectIndexablePages(records.pages, { exclude: agents.exclude })) {
+    const target = join(distDir, pageMarkdownFilename(routeOnDisk(route)))
     await mkdir(dirname(target), { recursive: true })
     await writeFile(target, markdown)
   }

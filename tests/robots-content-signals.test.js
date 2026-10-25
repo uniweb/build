@@ -11,7 +11,7 @@
  * site owner never stated, and "unstated" is not "no".
  */
 
-import { formatContentSignals, generateRobotsTxt } from '../src/site/plugin.js'
+import { formatContentSignals, generateRobotsTxt } from '../src/site/seo-files.js'
 
 describe('formatContentSignals', () => {
   test('emits nothing when undeclared — silence is not consent, nor refusal', () => {
@@ -63,10 +63,10 @@ describe('formatContentSignals', () => {
 
 describe('generateRobotsTxt — placement', () => {
   test('the directive sits inside the User-agent group, above the rules', () => {
-    const out = generateRobotsTxt('https://example.com', {
-      contentSignals: { search: true, 'ai-train': false },
-      disallow: ['/internal'],
-    })
+    const out = generateRobotsTxt(
+      { contentSignals: { search: true, 'ai-train': false }, disallow: ['/internal'] },
+      { sitemap: 'https://example.com/sitemap.xml' }
+    )
 
     const lines = out.split('\n')
     expect(lines[0]).toBe('User-agent: *')
@@ -75,22 +75,23 @@ describe('generateRobotsTxt — placement', () => {
   })
 
   test('an undeclared block leaves robots.txt byte-identical to before', () => {
-    const withOut = generateRobotsTxt('https://example.com', { disallow: ['/internal'] })
-    const withNull = generateRobotsTxt('https://example.com', {
-      disallow: ['/internal'],
-      contentSignals: null,
-    })
+    const sitemap = { sitemap: 'https://example.com/sitemap.xml' }
+    const withOut = generateRobotsTxt({ disallow: ['/internal'] }, sitemap)
+    const withNull = generateRobotsTxt({ disallow: ['/internal'], contentSignals: null }, sitemap)
     expect(withNull).toBe(withOut)
     expect(withOut).toBe('User-agent: *\nDisallow: /internal\n\nSitemap: https://example.com/sitemap.xml\n')
   })
 
   test('signals coexist with allow, crawl-delay and sitemaps', () => {
-    const out = generateRobotsTxt('https://example.com', {
-      contentSignals: { 'ai-input': true },
-      allow: ['/public'],
-      crawlDelay: 2,
-      additionalSitemaps: ['https://example.com/news-sitemap.xml'],
-    })
+    const out = generateRobotsTxt(
+      {
+        contentSignals: { 'ai-input': true },
+        allow: ['/public'],
+        crawlDelay: 2,
+        additionalSitemaps: ['https://example.com/news-sitemap.xml'],
+      },
+      { sitemap: 'https://example.com/sitemap.xml' }
+    )
 
     expect(out).toContain('Content-Signal: ai-input=yes')
     expect(out).toContain('Allow: /public')

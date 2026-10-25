@@ -34,6 +34,8 @@ import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
 import { stripBasePath } from './site/extension-urls.js'
 import { isSiteRelative, resolveExtensionDist } from './site/emit-extensions.js'
+import { crawlerFiles, sitemapEntry } from './site/seo-files.js'
+import { absoluteUrl } from '@uniweb/core/site-address'
 
 /**
  * Resolve an extension URL to the file prerender imports.
@@ -877,6 +879,10 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // Pre-render each locale
   const renderedFiles = []
+  // Each written page's sitemap entry, every locale's: the sitemap lists what this build serves.
+  const sitemapEntries = []
+  // A redirect stub names its target as the target's own pages do: absolutely, on the site's address.
+  const stubCanonical = (target) => absoluteUrl(defaultSiteContent.config?.url, target) || target
 
   for (const localeConfig of localeConfigs) {
     const { locale, contentPath: localeContentPath, htmlPath, isDefault, routePrefix } = localeConfig
@@ -1017,7 +1023,7 @@ export async function prerenderSite(siteDir, options = {}) {
           ? (website.basePath || '') + location
           : location
         onProgress(`  Redirect ${outputRoute} → ${target}`)
-        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><link rel="canonical" href="${target}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${target}">${target}</a></p></body></html>`
+        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><link rel="canonical" href="${stubCanonical(target)}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${target}">${target}</a></p></body></html>`
         const outputPath = getOutputPath(distDir, outputRoute)
         await mkdir(dirname(outputPath), { recursive: true })
         await writeFile(outputPath, redirectHtml)
@@ -1050,7 +1056,7 @@ export async function prerenderSite(siteDir, options = {}) {
             routePrefix
           })
           onProgress(`  Auto-redirect ${outputRoute} → ${targetPath}`)
-          const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${targetPath}"><link rel="canonical" href="${targetPath}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${targetPath}">${targetPath}</a></p></body></html>`
+          const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${targetPath}"><link rel="canonical" href="${stubCanonical(targetPath)}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${targetPath}">${targetPath}</a></p></body></html>`
           const outputPath = getOutputPath(distDir, outputRoute)
           await mkdir(dirname(outputPath), { recursive: true })
           await writeFile(outputPath, redirectHtml)
@@ -1145,6 +1151,9 @@ export async function prerenderSite(siteDir, options = {}) {
 
       renderedFiles.push(outputPath)
       onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
+      // The page whose head was written — a content-less folder renders its index child.
+      const entry = sitemapEntry(result.page || page)
+      if (entry) sitemapEntries.push(entry)
     }
 
     // Write 404.html — shared logic from @uniweb/runtime/ssr
@@ -1186,6 +1195,25 @@ export async function prerenderSite(siteDir, options = {}) {
       onProgress('Rewrote site-content.json as lightweight manifest')
     }
   }
+
+  // ⭐ The crawler files, from the pages just written (`./site/seo-files.js`). A site's own
+  // `public/robots.txt` or `public/sitemap.xml` is its author's, and is left as it is.
+  const crawl = crawlerFiles({
+    address: defaultSiteContent.config?.url || null,
+    base: defaultSiteContent.config?.base || '/',
+    entries: sitemapEntries,
+    robots: defaultSiteContent.config?.seo?.robots,
+  })
+  for (const [file, body] of [['sitemap.xml', crawl.sitemap], ['robots.txt', crawl.robots]]) {
+    if (!body) continue
+    if (existsSync(join(siteDir, 'public', file))) {
+      onProgress(`  ${file}: the site's own public/${file} is served; none was generated.`)
+      continue
+    }
+    await writeFile(join(distDir, file), body)
+    onProgress(`  → ${file}${file === 'sitemap.xml' ? ` (${sitemapEntries.length} pages)` : ''}`)
+  }
+  for (const note of crawl.notes) onProgress(`  ${note}`)
 
   // Emit host-specific helper files via the selected host adapter.
   //

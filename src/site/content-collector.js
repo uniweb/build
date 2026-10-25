@@ -42,6 +42,7 @@ import { parentRouteOf } from '@uniweb/core/route-match'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
+import { refuseUnreadableAddress } from './site-address.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 import { warnPlacementsNotOffered } from './placement-warnings.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
@@ -2561,6 +2562,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // for a placement its type does not offer is told (`./placement-warnings.js`).
   sectionTypes = await foundationSections(sitePath, siteConfig)
   refuseRetiredServiceKeys(siteConfig, configFile)
+  refuseUnreadableAddress(siteConfig, configFile)
   refuseUnreadableServices(siteConfig, configFile)
 
   // Queries are declared in TWO files — `site.yml::queries` and `queries.yml`,

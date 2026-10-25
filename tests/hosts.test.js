@@ -272,16 +272,23 @@ describe('github-pages adapter', () => {
       expect(yaml).toContain('path: sites/marketing/dist')
     })
 
-    test('workflow derives UNIWEB_BASE from the GitHub repo name (keeps site.yml clean)', async () => {
+    test('⭐ the build states its URLs where GitHub says it serves the site (keeps site.yml clean)', async () => {
       const result = await adapter.initCi({
         site: { name: 'my-site', path: 'site' },
         packageManager: 'pnpm',
       })
       const yaml = result.files[0].content
-      // Without --domain, UNIWEB_BASE is computed at workflow runtime
-      // from the GitHub repo name.
-      expect(yaml).toContain("REPO='${{ github.event.repository.name }}'")
-      expect(yaml).toContain('UNIWEB_BASE=/$REPO/')
+      // Without --domain, the origin and base come from configure-pages' outputs, read before
+      // the build — not guessed from the repo name.
+      const pages = yaml.indexOf('id: pages')
+      const build = yaml.indexOf('uniweb build --host=github-pages')
+      expect(pages).toBeGreaterThan(-1)
+      expect(pages).toBeLessThan(build)
+      expect(yaml).toContain('UNIWEB_ORIGIN: ${{ steps.pages.outputs.origin }}')
+      expect(yaml).toContain('UNIWEB_BASE: ${{ steps.pages.outputs.base_path }}/')
+      expect(yaml).not.toContain('github.event.repository.name')
+      // One configure-pages step, the one the build reads.
+      expect(yaml.split('actions/configure-pages@v5').length - 1).toBe(1)
     })
 
     test('npm package manager produces an npm-shaped workflow (npx + npm ci)', async () => {
@@ -315,16 +322,12 @@ describe('github-pages adapter', () => {
       expect(result.files[0].content).toContain('version: 10')
     })
 
-    test('without --domain: includes auto-detect for <user>.github.io profile repos', async () => {
+    test('without --domain: no CNAME file, and nothing guesses the base from the repo', async () => {
       const result = await adapter.initCi({
         site: { name: 'my-site', path: 'site' },
         packageManager: 'pnpm',
       })
-      const yaml = result.files[0].content
-      expect(yaml).toContain('Resolve UNIWEB_BASE for this repo shape')
-      expect(yaml).toContain('*.github.io')
-      expect(yaml).toContain('UNIWEB_BASE=/$REPO/')
-      // No CNAME file when --domain is not passed
+      expect(result.files[0].content).not.toContain('*.github.io')
       expect(result.files.some(f => f.path.endsWith('CNAME'))).toBe(false)
     })
 
@@ -337,8 +340,9 @@ describe('github-pages adapter', () => {
       const workflow = result.files.find(f => f.path.endsWith('.yml'))
       const cname = result.files.find(f => f.path.endsWith('CNAME'))
 
+      expect(workflow.content).toContain('UNIWEB_ORIGIN: https://mysite.com')
       expect(workflow.content).toContain('UNIWEB_BASE: /')
-      expect(workflow.content).not.toContain('Resolve UNIWEB_BASE')
+      expect(workflow.content).not.toContain('steps.pages.outputs')
       expect(workflow.content).not.toContain('github.event.repository.name')
 
       expect(cname).toBeDefined()

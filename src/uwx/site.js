@@ -92,6 +92,7 @@ import {
   refuseRetiredServiceKeys,
   refuseUnreadableServices
 } from './services-request.js'
+import { refuseUnreadableAddress } from '../site/site-address.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { qualifyRef } from '@uniweb/schemas/refs'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
@@ -1418,6 +1419,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   refuseOrgOption(opts, 'uwx/site')
   const siteYml = await readYamlFile(join(siteRoot, 'site.yml'))
   refuseRetiredServiceKeys(siteYml)
+  refuseUnreadableAddress(siteYml)
   refuseUnreadableServices(siteYml)
   const sourceLocale = opts.sourceLocale || resolveDefaultLocale(siteYml)
   if (!siteYml.name) {
