@@ -1,76 +1,40 @@
 /**
  * `sitemap.xml` and `robots.txt` — the two files a crawler reads about a statically served site,
- * written by the prerender from the pages it wrote.
+ * written by the prerender once it has written the pages.
  *
- * ⭐ THE SITEMAP LISTS THE PAGES A STATIC HOST WILL ANSWER WITH, BY THE URLS THEY STATE. An entry is
- * a page the prerender wrote — the static ones and each record's own — at its canonical URL with its
- * alternates, read off `Page#getHeadMeta`, the source its `<head>` was written from, so the sitemap
- * and the page cannot disagree. ⛔ Until 2026-10-25 the plugin wrote it at bundle time, before
- * parametric pages were expanded: it listed `/books/:slug` and no book, at URLs that left the base
- * path out.
+ * ⭐ BOTH ARE `@uniweb/projections`', made from the site's content alone (`sitemapEntries`,
+ * `renderSitemap`, `renderRobotsTxt`), so a host serving the site from its content serves the same
+ * files. A page's entry is the canonical and the alternates its `<head>` states, by the rules
+ * `Page#getHeadMeta` states them with (guarded by projections' `tests/sitemap-heads.test.js`).
+ * ⛔ Until 2026-10-25 the build read each entry off the rendered page instead, and until earlier
+ * that day the plugin wrote the sitemap at bundle time, before parametric pages were expanded: it
+ * listed `/books/:slug` and no book, at URLs that left the base path out.
  *
- * ⭐ `robots.txt` IS `@uniweb/projections`' (`renderRobotsTxt`), made from the site's content
- * alone, so a host serving the site from its content serves the same file. A site served under a
- * base path — a GitHub project site — gets none, since a crawler reads it only at a host's root, and
- * the build says so.
+ * ⭐ THE SITEMAP LISTS THE PAGES A STATIC HOST WILL ANSWER WITH: the pages this build wrote, each
+ * record's own among them. A page it wrote no file for — one whose render failed — is answered with
+ * the not-found page, so it is left out, where a host that renders on request lists it.
+ *
+ * ⭐ A site served under a base path — a GitHub project site — gets no `robots.txt`, since a crawler
+ * reads it only at a host's root, and the build says so.
  */
 
-import { renderRobotsTxt } from '@uniweb/projections'
+import { renderRobotsTxt, renderSitemap, sitemapEntries } from '@uniweb/projections'
 
 /**
- * A rendered page's sitemap entry — its canonical URL, with its alternates — or null when it is not
- * one to list: kept out of search (`noindex`), naming another URL as its canonical, or on a site
- * whose address is unknown.
+ * One language's sitemap entries, for the pages this build wrote: `sitemapEntries` for its content
+ * and its record pages, less any page the build wrote no file for.
  *
- * @param {Object} page - a Page of the Website the prerender rendered it from
- * @returns {{ loc: string, alternates: Array, lastmod: string|null, changefreq: string|null, priority: (string|number)|null }|null}
+ * @param {Object} content - the language's content, as authored: each parametric page its template
+ * @param {Object} options
+ * @param {string} options.locale - the language
+ * @param {Object[]} [options.records] - its record pages, as expanded (`expandDynamicPages`)
+ * @param {Set<string>} options.written - the route of each page written, as its head states it
+ *   (`Page#getNavRoute`)
+ * @returns {Array} `sitemapEntries` results
  */
-export function sitemapEntry(page) {
-  const meta = page?.getHeadMeta?.()
-  if (!meta?.canonical || meta.robots?.includes('noindex')) return null
-  const own = page.website?.getPageUrl?.(page)
-  if (!own || meta.canonical !== own) return null
-  return {
-    loc: own,
-    alternates: meta.alternates || [],
-    // A record's page has no file of its own, so no date of its own: none is better than its template's.
-    lastmod: !page.dynamicContext && page.lastModified ? String(page.lastModified).split('T')[0] : null,
-    changefreq: page.seo?.changefreq || null,
-    priority: page.seo?.priority ?? null,
-  }
-}
-
-/** Escape a value for XML text or a double-quoted attribute. */
-function escapeXml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
-
-/**
- * `sitemap.xml` for entries (`sitemapEntry`), each with its alternates when the site has several
- * locales.
- *
- * @param {Array} entries
- * @returns {string}
- */
-export function renderSitemap(entries) {
-  const alternated = entries.some((entry) => entry.alternates?.length)
-  const urls = entries.map((entry) => {
-    const lines = [`    <loc>${escapeXml(entry.loc)}</loc>`]
-    if (entry.lastmod) lines.push(`    <lastmod>${escapeXml(entry.lastmod)}</lastmod>`)
-    if (entry.changefreq) lines.push(`    <changefreq>${escapeXml(entry.changefreq)}</changefreq>`)
-    if (entry.priority !== null && entry.priority !== undefined) lines.push(`    <priority>${escapeXml(entry.priority)}</priority>`)
-    for (const { hreflang, url } of entry.alternates || []) {
-      lines.push(`    <xhtml:link rel="alternate" hreflang="${escapeXml(hreflang)}" href="${escapeXml(url)}" />`)
-    }
-    return `  <url>\n${lines.join('\n')}\n  </url>`
-  })
-  const xmlns = alternated ? ' xmlns:xhtml="http://www.w3.org/1999/xhtml"' : ''
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${xmlns}>\n${urls.join('\n')}\n</urlset>\n`
+export function sitemapEntriesOf(content, { locale, records = [], written }) {
+  const entries = sitemapEntries(content, { locale, records: records.map((page) => ({ type: 'record', route: page.route })) })
+  return entries.filter((entry) => written.has(entry.route))
 }
 
 /**
@@ -80,7 +44,7 @@ export function renderSitemap(entries) {
  * @param {Object} options
  * @param {Object} options.content - the site's content: its address (`config.url`), the base it is
  *   built for (`config.base`) and its rules (`config.seo.robots`)
- * @param {Array} options.entries - `sitemapEntry` results
+ * @param {Array} options.entries - every language's entries (`sitemapEntriesOf`)
  * @returns {{ sitemap: string|null, robots: string|null, notes: string[] }} what to write, and why
  *   anything was not
  */

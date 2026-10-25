@@ -1,81 +1,39 @@
 /**
- * `sitemap.xml` and `robots.txt` for a statically served site (`site/seo-files.js`) — written from
- * the pages the prerender wrote, at the URLs their heads state.
+ * `sitemap.xml` and `robots.txt` for a statically served site (`site/seo-files.js`) — made by
+ * `@uniweb/projections` from the site's content, for the pages the prerender wrote. The whole lane,
+ * prerender included: `prerender-sitemap.test.js`.
  */
-import { Website } from '@uniweb/core'
-import { renderRobotsTxt } from '@uniweb/projections'
-import { sitemapEntry, renderSitemap, crawlerFiles } from '../src/site/seo-files.js'
+import { renderRobotsTxt, sitemapEntries } from '@uniweb/projections'
+import { sitemapEntriesOf, crawlerFiles } from '../src/site/seo-files.js'
 
 const ADDRESS = 'https://octocat.github.io/handbook/'
 
-function site(config = {}, pages = []) {
-  return new Website({
-    content: {
-      config: { name: 'Site', defaultLanguage: 'en', url: ADDRESS, trailingSlash: true, ...config },
-      theme: {},
-      pages: [
-        { route: '/', isIndex: true, title: 'Home', sections: [], lastModified: '2026-10-20T10:00:00.000Z' },
-        { route: '/books', title: 'Books', sections: [] },
-        ...pages,
-      ],
-    },
+describe('sitemapEntriesOf', () => {
+  const content = () => ({
+    config: { name: 'Site', defaultLanguage: 'en', url: ADDRESS, trailingSlash: true },
+    pages: [
+      { route: '/', isIndex: true, title: 'Home', sections: [{}] },
+      { route: '/books', title: 'Books', sections: [{}] },
+      { route: '/books/:slug', isDynamic: true, title: 'Book', sections: [{}] },
+    ],
   })
-}
-const pageOf = (website, route) => website.pages.find((p) => p.route === route)
+  const records = [{ route: '/books/dune', dynamicContext: { templateRoute: '/books/:slug' } }]
 
-describe('sitemapEntry', () => {
-  test('⭐ a page at the URL its canonical states — with the base path, as a static host answers it', () => {
-    const website = site()
-    expect(sitemapEntry(pageOf(website, '/books'))).toEqual({
-      loc: `${ADDRESS}books/`,
-      alternates: [],
-      lastmod: null,
-      changefreq: null,
-      priority: null,
-    })
-    expect(sitemapEntry(pageOf(website, '/')).loc).toBe(ADDRESS)
-    expect(sitemapEntry(pageOf(website, '/')).lastmod).toBe('2026-10-20')
-  })
-
-  test('a page out of search, or naming another URL its canonical, is not listed', () => {
-    const website = site({}, [
-      { route: '/drafts', title: 'Drafts', sections: [], seo: { noindex: true } },
-      { route: '/old', title: 'Old', sections: [], seo: { canonical: '/books' } },
-    ])
-    expect(sitemapEntry(pageOf(website, '/drafts'))).toBeNull()
-    expect(sitemapEntry(pageOf(website, '/old'))).toBeNull()
-  })
-
-  test('nothing is listed for a site whose address is unknown', () => {
-    expect(sitemapEntry(pageOf(site({ url: undefined }), '/books'))).toBeNull()
-  })
-
-  test('a page in several locales carries its URL in each', () => {
-    const entry = sitemapEntry(pageOf(site({ languages: ['en', 'fr'] }), '/books'))
-    expect(entry.alternates).toEqual([
-      { hreflang: 'en', url: `${ADDRESS}books/` },
-      { hreflang: 'fr', url: `${ADDRESS}fr/books/` },
-      { hreflang: 'x-default', url: `${ADDRESS}books/` },
+  test('⭐ projections’ entries for the language, its record pages after its own', () => {
+    const written = new Set(['/', '/books', '/books/dune'])
+    expect(sitemapEntriesOf(content(), { locale: 'en', records, written })).toEqual(
+      sitemapEntries(content(), { locale: 'en', records: [{ type: 'record', route: '/books/dune' }] })
+    )
+    expect(sitemapEntriesOf(content(), { locale: 'en', records, written }).map((entry) => entry.loc)).toEqual([
+      ADDRESS,
+      `${ADDRESS}books/`,
+      `${ADDRESS}books/dune/`,
     ])
   })
 
-  test('only what the author set: changefreq and priority', () => {
-    const website = site({}, [{ route: '/news', title: 'News', sections: [], seo: { changefreq: 'daily', priority: 0.9 } }])
-    expect(sitemapEntry(pageOf(website, '/news'))).toMatchObject({ changefreq: 'daily', priority: 0.9 })
-  })
-})
-
-describe('renderSitemap', () => {
-  test('one url per entry, escaped; the xhtml namespace only when an entry has alternates', () => {
-    const xml = renderSitemap([{ loc: 'https://example.com/a?b=1&c=2', alternates: [], lastmod: null }])
-    expect(xml).toContain('<loc>https://example.com/a?b=1&amp;c=2</loc>')
-    expect(xml).not.toContain('xmlns:xhtml')
-    expect(xml).not.toContain('<lastmod>')
-    const withAlternates = renderSitemap([
-      { loc: 'https://example.com/', alternates: [{ hreflang: 'fr', url: 'https://example.com/fr/' }] },
-    ])
-    expect(withAlternates).toContain('xmlns:xhtml="http://www.w3.org/1999/xhtml"')
-    expect(withAlternates).toContain('<xhtml:link rel="alternate" hreflang="fr" href="https://example.com/fr/" />')
+  test('⭐ less any page the build wrote no file for — a static host answers it with its not-found page', () => {
+    const written = new Set(['/', '/books/dune'])
+    expect(sitemapEntriesOf(content(), { locale: 'en', records, written }).map((entry) => entry.route)).toEqual(['/', '/books/dune'])
   })
 })
 

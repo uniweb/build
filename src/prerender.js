@@ -34,7 +34,7 @@ import { getAdapter } from './hosts/index.js'
 import { detectCiContext } from './hosts/detect-ci-context.js'
 import { stripBasePath } from './site/extension-urls.js'
 import { isSiteRelative, resolveExtensionDist } from './site/emit-extensions.js'
-import { crawlerFiles, sitemapEntry } from './site/seo-files.js'
+import { crawlerFiles, sitemapEntriesOf } from './site/seo-files.js'
 import { absoluteUrl } from '@uniweb/core/site-address'
 
 /**
@@ -879,7 +879,7 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // Pre-render each locale
   const renderedFiles = []
-  // Each written page's sitemap entry, every locale's: the sitemap lists what this build serves.
+  // Each locale's sitemap entries, for the pages it wrote: the sitemap lists what this build serves.
   const sitemapEntries = []
   // A redirect stub names its target as the target's own pages do: absolutely, on the site's address.
   const stubCanonical = (target) => absoluteUrl(defaultSiteContent.config?.url, target) || target
@@ -907,6 +907,10 @@ export async function prerenderSite(siteDir, options = {}) {
 
     // Store fetchedData on siteContent for runtime DataStore pre-population
     siteContent.fetchedData = fetchedData
+
+    // The pages as authored, each parametric page its template: what the sitemap reads, with the
+    // record pages written from it (`./site/seo-files.js`).
+    const authoredPages = siteContent.pages
 
     // Expand dynamic pages (e.g., /blog/:slug → /blog/post-1, /blog/post-2)
     if (siteContent.pages?.some(p => p.isDynamic)) {
@@ -1010,6 +1014,8 @@ export async function prerenderSite(siteDir, options = {}) {
      * boot (measured).
      */
 
+    // The route of each page written, as its head states it (`Page#getNavRoute`).
+    const written = new Set()
     for (const page of website.pages) {
       // Skip dynamic template pages — they exist in the content for runtime
       // route matching but can't be pre-rendered (no concrete route)
@@ -1163,9 +1169,14 @@ export async function prerenderSite(siteDir, options = {}) {
       renderedFiles.push(outputPath)
       onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
       // The page whose head was written — a content-less folder renders its index child.
-      const entry = sitemapEntry(result.page || page)
-      if (entry) sitemapEntries.push(entry)
+      written.add((result.page || page).getNavRoute())
     }
+
+    sitemapEntries.push(...sitemapEntriesOf({ ...siteContent, pages: authoredPages }, {
+      locale,
+      records: (siteContent.pages || []).filter((page) => page.dynamicContext),
+      written,
+    }))
 
     // Write 404.html — shared logic from @uniweb/runtime/ssr
     const fallbackBaseHtml = injectBuildData(htmlShell, siteContent, {
