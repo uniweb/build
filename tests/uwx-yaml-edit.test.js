@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { editYamlText, setYamlKey, replaceInYamlList } from '../src/uwx/index.js'
+import { setYamlKeyFirst } from '../src/uwx/yaml-edit.js'
 
 const SITE = `# The sample site
 name: Research Profile
@@ -159,5 +160,27 @@ describe('editYamlText — a bare key', () => {
   it('CONTROL — a value written out (`~`) is replaced on its line, as any scalar', () => {
     const text = 'team: ~\n# next\nevents: 1\n'
     expect(editYamlText(text, { team: null, events: 1 }, { team: 'x', events: 1 })).toBe('team: x\n# next\nevents: 1\n')
+  })
+})
+
+describe('setYamlKeyFirst — an identity written into a file an author wrote', () => {
+  it('⭐ the key leads the map, after the comments that head the file, and nothing else moves', () => {
+    const text = '# Header\n\ntitle: "A: b"\ntags: [a, b]\n'
+    expect(setYamlKeyFirst(text, '$uuid', 'u-1')).toBe('# Header\n\n$uuid: u-1\ntitle: "A: b"\ntags: [a, b]\n')
+  })
+
+  it('a key already there is set where it stands, its comment kept', () => {
+    expect(setYamlKeyFirst('title: T\n$uuid: old  # kept\n', '$uuid', 'new')).toBe('title: T\n$uuid: new  # kept\n')
+  })
+
+  it('an empty file, or one of comments alone, gains the line after them', () => {
+    expect(setYamlKeyFirst('', '$uuid', 'u')).toBe('$uuid: u\n')
+    expect(setYamlKeyFirst('# only a comment\n', '$uuid', 'u')).toBe('# only a comment\n$uuid: u\n')
+  })
+
+  it('null for what it cannot edit in place: a flow map, an alias, a list', () => {
+    expect(setYamlKeyFirst('{ title: T }\n', '$uuid', 'u')).toBeNull()
+    expect(setYamlKeyFirst('a: &x 1\nb: *x\n', '$uuid', 'u')).toBeNull()
+    expect(setYamlKeyFirst('- a\n- b\n', '$uuid', 'u')).toBeNull()
   })
 })

@@ -61,6 +61,75 @@ describe('backfillUuid — YAML', () => {
   })
 })
 
+/**
+ * ⛔ Until 2026-10-25 a record's first push re-rendered its file whole: on a site's first
+ * publish every comment in its records was deleted, every long line refolded and every
+ * `[a, b]` list written as a block, in a commit made for the author.
+ */
+describe('backfillUuid — an author\'s file gains one line and loses nothing', () => {
+  const TALK = [
+    '# A talk, as its author wrote it.',
+    'title: "The Durable Interface: Designing for the Next Decade"',
+    'description: "Why most platforms need a rewrite every three years, and how to build frontends that last."',
+    'order: 1',
+    '',
+    'takeaways:',
+    '  - Tell the difference between healthy change and churn that signals a design fault',
+    '',
+    '# The speaker block: real credentials only.',
+    'speaker:',
+    '  name: Ada Lovelace',
+    '  tags: [speaking, craft]',
+    '',
+  ].join('\n')
+
+  it('⭐ YAML: `$uuid` leads, after the header comment, and every other byte is as written', () => {
+    const f = join(dir, 'talk.yml')
+    writeFileSync(f, TALK)
+    expect(backfillUuid(f, '0192-cccc')).toEqual({ status: 'updated' })
+    expect(readFileSync(f, 'utf8')).toBe(TALK.replace('title:', '$uuid: 0192-cccc\ntitle:'))
+  })
+
+  it('⭐ markdown: the frontmatter gains the line, and nothing else in the file changes', () => {
+    const post = [
+      '---',
+      'title: Conference Talks Are Products',
+      'excerpt: "Treat a talk like a product: the bar moves fast."',
+      'date: 2026-06-19',
+      'tags: [speaking, craft, positioning]',
+      '# not featured yet',
+      'featured: false',
+      '---',
+      '',
+      '# Heading',
+      '',
+      'Body text.',
+      '',
+    ].join('\n')
+    const f = join(dir, 'post.md')
+    writeFileSync(f, post)
+    expect(backfillUuid(f, '0192-dddd')).toEqual({ status: 'updated' })
+    expect(readFileSync(f, 'utf8')).toBe(post.replace('---\ntitle:', '---\n$uuid: 0192-dddd\ntitle:'))
+  })
+
+  it('a new $uuid replaces the old one where it stands, the comments kept', () => {
+    const f = join(dir, 'talk.yml')
+    const recorded = TALK.replace('title:', '$uuid: old-uuid\ntitle:')
+    writeFileSync(f, recorded)
+    expect(backfillUuid(f, 'new-uuid').status).toBe('updated')
+    expect(readFileSync(f, 'utf8')).toBe(recorded.replace('$uuid: old-uuid', '$uuid: new-uuid'))
+  })
+
+  it('a file it cannot edit in place is re-rendered whole, and the result says so', () => {
+    const f = join(dir, 'anchored.yml')
+    writeFileSync(f, 'base: &b\n  size: 1\ncopy: *b\n')
+    const res = backfillUuid(f, '0192-eeee')
+    expect(res.status).toBe('updated')
+    expect(res.warning).toMatch(/rewritten whole/)
+    expect(yaml.load(readFileSync(f, 'utf8'))).toEqual({ $uuid: '0192-eeee', base: { size: 1 }, copy: { size: 1 } })
+  })
+})
+
 describe('backfillUuid — JSON', () => {
   it('inserts $uuid as the leading key and re-parses', () => {
     const f = join(dir, 'g.json')

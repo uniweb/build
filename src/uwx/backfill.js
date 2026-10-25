@@ -4,13 +4,19 @@
 // `$id` with no `$uuid` on first sync; the backend mints `$uuid` and returns it;
 // this writes it into the record in its source file (docs/reference/entity-content.md).
 //
-// Write-back RE-RENDERS the parsed record with `$uuid` as the leading key, rather
-// than surgically patching the text. It does not preserve comments or incidental
-// formatting (accepted) — in exchange it is one uniform path across YAML, JSON, and
-// markdown frontmatter, and it converges to a fixpoint: a pristine file gains only
-// a `$uuid`, and a no-op re-sync is byte-identical (render(parse(x)) == x once
-// canonical). It reads from the SOURCE file (not the backend's finalized document),
-// so field values round-trip untouched and no inverse decode is needed in v1.
+// ⭐ Write-back ADDS ONE LINE: `$uuid` as the record's leading key, in a YAML file or a
+// markdown file's frontmatter (`yaml-edit.js::setYamlKeyFirst`), and changes nothing else
+// the author wrote — comments, quotes, blank lines, line breaks, `[a, b]` lists. A re-sync
+// with the same `$uuid` is byte-identical. It reads from the SOURCE file (not the backend's
+// finalized document), so field values round-trip untouched. A file that cannot be edited
+// in place (an alias, a flow-style map) is re-rendered whole and the caller is warned; JSON,
+// which holds no comments, is re-rendered as before.
+//
+// ⛔ Until 2026-10-25 every file was re-rendered whole, which the first push of a site's
+// records made into a commit of every record file: on a site's first publish, measured on
+// 16 hand-written records, every comment was deleted, every long line refolded, every
+// `[a, b]` list exploded and every blank line between keys removed — the price of "one
+// uniform path", written down as accepted before `yaml-edit.js` could edit in place.
 //
 // ⛔ A PUSH NEVER RENDERS THE BACKEND'S DOCUMENT OVER THE AUTHOR'S FILE. It did, for
 // a record's first push, from 2026-05-29 to 2026-09-23 ("variant A"), and that
@@ -34,6 +40,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './entity-source.js'
+import { setYamlKeyFirst } from './yaml-edit.js'
 import { isProseMirrorField, isOpenMapSection, openMapFromRows } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { unwrapLocalizedContent } from './locale-sync.js'
@@ -63,13 +70,16 @@ function withUuidFirst(obj, uuid) {
 }
 
 /**
- * Insert `$uuid` into a single-record source file by re-rendering the parsed
- * record with `$uuid` leading. Idempotent — if the render equals the file's
- * current bytes, nothing is written.
+ * Insert `$uuid` into a single-record source file as its leading key, editing nothing else
+ * in a YAML file or a markdown file's frontmatter (`setYamlKeyFirst`): an author's comments,
+ * quotes, blank lines and line breaks stay as written. A file that cannot be edited in place
+ * (an alias, a flow-style map) is re-rendered whole, and the result says so. Idempotent: the
+ * same `$uuid` leaves the file untouched.
  *
  * @param {string} filePath
  * @param {string} uuid
- * @returns {{ status: 'updated'|'unchanged'|'deferred'|'error', message?: string }}
+ * @returns {{ status: 'updated'|'unchanged'|'deferred'|'error', message?: string, warning?: string }}
+ *   `warning` when the file was re-rendered whole
  */
 export function backfillUuid(filePath, uuid) {
   const dot = filePath.lastIndexOf('.')
@@ -83,6 +93,7 @@ export function backfillUuid(filePath, uuid) {
   }
 
   let next
+  let rewritten = false
   if (ext === '.json') {
     let obj
     try {
@@ -104,17 +115,32 @@ export function backfillUuid(filePath, uuid) {
     if (Array.isArray(obj)) {
       return { status: 'deferred', message: 'array-form YAML (many records) not handled in v1' }
     }
-    next = yaml.dump(withUuidFirst(obj && typeof obj === 'object' ? obj : {}, uuid))
+    next = setYamlKeyFirst(text, '$uuid', uuid)
+    if (next === null) {
+      next = yaml.dump(withUuidFirst(obj && typeof obj === 'object' ? obj : {}, uuid))
+      rewritten = true
+    }
   } else if (ext === '.md') {
     const { frontmatter, body } = parseFrontmatter(text, filePath)
-    next = `---\n${yaml.dump(withUuidFirst(frontmatter, uuid))}---\n${body}`
+    // Split as `parseFrontmatter` splits, so the frontmatter edited is the one it reads and
+    // everything around it stays byte for byte.
+    const parts = text.split('---\n')
+    const edited = text.trimStart().startsWith('---') && parts.length >= 3 ? setYamlKeyFirst(parts[1], '$uuid', uuid) : null
+    if (edited !== null) next = [parts[0], edited, ...parts.slice(2)].join('---\n')
+    else {
+      next = `---\n${yaml.dump(withUuidFirst(frontmatter, uuid))}---\n${body}`
+      // A file with no frontmatter gains one, which loses nothing.
+      rewritten = text.trimStart().startsWith('---')
+    }
   } else {
     return { status: 'deferred', message: `${ext || '(no extension)'} back-fill is not yet implemented` }
   }
 
   if (next === text) return { status: 'unchanged' }
   writeFileSync(filePath, next)
-  return { status: 'updated' }
+  return rewritten
+    ? { status: 'updated', warning: 'rewritten whole to record its $uuid — it could not be edited in place, so its comments and layout are gone' }
+    : { status: 'updated' }
 }
 
 /**
@@ -473,6 +499,7 @@ export function backfillEntityUuids({ index, finalized }) {
 
     // The uuid, into the author's own file — never the returned document (header ⛔).
     const res = backfillUuid(entry.sourceFile, uuid)
+    if (res.warning) warnings.push(`${entry.sourceFile}: ${res.warning}`)
     if (res.status === 'updated') updated.push(entry.sourceFile)
     else if (res.status === 'unchanged') unchanged.push(entry.sourceFile)
     else if (res.status === 'deferred') deferred.push({ index: i, id: entry.id, file: entry.sourceFile, reason: res.message })

@@ -290,6 +290,47 @@ export function setYamlKey(text, key, value) {
 }
 
 /**
+ * Set top-level `key` to `value` as the map's FIRST key — a line of its own before the first
+ * key, so after any comments that head the file — editing nothing else. A key already there is
+ * set where it stands (`editYamlText`).
+ *
+ * For an identity a sync writes into a file an author wrote (`$uuid`, `backfill.js`), which leads
+ * a record by convention, as a record a pull writes has it.
+ *
+ * @param {string} text - the file's contents (a record's frontmatter, for a markdown record)
+ * @param {string} key
+ * @param {*} value
+ * @returns {string|null} the new contents; null when the text cannot be edited in place — not a
+ *   block map, an alias or merge key, a parse error, or a result that reads differently
+ */
+export function setYamlKeyFirst(text, key, value) {
+  const before = readMap(text)
+  if (!before) return null
+  if (Object.hasOwn(before, key)) return editYamlText(text, before, { ...before, [key]: value })
+  let doc
+  try {
+    doc = parseDocument(text)
+  } catch {
+    return null
+  }
+  if (doc.errors.length || usesReferences(doc)) return null
+  const line = yaml.dump({ [key]: value }, YAML_DUMP_OPTS)
+  let out
+  if (doc.contents === null || doc.contents === undefined) {
+    // Comments and nothing else: the key goes after them.
+    out = text + (text && !text.endsWith('\n') ? '\n' : '') + line
+  } else {
+    if (!isMap(doc.contents) || doc.contents.flow || !doc.contents.items[0]?.key?.range) return null
+    const first = doc.contents.items[0].key
+    if (columnOf(text, first) !== 0) return null
+    const at = lineStart(text, first.range[0])
+    out = text.slice(0, at) + line + text.slice(at)
+  }
+  const read = readMap(out)
+  return read && sameValue(read, { [key]: value, ...before }) ? out : null
+}
+
+/**
  * Replace entries of the top-level list `key` — each `from` entry becomes its `to` — where
  * they stand, in the quotes they were written in. An entry that only CONTAINS `from` is
  * left alone, and so is everything else in the file.

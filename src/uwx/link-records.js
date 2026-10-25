@@ -132,6 +132,7 @@ export function backfillLinkUuids({ links = [], folderDoc }) {
       warnings.push(`${link.sourceFile}: ${res.message}`)
       continue
     }
+    if (res.warning) warnings.push(`${link.sourceFile}: ${res.warning}`)
     if (res.status === 'updated') updated.push(link.sourceFile)
     mapped[item.$uuid] = item.$uuid
   }
