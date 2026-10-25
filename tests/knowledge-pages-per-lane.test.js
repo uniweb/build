@@ -69,17 +69,16 @@ describe('knowledge pages across the two site lanes', () => {
       expect(JSON.stringify(content)).toContain('zebranaut')
     })
 
-    it('but keeps them out of the free projections it emits alongside', async () => {
+    it('and emits no free projections beside it — the host derives its own, by its own rules', async () => {
       await buildSiteData({ siteRoot, distDir })
-      const llms = readFileSync(join(distDir, 'llms.txt'), 'utf8')
-
-      expect(llms).not.toContain('/kb')
-      expect(llms).not.toContain('zebranaut')
-      // Control: the public page IS listed, so the absences are selection and
-      // not an index that failed to render.
-      expect(llms).toContain('/index.md')
-      expect(existsSync(join(distDir, 'kb.md'))).toBe(false)
-      expect(existsSync(join(distDir, 'kb', 'pricing.md'))).toBe(false)
+      // ⛔ Until 2026-10-25 this lane wrote `llms.txt` and the `.md` files, which nothing read; the
+      // free projections keeping knowledge pages out is pinned where they are made
+      // (`site-projections.test.js`).
+      for (const file of ['llms.txt', 'index.md', 'kb.md', join('kb', 'pricing.md')]) {
+        expect(existsSync(join(distDir, file))).toBe(false)
+      }
+      // Control: the lane wrote the content they would be made from.
+      expect(existsSync(join(distDir, 'site-content.json'))).toBe(true)
     })
   })
 

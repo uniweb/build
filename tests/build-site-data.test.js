@@ -11,9 +11,10 @@ import { DATA_DIR } from '@uniweb/core'
 //   - `dist/site-content.json` always emitted, sections always inlined
 //     (never stripped per the split-content rule).
 //   - `dist/data/<query>.json` emitted when queries are declared.
-//   - HTML, JS, CSS, _importmap/, _pages/, sitemap, robots, search-index
-//     are NEVER emitted (those are static-host-bundle concerns), and no media
-//     is processed (no `dist/assets/`).
+//   - HTML, JS, CSS, _importmap/, _pages/, sitemap, robots, search-index,
+//     llms.txt and page markdown are NEVER emitted (those are
+//     static-host-bundle concerns), and no media is processed (no
+//     `dist/assets/`).
 //
 // See `src/site/build-site-data.js` for the why.
 
@@ -98,6 +99,10 @@ A short tagline.
     expect(existsSync(join(distDir, 'sitemap.xml'))).toBe(false)
     expect(existsSync(join(distDir, 'robots.txt'))).toBe(false)
     expect(existsSync(join(distDir, 'search-index.json'))).toBe(false)
+    // A host derives its agent projections from the content (until
+    // 2026-10-25 this lane wrote the default language's).
+    expect(existsSync(join(distDir, 'llms.txt'))).toBe(false)
+    expect(readdirSync(distDir, { recursive: true }).filter((file) => String(file).endsWith('.md'))).toEqual([])
     // Per-page split files are derived server-side from the full
     // sections we just shipped — link-mode CLI never emits these.
     expect(existsSync(join(distDir, '_pages'))).toBe(false)

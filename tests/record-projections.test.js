@@ -6,7 +6,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recordProjections, routeOnDisk } from '../src/site/record-projections.js'
+import { compiledData, recordProjections, routeOnDisk } from '../src/site/record-projections.js'
 
 const roots = []
 afterEach(() => {
@@ -33,7 +33,7 @@ function talksSite(records, { whole = {} } = {}) {
 }
 
 describe('recordProjections', () => {
-  test('⭐ each record is a page: a search entry, and a markdown page at its own route', () => {
+  test('⭐ each record is a page: a search entry, and a markdown page at its own route', async () => {
     const { content, dataRoot } = talksSite(
       [
         { $name: 'getting-started', title: 'Getting Started', abstract: 'An introduction.' },
@@ -41,7 +41,7 @@ describe('recordProjections', () => {
       ],
       { whole: { 'getting-started': { $name: 'getting-started', title: 'Getting Started', body: 'The whole talk.' } } }
     )
-    const { indexes, entries, pages } = recordProjections(content, { dataRoot, locale: 'en' })
+    const { indexes, entries, pages } = await recordProjections(content, { read: compiledData(dataRoot), locale: 'en' })
 
     expect(indexes).toHaveLength(1)
     expect(entries.map((entry) => [entry.type, entry.route, entry.title])).toEqual([
@@ -54,14 +54,24 @@ describe('recordProjections', () => {
     expect(pages[1].markdown).toContain('The details, in depth.')
   })
 
-  test('a query with no compiled file has no record pages to list — a host’s records are its own', () => {
+  test('a query with no compiled file has no record pages to list — a host’s records are its own', async () => {
     const { content, dataRoot } = talksSite([{ $name: 'a', title: 'A' }])
     content.pages[0].fetch = { query: 'talks', as: 'talks' }
-    expect(recordProjections(content, { dataRoot })).toEqual({ indexes: [], entries: [], pages: [] })
+    expect(await recordProjections(content, { read: compiledData(dataRoot) })).toEqual({ indexes: [], entries: [], pages: [] })
   })
 
-  test('a site with no parametric page has none', () => {
-    expect(recordProjections({ config: {}, pages: [{ route: '/', sections: [] }] }, { dataRoot: tmpdir() }).pages).toEqual([])
+  test('a site with no parametric page has none', async () => {
+    const content = { config: {}, pages: [{ route: '/', sections: [] }] }
+    expect((await recordProjections(content, { read: compiledData(tmpdir()) })).pages).toEqual([])
+  })
+
+  test('a language’s records are read as its caller reads them — an index in that language', async () => {
+    const { content } = talksSite([])
+    content.config.activeLocale = 'fr'
+    const files = { '/data/talks.json': [{ $name: 'premiers-pas', title: 'Premiers pas' }] }
+    const { indexes, pages } = await recordProjections(content, { read: async (path) => files[path] ?? null })
+    expect(indexes[0].locale).toBe('fr')
+    expect(pages.map((page) => page.route)).toEqual(['/talks/premiers-pas'])
   })
 })
 

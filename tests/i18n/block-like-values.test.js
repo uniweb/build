@@ -78,7 +78,7 @@ describe('a numbered heading, translated', () => {
     const root = site()
     await quiet(async () => {
       await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null })
-      await buildLocalizedContent(root, { locales: ['fr'], localesDir: 'locales', generateSearchIndexes: false })
+      await buildLocalizedContent(root, { locales: ['fr'], localesDir: 'locales' })
     })
     const sectionOf = (file) => JSON.parse(readFileSync(join(root, file), 'utf8')).pages.find((p) => p.route === '/').sections[0]
     expect(heading(sectionOf('dist/fr/site-content.json').content).content).toEqual([text('1. Informations que nous collectons')])

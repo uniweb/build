@@ -26,8 +26,8 @@ import {
   RECORD_LOCALES_DIR
 } from './records.js'
 import { resolveDefaultLocale } from '@uniweb/core'
-import { generateSearchIndex } from '@uniweb/projections'
-import { searchDeclaredOn } from '../site/search-declared.js'
+import { compiledData, recordProjections } from '../site/record-projections.js'
+import { projectionFiles } from '../site/projections.js'
 
 // Free-form translation support
 import {
@@ -347,20 +347,88 @@ function declaredLanguages(config, defaultLocale, locales) {
 }
 
 /**
+ * ⭐ EVERY LANGUAGE OF A SITE BUT ITS DEFAULT, IN THE ORDER ITS FILES NEED: its records, then its
+ * content, then — when `projections` asks — its search index, `llms.txt` and `.md` files, which are
+ * made from both (`../site/projections.js`). The default language's are the bundle's
+ * (`site/plugin.js`); this builds the rest.
+ *
+ * ⛔ Until 2026-10-25 a build ran content, then records — in two places, one per lane — and a
+ * language's search index was written inside the content step, from its pages alone, before its
+ * records were translated. So the French index of a site listed none of its record pages while the
+ * default one listed all of them, and no language but the default got an `llms.txt` or a `.md`
+ * (measured on a starter in three languages: 17 search entries against 20, and no `fr/llms.txt`).
+ *
+ * @param {string} siteRoot - Site root directory
+ * @param {Object} options
+ * @param {string[]} options.locales - the languages to build; the default is skipped
+ *   (`buildLocalizedContent`)
+ * @param {string} [options.localesDir='locales'] - where the translations are, from `siteRoot`
+ * @param {string} [options.outputDir] - the built site, `<siteRoot>/dist` by default
+ * @param {boolean} [options.projections=false] - write each language's projections. The bundle
+ *   lane's: a static host serves them. The link lane builds for a host, which derives its own.
+ * @returns {Promise<{ content: Object, records: Object, projections: Object }>} what each step
+ *   wrote, by language — `projections[locale]` the files (`projectionFiles`), each `fileName`
+ *   from `outputDir`
+ */
+export async function buildLocalizedSite(siteRoot, options = {}) {
+  const { localesDir = DEFAULTS.localesDir, outputDir = join(siteRoot, 'dist'), projections = false } = options
+
+  // The default language is the root tree, never a subdirectory — by the default the content step
+  // reads (`buildLocalizedContent`), so the records step writes no `dist/<default>/data/` either.
+  const source = JSON.parse(await readFile(join(outputDir, 'site-content.json'), 'utf-8'))
+  const defaultLocale = resolveDefaultLocale(source.config)
+  const locales = (options.locales || []).filter((locale) => locale !== defaultLocale)
+
+  // Records first: a language's projections list its record pages, and translating them reads
+  // the site's own files alone — never a translated page.
+  const records = await buildLocalizedRecords(siteRoot, {
+    locales,
+    outputDir,
+    recordLocalesDir: join(siteRoot, localesDir, RECORD_LOCALES_DIR),
+    localesDir: join(siteRoot, localesDir)
+  })
+  const content = await buildLocalizedContent(siteRoot, { localesDir, locales, outputDir, fallbackToSource: true })
+
+  const written = {}
+  if (projections) {
+    for (const [locale, { content: contentPath }] of Object.entries(content)) {
+      const translated = JSON.parse(await readFile(contentPath, 'utf-8'))
+      // The language's own records, where `buildLocalizedRecords` wrote them: `dist/<locale>/data/`.
+      const pages = await recordProjections(translated, { read: compiledData(join(outputDir, locale)), locale })
+      const files = projectionFiles(translated, pages)
+      for (const { fileName, source } of files) {
+        const target = join(outputDir, fileName)
+        await mkdir(dirname(target), { recursive: true })
+        await writeFile(target, source)
+      }
+      written[locale] = files
+    }
+  }
+
+  return { content, records, projections: written }
+}
+
+/**
  * Build translated site content for all locales
  * @param {string} siteRoot - Site root directory
  * @param {Object} options - Options
- * @param {boolean} [options.generateSearchIndexes=true] - Generate search indexes for each locale
  * @param {boolean} [options.freeformEnabled=true] - Enable free-form translation support
  * @returns {Object} Map of locale to output paths
  */
 export async function buildLocalizedContent(siteRoot, options = {}) {
+  // ⛔ It wrote each language's search index until 2026-10-25, from its pages alone and before its
+  // records were translated. A language's projections are `buildLocalizedSite`'s now.
+  if ('generateSearchIndexes' in options) {
+    throw new Error(
+      'buildLocalizedContent writes no search index: a language\'s search index, llms.txt and .md files are ' +
+        "written by buildLocalizedSite (`projections: true`), after the language's records are translated."
+    )
+  }
   const {
     localesDir = DEFAULTS.localesDir,
     locales = [],
     outputDir = join(siteRoot, 'dist'),
     fallbackToSource = true,
-    generateSearchIndexes = true,
     freeformEnabled = true
   } = options
 
@@ -456,20 +524,6 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
     await writeFile(contentOutputPath, JSON.stringify(translated, null, 2))
 
     outputs[locale] = { content: contentOutputPath }
-
-    // Generate search index for this locale if search is enabled
-    if (generateSearchIndexes && searchDeclaredOn(translated)) {
-      const searchConfig = translated.config?.search || {}
-      const searchIndex = generateSearchIndex(translated, {
-        locale,
-        search: searchConfig
-      })
-
-      const searchOutputPath = join(localeOutputDir, 'search-index.json')
-      await writeFile(searchOutputPath, JSON.stringify(searchIndex, null, 2))
-
-      outputs[locale].searchIndex = searchOutputPath
-    }
   }
 
   return outputs

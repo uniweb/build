@@ -50,7 +50,6 @@ describe('declared locale set on the built payload', () => {
     await buildLocalizedContent(ROOT, {
       locales: ['fr', 'es'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(await languagesOf(join(DIST, 'fr', 'site-content.json'))).toEqual(['en', 'fr', 'es'])
@@ -60,7 +59,6 @@ describe('declared locale set on the built payload', () => {
     await buildLocalizedContent(ROOT, {
       locales: ['fr', 'es'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(await languagesOf(join(DIST, 'site-content.json'))).toEqual(['en', 'fr', 'es'])
@@ -70,7 +68,6 @@ describe('declared locale set on the built payload', () => {
     await buildLocalizedContent(ROOT, {
       locales: ['fr'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(await languagesOf(join(DIST, 'fr', 'site-content.json'))).toContain('en')
@@ -86,7 +83,6 @@ describe('an authored languages list', () => {
     await buildLocalizedContent(ROOT, {
       locales: ['fr', 'es'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(await languagesOf(join(DIST, 'fr', 'site-content.json'))).toEqual([
@@ -103,7 +99,6 @@ describe('an authored languages list', () => {
     await buildLocalizedContent(ROOT, {
       locales: ['fr'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(await languagesOf(join(DIST, 'fr', 'site-content.json'))).toEqual(['en', 'fr'])
@@ -119,7 +114,6 @@ describe('the default locale is the root tree', () => {
     const outputs = await buildLocalizedContent(ROOT, {
       locales: ['en', 'fr'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(Object.keys(outputs)).toEqual(['fr'])
@@ -134,7 +128,6 @@ describe('the default locale is the root tree', () => {
     await buildLocalizedContent(ROOT, {
       locales: ['en', 'fr'],
       outputDir: DIST,
-      generateSearchIndexes: false,
       freeformEnabled: false
     })
     expect(await languagesOf(join(DIST, 'fr', 'site-content.json'))).toEqual(['en', 'fr'])

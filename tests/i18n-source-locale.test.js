@@ -76,7 +76,7 @@ async function rendered(siteRoot) {
   const locales = resolveLocaleList(config.languages, join(root, 'locales'))
   await quiet(async () => {
     await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null })
-    if (locales.length) await buildLocalizedContent(root, { locales, localesDir: 'locales', generateSearchIndexes: false })
+    if (locales.length) await buildLocalizedContent(root, { locales, localesDir: 'locales' })
   })
   const own = siteSourceLocale(root)
   const out = { [own]: summary(join(root, 'dist', 'site-content.json')) }

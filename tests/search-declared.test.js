@@ -20,6 +20,8 @@
 
 import { describe, test, expect } from 'vitest'
 import { searchDeclaredOn } from '../src/site/search-declared.js'
+import { siteContentPlugin } from '../src/site/plugin.js'
+import { defineSiteConfig } from '../src/site/config.js'
 
 const site = (search) => ({ config: search === undefined ? {} : { search } })
 
@@ -54,5 +56,18 @@ describe('searchDeclaredOn — the author tier only', () => {
     // needs.
     const withHostDecline = { config: { search: true, services: { tracking: '/_e' } } }
     expect(searchDeclaredOn(withHostDecline)).toBe(true)
+  })
+})
+
+describe('⛔ the search option of a site\'s Vite config — retired 2026-10-25', () => {
+  // It reached the default language's index alone, and a site's vite.config.js is scaffolding:
+  // `site.yml` decides, for every language. Refused where a site could still pass it.
+  test('siteContentPlugin refuses it, and says what decides instead', () => {
+    expect(() => siteContentPlugin({ search: { enabled: false } })).toThrow(/`services\.search` in site\.yml/)
+    expect(() => siteContentPlugin({})).not.toThrow()
+  })
+
+  test('defineSiteConfig refuses it before it reads anything', async () => {
+    await expect(defineSiteConfig({ search: {} })).rejects.toThrow(/defineSiteConfig: the `search` option is retired/)
   })
 })

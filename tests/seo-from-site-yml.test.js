@@ -108,9 +108,10 @@ describe('refuseUnreadableAddress', () => {
  * End-to-end on the LINK lane, which has a harness the bundle lane does not.
  *
  * ⚖️ The link lane builds a site's content for a host that serves it — and that host states its own
- * address — so its agent index stays root-relative whatever `seo.origin` says: a static host's
- * origin there would send an agent to another copy of the site. It does NOT run Vite, so the bundle
- * lane's stamped `config.url` is asserted at the unit level above and on a built site elsewhere.
+ * address — so its payload states none whatever `seo.origin` says: a static host's origin there would
+ * send a canonical to another copy of the site. It writes no agent index either: the host derives its
+ * own (until 2026-10-25 this asserted one, root-relative). It does NOT run Vite, so the bundle lane's
+ * stamped `config.url` is asserted at the unit level above and on a built site elsewhere.
  */
 
 import { buildSiteData } from '../src/site/build-site-data.js'
@@ -134,13 +135,13 @@ describe('site.yml::seo on the link lane', () => {
     if (siteRoot && existsSync(siteRoot)) rmSync(siteRoot, { recursive: true, force: true })
   })
 
-  test('the agent index links root-relative — the host that serves the site states its address', async () => {
+  test('the payload states no address — the host that serves the site states its own', async () => {
     scaffold('seo:\n  origin: https://docs.example.com\n')
     await buildSiteData({ siteRoot, distDir })
-    const index = readFileSync(join(distDir, 'llms.txt'), 'utf8')
-    expect(index).not.toContain('https://docs.example.com')
-    // `index: about` makes it the home page, whose projection is /index.md.
-    expect(index).toContain('](/index.md)')
+    const content = JSON.parse(readFileSync(join(distDir, 'site-content.json'), 'utf8'))
+    expect(content.config.url).toBeUndefined()
+    // Nor an agent index on it: the host derives its own.
+    expect(existsSync(join(distDir, 'llms.txt'))).toBe(false)
   })
 
   test('⛔ a retired seo.baseUrl stops the build, saying what replaced it', async () => {

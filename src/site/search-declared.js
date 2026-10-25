@@ -32,3 +32,21 @@ export function searchDeclaredOn(siteContent) {
   if (typeof search === 'boolean') return search
   return search?.enabled !== false
 }
+
+/**
+ * ⛔ A site's Vite config no longer says whether the site has search — retired 2026-10-25. Its
+ * `search` option reached the default language's index alone: every other language's is written
+ * after the bundle, where no Vite config is read (`i18n/index.js::buildLocalizedSite`). And a site's
+ * `vite.config.js` is scaffolding, so nothing a site gets may depend on it. `site.yml` decides, for
+ * every language (`searchDeclaredOn`).
+ *
+ * @param {Object} options - what `defineSiteConfig` or `siteContentPlugin` was given
+ * @param {string} where - which of them
+ */
+export function refuseSearchOption(options, where) {
+  if (options?.search === undefined) return
+  throw new Error(
+    `${where}: the \`search\` option is retired. Whether a site has search is \`services.search\` in site.yml, ` +
+      'for every language. Remove `search` from vite.config.js.'
+  )
+}

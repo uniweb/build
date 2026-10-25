@@ -30,18 +30,7 @@ import { resolve, join, relative, sep } from 'node:path'
 import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { resolveDefaultLocale, resolveFetchConfigs, DATA_DIR } from '@uniweb/core'
-import {
-  renderSiteIndex,
-  renderPageMarkdown,
-  resolveAgentsConfig,
-  selectIndexablePages,
-  selectIndexBranches,
-  pageMarkdownFilename,
-  branchIndexFilename,
-  applyRouteTranslation,
-  partitionKnowledgePages,
-  INDEX_FILENAME
-} from '@uniweb/projections'
+import { partitionKnowledgePages, INDEX_FILENAME } from '@uniweb/projections'
 import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
@@ -266,19 +255,12 @@ async function processDevSectionFetches(sections, fetchOptions, resolve) {
     }
   }
 }
-import { generateSearchIndex, getSearchIndexFilename, mergeSearchIndexes } from '@uniweb/projections'
-import { recordProjections, routeOnDisk } from './record-projections.js'
+import { compiledData, recordProjections, routeOnDisk } from './record-projections.js'
+import { agentFiles, describeProjections, projectionFiles, searchFiles } from './projections.js'
 import { mergeTranslations } from '../i18n/merge.js'
 import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
-import { searchDeclaredOn } from './search-declared.js'
+import { refuseSearchOption } from './search-declared.js'
 import { mountDevApi } from '../dev/api-mount.js'
-
-/*
- * `applyRouteTranslation` now comes from `@uniweb/projections` (imported
- * above). It used to be defined here; the agent index builds localized URLs
- * from the same rule, and two copies would eventually disagree about where a
- * localized page lives.
- */
 
 /**
  * Create the site content plugin
@@ -303,11 +285,10 @@ import { mountDevApi } from '../dev/api-mount.js'
  * @param {string} [options.assets.outputDir='assets'] - Output subdirectory for processed assets
  * @param {boolean} [options.assets.videoPosters=true] - Extract poster frames from videos (requires ffmpeg)
  * @param {boolean} [options.assets.pdfThumbnails=true] - Generate thumbnails for PDFs (requires pdf-lib)
- * @param {Object} [options.search] - Search index configuration
- * @param {boolean} [options.search.enabled=true] - Generate search index (uses site.yml config by default)
  * @param {string} [options.foundationPath] - Path to foundation directory (for loading theme vars)
  */
 export function siteContentPlugin(options = {}) {
+  refuseSearchOption(options, 'siteContentPlugin')
   const {
     sitePath = './',
     pagesDir = 'pages',
@@ -317,7 +298,6 @@ export function siteContentPlugin(options = {}) {
     watch: shouldWatch = true,
     seo = {},
     assets: assetsConfig = {},
-    search: searchPluginConfig = {},
     foundationPath
   } = options
 
@@ -559,112 +539,64 @@ export function siteContentPlugin(options = {}) {
   }
 
   /**
-   * Options shared by every projection call, so the dev middleware and the
-   * build emit cannot drift apart in how they build URLs.
+   * The site's content in `locale`, as a page in that language gets it — or null when the site has
+   * no translation for it (`getTranslatedContent`).
    */
-  function projectionOptions(content) {
-    const defaultLocale = resolveDefaultLocale(content.config)
-    return {
-      // Absolute on the site's address when it is known, else from the base (`buildPageUrl`).
-      address: content.config?.url || null,
-      basePath,
-      locale: content.config?.activeLocale || defaultLocale,
-      defaultLocale
-    }
+  async function languageContent(locale) {
+    const translated = await getTranslatedContent(locale)
+    return translated && { ...translated, config: { ...translated.config, activeLocale: locale } }
   }
 
   /**
-   * Emit `llms.txt` and the per-page `.md` projections.
-   *
-   * Called with the Rollup plugin context, so `this.emitFile` is available.
-   * Sits beside the sitemap and search-index emits because it is the same kind
-   * of thing: an artifact derived from the site's content alone.
-   *
-   * Unlike the sitemap, this does NOT skip when the site's address is unknown
-   * — it falls back to root-relative links and `uniweb doctor` warns.
-   * An agent that arrived via the index can still follow a relative link, and
-   * a silently-absent index is the failure mode the whole feature exists to
-   * prevent.
-   *
-   * @param {Object} content - Final site content for this locale
-   * @param {Object} [records] - its record pages (`recordProjections`), listed and written as pages
+   * A compiled data file in `locale` — a query's list (`articles.json`) or a record's own file
+   * (`articles/<$name>.json`), by its path under `data/` — translated as the localized build
+   * translates it (`buildLocalizedRecords`), by the same helpers (`translateRecordData`). Null when
+   * the site compiled no such file.
    */
-  function emitProjections(content, records = recordProjections(content, { dataRoot: resolvedPublicDir })) {
-    const agents = resolveAgentsConfig(content?.config)
-    if (!agents.index && !agents.markdown) return
-    if (!content?.pages?.length) return
+  async function localizedDataFile(locale, filename) {
+    const sourcePath = join(resolvedSitePath, 'public', DATA_DIR, filename)
+    if (!existsSync(sourcePath)) return null
+    const items = JSON.parse(await readFile(sourcePath, 'utf-8'))
+    const record = filename.includes('/') && items && typeof items === 'object' && !Array.isArray(items)
+    if (!Array.isArray(items) && !record) return items
+    const queryName = record ? filename.slice(0, filename.lastIndexOf('/')) : filename.replace(/\.json$/, '')
+    const { translateRecordData } = await import('../i18n/records.js')
+    return translateRecordData(items, queryName, resolvedSitePath, {
+      locale,
+      localesDir: join(resolvedSitePath, localesDir),
+      translations: (await loadRecordTranslations(locale)) || {},
+      freeformEnabled: existsSync(join(resolvedSitePath, localesDir, 'freeform', locale))
+    })
+  }
 
-    const options = projectionOptions(content)
-    const localeDir =
-      options.locale && options.defaultLocale && options.locale !== options.defaultLocale
-        ? `${options.locale}/`
-        : ''
-
-    if (agents.index) {
-      this.emitFile({
-        type: 'asset',
-        fileName: `${localeDir}${INDEX_FILENAME}`,
-        source: renderSiteIndex(content, { ...options, exclude: agents.exclude, records: records.entries })
-      })
-      console.log(`[site-content] Generated ${localeDir}${INDEX_FILENAME}`)
-
-      // Branch indexes are ADDITIVE — the root index above still enumerates
-      // every page, because the two-hop criterion depends on it. These are a
-      // scoped entry point for an agent already inside a branch.
-      if (agents.branchIndexes) {
-        const branches = selectIndexBranches(content.pages, {
-          exclude: agents.exclude,
-          minPages: agents.branchMinPages
-        })
-        for (const branch of branches) {
-          this.emitFile({
-            type: 'asset',
-            fileName: `${localeDir}${branchIndexFilename(branch.route)}`,
-            source: renderSiteIndex(content, {
-              ...options,
-              exclude: agents.exclude,
-              records: records.entries,
-              branch: branch.route
-            })
-          })
-        }
-        if (branches.length) {
-          const names = branches.map(b => `${b.route} (${b.count})`).join(', ')
-          console.log(`[site-content] Generated ${branches.length} branch index(es): ${names}`)
-        }
-      }
-    }
-
-    if (agents.markdown) {
-      const pages = selectIndexablePages(content.pages, { exclude: agents.exclude })
-      let emitted = 0
-      for (const page of pages) {
-        const markdown = renderPageMarkdown(page)
-        if (!markdown) continue
-        const route =
-          options.locale !== options.defaultLocale
-            ? applyRouteTranslation(page.route, options.locale, content.config?.i18n?.routeTranslations)
-            : page.route
-        this.emitFile({
-          type: 'asset',
-          fileName: `${localeDir}${pageMarkdownFilename(route)}`,
-          source: markdown
-        })
-        emitted++
-      }
-      // Each record's page, under the exclusions a page is held to.
-      const listed = new Set(selectIndexablePages(records.pages, { exclude: agents.exclude }).map((page) => page.route))
-      for (const { route, markdown } of records.pages) {
-        if (!listed.has(route)) continue
-        this.emitFile({
-          type: 'asset',
-          fileName: `${localeDir}${pageMarkdownFilename(routeOnDisk(route))}`,
-          source: markdown
-        })
-        emitted++
-      }
-      if (emitted) console.log(`[site-content] Generated ${emitted} page markdown projections`)
-    }
+  /**
+   * The projection a dev request names — the search index, an agent index, a page's markdown — made
+   * as the build makes it: by the same function, from the same language's content and records
+   * (`./projections.js`). A request under a language's prefix is that language's when the site has
+   * content in it; any other is the default language's. Null when the build writes no such file.
+   *
+   * @param {string} url - the request's path
+   * @returns {Promise<{ source: string, type: string }|null>}
+   */
+  async function devProjection(url) {
+    const search = url.endsWith('/search-index.json')
+    const markdown = url.endsWith('.md')
+    if (!search && !markdown && !url.endsWith(`/${INDEX_FILENAME}`)) return null
+    if (!siteContent) return null
+    // A static host decodes a request's path before it looks for the file.
+    const fileName = routeOnDisk(url).replace(/^\/+/, '')
+    const locale = fileName.match(new RegExp(`^(${LOCALE_RE})/`))?.[1]
+    const localized = locale ? await languageContent(locale) : null
+    const content = localized || siteContent
+    // A language's records, translated as its build translates them; the default's, as compiled.
+    const read = localized
+      ? (path) => (path.startsWith(`/${DATA_DIR}/`) ? localizedDataFile(locale, path.slice(DATA_DIR.length + 2)) : null)
+      : compiledData(resolvedPublicDir)
+    const records = await recordProjections(content, { read })
+    const file = (search ? searchFiles(content, records) : agentFiles(content, records)).find((f) => f.fileName === fileName)
+    if (!file) return null
+    const type = search ? 'application/json' : markdown ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8'
+    return { source: file.source, type }
   }
 
   return {
@@ -1079,106 +1011,19 @@ export function siteContentPlugin(options = {}) {
         // ⛔ No sitemap.xml or robots.txt here: the prerender writes them from the pages it
         // renders (`./seo-files.js`), and a dev server renders none ahead of a visit.
 
-        // Serve search-index.json in dev mode, under a language's prefix too.
-        // ⚠️ Made from the default language's content whatever the prefix, and with no records for
-        // another language: the build's `/fr/search-index.json` is in French, this one is not
-        // (measured 2026-10-25).
-        const searchIndexMatch = req.url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/search-index\\.json$`))
-        if (searchIndexMatch && siteContent) {
-          const searchEnabled = searchPluginConfig.enabled !== false && searchDeclaredOn(siteContent)
-          if (searchEnabled) {
-            const searchConfig = siteContent.config?.search || {}
-            const defaultLocale = resolveDefaultLocale(siteContent.config)
-            // Use requested locale from URL, fall back to active or default
-            const requestedLocale = searchIndexMatch[1]
-            const activeLocale = requestedLocale || siteContent.config?.activeLocale || defaultLocale
-
-            const pagesIndex = generateSearchIndex(siteContent, {
-              locale: activeLocale,
-              search: searchConfig
-            })
-            // The record pages, as the build lists them — the default locale's, whose records these are.
-            const searchIndex = activeLocale === defaultLocale
-              ? mergeSearchIndexes(pagesIndex, recordProjections(siteContent, { dataRoot: resolvedPublicDir, locale: activeLocale }).indexes)
-              : pagesIndex
-
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify(searchIndex, null, 2))
-            return
-          }
-        }
-
-        // Serve the agent projections in dev mode.
-        //
-        // Without this the artifacts can only be inspected by deploying, and
-        // `uniweb doctor`'s address warning describes something invisible
-        // locally. Both routes reuse the build's generators, so what a
-        // developer sees here is what ships — for the default language.
-        // ⚠️ Not for another one (measured 2026-10-25): the build writes it no `llms.txt` or `.md`,
-        // and the `.md` route below finds a page by its source route, so the translated links this
-        // `llms.txt` gives (`/fr/a-propos.md`) are answered with the page shell.
-        if (siteContent) {
-          const agents = resolveAgentsConfig(siteContent.config)
-          const url = req.url.split('?')[0]
-
-          // `/llms.txt`, `/fr/llms.txt`, and the branch form `/docs/llms.txt`.
-          // The optional middle group is the branch route; an empty one is the
-          // site index, so a single pattern serves both rather than two that
-          // could drift.
-          const indexMatch = url.match(
-            new RegExp(`^(?:\\/(${LOCALE_RE}))?((?:\\/[^/]+)*)\\/${INDEX_FILENAME}$`)
-          )
-          if (indexMatch && agents.index) {
-            const localized = (indexMatch[1] ? await getTranslatedContent(indexMatch[1]) : null) || siteContent
-            const branch = indexMatch[2] || null
-
-            // Serve a branch index only where the build would emit one, or dev
-            // and the built output disagree about which URLs exist.
-            const served =
-              !branch ||
-              (agents.branchIndexes &&
-                selectIndexBranches(localized.pages, {
-                  exclude: agents.exclude,
-                  minPages: agents.branchMinPages
-                }).some(b => b.route === branch))
-
-            if (served) {
-              // The record pages, as the build lists them — the default locale's, whose records these are.
-              const records = localized === siteContent
-                ? recordProjections(siteContent, { dataRoot: resolvedPublicDir }).entries
-                : undefined
-              res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-              res.end(
-                renderSiteIndex(localized, {
-                  ...projectionOptions(localized),
-                  locale: indexMatch[1] || projectionOptions(localized).locale,
-                  exclude: agents.exclude,
-                  records,
-                  branch
-                })
-              )
-              return
-            }
-          }
-
-          const markdownMatch = url.match(new RegExp(`^(?:\\/(${LOCALE_RE}))?\\/(.+)\\.md$`))
-          if (markdownMatch && agents.markdown) {
-            const localized = (markdownMatch[1] ? await getTranslatedContent(markdownMatch[1]) : null) || siteContent
-            const requested = markdownMatch[2] === 'index' ? '/' : `/${markdownMatch[2]}`
-            const pages = selectIndexablePages(localized.pages, { exclude: agents.exclude })
-            const page = pages.find(p => p.route === requested)
-            const markdown = page
-              ? renderPageMarkdown(page)
-              : localized === siteContent
-                ? selectIndexablePages(recordProjections(siteContent, { dataRoot: resolvedPublicDir }).pages, { exclude: agents.exclude })
-                  .find((record) => routeOnDisk(record.route) === routeOnDisk(requested))?.markdown
-                : null
-            if (markdown) {
-              res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-              res.end(markdown)
-              return
-            }
-          }
+        // The projections — the search index, `llms.txt` (and a branch's), each page as markdown —
+        // in every language: the file the build writes at this path, made by the same function from
+        // the same language's content and records (`devProjection`), so what a developer sees here
+        // is what ships. Without it they could be inspected only by deploying, and `uniweb doctor`'s
+        // address warning would describe something invisible locally. ⛔ Until 2026-10-25 dev made
+        // another language's search index from the default language's content, and found its `.md`
+        // by the source route, so the translated links its `llms.txt` gave answered with the page
+        // shell.
+        const projection = await devProjection(req.url.split('?')[0])
+        if (projection) {
+          res.setHeader('Content-Type', projection.type)
+          res.end(projection.source)
+          return
         }
 
         // Handle localized collection data (e.g., /fr/data/articles.json), and a
@@ -1186,45 +1031,16 @@ export function siteContentPlugin(options = {}) {
         // each, translated the same way.
         const localeDataMatch = req.url.match(new RegExp(`^\\/(${LOCALE_RE})\\/${DATA_DIR}\\/(.+\\.json)$`))
         if (localeDataMatch) {
-          const locale = localeDataMatch[1]
-          const filename = localeDataMatch[2]
-          const sourcePath = join(resolvedSitePath, 'public', DATA_DIR, filename)
-
-          if (existsSync(sourcePath)) {
-            try {
-              const raw = await readFile(sourcePath, 'utf-8')
-              const items = JSON.parse(raw)
-              const record = filename.includes('/') && items && typeof items === 'object' && !Array.isArray(items)
-              if (!Array.isArray(items) && !record) {
-                res.setHeader('Content-Type', 'application/json')
-                res.end(raw)
-                return
-              }
-              const queryName = record ? filename.slice(0, filename.lastIndexOf('/')) : filename.replace(/\.json$/, '')
-
-              // Load collection translations for this locale
-              const translations = await loadRecordTranslations(locale) || {}
-
-              // Check for free-form translations
-              const freeformDir = join(resolvedSitePath, localesDir, 'freeform', locale)
-              const hasFreeform = existsSync(freeformDir)
-
-              // Translate using the collections module
-              const { translateRecordData } = await import('../i18n/records.js')
-              const translated = await translateRecordData(items, queryName, resolvedSitePath, {
-                locale,
-                localesDir: join(resolvedSitePath, localesDir),
-                translations,
-                freeformEnabled: hasFreeform
-              })
-
+          try {
+            const translated = await localizedDataFile(localeDataMatch[1], localeDataMatch[2])
+            if (translated !== null) {
               res.setHeader('Content-Type', 'application/json')
               res.end(JSON.stringify(translated, null, 2))
               return
-            } catch (err) {
-              console.warn(`[site-content] Failed to serve localized records ${filename}: ${err.message}`)
-              // Fall through to Vite's static server
             }
+          } catch (err) {
+            console.warn(`[site-content] Failed to serve localized records ${localeDataMatch[2]}: ${err.message}`)
+            // Fall through to Vite's static server
           }
         }
 
@@ -1451,40 +1267,14 @@ export function siteContentPlugin(options = {}) {
       // sitemap.xml and robots.txt are the prerender's: it writes them from the pages it wrote,
       // record pages included (`./seo-files.js`).
 
-      // The site's record pages — each record of a parametric page — for its search index and its
-      // agent projections, as a host makes them (`./record-projections.js`).
-      const records = recordProjections(finalContent, {
-        dataRoot: resolvedPublicDir,
-        locale: finalContent.config?.activeLocale || resolveDefaultLocale(finalContent.config)
-      })
-
-      // Generate search index if enabled
-      const searchEnabled = searchPluginConfig.enabled !== false && searchDeclaredOn(finalContent)
-      if (searchEnabled) {
-        const searchConfig = finalContent.config?.search || {}
-        const defaultLocale = resolveDefaultLocale(finalContent.config)
-        const activeLocale = finalContent.config?.activeLocale || defaultLocale
-
-        // Generate search index for current locale — its pages, and its records' pages
-        const searchIndex = mergeSearchIndexes(
-          generateSearchIndex(finalContent, { locale: activeLocale, search: searchConfig }),
-          records.indexes
-        )
-
-        const searchFilename = getSearchIndexFilename(activeLocale, defaultLocale)
-        this.emitFile({
-          type: 'asset',
-          fileName: searchFilename,
-          source: JSON.stringify(searchIndex, null, 2)
-        })
-
-        console.log(`[site-content] Generated ${searchFilename} (${searchIndex.count} entries)`)
-      }
-
-      // Agent-readable projections: the index (discovery) and per-page
-      // markdown (retrieval). Free and on by default; a site opts out under
-      // `agents:` in site.yml.
-      emitProjections.call(this, finalContent, records)
+      // The default language's projections — its search index, its agent index and its pages as
+      // markdown, each record of a parametric page among them — by the rule every language's are
+      // made by (`./projections.js`). Each other language's are written after the bundle, once its
+      // records are translated (`i18n/index.js::buildLocalizedSite`).
+      const records = await recordProjections(finalContent, { read: compiledData(resolvedPublicDir) })
+      const projected = projectionFiles(finalContent, records)
+      for (const { fileName, source } of projected) this.emitFile({ type: 'asset', fileName, source })
+      for (const line of describeProjections(projected)) console.log(`[site-content] ${line}`)
 
       // A site-relative extension (`/effects/entry.js`) is served from the
       // site's OWN origin, so the site's build is what has to put it there.

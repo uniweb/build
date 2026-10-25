@@ -15,32 +15,22 @@
  * This function is the shared data-emission core used by the link-mode
  * pipeline. The vite plugin keeps its own emission for the bundle-mode
  * path (where the static-host extras — sitemap, robots, search-index,
- * `_pages/*` for split content — are actually consumed). Both paths use
+ * `llms.txt` and the `.md` projections, `_pages/*` for split content — are
+ * actually consumed). Both paths use
  * the same underlying building blocks (`collectSiteContent`,
  * `processQueries`, etc.), so behavior stays consistent without forcing
  * one path through the other's lifecycle. Media processing — WebP copies,
  * video posters, PDF thumbnails — is the bundle path's alone (below).
  */
 
-import { recordProjections, routeOnDisk } from './record-projections.js'
-import { writeFile, readFile, mkdir, cp } from 'node:fs/promises'
+import { writeFile, mkdir, cp } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, resolve, dirname } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
 import { resolveRecordsDir } from './entity-pool.js'
-import {
-  renderSiteIndex,
-  renderPageMarkdown,
-  resolveAgentsConfig,
-  selectIndexablePages,
-  selectIndexBranches,
-  pageMarkdownFilename,
-  branchIndexFilename,
-  INDEX_FILENAME
-} from '@uniweb/projections'
 
 /**
  * Build the site data for `uniweb build --link`, which `uniweb publish` runs.
@@ -98,6 +88,8 @@ import {
  *     described an emission its own step 5 had already removed, in the
  *     paragraph a reader consults BEFORE the code, and it was read as
  *     evidence by a downstream consumer.
+ *   - `llms.txt`, a branch's, or any page's `.md`, in any language — see step 6.
+ *     A host that serves the site derives its own from the content.
  *
  * @param {Object} params
  * @param {string} params.siteRoot - Absolute path to the site directory.
@@ -232,83 +224,11 @@ export async function buildSiteData({
   //    That is what GitHub Pages and every other static target serve, and the
   //    framework has more targets than one backend.
 
-  // 6. Agent projections — `llms.txt` and one `.md` per page.
-  //
-  //    Emitted here as well as in the vite plugin because both lanes publish
-  //    a site, and an artifact derived from site content has to exist
-  //    whichever lane produced it. A projection present after one publish and
-  //    absent after another is worse than none: agents are told to rely on it.
-  //
-  //    Ungated by `features:` — projections are free, so they carry no
-  //    billing intent and no entitlement to check downstream.
-  await writeProjections(finalContent, resolvedDistDir, join(resolvedSiteRoot, 'public'))
+  // 6. (removed 2026-10-25) This lane wrote `llms.txt` and a `.md` per page, for the default
+  //    language only, on the ground that both lanes publish a site. Nothing read them: `publish`
+  //    reads the schema-less query files and the languages, and a host that serves the site
+  //    derives its projections from the content, as it derives its search. The static host’s are
+  //    the bundle lane’s, in every language (`./projections.js`).
 
   return { siteContent: finalContent, distDir: resolvedDistDir }
-}
-
-/**
- * Write the agent projections into `distDir`.
- *
- * Mirrors the vite plugin's `emitProjections`, differing only in how bytes
- * reach disk (`writeFile` vs. Rollup's `emitFile`) — the generators, options
- * and filenames come from `@uniweb/projections`, so the two lanes cannot
- * disagree about what they produce.
- *
- * @param {Object} siteContent - Final site content for the default locale
- * @param {string} distDir - Resolved output directory
- * @param {string} dataRoot - where the compiled `/data/…` files are, for the record pages
- * @returns {Promise<void>}
- */
-async function writeProjections(siteContent, distDir, dataRoot) {
-  const agents = resolveAgentsConfig(siteContent?.config)
-  if (!agents.index && !agents.markdown) return
-  if (!siteContent?.pages?.length) return
-
-  const defaultLocale = resolveDefaultLocale(siteContent.config)
-  // ⭐ No address is assumed here: this lane builds for a host that serves the site, and states where
-  // (`config.url`). An author's static origin would send an agent to another copy of the site.
-  const options = {
-    address: siteContent.config?.url || null,
-    locale: siteContent.config?.activeLocale || defaultLocale,
-    defaultLocale
-  }
-  // Each record of a parametric page is a page, as a host lists them (`./record-projections.js`).
-  const records = recordProjections(siteContent, { dataRoot, locale: options.locale })
-
-  if (agents.index) {
-    const index = renderSiteIndex(siteContent, { ...options, exclude: agents.exclude, records: records.entries })
-    await writeFile(join(distDir, INDEX_FILENAME), index)
-
-    // Additive scoped indexes; the root one above stays complete. See
-    // `selectIndexBranches` for why this is not a delegation.
-    if (agents.branchIndexes) {
-      const branches = selectIndexBranches(siteContent.pages, {
-        exclude: agents.exclude,
-        minPages: agents.branchMinPages
-      })
-      for (const branch of branches) {
-        const target = join(distDir, branchIndexFilename(branch.route))
-        await mkdir(dirname(target), { recursive: true })
-        await writeFile(
-          target,
-          renderSiteIndex(siteContent, { ...options, exclude: agents.exclude, records: records.entries, branch: branch.route })
-        )
-      }
-    }
-  }
-
-  if (!agents.markdown) return
-
-  for (const page of selectIndexablePages(siteContent.pages, { exclude: agents.exclude })) {
-    const markdown = renderPageMarkdown(page)
-    if (!markdown) continue
-    const target = join(distDir, pageMarkdownFilename(page.route))
-    await mkdir(dirname(target), { recursive: true })
-    await writeFile(target, markdown)
-  }
-  for (const { route, markdown } of selectIndexablePages(records.pages, { exclude: agents.exclude })) {
-    const target = join(distDir, pageMarkdownFilename(routeOnDisk(route)))
-    await mkdir(dirname(target), { recursive: true })
-    await writeFile(target, markdown)
-  }
 }

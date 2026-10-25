@@ -40,7 +40,7 @@ let logs
 const run = async () => {
   warnings = []
   logs = []
-  await buildLocalizedContent(ROOT, { locales: ['es'], generateSearchIndexes: false })
+  await buildLocalizedContent(ROOT, { locales: ['es'] })
   return warnings
 }
 const manifestOf = () => {

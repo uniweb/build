@@ -40,6 +40,7 @@ import { readPreview, PREVIEW_ENV } from './preview.js'
 import { previewMediaPlugin } from './preview-media.js'
 import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
 import { devServerRecordPlugin, requestedDevPort } from './dev-server.js'
+import { refuseSearchOption } from './search-declared.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -108,7 +109,6 @@ export function readSiteConfig(siteRoot) {
  *   a site's `vite.config.js` is scaffolding, so nothing a site GETS may depend
  *   on what it passes here.
  * @param {Object} [options.assets] - Asset processing configuration
- * @param {Object} [options.search] - Search index configuration
  * @param {boolean} [options.tailwind] - Include Tailwind CSS v4 Vite plugin (default: true)
  * @param {string} [options.base] - Base public path for deployment (e.g., '/demos/mysite/')
  * @returns {Promise<Object>} Vite configuration
@@ -138,6 +138,7 @@ function runtimeAnchor(siteRoot) {
 }
 
 export async function defineSiteConfig(options = {}) {
+  refuseSearchOption(options, 'defineSiteConfig')
   const {
     plugins: extraPlugins = [],
     server: serverOverrides = {},
@@ -146,7 +147,6 @@ export async function defineSiteConfig(options = {}) {
     optimizeDeps: optimizeDepsOverrides = {},
     seo = {},
     assets = {},
-    search = {},
     tailwind = true,
     base: baseOption,
     ...restOptions
@@ -333,7 +333,6 @@ export async function defineSiteConfig(options = {}) {
       sitePath: './',
       seo,
       assets,
-      search,
       foundationPath: foundationInfo.path // For loading foundation theme vars
     }),
 

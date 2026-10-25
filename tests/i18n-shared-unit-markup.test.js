@@ -112,7 +112,7 @@ async function rendered(siteRoot) {
   cpSync(siteRoot, root, { recursive: true })
   await quiet(async () => {
     await buildSiteData({ siteRoot: root, distDir: join(root, 'dist'), foundationPath: null })
-    await buildLocalizedContent(root, { locales: ['fr'], localesDir: 'locales', generateSearchIndexes: false })
+    await buildLocalizedContent(root, { locales: ['fr'], localesDir: 'locales' })
   })
   return { en: view(join(root, 'dist/site-content.json')), fr: view(join(root, 'dist/fr/site-content.json')) }
 }
