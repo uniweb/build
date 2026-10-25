@@ -15,8 +15,7 @@
  * - fetch: The section's binding — names a query (query, as, where, sort, limit, current,
  *   prerender, detailPage); `query:` is its shorthand
  *
- * Uses @uniweb/content-reader for markdown → ProseMirror conversion
- * when available, otherwise uses a simplified parser.
+ * Uses @uniweb/content-reader for markdown → ProseMirror conversion.
  *
  * @module @uniweb/build/site
  */
@@ -45,24 +44,7 @@ import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 import { warnPlacementsNotOffered } from './placement-warnings.js'
-
-// Try to import content-reader, fall back to simplified parser
-let markdownToProseMirror
-try {
-  const contentReader = await import('@uniweb/content-reader')
-  markdownToProseMirror = contentReader.markdownToProseMirror
-} catch {
-  // Simplified fallback - just wraps content as text
-  markdownToProseMirror = (markdown) => ({
-    type: 'doc',
-    content: [
-      {
-        type: 'paragraph',
-        content: [{ type: 'text', text: markdown.trim() }]
-      }
-    ]
-  })
-}
+import { markdownToProseMirror } from '@uniweb/content-reader'
 
 /**
  * The multi-segment route folder — ONE fixed spelling, ruled 2026-09-04 [Diego].

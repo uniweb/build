@@ -73,24 +73,7 @@ import { collectNestedRefs } from '@uniweb/schemas/format'
 import { labelIn } from './entry-label.js'
 import { fileRecordValue, makeFilePreview } from './file-records.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
-
-// Try to import content-reader for markdown parsing
-let markdownToProseMirror
-try {
-  const contentReader = await import('@uniweb/content-reader')
-  markdownToProseMirror = contentReader.markdownToProseMirror
-} catch {
-  // Simplified fallback
-  markdownToProseMirror = (markdown) => ({
-    type: 'doc',
-    content: [
-      {
-        type: 'paragraph',
-        content: [{ type: 'text', text: markdown.trim() }]
-      }
-    ]
-  })
-}
+import { markdownToProseMirror } from '@uniweb/content-reader'
 
 /**
  * Parse collection config from site.yml

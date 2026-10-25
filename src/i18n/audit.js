@@ -12,17 +12,6 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { translationKeepsMarkup } from './merge.js'
 
-// Inline markdown → ProseMirror, so the markup check asks the merge's own question
-// ("would this value produce marks?") instead of pattern-matching markdown syntax.
-// Same lazy-import-with-fallback pattern as merge.js / extract.js.
-let markdownToProseMirror
-try {
-  const contentReader = await import('@uniweb/content-reader')
-  markdownToProseMirror = contentReader.markdownToProseMirror
-} catch {
-  markdownToProseMirror = null
-}
-
 /**
  * Audit a locale file against the manifest
  * @param {string} localesPath - Path to locales directory
@@ -118,11 +107,8 @@ export async function auditLocale(localesPath, locale) {
  *
  * Asks the merge rather than a regex (`translationKeepsMarkup`), since what the
  * merge makes of a value is the only honest answer to "will this keep its link".
- * With no converter available the check declines to fire — a missing dependency
- * must not invent findings.
  */
 function dropsSourceMarkup(markup, value) {
-  if (!markdownToProseMirror) return false
   try {
     return !translationKeepsMarkup(markup, value)
   } catch {

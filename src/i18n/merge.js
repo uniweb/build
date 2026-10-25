@@ -16,18 +16,7 @@ import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
 import { elementText, blockElements, translationContext, SITE_META_CONTEXT } from './extract.js'
 import { visitDataBlockStrings } from './data-strings.js'
-
-// Inline markdown → ProseMirror inline nodes, for resolving a whole-element
-// translation VALUE (which carries marks/links/icons as inline markdown). Same
-// lazy-import-with-fallback pattern as freeform.js / collection-processor.js, so
-// the synchronous merge path has the converter ready at call time.
-let inlineMarkdownToProseMirror
-try {
-  const contentReader = await import('@uniweb/content-reader')
-  inlineMarkdownToProseMirror = contentReader.inlineMarkdownToProseMirror
-} catch {
-  inlineMarkdownToProseMirror = (markdown) => [{ type: 'text', text: markdown.trim() }]
-}
+import { inlineMarkdownToProseMirror } from '@uniweb/content-reader'
 
 /**
  * Merge translations into site content for a specific locale

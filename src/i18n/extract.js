@@ -10,10 +10,9 @@ import { computeHash, stripInlineTags } from './hash.js'
 import { visitDataBlockStrings } from './data-strings.js'
 
 // ProseMirror inline fragment → inline markdown, for the TRANSLATOR-FACING half of
-// a unit. Same lazy-import-with-fallback pattern as merge.js, so the synchronous
-// extraction path has the serializer ready at call time. The fallback is the plain
-// text we already had, so a resolution failure degrades to the old behaviour rather
-// than breaking extraction.
+// a unit. Loaded at the top level, so the synchronous extraction path has the
+// serializer ready at call time. The fallback is the plain text we already had, so a
+// resolution failure degrades to the old behaviour rather than breaking extraction.
 let serializeInlineContent
 try {
   const contentWriter = await import('@uniweb/content-writer')

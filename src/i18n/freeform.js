@@ -27,25 +27,7 @@ import { parseFrontmatter } from '../utils/frontmatter.js'
 import { computeSourceHash } from './freeform-manifest.js'
 import { layoutAreaRoute } from '../site/layout-folder.js'
 import { warnOutsideVocabulary } from '../site/vocabulary-warnings.js'
-
-// Try to import content-reader for markdown → ProseMirror conversion
-let markdownToProseMirror
-try {
-  const contentReader = await import('@uniweb/content-reader')
-  markdownToProseMirror = contentReader.markdownToProseMirror
-} catch {
-  // Simplified fallback - just wraps content as text
-  markdownToProseMirror = (markdown) => ({
-    type: 'doc',
-    content: [
-      {
-        type: 'paragraph',
-        content: [{ type: 'text', text: markdown.trim() }]
-      }
-    ]
-  })
-}
-
+import { markdownToProseMirror } from '@uniweb/content-reader'
 
 /** Report what a translation's markdown could not honour, naming the file. */
 function warnFor(filePath) {

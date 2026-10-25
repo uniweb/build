@@ -102,18 +102,14 @@ async function resolveSchema(queryName, siteRoot) {
   }
 
   // 2. Standard schema from @uniweb/schemas (try exact name + singularized)
-  try {
-    const schemasModule = await import('@uniweb/schemas')
-    const names = [queryName, singularize(queryName)]
+  const schemasModule = await import('@uniweb/schemas')
+  const names = [queryName, singularize(queryName)]
 
-    for (const name of names) {
-      if (schemasModule.schemas?.[name]) {
-        schema = schemasModule.schemas[name]
-        break
-      }
+  for (const name of names) {
+    if (schemasModule.schemas[name]) {
+      schema = schemasModule.schemas[name]
+      break
     }
-  } catch {
-    // @uniweb/schemas not installed — that's fine
   }
 
   schemaCache.set(queryName, schema)
