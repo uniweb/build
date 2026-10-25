@@ -1,17 +1,18 @@
 /**
- * Collection Processor
+ * Query Processor
  *
  * Materializes each named QUERY over the site's records into JSON data.
- * Collections are defined in site.yml and processed at build time.
+ * Queries are declared in `queries.yml` (or `site.yml::queries`) and compiled
+ * at build time.
  *
- * ⛔ A COLLECTION `.md` IS NOT A PAGE-SECTION `.md`. Same extension, unrelated
+ * ⛔ A RECORD `.md` IS NOT A PAGE-SECTION `.md`. Same extension, unrelated
  * meanings, and the sync-side reader states this too
- * (`build/src/uwx/collection-source.js`) because getting it backwards produces
+ * (`build/src/uwx/entity-source.js`) because getting it backwards produces
  * confident nonsense:
  *
- *   - collection record — frontmatter is structured DATA whose shape is the
- *     collection's data schema; the body is the value of ONE declared field
- *     (the Model's content body field). Not "metadata".
+ *   - record — frontmatter is structured DATA whose shape is the record's
+ *     data schema; the body is the value of ONE declared field (the Model's
+ *     content body field). Not "metadata".
  *   - page section — frontmatter is foundation/runtime CONFIG (`type:`, params,
  *     `theme:`); the body is authored content with no schema behind it.
  *
@@ -24,7 +25,7 @@
  *
  * Features:
  * - Discovers markdown (.md), data (.yml/.yaml), JSON (.json), and BibTeX (.bib)
- *   files in collection folders
+ *   record files
  * - Parses frontmatter for record data (markdown), full YAML or JSON (data items),
  *   or BibTeX → CSL-JSON (bibliography items)
  * - Pure-data formats (YAML, JSON, BibTeX) accept either one record per file
@@ -38,7 +39,7 @@
  *   fixed `where` selects compiles
  * - Auto-generates excerpts and extracts first images (markdown items only)
  *
- * @module @uniweb/build/site/collection-processor
+ * @module @uniweb/build/site/query-processor
  *
  * @example
  * // queries.yml
