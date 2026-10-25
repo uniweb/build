@@ -998,7 +998,9 @@ export async function prerenderSite(siteDir, options = {}) {
      * ⭐ A PAGE RENDERS AGAINST WHAT IT CARRIES — the entries its HTML embeds, which are all the
      * browser's store holds when it boots on that page (`initUniweb` hydrates from them). The
      * browser renders over the prerendered page, so a render that reads more paints content the
-     * browser does not have, and the browser replaces it with a loading state at boot.
+     * browser does not have, and the browser replaces it with a loading state at boot. Each page
+     * hands them to `renderer.render` as `fetchedData`, as a host's isolate does; the 404 page,
+     * rendered on its own below, holds them the same way.
      *
      * ⛔ Until 2026-10-25 the store was hydrated once for the whole locale and then took every
      * page's answers in turn, so a page could render data that only other pages carried. A
@@ -1007,10 +1009,6 @@ export async function prerenderSite(siteDir, options = {}) {
      * the record pages before it had fetched, carried none of them, and showed "loading…" at
      * boot (measured).
      */
-    const holdOnly = (carried) => {
-      website.dataStore.clear()
-      hydrateDataStore(website, carried)
-    }
 
     for (const page of website.pages) {
       // Skip dynamic template pages — they exist in the content for runtime
@@ -1109,7 +1107,7 @@ export async function prerenderSite(siteDir, options = {}) {
       const scopeRoutes = new Set([page.route, page.parent?.route, page.dynamicContext?.templateRoute].filter(Boolean))
       // The same call `injectBuildData` makes below for this page's HTML, so the render holds what
       // the HTML embeds — the page's own data step's answers among them.
-      holdOnly(scopeFetchedData(siteContent.fetchedData, splitContent ? scopeRoutes : null, page.route))
+      const carried = scopeFetchedData(siteContent.fetchedData, splitContent ? scopeRoutes : null, page.route)
 
       onProgress(`Rendering ${outputRoute}...`)
 
@@ -1120,7 +1118,7 @@ export async function prerenderSite(siteDir, options = {}) {
       // is how the two lanes drift. This lane passes the Page it already holds; the
       // isolate passes a route. See `runtime/src/page-renderer.js` for what it leaves
       // to the host.
-      const result = renderer.render(page)
+      const result = renderer.render(page, { fetchedData: carried })
 
       if (result.outcome === 'failed') {
         const { type, message } = result.error
@@ -1176,7 +1174,8 @@ export async function prerenderSite(siteDir, options = {}) {
       scopeRoutes: new Set(),  // SPA fallback carries site-level fetched data only
     })
     // The 404 page renders against what 404.html carries, as every page above does.
-    holdOnly(scopeFetchedData(siteContent.fetchedData, splitContent ? new Set() : null, null))
+    website.forgetData()
+    hydrateDataStore(website, scopeFetchedData(siteContent.fetchedData, splitContent ? new Set() : null, null))
     const { html: notFoundHtml, hasNotFoundPage } = generate404Html({
       baseHtml: fallbackBaseHtml,
       website,
