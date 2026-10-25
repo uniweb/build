@@ -8,18 +8,7 @@
 import { resolveDefaultLocale } from '@uniweb/core'
 import { computeHash, stripInlineTags } from './hash.js'
 import { visitDataBlockStrings } from './data-strings.js'
-
-// ProseMirror inline fragment → inline markdown, for the TRANSLATOR-FACING half of
-// a unit. Loaded at the top level, so the synchronous extraction path has the
-// serializer ready at call time. The fallback is the plain text we already had, so a
-// resolution failure degrades to the old behaviour rather than breaking extraction.
-let serializeInlineContent
-try {
-  const contentWriter = await import('@uniweb/content-writer')
-  serializeInlineContent = contentWriter.serializeInlineContent
-} catch {
-  serializeInlineContent = null
-}
+import { serializeInlineContent } from '@uniweb/content-writer'
 
 /**
  * Extract all translatable units from site content
@@ -416,11 +405,11 @@ export function elementText(node) {
  * no instrument reported anything (coverage counts keys, not fidelity).
  * Measured 2026-09-18 on a documentation site with 266 internal links.
  *
- * Returns null when the serializer is unavailable or adds nothing over the plain
- * text, so `markup` appears on a unit only when it actually carries more.
+ * Returns null when the serializer adds nothing over the plain text, so `markup`
+ * appears on a unit only when it actually carries more.
  */
 export function elementMarkup(node) {
-  if (!serializeInlineContent || !node?.content) return null
+  if (!node?.content) return null
   try {
     const markup = serializeInlineContent(node.content)
     if (typeof markup !== 'string') return null
