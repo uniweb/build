@@ -10,6 +10,8 @@ export { siteContentPlugin } from './plugin.js'
 export { defineSiteConfig, readSiteConfig, default } from './config.js'
 // What `uniweb dev` hands the dev server of a site a backend holds (`./preview.js`).
 export { PREVIEW_ENV, encodePreview, readPreview } from './preview.js'
+// Where a site's dev server listens, as it states it, for `uniweb dev` (`./dev-server.js`).
+export { DEV_PORT_ENV, runningDevServer, stopDevServer } from './dev-server.js'
 export { collectSiteContent } from './content-collector.js'
 // The `agents:` vocabulary lives in @uniweb/projections (which owns the block);
 // re-exported so the CLI can validate an author's spelling, and read an

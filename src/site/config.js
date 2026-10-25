@@ -39,6 +39,7 @@ import { detectFoundationType } from './foundation-ref.js'
 import { readPreview, PREVIEW_ENV } from './preview.js'
 import { previewMediaPlugin } from './preview-media.js'
 import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
+import { devServerRecordPlugin, requestedDevPort } from './dev-server.js'
 
 /**
  * Normalize a base path for Vite compatibility
@@ -153,6 +154,8 @@ export async function defineSiteConfig(options = {}) {
 
   // Determine site root (where vite.config.js is)
   const siteRoot = process.cwd()
+  // The port `uniweb dev --port <n>` asked for, if it did (`dev-server.js`).
+  const devPort = requestedDevPort()
 
   // Read site.yml
   const siteConfig = readSiteConfig(siteRoot)
@@ -348,6 +351,9 @@ export async function defineSiteConfig(options = {}) {
         serve: '/foundation',
         watch: true
       }),
+
+    // The dev server says where it listens, for `uniweb dev` to read (`dev-server.js`).
+    devServerRecordPlugin(siteRoot),
 
     // User-provided plugins
     ...extraPlugins
@@ -567,7 +573,10 @@ export async function defineSiteConfig(options = {}) {
         })()
       },
       ...(siteConfig.build?.port && { port: siteConfig.build.port }),
-      ...serverOverrides
+      ...serverOverrides,
+      // `uniweb dev --port <n>` asks for that port and no other (`dev-server.js`). Asked on the
+      // command line, it is the last word over the site's own settings.
+      ...(devPort !== null && { port: devPort, strictPort: true })
     },
 
     build: {
