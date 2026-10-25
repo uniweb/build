@@ -460,9 +460,9 @@ export function siteContentPlugin(options = {}) {
   }
 
   /**
-   * Materialize every query the site declares into `public/data/` — at dev startup,
-   * and again whenever what a query file is made from changes (`siteRootChange`, and
-   * an entity change).
+   * Materialize every query the site declares into `public/data/` — at a production
+   * build's start, at dev startup, and again whenever what a query file is made from
+   * changes (`siteRootChange`, and an entity change).
    *
    * @param {Object|undefined} queries - the collected `config.queries`
    * @param {Object|undefined} config - the collected `config`, for the default locale a `sort` collates in
@@ -666,11 +666,12 @@ export function siteContentPlugin(options = {}) {
 
         // Materialize each query if the site declares any.
         // In dev mode, this was already done in configResolved (before server starts)
-        // In production, do it here
+        // In production, do it here — by the same call, so a `sort` collates in the site's default
+        // language in both. ⛔ Until 2026-10-25 this called `processQueries` with no language, and
+        // the built file was collated in English whatever the site's language.
         if (isProduction && siteContent.config?.queries) {
           console.log('[site-content] Materializing queries...')
-          const byQuery = await processQueries(resolvedSitePath, siteContent.config.queries, resolvedRecordsDir, basePath)
-          await writeQueryFiles(resolvedSitePath, byQuery, siteContent.config.queries)
+          await materializeQueries(siteContent.config.queries, siteContent.config)
         }
 
         // Execute data fetches in dev mode
