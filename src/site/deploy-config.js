@@ -186,7 +186,15 @@ function validate(doc, path) {
   // now: two targets naming DIFFERENT backends are two sites, and two naming the SAME
   // backend are one site shipped twice. The reason is gone, so the rejection is too.
   if (doc.saveDeploys !== undefined && typeof doc.saveDeploys !== 'boolean') {
-    throw new Error(`${path}: \`saveDeploys\` must be true or false.`)
+    // `lastDeploy` and `off` were the values of `autoSave:`, which `saveDeploys:` replaced: the
+    // key renamed by hand, its value kept (measured 2026-10-26 on a copied project).
+    const retired = doc.saveDeploys === 'lastDeploy' || doc.saveDeploys === 'off'
+    throw new Error(
+      `${path}: \`saveDeploys\` must be true or false` +
+        (retired
+          ? ` — \`${doc.saveDeploys}\` is a value of the retired \`autoSave:\`. \`uniweb doctor --fix deploy-yml-retired-key\` writes what it meant.`
+          : '.')
+    )
   }
   if (doc.default !== undefined && typeof doc.default !== 'string') {
     throw new Error(`${path}: \`default\` must be a string.`)

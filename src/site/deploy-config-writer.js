@@ -308,11 +308,14 @@ export async function forgetDeployYml(siteDir) {
  *
  * A target's record moves to `deploys:` when that target has none there; when it has, the
  * one in `deploys:` is newer, and the old is dropped. `autoSave: off` becomes
- * `saveDeploys: false`; any other value is the default, and goes.
+ * `saveDeploys: false`; any other value is the default, and goes. And `saveDeploys:` holding
+ * one of `autoSave:`'s values — the key renamed by hand, its value kept — is read the same way:
+ * `off` is `false`, `lastDeploy` the default.
  *
  * @param {string} siteDir
- * @returns {Promise<{ moved: string[], dropped: string[], saveDeploys: boolean|null } | null>}
- *   null when the file has neither key, or there is no file
+ * @returns {Promise<{ moved: string[], dropped: string[], saveDeploys: boolean|null, renamed: string|null } | null>}
+ *   `renamed` is the old value found under `saveDeploys:`; null when the file has none of
+ *   these, or there is no file
  */
 export async function retireDeployYmlKeys(siteDir) {
   const path = join(siteDir, 'deploy.yml')
@@ -321,7 +324,9 @@ export async function retireDeployYmlKeys(siteDir) {
   if (doc.errors.length) throw new Error(`${path}: ${doc.errors[0].message}`)
   const old = doc.get('lastDeploy')
   const autoSave = doc.get('autoSave')
-  if (old === undefined && autoSave === undefined) return null
+  const renamed = doc.get('saveDeploys')
+  const kept = renamed === 'off' || renamed === 'lastDeploy' ? renamed : undefined
+  if (old === undefined && autoSave === undefined && kept === undefined) return null
   const moved = []
   const dropped = []
   if (isMap(old)) {
@@ -338,6 +343,14 @@ export async function retireDeployYmlKeys(siteDir) {
   }
   doc.delete('lastDeploy')
   let saveDeploys = null
+  if (kept !== undefined) {
+    if (kept === 'off') {
+      doc.set('saveDeploys', false)
+      saveDeploys = false
+    } else {
+      doc.delete('saveDeploys')
+    }
+  }
   if (autoSave !== undefined) {
     if (String(autoSave) === 'off' && !doc.has('saveDeploys')) {
       doc.set('saveDeploys', false)
@@ -346,5 +359,5 @@ export async function retireDeployYmlKeys(siteDir) {
     doc.delete('autoSave')
   }
   await writeFile(path, String(doc))
-  return { moved, dropped, saveDeploys }
+  return { moved, dropped, saveDeploys, renamed: kept ?? null }
 }

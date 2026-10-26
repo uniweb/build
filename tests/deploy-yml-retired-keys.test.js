@@ -40,7 +40,7 @@ deploys:
 describe('retireDeployYmlKeys', () => {
   test("⭐ a target's record moves from lastDeploy: to deploys:, and the comments stay", async () => {
     const dir = await siteWith(BOTH)
-    expect(await retireDeployYmlKeys(dir)).toEqual({ moved: ['production'], dropped: [], saveDeploys: null })
+    expect(await retireDeployYmlKeys(dir)).toEqual({ moved: ['production'], dropped: [], saveDeploys: null, renamed: null })
     const text = await readFile(join(dir, 'deploy.yml'), 'utf8')
     expect(text).toContain("# the person's own words")
     expect(text).toContain('# the bucket')
@@ -52,7 +52,7 @@ describe('retireDeployYmlKeys', () => {
 
   test('a target deploys: already records keeps that record; the old one is dropped', async () => {
     const dir = await siteWith(BOTH.replace('lastDeploy:\n  production:', 'lastDeploy:\n  cloud:'))
-    expect(await retireDeployYmlKeys(dir)).toEqual({ moved: [], dropped: ['cloud'], saveDeploys: null })
+    expect(await retireDeployYmlKeys(dir)).toEqual({ moved: [], dropped: ['cloud'], saveDeploys: null, renamed: null })
     const loaded = await loadDeployYml(dir)
     expect(String(loaded.deploys.cloud.at)).toContain('2026-10-24')
     expect(loaded.lastDeploy).toBeUndefined()
@@ -60,13 +60,13 @@ describe('retireDeployYmlKeys', () => {
 
   test('autoSave: off becomes saveDeploys: false; any other value is the default, and goes', async () => {
     const off = await siteWith('default: p\ntargets:\n  p:\n    host: uniweb\nautoSave: off\n')
-    expect(await retireDeployYmlKeys(off)).toEqual({ moved: [], dropped: [], saveDeploys: false })
+    expect(await retireDeployYmlKeys(off)).toEqual({ moved: [], dropped: [], saveDeploys: false, renamed: null })
     const loadedOff = await loadDeployYml(off)
     expect(loadedOff.saveDeploys).toBe(false)
     expect(loadedOff.autoSave).toBeUndefined()
 
     const on = await siteWith('default: p\ntargets:\n  p:\n    host: uniweb\nautoSave: lastDeploy\n')
-    expect(await retireDeployYmlKeys(on)).toEqual({ moved: [], dropped: [], saveDeploys: null })
+    expect(await retireDeployYmlKeys(on)).toEqual({ moved: [], dropped: [], saveDeploys: null, renamed: null })
     const loadedOn = await loadDeployYml(on)
     expect(loadedOn.saveDeploys).toBeUndefined()
     expect(loadedOn.autoSave).toBeUndefined()
@@ -78,5 +78,26 @@ describe('retireDeployYmlKeys', () => {
     expect(await retireDeployYmlKeys(dir)).toBe(null)
     expect(await readFile(join(dir, 'deploy.yml'), 'utf8')).toBe(text)
     expect(await retireDeployYmlKeys(await mkdtemp(join(tmpdir(), 'uniweb-no-deploy-yml-')))).toBe(null)
+  })
+
+  // ⛔ `saveDeploys:` holding one of `autoSave:`'s values — the key renamed by hand, its value
+  // kept (measured 2026-10-26 on a copied project, `saveDeploys: lastDeploy`). The loader refuses
+  // it, naming this fix; the fix writes what the value meant.
+  test('saveDeploys: lastDeploy is the default, and goes; saveDeploys: off is false', async () => {
+    const kept = await siteWith('# mine\ndefault: p\ntargets:\n  p:\n    host: uniweb\nsaveDeploys: lastDeploy\n')
+    await expect(loadDeployYml(kept)).rejects.toThrow(/`lastDeploy` is a value of the retired `autoSave:`.*--fix deploy-yml-retired-key/)
+    expect(await retireDeployYmlKeys(kept)).toEqual({ moved: [], dropped: [], saveDeploys: null, renamed: 'lastDeploy' })
+    expect((await loadDeployYml(kept)).saveDeploys).toBeUndefined()
+    expect(await readFile(join(kept, 'deploy.yml'), 'utf8')).toContain('# mine')
+
+    const off = await siteWith('default: p\ntargets:\n  p:\n    host: uniweb\nsaveDeploys: off\n')
+    expect(await retireDeployYmlKeys(off)).toEqual({ moved: [], dropped: [], saveDeploys: false, renamed: 'off' })
+    expect((await loadDeployYml(off)).saveDeploys).toBe(false)
+  })
+
+  test('control: another value is still refused as it was, and left alone', async () => {
+    const odd = await siteWith('default: p\ntargets:\n  p:\n    host: uniweb\nsaveDeploys: sometimes\n')
+    await expect(loadDeployYml(odd)).rejects.toThrow(/`saveDeploys` must be true or false\.$/)
+    expect(await retireDeployYmlKeys(odd)).toBe(null)
   })
 })
