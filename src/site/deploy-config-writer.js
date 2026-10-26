@@ -297,3 +297,54 @@ export async function forgetDeployYml(siteDir) {
   await unlink(path)
   return names
 }
+
+/**
+ * Move a deploy.yml off the keys retired on 2026-09-20 — `lastDeploy:` to `deploys:`, and
+ * `autoSave:` to `saveDeploys:` — keeping its comments.
+ *
+ * ⛔ NOTHING READS THE OLD KEYS, and a renamed key returns empty rather than failing: a
+ * target's record under `lastDeploy:` is a deploy nothing can see, and `autoSave: off` is
+ * ignored, so deploys are recorded after all. `uniweb doctor` names both, and this is its fix.
+ *
+ * A target's record moves to `deploys:` when that target has none there; when it has, the
+ * one in `deploys:` is newer, and the old is dropped. `autoSave: off` becomes
+ * `saveDeploys: false`; any other value is the default, and goes.
+ *
+ * @param {string} siteDir
+ * @returns {Promise<{ moved: string[], dropped: string[], saveDeploys: boolean|null } | null>}
+ *   null when the file has neither key, or there is no file
+ */
+export async function retireDeployYmlKeys(siteDir) {
+  const path = join(siteDir, 'deploy.yml')
+  if (!existsSync(path)) return null
+  const doc = parseDocument(await readFile(path, 'utf8'))
+  if (doc.errors.length) throw new Error(`${path}: ${doc.errors[0].message}`)
+  const old = doc.get('lastDeploy')
+  const autoSave = doc.get('autoSave')
+  if (old === undefined && autoSave === undefined) return null
+  const moved = []
+  const dropped = []
+  if (isMap(old)) {
+    if (!isMap(doc.get('deploys'))) doc.set('deploys', doc.createNode({}))
+    const deploys = doc.get('deploys')
+    for (const pair of old.items) {
+      const name = String(pair.key?.value ?? pair.key)
+      if (deploys.has(name)) dropped.push(name)
+      else {
+        deploys.set(name, pair.value)
+        moved.push(name)
+      }
+    }
+  }
+  doc.delete('lastDeploy')
+  let saveDeploys = null
+  if (autoSave !== undefined) {
+    if (String(autoSave) === 'off' && !doc.has('saveDeploys')) {
+      doc.set('saveDeploys', false)
+      saveDeploys = false
+    }
+    doc.delete('autoSave')
+  }
+  await writeFile(path, String(doc))
+  return { moved, dropped, saveDeploys }
+}
