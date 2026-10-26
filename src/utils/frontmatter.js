@@ -51,24 +51,25 @@ import { YAML_OPTIONS } from './yaml-schema.js'
  * @param {string} [filepath] - where it came from. Optional only because a
  *   caller may genuinely not have one; pass it whenever you do, since the file
  *   name is the difference between a fixable error and a hunt.
- * @returns {{ frontmatter: object, body: string }}
+ * @returns {{ frontmatter: object, body: string, yaml: string }} `yaml` is the block as
+ *   written, for a caller that reads what the parse cannot say (`./yaml-comment-trap.js`)
  * @throws {Error} when a `---` block is present and does not parse as YAML
  */
 export function parseFrontmatter(raw, filepath) {
   const text = raw ?? ''
   if (!text.trimStart().startsWith('---')) {
-    return { frontmatter: {}, body: text }
+    return { frontmatter: {}, body: text, yaml: '' }
   }
 
   const parts = text.split('---\n')
   if (parts.length < 3) {
-    return { frontmatter: {}, body: text }
+    return { frontmatter: {}, body: text, yaml: '' }
   }
 
   try {
     const frontmatter = yaml.load(parts[1], YAML_OPTIONS) || {}
     const body = parts.slice(2).join('---\n')
-    return { frontmatter, body }
+    return { frontmatter, body, yaml: parts[1] }
   } catch (err) {
     const where = filepath ? `${filepath}: ` : ''
     throw new Error(

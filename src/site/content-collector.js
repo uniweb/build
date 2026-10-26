@@ -40,6 +40,7 @@ import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig
 import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
 import { parentRouteOf } from '@uniweb/core/route-match'
 import { parseFrontmatter } from '../utils/frontmatter.js'
+import { valuesCutByComment } from '../utils/yaml-comment-trap.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
 import { refuseUnreadableAddress } from './site-address.js'
@@ -438,6 +439,20 @@ let yamlFailures = []
  */
 let sectionTypes = null
 
+/** The site being collected, so a warning names a file as its author sees it. Reset per collect, as `yamlFailures` is. */
+let collectRoot = null
+
+/**
+ * Say each value the file's YAML cut short at a `#` its author meant as part of it — a
+ * gradient, a color (`../utils/yaml-comment-trap.js`). A warning, not a failure: the YAML is
+ * valid, and the site builds without the value, as it did before anything said so.
+ */
+function warnCutByComment(text, parsed, file) {
+  for (const { message } of valuesCutByComment(text, parsed)) {
+    console.warn(`[content-collector] ${collectRoot ? relative(collectRoot, file) : file}: ${message}`)
+  }
+}
+
 /**
  * Parse YAML, recording a failure against the file it came from.
  *
@@ -449,7 +464,9 @@ let sectionTypes = null
  */
 function parseYaml(yamlString, source = '<unknown>') {
   try {
-    return yaml.load(yamlString, YAML_OPTIONS) || {}
+    const parsed = yaml.load(yamlString, YAML_OPTIONS) || {}
+    warnCutByComment(yamlString, parsed, source)
+    return parsed
   } catch (err) {
     yamlFailures.push({ source, message: err.message })
     console.warn(`[content-collector] YAML parse error in ${source}: ${err.message}`)
@@ -1097,6 +1114,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
     const parsed = parseFrontmatter(content, filePath)
     frontMatter = parsed.frontmatter
     markdown = parsed.body
+    warnCutByComment(parsed.yaml, frontMatter, filePath)
   } catch (err) {
     yamlFailures.push({ source: filePath, message: err.message })
     console.warn(`[content-collector] ${err.message}`)
@@ -2556,6 +2574,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // still be counted.
   yamlFailures = []
   sectionTypes = null
+  collectRoot = sitePath
 
   // Read site config and raw theme config
   const siteConfig = await readYamlFile(join(sitePath, configFile))
