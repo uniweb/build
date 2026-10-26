@@ -225,11 +225,16 @@ export function backfillBibFile(filePath, uuidBySlug) {
 
 // Unwrap a localized wire value `{ <locale>: v }` back to the authored bare value
 // (the source locale, else the first present). Non-localized values pass through.
+// ⛔ One with no locale at all, `{}`, is no value: undefined, and the field is not written.
+// Until 2026-10-26 it passed through as the empty map, so a record's emptied caption was
+// written `caption: {}` — an object where its schema says string, which `uniweb validate`
+// refuses, and a publish stopped on fifteen of them.
 export function unwrapLocalized(value, sourceLocale) {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     if (Object.prototype.hasOwnProperty.call(value, sourceLocale)) return value[sourceLocale]
     const keys = Object.keys(value)
     if (keys.length) return value[keys[0]]
+    return undefined
   }
   return value
 }
@@ -238,7 +243,8 @@ export function unwrapLocalized(value, sourceLocale) {
 // field element-wise. An array unwraps each element; a bare localized map unwraps to
 // one value. The container shape is preserved (mirrors how the producer built it).
 export function unwrapLocalizedList(value, sourceLocale) {
-  if (Array.isArray(value)) return value.map((v) => unwrapLocalized(v, sourceLocale))
+  // An element with no locale at all is no element (`unwrapLocalized`).
+  if (Array.isArray(value)) return value.map((v) => unwrapLocalized(v, sourceLocale)).filter((v) => v !== undefined)
   return unwrapLocalized(value, sourceLocale)
 }
 
@@ -347,7 +353,8 @@ function decodeRecord(fields, value, dec, sectionName) {
     const isBody = Boolean(dec.bodyAt) && sectionName === dec.bodyAt.section && key === dec.bodyAt.key
     const decoded = decodeLeaf(raw, field, dec, isBody)
     if (isBody) dec.body = typeof decoded === 'string' ? decoded : String(decoded ?? '')
-    else out[key] = decoded
+    // A translatable value with no text in any language is no value: the field is not written.
+    else if (decoded !== undefined) out[key] = decoded
   }
   return out
 }
