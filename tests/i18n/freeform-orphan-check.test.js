@@ -112,6 +112,40 @@ describe('every section the renderer translates is one the check knows', () => {
   })
 })
 
+// ⛔ A PUBLISHED BUILD CARRIES NO DRAFTS. A translation of a `hidden:` section translated
+// nothing in it and was reported orphaned at every build, while `uniweb i18n status
+// --freeform`, which reads the source, counted it up to date. The source holds the section.
+describe('a translation of a draft section', () => {
+  // A home page of its own, so About keeps its route: a site's only page is its home.
+  const source = (sections) => {
+    w('site.yml', 'name: T\nindex: home\n')
+    w('pages/home/1-hello.md', 'Welcome\n')
+    w('pages/about/page.yml', 'title: About\nid: ae274cc8\n')
+    w('pages/about/1-story.md', 'Our story\n')
+    for (const [file, body] of Object.entries(sections)) w(`pages/about/${file}`, body)
+  }
+  const manifest = () =>
+    w('locales/freeform/es/.manifest.json', {
+      'pages/about/story.md': { hash: computeSourceHash(STORY), recorded: '2025-01-28' },
+      'pages/about/faq.md': { hash: 'aaaaaaaa', recorded: '2025-01-28' },
+    })
+
+  it('is not reported orphaned: the site\'s source holds its section', async () => {
+    source({ '2-faq.md': '---\nhidden: true\n---\n\nQuestions\n' })
+    w('locales/freeform/es/pages/about/faq.md', 'Preguntas\n')
+    manifest()
+    await run()
+    expect(orphaned()).toEqual([])
+  })
+
+  it('control: one that no section of the source holds is still orphaned', async () => {
+    source({})
+    manifest()
+    await run()
+    expect(orphaned()).toEqual(['es/pages/about/faq.md'])
+  })
+})
+
 // ⛔ A NEW FREE-FORM FILE WAS NEVER REGISTERED. The build registers a translation it finds
 // with no manifest entry, recording the hash of the source it translates, so a later
 // source change reads as stale. It compared the manifest's keys (`pages/about/story.md`)

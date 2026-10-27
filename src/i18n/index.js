@@ -454,6 +454,14 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
     await writeFile(siteContentPath, JSON.stringify(siteContent, null, 2))
   }
 
+  // The paths the site's source holds a section at, drafts included — read once, and only
+  // when a translation translates nothing this build publishes (`warnAboutFreeformIssues`).
+  let sourcePaths
+  const inSource = async (path) => {
+    sourcePaths ??= freeformSourceIndex(await collectSourceQuietly(siteRoot)).validPaths
+    return sourcePaths.has(path)
+  }
+
   for (const locale of locales) {
     // ⛔ THE DEFAULT LOCALE IS THE ROOT TREE, NEVER A SUBDIRECTORY. Emitting
     // `dist/<default>/` mints a byte-identical duplicate of every page at a second
@@ -496,7 +504,7 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
       })
 
       // Check for stale/orphaned free-form translations and warn
-      await warnAboutFreeformIssues(locale, freeformDir, siteContent)
+      await warnAboutFreeformIssues(locale, freeformDir, siteContent, inSource)
     } else {
       // Use sync merge (original behavior)
       translated = mergeTranslations(siteContent, translations, {
@@ -534,8 +542,10 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
  * @param {string} locale - Locale code
  * @param {string} freeformDir - Path to locale's freeform directory
  * @param {Object} siteContent - Site content for building source hashes
+ * @param {(path: string) => Promise<boolean>} inSource - whether the site's source holds a
+ *   section at a translation's path
  */
-async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
+async function warnAboutFreeformIssues(locale, freeformDir, siteContent, inSource) {
   try {
     // Every path the renderer reads a section's translation from, for every section it
     // translates, with the hash of each source — the index the CLI's free-form commands
@@ -550,9 +560,14 @@ async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
 
     // Check for orphaned translations — only those this content can judge: never a
     // record's (`records/…`), which is read from records the site content does not hold.
+    // ⭐ AND ONLY ONE THE SITE'S SOURCE DOES NOT HOLD EITHER. A published build carries no
+    // drafts, so a translation of a `hidden:` section or page translates nothing here while
+    // its section is still in the site — the source says, as `uniweb i18n status --freeform`
+    // judges. ⛔ Until 2026-10-27 each such translation was reported orphaned at every build.
     const orphaned = await getOrphanedTranslations(freeformDir, validPaths)
     for (const item of orphaned) {
       if (!canJudge(item.path)) continue
+      if (await inSource(item.path)) continue
       console.warn(`[i18n] Free-form translation orphaned: ${locale}/${item.path}`)
     }
 
@@ -571,6 +586,23 @@ async function warnAboutFreeformIssues(locale, freeformDir, siteContent) {
   } catch (err) {
     // Non-fatal: just log and continue
     console.warn(`[i18n] Could not check free-form translation status for ${locale}: ${err.message}`)
+  }
+}
+
+/**
+ * The site's content as its source says it, drafts included — what `uniweb i18n` judges a
+ * free-form translation by. This build collected the site and reported what it found, so
+ * this second reading says nothing.
+ */
+async function collectSourceQuietly(siteRoot) {
+  const { collectSiteContent } = await import('../site/content-collector.js')
+  const { log, warn } = console
+  console.log = console.warn = () => {}
+  try {
+    return await collectSiteContent(siteRoot)
+  } finally {
+    console.log = log
+    console.warn = warn
   }
 }
 
