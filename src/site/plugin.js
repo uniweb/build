@@ -45,11 +45,10 @@ import { FONT_LINKS_MARKER } from './head-markers.js'
 import { effectiveSeo, resolveSiteAddress } from './site-address.js'
 import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
 import { extensionNameOf, findSiteExtension } from './workspace-extension.js'
+import { faviconHref } from './favicon.js'
 
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
-
-const FAVICON_AUTODETECT = ['favicon.svg', 'favicon.ico', 'favicon.png']
 
 const EXTENSION_CONTENT_TYPES = {
   js: 'text/javascript',
@@ -73,26 +72,6 @@ const EXTENSION_CONTENT_TYPES = {
 /** The Content-Type the dev server answers an extension's built file with. */
 function extensionContentType(file) {
   return EXTENSION_CONTENT_TYPES[file.split('.').pop()?.toLowerCase()] || 'application/octet-stream'
-}
-
-/**
- * Resolve a favicon href for index.html injection.
- *  - If config.favicon is a string, use it as-is.
- *  - Otherwise, scan the public dir for favicon.{svg,ico,png} and link the first match.
- *  - Returns null if nothing found.
- */
-function resolveFaviconHref(configFavicon, publicDir, basePath) {
-  if (typeof configFavicon === 'string' && configFavicon.trim()) {
-    return configFavicon.trim()
-  }
-  if (!publicDir) return null
-  for (const name of FAVICON_AUTODETECT) {
-    if (existsSync(resolve(publicDir, name))) {
-      const base = (basePath || '/').replace(/\/$/, '')
-      return `${base}/${name}`
-    }
-  }
-  return null
 }
 
 /**
@@ -1130,14 +1109,12 @@ export function siteContentPlugin(options = {}) {
       // page is rendered into: the prerender writes each page's own (`injectPageContent`), and the
       // browser keeps them (`useHeadMeta`). Until 2026-10-25 the home page's were written here.
 
-      // Inject favicon link
-      // Source 1: contentToInject.config.favicon (matches Cloudflare publish schema)
-      // Source 2: auto-detect public/favicon.{ico,svg,png}
-      const faviconHref = resolveFaviconHref(contentToInject?.config?.favicon, resolvedPublicDir, basePath)
-      if (faviconHref) {
-        const type = faviconType(faviconHref)
+      // The favicon: site.yml's `favicon:`, else the one public/ holds (`./favicon.js`).
+      const favicon = faviconHref(contentToInject?.config?.favicon, resolvedPublicDir, basePath)
+      if (favicon) {
+        const type = faviconType(favicon)
         const typeAttr = type ? ` type="${type}"` : ''
-        headInjection += `    <link rel="icon"${typeAttr} href="${faviconHref}">\n`
+        headInjection += `    <link rel="icon"${typeAttr} href="${favicon}">\n`
       }
 
       // Inject content as JSON script tag
