@@ -19,6 +19,7 @@ import { deriveSupports } from './foundation/derive-supports.js'
 import { proseWithoutStyles, PROSE_WITHOUT_STYLES_WARNING } from './foundation/prose-styles.js'
 import { nodeEnvDefine } from './foundation/node-env.js'
 import { foundationScopeDefine } from './foundation/scope-define.js'
+import { ssrDormantDynamicImports } from './foundation/ssr-dormant-imports.js'
 import { DEV_REBUILD_MARKER, hasDevRebuildMarker } from './foundation/dev-rebuild.js'
 
 // Foundations already told that their prose has no stylesheet — once per process, so a dev
@@ -282,7 +283,10 @@ async function emitFoundationVarsCss(outDir, schema) {
  * It hydrates in the browser and never runs during renderToString. Keeping it
  * external drops the ~10 MB Shiki language graph from the SSR bundle and leaves
  * it a DORMANT dynamic import that server rendering never awaits — so a host
- * has nothing to supply for it.
+ * has nothing to supply for it. Every other package a foundation imports
+ * dynamically gets the same treatment from `ssrDormantDynamicImports`
+ * (`foundation/ssr-dormant-imports.js`); Shiki keeps its own entry here, which
+ * also keeps a static import of it out.
  *
  * ⛔ `fuse.js` was listed here too, until the local search ranker became
  * `@uniweb/projections/search` (2026-09-06). Nothing imports fuse now, so the
@@ -350,7 +354,9 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
     }
     const react = (await import('@vitejs/plugin-react')).default
     const svgr = (await import('vite-plugin-svgr')).default
-    plugins.push(react(), svgr(), nodeEnvDefine(), foundationScopeDefine({ foundationDir: foundationRoot }))
+    // ssrDormantDynamicImports: a package imported dynamically stays `import('pkg')`, dormant,
+    // rather than folded in to run at load (see its module).
+    plugins.push(react(), svgr(), nodeEnvDefine(), foundationScopeDefine({ foundationDir: foundationRoot }), ssrDormantDynamicImports())
 
     await viteBuild({
       root: foundationRoot,
