@@ -40,6 +40,23 @@ async function getImageMetadata(imagePath) {
 }
 
 /**
+ * An image's size and format, read from its bytes — or null when sharp cannot read the file as an
+ * image. Quiet: a caller that reports an unreadable image says so in its own words
+ * (`uniweb doctor`, measuring the image a link to the site shows).
+ *
+ * @param {string} imagePath
+ * @returns {Promise<{ width: number, height: number, format: string } | null>}
+ */
+export async function readImageSize(imagePath) {
+  try {
+    const { width, height, format } = await sharp(imagePath).metadata()
+    return width && height ? { width, height, format } : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Convert an image to webp format
  */
 async function convertToWebp(inputPath, outputPath, options = {}) {
