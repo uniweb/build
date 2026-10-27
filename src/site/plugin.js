@@ -261,6 +261,7 @@ import { mergeTranslations } from '../i18n/merge.js'
 import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { refuseSearchOption } from './search-declared.js'
 import { mountDevApi } from '../dev/api-mount.js'
+import { mountDevSubmit } from '../dev/submit-mount.js'
 
 /**
  * Create the site content plugin
@@ -381,16 +382,19 @@ export function siteContentPlugin(options = {}) {
   }
 
   let siteContent = null
-  // Where `uniweb dev` answers the site's `backend` service with `$devBackend`'s handler — set
-  // in `configureServer`, so never in a build.
+  // Where `uniweb dev` answers the site's services itself — `backend` with `$devBackend`'s
+  // handler, `submit` when the site asks its host for one. Set in `configureServer`, so
+  // never in a build.
   let devApiAddress = null
+  let devSubmitAddress = null
   /**
-   * The dev payload names `$devBackend`'s address as the site's `backend` service: the site
-   * tier, which `resolveService` reads when no host speaks. A build never gets here
-   * with one.
+   * The dev payload names those addresses as the site's `backend` and `submit` services:
+   * the site tier, which `resolveService` reads when no host speaks. A build never gets
+   * here with one.
    */
-  const withDevApi = (content) => {
+  const withDevServices = (content) => {
     if (devApiAddress && content?.config) content.config.backend = devApiAddress
+    if (devSubmitAddress && content?.config) content.config.submit = devSubmitAddress
     return content
   }
   // What each section type declares its data blocks are — read once per collection of the site.
@@ -659,7 +663,7 @@ export function siteContentPlugin(options = {}) {
         // pages stay in the graph so in-progress drafts remain previewable.
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
-        siteContent = locate(withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })))
+        siteContent = locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })))
         dataModelPromise = null
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
@@ -705,7 +709,7 @@ export function siteContentPlugin(options = {}) {
       // A site's own backend, answered locally in development. `site.yml::$devBackend`
       // names a module that default-exports a fetch handler; the dev server mounts it
       // at an address of its own and names that address in the payload it serves
-      // (`withDevApi`), so the site's `backend` service resolves to it.
+      // (`withDevServices`), so the site's `backend` service resolves to it.
       // ⚠️ Synchronous on purpose — see mountDevApi. An await here and the
       // middleware lands after Vite's SPA fallback, which answers the API with
       // index.html and says nothing about why.
@@ -713,6 +717,16 @@ export function siteContentPlugin(options = {}) {
         devApiAddress = mountDevApi(devServer, { root: resolvedSitePath })
       } catch (err) {
         console.error(`[dev-api] ${err.message}`)
+      }
+
+      // A site's forms, taken locally in development when site.yml asks its host for
+      // them (`services: { submit: true }`): the dev server is that host here, so a form
+      // shows and can be sent before the site is published. Synchronous for the same
+      // reason as the mount above.
+      try {
+        devSubmitAddress = mountDevSubmit(devServer, { root: resolvedSitePath, base: basePath })
+      } catch (err) {
+        console.error(`[dev-submit] ${err.message}`)
       }
 
       // A site-relative workspace extension (`/effects/entry.js`) is served from
@@ -796,7 +810,7 @@ export function siteContentPlugin(options = {}) {
             rebuildQueries = false
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = locate(withDevApi(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })))
+              siteContent = locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })))
               dataModelPromise = null
               headHtml = await loadHeadHtml()
               if (materialize) {
