@@ -55,6 +55,7 @@ export { nodeEnvDefine }
  * @param {boolean} [options.tailwind] - Include Tailwind CSS v4 plugin (default: true)
  * @param {boolean} [options.sourcemap] - Generate sourcemaps (default: true)
  * @param {Object} [options.build] - Additional build options to merge
+ * @param {Object} [options.experimental] - Vite experimental options to merge
  * @returns {Promise<Object>} Vite configuration
  */
 export async function defineFoundationConfig(options = {}) {
@@ -76,6 +77,7 @@ export async function defineFoundationConfig(options = {}) {
     tailwind = true,
     sourcemap = true,
     build: buildOverrides = {},
+    experimental: experimentalOverrides = {},
     ...restOptions
   } = options
 
@@ -125,6 +127,15 @@ export async function defineFoundationConfig(options = {}) {
 
   return {
     plugins,
+
+    // ⭐ A FOUNDATION NAMES ITS OWN FILES FROM WHERE ITS CODE IS. A host serves it from an
+    // address of its own, never the page's, so a file its code references — a worker; library
+    // mode inlines every other asset — is found beside the code, not at the page's root.
+    // ⛔ Until 2026-10-27 that URL was `/assets/<file>`, which a published site does not have.
+    experimental: {
+      renderBuiltUrl: (filename, { hostType }) => (hostType === 'js' ? { relative: true } : undefined),
+      ...experimentalOverrides
+    },
 
     build: {
       lib: {
