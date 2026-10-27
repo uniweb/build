@@ -129,6 +129,40 @@ describe('bare-string asset references', () => {
   })
 })
 
+describe('the favicon, whatever its type', () => {
+  // `.ico` is not media to the walker (`isLocalAssetPath`), so until 2026-10-27 a site's
+  // `favicon: /favicon.ico` was never uploaded: its hosted pages linked a site path the
+  // host does not serve, and answered 404 for it.
+  function withFavicon(favicon) {
+    const root = project()
+    const file = join(root, 'site.yml')
+    writeFileSync(file, readFileSync(file, 'utf8').replace('favicon: /f.png', `favicon: ${JSON.stringify(favicon)}`))
+    return root
+  }
+  const ICO = 'https://assets.example/f6'
+  const SERVED_ICO = { ...SERVED, '/favicon.ico': ICO }
+  const IDS_ICO = { ...IDS, '/favicon.ico': { id: 'f6', ext: 'ico', served: servedFingerprint(ICO) } }
+
+  it('⭐ an .ico is surfaced for upload, rides as its serve URL, and pulls back as the path', async () => {
+    const root = withFavicon('/favicon.ico')
+    expect((await emitSyncPackages(root)).localAssets).toContain('/favicon.ico')
+    const doc = siteDocOf(await emitSyncPackages(root, { assetRewrite: SERVED_ICO, assetIds: IDS_ICO }))
+    expect(doc.info.favicon).toBe(ICO)
+
+    const dest = tmp('uwx-ico-pull-')
+    mkdirSync(join(dest, 'pages'), { recursive: true })
+    updateBackendMap(dest, ORIGIN, 'assets', IDS_ICO)
+    siteContentDocumentToProject({ document: doc, siteRoot: dest, backend: ORIGIN })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).favicon).toBe('/favicon.ico')
+  })
+
+  it('an address of its own is never uploaded, and rides as written', async () => {
+    const pkg = await emitSyncPackages(withFavicon('https://cdn.example/f.ico'), { assetRewrite: SERVED_ICO, assetIds: IDS_ICO })
+    expect(pkg.localAssets).not.toContain('https://cdn.example/f.ico')
+    expect(siteDocOf(pkg).info.favicon).toBe('https://cdn.example/f.ico')
+  })
+})
+
 describe('info.preview values that are not a project image', () => {
   for (const value of ['2026-09-10T12:34:56Z', 'https://cdn.example/card.png']) {
     it(`${value} rides verbatim and is never uploaded`, async () => {

@@ -493,6 +493,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     })
   collectFrom(siteDoc)
   for (const e of col.entities) collectFrom(e.document)
+  // ⭐ The site's favicon, whatever its type. `.ico` is not media to the walker
+  // (`isLocalAssetPath`), but a host serves the favicon its page shell links only from
+  // the asset store: left as a site path, `/favicon.ico` was linked on every hosted page
+  // and answered 404. The rewrite above already swaps any path the upload map names.
+  const favicon = siteDoc?.info?.favicon
+  if (typeof favicon === 'string' && favicon.startsWith('/') && !favicon.startsWith('//')) localAssetSet.add(favicon)
   const localAssets = [...localAssetSet]
 
   // ⭐ THE IDENTITY OF A RECORD'S LIST ITEMS (`record-items.js`), taken on each document as it
