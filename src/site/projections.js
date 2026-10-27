@@ -17,7 +17,7 @@
  *
  * ⭐ A LANGUAGE'S FILES ARE AT ITS ADDRESSES: under its prefix, at its translated routes
  * (`applyRouteTranslation`) — `fr/actualites/x.md` for `/blog/x` — where its `llms.txt` links them
- * (`buildPageUrl`). A static host decodes a request's path before it looks for the file, so a
+ * (`renderSiteIndex`). A static host decodes a request's path before it looks for the file, so a
  * record's file is named for its decoded route (`routeOnDisk`).
  *
  * @module
@@ -101,10 +101,10 @@ export function agentFiles(content, records) {
   if (!agents.index && !agents.markdown) return []
   if (!content?.pages?.length) return []
 
-  const { locale, defaultLocale, prefix, at } = languageOf(content)
-  // The address and base path are the content's own (`config.url`, `config.base`), which
-  // `renderSiteIndex` reads.
-  const options = { locale, defaultLocale, exclude: agents.exclude, records: records?.entries }
+  const { locale, prefix, at } = languageOf(content)
+  // The address, the base path and the languages are the content's own (`config.url`,
+  // `config.base`, `config.languages`), which `renderSiteIndex` reads.
+  const options = { locale, exclude: agents.exclude, records: records?.entries }
   const files = []
 
   if (agents.index) {
