@@ -1,8 +1,10 @@
 /**
- * A static build's favicon: `site.yml`'s `favicon:`, else the first of these in the site's public
- * folder (`plugin.js` links it). A site sent to a Uniweb host has no such fallback — its pages link
- * only the favicon `favicon:` names, and only that file is uploaded — so `uniweb doctor` reads this
- * same list to say when a site has an icon on one lane and none on the other.
+ * A static build's icons (`plugin.js` links them). The favicon: `site.yml`'s `favicon:`, else the
+ * first of these in the site's public folder. A site sent to a Uniweb host has no such fallback —
+ * its pages link only the favicon `favicon:` names, and only that file is uploaded — so
+ * `uniweb doctor` reads this same list to say when a site has an icon on one lane and none on the
+ * other. The touch icon — the PNG iOS puts on a home screen — is `site.yml`'s `touchIcon:`, and
+ * only that: nothing is looked for.
  */
 
 import { existsSync } from 'node:fs'
@@ -32,9 +34,28 @@ export function findPublicFavicon(publicDir) {
  * @returns {string|null}
  */
 export function faviconHref(named, publicDir, basePath) {
-  const base = (basePath || '/').replace(/\/$/, '')
-  const href = typeof named === 'string' ? named.trim() : ''
-  if (href) return href.startsWith('/') && !href.startsWith('//') ? `${base}${href}` : href
+  const href = siteHref(named, basePath)
+  if (href) return href
   const found = findPublicFavicon(publicDir)
-  return found ? `${base}/${found}` : null
+  return found ? siteHref(`/${found}`, basePath) : null
+}
+
+/**
+ * The href a static build links its touch icon at — `site.yml`'s `touchIcon:`, under the base as
+ * the favicon is.
+ *
+ * @param {unknown} named
+ * @param {string} [basePath]
+ * @returns {string|null}
+ */
+export function touchIconHref(named, basePath) {
+  return siteHref(named, basePath)
+}
+
+/** A site path under the deployment base; an address of its own as written; null for none. */
+function siteHref(named, basePath) {
+  const href = typeof named === 'string' ? named.trim() : ''
+  if (!href) return null
+  const base = (basePath || '/').replace(/\/$/, '')
+  return href.startsWith('/') && !href.startsWith('//') ? `${base}${href}` : href
 }

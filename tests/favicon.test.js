@@ -12,7 +12,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findPublicFavicon, faviconHref } from '../src/site/favicon.js'
+import { findPublicFavicon, faviconHref, touchIconHref } from '../src/site/favicon.js'
 
 const DIRS = []
 afterEach(() => {
@@ -58,5 +58,18 @@ describe('faviconHref', () => {
   it('links an address of its own as written', () => {
     expect(faviconHref('https://cdn.example/f.ico', null, '/repo/')).toBe('https://cdn.example/f.ico')
     expect(faviconHref('//cdn.example/f.ico', null, '/repo/')).toBe('//cdn.example/f.ico')
+  })
+})
+
+describe('touchIconHref', () => {
+  it('links the named touch icon under the base, and an address of its own as written', () => {
+    expect(touchIconHref('/touch-icon.png', '/')).toBe('/touch-icon.png')
+    expect(touchIconHref('/touch-icon.png', '/repo/')).toBe('/repo/touch-icon.png')
+    expect(touchIconHref('https://cdn.example/t.png', '/repo/')).toBe('https://cdn.example/t.png')
+  })
+
+  it('links none it was not named — the build looks for no file of its own', () => {
+    expect(touchIconHref(undefined, '/')).toBeNull()
+    expect(touchIconHref('  ', '/')).toBeNull()
   })
 })

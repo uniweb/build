@@ -45,7 +45,7 @@ import { FONT_LINKS_MARKER } from './head-markers.js'
 import { effectiveSeo, resolveSiteAddress } from './site-address.js'
 import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
 import { extensionNameOf, findSiteExtension } from './workspace-extension.js'
-import { faviconHref } from './favicon.js'
+import { faviconHref, touchIconHref } from './favicon.js'
 
 // BCP 47 locale code pattern: en, zh-CN, zh-Hant, pt-BR, fr-CA, sr-Latn, etc.
 const LOCALE_RE = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?'
@@ -1116,6 +1116,9 @@ export function siteContentPlugin(options = {}) {
         const typeAttr = type ? ` type="${type}"` : ''
         headInjection += `    <link rel="icon"${typeAttr} href="${favicon}">\n`
       }
+      // The touch icon: site.yml's `touchIcon:`, the PNG iOS puts on a home screen.
+      const touchIcon = touchIconHref(contentToInject?.config?.touchIcon, basePath)
+      if (touchIcon) headInjection += `    <link rel="apple-touch-icon" href="${touchIcon}">\n`
 
       // Inject content as JSON script tag
       if (inject) {
