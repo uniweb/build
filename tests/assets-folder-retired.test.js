@@ -28,7 +28,7 @@ describe('the retired assets/ folder', () => {
     rmSync(siteRoot, { recursive: true, force: true })
   })
 
-  it('a /x that only assets/ holds is refused, naming the file and the two ways out', () => {
+  it('a /x that only assets/ holds is refused, naming the file and its place in public/', () => {
     writeFileSync(join(siteRoot, 'assets', 'explainer.mp4'), 'mp4')
     writeFileSync(page, '![Watch](/explainer.mp4){role=video}\n')
     let thrown
@@ -39,8 +39,8 @@ describe('the retired assets/ folder', () => {
     }
     expect(thrown?.code).toBe(ASSETS_FOLDER_RETIRED)
     expect(thrown.message).toContain('/explainer.mp4 (in pages/home/1-hero.md) names assets/explainer.mp4')
-    expect(thrown.message).toContain('./explainer.mp4')
-    expect(thrown.message).toContain('public/')
+    // Into public/, the move every host takes: a push uploads no co-located file.
+    expect(thrown.message).toContain('Move the file to public/explainer.mp4: the address stays /explainer.mp4')
   })
 
   it('a /x resolves to public/, which wins over a copy in assets/', () => {

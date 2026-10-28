@@ -157,9 +157,10 @@ export const ASSETS_FOLDER_RETIRED = 'ASSETS_FOLDER_RETIRED'
  *
  * ⛔ `/x` NAMES `public/x`, AND ONLY THAT. Until 2026-10-28 `assets/` was a second home for it,
  * searched after `public/`; it is retired [Diego: "We don't need too many ways of doing the same
- * thing"]. What it gave — a file that ships only when a page uses it, and once — a file beside
- * the page gives too. So a site keeps media beside the page that shows it, or in `public/` for a
- * fixed address, and a `/x` only `assets/` holds is refused by name, never read as missing.
+ * thing"]. A `/x` only `assets/` holds is refused by name, never read as missing, and the move it
+ * names is into `public/`: the one every host takes. A file beside the page that shows it ships
+ * once from a static build, but a push uploads only `/x` media (`uwx/sync-package.js`, which
+ * warns and skips a co-located one), so a site published with Uniweb keeps its media in `public/`.
  *
  * @param {string} src - Original source path from content
  * @param {string} contextPath - Path of the file containing the reference
@@ -205,8 +206,8 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
 }
 
 /**
- * The refusal of a `/x` that only `assets/` holds, naming the file and the two ways out — and
- * the file that wrote it, when there is one (a site's config is read through a stand-in path).
+ * The refusal of a `/x` that only `assets/` holds, naming the file and where it goes — and the
+ * file that wrote it, when there is one (a site's config is read through a stand-in path).
  */
 function assetsFolderRetired(src, contextPath, siteRoot) {
   const where = contextPath ? relative(siteRoot, contextPath).split(sep).join('/') : ''
@@ -214,8 +215,7 @@ function assetsFolderRetired(src, contextPath, siteRoot) {
   const file = src.replace(/^\/+/, '')
   const err = new Error(
     `${src}${named} names assets/${file}, and a site no longer keeps media in assets/. ` +
-      `Move the file beside the page that shows it and write ./${file.split('/').pop()}, ` +
-      `or into public/ to keep the address ${src}.`
+      `Move the file to public/${file}: the address stays ${src}.`
   )
   err.code = ASSETS_FOLDER_RETIRED
   return err
