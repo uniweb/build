@@ -34,6 +34,7 @@ import { partitionKnowledgePages, INDEX_FILENAME } from '@uniweb/projections'
 import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { processAdvancedAssets } from './advanced-processors.js'
+import { devMediaPaths } from './dev-media.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
 import { RECORDS_DIR, resolveRecordsDir } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
@@ -308,6 +309,18 @@ export function siteContentPlugin(options = {}) {
     return content
   }
 
+  /**
+   * Under `uniweb dev`, each local media reference rewritten to where the dev server serves its
+   * file (`./dev-media.js`), by the manifest and the rewrite a build uses — so dev shows the file
+   * a build ships. A build makes its own copies (`generateBundle`). The rewrite drops the
+   * manifest, as a build's does: no payload carries it.
+   */
+  const devMedia = (content) => {
+    if (isProduction || !content?.assets) return content
+    const mapping = devMediaPaths(content.assets, { root: viteRoot, publicDir: resolvedPublicDir, base: basePath })
+    return rewriteSiteContentPaths(content, mapping)
+  }
+
   // Warn once per build, not once per collection — the dev server re-collects
   // on every content change and would otherwise repeat this on every keystroke.
   let warnedAboutKnowledge = false
@@ -382,6 +395,7 @@ export function siteContentPlugin(options = {}) {
   let resolvedSitePath = null
   let resolvedPublicDir = null
   let resolvedOutDir = null
+  let viteRoot = null // Vite's config.root: the dev server serves a file under it by its path
   let isProduction = false
   let watcher = null
   let server = null
@@ -589,6 +603,7 @@ export function siteContentPlugin(options = {}) {
       resolvedSitePath = resolve(config.root, sitePath)
       resolvedPublicDir = config.publicDir || resolve(config.root, 'public')
       resolvedOutDir = resolve(config.root, config.build.outDir)
+      viteRoot = config.root
       isProduction = config.command === 'build'
       basePath = config.base || '/'
 
@@ -642,7 +657,7 @@ export function siteContentPlugin(options = {}) {
         // pages stay in the graph so in-progress drafts remain previewable.
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
-        siteContent = locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })))
+        siteContent = devMedia(locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction }))))
         dataModelPromise = null
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
@@ -789,7 +804,7 @@ export function siteContentPlugin(options = {}) {
             rebuildQueries = false
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })))
+              siteContent = devMedia(locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath }))))
               dataModelPromise = null
               headHtml = await loadHeadHtml()
               if (materialize) {
