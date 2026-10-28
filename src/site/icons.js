@@ -86,33 +86,27 @@ export function walkContentIcons(doc, visitor) {
 /**
  * Collect all icon references from a section's content
  *
+ * ⛔ Until 2026-10-28 this also recorded the file each icon came from, and the
+ * manifest carried that map as `bySource`: the build machine's absolute paths, in
+ * every page's payload, read by nothing.
+ *
  * @param {Object} section - Section object with content
- * @param {string} sourcePath - Path to source file (for bySource tracking)
  * @returns {Object} Icon collection result
  *   - icons: Set of normalized icon references (e.g., "lu:house")
- *   - bySource: Map of icon references to source files
  */
-export function collectSectionIcons(section, sourcePath) {
+export function collectSectionIcons(section) {
   const icons = new Set()
-  const bySource = new Map()
 
   if (section.content) {
     walkContentIcons(section.content, (library, name) => {
       const normalizedLibrary = normalizeLibrary(library)
       if (!normalizedLibrary) return
 
-      const iconRef = `${normalizedLibrary}:${name}`
-      icons.add(iconRef)
-
-      // Track which files use this icon
-      if (!bySource.has(iconRef)) {
-        bySource.set(iconRef, [])
-      }
-      bySource.get(iconRef).push(sourcePath)
+      icons.add(`${normalizedLibrary}:${name}`)
     })
   }
 
-  return { icons, bySource }
+  return { icons }
 }
 
 /**
@@ -123,26 +117,12 @@ export function collectSectionIcons(section, sourcePath) {
  */
 export function mergeIconCollections(...collections) {
   const merged = {
-    icons: new Set(),
-    bySource: new Map()
+    icons: new Set()
   }
 
   for (const collection of collections) {
-    if (!collection) continue
-
-    // Merge icons set
-    if (collection.icons) {
+    if (collection?.icons) {
       collection.icons.forEach(icon => merged.icons.add(icon))
-    }
-
-    // Merge bySource map
-    if (collection.bySource) {
-      for (const [iconRef, sources] of collection.bySource) {
-        if (!merged.bySource.has(iconRef)) {
-          merged.bySource.set(iconRef, [])
-        }
-        merged.bySource.get(iconRef).push(...sources)
-      }
     }
   }
 
@@ -156,7 +136,7 @@ export function mergeIconCollections(...collections) {
  * @returns {Object} Icon manifest for site-content.json
  */
 export function buildIconManifest(iconCollection) {
-  const { icons, bySource } = iconCollection
+  const { icons } = iconCollection
 
   // Get unique families used
   const families = new Set()
@@ -165,16 +145,9 @@ export function buildIconManifest(iconCollection) {
     families.add(family)
   }
 
-  // Convert bySource Map to plain object for JSON serialization
-  const bySourceObj = {}
-  for (const [iconRef, sources] of bySource) {
-    bySourceObj[iconRef] = [...new Set(sources)] // dedupe sources
-  }
-
   return {
     used: [...icons].sort(),
     families: [...families].sort(),
-    bySource: bySourceObj,
     count: icons.size
   }
 }

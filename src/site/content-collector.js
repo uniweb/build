@@ -1203,7 +1203,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const assetCollection = collectSectionAssets(section, filePath, siteRoot)
 
   // Collect icons referenced in this section
-  const iconCollection = collectSectionIcons(section, filePath)
+  const iconCollection = collectSectionIcons(section)
 
   return { section, assetCollection, iconCollection }
 }
