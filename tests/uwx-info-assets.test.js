@@ -1,7 +1,7 @@
 /**
  * Asset references that are a BARE STRING — `info.preview` (the site card's image
- * [Diego, 2026-09-10]), `info.favicon`, `settings.touch_icon`, `seo.image` at the site and
- * page tiers, a section param — and dropping a previous site's generated `preview` from site.yml, as the CLI
+ * [Diego, 2026-09-10]), `info.favicon`, `settings.touch_icon`, a theme's font faces, `seo.image`
+ * at the site and page tiers, a section param — and dropping a previous site's generated `preview` from site.yml, as the CLI
  * does, through `writeSiteConfig` (`removeYamlScalar` until 2026-10-07).
  *
  * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
@@ -211,6 +211,42 @@ describe('the touch icon — sent only where the deployment takes it', () => {
     const pkg = await emitSyncPackages(withTouchIcon())
     expect(siteDocOf(pkg).settings).not.toHaveProperty('touch_icon')
     expect(warnings.filter((w) => w.includes('touchIcon'))).toEqual([])
+  })
+})
+
+describe("the theme's font files", () => {
+  // A font is not media to the walker (`isLocalAssetPath`), so until 2026-10-28 a theme's
+  // `fonts.faces` were never uploaded: a hosted page preloaded each face from a site path its
+  // host does not serve, and the site fell back to system fonts.
+  function withFaces(...srcs) {
+    const root = project()
+    const faces = srcs.map((src) => ({ family: 'Söhne', src, weight: 400 }))
+    writeFileSync(join(root, 'theme.yml'), yaml.dump({ fonts: { heading: 'Söhne, sans-serif', faces } }))
+    return root
+  }
+  const FONT = 'https://assets.example/w8'
+  const SERVED_FONT = { ...SERVED, '/fonts/s.woff2': FONT }
+  const IDS_FONT = { ...IDS, '/fonts/s.woff2': { id: 'w8', ext: 'woff2', served: servedFingerprint(FONT) } }
+
+  it('⭐ a face is surfaced for upload, rides as its serve URL, and pulls back as the path', async () => {
+    const root = withFaces('/fonts/s.woff2')
+    expect((await emitSyncPackages(root)).localAssets).toContain('/fonts/s.woff2')
+    const doc = siteDocOf(await emitSyncPackages(root, { assetRewrite: SERVED_FONT, assetIds: IDS_FONT }))
+    // The theme as written, its address swapped: `src` is a slot's key, yet no identity attr lands.
+    expect(doc.settings.theme.fonts.faces).toEqual([{ family: 'Söhne', src: FONT, weight: 400 }])
+
+    const dest = tmp('uwx-font-pull-')
+    mkdirSync(join(dest, 'pages'), { recursive: true })
+    updateBackendMap(dest, ORIGIN, 'assets', IDS_FONT)
+    siteContentDocumentToProject({ document: doc, siteRoot: dest, backend: ORIGIN })
+    const theme = yaml.load(readFileSync(join(dest, 'theme.yml'), 'utf8'))
+    expect(theme.fonts.faces).toEqual([{ family: 'Söhne', src: '/fonts/s.woff2', weight: 400 }])
+  })
+
+  it('a face at an address of its own is never uploaded, and rides as written', async () => {
+    const pkg = await emitSyncPackages(withFaces('https://cdn.example/s.woff2'), { assetRewrite: SERVED_FONT, assetIds: IDS_FONT })
+    expect(pkg.localAssets).not.toContain('https://cdn.example/s.woff2')
+    expect(siteDocOf(pkg).settings.theme.fonts.faces[0].src).toBe('https://cdn.example/s.woff2')
   })
 })
 

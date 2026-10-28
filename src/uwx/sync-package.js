@@ -177,21 +177,23 @@ function walkEntityAssets(node, visitor) {
 // media object (`{image: {src}}`) with one rule — the two shapes framework
 // resolves, reached through the same walk.
 //
-// `noStamp` is the one object that must get NO identity attrs even when a slot
-// matches — the site's `info`, whose fields the host declares (see the call site).
-function rewriteEntityAssets(node, map, ids, noStamp = null) {
+// `bare` holds the objects under which NOTHING gets identity attrs, even where a slot
+// matches — the site's `info` and its theme (see the call site). Their references are
+// bare strings, which a pull recognizes by fingerprint.
+function rewriteEntityAssets(node, map, ids, bare = null) {
+  if (bare?.has(node)) ids = null
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
       const v = node[i]
       if (typeof v === 'string') { if (map[v]) node[i] = map[v] }
-      else rewriteEntityAssets(v, map, ids, noStamp)
+      else rewriteEntityAssets(v, map, ids, bare)
     }
     return node
   }
   if (node && typeof node === 'object') {
     // Stamp BEFORE the string swap below, while the reference is still the
     // local ref the ids map is keyed by.
-    if (ids && node !== noStamp) {
+    if (ids) {
       // Every asset slot, not just the primary: a video's `poster` and a
       // document's `preview` are assets like any other, and each has identity
       // attrs naming which reference they belong to (ASSET_SLOTS).
@@ -209,7 +211,7 @@ function rewriteEntityAssets(node, map, ids, noStamp = null) {
     for (const key of Object.keys(node)) {
       const v = node[key]
       if (typeof v === 'string') { if (map[v]) node[key] = map[v] }
-      else rewriteEntityAssets(v, map, ids, noStamp)
+      else rewriteEntityAssets(v, map, ids, bare)
     }
   }
   return node
@@ -464,12 +466,15 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const assetIds =
     opts.assetIds && typeof opts.assetIds === 'object' ? opts.assetIds : null
   if (assetRewrite) {
-    // ⛔ No identity attrs on `info`: it is a Section whose fields the host declares,
-    // and `preview` is a real ASSET_SLOTS slot, so stamping would add
-    // `previewAssetId`/`previewAssetExt` — fields the host refuses. Its bare strings
-    // are still swapped for their serve URLs, which the asset map in `sync.json`
-    // recognizes on pull by fingerprint (asset-map.js → `servedFingerprint`).
-    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds, siteDoc.info)
+    // ⛔ No identity attrs on `info` or in the theme. `info` is a Section whose fields
+    // the host declares, and `preview` is a real ASSET_SLOTS slot, so stamping would add
+    // `previewAssetId`/`previewAssetExt` — fields the host refuses. The theme is
+    // `theme.yml` as written, and a font face (`{ family, src }`) is slot-shaped but is
+    // configuration, not content. Their bare strings are still swapped for their serve
+    // URLs, which the asset map in `sync.json` recognizes on pull by fingerprint
+    // (asset-map.js → `servedFingerprint`).
+    const bare = new Set([siteDoc?.info, siteDoc?.settings?.theme].filter(Boolean))
+    if (siteDoc) rewriteEntityAssets(siteDoc, assetRewrite, assetIds, bare)
     for (const e of col.entities) rewriteEntityAssets(e.document, assetRewrite, assetIds)
     // The folder too: a file entry's value names its asset by an upload key until here.
     if (folder) rewriteEntityAssets(folder.document, assetRewrite, assetIds)
@@ -497,8 +502,17 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // (`isLocalAssetPath`), but a host serves the favicon its page shell links only from
   // the asset store: left as a site path, `/favicon.ico` was linked on every hosted page
   // and answered 404. The rewrite above already swaps any path the upload map names.
+  const sitePath = (v) => typeof v === 'string' && v.startsWith('/') && !v.startsWith('//')
   const favicon = siteDoc?.info?.favicon
-  if (typeof favicon === 'string' && favicon.startsWith('/') && !favicon.startsWith('//')) localAssetSet.add(favicon)
+  if (sitePath(favicon)) localAssetSet.add(favicon)
+  // ⭐ The theme's font files, the same way. A face's `src` names a file under `public/`
+  // as an image path does, but a font is not media to the walker either: left as a site
+  // path, each face was preloaded and @font-face'd on every hosted page from a path that
+  // answered 404.
+  const faces = siteDoc?.settings?.theme?.fonts?.faces
+  for (const face of Array.isArray(faces) ? faces : []) {
+    if (sitePath(face?.src)) localAssetSet.add(face.src)
+  }
   const localAssets = [...localAssetSet]
 
   // ⭐ THE IDENTITY OF A RECORD'S LIST ITEMS (`record-items.js`), taken on each document as it
