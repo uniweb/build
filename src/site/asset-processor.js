@@ -228,9 +228,11 @@ function rewriteDataPaths(data, pathMapping) {
  * @param {Object} content - ProseMirror document
  * @param {Object} pathMapping - Map of original paths to new paths
  * @param {Object} [files] - what the build knows of each file it copied (`processAssets`)
+ * @param {{ posters?: Object }} [made] - what the build made for a file, by the reference as
+ *   written: `posters`, a video's poster frame (`processAdvancedAssets`)
  * @returns {Object} Content with rewritten paths
  */
-export function rewriteContentPaths(content, pathMapping, files = null) {
+export function rewriteContentPaths(content, pathMapping, files = null, made = null) {
   if (!content) return content
 
   // Deep clone to avoid mutating original
@@ -251,6 +253,12 @@ export function rewriteContentPaths(content, pathMapping, files = null) {
           node.attrs[attr] = newPath
         }
       }
+      // The poster the build made for a video its author gave none, on the node — where an
+      // authored `{poster=…}` is — so `content.videos[i].poster` carries it. ⛔ Until 2026-10-28
+      // it went to a top-level `_assetMeta.posters` that nothing read, keyed by the reference
+      // the node no longer held: the frame was made, and no page showed it.
+      const poster = made?.posters?.[original]
+      if (poster && !node.attrs.poster) node.attrs.poster = poster
       // A document whose file the build copied: the file's name as the author gave it — the
       // address now holds a hashed one — its size, and its type (2026-09-29). Only on the built
       // output, never on what an author stored; a value written on the node stays.
@@ -329,15 +337,16 @@ export function rewriteParamPaths(params, pathMapping) {
  * @param {Object} siteContent - Full site content object
  * @param {Object} pathMapping - Map of original paths to new paths
  * @param {Object} [files] - what the build knows of each file it copied (`processAssets`)
+ * @param {{ posters?: Object }} [made] - what the build made for a file (`rewriteContentPaths`)
  * @returns {Object} Site content with rewritten paths
  */
-export function rewriteSiteContentPaths(siteContent, pathMapping, files = null) {
+export function rewriteSiteContentPaths(siteContent, pathMapping, files = null, made = null) {
   // Deep clone
   const result = JSON.parse(JSON.stringify(siteContent))
 
   function processSection(section) {
     if (section.content) {
-      section.content = rewriteContentPaths(section.content, pathMapping, files)
+      section.content = rewriteContentPaths(section.content, pathMapping, files, made)
     }
     if (section.params) {
       section.params = rewriteParamPaths(section.params, pathMapping)

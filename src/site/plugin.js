@@ -1177,7 +1177,7 @@ export function siteContentPlugin(options = {}) {
           let advancedResults = null
 
           if (advancedEnabled) {
-            const { posterMapping, thumbnailMapping, results: advResults } = await processAdvancedAssets(
+            const { posterMapping, results: advResults } = await processAdvancedAssets(
               siteContent.assets,
               {
                 outputDir: resolvedOutDir,
@@ -1207,18 +1207,11 @@ export function siteContentPlugin(options = {}) {
               console.log(`[site-content] Skipped ${advResults.pdfs.explicit} PDFs with explicit previews`)
             }
 
-            // Merge poster and thumbnail mappings into the path mapping
-            // Videos: add a .poster property to the content (not replace the src)
-            // PDFs: add a .thumbnail property to the content
-            finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
-
-            // Add poster and thumbnail metadata to the site content
-            if (Object.keys(posterMapping).length > 0 || Object.keys(thumbnailMapping).length > 0) {
-              finalContent._assetMeta = {
-                posters: posterMapping,
-                thumbnails: thumbnailMapping
-              }
-            }
+            // A video's generated poster goes on its node, as an authored one is
+            // (`rewriteContentPaths`). ⚠️ A PDF's generated thumbnail is a placeholder card,
+            // not a render of the file (`generatePdfThumbnail`), and no node takes it.
+            // ⛔ Until 2026-10-28 both went to a top-level `_assetMeta` that nothing read.
+            finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files, { posters: posterMapping })
           } else {
             // Rewrite paths in content
             finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
