@@ -57,6 +57,23 @@ export async function readImageSize(imagePath) {
 }
 
 /**
+ * Whether every pixel of an image is opaque — an alpha channel alone does not say, since most
+ * PNGs carry one whether they use it or not — or null when sharp cannot read the file. It decodes
+ * the whole image, so it is for a small one: `uniweb doctor` asks it of a site's touch icon,
+ * whose transparent pixels iOS draws black.
+ *
+ * @param {string} imagePath
+ * @returns {Promise<boolean|null>}
+ */
+export async function isImageOpaque(imagePath) {
+  try {
+    return (await sharp(imagePath).stats()).isOpaque
+  } catch {
+    return null
+  }
+}
+
+/**
  * Convert an image to webp format
  */
 async function convertToWebp(inputPath, outputPath, options = {}) {
