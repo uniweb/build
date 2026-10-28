@@ -149,13 +149,23 @@ function walkDataBlockAssets(doc, visitor) {
   }
 }
 
+/** The code `resolveAssetPath` refuses a `/x` with when only the retired `assets/` folder holds it. */
+export const ASSETS_FOLDER_RETIRED = 'ASSETS_FOLDER_RETIRED'
+
 /**
  * Resolve an asset path to absolute file system path
+ *
+ * ⛔ `/x` NAMES `public/x`, AND ONLY THAT. Until 2026-10-28 `assets/` was a second home for it,
+ * searched after `public/`; it is retired [Diego: "We don't need too many ways of doing the same
+ * thing"]. What it gave — a file that ships only when a page uses it, and once — a file beside
+ * the page gives too. So a site keeps media beside the page that shows it, or in `public/` for a
+ * fixed address, and a `/x` only `assets/` holds is refused by name, never read as missing.
  *
  * @param {string} src - Original source path from content
  * @param {string} contextPath - Path of the file containing the reference
  * @param {string} siteRoot - Site root directory
  * @returns {Object} Resolution result
+ * @throws {Error} `code: ASSETS_FOLDER_RETIRED` — a `/x` that only `assets/` holds
  */
 export function resolveAssetPath(src, contextPath, siteRoot) {
   // External URLs - don't process
@@ -176,19 +186,11 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
     const contextDir = dirname(contextPath)
     resolved = normalize(join(contextDir, src))
   }
-  // Absolute site paths: /images/hero.png
+  // Absolute site paths: /images/hero.png — a file in public/, whether or not it exists yet
   else if (src.startsWith('/')) {
-    // Check public folder first, then assets folder
-    const publicPath = join(siteRoot, 'public', src)
-    const assetsPath = join(siteRoot, 'assets', src)
-
-    if (existsSync(publicPath)) {
-      resolved = publicPath
-    } else if (existsSync(assetsPath)) {
-      resolved = assetsPath
-    } else {
-      // Default to public folder path even if it doesn't exist yet
-      resolved = publicPath
+    resolved = join(siteRoot, 'public', src)
+    if (!existsSync(resolved) && existsSync(join(siteRoot, 'assets', src))) {
+      throw assetsFolderRetired(src, contextPath, siteRoot)
     }
   }
 
@@ -200,6 +202,23 @@ export function resolveAssetPath(src, contextPath, siteRoot) {
     isVideo: isVideoPath(src),
     isPdf: isPdfPath(src)
   }
+}
+
+/**
+ * The refusal of a `/x` that only `assets/` holds, naming the file and the two ways out — and
+ * the file that wrote it, when there is one (a site's config is read through a stand-in path).
+ */
+function assetsFolderRetired(src, contextPath, siteRoot) {
+  const where = contextPath ? relative(siteRoot, contextPath).split(sep).join('/') : ''
+  const named = where && !where.startsWith('..') && existsSync(contextPath) ? ` (in ${where})` : ''
+  const file = src.replace(/^\/+/, '')
+  const err = new Error(
+    `${src}${named} names assets/${file}, and a site no longer keeps media in assets/. ` +
+      `Move the file beside the page that shows it and write ./${file.split('/').pop()}, ` +
+      `or into public/ to keep the address ${src}.`
+  )
+  err.code = ASSETS_FOLDER_RETIRED
+  return err
 }
 
 /**

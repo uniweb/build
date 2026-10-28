@@ -2,10 +2,10 @@
  * WHERE `uniweb dev` SERVES EACH MEDIA FILE A SITE NAMES — so dev shows the file a build ships.
  *
  * A build resolves each local media reference (`resolveAssetPath`, `./assets.js`) and rewrites it
- * to the copy it makes (`processAssets`, `rewriteSiteContentPaths`). Dev runs neither, so a
- * reference stayed as written and only one into `public/` reached its file: `./photo.png` was read
- * against the page's URL, and `/clip.mp4` — `assets/clip.mp4` to a build — named nothing the dev
- * server held. Both were answered with the site's HTML, and a 200 (measured 2026-10-28).
+ * to the copy it makes (`processAssets`, `rewriteSiteContentPaths`). Dev ran neither, so a
+ * reference stayed as written and only one into `public/` reached its file: a co-located
+ * `./photo.png` was read against the page's URL, and answered with the site's HTML and a 200
+ * (measured 2026-10-28).
  *
  * So dev rewrites each reference the collector resolved — the same manifest, the same rewrite — to
  * where the dev server serves its file: one in `public/` at the site's base, one under the root by
