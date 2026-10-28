@@ -26,13 +26,18 @@
  * file. That is the only form that keeps up with a growing Section.
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it, expect, afterEach } from 'vitest'
 import { siteProjectToDocument, siteContentDocumentToProject } from '../src/uwx/index.js'
 
 const DIRS = []
+
+// A deployment whose `settings` declares every key this producer can emit — so the keys sent only
+// where a deployment takes them (`touch_icon`) are in the cycle too.
+const SURFACE = JSON.parse(readFileSync(new URL('../src/uwx/emit-surface.json', import.meta.url), 'utf8'))
+const TAKES_ALL = { settingsFields: Object.keys(SURFACE.sections.settings.keys) }
 
 /** A site declaring one of everything framework emits. */
 function fullSite() {
@@ -55,6 +60,7 @@ function fullSite() {
       'agents: false', 'paths: { pages: ./pages }', 'query: articles',
       'layout: { name: DocsLayout, hide: [right] }',
       'placeholders: { product: Uniweb }',
+      'touchIcon: /touch-icon.png',
       '',
     ].join('\n')
   )
@@ -95,6 +101,10 @@ describe('the info / settings split', () => {
       'head_html', 'keywords', 'languages', 'layout', 'paths', 'placeholders',
       'publish_languages', 'seo', 'theme',
     ])
+    // …and where the deployment takes it, the touch icon beside them.
+    const taken = await siteProjectToDocument(fullSite(), TAKES_ALL)
+    expect(Object.keys(taken.settings).filter((k) => !(k in doc.settings))).toEqual(['touch_icon'])
+    expect(taken.settings.touch_icon).toBe('/touch-icon.png')
 
     // ⭐ A service rides its row, whole — never `settings` (`search`, `submit`,
     // `assistant` and `tracking` sat there until the evening of 2026-10-06).
@@ -120,14 +130,14 @@ describe('the info / settings split', () => {
 
 describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', () => {
   it('every authored key on both Sections survives a full cycle unchanged', async () => {
-    const first = await siteProjectToDocument(fullSite())
+    const first = await siteProjectToDocument(fullSite(), TAKES_ALL)
 
     const dest = mkdtempSync(join(tmpdir(), 'uwx-split-rt-'))
     DIRS.push(dest)
     mkdirSync(join(dest, 'pages'), { recursive: true })
     siteContentDocumentToProject({ document: first, siteRoot: dest })
 
-    const second = await siteProjectToDocument(dest)
+    const second = await siteProjectToDocument(dest, TAKES_ALL)
 
     // Compared whole rather than key by key: a key that stops round-tripping must
     // fail here even if nobody added an assertion for it.
@@ -140,10 +150,11 @@ describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', (
     // Guards the guard: if `siteContentDocumentToProject` wrote nothing at all, the
     // test above would compare two empty objects and pass. Assert the cycle actually
     // carried something substantial.
-    const first = await siteProjectToDocument(fullSite())
-    expect(Object.keys(first.settings).length).toBeGreaterThanOrEqual(15)
+    const first = await siteProjectToDocument(fullSite(), TAKES_ALL)
+    expect(Object.keys(first.settings).length).toBeGreaterThanOrEqual(16)
     expect(first.services.length).toBe(4)
     expect(first.settings.theme).toEqual({ colors: { primary: '#000' } })
+    expect(first.settings.touch_icon).toBe('/touch-icon.png')
   })
 
   it('a preview token that YAML would read as a number or a date comes back as the same string', async () => {

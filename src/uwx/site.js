@@ -1356,6 +1356,12 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   // carries the translation collector with it.
   setIf(settings, 'keywords', plainTextTargets(localizeScalarList(siteYml.keywords, sourceLocale, translations), sourceLocale))
 
+  // ⭐ The touch icon — `site.yml::touchIcon`, the PNG iOS puts on a home screen — where the
+  // deployment's `settings` takes it (`touchIconValue`). A site path is media to the upload walk
+  // (`sync-package.js::walkEntityAssets`), so it goes up with the site's other files and is sent
+  // as its serve URL, which a pull puts back as the path (`asset-map.js::restoreAssetRefs`).
+  setIf(settings, 'touch_icon', touchIconValue(siteYml.touchIcon, settingsFields))
+
   // ⛔ NO SERVICE IS HERE. A service's address and options ride its row in the
   // `services` Section, whole (`requestedServices`) [Diego, 2026-10-06: "If it's on and
   // has configuration, it can all be in the same place"]. *Until that evening
@@ -1388,6 +1394,21 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   setIf(settings, 'layout', siteYml.layout)
 
   return Object.keys(settings).length > 0 ? settings : undefined
+}
+
+/**
+ * `site.yml::touchIcon` as a push sends it: only to a deployment whose `settings` declares
+ * `touch_icon`, since one that does not refuses a push carrying it (`deploymentFields`). Such a
+ * site is told; with no list in hand, nothing optional is sent.
+ */
+function touchIconValue(named, settingsFields) {
+  if (typeof named !== 'string' || !named.trim() || !Array.isArray(settingsFields)) return undefined
+  if (settingsFields.includes('touch_icon')) return named
+  console.warn(
+    "uwx/site: `touchIcon:` is not sent — this backend's site settings take no touch icon, so " +
+      'the pages it serves link none.'
+  )
+  return undefined
 }
 
 /**

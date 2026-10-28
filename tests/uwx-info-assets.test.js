@@ -1,7 +1,7 @@
 /**
  * Asset references that are a BARE STRING — `info.preview` (the site card's image
- * [Diego, 2026-09-10]), `info.favicon`, `seo.image` at the site and page tiers, a
- * section param — and dropping a previous site's generated `preview` from site.yml, as the CLI
+ * [Diego, 2026-09-10]), `info.favicon`, `settings.touch_icon`, `seo.image` at the site and
+ * page tiers, a section param — and dropping a previous site's generated `preview` from site.yml, as the CLI
  * does, through `writeSiteConfig` (`removeYamlScalar` until 2026-10-07).
  *
  * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
@@ -17,7 +17,7 @@
  *   · a URL the map cannot recognize stays as the URL that works.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -160,6 +160,57 @@ describe('the favicon, whatever its type', () => {
     const pkg = await emitSyncPackages(withFavicon('https://cdn.example/f.ico'), { assetRewrite: SERVED_ICO, assetIds: IDS_ICO })
     expect(pkg.localAssets).not.toContain('https://cdn.example/f.ico')
     expect(siteDocOf(pkg).info.favicon).toBe('https://cdn.example/f.ico')
+  })
+})
+
+describe('the touch icon — sent only where the deployment takes it', () => {
+  // `site.yml::touchIcon` rides `settings.touch_icon`, a key a deployment declares or does not
+  // (`GET /dev/config` → `settingsFields`), and one that does not refuses a push carrying it.
+  function withTouchIcon() {
+    const root = project()
+    const file = join(root, 'site.yml')
+    writeFileSync(file, `${readFileSync(file, 'utf8')}touchIcon: /touch-icon.png\n`)
+    return root
+  }
+  const TOUCH = 'https://assets.example/t7'
+  const SERVED_TOUCH = { ...SERVED, '/touch-icon.png': TOUCH }
+  const IDS_TOUCH = { ...IDS, '/touch-icon.png': { id: 't7', ext: 'png', served: servedFingerprint(TOUCH) } }
+  const TAKES = { settingsFields: ['seo', 'touch_icon'] }
+
+  let warnings
+  beforeEach(() => {
+    warnings = []
+    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(String(message)))
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('⭐ is surfaced for upload, rides as its serve URL, and pulls back as the path', async () => {
+    const root = withTouchIcon()
+    expect((await emitSyncPackages(root, TAKES)).localAssets).toContain('/touch-icon.png')
+    const doc = siteDocOf(await emitSyncPackages(root, { ...TAKES, assetRewrite: SERVED_TOUCH, assetIds: IDS_TOUCH }))
+    expect(doc.settings.touch_icon).toBe(TOUCH)
+    // A bare string, like the favicon: no identity attr lands beside it.
+    expect(Object.keys(doc.settings).filter((k) => /AssetId|AssetExt/.test(k))).toEqual([])
+
+    const dest = tmp('uwx-touch-pull-')
+    mkdirSync(join(dest, 'pages'), { recursive: true })
+    updateBackendMap(dest, ORIGIN, 'assets', IDS_TOUCH)
+    siteContentDocumentToProject({ document: doc, siteRoot: dest, backend: ORIGIN })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).touchIcon).toBe('/touch-icon.png')
+    expect(warnings).toEqual([])
+  })
+
+  it('is neither sent nor uploaded where the deployment takes none — and the site is told', async () => {
+    const pkg = await emitSyncPackages(withTouchIcon(), { settingsFields: ['seo'] })
+    expect(siteDocOf(pkg).settings).not.toHaveProperty('touch_icon')
+    expect(pkg.localAssets).not.toContain('/touch-icon.png')
+    expect(warnings.filter((w) => w.includes('`touchIcon:` is not sent'))).toHaveLength(1)
+  })
+
+  it('with no list in hand, nothing optional is sent, and nothing is said', async () => {
+    const pkg = await emitSyncPackages(withTouchIcon())
+    expect(siteDocOf(pkg).settings).not.toHaveProperty('touch_icon')
+    expect(warnings.filter((w) => w.includes('touchIcon'))).toEqual([])
   })
 })
 

@@ -89,7 +89,10 @@
         "seo": [
           "site.yml::seo"
         ],
-        "theme": null
+        "theme": null,
+        "touch_icon": [
+          "site.yml::touchIcon"
+        ]
       }
     },
     "services": {

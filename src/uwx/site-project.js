@@ -192,6 +192,9 @@ const SETTINGS_TO_SITE_YML = {
   // offered through `config.services` and resolved at render, never entering the
   // stored record, so a pull cannot launder it into authored config.
   agents: 'agents',
+  // The touch icon, verbatim: the path the author wrote, which `restoreAssetRefs` has already put
+  // back from the serve URL the push recorded (asset-map.js), else a URL.
+  touch_icon: 'touchIcon',
 }
 
 
