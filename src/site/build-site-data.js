@@ -19,8 +19,8 @@
  * actually consumed). Both paths use
  * the same underlying building blocks (`collectSiteContent`,
  * `processQueries`, etc.), so behavior stays consistent without forcing
- * one path through the other's lifecycle. Media processing — WebP copies,
- * video posters, PDF thumbnails — is the bundle path's alone (below).
+ * one path through the other's lifecycle. Media processing — WebP copies and
+ * video posters — is the bundle path's alone (below).
  */
 
 import { writeFile, mkdir, cp } from 'node:fs/promises'
@@ -164,7 +164,6 @@ export async function buildSiteData({
   // Strip internal-only properties that don't serialize (Sets don't
   // JSON-roundtrip): the collector records them for media processing.
   delete finalContent.hasExplicitPoster
-  delete finalContent.hasExplicitPreview
 
   // ⛔ `config.icons` is a HOST-owned slot on this lane — drop it.
   //

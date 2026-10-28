@@ -2,10 +2,13 @@
  * Advanced Asset Processors
  *
  * Optional processors for advanced asset types:
- * - Video poster extraction (requires ffmpeg)
- * - PDF thumbnail generation (requires pdf-lib)
+ * - Video poster extraction (requires ffmpeg), for a site's videos
+ * - A PDF's placeholder card (requires pdf-lib), for a file record's preview (`./file-records.js`)
  *
  * These features gracefully degrade if dependencies aren't available.
+ *
+ * ⛔ A site's own PDFs got that card too, until 2026-10-28, and no page used it: a document's
+ * preview is the one its author names (`{preview=…}`).
  *
  * @module @uniweb/build/site
  */
@@ -150,9 +153,10 @@ export async function extractVideoPoster(videoPath, outputPath, options = {}) {
 }
 
 /**
- * Generate a thumbnail from a PDF's first page
+ * A placeholder card for a PDF — "PDF · N pages", sized as its first page — not a render of
+ * the file. A file record's preview (`./file-records.js`).
  *
- * Uses pdf-lib to extract the first page dimensions and sharp to render.
+ * Uses pdf-lib to read the page count and first page's size, and sharp to draw the card.
  * Falls back gracefully if pdf-lib is not available.
  *
  * @param {string} pdfPath - Path to the PDF file
@@ -254,19 +258,18 @@ export async function generatePdfThumbnail(pdfPath, outputPath, options = {}) {
 }
 
 /**
- * Process a video or PDF asset, generating appropriate thumbnails
+ * Process a video asset, extracting its poster
  *
  * @param {Object} asset - Asset info
  * @param {Object} options - Processing options
  * @param {string} [options.basePath='/'] - Site base path for subdirectory deployments
- * @returns {Promise<Object>} Processing result with poster/thumbnail info
+ * @returns {Promise<Object>} Processing result with the poster's URL
  */
 export async function processAdvancedAsset(asset, options = {}) {
   const {
     outputDir,
     assetsSubdir = 'assets',
     videoPosters = true,
-    pdfThumbnails = true,
     quality = 80,
     basePath = '/'
   } = options
@@ -311,54 +314,27 @@ export async function processAdvancedAsset(asset, options = {}) {
     }
   }
 
-  // Handle PDF files
-  if (isPdfFile(resolved) && pdfThumbnails) {
-    const thumbFilename = `${name}-thumb-${hash}.webp`
-    const thumbPath = join(outputDir, assetsSubdir, thumbFilename)
-
-    const result = await generatePdfThumbnail(resolved, thumbPath, { quality })
-
-    if (result.success) {
-      return {
-        processed: true,
-        type: 'pdf',
-        thumbnail: `${prefix}/${assetsSubdir}/${thumbFilename}`,
-        pageCount: result.pageCount,
-        placeholder: result.placeholder
-      }
-    } else if (result.skipped) {
-      // pdf-lib not available - not an error, just skip
-      return { processed: false, skipped: true, reason: result.error }
-    } else {
-      return { processed: false, error: result.error }
-    }
-  }
-
-  // Not a video or PDF, or processing disabled
+  // Not a video, or processing disabled
   return { processed: false, skipped: true, reason: 'Not an advanced asset type' }
 }
 
 /**
- * Process all advanced assets in a manifest
+ * Process all advanced assets in a manifest: a poster for each video its author gave none
  *
  * @param {Object} assetManifest - Asset manifest
  * @param {Object} options - Processing options
  * @param {Set} [options.hasExplicitPoster] - Set of video paths with explicit poster attributes
- * @param {Set} [options.hasExplicitPreview] - Set of PDF paths with explicit preview attributes
- * @returns {Promise<Object>} Results with poster/thumbnail mappings
+ * @returns {Promise<Object>} Results with the poster mapping
  */
 export async function processAdvancedAssets(assetManifest, options = {}) {
   const {
     hasExplicitPoster = new Set(),
-    hasExplicitPreview = new Set(),
     ...processingOptions
   } = options
 
   const posterMapping = {}  // video src -> poster url
-  const thumbnailMapping = {} // pdf src -> thumbnail url
   const results = {
-    videos: { processed: 0, skipped: 0, explicit: 0 },
-    pdfs: { processed: 0, skipped: 0, explicit: 0 }
+    videos: { processed: 0, skipped: 0, explicit: 0 }
   }
 
   for (const [originalPath, asset] of Object.entries(assetManifest)) {
@@ -376,26 +352,8 @@ export async function processAdvancedAssets(assetManifest, options = {}) {
       } else {
         results.videos.skipped++
       }
-    } else if (isPdfFile(asset.resolved || '')) {
-      // Skip auto-generation if explicit preview was provided
-      if (hasExplicitPreview.has(originalPath)) {
-        results.pdfs.explicit++
-        continue
-      }
-
-      const result = await processAdvancedAsset(asset, processingOptions)
-      if (result.processed && result.thumbnail) {
-        thumbnailMapping[originalPath] = {
-          url: result.thumbnail,
-          pageCount: result.pageCount,
-          placeholder: result.placeholder
-        }
-        results.pdfs.processed++
-      } else {
-        results.pdfs.skipped++
-      }
     }
   }
 
-  return { posterMapping, thumbnailMapping, results }
+  return { posterMapping, results }
 }

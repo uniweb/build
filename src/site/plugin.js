@@ -265,7 +265,6 @@ import { mountDevSubmit } from '../dev/submit-mount.js'
  * @param {number} [options.assets.quality=80] - WebP quality (1-100)
  * @param {string} [options.assets.outputDir='assets'] - Output subdirectory for processed assets
  * @param {boolean} [options.assets.videoPosters=true] - Extract poster frames from videos (requires ffmpeg)
- * @param {boolean} [options.assets.pdfThumbnails=true] - Generate thumbnails for PDFs (requires pdf-lib)
  * @param {string} [options.foundationPath] - Path to foundation directory (for loading theme vars)
  */
 export function siteContentPlugin(options = {}) {
@@ -288,8 +287,7 @@ export function siteContentPlugin(options = {}) {
     convertToWebp: assetsConfig.convertToWebp !== false, // Default true
     quality: assetsConfig.quality || 80,
     outputDir: assetsConfig.outputDir || 'assets',
-    videoPosters: assetsConfig.videoPosters !== false, // Default true
-    pdfThumbnails: assetsConfig.pdfThumbnails !== false // Default true
+    videoPosters: assetsConfig.videoPosters !== false // Default true
   }
 
   /**
@@ -1172,26 +1170,20 @@ export function siteContentPlugin(options = {}) {
             basePath
           })
 
-          // Process advanced assets (videos, PDFs)
-          const advancedEnabled = assetsOptions.videoPosters || assetsOptions.pdfThumbnails
-          let advancedResults = null
-
-          if (advancedEnabled) {
+          // A poster for each video its author gave none
+          if (assetsOptions.videoPosters) {
             const { posterMapping, results: advResults } = await processAdvancedAssets(
               siteContent.assets,
               {
                 outputDir: resolvedOutDir,
                 assetsSubdir: assetsOptions.outputDir,
                 videoPosters: assetsOptions.videoPosters,
-                pdfThumbnails: assetsOptions.pdfThumbnails,
                 quality: assetsOptions.quality,
                 basePath,
-                // Pass explicit poster/preview sets to skip auto-generation
-                hasExplicitPoster: siteContent.hasExplicitPoster || new Set(),
-                hasExplicitPreview: siteContent.hasExplicitPreview || new Set()
+                // Pass the explicit poster set to skip auto-generation
+                hasExplicitPoster: siteContent.hasExplicitPoster || new Set()
               }
             )
-            advancedResults = advResults
 
             // Log advanced processing results
             if (advResults.videos.processed > 0) {
@@ -1200,17 +1192,10 @@ export function siteContentPlugin(options = {}) {
             if (advResults.videos.explicit > 0) {
               console.log(`[site-content] Skipped ${advResults.videos.explicit} videos with explicit posters`)
             }
-            if (advResults.pdfs.processed > 0) {
-              console.log(`[site-content] Generated ${advResults.pdfs.processed} PDF thumbnails`)
-            }
-            if (advResults.pdfs.explicit > 0) {
-              console.log(`[site-content] Skipped ${advResults.pdfs.explicit} PDFs with explicit previews`)
-            }
 
             // A video's generated poster goes on its node, as an authored one is
-            // (`rewriteContentPaths`). ⚠️ A PDF's generated thumbnail is a placeholder card,
-            // not a render of the file (`generatePdfThumbnail`), and no node takes it.
-            // ⛔ Until 2026-10-28 both went to a top-level `_assetMeta` that nothing read.
+            // (`rewriteContentPaths`). ⛔ Until 2026-10-28 it went to a top-level `_assetMeta`
+            // that nothing read, beside a placeholder card made for each PDF that no page used.
             finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files, { posters: posterMapping })
           } else {
             // Rewrite paths in content
@@ -1233,7 +1218,6 @@ export function siteContentPlugin(options = {}) {
 
       // Clean up internal properties that shouldn't be in the output (Sets don't serialize)
       delete finalContent.hasExplicitPoster
-      delete finalContent.hasExplicitPreview
 
       // Note: theme.css is kept here so prerender can inject it into HTML
       // Prerender will strip it from the JSON it injects into each page

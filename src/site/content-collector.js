@@ -1228,7 +1228,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
  */
 async function processNesting(sections, nestConfig, pagePath, siteRoot, cachedFiles) {
   const result = {
-    assetCollection: { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() },
+    assetCollection: { assets: {}, hasExplicitPoster: new Set() },
     iconCollection: { icons: new Set(), bySource: new Map() },
     lastModified: null,
     attachedChildren: new Set(),
@@ -1305,8 +1305,7 @@ async function processExplicitSections(sectionsConfig, pagePath, siteRoot, paren
   const sections = []
   let assetCollection = {
     assets: {},
-    hasExplicitPoster: new Set(),
-    hasExplicitPreview: new Set()
+    hasExplicitPoster: new Set()
   }
   let iconCollection = {
     icons: new Set(),
@@ -1464,7 +1463,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         redirect: target,
         sections: []
       },
-      assetCollection: { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() },
+      assetCollection: { assets: {}, hasExplicitPoster: new Set() },
       iconCollection: { icons: new Set(), bySource: new Map() }
     }
   }
@@ -1490,7 +1489,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
         rewrite: pageConfig.rewrite,
         sections: []
       },
-      assetCollection: { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() },
+      assetCollection: { assets: {}, hasExplicitPoster: new Set() },
       iconCollection: { icons: new Set(), bySource: new Map() }
     }
   }
@@ -1498,8 +1497,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   let hierarchicalSections = []
   let pageAssetCollection = {
     assets: {},
-    hasExplicitPoster: new Set(),
-    hasExplicitPreview: new Set()
+    hasExplicitPoster: new Set()
   }
   let pageIconCollection = {
     icons: new Set(),
@@ -1939,8 +1937,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
   const pages = []
   let assetCollection = {
     assets: {},
-    hasExplicitPoster: new Set(),
-    hasExplicitPreview: new Set()
+    hasExplicitPoster: new Set()
   }
   let iconCollection = {
     icons: new Set(),
@@ -2465,7 +2462,7 @@ export async function loadFoundationInfo(foundationPath) {
  * @returns {Promise<{ layouts: Object|null, assetCollection: Object, iconCollection: Object }>}
  */
 async function collectLayouts(layoutDir, siteRoot) {
-  let assetCollection = { assets: {}, hasExplicitPoster: new Set(), hasExplicitPreview: new Set() }
+  let assetCollection = { assets: {}, hasExplicitPoster: new Set() }
   let iconCollection = { icons: new Set(), bySource: new Map() }
 
   const areas = await readLayoutFolder(layoutDir, { siteRoot })
@@ -2808,9 +2805,9 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Log asset summary
   const assetCount = Object.keys(assetCollection.assets).length
-  const explicitCount = assetCollection.hasExplicitPoster.size + assetCollection.hasExplicitPreview.size
+  const explicitCount = assetCollection.hasExplicitPoster.size
   if (assetCount > 0) {
-    console.log(`[content-collector] Found ${assetCount} asset references${explicitCount > 0 ? ` (${explicitCount} with explicit poster/preview)` : ''}`)
+    console.log(`[content-collector] Found ${assetCount} asset references${explicitCount > 0 ? ` (${explicitCount} with an explicit poster)` : ''}`)
   }
 
   // Build icon manifest from collected icons
@@ -2969,7 +2966,6 @@ export async function collectSiteContent(sitePath, options = {}) {
     versionedScopes: versionedScopesObj,
     assets: assetCollection.assets,
     hasExplicitPoster: assetCollection.hasExplicitPoster,
-    hasExplicitPreview: assetCollection.hasExplicitPreview,
     // Icon manifest for preloading
     icons: iconManifest
   }

@@ -272,7 +272,6 @@ export function walkContentAssets(doc, visitor, path = '') {
  * @returns {Object} Asset collection result
  *   - assets: Asset manifest mapping original paths to resolved info
  *   - hasExplicitPoster: Set of video src paths that have explicit poster attributes
- *   - hasExplicitPreview: Set of PDF src paths that have explicit preview attributes
  *   - uses: every co-located reference, with the file it resolved to and a setter
  *     for the place it is written — what `disambiguateAssetRefs` needs to rename
  *     one. In memory only; never part of the site content.
@@ -280,11 +279,10 @@ export function walkContentAssets(doc, visitor, path = '') {
 export function collectSectionAssets(section, markdownPath, siteRoot) {
   const assets = {}
   const hasExplicitPoster = new Set()
-  const hasExplicitPreview = new Set()
   const uses = []
 
   // One entry per reference. `set` writes a new reference where this one stands;
-  // `flags` carries the explicit-poster/preview marks a renamed video/PDF must keep.
+  // `flags` carries the explicit-poster mark a renamed video must keep.
   const add = (ref, set, flags = null) => {
     const result = resolveAssetPath(ref, markdownPath, siteRoot)
     if (result.external || !result.resolved) return
@@ -306,10 +304,9 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
       const ref = node.attrs.src
       let flags = null
       if (attrName === 'src') {
-        // Check if this image has explicit poster/preview
+        // A video with its own poster gets none made for it
         if (node.attrs.poster) hasExplicitPoster.add(ref)
-        if (node.attrs.preview) hasExplicitPreview.add(ref)
-        flags = { poster: !!node.attrs.poster, preview: !!node.attrs.preview }
+        flags = { poster: !!node.attrs.poster }
       }
       add(ref, holder ? (v) => { holder[attrName] = v } : null, flags)
     })
@@ -345,7 +342,7 @@ export function collectSectionAssets(section, markdownPath, siteRoot) {
     walkDataBlockAssets(section.content, (assetPath, set) => add(assetPath, set))
   }
 
-  return { assets, hasExplicitPoster, hasExplicitPreview, uses }
+  return { assets, hasExplicitPoster, uses }
 }
 
 /**
@@ -383,7 +380,6 @@ export function disambiguateAssetRefs(collection, siteRoot) {
     const entry = collection.assets[use.ref]
     collection.assets[key] = { ...entry, original: key, resolved: use.resolved }
     if (use.flags?.poster) collection.hasExplicitPoster?.add(key)
-    if (use.flags?.preview) collection.hasExplicitPreview?.add(key)
     use.set(key)
     renamed++
   }
@@ -392,7 +388,6 @@ export function disambiguateAssetRefs(collection, siteRoot) {
     if (files.size < 2) continue
     delete collection.assets[ref]
     collection.hasExplicitPoster?.delete(ref)
-    collection.hasExplicitPreview?.delete(ref)
   }
   return renamed
 }
@@ -469,7 +464,6 @@ export function mergeAssetCollections(...collections) {
   const merged = {
     assets: {},
     hasExplicitPoster: new Set(),
-    hasExplicitPreview: new Set(),
     uses: []
   }
 
@@ -479,7 +473,6 @@ export function mergeAssetCollections(...collections) {
       Object.assign(merged.assets, collection.assets)
       if (collection.uses) merged.uses.push(...collection.uses)
       collection.hasExplicitPoster?.forEach(p => merged.hasExplicitPoster.add(p))
-      collection.hasExplicitPreview?.forEach(p => merged.hasExplicitPreview.add(p))
     } else {
       // Legacy: plain asset manifest
       Object.assign(merged.assets, collection)
