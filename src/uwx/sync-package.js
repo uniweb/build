@@ -685,5 +685,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // The queries whose records the site's pages show live — what the `records` service
     // delivers on a published site (`shown-records.js`). Whether it changed or not.
     recordsShown: siteDoc ? recordQueriesShown(siteDoc) : [],
+    // Whether this push states the site's folder at all (`records.js::sendsFolder`). `false`
+    // leaves the backend's folder exactly as it is — no records directory, or one holding files
+    // that are not records — so a caller can say so where the backend still holds records.
+    sendsFolder: folder !== null,
   }
 }

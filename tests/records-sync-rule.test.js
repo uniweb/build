@@ -51,6 +51,8 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     // Not an empty folder — no folder. The backend's is left untouched, so a site
     // whose records live only there is not emptied by a push of its pages.
     expect(pkg.records).toBeNull()
+    // …and the package says so, for a caller that would tell the author (`noteFolderLeftAlone`).
+    expect(pkg.sendsFolder).toBe(false)
   })
 
   it('⛔ a directory holding NO records is destructive: a folder that holds nothing', async () => {
@@ -61,6 +63,7 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     const doc = folderDoc(pkg)
     expect(doc.$schema).toBe('@uniweb/folder')
     expect(doc.contents).toEqual([])
+    expect(pkg.sendsFolder).toBe(true)
   })
 
   // ⛔ CONTROL. Without it, an emitter that never produced a records lane would
@@ -70,6 +73,7 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     expect(pkg.records).toBeTruthy()
     expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toEqual(['article/hello', 'article/world'])
     expect(sentIds(pkg)).toEqual(['article/hello', 'article/world'])
+    expect(pkg.sendsFolder).toBe(true)
   })
 
   it('an empty folder.yml removes nothing — it only organizes', async () => {
@@ -86,6 +90,8 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     w('site/records/untyped/a.yml', 'title: A\n')
     const pkg = await emitSyncPackages(root)
     expect(pkg.records).toBeNull()
+    // The case an author who took the records out and kept other files meets: said, by the CLI.
+    expect(pkg.sendsFolder).toBe(false)
     expect(pkg.warnings.some((x) => x.includes('no data schema resolves') && x.includes('not pushed'))).toBe(true)
   })
 
