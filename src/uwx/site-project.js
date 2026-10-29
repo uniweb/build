@@ -35,7 +35,7 @@
 import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
-import { siteFileKeys, writtenRefs } from './located-media.js'
+import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
 import { servicesFromDocument, heldServices } from './services-request.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
@@ -1393,6 +1393,9 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // next push and the build read. See `siteContentDirs`.
   const siteYml = readAuthoredYaml(join(siteRoot, 'site.yml'))
   const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, siteYml)
+  // The tree a key names its file by: pages and layout wherever `paths:` puts them. (A mount's pages
+  // are never written, so the mounts need not join it.)
+  if (ctx.media) ctx.media.tree = siteTree(siteRoot, { pagesDir, layoutDir: layoutBaseDir })
   // ⭐ The pages authored in files a pull cannot write back — a mount's, a folder-mode folder's
   // `.md` pages — are neither written nor pruned (`git-authored.js`).
   ctx.leave = gitAuthoredPages(siteYml, pagesDir)

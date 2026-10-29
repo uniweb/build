@@ -79,7 +79,7 @@ import { normalizeHideIn } from '../site/nav-visibility.js'
 import { siteDefaultSectionType } from '../site/queries-config.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
-import { locateSectionMedia } from './located-media.js'
+import { locateSectionMedia, siteTree } from './located-media.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
@@ -1632,6 +1632,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   const ctx = { siteRoot, sourceLocale, translations, pageFields: opts.pageFields, media: opts.media || null }
   // The same two directories the pull writes back to — see `siteContentDirs`.
   const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
+  // The tree a push keys the site's media by (`located-media.js::siteTree`) — its mounts join it below.
+  if (ctx.media) ctx.media.tree = siteTree(siteRoot, { pagesDir: pagesPath, layoutDir })
   let pages = []
   if (existsSync(pagesPath)) {
     // ⭐ SUB-MOUNTS, AS THE BUILD READS THEM — `paths: { pages/<segment>: <dir> }`, through its own
@@ -1639,6 +1641,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     // submodule never fetched) stops the push. A push replaces the site's whole page tree, so a
     // mount read as empty would remove every page it holds from a published site.
     const mounts = resolveMounts(siteYml.paths, siteRoot, pagesPath, { strict: true })
+    if (ctx.media) ctx.media.tree = siteTree(siteRoot, { pagesDir: pagesPath, layoutDir, mounts })
     // The root has a mode too, read as the build reads it (`rootContentMode`): `pages/folder.yml`
     // puts the whole site in folder mode, its `.md` files pages and every folder with no config of
     // its own in folder mode too.

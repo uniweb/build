@@ -7,7 +7,7 @@
  * different file beside every page — and a pull writes it back as the author wrote it, relative
  * to the file the section is written to (`located-media.js`).
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { emitSyncPackages, readZip, siteContentDocumentToProject } from '../src/uwx/index.js'
@@ -99,12 +99,44 @@ describe('push — a section\'s co-located file', () => {
     expect(keysOf(await emitSyncPackages(SITE))).toEqual(['layout/logo.svg'])
   })
 
-  it('one outside the site\'s folder is warned about, and not uploaded', async () => {
+  it('one outside the site and the folders it mounts is warned about, and not uploaded', async () => {
     writeFileSync(join(ROOT, 'outside.png'), 'png')
     w('pages/home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![Out](../../../outside.png)\n')
     const pkg = await emitSyncPackages(SITE)
     expect(pkg.localFiles).toEqual([])
-    expect(pkg.warnings.some((m) => m.includes('../../../outside.png') && m.includes("outside the site's folder"))).toBe(true)
+    expect(pkg.warnings.some((m) => m.includes('../../../outside.png') && m.includes('outside the site and the folders it mounts'))).toBe(true)
+  })
+
+  it('one beside a page in a mounted folder rides under the mount\'s place in the site', async () => {
+    w('site.yml', ['name: Acme', 'foundation: "@acme/marketing"', 'index: home', 'paths:', '  pages/guide: ../guide', ''].join('\n'))
+    mkdirSync(join(ROOT, 'guide'), { recursive: true })
+    writeFileSync(join(ROOT, 'guide', '1-intro.md'), '---\ntype: Hero\nid: intro\n---\n# Guide\n\n![Shot](./shot.png)\n')
+    writeFileSync(join(ROOT, 'guide', 'shot.png'), 'png')
+    const pkg = await emitSyncPackages(SITE)
+    // The mount's folder as the build resolves it: canonical (`resolveMounts`).
+    expect(pkg.localFiles).toContainEqual({ ref: 'pages/guide/shot.png', path: realpathSync(join(ROOT, 'guide', 'shot.png')) })
+    expect(pkg.warnings.some((m) => m.includes('shot.png'))).toBe(false)
+  })
+})
+
+describe('a pages folder `paths:` puts outside the site', () => {
+  beforeEach(() => {
+    w('site.yml', ['name: Acme', 'foundation: "@acme/marketing"', 'index: home', 'paths:', '  pages: ../content', ''].join('\n'))
+    mkdirSync(join(ROOT, 'content', 'home'), { recursive: true })
+    writeFileSync(join(ROOT, 'content', 'home', 'page.yml'), 'id: home\n')
+    writeFileSync(join(ROOT, 'content', 'home', 'team.jpg'), 'jpg')
+  })
+
+  it('⭐ keys its media as pages/…, and a push then a pull writes it back beside the page', async () => {
+    const authored = '---\ntype: Hero\nid: hero\n---\n\n# Hi\n\n![Team](./team.jpg)\n'
+    writeFileSync(join(ROOT, 'content', 'home', 'hero.md'), authored)
+    expect(keysOf(await emitSyncPackages(SITE))).toEqual(['pages/home/team.jpg'])
+
+    const ids = { 'pages/home/team.jpg': { id: 'a1', ext: 'jpg' } }
+    const document = sent(await emitSyncPackages(SITE, { assetRewrite: { 'pages/home/team.jpg': '/assets/a1.jpg' }, assetIds: ids }))
+    writeFileSync(join(SITE, 'sync.json'), JSON.stringify({ version: 1, backends: { [BACKEND]: { assets: ids } } }))
+    siteContentDocumentToProject({ document, siteRoot: SITE, backend: BACKEND })
+    expect(readFileSync(join(ROOT, 'content', 'home', 'hero.md'), 'utf8')).toBe(authored)
   })
 })
 
