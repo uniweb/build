@@ -78,6 +78,21 @@ describe('push — a section\'s co-located file', () => {
     expect(pages.about).toContain('https://cdn/about.png')
   })
 
+  it('a video beside the page and its ./ poster both ride, and the poster is swapped with its identity', async () => {
+    w('pages/home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![Clip](./clip.mp4){role=video poster=./thumb.jpg}\n')
+    w('pages/home/clip.mp4', 'mp4')
+    w('pages/home/thumb.jpg', 'jpg')
+    expect(keysOf(await emitSyncPackages(SITE))).toEqual(['pages/home/clip.mp4', 'pages/home/thumb.jpg'])
+
+    const pkg = await emitSyncPackages(SITE, {
+      assetRewrite: { 'pages/home/clip.mp4': '/assets/v1.mp4', 'pages/home/thumb.jpg': '/assets/p1.jpg' },
+      assetIds: { 'pages/home/clip.mp4': { id: 'v1', ext: 'mp4' }, 'pages/home/thumb.jpg': { id: 'p1', ext: 'jpg' } },
+    })
+    const json = JSON.stringify(sent(pkg))
+    expect(json).toContain('"poster":"/assets/p1.jpg"')
+    expect(json).toContain('"posterAssetId":"p1"')
+  })
+
   it('one in the layout rides under its path too', async () => {
     w('layout/header.md', '---\ntype: Header\n---\n# H\n\n![Logo](./logo.svg)\n')
     w('layout/logo.svg', '<svg/>')
