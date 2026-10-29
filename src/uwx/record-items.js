@@ -4,10 +4,16 @@
 // ⛔ AN ITEM OF A LIST WITHOUT A `$uuid` IS A NEW ROW. A record's `many` sections are `multi`
 // sections on the backend, so a record re-sent with its list items uuid-less would insert them all
 // and delete every stored one. The backend refuses that, whole (`identity_required`, naming the
-// section) — measured 2026-09-25 on an edit of a talk whose `sessions` it held. A single section
-// needs nothing: its one item is matched by section. So every LIST of a record carries its items'
-// `$uuid`s once the backend holds them: a `many` section, a list nested in a section or in an
-// item, and a self-nesting list's `$children`, at every depth.
+// section) — measured 2026-09-25 on an edit of a talk whose `sessions` it held. So every LIST of a
+// record carries its items' `$uuid`s once the backend holds them: a `many` section, a list nested
+// in a section or in an item, and a self-nesting list's `$children`, at every depth.
+//
+// ⭐ AND SO DOES A SINGLE SECTION UNDER A LIST. A single section with no list above it holds one
+// item, matched by section, and needs nothing. Under a list it holds one item PER ITEM of the list
+// (a degree's `thesis`), so a backend matches it by its `$uuid`, as a list element: sent without
+// one, every push after the first is refused whole. It is banked at its place under its item
+// (`degrees[0].thesis`), with no fingerprint, since its item's own match places it. ⛔ Until
+// 2026-10-28 it was never banked, because a backend matched every single section by section.
 //
 // ⭐ BANKED PER RECORD, FROM WHAT WAS SENT AND WHAT CAME BACK. An item has no file and no name, so
 // nothing on disk can carry its identity — the fourth kind in the producer's ledger, beside
@@ -74,6 +80,18 @@ function eachList(def, value, prefix, visit) {
   }
 }
 
+// Each single section of a container that the container holds a value for, by its path, and
+// the single sections inside it: never into a list, whose items are visited as items. Called on
+// an item of a list, so every section it visits has a list above it.
+function eachSingle(def, value, prefix, visit) {
+  if (!isPlainObject(value)) return
+  for (const [key, field] of Object.entries(def?.fields || {})) {
+    if (field?.type !== 'section' || field.multiple === true || !isPlainObject(value[key])) continue
+    visit(`${prefix}${key}`, field, value[key])
+    eachSingle(field, value[key], `${prefix}${key}.`, visit)
+  }
+}
+
 // Each list of a record document: its `many` sections, and the lists inside its single ones.
 function eachRecordList(declaration, document, visit) {
   for (const [name, def] of Object.entries(declaration?.sections || {})) {
@@ -95,18 +113,23 @@ function itemsOf(def, items) {
       nested[path] = itemsOf(d, list)
     })
     if (Object.keys(nested).length) node.c = nested
+    const singles = []
+    eachSingle(def, item, '', (path) => singles.push(path))
+    if (singles.length) node.s = singles
     return node
   })
 }
 
 /**
  * The lists of one record document, as sent: each list's items by path, each item its
- * fingerprint (`h`) and its own lists (`c`). What `harvestRecordItems` pairs with the
- * document the backend returns. Not stored — a bank is (`harvestRecordItems`).
+ * fingerprint (`h`), its own lists (`c`) and the paths of the single sections under it (`s`).
+ * What `harvestRecordItems` pairs with the document the backend returns. Not stored — a bank
+ * is (`harvestRecordItems`).
  *
  * @param {object} document - the record's `$`-document
  * @param {object} declaration - its data schema's declaration (`{ name, sections }`)
- * @returns {Object<string, Array<{ h: string, c?: object }>>} empty when the record has no list
+ * @returns {Object<string, Array<{ h: string, c?: object, s?: string[] }>>} empty when the
+ *   record has no list
  */
 export function recordItemLists(document, declaration) {
   const lists = {}
@@ -136,6 +159,11 @@ function pairItems(ours, theirs, at, bank) {
     if (!uuid) return
     const place = `${at}[${k}]`
     bank[place] = exact ? `${uuid} ${ours[k].h}` : uuid
+    // A single section under the item, at its place under it: the uuid alone.
+    for (const path of ours[k]?.s || []) {
+      const single = uuidOf(valueAt(item, path))
+      if (single) bank[`${place}.${path}`] = single
+    }
     for (const [path, sub] of Object.entries(ours[k]?.c || {})) {
       const list = valueAt(item, path)
       if (Array.isArray(list)) pairItems(sub, list, `${place}.${path}`, bank)
@@ -164,18 +192,19 @@ export function harvestRecordItems(lists, returned) {
 // A list in the backend's document: an array of items that each carry a `$uuid`.
 const isStoredList = (v) => Array.isArray(v) && v.length > 0 && v.every((item) => uuidOf(item))
 
-function storedLists(container, prefix, bank) {
+function storedLists(container, prefix, bank, underList = false) {
   for (const [key, value] of Object.entries(container || {})) {
     if (key.startsWith('$') && key !== '$children') continue
     if (isStoredList(value)) {
       value.forEach((item, k) => {
         const place = `${prefix}${key}[${k}]`
         bank[place] = item.$uuid
-        storedLists(item, `${place}.`, bank)
+        storedLists(item, `${place}.`, bank, true)
       })
     } else if (uuidOf(value)) {
-      // A section: its lists sit under its name.
-      storedLists(value, `${prefix}${key}.`, bank)
+      // A section: its lists sit under its name. A single one under a list is banked too.
+      if (underList) bank[`${prefix}${key}`] = value.$uuid
+      storedLists(value, `${prefix}${key}.`, bank, underList)
     }
   }
 }
@@ -187,7 +216,8 @@ function storedLists(container, prefix, bank) {
  *
  * Read by shape: a list is an array whose every item carries a `$uuid`, and a section is an
  * object carrying one — a reference is a string or an `{ schema, entity }`, and a localized
- * value a `{ lang: … }` map, neither of which does.
+ * value a `{ lang: … }` map, neither of which does. A section under a list is banked at its
+ * place, as `harvestRecordItems` banks it.
  *
  * @param {object} returned - the backend's document for one record
  * @returns {Object<string, string>} place → `"<uuid>"`
@@ -240,8 +270,19 @@ function matchItems(prints, banked) {
   return assigned
 }
 
-function stampList(def, items, at, lists, counts, claimed) {
-  const banked = (at !== null && lists.get(at)) || []
+// The bank's single sections — a place that does not end in an index — place → uuid.
+function bankedSingles(bank) {
+  const singles = new Map()
+  for (const [place, value] of Object.entries(bank || {})) {
+    if (/\]$/.test(place) || typeof value !== 'string') continue
+    const [u] = value.split(' ')
+    if (u) singles.set(place, u)
+  }
+  return singles
+}
+
+function stampList(def, items, at, banks, counts, claimed) {
+  const banked = (at !== null && banks.lists.get(at)) || []
   const assigned = matchItems(items.map((item) => fingerprint(def, item)), banked)
   items.forEach((item, i) => {
     const b = assigned[i]
@@ -252,11 +293,24 @@ function stampList(def, items, at, lists, counts, claimed) {
     } else {
       counts.unknown++
     }
-    // An item's own lists are banked under the place of the item it matched — a new item's
-    // nested items are new too.
+    // An item's own lists, and its single sections, are banked under the place of the item it
+    // matched — a new item's nested items are new too.
     const under = b && item.$uuid === b.u ? b.place : null
+    if (under !== null) {
+      eachSingle(def, item, '', (path, d, single) => {
+        const u = banks.singles.get(`${under}.${path}`)
+        if (u && !claimed.has(u)) {
+          single.$uuid = u
+          claimed.add(u)
+          counts.stamped++
+        } else {
+          // Under an item the backend holds, with no identity here: one the backend may hold.
+          counts.unbankedSingles++
+        }
+      })
+    }
     eachList(def, item, '', (path, d, list) =>
-      stampList(d, list, under === null ? null : `${under}.${path}`, lists, counts, claimed)
+      stampList(d, list, under === null ? null : `${under}.${path}`, banks, counts, claimed)
     )
   })
 }
@@ -268,14 +322,17 @@ function stampList(def, items, at, lists, counts, claimed) {
  * @param {object} declaration - its data schema's declaration
  * @param {Object<string,string>} bank - this record's entry (`harvestRecordItems` /
  *        `storedRecordItems`)
- * @returns {{ stamped: number, unknown: number }} items given a uuid, and items sent as new
+ * @returns {{ stamped: number, unknown: number, unbankedSingles: number }} items given a
+ *   uuid; list items sent as new; and single sections under an item that kept its uuid but
+ *   with none banked for them, which a backend may hold (a bank from before 2026-10-28 has
+ *   none), so the caller can recover them
  */
 export function stampRecordItems(document, declaration, bank) {
-  const counts = { stamped: 0, unknown: 0 }
+  const counts = { stamped: 0, unknown: 0, unbankedSingles: 0 }
   const claimed = new Set()
-  const lists = bankedLists(bank)
+  const banks = { lists: bankedLists(bank), singles: bankedSingles(bank) }
   eachRecordList(declaration, document, (path, def, items) => {
-    stampList(def, items, path, lists, counts, claimed)
+    stampList(def, items, path, banks, counts, claimed)
   })
   return counts
 }

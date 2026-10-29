@@ -90,7 +90,7 @@ describe('the bank — each list item, at its place, with its fingerprint as sen
       'sessions[1]',
     ])
     expect(bank['sessions[0]']).toMatch(/^U:sessions\[0\] [0-9a-f]{16}$/)
-    // A single section's own uuid is the backend's to keep: not banked.
+    // A single section with no list above it is matched by section: not banked.
     expect(Object.values(bank).some((v) => v.startsWith('U:brief '))).toBe(false)
   })
 
@@ -109,7 +109,7 @@ describe('the next send — each item takes a banked uuid by content, then by pl
     const bank = bankFor(sent())
     const next = sent()
     const counts = stampRecordItems(next, DECL, bank)
-    expect(counts).toEqual({ stamped: 8, unknown: 0 })
+    expect(counts).toEqual({ stamped: 8, unknown: 0, unbankedSingles: 0 })
     expect(uuids(next)).toEqual({
       notes: ['U:brief.notes[0]'],
       sessions: ['U:sessions[0]', 'U:sessions[1]'],
@@ -117,7 +117,7 @@ describe('the next send — each item takes a banked uuid by content, then by pl
       parts: ['U:parts[0]', 'U:parts[1]'],
       children: [['U:parts[0].$children[0]'], []],
     })
-    // A single section is matched by section on the backend, and is sent as it is.
+    // A single section with no list above it is matched by section, and is sent as it is.
     expect(next.brief).not.toHaveProperty('$uuid')
   })
 
@@ -194,7 +194,7 @@ describe('the next send — each item takes a banked uuid by content, then by pl
 
   it('CONTROL — with no bank every item goes as new', () => {
     const next = sent()
-    expect(stampRecordItems(next, DECL, {})).toEqual({ stamped: 0, unknown: 8 })
+    expect(stampRecordItems(next, DECL, {})).toEqual({ stamped: 0, unknown: 8, unbankedSingles: 0 })
     expect(uuids(next).sessions).toEqual([undefined, undefined])
   })
 })
@@ -233,6 +233,103 @@ describe('a bank refingerprinted — the same items, another encoding', () => {
     const next = sent([B(), { room: 'A', slots: [{ at: 'UUID-NINE' }] }])
     stampRecordItems(next, DECL, reprinted)
     expect(uuids(next).sessions[1]).toBe('U:sessions[0]')
+  })
+})
+
+// ── A single section under a list holds one item per item of the list ────────────────
+// So a backend matches it by `$uuid`, as a list element: it is banked at its place under its
+// item and stamped when its item keeps its uuid. A top-level single is still matched by section.
+
+const CV = {
+  name: '@acme/cv',
+  sections: {
+    brief: { brief: true, fields: { name: { type: 'string' } } },
+    degrees: {
+      multiple: true,
+      fields: {
+        title: { type: 'string' },
+        thesis: {
+          type: 'section',
+          fields: {
+            topic: { type: 'string' },
+            committee: { type: 'section', fields: { chair: { type: 'string' } } },
+          },
+        },
+      },
+    },
+  },
+}
+const PHD = () => ({ title: 'PhD', thesis: { topic: 'Engines', committee: { chair: 'Babbage' } } })
+const MSC = () => ({ title: 'MSc', thesis: { topic: 'Looms' } })
+const cv = (degrees = [PHD(), MSC()]) => ({ $id: 'cv/ada', $schema: '@acme/cv', brief: { name: 'Ada' }, degrees })
+
+// What the backend returns: every item a uuid named after its place, a single section's too.
+function returnedCv(doc) {
+  const out = structuredClone(doc)
+  out.$uuid = 'REC'
+  out.brief.$uuid = 'U:brief'
+  out.degrees.forEach((d, k) => {
+    d.$uuid = `U:degrees[${k}]`
+    if (d.thesis) d.thesis.$uuid = `U:degrees[${k}].thesis`
+    if (d.thesis?.committee) d.thesis.committee.$uuid = `U:degrees[${k}].thesis.committee`
+  })
+  return out
+}
+const cvBank = (doc) => harvestRecordItems(recordItemLists(doc, CV), returnedCv(doc))
+const theses = (doc) => doc.degrees.map((d) => d.thesis?.$uuid)
+
+describe('a single section under a list — banked and stamped as a list element', () => {
+  it('is banked at its place under its item, with no fingerprint; a top-level one is not', () => {
+    expect(cvBank(cv())).toEqual({
+      'degrees[0]': expect.stringMatching(/^U:degrees\[0\] [0-9a-f]{16}$/),
+      'degrees[0].thesis': 'U:degrees[0].thesis',
+      'degrees[0].thesis.committee': 'U:degrees[0].thesis.committee',
+      'degrees[1]': expect.stringMatching(/^U:degrees\[1\] [0-9a-f]{16}$/),
+      'degrees[1].thesis': 'U:degrees[1].thesis',
+    })
+  })
+
+  it('an unchanged record takes every one back', () => {
+    const next = cv()
+    expect(stampRecordItems(next, CV, cvBank(cv()))).toEqual({ stamped: 5, unknown: 0, unbankedSingles: 0 })
+    expect(theses(next)).toEqual(['U:degrees[0].thesis', 'U:degrees[1].thesis'])
+    expect(next.degrees[0].thesis.committee.$uuid).toBe('U:degrees[0].thesis.committee')
+    expect(next.brief).not.toHaveProperty('$uuid')
+  })
+
+  it('follows its item when the list is reordered', () => {
+    const next = cv([MSC(), PHD()])
+    stampRecordItems(next, CV, cvBank(cv()))
+    expect(theses(next)).toEqual(['U:degrees[1].thesis', 'U:degrees[0].thesis'])
+  })
+
+  it('comes new with a new item, and asks for no recovery', () => {
+    const next = cv([{ title: 'BSc', thesis: { topic: 'Gears' } }, PHD(), MSC()])
+    const counts = stampRecordItems(next, CV, cvBank(cv()))
+    expect(theses(next)).toEqual([undefined, 'U:degrees[0].thesis', 'U:degrees[1].thesis'])
+    expect(counts.unbankedSingles).toBe(0)
+  })
+
+  it('under an item that kept its uuid, with none banked — a bank from before — is counted for recovery', () => {
+    const lists = Object.entries(cvBank(cv())).filter(([place]) => place.endsWith(']'))
+    const next = cv()
+    expect(stampRecordItems(next, CV, Object.fromEntries(lists))).toEqual({ stamped: 2, unknown: 0, unbankedSingles: 3 })
+    expect(theses(next)).toEqual([undefined, undefined])
+  })
+
+  it('is read from a stored document by shape, as the lists are', () => {
+    expect(storedRecordItems(returnedCv(cv()))).toEqual({
+      'degrees[0]': 'U:degrees[0]',
+      'degrees[0].thesis': 'U:degrees[0].thesis',
+      'degrees[0].thesis.committee': 'U:degrees[0].thesis.committee',
+      'degrees[1]': 'U:degrees[1]',
+      'degrees[1].thesis': 'U:degrees[1].thesis',
+    })
+  })
+
+  it('keeps its uuid through a refingerprinted bank', () => {
+    const reprinted = reprintRecordItems(cvBank(cv()), recordItemLists(cv(), CV))
+    expect(reprinted['degrees[0].thesis']).toBe('U:degrees[0].thesis')
   })
 })
 
@@ -305,6 +402,49 @@ describe('emitSyncPackages — record list items', () => {
     w('sync.json', { version: 1, backends: {} })
     const pkg = await emitSyncPackages(SITE, { backend: ORIGIN })
     expect(pkg.recordItemIdentity).toEqual({ stamped: 0, unknown: 0, unbanked: [] })
+  })
+
+  it('names a record whose single section under a list has no banked uuid — the caller recovers it', async () => {
+    writeFileSync(
+      join(ROOT, 'foundation', 'dist', 'meta', 'schema.json'),
+      JSON.stringify({
+        _self: { name: '@acme/marketing', version: '1', role: 'foundation' },
+        dataSchemas: {
+          '@/cv': {
+            name: 'cv',
+            sections: {
+              brief: { kind: 'single', brief: true, fields: { name: { type: 'string' } } },
+              degrees: {
+                kind: 'multi',
+                fields: { title: { type: 'string' }, thesis: { type: 'object', fields: { topic: { type: 'string' } } } },
+              },
+            },
+          },
+        },
+      })
+    )
+    rmSync(join(SITE, 'records', 'talk'), { recursive: true, force: true })
+    w('records/cv/ada.yml', '$uuid: OWN-CV\nbrief:\n  name: Ada\ndegrees:\n  - title: PhD\n    thesis:\n      topic: Engines\n')
+    w('sync.json', { version: 1, backends: { [ORIGIN]: { records: { 'OWN-CV': 'MINT-CV' } } } })
+    const cvIn = (pkg) => {
+      for (const [name, buf] of readZip(pkg.records.buffer)) {
+        if (!name.startsWith('entities/')) continue
+        const doc = JSON.parse(buf.toString('utf8'))
+        if (doc.$id === 'cv/ada') return doc
+      }
+      return null
+    }
+    // A bank from before: the degree, not its thesis.
+    const before = await emitSyncPackages(SITE, { backend: ORIGIN, recordItemUuids: { 'MINT-CV': { 'degrees[0]': 'I-PHD' } } })
+    expect(before.recordItemIdentity.unbanked).toEqual(['MINT-CV'])
+    // Recovered, the thesis goes with its uuid and nothing is asked again.
+    const after = await emitSyncPackages(SITE, {
+      backend: ORIGIN,
+      recordItemUuids: { 'MINT-CV': { 'degrees[0]': 'I-PHD', 'degrees[0].thesis': 'I-THESIS' } },
+    })
+    expect(after.recordItemIdentity.unbanked).toEqual([])
+    expect(cvIn(after).degrees[0]).toMatchObject({ $uuid: 'I-PHD', thesis: { $uuid: 'I-THESIS', topic: { en: 'Engines' } } })
+    expect(cvIn(after).brief).not.toHaveProperty('$uuid')
   })
 
   it('stamping moves no content hash', async () => {
