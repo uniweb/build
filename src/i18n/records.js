@@ -206,10 +206,23 @@ function referencedModels(model) {
   return out
 }
 
-/** The fields of a model's brief — what a reference to one of its records is delivered as. */
+/**
+ * The fields of a model's brief — what a reference to one of its records is delivered as: the
+ * section the declaration marks `brief: true`, at any depth (inside a group, say), else the one
+ * section of a model that has a single one.
+ */
 function briefFields(model) {
+  const marked = (sections) => {
+    for (const section of Object.values(sections || {})) {
+      if (section?.brief) return section
+      const nested = Object.fromEntries(Object.entries(section?.fields || {}).filter(([, f]) => f?.type === 'section'))
+      const found = marked(nested)
+      if (found) return found
+    }
+    return null
+  }
   const sections = Object.values(model?.sections || {})
-  const brief = sections.find((s) => s?.brief) ?? (sections.length === 1 && !sections[0]?.multiple ? sections[0] : null)
+  const brief = marked(model?.sections) ?? (sections.length === 1 && !sections[0]?.multiple ? sections[0] : null)
   return brief?.fields ?? null
 }
 

@@ -22,6 +22,7 @@
  */
 
 import { parseOptionsRef, FIELD_RULES } from '@uniweb/schemas/format'
+import { markedBriefPath } from '@uniweb/schemas/conform'
 import { qualifyRef } from '@uniweb/schemas/refs'
 
 // Text kinds carry per-locale values when localized.
@@ -159,7 +160,7 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   // The model-level sort axis is inline: `sort_date: true` on the brief's named
   // date field (replaces the old schema-level `sort_date_field` back-reference).
   if (normalized.sortDate && brief) {
-    const f = sections[brief]?.fields?.[normalized.sortDate]
+    const f = sectionAt(sections, brief)?.fields?.[normalized.sortDate]
     if (f) f.sort_date = true
   }
 
@@ -291,24 +292,25 @@ function lowerFieldsForm(fields, resolve, optResolve, constraints) {
   }
 }
 
-// The explicit `sections:` map → a map of lowered section bodies. The brief is the
-// section marked `brief: true`, else the first `single` (the framework's inference).
+// The explicit `sections:` map → a map of lowered section bodies. The brief is the section
+// marked `brief: true` at any depth (`markedBriefPath`, `@uniweb/schemas/conform`), else the
+// first top-level `single` not marked `brief: false` (the framework's inference).
 function lowerSectionsForm(sectionsMap, resolve, optResolve) {
   const sections = {}
-  let explicit = null
   let firstSingle = null
   for (const [secName, def] of Object.entries(sectionsMap)) {
     sections[secName] = lowerSection(def, resolve, optResolve, secName)
-    if (def.brief === true) explicit = secName
-    if (!firstSingle && (def.kind || 'single') === 'single') firstSingle = secName
+    if (!firstSingle && (def.kind || 'single') === 'single' && def.brief !== false) firstSingle = secName
   }
-  // The brief is the section marked `brief: true`, else the first `single` (the
-  // framework's inference). Stamp it inline so the wire and the producer's own
-  // consumers (entity-shaping, back-fill render) find it the same way — the
-  // sections-tree has no schema-level `brief:` back-reference.
-  const brief = explicit || firstSingle
-  if (brief && sections[brief] && !sections[brief].brief) sections[brief].brief = true
-  return { sections, brief }
+  // A marked brief is lowered where it sits, marked; only with none is the inferred one stamped,
+  // inline, so the wire and the producer's own consumers (entity-shaping, back-fill render) find
+  // it the same way — the sections-tree has no schema-level `brief:` back-reference. ⛔ Until
+  // 2026-10-29 only a top-level mark was seen here, so a brief marked inside a group went out
+  // beside the first top-level single, stamped too, and a register refused the two.
+  const marked = markedBriefPath({ sections: sectionsMap })
+  if (marked) return { sections, brief: marked }
+  if (firstSingle) sections[firstSingle].brief = true
+  return { sections, brief: firstSingle }
 }
 
 // Lower one section to its declaration body (the caller keys it by name; a nested

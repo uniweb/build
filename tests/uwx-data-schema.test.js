@@ -1041,3 +1041,41 @@ describe('toDataSchemaDeclaration — i18n', () => {
     expect(() => assertI18nPaths({ '@/x': validateAndNormalizeSchema({ fields: { a: 'string' } }, '@/x') })).not.toThrow()
   })
 })
+
+// A registry takes one brief, and it is the section marked `brief: true` wherever it sits but
+// under a list. The lowering stamps the first top-level single section only when none is marked.
+describe('toDataSchemaDeclaration — the brief', () => {
+  const briefsOf = (decl) => {
+    const out = []
+    const walk = (sections, prefix) => {
+      for (const [name, s] of Object.entries(sections || {})) {
+        if (s?.brief) out.push(`${prefix}${name}`)
+        walk(Object.fromEntries(Object.entries(s?.fields || {}).filter(([, f]) => f?.type === 'section')), `${prefix}${name}/`)
+      }
+    }
+    walk(decl.sections, '')
+    return out
+  }
+  const cv = (profile = {}) => ({
+    sort_date: 'born',
+    sections: {
+      personal: { sections: { identification: { brief: true, fields: { family_name: 'string', born: 'date' } } } },
+      user_profile: { ...profile, fields: { bio: 'string' } },
+    },
+  })
+
+  it('a brief marked inside a group is the only one — nothing is taken for it beside it', () => {
+    expect(briefsOf(lower(cv(), '@/cv', '@acme/cv'))).toEqual(['personal/identification'])
+    expect(briefsOf(lower(cv({ brief: false }), '@/cv', '@acme/cv'))).toEqual(['personal/identification'])
+  })
+
+  it('takes its sort date where it sits', () => {
+    expect(lower(cv(), '@/cv', '@acme/cv').sections.personal.fields.identification.fields.born.sort_date).toBe(true)
+  })
+
+  it('with none marked, takes the first top-level single section not marked `brief: false`', () => {
+    const decl = lower({ sections: { a: { brief: false, fields: { x: 'string' } }, b: { fields: { y: 'string' } } } }, '@/x', '@acme/x')
+    expect(briefsOf(decl)).toEqual(['b'])
+    expect(decl.sections.a).not.toHaveProperty('brief')
+  })
+})
