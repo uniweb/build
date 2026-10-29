@@ -22,9 +22,10 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown, serializeInlineContent } from '@uniweb/content-writer'
 import { computeHash } from '../i18n/hash.js'
-import { blockElements, elementText, dataBlockNodes } from '../i18n/extract.js'
+import { blockElements, elementText, dataBlockNodes, imageNodes, imageMarkup, TRANSLATED_IMAGE_ATTRS } from '../i18n/extract.js'
 import { visitDataBlockStrings } from '../i18n/data-strings.js'
-import { resolveDocForLocale, translatedInline, linkLabels, toPlainText } from '../i18n/merge.js'
+import { resolveDocForLocale, translatedInline, translatedImage, linkLabels, toPlainText } from '../i18n/merge.js'
+import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { computeSourceHash, manifestText } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
@@ -426,7 +427,60 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks
     // a mark we can't serialize → don't risk a lossy map; store as free-form
     return null
   }
-  return addDataBlockStrings(map, sourceDoc, targetDoc, modelFor, checks)
+  const withData = addDataBlockStrings(map, sourceDoc, targetDoc, modelFor, checks)
+  return withData && addImageTranslations(withData, sourceDoc, targetDoc, checks)
+}
+
+// ⭐ AN IMAGE's translation, read pairwise — what a translation may give it (`merge.js::translateImages`):
+// its words alone when only its alt text changed, else the image as inline markdown (`imageMarkup`),
+// never the identity a push stamps beside a URL. Keyed by its source alt text, as extraction keys it.
+// A target whose images differ in anything else — their number, a role, a size — or that changed an
+// image with no alt text cannot be said per image, and the whole translation is free-form.
+// ⛔ Until 2026-10-28 an image was not read here, and its translation was not sent either.
+function addImageTranslations(map, sourceDoc, targetDoc, checks = null) {
+  const src = imageNodes(sourceDoc)
+  const tgt = imageNodes(targetDoc)
+  if (src.length !== tgt.length) return null
+  for (let i = 0; i < src.length; i++) {
+    const s = src[i].attrs || {}
+    const t = tgt[i].attrs || {}
+    if (canonicalJson(untranslated(s)) !== canonicalJson(untranslated(t))) return null
+    const changed = TRANSLATED_IMAGE_ATTRS.filter((attr) => (s[attr] ?? null) !== (t[attr] ?? null))
+    if (!changed.length) continue
+    const key = typeof s.alt === 'string' ? s.alt.trim() : ''
+    if (!key) return null
+    const words = typeof t.alt === 'string' ? t.alt.trim() : ''
+    const value = changed.every((attr) => attr === 'alt') ? words : imageMarkup(tgt[i])
+    if (!value) return null
+    // A text element of the same words read its own translation: the image's says them too when its
+    // words match, and a text element reads an image value as its words (`merge.js::translatedInline`).
+    if (map[key] !== undefined && map[key] !== value && toPlainText(map[key]).trim() !== words) return null
+    map[key] = value
+    if (checks) checks[key] = saysImage(s, t)
+  }
+  return map
+}
+
+// What a translation may not change about an image: everything but its words and files, and the
+// identity a push stamps beside each URL.
+const IMAGE_IDENTITY = new Set(ASSET_SLOTS.flatMap((slot) => [slot.id, slot.ext]))
+function untranslated(attrs) {
+  const out = {}
+  for (const [key, value] of Object.entries(attrs)) {
+    if (TRANSLATED_IMAGE_ATTRS.includes(key) || IMAGE_IDENTITY.has(key)) continue
+    if (value != null) out[key] = value
+  }
+  return out
+}
+
+// Whether a value, pushed onto the source image, gives it what the pull read.
+function saysImage(source, read) {
+  return (value) => {
+    if (typeof value !== 'string') return false
+    const given = translatedImage(value)
+    if (!given) return false
+    return TRANSLATED_IMAGE_ATTRS.every((attr) => (given[attr] ?? source[attr] ?? null) === (read[attr] ?? null))
+  }
 }
 
 // ⭐ WHAT SAYS A TRANSLATION, WHERE A PULL READ IT — the push's own rule for that place. A pull reads

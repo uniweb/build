@@ -172,6 +172,7 @@ function extractFromSection(section, pageRoute, units, dataModel = null) {
   if (section.content?.type === 'doc') {
     extractFromProseMirrorDoc(section.content, context, units)
     extractFromDataBlocks(section.content, context, units, (tag) => dataModel?.(section.type, tag) ?? null)
+    extractFromImages(section.content, context, units)
   }
 
   // Recursively process subsections
@@ -234,6 +235,76 @@ export function dataBlockNodes(doc) {
   }
   walk(doc?.content)
   return out
+}
+
+/**
+ * A section's IMAGES, one unit each, keyed by its alt text (2026-10-28). The translation of one is
+ * words — its alt text in that language — or an image, which also names that language's files:
+ * `![La vue d'ensemble](/docs-media/fr/overview.png)` (`merge.js::translateImages`).
+ *
+ * Keyed by the alt text alone, as every unit is keyed by its words (`hash.js`): the file is not in
+ * the key because the build, the dev server and a push each hold a different address for it by the
+ * time they translate. So two images with the same alt text share a translation, and a place that
+ * needs another one takes an override.
+ *
+ * ⭐ Separate from `extractFromProseMirrorDoc` for the reason `extractFromDataBlocks` is: that is
+ * the block-element keying the editor shares, pinned by tests/i18n/structural-keying-vectors.json,
+ * and an image is not a block element's text. A pull reads an image's translation back pairwise
+ * (`uwx/locale-sync.js`). ⛔ Until 2026-10-28 no image was offered for translation: a translated
+ * page kept its source alt text, and could not name a screenshot of its own.
+ */
+function extractFromImages(doc, context, units) {
+  imageNodes(doc).forEach((node, index) => {
+    const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt.trim() : ''
+    if (!alt) return
+    addUnit(units, alt, index === 0 ? 'image' : `image.${index}`, context, imageMarkup(node))
+  })
+}
+
+/**
+ * Every block image in a doc, in document order — inside a container or a list item too — but not
+ * an icon, which is a name rather than a file. An image in a paragraph is that paragraph's: its
+ * unit's markup carries it.
+ */
+export function imageNodes(doc) {
+  const out = []
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (!node) continue
+      if (node.type === 'image') {
+        if (node.attrs?.role !== 'icon') out.push(node)
+      } else if (CONTAINER_BLOCKS.has(node.type)) {
+        walk(node.content)
+      } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+        for (const listItem of node.content || []) walk(listItem.content)
+      }
+    }
+  }
+  walk(doc?.content)
+  return out
+}
+
+/** What a translation may give an image: its words, and the files it shows. */
+export const TRANSLATED_IMAGE_ATTRS = ['alt', 'caption', 'src', 'poster', 'preview']
+
+/**
+ * An image as a translator is shown it and a pull writes one back: inline markdown of its role and
+ * of what a translation may give it — never the identity a push stamps beside a URL.
+ *
+ * @param {Object} node - an image node
+ * @returns {string|null}
+ */
+export function imageMarkup(node) {
+  const attrs = node?.attrs || {}
+  const shown = { role: attrs.role }
+  for (const key of TRANSLATED_IMAGE_ATTRS) {
+    if (attrs[key] != null && attrs[key] !== '') shown[key] = attrs[key]
+  }
+  try {
+    return serializeInlineContent([{ type: 'image', attrs: shown }]).trim() || null
+  } catch {
+    return null
+  }
 }
 
 /**

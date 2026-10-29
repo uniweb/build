@@ -14,7 +14,7 @@
 
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
-import { elementText, blockElements, translationContext, SITE_META_CONTEXT } from './extract.js'
+import { elementText, blockElements, translationContext, SITE_META_CONTEXT, imageNodes, TRANSLATED_IMAGE_ATTRS } from './extract.js'
 import { visitDataBlockStrings } from './data-strings.js'
 import { inlineMarkdownToProseMirror } from '@uniweb/content-reader'
 
@@ -293,6 +293,7 @@ function translateSectionSync(section, pageRoute, translations, fallbackToSource
   if (section.content?.type === 'doc') {
     translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
     translateDataBlocks(section.content, context, translations, fallbackToSource, (tag) => dataModel?.(section.type, tag) ?? null)
+    translateImages(section.content, context, translations, fallbackToSource)
   }
 
   // Recursively translate subsections
@@ -325,6 +326,7 @@ async function translateSectionAsync(section, page, translations, options) {
     if (section.content?.type === 'doc') {
       translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
       translateDataBlocks(section.content, context, translations, fallbackToSource, (tag) => dataModel?.(section.type, tag) ?? null)
+      translateImages(section.content, context, translations, fallbackToSource)
     }
   }
 
@@ -399,7 +401,21 @@ function applyElementTranslation(node, context, translations, fallbackToSource) 
 export function translatedInline(source, value) {
   const fragment = inlineMarkdownToFragment(value)
   if (!fragment) return null
+  // ⭐ A value that is only an image, for an element whose source holds none, reads as its words —
+  // its alt text. An image's unit is its alt text (`extract.js::extractFromImages`), which a
+  // heading or a paragraph of the same words shares, and the file such a value names is the image's.
+  const image = loneImage(fragment)
+  if (image && !(source || []).some((node) => node?.type === 'image')) {
+    const alt = typeof image.attrs?.alt === 'string' ? image.attrs.alt.trim() : ''
+    return alt ? [{ type: 'text', text: alt }] : null
+  }
   return asLinkLabels(source, fragment, value) || fragment
+}
+
+// The one image an inline fragment is, around any spaces — or null.
+function loneImage(fragment) {
+  const nodes = (fragment || []).filter((node) => !(node?.type === 'text' && !node.text?.trim()))
+  return nodes.length === 1 && nodes[0].type === 'image' ? nodes[0] : null
 }
 
 /**
@@ -412,7 +428,10 @@ export function translatedInline(source, value) {
  * @returns {boolean}
  */
 export function translationKeepsMarkup(markup, value) {
-  const result = translatedInline(inlineMarkdownToFragment(markup) || [], value) || []
+  const source = inlineMarkdownToFragment(markup) || []
+  // An image keeps its image whatever its translation says: words are its alt text (`translateImages`).
+  if (loneImage(source)) return true
+  const result = translatedInline(source, value) || []
   return result.some((node) => node.type !== 'text' || (node.marks && node.marks.length > 0))
 }
 
@@ -605,6 +624,58 @@ function translateDataBlocks(doc, context, translations, fallbackToSource, model
 }
 
 /**
+ * Translate a section's IMAGES in place — the other half of `extract.js::extractFromImages`. Each
+ * image whose alt text has a translation takes what it gives (`translatedImage`): words, its alt
+ * text; an image, its alt text and the files and caption it names. A file is the value's address as
+ * written, so it serves where the source's would: a `/` path is a file in `public/`.
+ *
+ * Called from the build's two section walks and from `resolveDocForLocale`, the push's, so a site
+ * a static host serves and one published with Uniweb show the same image in each language.
+ *
+ * @returns {boolean} whether an image changed
+ */
+function translateImages(doc, context, translations, fallbackToSource) {
+  let changed = false
+  for (const node of imageNodes(doc)) {
+    const key = typeof node.attrs?.alt === 'string' ? node.attrs.alt.trim() : ''
+    if (!key) continue
+    const value = lookupTranslation(key, context, translations, fallbackToSource)
+    if (value === key) continue
+    for (const [attr, given] of Object.entries(translatedImage(value) || {})) {
+      if (node.attrs[attr] !== given) {
+        node.attrs[attr] = given
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+
+/**
+ * What a translation gives an image. A value that is an image (`![alt](file "caption"){poster=…}`):
+ * its alt text, and the file, caption, poster or preview it names — what it leaves out stays the
+ * source's. Any other value: its words, as the alt text. Null for an empty value.
+ *
+ * @param {string} value - the translation, inline markdown
+ * @returns {Object|null} the attributes to give the image
+ */
+export function translatedImage(value) {
+  const fragment = inlineMarkdownToFragment(value)
+  if (!fragment) return null
+  const image = loneImage(fragment)
+  if (image) {
+    const given = {}
+    for (const attr of TRANSLATED_IMAGE_ATTRS) {
+      const v = image.attrs?.[attr]
+      if (v != null && v !== '') given[attr] = v
+    }
+    return given
+  }
+  const words = toPlainText(value).trim()
+  return words ? { alt: words } : null
+}
+
+/**
  * Resolve ONE ProseMirror content doc for a single target locale: a deep clone of
  * the source doc with each whole-element translated (inline content replaced from
  * the table's inline-markdown value). `table` is `{ hash: value }` for that locale.
@@ -621,7 +692,8 @@ export function resolveDocForLocale(sourceDoc, table, context = { page: '', sect
   const doc = JSON.parse(JSON.stringify(sourceDoc))
   const elements = translateProseMirrorDoc(doc, context, table, true)
   const data = translateDataBlocks(doc, context, table, true, modelFor)
-  return elements || data ? doc : null
+  const images = translateImages(doc, context, table, true)
+  return elements || data || images ? doc : null
 }
 
 // Parse an inline-markdown translation value into a ProseMirror inline fragment: one element's

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { emitSyncPackages, readZip, siteContentDocumentToProject } from '../src/uwx/index.js'
 import { writtenRefs, siteFileKey } from '../src/uwx/located-media.js'
+import { computeHash } from '../src/i18n/hash.js'
 
 const BACKEND = 'http://localhost:8080'
 let ROOT, SITE
@@ -171,5 +172,22 @@ describe('pull — a co-located file a push uploaded', () => {
     const document = sent(await emitSyncPackages(SITE, { assetRewrite: { 'pages/home/team.jpg': '/assets/a1.jpg' }, assetIds: ids }))
     siteContentDocumentToProject({ document, siteRoot: SITE, backend: BACKEND })
     expect(readFileSync(join(SITE, 'pages/home/hero.md'), 'utf8')).toContain('/assets/a1.jpg')
+  })
+})
+
+describe('a translation\'s file', () => {
+  it('rides the push: the French image names its own file, and the push uploads it', async () => {
+    w('site.yml', ['name: Acme', 'foundation: "@acme/marketing"', 'index: home', 'defaultLanguage: en', 'languages: [en, fr]', ''].join('\n'))
+    w('pages/home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![The overlay](/docs-media/overlay.png)\n')
+    w('public/docs-media/overlay.png', 'en')
+    w('public/docs-media/fr/overlay.png', 'fr')
+    w('locales/fr.json', JSON.stringify({ [computeHash('The overlay')]: '![La superposition](/docs-media/fr/overlay.png)' }))
+    const pkg = await emitSyncPackages(SITE)
+    expect(pkg.localAssets).toEqual(expect.arrayContaining(['/docs-media/overlay.png', '/docs-media/fr/overlay.png']))
+    const { content } = sent(pkg).pages[0].page_sections[0]
+    const fr = JSON.stringify(content.fr)
+    expect(fr).toContain('"src":"/docs-media/fr/overlay.png"')
+    expect(fr).toContain('"alt":"La superposition"')
+    expect(JSON.stringify(content.en)).toContain('"src":"/docs-media/overlay.png"')
   })
 })
