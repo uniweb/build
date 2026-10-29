@@ -303,9 +303,6 @@ function stampList(def, items, at, banks, counts, claimed) {
           single.$uuid = u
           claimed.add(u)
           counts.stamped++
-        } else {
-          // Under an item the backend holds, with no identity here: one the backend may hold.
-          counts.unbankedSingles++
         }
       })
     }
@@ -322,13 +319,10 @@ function stampList(def, items, at, banks, counts, claimed) {
  * @param {object} declaration - its data schema's declaration
  * @param {Object<string,string>} bank - this record's entry (`harvestRecordItems` /
  *        `storedRecordItems`)
- * @returns {{ stamped: number, unknown: number, unbankedSingles: number }} items given a
- *   uuid; list items sent as new; and single sections under an item that kept its uuid but
- *   with none banked for them, which a backend may hold (a bank from before 2026-10-28 has
- *   none), so the caller can recover them
+ * @returns {{ stamped: number, unknown: number }} items given a uuid, and list items sent as new
  */
 export function stampRecordItems(document, declaration, bank) {
-  const counts = { stamped: 0, unknown: 0, unbankedSingles: 0 }
+  const counts = { stamped: 0, unknown: 0 }
   const claimed = new Set()
   const banks = { lists: bankedLists(bank), singles: bankedSingles(bank) }
   eachRecordList(declaration, document, (path, def, items) => {

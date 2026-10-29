@@ -554,10 +554,6 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     const n = stampRecordItems(e.document, declaration, banked)
     recordItemIdentity.stamped += n.stamped
     recordItemIdentity.unknown += n.unknown
-    // A single section under an item the backend holds, banked nowhere — a bank from before such
-    // sections were banked (2026-10-28) — is recovered as an unbanked record's items are: sent
-    // without its `$uuid`, a push after the first is refused whole.
-    if (n.unbankedSingles > 0) unbankedIds.add(e.id)
   }
 
   const siteEntity = siteDoc

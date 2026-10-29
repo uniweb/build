@@ -109,7 +109,7 @@ describe('the next send — each item takes a banked uuid by content, then by pl
     const bank = bankFor(sent())
     const next = sent()
     const counts = stampRecordItems(next, DECL, bank)
-    expect(counts).toEqual({ stamped: 8, unknown: 0, unbankedSingles: 0 })
+    expect(counts).toEqual({ stamped: 8, unknown: 0 })
     expect(uuids(next)).toEqual({
       notes: ['U:brief.notes[0]'],
       sessions: ['U:sessions[0]', 'U:sessions[1]'],
@@ -194,7 +194,7 @@ describe('the next send — each item takes a banked uuid by content, then by pl
 
   it('CONTROL — with no bank every item goes as new', () => {
     const next = sent()
-    expect(stampRecordItems(next, DECL, {})).toEqual({ stamped: 0, unknown: 8, unbankedSingles: 0 })
+    expect(stampRecordItems(next, DECL, {})).toEqual({ stamped: 0, unknown: 8 })
     expect(uuids(next).sessions).toEqual([undefined, undefined])
   })
 })
@@ -291,7 +291,7 @@ describe('a single section under a list — banked and stamped as a list element
 
   it('an unchanged record takes every one back', () => {
     const next = cv()
-    expect(stampRecordItems(next, CV, cvBank(cv()))).toEqual({ stamped: 5, unknown: 0, unbankedSingles: 0 })
+    expect(stampRecordItems(next, CV, cvBank(cv()))).toEqual({ stamped: 5, unknown: 0 })
     expect(theses(next)).toEqual(['U:degrees[0].thesis', 'U:degrees[1].thesis'])
     expect(next.degrees[0].thesis.committee.$uuid).toBe('U:degrees[0].thesis.committee')
     expect(next.brief).not.toHaveProperty('$uuid')
@@ -303,17 +303,16 @@ describe('a single section under a list — banked and stamped as a list element
     expect(theses(next)).toEqual(['U:degrees[1].thesis', 'U:degrees[0].thesis'])
   })
 
-  it('comes new with a new item, and asks for no recovery', () => {
+  it('comes new with a new item', () => {
     const next = cv([{ title: 'BSc', thesis: { topic: 'Gears' } }, PHD(), MSC()])
-    const counts = stampRecordItems(next, CV, cvBank(cv()))
+    stampRecordItems(next, CV, cvBank(cv()))
     expect(theses(next)).toEqual([undefined, 'U:degrees[0].thesis', 'U:degrees[1].thesis'])
-    expect(counts.unbankedSingles).toBe(0)
   })
 
-  it('under an item that kept its uuid, with none banked — a bank from before — is counted for recovery', () => {
+  it('goes without one when none is banked, its item stamped all the same', () => {
     const lists = Object.entries(cvBank(cv())).filter(([place]) => place.endsWith(']'))
     const next = cv()
-    expect(stampRecordItems(next, CV, Object.fromEntries(lists))).toEqual({ stamped: 2, unknown: 0, unbankedSingles: 3 })
+    expect(stampRecordItems(next, CV, Object.fromEntries(lists))).toEqual({ stamped: 2, unknown: 0 })
     expect(theses(next)).toEqual([undefined, undefined])
   })
 
@@ -404,7 +403,7 @@ describe('emitSyncPackages — record list items', () => {
     expect(pkg.recordItemIdentity).toEqual({ stamped: 0, unknown: 0, unbanked: [] })
   })
 
-  it('names a record whose single section under a list has no banked uuid — the caller recovers it', async () => {
+  it('sends a single section under a list with its banked uuid', async () => {
     writeFileSync(
       join(ROOT, 'foundation', 'dist', 'meta', 'schema.json'),
       JSON.stringify({
@@ -434,10 +433,6 @@ describe('emitSyncPackages — record list items', () => {
       }
       return null
     }
-    // A bank from before: the degree, not its thesis.
-    const before = await emitSyncPackages(SITE, { backend: ORIGIN, recordItemUuids: { 'MINT-CV': { 'degrees[0]': 'I-PHD' } } })
-    expect(before.recordItemIdentity.unbanked).toEqual(['MINT-CV'])
-    // Recovered, the thesis goes with its uuid and nothing is asked again.
     const after = await emitSyncPackages(SITE, {
       backend: ORIGIN,
       recordItemUuids: { 'MINT-CV': { 'degrees[0]': 'I-PHD', 'degrees[0].thesis': 'I-THESIS' } },
