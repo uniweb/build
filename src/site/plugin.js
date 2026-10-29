@@ -33,6 +33,7 @@ import { resolveDefaultLocale, resolveFetchConfigs, DATA_DIR } from '@uniweb/cor
 import { partitionKnowledgePages, INDEX_FILENAME } from '@uniweb/projections'
 import { collectSiteContent, mountEntriesOf } from './content-collector.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
+import { collectTranslatedAssets } from './assets.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { devMediaPaths } from './dev-media.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
@@ -238,6 +239,7 @@ async function processDevSectionFetches(sections, fetchOptions, resolve) {
 import { compiledData, recordProjections, routeOnDisk } from './record-projections.js'
 import { agentFiles, describeProjections, projectionFiles, searchFiles } from './projections.js'
 import { mergeTranslations } from '../i18n/merge.js'
+import { localesToBuild } from '../i18n/locales.js'
 import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { refuseSearchOption } from './search-declared.js'
 import { mountDevApi } from '../dev/api-mount.js'
@@ -531,6 +533,34 @@ export function siteContentPlugin(options = {}) {
       freeformEnabled: hasFreeform,
       dataModel: await dataModels()
     })
+  }
+
+  /**
+   * The files the languages this build makes pages in name and the site's own content does not
+   * (`collectTranslatedAssets`), each language's translations merged as its pages will be. The
+   * languages are `uniweb build`'s (`localesToBuild`), so a file is processed for exactly the pages
+   * that show it.
+   *
+   * @returns {Promise<{ assets: Object, languages: number }>} a manifest of those files, and how
+   *   many languages the build makes besides its default
+   */
+  async function translatedAssets() {
+    const { readSiteConfig } = await import('./config.js')
+    const localesPath = join(resolvedSitePath, localesDir)
+    const { locales } = localesToBuild(readSiteConfig(resolvedSitePath), localesPath)
+    const languages = []
+    for (const locale of locales) {
+      const content = await getTranslatedContent(locale)
+      if (content) languages.push({ locale, content })
+    }
+    const { assets, unplaced } = collectTranslatedAssets(languages, siteContent.assets, resolvedSitePath, localesPath)
+    for (const { locale, ref } of unplaced) {
+      console.warn(
+        `[site-content] A ${locale} translation names ${ref}, and a translation sits in no folder for ` +
+          `a relative path to start from. Name the file from public/, as /<its path there>.`
+      )
+    }
+    return { assets, languages: locales.length }
   }
 
   /**
@@ -1156,13 +1186,18 @@ export function siteContentPlugin(options = {}) {
 
       // Process assets in production builds
       if (isProduction && assetsOptions.process && siteContent?.assets) {
-        const assetCount = Object.keys(siteContent.assets).length
+        // ⭐ With the files a translation names (`translatedAssets`): one step for both, so a
+        // translated page shows the build's copy of its file as the default language's page does.
+        const translated = await translatedAssets()
+        const fromTranslations = Object.keys(translated.assets).length
+        const manifest = { ...siteContent.assets, ...translated.assets }
+        const assetCount = Object.keys(manifest).length
 
         if (assetCount > 0) {
           console.log(`[site-content] Processing ${assetCount} assets...`)
 
           // Process standard assets (images)
-          const { pathMapping, results, files } = await processAssets(siteContent.assets, {
+          const { pathMapping, results, files } = await processAssets(manifest, {
             outputDir: resolvedOutDir,
             assetsSubdir: assetsOptions.outputDir,
             convertToWebp: assetsOptions.convertToWebp,
@@ -1202,9 +1237,14 @@ export function siteContentPlugin(options = {}) {
             finalContent = rewriteSiteContentPaths(siteContent, pathMapping, files)
           }
 
+          // Where the build put each file, for the step that makes each other language's pages from
+          // this payload, and takes it out (`i18n/index.js::buildLocalizedContent`).
+          if (translated.languages > 0) finalContent.builtAssets = { paths: pathMapping, files }
+
           // Log results
           const sizeKB = (results.totalSize / 1024).toFixed(1)
           console.log(`[site-content] Processed ${results.processed} assets (${results.converted} converted to WebP, ${sizeKB}KB total)`)
+          if (fromTranslations > 0) console.log(`[site-content] ${fromTranslations} of them named by a translation`)
 
           if (results.failed > 0) {
             console.warn(`[site-content] ${results.failed} assets failed to process`)

@@ -721,6 +721,9 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
   // Inject site content as JSON for hydration
   // Strip CSS and font links from theme (both are already in <head>)
   let contentForJson = { ...siteContent }
+  // The bundle's note to the step that makes each other language's pages, which takes it out
+  // (`i18n/index.js::buildLocalizedContent`) — and no page's, if that step failed.
+  delete contentForJson.builtAssets
   if (contentForJson.theme?.css || contentForJson.theme?.links) {
     contentForJson.theme = { ...contentForJson.theme }
     delete contentForJson.theme.css

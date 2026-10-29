@@ -6,10 +6,11 @@
 // which has none — was pushed as a one-language site, and none of its translations left the
 // machine, while the build of the same site produced every one of them.
 //
-// A leaf, with nothing but `node:fs` beneath it, so the sync lane can use it without pulling in
-// the rest of the i18n module.
+// A leaf, with nothing but `node:fs` and core's locale rules (a leaf too) beneath it, so the sync
+// lane can use it without pulling in the rest of the i18n module.
 
 import { existsSync, readdirSync } from 'node:fs'
+import { normalizeLanguageList, resolveDefaultLocale } from '@uniweb/core/locale-config'
 
 // Files in the locales directory that are not a locale's translations.
 export const RESERVED_LOCALE_FILES = new Set(['manifest.json', '_memory.json'])
@@ -48,4 +49,29 @@ export function resolveLocaleList(configLocales, localesPath) {
     return configLocales.map((l) => (typeof l === 'string' ? l : l.code))
   }
   return availableLocales(localesPath)
+}
+
+/**
+ * The languages a build makes pages in besides its default: the site's locales
+ * (`resolveLocaleList`), only those `publishLanguages:` lists when it lists any, never the default,
+ * which is the root tree. One rule for `uniweb build`, which makes each one's pages, and for the
+ * bundle, which processes the files their translations name (`site/plugin.js`), so the second
+ * never processes for a language the first does not make, nor misses one it does.
+ *
+ * @param {Object} siteConfig - `site.yml`, as written
+ * @param {string} localesPath - the locales directory
+ * @returns {{ locales: string[], skipped: string[], defaultLocale: string }} the languages a build
+ *   makes, and those `publishLanguages:` leaves out
+ */
+export function localesToBuild(siteConfig, localesPath) {
+  const config = siteConfig || {}
+  let locales = resolveLocaleList(config.languages, localesPath)
+  let skipped = []
+  if (config.publishLanguages != null) {
+    const publish = new Set(normalizeLanguageList(config.publishLanguages))
+    skipped = locales.filter((l) => !publish.has(l))
+    locales = locales.filter((l) => publish.has(l))
+  }
+  const defaultLocale = resolveDefaultLocale(config)
+  return { locales: locales.filter((l) => l !== defaultLocale), skipped, defaultLocale }
 }

@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
 import { computeHash, normalizeText } from './hash.js'
-import { availableLocales, resolveLocaleList } from './locales.js'
+import { availableLocales, resolveLocaleList, localesToBuild } from './locales.js'
 import { extractTranslatableContent } from './extract.js'
 import { dataBlockModels } from './data-models.js'
 import { syncManifests, formatSyncReport } from './sync.js'
@@ -82,6 +82,7 @@ export {
   // Locale resolution
   getAvailableLocales,
   resolveLocales,
+  localesToBuild,
 
   // Free-form translation functions
   loadFreeformTranslation,
@@ -444,15 +445,21 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
   // What each section type declares its data blocks are, so a block translates what extraction offered.
   const dataModel = await dataBlockModels(siteRoot)
 
+  // ⭐ Where the bundle put each file a page names, a translation's among them (`site/plugin.js::
+  // generateBundle`, `collectTranslatedAssets`): a language's page shows the build's copy of the
+  // file its translation names, as the default language's page does. The bundle's note to this
+  // step, taken out of the payload here, since no page reads it.
+  const builtAssets = siteContent.builtAssets
+  delete siteContent.builtAssets
+
   // ⭐ The DEFAULT locale's payload needs the same stamp. It is not written in
   // this loop — it is the source this function reads — but a visitor landing on
   // `/` gets a Website built from it, and without the set that page loses its
   // language switcher while every translated page has one.
   const stampedLanguages = declaredLanguages(siteContent.config, defaultLocale, locales)
-  if (JSON.stringify(siteContent.config?.languages) !== JSON.stringify(stampedLanguages)) {
-    siteContent.config = { ...siteContent.config, languages: stampedLanguages }
-    await writeFile(siteContentPath, JSON.stringify(siteContent, null, 2))
-  }
+  const restamp = JSON.stringify(siteContent.config?.languages) !== JSON.stringify(stampedLanguages)
+  if (restamp) siteContent.config = { ...siteContent.config, languages: stampedLanguages }
+  if (restamp || builtAssets) await writeFile(siteContentPath, JSON.stringify(siteContent, null, 2))
 
   // The paths the site's source holds a section at, drafts included — read once, and only
   // when a translation translates nothing this build publishes (`warnAboutFreeformIssues`).
@@ -513,6 +520,8 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
       })
     }
 
+    if (builtAssets) translated = await builtCopies(translated, builtAssets)
+
     // Mark the active locale in the translated content, and stamp the resolved
     // locale set so the runtime does not have to re-derive it — see
     // `declaredLanguages`.
@@ -535,6 +544,16 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
   }
 
   return outputs
+}
+
+/**
+ * A language's content with each file its translations name pointed at the build's copy
+ * (`builtAssets`, `{ paths, files }` by the reference as written). The bundle's own rewrite, loaded
+ * only on the lane that processed media, which is the one that left the note.
+ */
+async function builtCopies(content, builtAssets) {
+  const { rewriteSiteContentPaths } = await import('../site/asset-processor.js')
+  return rewriteSiteContentPaths(content, builtAssets.paths || {}, builtAssets.files || null)
 }
 
 /**

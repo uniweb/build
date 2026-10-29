@@ -480,3 +480,73 @@ export function mergeAssetCollections(...collections) {
 
   return merged
 }
+
+/**
+ * The files each language's pages name that the site's own content does not: what its
+ * translations brought, such as an image's file in that language or a free-form section's media.
+ *
+ * ⭐ A TRANSLATION'S FILE GOES THROUGH THE IMAGE STEP, AS THE CONTENT'S DOES (2026-10-28). A
+ * translation names an image's file in its language as `![alt](/x)` (`i18n/merge.js::
+ * translatedImage`), and a language's pages are made after the build has processed the site's
+ * media, from what it wrote. So a translated page showed that file as `public/` holds it, a PNG
+ * where the default language's page had the build's WebP. The bundle collects them here, from each
+ * language's merged content, and processes them with the site's own (`site/plugin.js::
+ * generateBundle`); a language's pages take the address the build gave each one
+ * (`i18n/index.js::buildLocalizedContent`).
+ *
+ * Only a `/x` names a file here. A translation is written in no folder, so a `./x` it holds has
+ * nowhere to resolve from: it comes back in `unplaced`, to be said, never guessed.
+ *
+ * @param {Array<{ locale: string, content: Object }>} languages - each language's content: its
+ *   translations merged into the site's content as collected (`mergeTranslations`)
+ * @param {Object} known - the site's own manifest, by reference as written (`siteContent.assets`)
+ * @param {string} siteRoot - Site root directory
+ * @param {string} localesDir - the translations' folder; a refusal names `<locale>.json` in it
+ * @returns {{ assets: Object, unplaced: Array<{ locale: string, ref: string }> }} a manifest of the
+ *   files, in `collectSectionAssets`'s shape, and each reference no folder places
+ * @throws {Error} `code: ASSETS_FOLDER_RETIRED` — a `/x` that only `assets/` holds
+ */
+export function collectTranslatedAssets(languages, known, siteRoot, localesDir) {
+  const assets = {}
+  const unplaced = []
+  for (const { locale, content } of languages) {
+    const table = join(localesDir, `${locale}.json`)
+    const seen = new Set()
+    const visit = (ref) => {
+      if (typeof ref !== 'string' || !ref || isExternalUrl(ref)) return
+      if (known?.[ref] || assets[ref] || seen.has(ref)) return
+      seen.add(ref)
+      if (!ref.startsWith('/')) {
+        unplaced.push({ locale, ref })
+        return
+      }
+      const result = resolveAssetPath(ref, table, siteRoot)
+      if (result.external || !result.resolved) return
+      assets[ref] = {
+        original: ref,
+        resolved: result.resolved,
+        isImage: result.isImage,
+        isVideo: result.isVideo,
+        isPdf: result.isPdf
+      }
+    }
+    eachSectionDoc(content, (doc) => {
+      walkContentAssets(doc, (node) => visit(node.attrs.src))
+      walkDataBlockAssets(doc, (path) => visit(path))
+    })
+  }
+  return { assets, unplaced }
+}
+
+/** Each section's content in a site's content, as `rewriteSiteContentPaths` walks it: pages, layout areas, subsections. */
+function eachSectionDoc(siteContent, visit) {
+  const section = (s) => {
+    if (s?.content) visit(s.content)
+    s?.subsections?.forEach(section)
+  }
+  const page = (p) => p?.sections?.forEach(section)
+  siteContent?.pages?.forEach(page)
+  for (const areas of Object.values(siteContent?.layouts || {})) {
+    for (const area of Object.values(areas || {})) page(area)
+  }
+}
