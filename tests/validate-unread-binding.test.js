@@ -97,6 +97,20 @@ describe('a section reading a key the page does not deliver', () => {
     const [err] = unread(await validateDataInputs(site({ metaKey: 'team', queryName: 'members' })))
     expect(err.message).toMatch(/nothing else will say so/)
   })
+
+  // ⛔ Reported until 2026-10-28: a concept block is read from its fence in the section, never
+  // from a fetch, so a page's query that feeds another section had not failed to reach it.
+  it('a concept block it reads (`md:<tag>`) is not one the page should fill', async () => {
+    const report = await validateDataInputs(site({ metaKey: "'md:prompt'", queryName: 'members' }))
+    expect(unread(report)).toEqual([])
+  })
+
+  it('…while a key beside one is still reported, alone', async () => {
+    const [err, ...rest] = unread(await validateDataInputs(site({ metaKey: "'md:prompt': 'Prompt', team", queryName: 'members' })))
+    expect(rest).toEqual([])
+    expect(err.message).toContain('section reads content.data.team,')
+    expect(err.message).not.toContain('content.data.prompt')
+  })
 })
 
 describe('⛔ and it stays quiet where silence is correct', () => {

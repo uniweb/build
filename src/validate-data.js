@@ -172,7 +172,16 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       // keys on a page with no data at all is ordinary and silent. What is not ordinary is
       // a page that fetched something and a section on it that receives none of it —
       // there the author demonstrably intended data to arrive and the names did not meet.
-      const declaredNames = declared.map(([key]) => key)
+      //
+      // ⛔ A CONCEPT BLOCK'S KEY IS NOT ONE A FETCH FILLS. `'md:prompt'` in `data:` reads a
+      // ```md:prompt fence written in the section, and nothing else delivers it, so a section with
+      // no such fence is ordinary — the describer lists it as `{ key, kind: 'concept' }`
+      // (`@uniweb/schemas/content`). ⛔ Until 2026-10-28 it was counted here, and a page whose
+      // query fed another section reported it as data that failed to arrive.
+      const concepts = new Set(
+        (foundation[type]?.content || []).filter((e) => e?.kind === 'concept').map((e) => e.key)
+      )
+      const declaredNames = declared.map(([key]) => key).filter((key) => !concepts.has(key))
       if (declaredNames.length > 0 && inputs.length > 0 && fills.size === 0 && !declaredNames.some((k) => held.includes(k))) {
         const delivered = inputs.map((i) => i.as).filter(Boolean)
         setupErrors.push({
