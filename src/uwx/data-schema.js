@@ -263,17 +263,25 @@ function lowerSection(def, resolve, optResolve, path = '') {
   if (def.nestable) out.self_nesting = true
   if (def.append_only) out.append_only = true
 
+  // Leaves and explicit child sections (sections-form, e.g. under a binder) share one ordered
+  // `fields:` namespace, a child as a `type: section` field. The two maps are lowered in the
+  // order the author wrote them, which the IR keeps (`@uniweb/schemas/format`), since a
+  // registry lists a definition's sections in the declared order. ⛔ Until 2026-10-28 every
+  // child section went after the leaves, wherever it was written.
   const fields = {}
-  for (const [key, rawField] of Object.entries(def.fields || {})) {
-    fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key)
-  }
-  // Explicit child sections (sections-form, e.g. under a binder) → `type: section`
-  // fields, in the same ordered namespace as the leaves.
-  for (const [childName, childDef] of Object.entries(def.sections || {})) {
-    const childPath = path ? `${path}/${childName}` : childName
-    fields[childName] = {
-      type: 'section',
-      ...lowerSection(childDef, resolve, optResolve, childPath)
+  for (const part of Object.keys(def)) {
+    if (part === 'fields') {
+      for (const [key, rawField] of Object.entries(def.fields || {})) {
+        fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key)
+      }
+    } else if (part === 'sections') {
+      for (const [childName, childDef] of Object.entries(def.sections || {})) {
+        const childPath = path ? `${path}/${childName}` : childName
+        fields[childName] = {
+          type: 'section',
+          ...lowerSection(childDef, resolve, optResolve, childPath)
+        }
+      }
     }
   }
   // A section with neither leaves nor sub-sections carries nothing, and is not a

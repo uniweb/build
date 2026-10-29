@@ -960,3 +960,36 @@ describe('toDataSchemaDeclaration — a picklist cannot pick from its own schema
     )
   })
 })
+
+// A registry lists a definition's sections in the declared order, depth first, so the
+// declaration keeps the order the author wrote — read back from `dist/meta/schema.json` too.
+describe('toDataSchemaDeclaration — declared order', () => {
+  const viaSchemaJson = (authored) =>
+    toDataSchemaDeclaration(JSON.parse(JSON.stringify(validateAndNormalizeSchema(authored, '@/x'))), {
+      name: '@acme/x',
+    })
+  const child = { fields: { note: 'string' } }
+
+  it('keeps top-level sections and their fields as authored, not alphabetized', () => {
+    const decl = viaSchemaJson({
+      sections: {
+        zeta: { brief: true, fields: { surname: 'string', given: 'string' } },
+        alpha: { many: true, fields: { title: 'string', year: 'int' } },
+      },
+    })
+    expect(Object.keys(decl.sections)).toEqual(['zeta', 'alpha'])
+    expect(Object.keys(decl.sections.zeta.fields)).toEqual(['surname', 'given'])
+    expect(Object.keys(decl.sections.alpha.fields)).toEqual(['title', 'year'])
+  })
+
+  it('puts child sections written above the fields above them', () => {
+    const decl = viaSchemaJson({ sections: { s: { sections: { child }, fields: { title: 'string', year: 'int' } } } })
+    expect(Object.keys(decl.sections.s.fields)).toEqual(['child', 'title', 'year'])
+    expect(decl.sections.s.fields.child.type).toBe('section')
+  })
+
+  it('and child sections written below the fields below them', () => {
+    const decl = viaSchemaJson({ sections: { s: { fields: { title: 'string' }, sections: { child } } } })
+    expect(Object.keys(decl.sections.s.fields)).toEqual(['title', 'child'])
+  })
+})
