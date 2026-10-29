@@ -1,8 +1,8 @@
 /**
  * Asset references that are a BARE STRING — `info.preview` (the site card's image
  * [Diego, 2026-09-10]), `info.favicon`, `settings.touch_icon`, a theme's font faces, `seo.image`
- * at the site and page tiers, a section param — and dropping a previous site's generated `preview` from site.yml, as the CLI
- * does, through `writeSiteConfig` (`removeYamlScalar` until 2026-10-07).
+ * at the site and page tiers, a section param — and removing a key from site.yml through `writeSiteConfig`, as a pull
+ * removes the token an older pull left in `preview` (`removeYamlScalar` until 2026-10-07).
  *
  * Content images carry identity BESIDE their URL as flat attrs, so a pull restores
  * the author's path by id. A bare string has no object to carry it: the stored value
@@ -251,16 +251,19 @@ describe("the theme's font files", () => {
 })
 
 describe('info.preview values that are not a project image', () => {
-  for (const value of ['2026-09-10T12:34:56Z', 'https://cdn.example/card.png']) {
-    it(`${value} rides verbatim and is never uploaded`, async () => {
-      const pkg = await emitSyncPackages(project({ preview: value }), {
-        assetRewrite: SERVED,
-        assetIds: IDS,
-      })
-      expect(siteDocOf(pkg).info.preview).toBe(value)
-      expect(pkg.localAssets).not.toContain(value)
-    })
-  }
+  it('a URL rides verbatim and is never uploaded', async () => {
+    const value = 'https://cdn.example/card.png'
+    const pkg = await emitSyncPackages(project({ preview: value }), { assetRewrite: SERVED, assetIds: IDS })
+    expect(siteDocOf(pkg).info.preview).toBe(value)
+    expect(pkg.localAssets).not.toContain(value)
+  })
+
+  it('the token an older pull wrote for the app\'s card image is neither sent nor uploaded', async () => {
+    const value = '2026-09-10T12:34:56Z'
+    const pkg = await emitSyncPackages(project({ preview: value }), { assetRewrite: SERVED, assetIds: IDS })
+    expect(siteDocOf(pkg).info).not.toHaveProperty('preview')
+    expect(pkg.localAssets).not.toContain(value)
+  })
 })
 
 describe('assets.json — the served fingerprint', () => {
@@ -286,7 +289,7 @@ describe('assets.json — the served fingerprint', () => {
   })
 })
 
-describe('dropping a key from site.yml — what the CLI does to a generated `preview`', () => {
+describe('dropping a key from site.yml — what a pull does to the app\'s old `preview` token', () => {
   const siteYml = (body) => {
     const root = tmp('uwx-yml-')
     writeFileSync(join(root, 'site.yml'), body)

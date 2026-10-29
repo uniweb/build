@@ -198,6 +198,9 @@ export {
   writeThemeFile,
   writeRecordFile,
 } from './project-writer.js'
+// Whether `site.yml::preview` is an author's address — the one test the push, the pull and
+// `uniweb snapshot` share.
+export { isAuthoredPreview } from './authored-preview.js'
 
 // Registry-publish (names-only) — the document `uniweb register` submits, and the
 // schema → @uniweb/data-schema declaration lowering it bundles. `buildRegistryPackage`

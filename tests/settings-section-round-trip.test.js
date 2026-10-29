@@ -30,6 +30,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it, expect, afterEach } from 'vitest'
+import yaml from 'js-yaml'
 import { siteProjectToDocument, siteContentDocumentToProject } from '../src/uwx/index.js'
 
 const DIRS = []
@@ -52,7 +53,7 @@ function fullSite() {
     [
       "name: S", "foundation: '@a/b@1.0.0'", 'description: D', 'favicon: /f.svg',
       'template: true', 'tags: [academic, portfolio]',
-      "preview: '2026-09-10T12:34:56Z'",
+      'preview: /images/card.png',
       'languages: [en, fr]', 'defaultLanguage: en', 'publishLanguages: [en]',
       'base: /x/', 'seo: { image: /og.png }', 'keywords: [a, b]',
       'fetcher: { transports: {} }', 'build: { prerender: true }',
@@ -82,11 +83,12 @@ describe('the info / settings split', () => {
       'description', 'favicon', 'foundation', 'name', 'preview', 'tags', 'template',
     ])
 
-    // ⭐ `preview` (the card image) is carried and round-trips [Diego, 2026-09-10].
-    // Until then this asserted framework did NOT emit it, which let every push
-    // destroy an app-written value, because `info` is replaced whole. (`url` rode
-    // beside it until 2026-09-17 and is retired — uwx-site-project.test.js.)
-    expect(doc.info.preview).toBe('2026-09-10T12:34:56Z')
+    // ⭐ `preview` (the card image) is carried and round-trips [Diego, 2026-09-10] — an
+    // author's address, the only kind sent since 2026-10-29 (below). Until 2026-09-10 this
+    // asserted framework did NOT emit it, which let every push destroy an app-written
+    // value, because `info` is replaced whole. (`url` rode beside it until 2026-09-17 and
+    // is retired — uwx-site-project.test.js.)
+    expect(doc.info.preview).toBe('/images/card.png')
 
     // ⚠️ THE SPELLING IS LOAD-BEARING. These are the Model's earlier names for the
     // card image (`preview_url`, then `preview_image` until generation 19) plus one it
@@ -157,22 +159,56 @@ describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', (
     expect(first.settings.touch_icon).toBe('/touch-icon.png')
   })
 
-  it('a preview token that YAML would read as a number or a date comes back as the same string', async () => {
-    // The app's value is opaque, and some opaque strings are also YAML numbers or
-    // dates — unquoted, `3e451234` loads as Infinity. The projector must quote them,
-    // or the first pull turns the token into something else.
-    for (const token of ['3e451234', '20260910', '2026-09-10T12:34:56Z']) {
-      const src = fullSite()
-      writeFileSync(join(src, 'site.yml'), `name: S\nfoundation: '@a/b@1.0.0'\npreview: '${token}'\n`)
-      const first = await siteProjectToDocument(src)
-      expect(first.info.preview).toBe(token)
+})
 
-      const dest = mkdtempSync(join(tmpdir(), 'uwx-split-token-'))
-      DIRS.push(dest)
-      mkdirSync(join(dest, 'pages'), { recursive: true })
-      siteContentDocumentToProject({ document: first, siteRoot: dest })
-      const second = await siteProjectToDocument(dest)
-      expect(second.info.preview).toBe(token)
+// ⭐ `preview` IS AN AUTHOR'S ADDRESS OR NOTHING (2026-10-29). Until then the app recorded a card
+// image it generated as an opaque token in this field, and the token rode every push and pull so
+// that a push would not erase it. That record is kept apart from the site's content now, so the
+// token an older pull left in a site.yml is not sent, and a pull removes it.
+describe("`preview` — an author's address, and only that", () => {
+  // Some tokens are also YAML numbers or dates: unquoted, `3e451234` loads as Infinity.
+  const TOKENS = ["'3e451234'", '20260910', "'2026-09-10T12:34:56Z'", '2026-09-10T12:34:56Z']
+  const ADDRESSES = ['/images/card.png', 'images/card.png', 'https://cdn.example/card.png']
+
+  /** A pull of a document that carries no `preview`, into a copy whose site.yml holds `preview`. */
+  async function pullInto(preview) {
+    const document = await siteProjectToDocument(fullSite())
+    delete document.info.preview
+    const dest = mkdtempSync(join(tmpdir(), 'uwx-split-preview-'))
+    DIRS.push(dest)
+    mkdirSync(join(dest, 'pages'), { recursive: true })
+    writeFileSync(join(dest, 'site.yml'), `# the card\nname: S\npreview: ${preview}\n`)
+    siteContentDocumentToProject({ document, siteRoot: dest })
+    return readFileSync(join(dest, 'site.yml'), 'utf8')
+  }
+
+  it('a push sends no token, whatever YAML reads it as', async () => {
+    for (const token of TOKENS) {
+      const src = fullSite()
+      writeFileSync(join(src, 'site.yml'), `name: S\nfoundation: '@a/b@1.0.0'\npreview: ${token}\n`)
+      expect((await siteProjectToDocument(src)).info, token).not.toHaveProperty('preview')
+    }
+  })
+
+  it('a push sends an address as the author wrote it', async () => {
+    for (const address of ADDRESSES) {
+      const src = fullSite()
+      writeFileSync(join(src, 'site.yml'), `name: S\nfoundation: '@a/b@1.0.0'\npreview: ${address}\n`)
+      expect((await siteProjectToDocument(src)).info.preview).toBe(address)
+    }
+  })
+
+  it("a pull that brings no `preview` removes a token, and keeps the file's other lines", async () => {
+    for (const token of TOKENS) {
+      const after = await pullInto(token)
+      expect(yaml.load(after), token).not.toHaveProperty('preview')
+      expect(after.startsWith('# the card\nname: S\n'), after).toBe(true)
+    }
+  })
+
+  it("a pull that brings no `preview` keeps an author's address", async () => {
+    for (const address of ADDRESSES) {
+      expect(yaml.load(await pullInto(address)).preview).toBe(address)
     }
   })
 })

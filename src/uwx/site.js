@@ -86,6 +86,7 @@ import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph.js'
+import { isAuthoredPreview } from './authored-preview.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
 import {
   readServicesRequest,
@@ -103,17 +104,6 @@ const SITE_ENTITY_KEY = 'site-content' // one content entity per site project
 
 function setIf(obj, key, value) {
   if (value !== undefined) obj[key] = value
-}
-
-// A YAML scalar the author may have written unquoted: `20260910` loads as a number.
-// Carry it as the string it stands for; anything else that is not a string is not a
-// value a string field can hold. (`2026-09-10` loads as the string it is written as —
-// the build's YAML resolves no timestamps, `utils/yaml-schema.js` — so no Date arrives:
-// it was carried re-rendered by `toISOString()` until 2026-09-14.)
-function scalarString(value) {
-  if (typeof value === 'string') return value
-  if (typeof value === 'number') return String(value)
-  return undefined
 }
 
 // page_sections and layout_sections share this content shape.
@@ -1604,20 +1594,17 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // over an already-fetched list and never asks the database, while a DB-filterable
   // facet is separately useful — only the second needs a predicable brief field.
   setIf(info, 'tags', siteYml.tags)
-  // ⭐ `preview` — the site card's image. ONE field, TWO writers, and it round-trips
-  // whichever wrote it [Diego, 2026-09-10]:
-  //   · the APP, when it generates a card image — a timestamp, carried verbatim;
-  //   · an AUTHOR, deliberately — typically a template site's custom image: a URL, or
-  //     a site-root path to an image in the project, which push uploads like any
-  //     content image and sends as its serve URL, and which pull puts back as the
-  //     path the author wrote (`restoreAssetRefs` recognizes the URL by the
-  //     fingerprint recorded for it in `sync.json`'s asset map).
-  // The app leaves an author's value alone.
+  // ⭐ `preview` — the site card's image, as an AUTHOR set it, typically a template site's
+  // own picture: a URL, or a site-root path to an image in the project, which push uploads
+  // like any content image and sends as its serve URL, and which pull puts back as the path
+  // the author wrote (`restoreAssetRefs` recognizes the URL by the fingerprint recorded for it
+  // in `sync.json`'s asset map).
   //
-  // ⚠️ Until 2026-09-10 framework emitted no preview, on the premise that the host
-  // stamps it. Nothing did, and leaving an app-written field off an allowlist
-  // destroys it on every push, because `info` is replaced whole.
-  setIf(info, 'preview', scalarString(siteYml.preview))
+  // ⛔ Nothing else is sent (`isAuthoredPreview`). A card image the app generates is kept
+  // apart from the site's content, so the token an older pull wrote here for one is no
+  // author's value, and a pull removes it (`site-project.js`). Until 2026-10-29 the token
+  // was carried verbatim: it was the only way to keep it, since `info` is replaced whole.
+  setIf(info, 'preview', isAuthoredPreview(siteYml.preview) ? siteYml.preview : undefined)
   // ⛔ `url` IS RETIRED (2026-09-17) — do not reintroduce it, in either direction.
   // It carried where the site went live, read from `site.yml::$url` (which pull
   // wrote), so a site card could link to it. That is a fact about a DEPLOY, not

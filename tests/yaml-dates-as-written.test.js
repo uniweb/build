@@ -122,10 +122,11 @@ describe('the sync lane reads the same values', () => {
   })
 
   it('site.yml on the push — an unquoted timestamp is carried as written, not re-rendered', async () => {
-    w('site.yml', 'name: t\nfoundation: "@acme/x@1.0.0"\npreview: 2026-09-10T12:34:56Z\n')
+    // (Read off `preview` until 2026-10-29, when the app's token stopped riding it.)
+    w('site.yml', 'name: t\nfoundation: "@acme/x@1.0.0"\nplaceholders:\n  launched: 2026-09-10T12:34:56Z\n')
     w('pages/home/1-hero.md', '---\ntype: Hero\n---\n# Home\n')
     const doc = await quiet(() => siteProjectToDocument(ROOT))
-    expect(doc.info.preview).toBe('2026-09-10T12:34:56Z')
+    expect(doc.settings.placeholders.launched).toBe('2026-09-10T12:34:56Z')
   })
 })
 

@@ -30,9 +30,11 @@
 //
 // Localized fields (`name`, `description`) are wired as `{ <locale>: value }`;
 // we unwrap to the source locale for the file surface (other locales stay in
-// the i18n pipeline). Absent `info` keys are left untouched on disk.
+// the i18n pipeline). Absent `info` keys are left untouched on disk, except a
+// `preview` that is no author's address (`siteInfoToConfig`).
 
 import { foldOpenGraph } from './open-graph.js'
+import { isAuthoredPreview } from './authored-preview.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
@@ -143,14 +145,11 @@ const INFO_TO_SITE_YML = {
   // ⭐ `tags` — authored, non-localized tokens; the filter facet for a list of site
   // cards. Round-trips verbatim like any authored list.
   tags: 'tags',
-  // ⭐ `preview` — the card image, verbatim: the app's timestamp, an author's URL, or
-  // the path an author wrote for an image in the project, which `restoreAssetRefs`
-  // has already put back by recognizing the serve URL the push recorded in
-  // `sync.json`'s asset map (asset-map.js). [Diego, 2026-09-10]
-  //
-  // ⚠️ It was listed here as "DELIBERATELY ABSENT… BACKEND-STAMPED" until
-  // 2026-09-10. Leaving an app-written field out of this map is what lets the next
-  // push destroy it, since `info` is replaced whole.
+  // ⭐ `preview` — the card image, verbatim: an author's URL, or the path an author
+  // wrote for an image in the project, which `restoreAssetRefs` has already put back by
+  // recognizing the serve URL the push recorded in `sync.json`'s asset map
+  // (asset-map.js). A document that carries none removes the token an older pull wrote
+  // here for a card image the app generated (`siteInfoToConfig`).
   preview: 'preview',
   // ⛔ `url` is RETIRED (2026-09-17) and must not come back: where a site went live
   // is a deploy fact, which `publish` records in `deploy.yml`, not site config. A
@@ -212,7 +211,8 @@ function readAuthoredYaml(filePath) {
 /**
  * Project a site-content document's `info` (+ `extensions`) onto the site's
  * config files: `site.yml`, `theme.yml`, and `head.html`. Idempotent; only the
- * keys the document carries are written (absent keys are left as-is on disk).
+ * keys the document carries are written (absent keys are left as-is on disk), and
+ * a `preview` that is no author's address is removed when the document has none.
  *
  * @param {object} params
  * @param {object} params.document - the `@uniweb/site-content` `$`-document
@@ -247,6 +247,14 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   for (const [infoKey, ymlKey] of Object.entries(INFO_TO_SITE_YML)) {
     if (infoKey === 'foundation' && keepAuthoredFoundation) continue
     if (info[infoKey] !== undefined) siteChanges[ymlKey] = info[infoKey]
+  }
+  // ⭐ `preview` is an author's address or nothing. The token an older pull wrote here for a
+  // card image the app generated is removed once the document carries no `preview`, as it
+  // no longer does for such an image; an author's address stays as the absent-key rule keeps
+  // it. ⛔ Until 2026-10-29 the document carried the token, and this wrote it.
+  if (info.preview === undefined) {
+    const held = readAuthoredYaml(join(siteRoot, 'site.yml'))?.preview
+    if (held != null && !isAuthoredPreview(held)) siteChanges.preview = null
   }
 
   // ⭐ `settings.fetch` → `site.yml::query` or `site.yml::fetch` — the key the file
