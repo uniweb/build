@@ -158,9 +158,8 @@ export const ASSETS_FOLDER_RETIRED = 'ASSETS_FOLDER_RETIRED'
  * ⛔ `/x` NAMES `public/x`, AND ONLY THAT. Until 2026-10-28 `assets/` was a second home for it,
  * searched after `public/`; it is retired [Diego: "We don't need too many ways of doing the same
  * thing"]. A `/x` only `assets/` holds is refused by name, never read as missing, and the move it
- * names is into `public/`: the one every host takes. A file beside the page that shows it ships
- * once from a static build, but a push uploads only `/x` media (`uwx/sync-package.js`, which
- * warns and skips a co-located one), so a site published with Uniweb keeps its media in `public/`.
+ * names is into `public/`, where the address the content names stays the same. A file beside the
+ * page that shows it serves as well, on every host (`uwx/located-media.js`).
  *
  * @param {string} src - Original source path from content
  * @param {string} contextPath - Path of the file containing the reference

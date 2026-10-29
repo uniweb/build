@@ -315,12 +315,15 @@ describe('emitSyncPackages — baseVersions (the push staleness gate)', () => {
 })
 
 describe('emitSyncPackages — local-media (Slice 5)', () => {
-  it('collects site-root local asset refs in localAssets; co-located refs warn + skip', async () => {
+  // ⛔ A section's co-located refs were warned and skipped until 2026-10-28; they ride `localFiles`
+  // under their keys now (`uwx-located-media.test.js`), and one naming no file is warned.
+  it('collects site-root local asset refs in localAssets; a co-located ref naming no file is warned', async () => {
     w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![banner](/images/banner.png)\n\n![local](./co.png)\n')
     const pkg = await emitSyncPackages(SITE)
     expect(pkg.localAssets).toContain('/images/banner.png')
     expect(pkg.localAssets).not.toContain('./co.png')
-    expect(pkg.warnings.some((m) => m.includes('co.png') && m.includes('co-located'))).toBe(true)
+    expect(pkg.localFiles.some((f) => f.ref.endsWith('co.png'))).toBe(false)
+    expect(pkg.warnings.some((m) => m.includes('./co.png') && m.includes('names no file'))).toBe(true)
   })
 
   it('assetRewrite swaps the entity content refs for serve URLs (opt-in)', async () => {

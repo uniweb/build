@@ -35,6 +35,7 @@
 import { foldOpenGraph } from './open-graph.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
+import { siteFileKeys, writtenRefs } from './located-media.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
 import { servicesFromDocument, heldServices } from './services-request.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
@@ -389,14 +390,18 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  *        site (`siteDefaultSectionType`), which a file leaves out
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
   // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
   // four from a section (2026-09-28), with a stored background, theme and data declaration copied
   // into `params`. Until then a field filled in where `params` lacked the key, and a stored
   // `insets[]` was re-inlined into the body. (A PAGE's `fetch` is its own field — `pageRecordToYml`.)
-  const { type, stable_id, hidden, params, content } = record || {}
+  const { type, stable_id, hidden } = record || {}
+  // ⭐ A co-located file a push uploaded comes back as its key from the site root (`restoreAssetRefs`),
+  // and is written as the author wrote it: relative to this file (`located-media.js`, `media`).
+  const params = media ? writtenRefs(record?.params, { ...media, filePath }) : record?.params
+  const content = media ? writtenRefs(record?.content, { ...media, filePath }) : record?.content
 
   // A localized `content` field unwraps to the source-locale doc for the body; its
   // target-locale structural maps are captured into the locales/ collector, and any
@@ -554,6 +559,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         freeformCandidates,
         writeId: fileSectionName(filePath) !== stableId,
         context: pageContext ? translationContext({ stableId }, pageContext.route) : null,
+        media: ctx?.media ?? null,
       })
       written.push(filePath)
       if (!top) childFiles.push(basename(filePath))
@@ -1255,6 +1261,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
       freeformRelPath: stableId ? buildFreeformPath({ stableId }, page) : null,
       freeformCandidates: stableId ? freeformPathsFor({ stableId }, page) : null,
       context: translationContext({ stableId }, page.route),
+      media: ctx?.media ?? null,
     })
     report.layout.push(filePath)
     written.push(filePath)
@@ -1363,10 +1370,11 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // not tied to one has no known assets and restores nothing. Every caller that
   // pulls has an origin; the ones that do not are projecting a document in the
   // abstract.
-  report.assets = restoreAssetRefs(
-    document,
-    backend ? readBackendState(siteRoot, backend).assets || {} : {}
-  )
+  const assetMap = backend ? readBackendState(siteRoot, backend).assets || {} : {}
+  report.assets = restoreAssetRefs(document, assetMap)
+  // The keys among them that name a site file — a co-located file a push uploaded — for each
+  // section's writer to make relative to its own file (`located-media.js`).
+  const mediaKeys = siteFileKeys(assetMap)
 
   report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
   report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
@@ -1375,7 +1383,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // rename detection, build a fresh one as we project, then persist it. Items not
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
-  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map(), dataModel, sectionType }
+  const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map(), dataModel, sectionType, media: mediaKeys.size ? { siteRoot, keys: mediaKeys } : null }
   // Where the site keeps its localized URLs — `site.yml`'s map, when it has one (`pageSlugToYml`).
   const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
   ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }

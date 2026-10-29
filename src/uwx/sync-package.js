@@ -23,6 +23,7 @@ import { buildRecordEntities, entityContentHash } from './records.js'
 import { recordItemLists, hasListItems, stampRecordItems } from './record-items.js'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { fileRecordUploads } from './file-records.js'
+import { locatedMediaSink } from './located-media.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
 import { siteSourceLocale } from './source-locale.js'
@@ -290,7 +291,9 @@ function rewriteEntityAssets(node, map, ids, bare = null) {
  *   `schemaless` lists queries that resolved no data schema (soft-skipped from
  *   the sync) — the composite deploy delivers these statically via the data ball.
  *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
- *   must upload + rewrite to serve URLs; co-located refs are warned and skipped.
+ *   must upload + rewrite to serve URLs. A section's co-located files ride `localFiles`,
+ *   under their keys from the site root (`located-media.js`); any other co-located ref is
+ *   warned and skipped.
  *   `applied` echoes the hash-affecting injections this emit actually used
  *   (`assetRewrite` / `assetIds` / `injectInfo` / `injectExtensions`), ready to be
  *   passed straight back as opts. A caller that banks the `hashes` must bank this
@@ -373,10 +376,18 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // an expected path.
   if (folder?.warnings?.length) warnings.push(...folder.warnings)
 
+  // ⭐ A section's co-located media (`./team.jpg`), located where its file is read: each file rides
+  // `localFiles` under its key from the site root, and the emit handed the upload that names it writes
+  // the key where the reference was, for the rewrite below to swap (`located-media.js`).
+  const media = includeSite
+    ? locatedMediaSink(opts.assetRewrite && typeof opts.assetRewrite === 'object' ? opts.assetRewrite : null)
+    : null
+
   // `queryUuids` — identity for the `queries` section, keyed by query
   // NAME because a declaration has no file of its own (see queriesNested).
   const siteDoc = includeSite
     ? await siteProjectToDocument(siteRoot, {
+        media,
         sourceLocale,
         // Whose $uuid belongs on this wire document — see siteProjectToDocument.
         ...(opts.backend ? { backend: opts.backend } : {}),
@@ -480,14 +491,18 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     if (folder) rewriteEntityAssets(folder.document, assetRewrite, assetIds)
   }
   // Collect the site-root local refs the deploy must upload (`/images/x.png`).
-  // Co-located refs (`./x`, `../x`) need the source `.md` location to resolve — the
-  // entity doesn't carry it — so warn once each and skip (v1: use a site-root path).
+  // A section's co-located refs (`./x`, `../x`) were taken where their files were read
+  // (`media`, above): uploaded under their keys, or warned about there. Any other — a
+  // record's, `site.yml`'s — needs a location the entity does not carry, so it is warned
+  // once and skipped. ⛔ Until 2026-10-28 a section's were skipped too.
+  if (media) warnings.push(...media.warnings)
   const localAssetSet = new Set()
   const colocatedSeen = new Set()
-  const collectFrom = (doc) =>
+  const collectFrom = (doc, taken = null) =>
     doc &&
     walkEntityAssets(doc, (ref) => {
       if (ref.startsWith('/')) localAssetSet.add(ref)
+      else if (taken && (taken.refs.has(ref) || taken.warned.has(ref))) return
       else if (!colocatedSeen.has(ref)) {
         colocatedSeen.add(ref)
         warnings.push(
@@ -496,7 +511,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         )
       }
     })
-  collectFrom(siteDoc)
+  collectFrom(siteDoc, media)
   for (const e of col.entities) collectFrom(e.document)
   // ⭐ The site's favicon, whatever its type. `.ico` is not media to the walker
   // (`isLocalAssetPath`), but a host serves the favicon its page shell links only from
@@ -656,8 +671,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     refusals,
     schemaless: col.schemaless, localAssets, applied,
     // The files a push uploads for its file records, each `{ ref, path, contentType }` — the file, and
-    // a PDF's preview. Uploaded through the media lane; `ref` is the key the second emit rewrites.
-    localFiles,
+    // a PDF's preview — and for its sections' co-located media, each `{ ref, path }`. Uploaded through
+    // the media lane; `ref` is the key the second emit rewrites.
+    localFiles: [...localFiles, ...[...(media?.files || [])].map(([ref, path]) => ({ ref, path }))],
     // { stamped, unknown } when identity was applied; null when the caller passed
     // no map. `unknown > 0` with `stamped === 0` on a site that has been pushed
     // before is the index-loss signature the backend refuses — the caller reports it.

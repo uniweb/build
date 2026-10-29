@@ -79,6 +79,7 @@ import { normalizeHideIn } from '../site/nav-visibility.js'
 import { siteDefaultSectionType } from '../site/queries-config.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
+import { locateSectionMedia } from './located-media.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
@@ -555,6 +556,14 @@ function sectionToRecord(section, index) {
   return rec
 }
 
+// A section's file, read the build's way — and on a push, its co-located media located
+// (`./located-media.js`) before a record is made of it, since the setters write into the section.
+async function readSectionFile(filePath, id, siteRoot, stableId, media) {
+  const read = await processMarkdownFile(filePath, id, siteRoot, stableId)
+  locateSectionMedia(read.assetCollection, { siteRoot, filePath, sink: media })
+  return read
+}
+
 // Resolve a section's logical name (`hero`, `card-a`) to its file in `mdFiles`, in the
 // normal build's order (`content-collector.js::findSectionFile`): `name.md`, then
 // `@name.md`, then the first file whose name is `name` once its `@` and `N-` prefixes
@@ -612,7 +621,7 @@ function isExplicitWithRest(sectionsConfig) {
 // a section name (string) or `{ name: [children…] }`, resolved to its file by
 // name (bare / `@` / numeric-prefix tolerant) and recursed. Order and nesting
 // come from the array, not the directory.
-async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { appendRest = false, nest = null } = {}) {
+async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { appendRest = false, nest = null, media = null } = {}) {
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const seen = new Set()
 
@@ -622,7 +631,7 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { 
     const file = findSectionFileName(mdFiles, name)
     if (!file || seen.has(file)) return null // missing / already used → skip
     seen.add(file)
-    const { section } = await processMarkdownFile(join(pageDir, file), String(seen.size), siteRoot, name)
+    const { section } = await readSectionFile(join(pageDir, file), String(seen.size), siteRoot, name, media)
     section.subsections = []
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -649,7 +658,7 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { 
       if (isChildSection(file) || seen.has(file)) continue
       seen.add(file)
       const stableDefault = parseNumericPrefix(stripAtPrefix(parse(file).name)).name
-      const { section } = await processMarkdownFile(join(pageDir, file), String(seen.size), siteRoot, stableDefault)
+      const { section } = await readSectionFile(join(pageDir, file), String(seen.size), siteRoot, stableDefault, media)
       section.subsections = []
       sections.push(section)
     }
@@ -670,7 +679,7 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { 
       for (const childName of childNames) {
         const file = findSectionFileName(mdFiles, childName)
         if (!file) continue
-        const { section } = await processMarkdownFile(join(pageDir, file), String(parent.subsections.length + 1), siteRoot, childName)
+        const { section } = await readSectionFile(join(pageDir, file), String(parent.subsections.length + 1), siteRoot, childName, media)
         section.subsections = []
         parent.subsections.push(section)
       }
@@ -679,12 +688,12 @@ async function collectPageSectionsExplicit(pageDir, siteRoot, sectionsConfig, { 
   return sections.map((s, i) => sectionToRecord(s, i))
 }
 
-async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
+async function collectPageSectionsNested(pageDir, siteRoot, pageConfig, media = null) {
   if (isFullyExplicitSections(pageConfig?.sections)) {
-    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { nest: pageConfig.nest })
+    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { nest: pageConfig.nest, media })
   }
   if (isExplicitWithRest(pageConfig?.sections)) {
-    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { appendRest: true, nest: pageConfig.nest })
+    return collectPageSectionsExplicit(pageDir, siteRoot, pageConfig.sections, { appendRest: true, nest: pageConfig.nest, media })
   }
   const mdFiles = (await readdir(pageDir)).filter(isMarkdownFile).sort(compareFilenames)
   const nest = pageConfig?.nest && typeof pageConfig.nest === 'object' ? pageConfig.nest : {}
@@ -694,11 +703,12 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
   // `.subsections`. `seen` guards against a cycle in a hand-written `nest:`.
   const buildSection = async (file, seen) => {
     const stableDefault = parseNumericPrefix(stripAtPrefix(parse(file).name)).name
-    const { section } = await processMarkdownFile(
+    const { section } = await readSectionFile(
       join(pageDir, file),
       String(seen.size),
       siteRoot,
-      stableDefault
+      stableDefault,
+      media
     )
     const childNames = Array.isArray(nest[section.stableId]) ? nest[section.stableId] : []
     section.subsections = []
@@ -731,7 +741,7 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig) {
     if (!isChildSection(file) || seen.has(file)) continue
     seen.add(file)
     const stableDefault = parseNumericPrefix(stripAtPrefix(parse(file).name)).name
-    const { section } = await processMarkdownFile(join(pageDir, file), String(seen.size), siteRoot, stableDefault)
+    const { section } = await readSectionFile(join(pageDir, file), String(seen.size), siteRoot, stableDefault, media)
     section.subsections = []
     sections.push(section)
   }
@@ -750,7 +760,8 @@ async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
   const records = []
   for (const { file, name } of files) {
     const filePath = join(dirPath, file)
-    const { page } = await processFileAsPage(filePath, file, siteRoot, '/')
+    const { page, assetCollection } = await processFileAsPage(filePath, file, siteRoot, '/')
+    locateSectionMedia(assetCollection, { siteRoot, filePath, sink: ctx.media })
     const config = { title: page.title }
     if (page.hidden) config.hidden = true
     const data = buildPageData(config, {
@@ -827,7 +838,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
 
     // A folder-mode folder has no sections: its `.md` files are pages, sent among its children.
     if (mode === 'page') {
-      const sections = await collectPageSectionsNested(f.path, siteRoot, f.config)
+      const sections = await collectPageSectionsNested(f.path, siteRoot, f.config, ctx.media)
       if (sections.length > 0) record.page_sections = sections
     }
 
@@ -847,7 +858,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
 // until 2026-09-13: this walk called every folder a named layout and read only the
 // files directly inside it, while the build called a folder an area of the default
 // layout unless the foundation declared a layout by that name.
-async function collectLayoutNested(layoutDir, siteRoot) {
+async function collectLayoutNested(layoutDir, siteRoot, media = null) {
   const areas = await readLayoutFolder(layoutDir, { siteRoot })
   const items = []
   let order = 0
@@ -857,7 +868,7 @@ async function collectLayoutNested(layoutDir, siteRoot) {
       // section of a multi-section area is named the way a page's section is.
       const { name } = parse(file)
       const fallback = area.form === 'file' ? area.area : (parseNumericPrefix(name).name || name)
-      const { section } = await processMarkdownFile(join(area.dir, file), String(order + 1), siteRoot, fallback)
+      const { section } = await readSectionFile(join(area.dir, file), String(order + 1), siteRoot, fallback, media)
       const stable = section.stableId || String(order)
       items.push(withIdentity(stable, { layout_name: area.layout, area: area.area, ...mapSectionData(section) }))
       order++
@@ -1432,6 +1443,9 @@ function touchIconValue(named, settingsFields) {
  *        known, `@/x` ships as written.
  * @param {string[]} [opts.schemaless] - the queries whose records resolved no data schema
  *        (the records lane's `schemaless`): their declarations name no `schema`.
+ * @param {object} [opts.media] - a push's sink for the sections' co-located media
+ *        (`located-media.js::locatedMediaSink`): each file to upload, and — where its upload
+ *        map names the file — the reference replaced by the file's key. Absent, nothing is located.
  * @returns {Promise<object>} the section-keyed `$`-document:
  *        `{ $uuid?, $id, $schema, info, settings?, pages, layout_sections, extensions,
  *        queries, services?, secrets? }`
@@ -1615,7 +1629,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
 
   // `siteIndex` — the homepage — joins below, once the pages directory's own config is read.
   // …and the keys this deployment's page takes (`siteContent.pageFields`), for its Open Graph texts.
-  const ctx = { siteRoot, sourceLocale, translations, pageFields: opts.pageFields }
+  const ctx = { siteRoot, sourceLocale, translations, pageFields: opts.pageFields, media: opts.media || null }
   // The same two directories the pull writes back to — see `siteContentDirs`.
   const { pagesDir: pagesPath, layoutDir } = siteContentDirs(siteRoot, siteYml)
   let pages = []
@@ -1638,7 +1652,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     localizeRouteSlugs(pages, siteYml, sourceLocale)
   }
 
-  const layoutSections = await collectLayoutNested(layoutDir, siteRoot)
+  const layoutSections = await collectLayoutNested(layoutDir, siteRoot, opts.media || null)
   // Before anything reads a section's type — localizing a data block asks it for the block's model.
   const sectionType = await siteDefaultSectionType(siteRoot, siteYml)
   fillPageSectionTypes(pages, sectionType)
