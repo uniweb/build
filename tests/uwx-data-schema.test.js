@@ -1,4 +1,4 @@
-import { toDataSchemaDeclaration, optionsSectionPath } from '../src/uwx/data-schema.js'
+import { toDataSchemaDeclaration, optionsSectionPath, assertI18nPaths } from '../src/uwx/data-schema.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
 // Drive the lowering off the real normalized IR, so the translation and the
@@ -991,5 +991,53 @@ describe('toDataSchemaDeclaration — declared order', () => {
   it('and child sections written below the fields below them', () => {
     const decl = viaSchemaJson({ sections: { s: { fields: { title: 'string' }, sections: { child } } } })
     expect(Object.keys(decl.sections.s.fields)).toEqual(['title', 'child'])
+  })
+})
+
+// A registry takes a schema's labels in other languages as a top-level `i18n`, the whole set
+// on every register: absent, it leaves stored translations alone, so a language taken out
+// would never go. Each path names a label of the declaration, a section by its full path.
+describe('toDataSchemaDeclaration — i18n', () => {
+  it('rides on every declaration, `{}` when the schema writes none', () => {
+    expect(lower({ fields: { title: 'string' } }, '@/x', '@acme/x').i18n).toEqual({})
+  })
+
+  it('carries the labels as written, a `fields:` schema naming its one section `brief`', () => {
+    const fr = { 'model.label': 'Article', 'section.brief.field.title.label': 'Titre', 'section.brief.label': 'Fiche' }
+    expect(lower({ fields: { title: 'string' }, i18n: { fr } }, '@/x', '@acme/x').i18n).toEqual({ fr })
+  })
+
+  const cv = (fr) => ({
+    sections: {
+      identity: { brief: true, fields: { full_name: 'string' } },
+      contributions: { sections: { publications: { many: true, fields: { title: 'string' } } } },
+    },
+    i18n: { fr },
+  })
+
+  it('names a nested section by its full path', () => {
+    const fr = { 'section.contributions/publications.label': 'Publications', 'section.contributions/publications.field.title.label': 'Titre' }
+    expect(lower(cv(fr), '@/cv', '@acme/cv').i18n.fr).toEqual(fr)
+  })
+
+  it('refuses a nested section named by its bare name, giving its full path', () => {
+    expect(() => lower(cv({ 'section.publications.label': 'Publications' }), '@/cv', '@acme/cv')).toThrow(
+      /i18n 'fr': 'section.publications.label' names a nested section by its bare name — write its full path, 'contributions\/publications'/
+    )
+  })
+
+  it('refuses a section or a field the schema does not have', () => {
+    expect(() => lower(cv({ 'section.career.label': 'Carrière' }), '@/cv', '@acme/cv')).toThrow(
+      /'section.career.label' names no section 'career' — this schema's are 'identity', 'contributions', 'contributions\/publications'/
+    )
+    expect(() => lower(cv({ 'section.identity.field.age.label': 'Âge' }), '@/cv', '@acme/cv')).toThrow(
+      /names no field 'age' in section 'identity'/
+    )
+  })
+
+  it('is checked where schemas resolve, before any register', () => {
+    const schema = validateAndNormalizeSchema(cv({ 'section.career.label': 'Carrière' }), '@/cv')
+    expect(() => assertI18nPaths({ '@/cv': schema })).toThrow(/names no section 'career'/)
+    expect(() => assertI18nPaths({ '@/x': validateAndNormalizeSchema({ fields: { a: 'string' } }, '@/x') })).not.toThrow()
   })
 })

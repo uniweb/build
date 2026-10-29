@@ -119,7 +119,8 @@ export function isContentBodyField(field) {
  *   register supplies it (`registry-package.js`), naming the section a short `'@/x'` means.
  *   Falls back to `resolveName`, which resolves the scope and keeps the rest as written.
  * @returns {Object} the declaration (`{ name, label?, plural?, icon?, description?,
- *          source_locale?, linkable?, grantable?, sections }`).
+ *          source_locale?, linkable?, grantable?, sections, i18n }`) — `i18n` always, `{}`
+ *          when the schema has no labels in other languages.
  */
 export function toDataSchemaDeclaration(normalized, { name, resolveName, resolveOptions } = {}) {
   if (!name) throw new Error('toDataSchemaDeclaration: a registry name is required')
@@ -191,7 +192,81 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   if (normalized.grantable === false) decl.grantable = false
 
   decl.sections = sections
+
+  // `i18n` — the schema's labels in other languages — rides on every declaration, the whole
+  // set: `{}` when the schema has none. A registry leaves its stored translations alone when the
+  // key is absent, so a language taken out of the schema would never go. Each path must name a
+  // label of the sections above. Since 2026-10-28.
+  decl.i18n = lowerI18n(normalized.i18n, sections, name)
   return decl
+}
+
+// --- i18n ----------------------------------------------------------------------
+
+// A section of the lowered declaration by its full `/`-path from the root, or null.
+function sectionAt(sections, path) {
+  const [first, ...rest] = path.split('/')
+  let section = sections[first]
+  for (const segment of rest) {
+    const child = section?.fields?.[segment]
+    section = child?.type === 'section' ? child : null
+  }
+  return section || null
+}
+
+// Every section's full `/`-path, depth first.
+function sectionPaths(sections) {
+  const out = []
+  const visit = (path, section) => {
+    out.push(path)
+    for (const [key, field] of Object.entries(section?.fields || {})) {
+      if (field?.type === 'section') visit(`${path}/${key}`, field)
+    }
+  }
+  for (const [name, section] of Object.entries(sections || {})) visit(name, section)
+  return out
+}
+
+// Why a label path names no label of these sections, or null when it does.
+function labelPathProblem(path, sections) {
+  if (/^model\.(?:label|plural|description)$/.test(path)) return null
+  const field = /^section\.(.+)\.field\.([^./]+)\.(?:label|description)$/.exec(path)
+  const section = field || /^section\.(.+)\.(?:label|description)$/.exec(path)
+  if (!section) return 'is not a label path'
+  const at = sectionAt(sections, section[1])
+  if (!at) {
+    const paths = sectionPaths(sections)
+    const full = paths.filter((p) => p.endsWith(`/${section[1]}`))
+    return full.length === 1
+      ? `names a nested section by its bare name — write its full path, '${full[0]}'`
+      : `names no section '${section[1]}' — this schema's are ${paths.map((p) => `'${p}'`).join(', ')}`
+  }
+  if (field && !at.fields?.[field[2]]) return `names no field '${field[2]}' in section '${section[1]}'`
+  return null
+}
+
+function lowerI18n(i18n, sections, name) {
+  const out = {}
+  for (const [language, labels] of Object.entries(i18n || {})) {
+    for (const path of Object.keys(labels || {})) {
+      const problem = labelPathProblem(path, sections)
+      if (problem) throw new Error(`Data schema '${name}': i18n '${language}': '${path}' ${problem}.`)
+    }
+    out[language] = { ...labels }
+  }
+  return out
+}
+
+/**
+ * Refuse an `i18n` path that names no label of its schema where schemas resolve — the foundation
+ * build and `uniweb validate` (`buildDataSchemaMap`) — rather than when the schema is registered.
+ *
+ * @param {Object<string, object>} dataSchemas - normalized schemas by ref
+ */
+export function assertI18nPaths(dataSchemas) {
+  for (const [ref, schema] of Object.entries(dataSchemas || {})) {
+    if (schema?.i18n) toDataSchemaDeclaration(schema, { name: ref })
+  }
 }
 
 // --- shapes ------------------------------------------------------------------
