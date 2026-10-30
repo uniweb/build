@@ -1101,6 +1101,8 @@ export async function prerenderSite(siteDir, options = {}) {
         fetch: fileTransport,
         prerender: 'author',
         cache: buildDataCache,
+        // This lane's icons are `prefetchIcons`'s, the whole site's, which every page embeds.
+        icons: false,
       })
       // Filed under this page, the way a route-bound view always has been: `scopeFetchedData`
       // embeds it in this page's HTML and nowhere else, and one address embedded twice collapses.
