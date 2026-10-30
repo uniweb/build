@@ -28,6 +28,7 @@ import { foundationPlugin } from '../vite-foundation-plugin.js'
 import { jsxExtensionGuard } from '../jsx-extension.js'
 import { nodeEnvDefine } from './node-env.js'
 import { foundationScopeDefine } from './scope-define.js'
+import { compactOutput } from './compact-output.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 // The ONE definition. This list used to be re-typed here, and again in
 // vite-foundation-plugin.js — three hand-synced copies of "what a foundation
@@ -53,7 +54,8 @@ export { nodeEnvDefine }
  * @param {boolean} [options.includeDefaultExternals] - Include default externals (default: true)
  * @param {Array} [options.plugins] - Additional Vite plugins
  * @param {boolean} [options.tailwind] - Include Tailwind CSS v4 plugin (default: true)
- * @param {boolean} [options.sourcemap] - Generate sourcemaps (default: true)
+ * @param {boolean|'hidden'} [options.sourcemap] - Generate sourcemaps (default: 'hidden', maps
+ *                                       beside the code and no reference to them in it)
  * @param {Object} [options.build] - Additional build options to merge
  * @param {Object} [options.experimental] - Vite experimental options to merge
  * @returns {Promise<Object>} Vite configuration
@@ -75,7 +77,7 @@ export async function defineFoundationConfig(options = {}) {
     includeDefaultExternals = true,
     plugins: extraPlugins = [],
     tailwind = true,
-    sourcemap = true,
+    sourcemap = 'hidden',
     build: buildOverrides = {},
     experimental: experimentalOverrides = {},
     ...restOptions
@@ -119,6 +121,7 @@ export async function defineFoundationConfig(options = {}) {
     nodeEnvDefine(),
     // `__FOUNDATION_SCOPE__` — the scope the foundation's own `@/x` names (`scope-define.js`).
     foundationScopeDefine({ foundationDir: foundationRoot }),
+    compactOutput(),
     tailwind && tailwindcss(),
     react(),
     svgr(),
