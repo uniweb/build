@@ -80,6 +80,7 @@ import { siteDefaultSectionType } from '../site/queries-config.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { locateSectionMedia, siteTree } from './located-media.js'
+import { mapPageRefs, pageRefIndex, pageRefPages, storedPageRef } from './page-refs.js'
 import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
@@ -1658,6 +1659,11 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // a bare doc from single-locale sites — see localizeContentDoc for why one
   // field with two shapes is a store that cannot validate its own declaration.
   await localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot)
+
+  // ⭐ A link to a page is stored by the page's id where it has one (`page-refs.js`), so it
+  // survives a rename in an editor, and a pull writes it back as the path a file shows.
+  const refIndex = pageRefIndex(pageRefPages(pages, sourceLocale, buildRouteOf))
+  mapPageRefs({ pages, layoutSections }, (ref) => storedPageRef(ref, refIndex))
 
   // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
   // config (the records themselves are separate entities; this is just the config).

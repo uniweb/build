@@ -37,6 +37,7 @@ import { foldOpenGraph } from './open-graph.js'
 import { isAuthoredPreview } from './authored-preview.js'
 import { join, relative, extname, basename, dirname } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
+import { mapPageRefs, pageRefIndex, pageRefPages, writtenPageRef } from './page-refs.js'
 import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
 import { servicesFromDocument, heldServices } from './services-request.js'
@@ -1380,6 +1381,10 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // abstract.
   const assetMap = backend ? readBackendState(siteRoot, backend).assets || {} : {}
   report.assets = restoreAssetRefs(document, assetMap)
+  // ⭐ And each stored link to a page as the page's path (`page-refs.js`): what a file shows, where
+  // the store keeps the id an editor links by.
+  const refIndex = pageRefIndex(pageRefPages(document?.pages, sourceLocale, buildRouteOf))
+  mapPageRefs({ pages: document?.pages, layoutSections: document?.layout_sections }, (ref) => writtenPageRef(ref, refIndex))
   // The keys among them that name a site file — a co-located file a push uploaded — for each
   // section's writer to make relative to its own file (`located-media.js`).
   const mediaKeys = siteFileKeys(assetMap)
