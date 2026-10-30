@@ -61,6 +61,18 @@ function normalizeLibrary(library) {
 }
 
 /**
+ * `icons.cdnUrl` is now `icons.base`, the name a host states it under. The runtime reads only that,
+ * so a file still writing the old one would quietly load its icons from the default origin.
+ *
+ * @param {Object} siteYml
+ * @param {string} [where]
+ */
+export function refuseRetiredIconKey(siteYml, where = 'site.yml') {
+  if (siteYml?.icons?.cdnUrl === undefined) return
+  throw new Error(`[uniweb] ${where}: \`icons.cdnUrl\` is now \`icons.base\`. Rename the key; its value stays.`)
+}
+
+/**
  * Walk a ProseMirror document and collect icon references
  *
  * @param {Object} doc - ProseMirror document

@@ -31,7 +31,7 @@ import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { collectSectionAssets, mergeAssetCollections, collectConfigAssets, disambiguateAssetRefs } from './assets.js'
-import { collectSectionIcons, mergeIconCollections, buildIconManifest } from './icons.js'
+import { collectSectionIcons, mergeIconCollections, buildIconManifest, refuseRetiredIconKey } from './icons.js'
 import { normalizeHideIn, dropUnpublishedPages, dropHiddenSections } from './nav-visibility.js'
 import { parseFetchConfig, toFetchList } from './data-fetcher.js'
 import { resolveExtensionUrls } from './extension-urls.js'
@@ -2579,6 +2579,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // for a placement its type does not offer is told (`./placement-warnings.js`).
   sectionTypes = await foundationSections(sitePath, siteConfig)
   refuseRetiredServiceKeys(siteConfig, configFile)
+  refuseRetiredIconKey(siteConfig, configFile)
   refuseUnreadableAddress(siteConfig, configFile)
   refuseUnreadableServices(siteConfig, configFile)
 

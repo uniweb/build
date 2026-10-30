@@ -238,7 +238,7 @@ Body text.
     it('drops an author-set icons block, and keeps the rest of site.yml', async () => {
       writeFileSync(
         join(siteRoot, 'site.yml'),
-        `name: test-site\nfoundation: src\nindex: home\ndescription: kept\nicons:\n  cdnUrl: https://authors-choice.test\n`
+        `name: test-site\nfoundation: src\nindex: home\ndescription: kept\nicons:\n  base: https://authors-choice.test\n`
       )
 
       await buildSiteData({ siteRoot, distDir })

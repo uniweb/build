@@ -168,7 +168,7 @@ export async function buildSiteData({
   // ⛔ `config.icons` is a HOST-owned slot on this lane — drop it.
   //
   // This is the build for a backend (link mode is what `uniweb publish` runs),
-  // and `config` is site.yml spread whole, so an author's `icons.cdnUrl` would
+  // and `config` is site.yml spread whole, so an author's `icons.base` would
   // otherwise sit in a slot the host is supposed to fill. The icon base is a
   // property of the DEPLOYMENT, identical for every site a given backend
   // serves — not something one site gets to choose [Diego, 2026-08-17].
