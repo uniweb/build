@@ -162,13 +162,13 @@ function generateEntrySource(components, options = {}) {
   // Component imports
   for (const name of componentNames) {
     const { path, entryFile = `index.js` } = components[name]
-    lines.push(`import ${name} from './${path}/${entryFile}'`)
+    lines.push(`import ${name} from './${toPosix(path)}/${entryFile}'`)
   }
 
   // Layout imports
   for (const name of layoutNames) {
     const { path, entryFile = `index.js` } = layouts[name]
-    lines.push(`import ${name} from './${path}/${entryFile}'`)
+    lines.push(`import ${name} from './${toPosix(path)}/${entryFile}'`)
   }
 
   lines.push('')
@@ -388,7 +388,10 @@ export async function generateEntryPoint(srcDir, outputPath = null, options = {}
   }
 }
 
-/** Normalize native path separators so matching is platform-independent. */
+/**
+ * Normalize native path separators, so matching is platform-independent and a path written into
+ * generated JavaScript is one: in a string, the `\A` of `sections\Abstract` is just `A`.
+ */
 const toPosix = path => path.replace(/\\/g, '/')
 
 /**
