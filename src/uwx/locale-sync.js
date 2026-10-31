@@ -181,6 +181,44 @@ export function restoreKept(localized, held, files = null) {
 }
 
 /**
+ * ⭐ WORDS WRITTEN OVER A FLAGGED TRANSLATION END ITS FLAG, as an edit in the app's cell does: whoever typed
+ * them reviewed it, whatever they left beside them in the file. What the flag was made with is what the app
+ * keeps for the older text, else that text's own entry, which a file edit's flag leaves in place. With
+ * neither left to compare, it holds. ⛔ Until 2026-10-31 a new `default` beside `outdated` stayed flagged: a
+ * push wrote the map's entry from it.
+ *
+ * @param {string} words - what the row reads
+ * @param {string} older - the text the flag names
+ * @param {Array} [held] - the inline content the app keeps for that text in this language
+ * @param {object} table - the language's translation file
+ * @param {object} context - the row's translation context
+ * @returns {boolean}
+ */
+function flagHolds(words, older, held, table, context) {
+  const made = Array.isArray(held) ? elementText({ content: held }) : toPlainText(translationFor(table[computeHash(older)], context))
+  return typeof made !== 'string' || computeHash(made) === computeHash(words)
+}
+
+/**
+ * An entry's flags that still hold, by place (`flagHolds`): what it is outdated in, whatever else it says.
+ *
+ * @param {*} entry - a translation file's entry
+ * @param {object} table - the language's translation file
+ * @param {string} locale
+ * @param {object} [kept] - what `readKept` gives
+ * @returns {{ [place: string]: string }}
+ */
+export function standingFlags(entry, table, locale, kept = {}) {
+  return Object.fromEntries(
+    Object.entries(entry?.outdated || {}).filter(([place, older]) => {
+      const context = { key: place }
+      const words = toPlainText(translationFor(entry, context))
+      return typeof words === 'string' && flagHolds(words, older, kept[place]?.['@']?.translations?.[older]?.[locale], table, context)
+    }),
+  )
+}
+
+/**
  * ⭐ WHICH ROWS ARE OUTDATED IS THE TRANSLATION FILES' TO SAY, and the app reads it from `@.translations`:
  * a row is outdated when its translation is kept there under a similar text (`olderSourceOf`). So a flagged
  * row goes with its entry there, and a row its file does not flag goes without one. An entry already there
@@ -206,14 +244,17 @@ function mapWithFlags(at, localized, { sourceLocale, translations, context, free
     const read = blockElements(localized[locale])
     if (read.length !== rows.length) continue
     const keys = rows.map((row) => elementText(row))
-    const olderAt = (key) => (key ? table[computeHash(key)]?.outdated?.[place] : undefined)
-    const claimed = new Set(keys.map(olderAt))
-    keys.forEach((key, i) => {
-      const older = olderAt(key)
-      if (typeof older === 'string' && older !== key && !map?.[older]?.[locale]) (writable()[older] ||= {})[locale] = read[i].content
+    const flagged = keys.map((key, i) => {
+      const older = key ? table[computeHash(key)]?.outdated?.[place] : undefined
+      if (typeof older !== 'string' || older === key) return null
+      return flagHolds(elementText(read[i]), older, map?.[older]?.[locale], table, context) ? older : null
+    })
+    const claimed = new Set(flagged)
+    flagged.forEach((older, i) => {
+      if (older && !map?.[older]?.[locale]) (writable()[older] ||= {})[locale] = read[i].content
     })
     keys.forEach((key, i) => {
-      if (!key || olderAt(key) || translationFor(table[computeHash(key)], context) === undefined) return
+      if (!key || flagged[i] || translationFor(table[computeHash(key)], context) === undefined) return
       const says = elementText(read[i])
       for (const [older, byLocale] of Object.entries(map || {})) {
         if (older === key || claimed.has(older) || !Array.isArray(byLocale?.[locale]) || !isSmallEdit(older, key)) continue

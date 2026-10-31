@@ -16,7 +16,8 @@ import { availableLocales, resolveLocaleList, localesToBuild } from './locales.j
 import { extractTranslatableContent } from './extract.js'
 import { dataBlockModels } from './data-models.js'
 import { syncManifests, formatSyncReport, formatKeptTranslations } from './sync.js'
-import { keepEditedTranslations, rowsWantTranslation, manifestRows } from './outdated.js'
+import { keepEditedTranslations, rowsWantTranslation, manifestRows, settleFlags } from './outdated.js'
+import { readKept, standingFlags } from '../uwx/locale-sync.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
 import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
 import {
@@ -186,6 +187,7 @@ export async function extractManifest(siteRoot, siteContent, options = {}) {
   // Generate sync report
   const report = syncManifests(previousManifest, manifest)
 
+  settleFlags(siteRoot, { sourceLocale: manifest.defaultLocale, dryRun })
   // What the manifest is about to forget says what an edited text's translation was made from.
   report.kept = keepEditedTranslations(siteRoot, manifestRows(previousManifest), manifestRows(manifest), {
     sourceLocale: manifest.defaultLocale,
@@ -272,6 +274,7 @@ export async function getTranslationStatus(siteRoot, options = {}) {
   const totalUnits = Object.keys(manifest.units).length
 
   const status = {}
+  const kept = readKept(siteRoot)
 
   for (const locale of locales) {
     const localePath = join(localesPath, `${locale}.json`)
@@ -296,7 +299,7 @@ export async function getTranslationStatus(siteRoot, options = {}) {
 
     for (const hash of Object.keys(manifest.units)) {
       // An entry flagged `outdated` still renders, and is not this text's translation.
-      if (translations[hash]?.outdated) {
+      if (Object.keys(standingFlags(translations[hash], translations, locale, kept)).length) {
         outdated++
       } else if (translatedHashes.has(hash)) {
         translated++

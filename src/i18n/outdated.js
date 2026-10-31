@@ -17,7 +17,7 @@
 import { computeHash } from './hash.js'
 import { toPlainText } from './merge.js'
 import { isSmallEdit, wordOverlap } from './word-overlap.js'
-import { discoverLocales, loadLocaleTranslations, translationFor, addTranslationEntries } from '../uwx/locale-sync.js'
+import { discoverLocales, loadLocaleTranslations, translationFor, addTranslationEntries, readKept, standingFlags } from '../uwx/locale-sync.js'
 
 // A language's words for a text here. Not an empty one, nor the text's own: `uniweb i18n init` starts a
 // language's file with each text's source, and that is nothing to keep.
@@ -143,4 +143,30 @@ export function keepEditedTranslations(siteRoot, previous, current, { sourceLoca
     )
   }
   return kept
+}
+
+/**
+ * Take out of each language's file a flag whose entry has been written over (`standingFlags`), so the file
+ * says what a push and `uniweb i18n status` already read. On a site with no backend nothing else would.
+ *
+ * @param {string} siteRoot
+ * @param {object} [o]
+ * @param {string} [o.sourceLocale]
+ * @param {boolean} [o.dryRun]
+ */
+export function settleFlags(siteRoot, { sourceLocale = null, dryRun = false } = {}) {
+  if (dryRun) return
+  const kept = readKept(siteRoot)
+  for (const [locale, table] of Object.entries(languageTables(siteRoot, sourceLocale))) {
+    const settled = {}
+    for (const [hash, entry] of Object.entries(table)) {
+      if (!entry?.outdated) continue
+      const standing = standingFlags(entry, table, locale, kept)
+      if (Object.keys(standing).length === Object.keys(entry.outdated).length) continue
+      const { outdated: _flags, ...rest } = entry
+      if (Object.keys(standing).length) settled[hash] = { ...rest, outdated: standing }
+      else settled[hash] = Object.keys(rest).length === 1 && typeof rest.default === 'string' ? rest.default : rest
+    }
+    if (Object.keys(settled).length) addTranslationEntries(siteRoot, locale, settled)
+  }
 }

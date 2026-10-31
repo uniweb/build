@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { documentRows, sectionsChangedSince, computeUnitHashes, siteContentDocumentToProject, siteProjectToDocument } from '../src/uwx/index.js'
-import { extractManifest, formatKeptTranslations, formatSyncReport, keepEditedTranslations, rowsWantTranslation } from '../src/i18n/index.js'
+import { auditLocale, extractManifest, formatKeptTranslations, formatSyncReport, getTranslationStatus, keepEditedTranslations, rowsWantTranslation } from '../src/i18n/index.js'
 import { carriedTranslations, manifestRows } from '../src/i18n/outdated.js'
 import { isSmallEdit, wordOverlap } from '../src/i18n/word-overlap.js'
 import { computeHash } from '../src/i18n/hash.js'
@@ -331,6 +331,75 @@ describe('a project on disk', () => {
     })
   })
 
+  describe('a translation written over its flag, read from the files', () => {
+    const NOW = h('About PandaWatch today')
+    const OLD = h('About PandaWatch')
+    const flagged = (words) => ({ default: words, outdated: { [PLACE]: 'About PandaWatch' } })
+    const es = (table) => write('locales/es.json', table)
+    const status = async () => (await getTranslationStatus(dir, { locales: ['es'] })).locales.es
+
+    beforeEach(async () => {
+      files('About PandaWatch today')
+      await manifest()
+    })
+
+    it('⭐ status and audit count it as translated', async () => {
+      es({ [OLD]: 'Acerca de PandaWatch', [NOW]: flagged('Acerca de PandaWatch hoy') })
+      expect((await status()).outdated).toBeUndefined()
+      const audit = await auditLocale(join(dir, 'locales'), 'es')
+      expect(audit.outdated).toEqual([])
+      expect(audit.valid.map((v) => v.hash)).toContain(NOW)
+    })
+
+    it('CONTROL — with the words it was flagged with, they count it as outdated', async () => {
+      es({ [OLD]: 'Acerca de PandaWatch', [NOW]: flagged('Acerca de PandaWatch') })
+      expect((await status()).outdated).toBe(1)
+      expect((await auditLocale(join(dir, 'locales'), 'es')).outdated[0].was).toEqual(['About PandaWatch'])
+    })
+
+    it('what the app keeps counts too: an older entry that says otherwise is no review', async () => {
+      es({ [OLD]: 'Una traducción anterior', [NOW]: flagged('Acerca de PandaWatch') })
+      write('locales/_kept.json', { [PLACE]: { '@': { translations: { 'About PandaWatch': { es: [text('Acerca de PandaWatch')] } } } } })
+      expect((await status()).outdated).toBe(1)
+      expect((await auditLocale(join(dir, 'locales'), 'es')).outdated).toHaveLength(1)
+    })
+
+    it('with nothing left to compare, the flag holds', async () => {
+      es({ [NOW]: flagged('Lo que sea') })
+      expect((await status()).outdated).toBe(1)
+    })
+
+    it('⭐ `uniweb i18n sync` takes the flag out of the file, the only reader a site with no backend has', async () => {
+      es({ [OLD]: 'Acerca de PandaWatch', [NOW]: flagged('Acerca de PandaWatch hoy') })
+      await manifest()
+      expect(read('es.json')[NOW]).toBe('Acerca de PandaWatch hoy')
+    })
+
+    it('and leaves what still holds: a place written over goes, another stays', async () => {
+      const other = '/home:hero'
+      es({
+        [OLD]: 'Acerca de PandaWatch',
+        [NOW]: { default: 'Acerca de PandaWatch', overrides: { [other]: 'Otras palabras' }, outdated: { [PLACE]: 'About PandaWatch', [other]: 'About PandaWatch' } },
+      })
+      await manifest()
+      expect(read('es.json')[NOW]).toEqual({ default: 'Acerca de PandaWatch', overrides: { [other]: 'Otras palabras' }, outdated: { [PLACE]: 'About PandaWatch' } })
+    })
+
+    it('a dry run writes nothing', async () => {
+      es({ [OLD]: 'Acerca de PandaWatch', [NOW]: flagged('Acerca de PandaWatch hoy') })
+      const before = readFileSync(join(dir, 'locales/es.json'), 'utf8')
+      await manifest({ dryRun: true })
+      expect(readFileSync(join(dir, 'locales/es.json'), 'utf8')).toBe(before)
+    })
+
+    it('CONTROL — a sync with no flag to settle writes nothing', async () => {
+      es({ [OLD]: 'Acerca de PandaWatch', [NOW]: flagged('Acerca de PandaWatch') })
+      const before = readFileSync(join(dir, 'locales/es.json'), 'utf8')
+      await manifest()
+      expect(readFileSync(join(dir, 'locales/es.json'), 'utf8')).toBe(before)
+    })
+  })
+
   it('CONTROL — a first extraction has nothing to compare, and keeps nothing', async () => {
     files('About PandaWatch today')
     write('locales/es.json', { [h('About PandaWatch')]: 'Acerca de PandaWatch' })
@@ -358,6 +427,41 @@ describe('a project on disk', () => {
       expect(read('es.json')[h('About PandaWatch today')]).toEqual(entry)
       expect(read('_kept.json')[PLACE]['@']).toEqual({ translations: { 'About PandaWatch': { es: [text('Acerca de PandaWatch')] } } })
       expect(canonicalJson(await pushed())).toBe(first)
+    })
+
+    it('⭐ words written over a flagged translation end its flag, as an edit in the app’s cell does', async () => {
+      files('About PandaWatch today')
+      write('locales/es.json', {
+        [h('About PandaWatch')]: 'Acerca de PandaWatch',
+        [h('About PandaWatch today')]: { default: 'Acerca de PandaWatch hoy', outdated: { [PLACE]: 'About PandaWatch' } },
+      })
+      const document = await siteProjectToDocument(dir)
+      expect(contentIn(document).es.content[0].content).toEqual([text('Acerca de PandaWatch hoy')])
+      expect(contentIn(document)['@']).toBeUndefined()
+      // And a pull leaves the file saying so.
+      siteContentDocumentToProject({ siteRoot: dir, document })
+      expect(read('es.json')[h('About PandaWatch today')]).toBe('Acerca de PandaWatch hoy')
+    })
+
+    it('CONTROL — the words it was flagged with stay flagged, in another spelling too', async () => {
+      files('About PandaWatch today')
+      write('locales/es.json', {
+        [h('About PandaWatch')]: 'Acerca  de *PandaWatch*',
+        [h('About PandaWatch today')]: { default: 'Acerca de PandaWatch', outdated: { [PLACE]: 'About PandaWatch' } },
+      })
+      expect((await pushed())['@'].translations['About PandaWatch'].es).toEqual([text('Acerca de PandaWatch')])
+    })
+
+    it('what the app keeps says what a flag was made with, ahead of the older text’s own entry', async () => {
+      files('About PandaWatch today')
+      write('locales/es.json', {
+        [h('About PandaWatch')]: 'Una traducción anterior',
+        [h('About PandaWatch today')]: entry,
+      })
+      write('locales/_kept.json', { [PLACE]: { '@': { translations: { 'About PandaWatch': { es: [text('Acerca de PandaWatch')] } } } } })
+      const content = await pushed()
+      expect(content['@'].translations['About PandaWatch'].es).toEqual([text('Acerca de PandaWatch')])
+      expect(content.es.content[0].content).toEqual([text('Acerca de PandaWatch')])
     })
 
     it('⭐ a pull flags what the editor flags: a row kept under a text not like it is plain, and the map stays', async () => {

@@ -11,6 +11,8 @@ import { readFile, writeFile } from 'fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { translationKeepsMarkup } from './merge.js'
+import { KEPT_FILE } from './locales.js'
+import { standingFlags } from '../uwx/locale-sync.js'
 
 /**
  * Audit a locale file against the manifest
@@ -42,6 +44,8 @@ export async function auditLocale(localesPath, locale) {
   }
 
   const translations = JSON.parse(await readFile(localePath, 'utf-8'))
+  const keptPath = join(localesPath, KEPT_FILE)
+  const kept = existsSync(keptPath) ? JSON.parse(await readFile(keptPath, 'utf-8')) : {}
   const translationHashes = new Set(Object.keys(translations))
 
   const valid = []
@@ -57,8 +61,9 @@ export async function auditLocale(localesPath, locale) {
       const source = unit.source
       const translation = getTranslationText(translations[hash])
       // Made from an older source text (`locale-sync.js::settleEntry`). It still shows.
-      if (translations[hash]?.outdated) {
-        outdated.push({ hash, source, translation, was: [...new Set(Object.values(translations[hash].outdated))] })
+      const standing = standingFlags(translations[hash], translations, locale, kept)
+      if (Object.keys(standing).length) {
+        outdated.push({ hash, source, translation, was: [...new Set(Object.values(standing))] })
         continue
       }
       valid.push({ hash, source, translation })
