@@ -419,6 +419,31 @@ function loneImage(fragment) {
 }
 
 /**
+ * The translations in a locale's table that hold HTML, by key. HTML is not content, so what the
+ * merge makes of such a value shows the tag on the page; the words are the merge's own, read the
+ * way it reads them (`@uniweb/content-reader`), and saying so is the caller's job.
+ *
+ * @param {Object} [translations] - a locale's table: `{ key: value }`, a value a string or
+ *   `{ default, overrides }`
+ * @returns {string[]} the keys
+ */
+export function translationsHoldingHtml(translations) {
+  const holdsHtml = (value) => {
+    if (typeof value !== 'string') return false
+    let found = false
+    inlineMarkdownToProseMirror(value.trim(), { onWarning: () => (found = true) })
+    return found
+  }
+  return Object.entries(translations || {})
+    .filter(([, entry]) =>
+      typeof entry === 'string'
+        ? holdsHtml(entry)
+        : holdsHtml(entry?.default) || Object.values(entry?.overrides || {}).some(holdsHtml)
+    )
+    .map(([key]) => key)
+}
+
+/**
  * Does a translation keep the inline markup of its source element? The merge's own answer —
  * what `translatedInline` makes of the value — so the audit can neither report a loss the merge
  * does not make nor miss one it does.

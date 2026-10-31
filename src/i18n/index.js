@@ -18,7 +18,7 @@ import { dataBlockModels } from './data-models.js'
 import { syncManifests, formatSyncReport, formatKeptTranslations } from './sync.js'
 import { keepEditedTranslations, rowsWantTranslation, manifestRows, settleFlags } from './outdated.js'
 import { readKept, standingFlags } from '../uwx/locale-sync.js'
-import { mergeTranslations, generateAllLocales } from './merge.js'
+import { mergeTranslations, generateAllLocales, translationsHoldingHtml } from './merge.js'
 import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
 import {
   extractRecordContent,
@@ -510,6 +510,20 @@ export async function buildLocalizedContent(siteRoot, options = {}) {
     if (existsSync(localePath)) {
       const localeRaw = await readFile(localePath, 'utf-8')
       translations = JSON.parse(localeRaw)
+    }
+
+    // ⭐ HTML in a translation shows on the page as written. Pages and free-form translations say
+    // so as they are read; a table's values are read one by one deep in the merge, with no file in
+    // hand, so this says it once for the file. ⛔ Until 2026-10-31 nothing did: a site's headlines
+    // showed `<span primary="true">` in ten languages through a build and two publishes.
+    const holdingHtml = translationsHoldingHtml(translations)
+    if (holdingHtml.length) {
+      const n = holdingHtml.length
+      const keys = holdingHtml.slice(0, 8).join(', ') + (n > 8 ? `, and ${n - 8} more` : '')
+      console.warn(
+        `[i18n] ${localesDir}/${locale}.json: ${n} translation${n === 1 ? ' holds' : 's hold'} HTML, which shows on the page as written: ${keys}. ` +
+          'A translation is inline markdown: write a span as [text]{primary}.'
+      )
     }
 
     // Check if free-form translations exist for this locale
