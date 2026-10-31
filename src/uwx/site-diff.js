@@ -23,7 +23,7 @@
 // Units are DISJOINT: a page's hash excludes its sections, a section's excludes its
 // children, so a change lands in exactly one unit and is never double-reported.
 // Naming comes from the projector's own helpers (`pageDirName`,
-// `sectionFileBase`) rather than a local copy, so a label always names a file
+// `sectionFileBases`) rather than a local copy, so a label always names a file
 // that really exists.
 //
 // It needs TWO bases, and that is the non-obvious part.
@@ -47,7 +47,7 @@
 // reported as unattributed rather than guessed at.
 
 import { entityContentHash } from './records.js'
-import { sectionFileBase, pageDirName, layoutSectionPaths } from './site-project.js'
+import { sectionFileBases, pageDirName, layoutSectionPaths } from './site-project.js'
 import { documentSourceLocale } from './source-locale.js'
 
 // A unit's own content, with the nested collections that are their own units
@@ -94,17 +94,17 @@ export function collectSiteUnits(doc, sourceLocale = documentSourceLocale(doc)) 
  * @param {(path: string, record: object, kind: 'info'|'page'|'section') => void} cb
  */
 export function walkSiteUnits(doc, cb, sourceLocale = documentSourceLocale(doc)) {
-  const walkSections = (sections, dir) => {
+  const walkSections = (sections, dir, bases = sectionFileBases(sections)) => {
     for (const record of sections || []) {
       // The projector's own file rule — including an app-created section named from its
-      // `$uuid`. ⚠️ The path NAMES the unit by its id; it is not always the author's file:
+      // type. ⚠️ The path NAMES the unit by its id; it is not always the author's file:
       // a pull writes into an existing `1-about.md` or `@about.md` in place
       // (`existingSectionFile`), so a reader mapping a unit to disk looks it up there.
       // (This said "a unit's path here is the file it is written to" until 2026-10-07,
       // and a push recorded no file for a numbered section.)
-      const base = sectionFileBase(record)
+      const base = bases.get(record)
       if (base) cb(`${dir}/${base}.md`, record, 'section')
-      walkSections(record.$children, dir)
+      walkSections(record.$children, dir, bases)
     }
   }
   const walkPages = (pages, parentDir) => {

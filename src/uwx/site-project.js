@@ -480,39 +480,61 @@ export function safeStableIdFilename(stableId) {
 }
 
 /**
- * The `.md` file base a page section is written to — the ONE rule the projector,
- * the prune keep-set and the push/pull unit walk (`site-diff.js::walkSiteUnits`)
- * all use, so the path a pull harvests a `$uuid` under is the path the next push
- * stamps it back onto.
+ * The `.md` file base of each section of a page, nested ones included, since they are written as
+ * flat files in the same folder — the ONE rule the projector, the prune keep-set and the
+ * push/pull unit walk (`site-diff.js::walkSiteUnits`) all use, so the path a pull harvests a
+ * `$uuid` under is the path the next push stamps it back onto.
  *
- * `stable_id || $id` when the record has one (unchanged). ⛔ A section with
- * neither — what the app's editor creates: a `$uuid` and no stable id — used to be
- * SKIPPED, silently, by all three. A pull then left its file out, and a push after
- * any local edit sent the page without it, which the backend deletes (a
- * package's absence of a stored `page_sections` item under a page it sends is a
- * delete). So such a section is named from its identity instead:
- * `<type-kebab>-<last 8 hex of $uuid>`, e.g. `hero-95993360`.
+ * `stable_id || $id` when the record has one (unchanged). ⛔ A section with neither — what the
+ * app's editor creates: a `$uuid` and no stable id — used to be SKIPPED, silently, by all three.
+ * A pull then left its file out, and a push after any local edit sent the page without it, which
+ * the backend deletes (a package's absence of a stored `page_sections` item under a page it sends
+ * is a delete). So such a section is named from its type, as a person would name it: `hero`, and
+ * `hero-2` beside another. ⛔ Until 2026-10-30 it took the end of its `$uuid`, `hero-e09a1923`.
  *
- * The derived base is already filesystem-safe and starts with a letter, so the
- * build reads it back verbatim as the section's stable id (no numeric prefix to
- * strip) and `safeStableIdFilename` returns it unchanged — the push path equals
- * the pull path. The first push after such a pull therefore gives the item that
- * stable id; the `$uuid` is re-stamped by path, so the item keeps its identity.
+ * The derived base is already filesystem-safe and starts with a letter, so the build reads it back
+ * verbatim as the section's stable id (no numeric prefix to strip) and `safeStableIdFilename`
+ * returns it unchanged — the push path equals the pull path. The first push after such a pull
+ * therefore gives the item that stable id; the `$uuid` is re-stamped by path, so the item keeps its
+ * identity, and the name stops depending on its neighbours.
  *
- * @returns {string|null} null only for a record with no stable id and no `$uuid`
+ * @param {object[]} pageSections - a page's section `$`-records
+ * @returns {Map<object, string>} each record's base; a record with no stable id and no `$uuid` has none
  */
-export function sectionFileBase(record) {
-  const id = recordStableId(record)
-  if (id) return safeStableIdFilename(id)
-  const hex = typeof record?.$uuid === 'string' ? record.$uuid.replace(/-/g, '').toLowerCase() : ''
-  if (!/^[0-9a-f]{8,}$/.test(hex)) return null
-  const kebab = String(record?.type || '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-  const stem = /^[a-z]/.test(kebab) ? kebab : 'section'
-  return `${stem}-${hex.slice(-8)}`
+export function sectionFileBases(pageSections) {
+  const records = []
+  const collect = (list) => {
+    for (const record of list || []) {
+      records.push(record)
+      collect(record?.$children)
+    }
+  }
+  collect(pageSections)
+  const bases = new Map()
+  const taken = new Set()
+  for (const record of records) {
+    const id = recordStableId(record)
+    if (!id) continue
+    const base = safeStableIdFilename(id)
+    bases.set(record, base)
+    taken.add(base)
+  }
+  for (const record of records) {
+    if (bases.has(record)) continue
+    const hex = typeof record?.$uuid === 'string' ? record.$uuid.replace(/-/g, '').toLowerCase() : ''
+    if (!/^[0-9a-f]{8,}$/.test(hex)) continue
+    const kebab = String(record?.type || '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    const stem = /^[a-z]/.test(kebab) ? kebab : 'section'
+    let base = stem
+    for (let n = 2; taken.has(base); n++) base = `${stem}-${n}`
+    bases.set(record, base)
+    taken.add(base)
+  }
+  return bases
 }
 
 /**
@@ -534,14 +556,15 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
   const files = [] // the top level's file names, in the document's order
   const childFiles = [] // every nested section's file name
   let nested = false
+  const fileBases = sectionFileBases(pageSections)
   const buildEntries = (records, top) => {
     const entries = []
     for (const record of records || []) {
-      // Filesystem-safe filename (= stableId when already safe; derived from `$uuid`
+      // Filesystem-safe filename (= stableId when already safe; derived from its type
       // for an app-created section with no stable id); the true stableId rides in
       // frontmatter `id:`. The sections: leaf uses the same base so the producer's
       // filename-based resolution matches.
-      const fileBase = sectionFileBase(record)
+      const fileBase = fileBases.get(record)
       if (!fileBase) continue // no stable id AND no `$uuid` → nothing to name it by
       const stableId = recordStableId(record) || fileBase
       // The file the author keeps it in, else a new `<fileBase>.md` (`existingSectionFile`).
@@ -1055,16 +1078,7 @@ function parentOrderList(ymlPath) {
 // flat `<base>.md` files in the SAME page dir, so all are kept on prune. Uses the
 // safe filename (= stableId when safe) so the keep-set matches the files on disk.
 function collectSectionFileBases(pageSections) {
-  const bases = new Set()
-  const walk = (records) => {
-    for (const record of records || []) {
-      const base = sectionFileBase(record)
-      if (base) bases.add(base)
-      if (Array.isArray(record.$children)) walk(record.$children)
-    }
-  }
-  walk(pageSections)
-  return bases
+  return new Set(sectionFileBases(pageSections).values())
 }
 
 // Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per

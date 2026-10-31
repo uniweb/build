@@ -1170,9 +1170,11 @@ export function siteContentPlugin(options = {}) {
 
       let result = html
 
-      // Update <html lang> for non-default locales
-      if (activeLocale) {
-        result = result.replace(/<html([^>]*)\slang="[^"]*"/, `<html$1 lang="${activeLocale}"`)
+      // <html lang> is the language this page is in. ⛔ Until 2026-10-30 only the other locales were
+      // rewritten, so a site written in Spanish built its default pages as `lang="en"`, the scaffold's.
+      const lang = activeLocale || resolveDefaultLocale(contentToInject?.config)
+      if (lang) {
+        result = result.replace(/<html([^>]*)\slang="[^"]*"/, `<html$1 lang="${lang}"`)
       }
 
       if (!headInjection) return result

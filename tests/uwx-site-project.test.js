@@ -528,21 +528,63 @@ describe('an app-created section (a $uuid, no stable id) survives pull → edit 
     ],
   })
 
-  it('is written under a name derived from its $uuid, in the page’s order, and kept on a pruning re-pull', () => {
+  it('is written under a name derived from its type, in the page’s order, and kept on a pruning re-pull', () => {
     const site = join(dir, 'site')
     mkdirSync(site, { recursive: true })
     siteContentDocumentToProject({ document: remote(), siteRoot: site })
 
-    const file = join(site, 'pages', 'home', 'split-content-95993360.md')
+    const file = join(site, 'pages', 'home', 'split-content.md')
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, 'utf8')).toContain('Added in the app')
-    // `hero.md`, then `split-content-95993360.md`: the names give the order, so no list says it.
+    // `hero.md`, then `split-content.md`: the names give the order, so no list says it.
     const pageYml = yaml.load(readFileSync(join(site, 'pages', 'home', 'page.yml'), 'utf8'))
     expect(pageYml.sections).toBeUndefined()
 
     // A second pull with prune must not treat the file as an orphan.
     siteContentDocumentToProject({ document: remote(), siteRoot: site, prune: true })
     expect(existsSync(file)).toBe(true)
+  })
+
+  it('beside another of its type it takes the next number, and a stable id keeps its name', () => {
+    const site = join(dir, 'site')
+    mkdirSync(site, { recursive: true })
+    const uuid = (n) => `01a1787b-cb90-7493-ba88-218ae09a192${n}`
+    siteContentDocumentToProject({
+      document: {
+        info: { name: { en: 'S' }, foundation: '@a/base' },
+        pages: [
+          {
+            $uuid: 'u-page',
+            stable_id: 'home',
+            mode: 'page',
+            slug: { en: 'home' },
+            is_index: true,
+            page_sections: [
+              { $uuid: uuid(1), type: 'Hero', content: docOf('First made in the app') },
+              { $uuid: 'u-hero', stable_id: 'hero', type: 'Hero', content: docOf('From a file') },
+              { $uuid: uuid(2), type: 'Hero', content: docOf('Second made in the app') },
+            ],
+          },
+        ],
+      },
+      siteRoot: site,
+    })
+    const read = (name) => readFileSync(join(site, 'pages', 'home', `${name}.md`), 'utf8')
+    expect(read('hero')).toContain('From a file')
+    expect(read('hero-2')).toContain('First made in the app')
+    expect(read('hero-3')).toContain('Second made in the app')
+  })
+
+  it('a file a pull named from its $uuid before moves to the plain name', () => {
+    const site = join(dir, 'site')
+    mkdirSync(join(site, 'pages', 'home'), { recursive: true })
+    mkdirSync(join(site, '.uniweb'), { recursive: true })
+    const before = join('pages', 'home', 'split-content-95993360.md')
+    writeFileSync(join(site, before), '---\ntype: SplitContent\n---\n\nAdded in the app\n')
+    writeFileSync(join(site, '.uniweb', 'pull-index.json'), JSON.stringify({ items: { [APP_UUID]: before } }))
+    siteContentDocumentToProject({ document: remote(), siteRoot: site, prune: true })
+    expect(existsSync(join(site, before))).toBe(false)
+    expect(readFileSync(join(site, 'pages', 'home', 'split-content.md'), 'utf8')).toContain('Added in the app')
   })
 
   it('goes back out with its original $uuid, so the backend matches it instead of deleting it', async () => {

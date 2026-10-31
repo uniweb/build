@@ -327,3 +327,27 @@ describe('describeSiteDiff says a unit as the reader knows it', () => {
     expect(describeSiteDiff(diff)[1]).toBe('Changed by you: pages/home/cta.md')
   })
 })
+
+describe('a section made in the app is keyed by the file a pull writes it to', () => {
+  it('its type, and the next number beside another of its type', () => {
+    const hex = (n) => `01a1787b-cb90-7493-ba88-218ae09a192${n}`
+    const units = collectSiteUnits({
+      pages: [
+        {
+          stable_id: 'home',
+          mode: 'page',
+          slug: { en: 'home' },
+          page_sections: [
+            { $uuid: hex(1), type: 'FeatureCards', content: null },
+            { $uuid: hex(2), type: 'FeatureCards', $children: [{ $uuid: hex(3), type: 'Hero', content: null }] },
+          ],
+        },
+      ],
+    })
+    expect([...units.keys()].filter((path) => path.endsWith('.md'))).toEqual([
+      'pages/home/feature-cards.md',
+      'pages/home/feature-cards-2.md',
+      'pages/home/hero.md',
+    ])
+  })
+})
