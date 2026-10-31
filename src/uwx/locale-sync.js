@@ -302,9 +302,19 @@ export function isLocalizedContent(value) {
  * `add(localizedValue)` records, for each non-source locale, `hash(source) → target`
  * (source text hashed exactly as `i18n extract` keys it). Non-string or missing
  * values are skipped (only hashable scalars belong in the hash manifest).
+ *
+ * With `languages` (`documentLanguages`), a value in any other language is left out, and the
+ * language is named in `outside` for the caller to report: the next push of that section removes it.
  */
-export function createTranslationCollector(sourceLocale, { siteRoot = null } = {}) {
+export function createTranslationCollector(sourceLocale, { siteRoot = null, languages = null } = {}) {
   const byLocale = {} // { locale: { hash: target } }
+  const outside = new Set() // the languages read that the site does not have
+
+  function has(locale) {
+    if (!languages || languages.includes(locale)) return true
+    outside.add(locale)
+    return false
+  }
   // ⭐ What says each value read, in the place it was read — the push's own rule there — so the
   // writer keeps an author's entry that says the same thing in another spelling (`reconcileTranslation`).
   const says = {} // { locale: { hash: { plain?: (value) => boolean, values: { [contextKey]: (value) => boolean } } } }
@@ -328,7 +338,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
     const hash = computeHash(source)
     for (const [locale, value] of Object.entries(localizedValue)) {
       if (locale === sourceLocale) continue
-      if (typeof value !== 'string') continue
+      if (typeof value !== 'string' || !has(locale)) continue
       const table = (byLocale[locale] ||= {})
       noteSays(locale, hash, context, plainText ? saysAsText(value) : saysAsIs(value))
       if (!context) {
@@ -350,7 +360,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
   // read won, and a pull wrote that one string over the author's `{ default, overrides }`.
   // `checks` — what says each element's translation (`deriveStructuralMap`); a value as read, else.
   function addStructuralMap(locale, map, context = null, checks = null) {
-    if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map)) return
+    if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map) || !has(locale)) return
     const table = (byLocale[locale] ||= {})
     for (const [src, target] of Object.entries(map)) {
       if (typeof src !== 'string' || typeof target !== 'string') continue
@@ -373,6 +383,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
   // — null when the caller can't place it (e.g. layout sections have no freeform
   // home), so it's surfaced rather than dropped.
   function noteFreeform(locale, target, source, relpath) {
+    if (!has(locale)) return
     freeformPending.push({ locale, target, source, relpath: relpath || null })
   }
 
@@ -390,7 +401,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null } = {
     return null
   }
 
-  return { add, addStructuralMap, noteFreeform, keptFreeform, byLocale, says, freeformPending }
+  return { add, addStructuralMap, noteFreeform, keptFreeform, has, byLocale, says, freeformPending, outside }
 }
 
 /**

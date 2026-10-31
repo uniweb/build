@@ -35,6 +35,7 @@ function pull({ keepsFreeform }) {
     siteRoot: ROOT,
     document: {
       info: { name: 'Site' },
+      settings: { languages: ['en', 'es'] },
       pages: [
         {
           stable_id: 'about',
@@ -86,6 +87,7 @@ describe('pull — a free-form translation it did not change', () => {
       siteRoot: ROOT,
       document: {
         info: { name: 'Site' },
+        settings: { languages: ['en', 'es'] },
         pages: [{
           stable_id: 'about', mode: 'page', slug: { en: 'about' }, title: { en: 'About' },
           page_sections: [{ stable_id: 'story', type: 'Section', content: { en: source, es: markdownToProseMirror(authored) } }],
@@ -123,6 +125,7 @@ describe('pull — the manifest of a free-form translation', () => {
       siteRoot: ROOT,
       document: {
         info: { name: 'Site' },
+        settings: { languages: ['en', 'es'] },
         pages: [{
           stable_id: 'about', mode: 'page', slug: { en: 'about' }, title: { en: 'About' },
           page_sections: [{ stable_id: 'story', type: 'Section', content: { en: docOf('Hello world'), es } }],

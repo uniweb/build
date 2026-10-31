@@ -828,6 +828,7 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
   it('writes the source value inline and target locales to locales/{locale}.json keyed by source hash', () => {
     const document = {
       info: info(),
+      settings: { languages: ['en', 'es', 'fr'] },
       pages: [
         { $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', title: { en: 'Home', es: 'Inicio' }, page_sections: [] },
       ],
@@ -852,7 +853,7 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
     mkdirSync(join(dir, 'locales'), { recursive: true })
     writeFileSync(join(dir, 'locales/es.json'), JSON.stringify({ existinghash: 'kept' }))
 
-    siteContentDocumentToProject({ document: { info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@a/base' } }, siteRoot: dir })
+    siteContentDocumentToProject({ document: { settings: { languages: ['en', 'es', 'fr'] }, info: { name: { en: 'Atlas', es: 'Atlas ES' }, foundation: '@a/base' } }, siteRoot: dir })
 
     const es = JSON.parse(readFileSync(join(dir, 'locales/es.json'), 'utf8'))
     expect(es.existinghash).toBe('kept')
@@ -868,6 +869,7 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
     const srcDoc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello world' }] }] }
     const document = {
       info: { name: { en: 'S' }, foundation: '@a/base' },
+      settings: { languages: ['en', 'es', 'fr'] },
       pages: [
         {
           $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
@@ -898,6 +900,7 @@ describe('localized scalar projection → locales/{locale}.json (B)', () => {
     const report = siteContentDocumentToProject({
       document: {
         info: { name: { en: 'S' }, foundation: '@a/base' },
+        settings: { languages: ['en', 'es', 'fr'] },
         pages: [{ $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: { en: srcDoc, es: ffDoc } }] }],
       },
       siteRoot: dir,
@@ -942,6 +945,7 @@ describe('localized keywords array: producer ⇄ projector (B-2)', () => {
   it('projects a localized keywords array: source elements inline, targets to locales/{locale}.json', () => {
     const document = {
       info: { name: { en: 'S' }, foundation: '@a/base' },
+      settings: { languages: ['en', 'es', 'fr'] },
       pages: [
         {
           $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',

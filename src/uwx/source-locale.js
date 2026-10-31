@@ -55,3 +55,24 @@ export function documentSourceLocale(document) {
     languages: settings?.languages,
   })
 }
+
+/**
+ * ⭐ THE LANGUAGES A DOCUMENT SAYS ITS SITE HAS — what a pull may write translations for. What
+ * `settings.languages` lists, with the source; the source alone where it lists none, since a push
+ * lists every language a site's files make (`uwx/site.js::settingsNested`). `null` for a wildcard,
+ * which leaves them to the site's translation files.
+ *
+ * A section's `content` can hold a language the site does not have: the app keeps a document per
+ * language it edits in, whichever languages the site declares. In a file a language is made by its
+ * translation file (`i18n/locales.js`), so writing one would add the language to the site.
+ *
+ * @param {object} document - the site-content `$`-document
+ * @param {string} [sourceLocale]
+ * @returns {string[]|null}
+ */
+export function documentLanguages(document, sourceLocale = documentSourceLocale(document)) {
+  const listed = document?.settings?.languages
+  if (listed === '*' || (Array.isArray(listed) && listed.includes('*'))) return null
+  const codes = Array.isArray(listed) ? listed.map((l) => (typeof l === 'string' ? l : l?.code)).filter(Boolean) : []
+  return [...new Set([sourceLocale, ...codes])]
+}

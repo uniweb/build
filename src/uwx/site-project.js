@@ -57,7 +57,7 @@ import { unwritableNodes } from '@uniweb/content-writer'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
-import { documentSourceLocale } from './source-locale.js'
+import { documentLanguages, documentSourceLocale } from './source-locale.js'
 import { siteContentDirs } from './site-dirs.js'
 import { gitAuthoredPages } from './git-authored.js'
 import { layoutAreaRoute, readLayoutFolderSync, DEFAULT_LAYOUT } from '../site/layout-folder.js'
@@ -936,7 +936,7 @@ function subtreeRoutes(record, route, sourceLocale) {
 // none, and reading that as "none" would delete what the author wrote.
 function pageSlugToYml(record, canon, existing, sourceLocale, ctx) {
   if (record.is_dynamic) return dynamicOwnSlug(record, existing, sourceLocale)
-  const targets = localizedTargets(record.slug, sourceLocale)
+  const targets = localizedTargets(record.slug, sourceLocale, ctx)
   const own = isPlainRecord(existing?.slug)
   if (!own && ctx.routes?.siteMap && !record.is_index) {
     if (Object.keys(targets).length) ctx.routes.slugs.set(canon, targets)
@@ -961,11 +961,11 @@ function dynamicOwnSlug(record, existing, sourceLocale) {
   return typeof existing?.slug === 'string' ? own : null
 }
 
-// The locales of a pulled localized `slug` other than the source one.
-function localizedTargets(slug, sourceLocale) {
+// The locales of a pulled localized `slug` other than the source one, in the languages the site has.
+function localizedTargets(slug, sourceLocale, ctx) {
   if (!isPlainRecord(slug)) return {}
   return Object.fromEntries(
-    Object.entries(slug).filter(([l, v]) => l !== sourceLocale && l !== '@' && !l.startsWith('$') && typeof v === 'string' && v)
+    Object.entries(slug).filter(([l, v]) => l !== sourceLocale && l !== '@' && !l.startsWith('$') && typeof v === 'string' && v && (ctx?.collector?.has(l) ?? true))
   )
 }
 
@@ -1367,7 +1367,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).
-  const collector = createTranslationCollector(sourceLocale, { siteRoot })
+  const collector = createTranslationCollector(sourceLocale, { siteRoot, languages: documentLanguages(document, sourceLocale) })
 
   // Put the author's own asset paths back before anything is serialized. Stored
   // content carries an id and a serve URL; only the committed map knows the ref
@@ -1437,6 +1437,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   report.locales = writeLocaleTranslations(siteRoot, collector.byLocale, '', collector.says)
   // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
   report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
+  report.outsideLanguages = [...collector.outside].sort()
   writePullIndex(siteRoot, ctx.newIndex)
   return report
 }
