@@ -16,7 +16,7 @@
 // surface, used by the projector (pull → files) and, later, the producer
 // (files → push).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -29,6 +29,7 @@ import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { computeSourceHash, manifestText } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
+import { KEPT_FILE, RESERVED_LOCALE_FILES } from '../i18n/locales.js'
 
 const FREEFORM_MANIFEST = '.manifest.json'
 
@@ -92,7 +93,7 @@ export function discoverLocales(siteRoot, subdir = '') {
   if (!existsSync(dir)) return []
   try {
     return readdirSync(dir)
-      .filter((f) => f.endsWith('.json') && f !== 'manifest.json' && !f.startsWith('.'))
+      .filter((f) => f.endsWith('.json') && !RESERVED_LOCALE_FILES.has(f) && !f.startsWith('.'))
       .map((f) => f.slice(0, -'.json'.length))
   } catch {
     return []
@@ -128,6 +129,85 @@ export function loadLocaleTranslations(siteRoot, locales, subdir = '') {
     }
   }
   return out
+}
+
+/**
+ * ⭐ WHAT A PULL KEEPS FOR A PUSH TO SEND BACK, `locales/_kept.json`: for a section, its `@` (what the
+ * app holds beside its translations, opaque here) and its documents in languages the site does not
+ * list (a language removed in the app keeps them, so adding it back loses nothing). A file has no
+ * other place for either, and THE ROUND-TRIP LAW holds for both. Absent on almost every site.
+ *
+ * ⛔ Until 2026-10-31 a pull dropped both, and the next push of the section removed them from the store.
+ *
+ * Keyed as a translation's place is (`contextKey`), since a section's identity on a backend is no use
+ * to another backend's copy.
+ *
+ * @param {string} siteRoot
+ * @param {string} [subdir] - `records` for record translations
+ * @returns {{ [place: string]: { '@'?: object, languages?: object } }}
+ */
+export function readKept(siteRoot, subdir = '') {
+  try {
+    const parsed = JSON.parse(readFileSync(join(localesDir(siteRoot, subdir), KEPT_FILE), 'utf8'))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Where a record's localized field is kept: a record has more than one such field. */
+export function recordFieldPlace(context, field) {
+  return `${contextKey(context)}#${field}`
+}
+
+/** A localized `content` with what the site keeps for it: never over a language the push has now. */
+export function restoreKept(localized, held) {
+  if (!held || !isLocalizedContent(localized)) return localized
+  const out = { ...localized }
+  for (const [locale, doc] of Object.entries(held.languages || {})) {
+    if (!(locale in out)) out[locale] = doc
+  }
+  if (held['@']) out['@'] = held['@']
+  return out
+}
+
+/**
+ * Write what a pull read to `locales/_kept.json`, removing the file when nothing is kept. An entry
+ * keeps its place and the pull adds nothing it did not change, as `writeLocaleTranslations` does.
+ *
+ * @param {string} siteRoot
+ * @param {object} kept - the collector's `kept`
+ * @param {string} [subdir]
+ * @param {Set<string>|null} [read] - the places this pull read, and only these change. None: every
+ *   place is the document's to say, for a lane whose document is the whole site.
+ * @returns {'updated'|'unchanged'}
+ */
+export function writeKept(siteRoot, kept, subdir = '', read = null) {
+  const filePath = join(localesDir(siteRoot, subdir), KEPT_FILE)
+  let text = null
+  try {
+    text = readFileSync(filePath, 'utf8')
+  } catch {
+    // absent
+  }
+  const existing = text ? readKept(siteRoot, subdir) : {}
+  const order = text ? topLevelKeyOrder(text).filter((key) => key in existing) : []
+  const entries = []
+  for (const key of order) {
+    if (key in kept) entries.push([key, canonicalJson(kept[key]) === canonicalJson(existing[key]) ? existing[key] : kept[key]])
+    else if (read && !read.has(key)) entries.push([key, existing[key]])
+  }
+  for (const key of Object.keys(kept).filter((k) => !order.includes(k)).sort()) entries.push([key, kept[key]])
+  if (entries.length === 0) {
+    if (text === null) return 'unchanged'
+    rmSync(filePath)
+    return 'updated'
+  }
+  const next = jsonObjectText(entries)
+  if (next === text) return 'unchanged'
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, next)
+  return 'updated'
 }
 
 /**
@@ -303,12 +383,25 @@ export function isLocalizedContent(value) {
  * (source text hashed exactly as `i18n extract` keys it). Non-string or missing
  * values are skipped (only hashable scalars belong in the hash manifest).
  *
- * With `languages` (`documentLanguages`), a value in any other language is left out, and the
- * language is named in `outside` for the caller to report: the next push of that section removes it.
+ * With `languages` (`documentLanguages`), a value in any other language is left out of the
+ * translation files, and the language is named in `outside` for the caller to report. A whole document
+ * in one is kept (`keepLanguage`, `readKept`), so a push sends it back.
  */
 export function createTranslationCollector(sourceLocale, { siteRoot = null, languages = null } = {}) {
   const byLocale = {} // { locale: { hash: target } }
   const outside = new Set() // the languages read that the site does not have
+  const kept = {} // { place: { '@'?, languages? } }, what `readKept` gives back
+  const keptRead = new Set() // the places read, whether or not they keep anything
+  const marks = { cleared: {}, outdated: {} } // what `addStructuralMap` was told of each row beyond its value
+
+  function keepMeta(place, at) {
+    keptRead.add(place)
+    if (at && typeof at === 'object' && Object.keys(at).length > 0) (kept[place] ||= {})['@'] = at
+  }
+
+  function keepLanguage(place, locale, doc) {
+    if (isProseMirrorDoc(doc)) ((kept[place] ||= {}).languages ||= {})[locale] = doc
+  }
 
   function has(locale) {
     if (!languages || languages.includes(locale)) return true
@@ -359,8 +452,16 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
   // context-specific overrides (`writeLocaleTranslations`). ⛔ Until 2026-09-26 the last section
   // read won, and a pull wrote that one string over the author's `{ default, overrides }`.
   // `checks` — what says each element's translation (`deriveStructuralMap`); a value as read, else.
-  function addStructuralMap(locale, map, context = null, checks = null) {
+  // `notes` — its rows that hold their source, and those that hold an older source's translation.
+  function addStructuralMap(locale, map, context = null, checks = null, notes = null) {
     if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map) || !has(locale)) return
+    const place = context ? contextKey(context) : ''
+    for (const [src, row] of Object.entries(notes?.cleared || {})) {
+      ;((marks.cleared[locale] ||= {})[computeHash(src)] ||= {})[place] = row
+    }
+    for (const [src, older] of Object.entries(notes?.outdated || {})) {
+      ;((marks.outdated[locale] ||= {})[computeHash(src)] ||= {})[place] = older
+    }
     const table = (byLocale[locale] ||= {})
     for (const [src, target] of Object.entries(map)) {
       if (typeof src !== 'string' || typeof target !== 'string') continue
@@ -401,7 +502,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
     return null
   }
 
-  return { add, addStructuralMap, noteFreeform, keptFreeform, has, byLocale, says, freeformPending, outside }
+  return { add, addStructuralMap, noteFreeform, keptFreeform, keepMeta, keepLanguage, has, byLocale, says, marks, freeformPending, outside, kept, keptRead }
 }
 
 /**
@@ -416,13 +517,22 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
  * inline markdown (serializeInlineContent), so emphasis, inline icons, and
  * per-locale link hrefs survive. Keyed by the source element's cleaned text, so
  * `computeHash(key)` matches the extractor's unit hash — closing the round trip.
+ *
+ * ⭐ `notes` hears what a value alone can't say. `cleared`: a row holding its source, so that source's
+ * entry goes, and a translation an author cleared stays cleared. `outdated`: a row holding what the
+ * app keeps as an older source text's translation (`olderSource`). It is still what the row reads, so
+ * it stays in the map, and the caller records it as outdated rather than as this source's.
+ *
+ * ⭐ TWO ROWS OF ONE SOURCE TEXT THAT READ DIFFERENTLY cannot be said by one entry, so the target is
+ * free-form. ⛔ Until 2026-10-31 the last one won: `(zh_A, zh_B)` became `(zh_B, zh_B)` on the next push.
  */
-function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks = {}) {
+function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks = {}, notes = { cleared: {}, outdated: {} }, olderSource = () => null) {
   if (!isProseMirrorDoc(sourceDoc) || !isProseMirrorDoc(targetDoc)) return null
   const src = blockElements(sourceDoc)
   const tgt = blockElements(targetDoc)
   if (src.length !== tgt.length) return null // structurally divergent → free-form
   const map = {}
+  const read = new Map()
   try {
     for (let i = 0; i < src.length; i++) {
       if (src[i].type !== tgt[i].type) return null // divergent → free-form
@@ -430,9 +540,18 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks
       if (!key) continue
       const srcMd = serializeInlineContent(src[i].content || [])
       const tgtMd = serializeInlineContent(tgt[i].content || [])
-      if (srcMd === tgtMd) continue // unchanged → untranslated → omit
-      map[key] = labelsAlone(src[i].content || [], tgt[i].content || [], tgtMd) ?? tgtMd
+      const says = srcMd === tgtMd ? null : labelsAlone(src[i].content || [], tgt[i].content || [], tgtMd) ?? tgtMd
+      if (read.has(key) && read.get(key) !== says) return null // one entry cannot say both → free-form
+      read.set(key, says)
+      if (says === null) {
+        // unchanged → untranslated → omit, and no entry says otherwise
+        notes.cleared[key] = { markdown: srcMd, says: saysElement(src[i].content || [], tgtMd) }
+        continue
+      }
+      map[key] = says
       checks[key] = saysElement(src[i].content || [], tgtMd)
+      const older = olderSource(tgt[i], key)
+      if (older) notes.outdated[key] = older
     }
   } catch {
     // a mark we can't serialize → don't risk a lossy map; store as free-form
@@ -608,25 +727,51 @@ function addDataBlockStrings(map, sourceDoc, targetDoc, modelFor = () => null, c
  * map still on the wire (legacy / transition) passes through unchanged. The
  * reserved `@` (and `$`-prefixed) key is opaque metadata — NEVER a locale. A bare
  * doc (no locale wrap) is returned unchanged.
+ *
+ * `place` names what is kept for this field (`readKept`): the translation's place, unless a record's
+ * field needs its own.
  */
-export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null, context = null, modelFor = () => null) {
+export function unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates = null, context = null, modelFor = () => null, place = context ? contextKey(context) : null) {
   if (!isLocalizedContent(content)) return content
   const source = content[sourceLocale]
+  if (place) collector?.keepMeta?.(place, content['@'])
   for (const [locale, value] of Object.entries(content)) {
     if (locale === sourceLocale) continue
     if (locale === '@' || locale.startsWith('$')) continue // reserved metadata, not a locale
+    if (collector?.has && !collector.has(locale)) {
+      if (place) collector.keepLanguage(place, locale, value)
+      continue
+    }
     if (isProseMirrorDoc(value)) {
       // A translation the site keeps as a free-form file stays one, even when it lines up.
       const kept = collector?.keptFreeform?.(locale, freeformCandidates || freeformRelPath) || null
       const checks = {}
-      const map = kept ? null : deriveStructuralMap(source, value, modelFor, checks)
-      if (map) collector?.addStructuralMap?.(locale, map, context, checks)
+      const notes = { cleared: {}, outdated: {} }
+      const map = kept ? null : deriveStructuralMap(source, value, modelFor, checks, notes, olderSourceOf(content['@'], locale))
+      if (map) collector?.addStructuralMap?.(locale, map, context, checks, notes)
       else collector?.noteFreeform?.(locale, value, source, kept || freeformRelPath)
     } else {
       collector?.addStructuralMap?.(locale, value, context)
     }
   }
   return source
+}
+
+// ⭐ Which older source text a row's translation was made from, by what the app keeps in `@.translations`
+// (`{ <source text>: { <lang>: <inline content> } }`): a row is outdated when its translation is one of
+// those under another text. Compared as text, the key's own terms: a push's link addresses are not the store's.
+function olderSourceOf(at, locale) {
+  const held = at?.translations
+  if (!held || typeof held !== 'object') return () => null
+  const byText = new Map()
+  for (const [older, byLocale] of Object.entries(held)) {
+    const inline = byLocale?.[locale]
+    if (Array.isArray(inline)) byText.set(elementText({ content: inline }), older)
+  }
+  return (element, key) => {
+    const older = byText.get(elementText(element))
+    return older !== undefined && older !== key ? older : null
+  }
 }
 
 // A translation read in several sections: what each section's context says, and what a place with
@@ -796,6 +941,56 @@ function jsonObjectText(entries) {
 }
 
 /**
+ * ⭐ THE ENTRY A TRANSLATION FILE HOLDS for what a pull read of one source text, in one language.
+ *
+ * - What the places read, as the author keeps it (`reconcileTranslation`).
+ * - `cleared`: places whose row holds its source. With nothing else read the entry goes, so a
+ *   cleared translation stays cleared; beside a place that reads a translation, an override says so.
+ *   ⛔ Until 2026-10-31 the entry stayed, and the next push brought the old translation back.
+ * - `outdated`: places whose row holds an older source text's translation, `{ place: older text }`. It
+ *   is still what they read, so the entry gives it to a build and a push, and `uniweb i18n status`
+ *   lists it. ⛔ Until 2026-10-31 it read as this source's translation, and nothing could say otherwise.
+ *
+ * @returns {string|object|undefined} undefined: no entry
+ */
+function settleEntry(existing, seen, check, cleared, outdated) {
+  let own = existing
+  if (own && typeof own === 'object' && 'outdated' in own) {
+    const { outdated: _flag, ...rest } = own
+    own = rest
+  }
+  const rows = Object.entries(cleared || {})
+  const places = rows.map(([place]) => place).filter(Boolean)
+  const reads = seen instanceof SeenInContexts ? seen : seen === undefined ? new SeenInContexts() : new SeenInContexts(seen)
+  // Whether the author's entry, pushed to these rows, gives them what they hold: their source. That is
+  // no translation cleared, in whatever spelling it is written. `Pricing` is the label of `[Pricing](/pricing)`.
+  const ownSaysThem = (value) => typeof value === 'string' && rows.every(([, row]) => row.says(value))
+  let entry
+  if (reads.plain !== undefined || Object.keys(reads.values).length > 0) {
+    entry = reconcileTranslation(own, reads, check)
+    const readsElsewhere = typeof entry === 'string' ? entry : entry?.default
+    if (places.length && !ownSaysThem(readsElsewhere)) {
+      const overrides = { ...(entry && typeof entry === 'object' ? entry.overrides : {}) }
+      for (const [place, row] of rows) if (place) overrides[place] = row.markdown
+      entry = { default: readsElsewhere, overrides }
+    }
+  } else if (ownSaysThem(own)) {
+    entry = own
+  } else if (own && typeof own === 'object') {
+    // Its default and any overrides here go. An override for a place this pull did not see stays.
+    const rest = Object.fromEntries(Object.entries(own.overrides || {}).filter(([place]) => !places.includes(place)))
+    const defaultStays = typeof own.default === 'string' && ownSaysThem(own.default)
+    entry = defaultStays || Object.keys(rest).length ? { ...(defaultStays ? { default: own.default } : {}), ...(Object.keys(rest).length ? { overrides: rest } : {}) } : undefined
+  }
+  if (entry === undefined) return undefined
+  if (outdated && Object.keys(outdated).length) {
+    entry = { ...(typeof entry === 'string' ? { default: entry } : entry), outdated }
+  }
+  if (entry && typeof entry === 'object' && Object.keys(entry).length === 1 && typeof entry.default === 'string') return entry.default
+  return entry
+}
+
+/**
  * Merge `{ locale: { hash: target } }` into each `locales/{locale}.json`,
  * preserving existing entries (translations for strings not in this projection are
  * kept — `uniweb i18n audit --clean` removes genuine orphans). An entry keeps its place
@@ -807,12 +1002,17 @@ function jsonObjectText(entries) {
  * @param {string} [subdir] - `records` for record translations
  * @param {object} [says] - the collector's `says`: what says each value read, in its place
  *   (`reconcileTranslation`). Without it, a value says only itself.
+ * @param {object} [marks] - the collector's `marks`: the rows that hold their source, and those
+ *   that hold an older source's translation (`settleEntry`)
  * @returns {{ [locale: string]: 'updated' | 'unchanged' }}
  */
-export function writeLocaleTranslations(siteRoot, byLocale, subdir = '', says = null) {
+export function writeLocaleTranslations(siteRoot, byLocale, subdir = '', says = null, marks = null) {
   const report = {}
-  for (let [locale, entries] of Object.entries(byLocale || {})) {
-    if (!entries || Object.keys(entries).length === 0) continue
+  for (const locale of new Set([...Object.keys(byLocale || {}), ...Object.keys(marks?.cleared || {})])) {
+    const read = byLocale?.[locale] || {}
+    const cleared = marks?.cleared?.[locale] || {}
+    const outdated = marks?.outdated?.[locale] || {}
+    if (Object.keys(read).length === 0 && Object.keys(cleared).length === 0) continue
     const filePath = localeFilePath(siteRoot, locale, subdir)
 
     let existing = {}
@@ -837,22 +1037,22 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '', says = 
     // A translation read in several sections becomes the string or the `{ default, overrides }` the
     // author keeps (`reconcileTranslation`) — and one read in one place too, which keeps an entry
     // that says it in another spelling, and an override for a place the pull did not see.
-    entries = Object.fromEntries(
-      Object.entries(entries).map(([key, value]) => [
-        key,
-        reconcileTranslation(existing[key], value instanceof SeenInContexts ? value : new SeenInContexts(value), says?.[locale]?.[key]),
-      ])
-    )
-    const fresh = Object.keys(entries).filter((key) => !(key in existing)).sort()
-    if (fresh.length === 0 && Object.entries(entries).every(([key, value]) => canonicalJson(existing[key]) === canonicalJson(value))) {
-      report[locale] = 'unchanged'
+    const entries = {}
+    for (const key of new Set([...Object.keys(read), ...Object.keys(cleared)])) {
+      // Nothing to say of a row that holds its source where the file has no entry for it, and no place reads one.
+      if (!(key in read) && !(key in existing)) continue
+      entries[key] = settleEntry(existing[key], read[key], says?.[locale]?.[key], cleared[key], outdated[key])
+    }
+    const fresh = Object.keys(entries).filter((key) => !(key in existing) && entries[key] !== undefined).sort()
+    const same = (key) => (entries[key] === undefined ? !(key in existing) : canonicalJson(existing[key]) === canonicalJson(entries[key]))
+    if (fresh.length === 0 && Object.keys(entries).every(same)) {
+      if (existsSync(filePath)) report[locale] = 'unchanged'
       continue
     }
     // An entry the pull did not change keeps its value as written — key order included.
-    const merged = [...new Set([...order, ...Object.keys(existing)])].map((key) => [
-      key,
-      key in entries && canonicalJson(entries[key]) !== canonicalJson(existing[key]) ? entries[key] : existing[key],
-    ])
+    const merged = [...new Set([...order, ...Object.keys(existing)])]
+      .filter((key) => !(key in entries) || entries[key] !== undefined)
+      .map((key) => [key, key in entries && canonicalJson(entries[key]) !== canonicalJson(existing[key]) ? entries[key] : existing[key]])
     for (const key of fresh) merged.push([key, entries[key]])
     const next = jsonObjectText(merged)
 

@@ -13,7 +13,8 @@ import { existsSync, readdirSync } from 'node:fs'
 import { normalizeLanguageList, resolveDefaultLocale } from '@uniweb/core/locale-config'
 
 // Files in the locales directory that are not a locale's translations.
-export const RESERVED_LOCALE_FILES = new Set(['manifest.json', '_memory.json'])
+export const KEPT_FILE = '_kept.json'
+export const RESERVED_LOCALE_FILES = new Set(['manifest.json', '_memory.json', KEPT_FILE])
 
 /**
  * The locales a directory holds translations for — one per `<locale>.json` — sorted.

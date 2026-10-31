@@ -48,6 +48,7 @@ export async function auditLocale(localesPath, locale) {
   const missing = []
   const stale = []
   const losesMarkup = []
+  const outdated = []
 
   // Check manifest entries
   for (const hash of manifestHashes) {
@@ -55,6 +56,11 @@ export async function auditLocale(localesPath, locale) {
       const unit = manifest.units[hash]
       const source = unit.source
       const translation = getTranslationText(translations[hash])
+      // Made from an older source text (`locale-sync.js::settleEntry`). It still shows.
+      if (translations[hash]?.outdated) {
+        outdated.push({ hash, source, translation, was: [...new Set(Object.values(translations[hash].outdated))] })
+        continue
+      }
       valid.push({ hash, source, translation })
 
       // ⭐ The source element carries inline markdown, and what the merge makes of
@@ -98,7 +104,8 @@ export async function auditLocale(localesPath, locale) {
     valid,
     missing,
     stale,
-    losesMarkup
+    losesMarkup,
+    outdated
   }
 }
 

@@ -19,6 +19,7 @@
 //     changed records. An untouched site with records pushes nothing on either
 //     lane (the idempotent no-op).
 
+import { basename } from 'node:path'
 import { buildRecordEntities, entityContentHash } from './records.js'
 import { recordItemLists, hasListItems, stampRecordItems } from './record-items.js'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
@@ -459,14 +460,11 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   let itemIdentity = null
   if (siteDoc && opts.itemUuids && typeof opts.itemUuids === 'object') {
     itemIdentity = stampUnitUuids(siteDoc, opts.itemUuids, sourceLocale)
-    for (const path of itemIdentity.collisions) {
-      warnings.push(
-        `Two sections resolve to the same file (${path}) — their stable ids collide ` +
-        `(e.g. \`1-name.md\` and \`name.md\`). Only the first keeps its identity, and a pull ` +
-        `would collapse them into one file. Rename one.`
-      )
-    }
   }
+  // ⭐ TWO SECTIONS OF ONE PAGE WITH ONE ID ARE REFUSED, on a first push too. ⛔ Until 2026-10-31 it was
+  // a warning and the push went on. Measured with `1-hero.md` beside `hero.md`: the store held both, a
+  // pull deleted one of the files, and from then on a push was refused as stale with nothing to pull.
+  const sameId = siteDoc ? (itemIdentity ?? stampUnitUuids(siteDoc, {}, sourceLocale)).collisions : []
 
   // Local-media over push (Slice 5). `assetRewrite` ({ '/images/x.png': serveUrl })
   // is supplied by the deploy's SECOND emit, after it has uploaded the files the
@@ -589,6 +587,12 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // by `$ref`, and the backend refused a reference to a record the package does not carry
   // (measured 2026-09-26); sent, it would be a second record. A pull writes it back.
   const refusals = [...(col.refusals || [])]
+  for (const path of sameId) {
+    refusals.push(
+      `${path}: two sections of this page have the id \`${basename(path, '.md')}\`, as \`1-name.md\` and \`name.md\` do. ` +
+        'A section is named by its file, without the number. Rename one.'
+    )
+  }
   for (const r of recordChanged) {
     if (r.changed || r.entity.document.$uuid) continue
     refusals.push(

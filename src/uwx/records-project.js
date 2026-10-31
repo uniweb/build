@@ -55,7 +55,7 @@ import { labelForFile } from '../site/entry-label.js'
 import { LINK_MODEL, writeLinkRecords } from './link-records.js'
 import { FILE_MODEL, filesToPull } from './file-records.js'
 import { parseBibtex } from '@citestyle/bibtex'
-import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, writeKept } from './locale-sync.js'
 import { siteSourceLocale } from './source-locale.js'
 import { buildFreeformRecordPath } from '../i18n/freeform.js'
 
@@ -900,8 +900,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
 
   // Flush localized record-field translations to locales/records/{locale}.json,
   // and any prosemirror free-form body overrides to locales/freeform/{locale}/.
-  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'records', collector.says)
+  const locales = writeLocaleTranslations(siteRoot, collector.byLocale, 'records', collector.says, collector.marks)
   const freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
+  // A record this pull did not read keeps what is kept for it.
+  writeKept(siteRoot, collector.kept, 'records', collector.keptRead)
 
   if (opts.backend && Object.keys(learned).length) {
     updateBackendMap(siteRoot, opts.backend, 'records', learned)

@@ -52,7 +52,7 @@ import { buildRouteOf } from './site.js'
 import { DEFAULT_SECTION_TYPE } from '@uniweb/core/section-type'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
-import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, unwrapLocalizedContent, isProseMirrorDoc } from './locale-sync.js'
+import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, writeKept, unwrapLocalizedContent, isProseMirrorDoc } from './locale-sync.js'
 import { unwritableNodes } from '@uniweb/content-writer'
 import { buildFreeformPath, freeformPathsFor } from '../i18n/freeform.js'
 import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
@@ -1448,9 +1448,11 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   }
   projectLayout(document?.layout_sections, layoutBaseDir, report, prune, ctx)
 
-  report.locales = writeLocaleTranslations(siteRoot, collector.byLocale, '', collector.says)
+  report.locales = writeLocaleTranslations(siteRoot, collector.byLocale, '', collector.says, collector.marks)
   // Target-locale FREE-FORM bodies → locales/freeform/{locale}/<relpath> + manifest.
   report.freeform = writeFreeformTranslations(siteRoot, collector.freeformPending)
+  // What the files hold no place for, kept for the push to send back: this document is the whole site.
+  report.kept = writeKept(siteRoot, collector.kept)
   report.outsideLanguages = [...collector.outside].sort()
   writePullIndex(siteRoot, ctx.newIndex)
   return report

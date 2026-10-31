@@ -282,9 +282,13 @@ export async function getTranslationStatus(siteRoot, options = {}) {
 
     let translated = 0
     let missing = 0
+    let outdated = 0
 
     for (const hash of Object.keys(manifest.units)) {
-      if (translatedHashes.has(hash)) {
+      // An entry flagged `outdated` still renders, and is not this text's translation.
+      if (translations[hash]?.outdated) {
+        outdated++
+      } else if (translatedHashes.has(hash)) {
         translated++
       } else {
         missing++
@@ -295,6 +299,7 @@ export async function getTranslationStatus(siteRoot, options = {}) {
       exists: true,
       translated,
       missing,
+      ...(outdated ? { outdated } : {}),
       coverage: totalUnits > 0 ? Math.round((translated / totalUnits) * 100) : 100
     }
   }
@@ -641,6 +646,9 @@ export function formatTranslationStatus(status) {
       lines.push(`  ${locale}: ${bar} ${info.coverage}% (${info.translated}/${status.totalUnits})`)
       if (info.missing > 0) {
         lines.push(`       ${info.missing} strings missing`)
+      }
+      if (info.outdated > 0) {
+        lines.push(`       ${info.outdated} outdated: the old translation still shows, and its source has changed`)
       }
     }
   }

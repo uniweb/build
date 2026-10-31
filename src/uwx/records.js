@@ -66,7 +66,7 @@ import { isUuid } from './uuid.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { siteSourceLocale } from './source-locale.js'
-import { localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
+import { readKept, restoreKept, recordFieldPlace, localizeScalar, localizeScalarList, localizeContentDoc, loadLocaleTranslations, discoverLocales, discoverFreeformLocales, localesDir, isLocalizedContent } from './locale-sync.js'
 import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
 import { LINK_MODEL, linkRecordRefusal } from './link-records.js'
@@ -172,7 +172,7 @@ export function entityContentHash(document) {
 // ⭐ `context` is the record the value is in — `{ key: '<pool>/<handle>' }`, the identity its
 // translations are kept under (`i18n/records.js`) — so an entry that reads differently in some
 // records (`{ default, overrides }`) is sent as each one renders it.
-function encodeFieldValue(value, field, sourceLocale, translations, context = null) {
+function encodeFieldValue(value, field, sourceLocale, translations, context = null, heldFor = null) {
   if (value == null) return value
   if (isProseMirrorField(field)) {
     // markdown source → ProseMirror doc. When localized, wrap per-locale exactly
@@ -185,7 +185,8 @@ function encodeFieldValue(value, field, sourceLocale, translations, context = nu
     // localized field MUST ride as a `{ lang: value }` map on the wire — the
     // schema-driven projector drops a localized field whose value isn't a map — so
     // wrap the source doc, consistent with localizeScalar (which always wraps).
-    return isLocalizedContent(localized) ? localized : { [sourceLocale]: localized }
+    // And what a pull kept for this field goes back with it (`readKept`).
+    return restoreKept(isLocalizedContent(localized) ? localized : { [sourceLocale]: localized }, heldFor)
   }
   if (field.localized) {
     // A list of localized values rides as a list of `{ lang: value }` maps, one per
@@ -249,6 +250,7 @@ export function recordsToEntities({
   sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale,
   translations,
   refs = null,
+  kept = null,
 }) {
   if (!declaration || !declaration.name) {
     throw new Error('uwx/records: a declaration with a name is required')
@@ -299,14 +301,14 @@ export function recordsToEntities({
     const hasBody = typeof record.$body === 'string' && record.$body.trim() !== ''
 
     const context = { key: `${label}/${slug}` } // as the build keys the record's translations
-    const enc = encoder(sourceLocale, translations, refs, context)
+    const enc = encoder(sourceLocale, translations, refs, context, kept)
     const sections = layout.flat ? readFlat(layout, record, enc) : readBySection(layout, record, enc)
     // The markdown body fills the content body field, in whatever section declares it,
     // unless the file already sets that field.
     if (hasBody && bodyTarget) {
       const data = (sections[bodyTarget.section] ??= {})
       if (data[bodyTarget.key] == null) {
-        data[bodyTarget.key] = encodeFieldValue(record.$body, bodyTarget.field, sourceLocale, translations, context)
+        data[bodyTarget.key] = encodeFieldValue(record.$body, bodyTarget.field, sourceLocale, translations, context, kept?.[recordFieldPlace(context, bodyTarget.key)])
       }
     }
     // The brief is the card, and is always sent — an empty one included, so a required
@@ -389,8 +391,8 @@ export function recordsToEntities({
 // What one record's read collects beside the values: the keys with no place in the
 // schema, the keys written flat in a schema written by section, and values of the
 // wrong shape for their section.
-function encoder(sourceLocale, translations, refs = null, context = null) {
-  return { sourceLocale, translations, refs, context, undeclared: [], misplaced: [], shape: [], unresolved: [], namesNew: 0 }
+function encoder(sourceLocale, translations, refs = null, context = null, kept = null) {
+  return { sourceLocale, translations, refs, context, kept, undeclared: [], misplaced: [], shape: [], unresolved: [], namesNew: 0 }
 }
 
 // A flat record: its keys, minus the record's own, are the one section's fields.
@@ -489,7 +491,7 @@ function encodeRecord(fields, value, enc, prefix, reserved) {
         ? encodeSection(field, v, enc, `${prefix}${key}`)
         : field?.type === 'entity_ref'
           ? encodeReference(v, field, enc, `${prefix}${key}`)
-          : encodeFieldValue(v, field, enc.sourceLocale, enc.translations, enc.context)
+          : encodeFieldValue(v, field, enc.sourceLocale, enc.translations, enc.context, enc.kept?.[recordFieldPlace(enc.context, key)])
     if (encoded !== undefined) out[key] = encoded
   }
   for (const key of Object.keys(value)) {
@@ -1041,6 +1043,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   ].filter((l) => l !== sourceLocale)
   const translations =
     targetLocales.length > 0 ? loadLocaleTranslations(siteRoot, targetLocales, 'records') : null
+  // What a pull kept for this push to send back (`readKept`).
+  const kept = readKept(siteRoot, 'records')
 
   // ⭐ THE FILE'S `$uuid` IS OURS; THE WIRE'S IS THE BACKEND'S (2026-09-20).
   //
@@ -1209,6 +1213,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       sourceLocale,
       translations,
       refs,
+      kept,
     })
     // Free-form per-locale body overrides (a full localized doc beats the structural
     // map) — only meaningful for a multi-locale site with a prosemirror content field.

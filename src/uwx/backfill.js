@@ -43,7 +43,7 @@ import { parseFrontmatter } from './entity-source.js'
 import { setYamlKeyFirst } from './yaml-edit.js'
 import { isProseMirrorField, isOpenMapSection, openMapFromRows } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
-import { unwrapLocalizedContent } from './locale-sync.js'
+import { recordFieldPlace, unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
 
 // Probed in this order to locate a single-record source file by slug.
@@ -351,7 +351,7 @@ function decodeRecord(fields, value, dec, sectionName) {
       continue
     }
     const isBody = Boolean(dec.bodyAt) && sectionName === dec.bodyAt.section && key === dec.bodyAt.key
-    const decoded = decodeLeaf(raw, field, dec, isBody)
+    const decoded = decodeLeaf(raw, field, dec, isBody, key)
     if (isBody) dec.body = typeof decoded === 'string' ? decoded : String(decoded ?? '')
     // A translatable value with no text in any language is no value: the field is not written.
     else if (decoded !== undefined) out[key] = decoded
@@ -386,11 +386,11 @@ function decodeList(def, value, dec) {
 // list of localized values is unwrapped element by element. ⛔ Until 2026-09-26 a body was
 // taken to be ProseMirror, so a markdown one's translations were captured nowhere and a
 // clone rendered it in the source language.
-function decodeLeaf(raw, field, dec, isBody) {
+function decodeLeaf(raw, field, dec, isBody, key) {
   if (field?.type === 'entity_ref') return decodeReference(raw, field, dec)
   if (isProseMirrorField(field)) {
     const sourceDoc = field.localized
-      ? unwrapLocalizedContent(raw, dec.sourceLocale, dec.collector, isBody ? dec.freeformRelPath : undefined, null, dec.context)
+      ? unwrapLocalizedContent(raw, dec.sourceLocale, dec.collector, isBody ? dec.freeformRelPath : undefined, null, dec.context, undefined, dec.context ? recordFieldPlace(dec.context, key) : null)
       : raw
     return sourceDoc ? proseMirrorToMarkdown(sourceDoc) : ''
   }

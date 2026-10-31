@@ -81,7 +81,7 @@ import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uni
 import { emitEntitySyncPackage } from './entity-document.js'
 import { locateSectionMedia, siteTree } from './located-media.js'
 import { mapPageRefs, pageRefIndex, pageRefPages, storedPageRef } from './page-refs.js'
-import { loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
+import { readKept, restoreKept, contextKey, loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
@@ -207,6 +207,8 @@ export function buildRouteOf(record, parentRoute, sourceLocale) {
 // hits the filesystem.
 async function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot) {
   const freeformBase = localesDir(siteRoot)
+  // What a pull kept for this push to send back (`readKept`).
+  const kept = readKept(siteRoot)
   // What each section type declares its data blocks are, so a block is pushed as the build translates it.
   const dataModel = await dataBlockModels(siteRoot)
 
@@ -216,7 +218,8 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
     // Resolved in the section's context, as the build resolves it (`translationContext`): a
     // context-specific override applies here and nowhere else. ⛔ Until 2026-09-26 every section was
     // resolved with none, so an override never reached a backend.
-    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, translationContext({ stableId }, page?.route), (tag) => dataModel(record.type, tag))
+    const context = translationContext({ stableId }, page?.route)
+    let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, context, (tag) => dataModel(record.type, tag))
     if (page) {
       const section = { stableId }
       for (const locale of targetLocales) {
@@ -229,7 +232,7 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
         localized[locale] = body // free-form full body overrides the structural map
       }
     }
-    record.content = localized
+    record.content = restoreKept(localized, kept[contextKey(context)])
   }
 
   const visitSections = async (sections, page) => {

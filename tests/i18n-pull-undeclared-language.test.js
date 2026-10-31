@@ -8,7 +8,7 @@
  * a second language.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
@@ -84,7 +84,9 @@ describe('pull — a language the site does not have', () => {
         page: { title: { es: 'Inicio', en: 'Home' }, slug: { es: 'inicio', fr: 'accueil' } },
       }),
     })
-    expect(existsSync(join(dir, 'locales'))).toBe(false)
+    // Not a translation file for any of them, and not a free-form body: the document is kept, whole.
+    expect(readdirSync(join(dir, 'locales'))).toEqual(['_kept.json'])
+    expect(Object.keys(JSON.parse(readFileSync(join(dir, 'locales/_kept.json'), 'utf8'))['/inicio:hero'].languages)).toEqual(['de'])
     expect(yaml.load(readFileSync(join(dir, 'pages/inicio/page.yml'), 'utf8')).slug).toBeUndefined()
     expect(report.outsideLanguages).toEqual(['de', 'en', 'fr'])
   })
