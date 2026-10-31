@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { recordsToEntities, recordsToProject, siteContentDocumentToProject, siteProjectToDocument } from '../src/uwx/index.js'
 import { computeHash } from '../src/i18n/hash.js'
 import { availableLocales } from '../src/i18n/locales.js'
+import { getRecordLocales } from '../src/i18n/records.js'
 import { canonicalJson } from '../src/uwx/same-content.js'
 
 const text = (value) => ({ type: 'text', text: value })
@@ -231,6 +232,14 @@ describe('a record’s rich-text field keeps what the app keeps', () => {
     const body = entities[0].document.article.body
     expect(body['@']).toEqual(edited()['@'])
     expect(body.es.content[0].content[0].text).toBe('Palabras viejas')
+  })
+
+  it('what is kept is no language of the records', async () => {
+    const dir = tmp()
+    mkdirSync(join(dir, 'locales/records'), { recursive: true })
+    writeFileSync(join(dir, 'locales/records/es.json'), '{}')
+    writeFileSync(join(dir, 'locales/records/_kept.json'), '{}')
+    expect(await getRecordLocales(join(dir, 'locales'))).toEqual(['es'])
   })
 
   it('a record this pull did not read keeps what is kept for it', () => {

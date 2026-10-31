@@ -11,6 +11,7 @@
  */
 
 import { readFile, writeFile, readdir, mkdir, rm } from 'fs/promises'
+import { RESERVED_LOCALE_FILES } from './locales.js'
 import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -1338,7 +1339,7 @@ export async function getRecordLocales(localesPath) {
   try {
     const files = await readdir(recordLocalesDir)
     return files
-      .filter(f => f.endsWith('.json') && f !== 'manifest.json')
+      .filter(f => f.endsWith('.json') && !RESERVED_LOCALE_FILES.has(f))
       .map(f => f.replace('.json', ''))
       .sort()
   } catch {
