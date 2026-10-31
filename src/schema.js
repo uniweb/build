@@ -1234,8 +1234,8 @@ export function reportPlacementDeclarations(components) {
  * Returns { _self: { identity + config }, ComponentName: componentMeta, ... }
  *
  * The _self object contains:
- * - Identity from package.json (name, version, description)
- * - Configuration from foundation.js (vars, Layout, etc.)
+ * - Identity from package.json (version, description, and the name when main.js gives none)
+ * - Declarations from main.js (name, vars, etc.)
  *
  * @param {string} srcDir - Source directory
  * @param {string[]} [sectionPaths] - Paths to scan for section types
@@ -1247,7 +1247,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
   // Load identity from package.json
   const identity = await loadPackageJson(srcDir)
 
-  // Load configuration from foundation.js
+  // Load the declarations from main.js
   const foundationConfig = await loadFoundationConfig(srcDir)
 
   refuseDataDeclarations('the foundation (main.js)', lowerData(foundationConfig.data))
