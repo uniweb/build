@@ -18,7 +18,6 @@
 import { statSync } from 'node:fs'
 import { extname } from 'node:path'
 import { mimeFor } from '@uniweb/semantic-parser'
-import { generatePdfThumbnail } from './advanced-processors.js'
 
 export const FILE_MODEL = '@uniweb/file'
 
@@ -51,12 +50,23 @@ export function fileRecordValue({ absPath, name, url, preview }) {
 
 /**
  * Make a PDF's preview image at `outputPath` — a placeholder card, not a render of the page — or
- * report that none was made (not a PDF, or `pdf-lib` not installed).
+ * report that none was made (not a PDF, or `pdf-lib` or `sharp` not available).
+ *
+ * ⛔ The card's module is loaded here, not at the top of this file. This file is on the chain of
+ * `@uniweb/build/content`, which promises no `sharp`, and that module imports `sharp` as it loads:
+ * a standalone binary has no native `sharp`, and with the import at the top it could not start, on
+ * any command (`tests/content-entry-graph.test.js`).
  *
  * @returns {Promise<boolean>} whether a preview now exists at `outputPath`
  */
 export async function makeFilePreview(absPath, outputPath) {
   if (!isPdfFile(absPath)) return false
+  let generatePdfThumbnail
+  try {
+    ;({ generatePdfThumbnail } = await import('./advanced-processors.js'))
+  } catch {
+    return false
+  }
   const result = await generatePdfThumbnail(absPath, outputPath)
   return Boolean(result?.success)
 }
