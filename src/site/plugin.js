@@ -42,7 +42,7 @@ import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.
 import { shouldSplitContent } from './split-content.js'
 import { jsonForScript } from '@uniweb/core/data-script'
 // A favicon's MIME type by its extension — the rule a host's page shell types it by too.
-import { faviconType } from '@uniweb/core/page-shell'
+import { escapeHtml, faviconType } from '@uniweb/core/page-shell'
 import { FONT_LINKS_MARKER } from './head-markers.js'
 import { effectiveSeo, resolveSiteAddress } from './site-address.js'
 import { collectExtensionAssets, isBrowserAsset } from './emit-extensions.js'
@@ -1175,6 +1175,15 @@ export function siteContentPlugin(options = {}) {
       const lang = activeLocale || resolveDefaultLocale(contentToInject?.config)
       if (lang) {
         result = result.replace(/<html([^>]*)\slang="[^"]*"/, `<html$1 lang="${lang}"`)
+      }
+
+      // The shell's title is the site's name, as a hosted page's is (`@uniweb/core/page-shell`). A
+      // page writes its own over it, so this is what shows where no page does: a static host's
+      // 404.html, a site that does not prerender, a tab before the bundle runs. ⛔ Until 2026-10-31 it
+      // stayed what the scaffold's `index.html` says, the project folder's name.
+      const siteName = contentToInject?.config?.name
+      if (siteName) {
+        result = result.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${escapeHtml(siteName)}</title>`)
       }
 
       if (!headInjection) return result
