@@ -1815,6 +1815,31 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
 }
 
 /**
+ * A page folder's markdown files in the order the page has them, each child after its parent. A
+ * file the page leaves out, as a `sections:` list not naming it does, is not among them.
+ *
+ * The page's own walk (`processPage`), so a tool that shows a page (`uniweb inspect`) has no second
+ * rule for what is on it or in what order.
+ *
+ * @param {string} pagePath - The page's folder
+ * @param {string} siteRoot - The site's folder
+ * @returns {Promise<string[]>} File names
+ */
+export async function pageSectionFiles(pagePath, siteRoot) {
+  const { page } = await processPage(pagePath, parse(pagePath).base, siteRoot)
+  const filesOf = new Map()
+  const files = (await readdir(pagePath)).filter(isMarkdownFile).sort(compareFilenames)
+  for (const file of files) {
+    const name = stripAtPrefix(parse(file).name)
+    const key = parseNumericPrefix(name).name || name
+    filesOf.set(key, [...(filesOf.get(key) || []), file])
+  }
+  const walk = (sections) =>
+    sections.flatMap((section) => [filesOf.get(section.stableId)?.shift(), ...walk(section.subsections || [])])
+  return walk(page.sections).filter(Boolean)
+}
+
+/**
  * The homepage ONE config declares: the first named `pages:` entry, else `index:`.
  * `undefined` when it declares none; `null` when its first `pages:` entry names
  * nothing usable, which has always meant "no homepage" rather than "fall through".

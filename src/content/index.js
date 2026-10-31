@@ -10,7 +10,7 @@
  * @module @uniweb/build/content
  */
 
-export { collectSiteContent } from '../site/content-collector.js'
+export { collectSiteContent, pageSectionFiles } from '../site/content-collector.js'
 
 // Query + fetch resolution. Pure functions on the clean dep
 // chain — re-exported here so headless callers (unipress, sidecars)
