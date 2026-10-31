@@ -85,6 +85,7 @@ export {
 
 // Foundation source root resolution (reads package.json::main)
 export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'
+export { staleSources, staleSourceNote } from './foundation/stale-sources.js'
 
 // Package classification (foundation vs site vs standalone schemas package)
 export { classifyPackage, isExtensionPackage, isSchemasPackage } from './utils/classify-package.js'

@@ -17,6 +17,7 @@ import { generateFoundationVars } from './theme/index.js'
 import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
 import { deriveSupports } from './foundation/derive-supports.js'
 import { proseWithoutStyles, PROSE_WITHOUT_STYLES_WARNING } from './foundation/prose-styles.js'
+import { staleSources, staleSourcesWarning } from './foundation/stale-sources.js'
 import { nodeEnvDefine } from './foundation/node-env.js'
 import { foundationScopeDefine } from './foundation/scope-define.js'
 import { ssrDormantDynamicImports } from './foundation/ssr-dormant-imports.js'
@@ -26,6 +27,8 @@ import { DEV_REBUILD_MARKER, hasDevRebuildMarker } from './foundation/dev-rebuil
 // Foundations already told that their prose has no stylesheet — once per process, so a dev
 // server's rebuild on every save does not repeat it.
 const warnedProseWithoutStyles = new Set()
+// Likewise for a `@source` that finds nothing.
+const warnedStaleSources = new Set()
 
 /**
  * Build schema.json with preview image references
@@ -449,6 +452,16 @@ export function foundationBuildPlugin(options = {}) {
       if (!warnedProseWithoutStyles.has(resolvedSrcDir) && proseWithoutStyles(bundle)) {
         warnedProseWithoutStyles.add(resolvedSrcDir)
         console.warn(PROSE_WITHOUT_STYLES_WARNING)
+      }
+
+      // A `@source` that finds nothing: the build succeeds and the CSS is short every class that
+      // was only there, and nothing else says so (`foundation/stale-sources.js`).
+      if (!warnedStaleSources.has(resolvedSrcDir)) {
+        const stale = staleSources(join(resolvedSrcDir, 'styles.css'))
+        if (stale.length) {
+          warnedStaleSources.add(resolvedSrcDir)
+          console.warn(staleSourcesWarning(stale))
+        }
       }
 
       // What host services this foundation actually reaches for, read off the
