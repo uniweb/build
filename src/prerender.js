@@ -1246,7 +1246,8 @@ export async function prerenderSite(siteDir, options = {}) {
   //   1) CLI --host flag (hostOverride)
   //   2) CI host detected from env vars (Vercel, CF Pages, Netlify)
   //   3) 'cloudflare-pages' default (preserves the historical
-  //      `_redirects` output; same format also works on Netlify)
+  //      `_redirects` output; same format also works on Netlify). This is a
+  //      file format, not a host anyone chose, so the build names no adapter for it.
   //
   // The build does not read deploy.yml. When the orchestrator
   // (uniweb deploy) needs adapter-specific config (bucket,
@@ -1259,7 +1260,7 @@ export async function prerenderSite(siteDir, options = {}) {
   if (ciContext?.runner) {
     onProgress(`CI runner: ${ciContext.runner}${ciContext.host ? '' : ' (host not implied)'}`)
   }
-  onProgress(`Host adapter: ${adapter.name}`)
+  if (hostOverride || ciContext?.host) onProgress(`Host adapter: ${adapter.name}`)
   await adapter.postBuild({
     distDir,
     siteContent: defaultSiteContent,
