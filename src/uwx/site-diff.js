@@ -132,6 +132,23 @@ export function walkSiteUnits(doc, cb, sourceLocale = documentSourceLocale(doc))
   }
 }
 
+/**
+ * The sections of a document that differ from a base in its own representation: this copy's edits since
+ * the last sync, read against `unitBases.local`. A section the base does not name counts as changed.
+ *
+ * @param {object} doc
+ * @param {Object<string,string>} [base] - per-unit hashes (`computeUnitHashes`)
+ * @param {string} [sourceLocale]
+ * @returns {Set<object>} the section records of `doc`
+ */
+export function sectionsChangedSince(doc, base = {}, sourceLocale = documentSourceLocale(doc)) {
+  const changed = new Set()
+  walkSiteUnits(doc, (path, record, kind) => {
+    if (kind === 'section' && entityContentHash(ownContent(record, '$children')) !== base[path]) changed.add(record)
+  }, sourceLocale)
+  return changed
+}
+
 /** Per-unit content hashes: `{ <path>: <sha256> }`. */
 export function computeUnitHashes(doc, sourceLocale) {
   const out = {}

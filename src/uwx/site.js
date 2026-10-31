@@ -81,11 +81,12 @@ import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uni
 import { emitEntitySyncPackage } from './entity-document.js'
 import { locateSectionMedia, siteTree } from './located-media.js'
 import { mapPageRefs, pageRefIndex, pageRefPages, storedPageRef } from './page-refs.js'
-import { readKept, restoreKept, contextKey, loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, plainTextTargets } from './locale-sync.js'
+import { readKept, restoreKept, contextKey, loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, isProseMirrorDoc, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
-import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
+import { translationContext, SITE_META_CONTEXT, blockElements, elementText } from '../i18n/extract.js'
+import { documentSourceLocale } from './source-locale.js'
 import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph.js'
 import { isAuthoredPreview } from './authored-preview.js'
 import { updateBackendState, readBackendState } from './sync-store.js'
@@ -220,6 +221,7 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
     // resolved with none, so an override never reached a backend.
     const context = translationContext({ stableId }, page?.route)
     let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, context, (tag) => dataModel(record.type, tag))
+    const freeform = new Set()
     if (page) {
       const section = { stableId }
       for (const locale of targetLocales) {
@@ -230,9 +232,10 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
         // override (isLocalizedContent excludes a PM doc, which is also an object).
         if (!isLocalizedContent(localized)) localized = { [sourceLocale]: record.content }
         localized[locale] = body // free-form full body overrides the structural map
+        freeform.add(locale)
       }
     }
-    record.content = restoreKept(localized, kept[contextKey(context)])
+    record.content = restoreKept(localized, kept[contextKey(context)], { sourceLocale, translations, context, freeform })
   }
 
   const visitSections = async (sections, page) => {
@@ -257,6 +260,43 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
   // A layout area's section has its free-form home at the area's route, as the build reads it
   // (`layoutAreaRoute`). ⛔ This said "layout sections have no free-form home" until 2026-09-26.
   for (const s of layoutSections || []) await localizeSection(s, { route: layoutAreaRoute(s.layout_name, s.area || s.stable_id) })
+}
+
+/**
+ * Each section's rows in a site-content document, ours or a backend's, by the place its translations
+ * apply (`translationContext`): the text of its block elements in the source language, as extraction
+ * keys them. The walk `localizeContentTree` makes.
+ *
+ * @param {object} doc
+ * @param {string} [sourceLocale]
+ * @param {(record: object) => boolean} [only] - the sections to read
+ * @returns {{ [place: string]: string[] }}
+ */
+export function documentRows(doc, sourceLocale = documentSourceLocale(doc), only = () => true) {
+  const rows = {}
+  const add = (record, route) => {
+    if (!only(record)) return
+    const source = isLocalizedContent(record.content) ? record.content[sourceLocale] : record.content
+    if (!isProseMirrorDoc(source)) return
+    const texts = blockElements(source).map((element) => elementText(element)).filter(Boolean)
+    if (texts.length) rows[contextKey(translationContext({ stableId: record.stable_id || record.$id }, route))] = texts
+  }
+  const visitSections = (sections, route) => {
+    for (const s of sections || []) {
+      add(s, route)
+      visitSections(s.$children, route)
+    }
+  }
+  const visitPages = (pages, parentRoute) => {
+    for (const p of pages || []) {
+      const route = buildRouteOf(p, parentRoute, sourceLocale)
+      visitSections(p.page_sections, route)
+      visitPages(p.$children, route)
+    }
+  }
+  visitPages(doc?.pages, '/')
+  for (const s of doc?.layout_sections || []) add(s, layoutAreaRoute(s.layout_name, s.area || s.stable_id))
+  return rows
 }
 
 // ⭐ A page's title, label, description and keywords are resolved in the page's context, as the

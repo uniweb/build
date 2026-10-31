@@ -1,5 +1,5 @@
 /**
- * ⭐ WHAT THE APP KEEPS BESIDE A TRANSLATION SURVIVES A PULL AND A PUSH (kb/frontend/plans/translations-in-step.md § 6).
+ * ⭐ WHAT THE APP KEEPS BESIDE A TRANSLATION SURVIVES A PULL AND A PUSH.
  *
  * The app keeps a translated row when its source changes, flagged by a map in `@.translations` of what
  * each row was made from. So a pull must not read that row as the new source's translation, and a push

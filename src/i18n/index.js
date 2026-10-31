@@ -15,7 +15,8 @@ import { computeHash, normalizeText } from './hash.js'
 import { availableLocales, resolveLocaleList, localesToBuild } from './locales.js'
 import { extractTranslatableContent } from './extract.js'
 import { dataBlockModels } from './data-models.js'
-import { syncManifests, formatSyncReport } from './sync.js'
+import { syncManifests, formatSyncReport, formatKeptTranslations } from './sync.js'
+import { keepEditedTranslations, rowsWantTranslation, manifestRows } from './outdated.js'
 import { mergeTranslations, generateAllLocales } from './merge.js'
 import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
 import {
@@ -64,6 +65,9 @@ export {
   extractTranslatableContent,
   syncManifests,
   formatSyncReport,
+  formatKeptTranslations,
+  keepEditedTranslations,
+  rowsWantTranslation,
   mergeTranslations,
   generateAllLocales,
 
@@ -181,6 +185,12 @@ export async function extractManifest(siteRoot, siteContent, options = {}) {
 
   // Generate sync report
   const report = syncManifests(previousManifest, manifest)
+
+  // What the manifest is about to forget says what an edited text's translation was made from.
+  report.kept = keepEditedTranslations(siteRoot, manifestRows(previousManifest), manifestRows(manifest), {
+    sourceLocale: manifest.defaultLocale,
+    dryRun
+  })
 
   // Write new manifest (skip in dry-run mode)
   if (!dryRun) {

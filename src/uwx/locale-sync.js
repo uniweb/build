@@ -30,6 +30,7 @@ import { computeSourceHash, manifestText } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { KEPT_FILE, RESERVED_LOCALE_FILES } from '../i18n/locales.js'
+import { isSmallEdit, wordOverlap } from '../i18n/word-overlap.js'
 
 const FREEFORM_MANIFEST = '.manifest.json'
 
@@ -160,15 +161,72 @@ export function recordFieldPlace(context, field) {
   return `${contextKey(context)}#${field}`
 }
 
-/** A localized `content` with what the site keeps for it: never over a language the push has now. */
-export function restoreKept(localized, held) {
-  if (!held || !isLocalizedContent(localized)) return localized
+/**
+ * A localized `content` with what the site keeps for it: never over a language the push has now.
+ *
+ * @param {object} localized
+ * @param {object} [held] - what `readKept` gives for it
+ * @param {object} [files] - what its translation files say (`mapWithFlags`)
+ */
+export function restoreKept(localized, held, files = null) {
+  if (!isLocalizedContent(localized)) return localized
+  const at = files ? mapWithFlags(held?.['@'], localized, files) : held?.['@']
+  if (!held && !at) return localized
   const out = { ...localized }
-  for (const [locale, doc] of Object.entries(held.languages || {})) {
+  for (const [locale, doc] of Object.entries(held?.languages || {})) {
     if (!(locale in out)) out[locale] = doc
   }
-  if (held['@']) out['@'] = held['@']
+  if (at) out['@'] = at
   return out
+}
+
+/**
+ * ⭐ WHICH ROWS ARE OUTDATED IS THE TRANSLATION FILES' TO SAY, and the app reads it from `@.translations`:
+ * a row is outdated when its translation is kept there under a similar text (`olderSourceOf`). So a flagged
+ * row goes with its entry there, and a row its file does not flag goes without one. An entry already there
+ * stays as it is: a push's link addresses are not the store's. Nor is one touched that flags nothing, such
+ * as a deleted row's whose words a row happens to read: what it is for is a text coming back.
+ *
+ * @param {object|undefined} at - the `@` a pull kept
+ * @param {object} localized - the section's `content`: the source doc and each translated language's
+ * @param {object} files
+ * @param {string} files.sourceLocale
+ * @param {object} files.translations - `{ locale: { hash: entry } }`
+ * @param {object} files.context - the section's translation context
+ * @param {Set<string>} [files.freeform] - languages whose whole document is written by hand, so no row is the file's
+ * @returns {object|undefined}
+ */
+function mapWithFlags(at, localized, { sourceLocale, translations, context, freeform = null }) {
+  const place = contextKey(context)
+  const rows = blockElements(localized[sourceLocale])
+  let map = at?.translations
+  const writable = () => (map === at?.translations ? (map = JSON.parse(JSON.stringify(map || {}))) : map)
+  for (const [locale, table] of Object.entries(translations || {})) {
+    if (locale === sourceLocale || freeform?.has(locale) || !isProseMirrorDoc(localized[locale])) continue
+    const read = blockElements(localized[locale])
+    if (read.length !== rows.length) continue
+    const keys = rows.map((row) => elementText(row))
+    const olderAt = (key) => (key ? table[computeHash(key)]?.outdated?.[place] : undefined)
+    const claimed = new Set(keys.map(olderAt))
+    keys.forEach((key, i) => {
+      const older = olderAt(key)
+      if (typeof older === 'string' && older !== key && !map?.[older]?.[locale]) (writable()[older] ||= {})[locale] = read[i].content
+    })
+    keys.forEach((key, i) => {
+      if (!key || olderAt(key) || translationFor(table[computeHash(key)], context) === undefined) return
+      const says = elementText(read[i])
+      for (const [older, byLocale] of Object.entries(map || {})) {
+        if (older === key || claimed.has(older) || !Array.isArray(byLocale?.[locale]) || !isSmallEdit(older, key)) continue
+        if (elementText({ content: byLocale[locale] }) !== says) continue
+        delete writable()[older][locale]
+        if (Object.keys(map[older]).length === 0) delete map[older]
+      }
+    })
+  }
+  if (map === at?.translations) return at
+  const { translations: _map, ...rest } = at || {}
+  const settled = Object.keys(map).length ? { ...at, translations: map } : rest
+  return Object.keys(settled).length ? settled : undefined
 }
 
 /**
@@ -759,18 +817,21 @@ export function unwrapLocalizedContent(content, sourceLocale, collector, freefor
 
 // ⭐ Which older source text a row's translation was made from, by what the app keeps in `@.translations`
 // (`{ <source text>: { <lang>: <inline content> } }`): a row is outdated when its translation is one of
-// those under another text. Compared as text, the key's own terms: a push's link addresses are not the store's.
+// those under a similar text, the most like it if several (`isSmallEdit`, the editor's own test). Compared
+// as text, the key's own terms: a push's link addresses are not the store's.
 function olderSourceOf(at, locale) {
   const held = at?.translations
   if (!held || typeof held !== 'object') return () => null
   const byText = new Map()
   for (const [older, byLocale] of Object.entries(held)) {
     const inline = byLocale?.[locale]
-    if (Array.isArray(inline)) byText.set(elementText({ content: inline }), older)
+    if (!Array.isArray(inline)) continue
+    const text = elementText({ content: inline })
+    byText.set(text, [...(byText.get(text) || []), older])
   }
   return (element, key) => {
-    const older = byText.get(elementText(element))
-    return older !== undefined && older !== key ? older : null
+    const similar = (byText.get(elementText(element)) || []).filter((older) => older !== key && isSmallEdit(older, key))
+    return similar.sort((x, y) => wordOverlap(y, key) - wordOverlap(x, key))[0] ?? null
   }
 }
 
@@ -988,6 +1049,25 @@ function settleEntry(existing, seen, check, cleared, outdated) {
   }
   if (entry && typeof entry === 'object' && Object.keys(entry).length === 1 && typeof entry.default === 'string') return entry.default
   return entry
+}
+
+/**
+ * Add entries to a language's translation file: one it holds changes in its place, and new ones follow,
+ * sorted, as `writeLocaleTranslations` writes them.
+ *
+ * @param {string} siteRoot
+ * @param {string} locale
+ * @param {{ [hash: string]: object|string }} entries
+ * @param {string} [subdir] - `records` for record translations
+ */
+export function addTranslationEntries(siteRoot, locale, entries, subdir = '') {
+  const filePath = localeFilePath(siteRoot, locale, subdir)
+  const text = readFileSync(filePath, 'utf8')
+  const parsed = JSON.parse(text)
+  const merged = [...new Set([...topLevelKeyOrder(text).filter((key) => key in parsed), ...Object.keys(parsed)])]
+    .map((key) => [key, key in entries ? entries[key] : parsed[key]])
+  for (const key of Object.keys(entries).filter((k) => !(k in parsed)).sort()) merged.push([key, entries[key]])
+  writeFileSync(filePath, jsonObjectText(merged))
 }
 
 /**

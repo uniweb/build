@@ -186,7 +186,7 @@ function encodeFieldValue(value, field, sourceLocale, translations, context = nu
     // schema-driven projector drops a localized field whose value isn't a map — so
     // wrap the source doc, consistent with localizeScalar (which always wraps).
     // And what a pull kept for this field goes back with it (`readKept`).
-    return restoreKept(isLocalizedContent(localized) ? localized : { [sourceLocale]: localized }, heldFor)
+    return restoreKept(isLocalizedContent(localized) ? localized : { [sourceLocale]: localized }, heldFor, { sourceLocale, translations, context })
   }
   if (field.localized) {
     // A list of localized values rides as a list of `{ lang: value }` maps, one per

@@ -208,6 +208,8 @@ export function formatSyncReport(report) {
     }
   }
 
+  lines.push(...formatKeptTranslations(report.kept).map((line) => `  ${line}`))
+
   if (report.added.length > 0) {
     lines.push(`  + ${report.added.length} new strings`)
     for (const item of report.added.slice(0, 5)) {
@@ -233,6 +235,25 @@ export function formatSyncReport(report) {
   }
 
   return lines.join('\n')
+}
+
+/**
+ * What `keepEditedTranslations` kept, as lines to print.
+ *
+ * @param {{ [locale: string]: Array<{ was: string, now: string }> }} [kept]
+ * @returns {string[]} none when nothing was kept
+ */
+export function formatKeptTranslations(kept) {
+  const pairs = new Map()
+  for (const { was, now } of Object.values(kept || {}).flat()) pairs.set(`${was}\n${now}`, { was, now })
+  if (pairs.size === 0) return []
+  const lines = [
+    `↺ ${pairs.size} edited string${pairs.size === 1 ? ' keeps its' : 's keep their'} old translation until someone reviews it (${Object.keys(kept).join(', ')})`,
+  ]
+  for (const { was, now } of [...pairs.values()].slice(0, 5)) lines.push(`  - "${truncate(was, 30)}" → "${truncate(now, 30)}"`)
+  if (pairs.size > 5) lines.push(`  ... and ${pairs.size - 5} more`)
+  lines.push('  Each is flagged `outdated` in the language files: replace it with the new translation, or with the same words as a plain string if they still hold.')
+  return lines
 }
 
 /**

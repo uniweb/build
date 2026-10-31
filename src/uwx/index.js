@@ -41,8 +41,10 @@ export {
   foundationSchemaToEntity,
   emitFoundationSchemaPackage,
 } from './foundation-schema.js'
+export { documentSourceLocale } from './source-locale.js'
 export {
   siteProjectToDocument,
+  documentRows,
   emitSiteSyncPackage,
   writeSiteEntityUuid,
   extensionDeclaration,
@@ -138,6 +140,7 @@ export {
   diffSiteUnits,
   describeSiteDiff,
   computeUnitHashes,
+  sectionsChangedSince,
   collectSiteUnits,
   walkSiteUnits,
   collectUnitUuids,
