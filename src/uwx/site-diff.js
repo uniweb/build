@@ -251,8 +251,8 @@ export function diffSiteUnits(localDoc, remoteDoc, bases = {}) {
     // settle the question. If the remote is known to sit at its base, this unit is
     // not contested no matter what we did to it — pushing our version is the whole
     // point — so "differs, side unknown" would be both untrue and noise. That
-    // combination is the normal state right after a pull (which clears the local
-    // base), which is exactly when a refusal is most likely, so getting it wrong
+    // combination is the normal state when a copy has no local base, which is exactly
+    // when a refusal is most likely, so getting it wrong
     // buried the one contested file under a list of perfectly fine ones.
     if (weChanged === true && theyChanged === true) out.changedBoth.push(path)
     else if (theyChanged === true) out.changedUpstream.push(path)
@@ -268,17 +268,22 @@ export function diffSiteUnits(localDoc, remoteDoc, bases = {}) {
 /**
  * Render a diff as the lines a CLI shows after a staleness refusal, ordered by the
  * cost of getting each one wrong. Returns `[]` when there is nothing to say.
+ *
+ * `label` says a unit as the reader knows it: a unit's path names it by its id, and the
+ * author's file may be `1-hero.md`.
  */
-export function describeSiteDiff(diff, { limit = 8 } = {}) {
+export function describeSiteDiff(diff, { limit = 8, label = (path) => path } = {}) {
   const lines = []
   // Never let a long list silently truncate into something that reads complete.
-  const list = (xs) =>
-    xs.length > limit ? `${xs.slice(0, limit).join(', ')} … and ${xs.length - limit} more` : xs.join(', ')
+  const list = (paths) => {
+    const xs = paths.map(label)
+    return xs.length > limit ? `${xs.slice(0, limit).join(', ')} … and ${xs.length - limit} more` : xs.join(', ')
+  }
 
   if (diff.addedUpstream.length) lines.push(`Added upstream — forcing DELETES these: ${list(diff.addedUpstream)}`)
   if (diff.changedBoth.length) lines.push(`Changed on both sides: ${list(diff.changedBoth)}`)
   if (diff.changedUpstream.length) lines.push(`Changed upstream — forcing discards these: ${list(diff.changedUpstream)}`)
-  if (diff.changedLocally.length) lines.push(`Changed by you — pulling discards these: ${list(diff.changedLocally)}`)
+  if (diff.changedLocally.length) lines.push(`Changed by you: ${list(diff.changedLocally)}`)
   if (diff.changedUnattributed.length) lines.push(`Differs, side unknown: ${list(diff.changedUnattributed)}`)
   if (diff.addedLocally.length) lines.push(`Added by you (not upstream yet): ${list(diff.addedLocally)}`)
 

@@ -313,3 +313,17 @@ describe('siteItemsByKey', () => {
     expect(page.page_sections).toBeUndefined()
   })
 })
+
+describe('describeSiteDiff says a unit as the reader knows it', () => {
+  const diff = { addedUpstream: [], changedBoth: [], changedUpstream: ['pages/home/hero.md'], changedLocally: ['pages/home/cta.md'], changedUnattributed: [], addedLocally: [], knowsLocal: true, knowsRemote: true }
+
+  it('with a label, the author\u2019s file; without one, the unit\u2019s path', () => {
+    const label = (path) => path.replace('hero.md', '1-hero.md')
+    expect(describeSiteDiff(diff, { label })[0]).toBe('Changed upstream — forcing discards these: pages/home/1-hero.md')
+    expect(describeSiteDiff(diff)[0]).toBe('Changed upstream — forcing discards these: pages/home/hero.md')
+  })
+
+  it('says a pull merges rather than discards: an edit of yours is listed as yours', () => {
+    expect(describeSiteDiff(diff)[1]).toBe('Changed by you: pages/home/cta.md')
+  })
+})
