@@ -26,7 +26,7 @@ import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { readLayoutFolder, DEFAULT_LAYOUT, layoutAreaRoute } from './layout-folder.js'
-import { join, parse, relative, resolve, sep } from 'node:path'
+import { basename, join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -939,6 +939,22 @@ function parseWildcardArray(arr) {
   }
 
   return { mode: 'inclusive', before, after }
+}
+
+/**
+ * A name in an order list that matches no page does nothing, and the list reads as if it worked:
+ * every page is still there, in file order. The usual cause is a file's number, which isn't part of
+ * its name, so `01-welcome` in a list names no page. Said here, or moving an entry changes nothing
+ * and nobody knows why.
+ */
+function warnOfListedNamesThatMatchNothing(pageNames, parsed, dirPath) {
+  const names = new Set(pageNames)
+  for (const listed of [...parsed.before, ...parsed.after].map(extractItemName).filter(Boolean)) {
+    if (names.has(listed)) continue
+    const { name: withoutNumber } = parseNumericPrefix(listed)
+    const hint = withoutNumber && names.has(withoutNumber) ? `: its name has no number, "${withoutNumber}"` : ''
+    console.warn(`[content-collector] ${basename(dirPath)}: the page order lists "${listed}", and no page is called that${hint}`)
+  }
 }
 
 /**
@@ -2034,6 +2050,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   if (pagesParsed && pagesParsed.mode !== 'all') {
     orderedFolders = applyWildcardOrder(pageFolders, pagesParsed)
+    warnOfListedNamesThatMatchNothing(
+      [...pageFolders.map(f => f.name), ...(contentMode === 'pages' ? folderModePageFiles(entries, null).files.map(f => f.name) : [])],
+      pagesParsed,
+      dirPath
+    )
     if (pagesParsed.mode === 'strict') {
       strictPageNames = new Set(pagesParsed.before.map(extractItemName).filter(Boolean))
     }
