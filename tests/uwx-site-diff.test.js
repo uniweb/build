@@ -191,6 +191,24 @@ describe('per-item identity — stamping and harvesting', () => {
     expect(d.pages[0].page_sections[1].$uuid).toBeUndefined()
   })
 
+  it('a page moved between page.yml and folder.yml keeps its identity', () => {
+    // One directory, one page. The move pushed a new page under the stored page's slug, and the
+    // backend refused the push (409, `unique_field`).
+    const toFolder = doc({ ...page('d', 'docs', []), mode: 'folder' })
+    expect(stampUnitUuids(toFolder, { 'pages/docs/page.yml': 'u-docs' }).stamped).toBe(1)
+    expect(toFolder.pages[0].$uuid).toBe('u-docs')
+
+    const toPage = doc(page('d', 'docs', []))
+    expect(stampUnitUuids(toPage, { 'pages/docs/folder.yml': 'u-docs' }).stamped).toBe(1)
+    expect(toPage.pages[0].$uuid).toBe('u-docs')
+
+    // Its own name wins, and the next sync records the page under the name it has now.
+    const both = doc({ ...page('d', 'docs', []), mode: 'folder' })
+    stampUnitUuids(both, { 'pages/docs/page.yml': 'u-old', 'pages/docs/folder.yml': 'u-docs' })
+    expect(both.pages[0].$uuid).toBe('u-docs')
+    expect(collectUnitUuids(both)).toEqual({ 'pages/docs/folder.yml': 'u-docs' })
+  })
+
   it('stamping does NOT change the content hash — adopting it must not re-fire an unchanged lane', () => {
     // entityContentHash strips $-sigils; if that ever stopped being true, every
     // site would re-push wholesale the first time it stamped identity.

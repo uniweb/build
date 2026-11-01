@@ -184,6 +184,11 @@ export function collectUnitUuids(doc, sourceLocale) {
  * is the dangerous case — see `collectUnitUuids` — and the caller is responsible for
  * not pushing blind (the backend also refuses an all-blank `multi` section).
  *
+ * ⭐ One directory is one page, whichever of its two files declares it, so a page moved between
+ * `page.yml` and `folder.yml` keeps its identity. ⛔ Until 2026-11-01 the map was read by the file's
+ * name alone, so the move pushed a new page beside the stored one, under its slug, and the backend
+ * refused it (409, `unique_field`) after the publish had already released the foundation.
+ *
  * @returns {{ stamped: number, unknown: number }}
  */
 export function stampUnitUuids(doc, pathToUuid = {}, sourceLocale) {
@@ -191,7 +196,11 @@ export function stampUnitUuids(doc, pathToUuid = {}, sourceLocale) {
   let unknown = 0
   const seen = new Set()
   const collisions = []
-  walkSiteUnits(doc, (path, record) => {
+  const otherPageFile = (path) =>
+    path.endsWith('/page.yml')
+      ? `${path.slice(0, -'page.yml'.length)}folder.yml`
+      : `${path.slice(0, -'folder.yml'.length)}page.yml`
+  walkSiteUnits(doc, (path, record, kind) => {
     // Two records can resolve to ONE path when their stable ids collide — most
     // easily `1-hero.md` and `hero.md` in the same page dir, since the numeric
     // prefix is stripped. Stamping both with the same uuid produces a package the
@@ -206,7 +215,7 @@ export function stampUnitUuids(doc, pathToUuid = {}, sourceLocale) {
       return
     }
     seen.add(path)
-    const uuid = pathToUuid[path]
+    const uuid = pathToUuid[path] || (kind === 'page' ? pathToUuid[otherPageFile(path)] : undefined)
     if (uuid) {
       record.$uuid = uuid
       stamped++
