@@ -6,9 +6,9 @@
  */
 
 import { describe, test, expect, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { staleSources, staleSourcesWarning } from '../src/foundation/stale-sources.js'
 
 const dirs = []
@@ -83,6 +83,80 @@ describe('which @source lines find nothing', () => {
 
   test('CONTROL — no stylesheet, nothing stale', () => {
     expect(staleSources(join(tmpdir(), 'no-such-folder', 'styles.css'))).toEqual([])
+  })
+})
+
+describe('a stale line for a package whose own stylesheet names its source', () => {
+  const LINE = '@source "./node_modules/@uniweb/kit/src/**/*.{js,jsx}";'
+
+  /** Kit hoisted to the workspace root, as npm leaves it, holding the given stylesheet. */
+  function hoisted(styles, kitStylesheet) {
+    const root = mkdtempSync(join(tmpdir(), 'uw-stale-kit-'))
+    dirs.push(root)
+    const kit = join(root, 'node_modules', '@uniweb', 'kit')
+    mkdirSync(join(kit, 'src'), { recursive: true })
+    writeFileSync(
+      join(kit, 'package.json'),
+      JSON.stringify({ name: '@uniweb/kit', exports: { './theme-tokens.css': './src/theme-tokens.css' } })
+    )
+    writeFileSync(join(kit, 'src', 'theme-tokens.css'), kitStylesheet)
+    mkdirSync(join(root, 'src'))
+    const path = join(root, 'src', 'styles.css')
+    writeFileSync(path, styles)
+    return path
+  }
+
+  const TOKENS = '@import "@uniweb/kit/theme-tokens.css";'
+  const NAMES_ITS_SOURCE = '/* Kit\'s own classes */\n@source "./**/*.{js,jsx}";\n@theme inline {}\n'
+
+  test('⭐ the import reads that folder, so the line loses nothing and nothing is said', () => {
+    expect(staleSources(hoisted(`${TOKENS}\n${LINE}`, NAMES_ITS_SOURCE))).toEqual([])
+  })
+
+  test('⭐ kit behind a link, as pnpm leaves it: the folder and the import meet at the real path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'uw-stale-linked-'))
+    dirs.push(root)
+    const real = join(root, 'node_modules', '.pnpm', 'kit@1', 'node_modules', '@uniweb', 'kit')
+    mkdirSync(join(real, 'src'), { recursive: true })
+    writeFileSync(join(real, 'package.json'), JSON.stringify({ name: '@uniweb/kit', exports: { './theme-tokens.css': './src/theme-tokens.css' } }))
+    writeFileSync(join(real, 'src', 'theme-tokens.css'), NAMES_ITS_SOURCE)
+    mkdirSync(join(root, 'src', 'node_modules', '@uniweb'), { recursive: true })
+    symlinkSync(real, join(root, 'src', 'node_modules', '@uniweb', 'kit'))
+    const path = join(root, 'src', 'styles.css')
+    // A move left this one climbing out of the folder that holds the link.
+    writeFileSync(path, `${TOKENS}\n@source "../node_modules/@uniweb/kit/src/**/*.{js,jsx}";`)
+    expect(staleSources(path)).toEqual([])
+  })
+
+  test('single quotes, and a font imported ahead of it', () => {
+    const css = `@import url('https://fonts.example/x.css');\n@import '@uniweb/kit/theme-tokens.css';\n${LINE}`
+    expect(staleSources(hoisted(css, NAMES_ITS_SOURCE))).toEqual([])
+  })
+
+  test('⭐ an older kit, whose stylesheet names nothing: the loss is real, and said', () => {
+    const stale = staleSources(hoisted(`${TOKENS}\n${LINE}`, '@theme inline {}\n'))
+    expect(stale.map((s) => s.foundAt)).toEqual(['../node_modules/@uniweb/kit/src'])
+  })
+
+  test('a foundation that skips the import: nothing else reads kit, and it is said', () => {
+    expect(staleSources(hoisted(LINE, NAMES_ITS_SOURCE))).toHaveLength(1)
+  })
+
+  test("a stylesheet's comment naming a source reads nothing", () => {
+    const commented = '/* @source "./**/*.{js,jsx}"; */\n@theme inline {}\n'
+    expect(staleSources(hoisted(`${TOKENS}\n${LINE}`, commented))).toHaveLength(1)
+  })
+
+  test('its source does not cover a line for another package', () => {
+    const line = '@source "./node_modules/other/src/**/*.jsx";'
+    const path = hoisted(`${TOKENS}\n${line}`, NAMES_ITS_SOURCE)
+    mkdirSync(join(dirname(dirname(path)), 'node_modules', 'other', 'src'), { recursive: true })
+    expect(staleSources(path)).toHaveLength(1)
+  })
+
+  test('an import that resolves to nothing changes nothing', () => {
+    const css = `@import "@uniweb/none/x.css";\n@import "tailwindcss";\n${LINE}`
+    expect(staleSources(hoisted(css, NAMES_ITS_SOURCE))).toHaveLength(1)
   })
 })
 

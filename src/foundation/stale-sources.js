@@ -13,15 +13,25 @@
  * into `node_modules`. A starter's `./components/**` names a folder a foundation may not have
  * yet, and with no such folder there is nothing to lose.
  *
+ * ⚖️ And only a line that loses something. A stylesheet the foundation imports can name a package's
+ * source itself, relative to itself, which holds wherever the package manager put it. Kit's does,
+ * so a template's line for kit that leads nowhere under npm costs nothing there, and saying the CSS
+ * is missing classes would be false. With a kit from before that, the loss is real: its stylesheet
+ * names nothing, so the line is still reported.
+ *
  * @module @uniweb/build/foundation/stale-sources
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 // `@source not "…"` excludes a path and `@source inline("…")` names no path: neither has a quote
 // right after the keyword.
 const SOURCE = /@source\s+(["'])(.+?)\1/g
+
+// `@import url(…)` is a font on another host, with no quote right after the keyword.
+const IMPORT = /@import\s+(["'])(.+?)\1/g
 
 /** The part of a glob with no pattern in it: the folder it starts from. */
 function fixedPrefix(glob) {
@@ -54,10 +64,40 @@ export function staleSources(stylesPath) {
   for (const [, , source] of withoutComments(css).matchAll(SOURCE)) {
     const missing = fixedPrefix(source)
     if (missing && reachesOut(source) && !existsSync(resolve(dir, missing))) {
-      stale.push({ source, missing, foundAt: foundAbove(dir, missing) })
+      const foundAt = foundAbove(dir, missing)
+      if (!foundAt || !readByAnImport(css, stylesPath, resolve(dir, foundAt))) {
+        stale.push({ source, missing, foundAt })
+      }
     }
   }
   return stale
+}
+
+/**
+ * Does a stylesheet this one imports read that folder already, by a `@source` of its own?
+ *
+ * ⛔ Only a `.css` specifier: `tailwindcss` resolves to the package's JavaScript here, with no
+ * `style` condition to choose its stylesheet.
+ */
+function readByAnImport(css, stylesPath, folder) {
+  const require = createRequire(resolve(stylesPath))
+  // An import resolves to the file itself, and pnpm's copy of a package is behind a link.
+  const real = realpathSync(folder)
+  for (const [, , specifier] of withoutComments(css).matchAll(IMPORT)) {
+    if (!specifier.endsWith('.css')) continue
+    let file, imported
+    try {
+      file = require.resolve(specifier)
+      imported = readFileSync(file, 'utf8')
+    } catch {
+      continue
+    }
+    for (const [, , source] of withoutComments(imported).matchAll(SOURCE)) {
+      const rel = relative(resolve(dirname(file), fixedPrefix(source)), real)
+      if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) return true
+    }
+  }
+  return false
 }
 
 /**
