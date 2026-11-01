@@ -8,8 +8,8 @@
 import { describe, test, expect, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { staleSources, staleSourcesWarning } from '../src/foundation/stale-sources.js'
+import { dirname, join, relative } from 'node:path'
+import { staleSources, staleSourcesWarning, unreadFolders, unreadFoldersWarning } from '../src/foundation/stale-sources.js'
 
 const dirs = []
 afterEach(() => dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })))
@@ -165,4 +165,124 @@ test('the warning names the line and what is missing', () => {
   expect(said).toMatch(/finds nothing/)
   expect(said).toContain('@source "../node_modules/x/**"  (no ../node_modules/x/; it is at ./node_modules/x)')
   expect(staleSourcesWarning([{ source: '../y/**', missing: '../y/', foundAt: null }])).toContain('(no ../y/)')
+})
+
+/**
+ * A foundation's source folder holding these files. A site build and `uniweb dev` read only what
+ * `@source` names, where the foundation's own build finds everything: measured on the `dynamic`
+ * template, 2026-11-01.
+ */
+function writing(css, files = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'uw-unread-'))
+  dirs.push(root)
+  for (const [rel, body] of Object.entries({ 'styles.css': css, ...files })) {
+    mkdirSync(dirname(join(root, rel)), { recursive: true })
+    writeFileSync(join(root, rel), body)
+  }
+  return join(root, 'styles.css')
+}
+
+const TAILWIND = '@import "tailwindcss";\n'
+const SECTIONS = `${TAILWIND}@source "./sections/**/*.{js,jsx}";\n`
+const CARD = 'export default () => <div className="bg-slate-800 p-4" />\n'
+const CARDS = { 'sections/Hero/index.jsx': CARD, 'components/Card.jsx': CARD, 'components/deep/Note.jsx': CARD }
+
+describe('what no @source reads', () => {
+  test("⭐ a template's shape: a stylesheet naming sections, over components that write classes", () => {
+    expect(unreadFolders(writing(SECTIONS, CARDS))).toEqual([
+      { path: 'components', files: 2, line: '@source "./components/**/*.{js,jsx}";' }
+    ])
+  })
+
+  test('the line it gives reads what it found', () => {
+    const [{ line }] = unreadFolders(writing(SECTIONS, CARDS))
+    expect(unreadFolders(writing(`${SECTIONS}${line}\n`, CARDS))).toEqual([])
+  })
+
+  test.each([
+    ['a folder with no glob', '@source "./components";'],
+    ['a glob that may stop short, since this errs toward saying nothing', '@source "./components/*.jsx";'],
+    ['the whole folder', '@source "./";'],
+    ['the whole folder, by a glob', '@source "./**/*.{js,jsx}";'],
+    ['an exclusion, which is a decision', '@source not "./components/**";']
+  ])('CONTROL — it counts as read: %s', (_, line) => {
+    expect(unreadFolders(writing(`${SECTIONS}${line}\n`, CARDS))).toEqual([])
+  })
+
+  test.each([
+    ['className="…"', 'export default () => <div className="flex" />'],
+    ["className={'…'}", "export default () => <div className={'flex'} />"],
+    ['a choice between two', "export default ({ on }) => <div className={on ? 'flex' : 'hidden'} />"],
+    ['cn(…)', "import { cn } from '@uniweb/kit'\nexport const x = cn('flex')"],
+    ["X.className = '…', as a section sets", "const X = () => null\nX.className = 'py-4'\nexport default X"],
+    ["className: '…'", "export const props = { className: 'flex' }"],
+    ['class="…" in a string', 'export const html = \'<div class="flex"></div>\'']
+  ])('%s writes a class', (_, code) => {
+    expect(unreadFolders(writing(SECTIONS, { 'widgets/X.jsx': code })).map((u) => u.path)).toEqual(['widgets'])
+  })
+
+  test.each([
+    ['logic alone', 'export const add = (a, b) => a + b'],
+    ['a class passed along', 'export default ({ className }) => <div className={className} />'],
+    ['a param declared with that name', "export default { params: { className: { type: 'string' } } }"],
+    ['a comment about one', '/**\n * <span class="x">y</span> becomes y\n */\nexport const strip = (html) => html']
+  ])('CONTROL — %s writes none', (_, code) => {
+    expect(unreadFolders(writing(SECTIONS, { 'utils/x.js': code }))).toEqual([])
+  })
+
+  test.each([
+    ['node_modules/@acme/ui/Card.jsx'],
+    ['dist/entry.js'],
+    ['public/embed.js'],
+    ['tests/Card.jsx'],
+    ['__tests__/Card.jsx'],
+    ['components/Card.test.jsx'],
+    ['_entry.generated.js'],
+    ['.cache/Card.jsx']
+  ])("CONTROL — %s isn't the foundation's code", (rel) => {
+    expect(unreadFolders(writing(SECTIONS, { [rel]: CARD }))).toEqual([])
+  })
+
+  test('a file beside the stylesheet is named by itself', () => {
+    expect(unreadFolders(writing(SECTIONS, { 'Shell.jsx': CARD }))).toEqual([
+      { path: 'Shell.jsx', files: 1, line: '@source "./Shell.jsx";' }
+    ])
+  })
+
+  test('TypeScript is code too, and the line then reads it', () => {
+    const [{ line }] = unreadFolders(writing(SECTIONS, { 'components/Card.tsx': CARD }))
+    expect(line).toBe('@source "./components/**/*.{js,jsx,ts,tsx}";')
+  })
+
+  test('a line in a stylesheet this one imports counts, relative to that stylesheet', () => {
+    const files = { ...CARDS, 'styles/tw.css': '@source "../components/**/*.jsx";\n' }
+    expect(unreadFolders(writing(`${SECTIONS}@import "./styles/tw.css";\n`, files))).toEqual([])
+  })
+
+  test('a commented-out line reads nothing', () => {
+    expect(unreadFolders(writing(`${SECTIONS}/* @source "./components/**"; */\n`, CARDS))).toHaveLength(1)
+  })
+
+  test.each([
+    ['its root set to the foundation', '@import "tailwindcss" source("./");\n'],
+    ['no root in any build', '@import "tailwindcss" source(none);\n'],
+    ['no Tailwind', '.card { color: red; }\n']
+  ])('CONTROL — every build agrees with %s', (_, css) => {
+    expect(unreadFolders(writing(css, CARDS))).toEqual([])
+  })
+
+  test('no stylesheet, nothing to say', () => {
+    expect(unreadFolders(join(tmpdir(), 'no-such-folder', 'styles.css'))).toEqual([])
+  })
+
+  test('a relative path to the stylesheet reads the same', () => {
+    const path = writing(SECTIONS, CARDS)
+    expect(unreadFolders(relative(process.cwd(), path))).toEqual(unreadFolders(path))
+  })
+
+  test('the warning gives the lines to add', () => {
+    const said = unreadFoldersWarning(unreadFolders(writing(SECTIONS, CARDS)))
+    expect(said).toContain('a site build and `uniweb dev`')
+    expect(said).toContain('\n  @source "./components/**/*.{js,jsx}";')
+  })
 })

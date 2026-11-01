@@ -19,12 +19,14 @@
  * is missing classes would be false. With a kit from before that, the loss is real: its stylesheet
  * names nothing, so the line is still reported.
  *
+ * A folder no `@source` names is the same loss from the other side: see `unreadFolders`.
+ *
  * @module @uniweb/build/foundation/stale-sources
  */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 // `@source not "…"` excludes a path and `@source inline("…")` names no path: neither has a quote
 // right after the keyword.
@@ -114,6 +116,117 @@ function foundAbove(dir, missing) {
     }
     if (dirname(at) === at) return null
   }
+}
+
+// `@source not "…"` is the author's decision about that path, which is all `unreadFolders` asks.
+const NOT_SOURCE = /@source\s+not\s+(["'])(.+?)\1/g
+
+const USES_TAILWIND = /@import\s+["']tailwindcss/
+
+// `source(…)` on the import sets Tailwind's root: "./" reads the foundation in every build, `none`
+// in no build. Either way a site build and the foundation's own agree.
+const SETS_ITS_ROOT = /@import\s+["']tailwindcss[^"']*["'][^;]*\bsource\(/
+
+// ⚖️ A class written here, not one passed along (`className={className}`), nor a param declared
+// with that name (`className: { type: 'string' }`).
+const WRITES_CLASSES = /\bclassName\s*(?:=\s*\{[^}]*["'`]|[=:]\s*["'`])|\bcn\(|\bclass=["']/
+
+const NOT_THE_FOUNDATIONS_CODE = new Set(['node_modules', 'dist', 'public', 'test', 'tests', '__tests__'])
+
+function codeFiles(dir, found = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || NOT_THE_FOUNDATIONS_CODE.has(entry.name)) continue
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) codeFiles(path, found)
+    else if (/\.[jt]sx?$/.test(entry.name) && !/\.(?:test|spec|generated)\./.test(entry.name)) found.push(path)
+  }
+  return found
+}
+
+/** The paths a stylesheet's `@source` lines start from, and those of the stylesheets it imports. */
+function pathsRead(file, seen = new Set()) {
+  if (seen.has(file)) return []
+  seen.add(file)
+  let css
+  try {
+    css = withoutComments(readFileSync(file, 'utf8'))
+  } catch {
+    return []
+  }
+  const read = [...css.matchAll(SOURCE), ...css.matchAll(NOT_SOURCE)].map((m) => resolve(dirname(file), fixedPrefix(m[2])))
+  const require = createRequire(file)
+  for (const [, , specifier] of css.matchAll(IMPORT)) {
+    // ⛔ Only a `.css` specifier, as in `readByAnImport`.
+    if (!specifier.endsWith('.css')) continue
+    let imported
+    try {
+      imported = require.resolve(specifier)
+    } catch {
+      continue
+    }
+    read.push(...pathsRead(imported, seen))
+  }
+  return read
+}
+
+/**
+ * The code in a foundation that writes classes no `@source` reads.
+ *
+ * Tailwind reads everything under Vite's root, and whatever `@source` names. A foundation's own build
+ * has the foundation for its root, so it finds every class. A site build and `uniweb dev` have the
+ * site: there, `@source` is all that reaches the foundation. So a class only such code uses is in the
+ * foundation's CSS and missing from the site's, with both builds exiting 0, and a page on a host
+ * loading the foundation's own CSS looks right. Measured 2026-11-01 on the `dynamic` template, whose
+ * stylesheet named `./sections` alone: its home page's weather card came out a blank white box, 27
+ * classes short, under `uniweb dev` and in a site build.
+ *
+ * ⚖️ It errs toward saying nothing. Any `@source` starting at or above a file reads that file, whatever
+ * its glob, and a foundation that doesn't import Tailwind by name is not looked at. A word here is a
+ * line to add, whose only cost is a stylesheet naming one more folder.
+ *
+ * @param {string} stylesPath - the foundation's stylesheet; none there, nothing to say
+ * @returns {Array<{ path: string, files: number, line: string }>} each folder (or file) beside the
+ *   stylesheet, how many of its files write classes, and the line that reads it
+ */
+export function unreadFolders(stylesPath) {
+  // ⛔ The real path: an import resolves to one, so a line it holds would never match a file reached
+  // through a link (a macOS temp folder, a workspace dependency).
+  let stylesheet, css
+  try {
+    stylesheet = realpathSync(stylesPath)
+    css = withoutComments(readFileSync(stylesheet, 'utf8'))
+  } catch {
+    return []
+  }
+  if (!USES_TAILWIND.test(css) || SETS_ITS_ROOT.test(css)) return []
+
+  const dir = dirname(stylesheet)
+  const read = pathsRead(stylesheet)
+  const unread = new Map()
+  for (const file of codeFiles(dir)) {
+    if (read.some((path) => file === path || file.startsWith(path + sep))) continue
+    if (!WRITES_CLASSES.test(withoutComments(readFileSync(file, 'utf8')))) continue
+    const [top, ...below] = relative(dir, file).split(sep)
+    const entry = unread.get(top) ?? { path: top, files: 0, isFolder: below.length > 0, typed: false }
+    entry.files++
+    entry.typed ||= /\.tsx?$/.test(file)
+    unread.set(top, entry)
+  }
+  return [...unread.values()]
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map(({ path, files, isFolder, typed }) => ({
+      path,
+      files,
+      line: `@source "./${path}${isFolder ? `/**/*.{js,jsx${typed ? ',ts,tsx' : ''}}` : ''}";`
+    }))
+}
+
+/** What a site build and `uniweb dev` print when `unreadFolders` finds any: it is them that lose the classes. */
+export function unreadFoldersWarning(unread) {
+  return [
+    "[uniweb] The foundation's styles.css names no @source for code that writes classes, so a site build and `uniweb dev` miss any class only that code uses, though the foundation's own build has it. Add:",
+    ...unread.map(({ line }) => `  ${line}`)
+  ].join('\n')
 }
 
 /** A stale line's note: what is missing, and where it is instead when that is known. */

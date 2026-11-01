@@ -24,6 +24,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
+import { unreadFolders, unreadFoldersWarning } from '../foundation/stale-sources.js'
 import {
   generateEntryPoint,
   shouldRegenerateForFile,
@@ -286,6 +287,11 @@ export async function defineSiteConfig(options = {}) {
           siteRoot,
         })
         if (!agreement.ok) console.warn(`\n${agreement.message}\n`)
+
+        // Code the foundation's stylesheet names no `@source` for: here is where its classes go
+        // missing, in a site build and under `uniweb dev`, while its own build has them all.
+        const unread = unreadFolders(join(srcDir, 'styles.css'))
+        if (unread.length) console.warn(unreadFoldersWarning(unread))
       }
     },
 
