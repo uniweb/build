@@ -92,6 +92,56 @@ const docsSite = () => {
 }
 
 describe('folder-mode `.md` pages are pushed as the build makes them', () => {
+  // The level's direct children, in the order given.
+  const levelOf = (list, parent) => list.filter((r) => r.startsWith(`${parent}/`) && !r.slice(parent.length + 1).includes('/'))
+  const guideSite = (pages) => {
+    site('index: home\n')
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('site/pages/home/hero.md', '# Hi\n')
+    w('site/pages/guide/folder.yml', `title: Guide\n${pages ? `pages: ${pages}\n` : ''}`)
+    w('site/pages/guide/start.md', '# Start\n')
+    w('site/pages/guide/cli.md', '# CLI\n')
+    w('site/pages/guide/notes.md', '# Notes\n')
+    w('site/pages/guide/topics/a.md', '# A\n')
+    w('site/pages/guide/more/b.md', '# B\n')
+    w('site/pages/guide/zeta/c.md', '# C\n')
+  }
+
+  it('`pages:` is one order over a level\'s files and its folders, on both lanes', async () => {
+    guideSite('[start, topics, cli, ..., more]')
+    const doc = await siteProjectToDocument(siteDir())
+    expect(routes(doc)).toEqual(await built())
+    expect(levelOf(routes(doc), '/guide')).toEqual([
+      '/guide/start', '/guide/topics', '/guide/cli', '/guide/notes', '/guide/zeta', '/guide/more',
+    ])
+    // A folder's own pages stay with it.
+    expect(routes(doc).indexOf('/guide/topics/a')).toBe(routes(doc).indexOf('/guide/topics') + 1)
+  })
+
+  it('a strict `pages:` lists what it names first, in that order', async () => {
+    guideSite('[topics, cli]')
+    const doc = await siteProjectToDocument(siteDir())
+    expect(routes(doc)).toEqual(await built())
+    expect(levelOf(routes(doc), '/guide').slice(0, 2)).toEqual(['/guide/topics', '/guide/cli'])
+  })
+
+  it('with no `pages:`, a level\'s files come first, then its folders', async () => {
+    guideSite()
+    const doc = await siteProjectToDocument(siteDir())
+    expect(routes(doc)).toEqual(await built())
+    expect(levelOf(routes(doc), '/guide')).toEqual([
+      '/guide/cli', '/guide/notes', '/guide/start', '/guide/more', '/guide/topics', '/guide/zeta',
+    ])
+  })
+
+  it('a file and a folder of one name both stay', async () => {
+    guideSite('[topics, ...]')
+    w('site/pages/guide/topics.md', '# Topics, the file\n')
+    const doc = await siteProjectToDocument(siteDir())
+    expect(routes(doc).filter((r) => r === '/guide/topics')).toHaveLength(2)
+    expect(await built()).toEqual(expect.arrayContaining(['/guide/topics', '/guide/topics/a']))
+  })
+
   it('each file is a page — its one section the file, titled by its first heading', async () => {
     site('index: home\n')
     w('site/pages/home/page.yml', 'title: Home\n')
@@ -209,8 +259,8 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
     expect(docs.title).toEqual({ en: 'Documentation' })
     expect(docs.label).toEqual({ en: 'Docs' })
     expect(docs.layout).toBe('DocsLayout')
-    // The repo's `pages:` orders the route's folders.
-    expect(docs.$children.map((c) => c.$id)).toEqual(['intro', 'start', 'reference'])
+    // The repo's `pages:` orders the route's children: what it lists, then the rest.
+    expect(docs.$children.map((c) => c.$id)).toEqual(['start', 'reference', 'intro'])
   })
 
   it('with no local folder, the route comes from the mount alone', async () => {

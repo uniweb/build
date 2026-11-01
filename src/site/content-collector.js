@@ -807,6 +807,34 @@ export function folderModePageFiles(entries, orderConfig) {
 }
 
 /**
+ * A folder-mode level's children in one order: its `.md` pages, then its folders, each in the order
+ * it already has, with its `pages:` over both, since that is one list. Shared by the build's walk
+ * and the push's. ⛔ Until 2026-11-01 each kept to its own side, so `pages: [a, guides, b]` listed
+ * `a`, `b`, `guides`, with no word about it.
+ *
+ * Sorted by rank, not picked by name, so a file and a folder of one name both stay.
+ *
+ * @template {{ name: string }} T
+ * @param {T[]} files
+ * @param {T[]} folders
+ * @param {{ pages?: Array }} [orderConfig] - the level's own config
+ * @returns {T[]}
+ */
+export function folderModeChildren(files, folders, orderConfig) {
+  const children = [...files, ...folders]
+  const parsed = Array.isArray(orderConfig?.pages) ? parseWildcardArray(orderConfig.pages) : null
+  if (!parsed || parsed.mode === 'all') return children
+  const before = parsed.before.map(extractItemName).filter(Boolean)
+  const after = parsed.after.map(extractItemName).filter(Boolean)
+  const rank = new Map([
+    ...before.map((name, i) => [name, i]),
+    ...after.map((name, i) => [name, before.length + 1 + i])
+  ])
+  const rankOf = (child) => rank.get(child.name) ?? before.length
+  return children.sort((a, b) => rankOf(a) - rankOf(b))
+}
+
+/**
  * Parse numeric prefix from filename (e.g., "1-hero.md" → { prefix: "1", name: "hero" })
  * Supports:
  *   - Simple: "1", "2", "3"
@@ -2147,37 +2175,38 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       indexName = homepageOf(orderConfig) ?? null
     }
 
-    // Add md-file-pages
-    for (const { name, result } of orderedMdPages) {
-      const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
-      assetCollection = mergeAssetCollections(assetCollection, pageAssets)
-      iconCollection = mergeIconCollections(iconCollection, pageIcons)
+    // The level's md-file-pages and subdirectories, in one order
+    for (const child of folderModeChildren(orderedMdPages, orderedFolders, orderConfig)) {
+      if (child.result) {
+        const { name, result } = child
+        const { page, assetCollection: pageAssets, iconCollection: pageIcons } = result
+        assetCollection = mergeAssetCollections(assetCollection, pageAssets)
+        iconCollection = mergeIconCollections(iconCollection, pageIcons)
 
-      // Handle index: promote to parent route
-      if (name === indexName) {
-        page.isIndex = true
-        page.sourcePath = page.route
-        page.route = parentRoute
+        // Handle index: promote to parent route
+        if (name === indexName) {
+          page.isIndex = true
+          page.sourcePath = page.route
+          page.route = parentRoute
+        }
+
+        // Inherit the layout from the folder / site cascade.
+        //
+        // ⭐ THE WHOLE OBJECT, not just the name. `processFileAsPage` (folder-mode
+        // `.md`-as-pages) takes no layout argument, so this post-hoc merge is where
+        // the cascade reaches these pages at all — the threaded path above covers
+        // every other kind. Until 2026-09-09 it patched `name` only, which is why a
+        // folder or site `hide:` never reached a folder-mode page.
+        //
+        // `normalizeLayoutConfig` first so the page's own record has no undefined
+        // keys to shadow an inherited value through the spread.
+        page.layout = mergeLayoutConfig(parentLayout, normalizeLayoutConfig(page.layout))
+
+        pages.push(page)
+        continue
       }
 
-      // Inherit the layout from the folder / site cascade.
-      //
-      // ⭐ THE WHOLE OBJECT, not just the name. `processFileAsPage` (folder-mode
-      // `.md`-as-pages) takes no layout argument, so this post-hoc merge is where
-      // the cascade reaches these pages at all — the threaded path above covers
-      // every other kind. Until 2026-09-09 it patched `name` only, which is why a
-      // folder or site `hide:` never reached a folder-mode page.
-      //
-      // `normalizeLayoutConfig` first so the page's own record has no undefined
-      // keys to shadow an inherited value through the spread.
-      page.layout = mergeLayoutConfig(parentLayout, normalizeLayoutConfig(page.layout))
-
-      pages.push(page)
-    }
-
-    // Process subdirectories
-    for (const folder of orderedFolders) {
-      const { name: entry, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = folder
+      const { name: entry, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = child
       assertRouteFolder(entry, parentRoute)
       const isIndex = entry === indexName
       const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)

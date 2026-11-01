@@ -68,6 +68,7 @@ import {
   resolveMounts,
   layerMountedFolder,
   folderModePageFiles,
+  folderModeChildren,
   rootOrderConfig,
   composeLocalizedRoute,
   isValidSlugSegment,
@@ -790,6 +791,8 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig, media = 
 // says `hidden: true`, slugged by the filename without its numeric prefix — and in the build's
 // order (`folderModePageFiles`). ⛔ Until 2026-10-23 this lane sent none of them and warned instead;
 // a documentation site — folder-mode pages in a mounted repo — published 2 of its 49 pages.
+//
+// Each comes with the name a `pages:` list knows it by.
 async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
   const { siteRoot, siteIndex, sourceLocale, translations, pageFields } = ctx
   const { files } = folderModePageFiles(await readdir(dirPath), orderConfig)
@@ -813,17 +816,19 @@ async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
     })
     const record = withIdentity(data.stable_id || name, data)
     record.page_sections = page.sections.map((s, i) => sectionToRecord(s, i))
-    records.push(record)
+    records.push({ name, record })
   }
   return records
 }
 
 // Recursively build the `pages` tree: each record carries its fields, its inline
 // `page_sections` (page mode only), and its child pages under `$children`. A folder-mode level's
-// own `.md` pages come first, then its folders, as the build lists them.
+// own `.md` pages and its folders are sent in one order, as the build lists them
+// (`folderModeChildren`).
 async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, parentConfig, isRoot, mounts = null) {
   const { siteRoot, siteIndex, sourceLocale, translations, pageFields } = ctx
-  const out = inheritedMode === 'pages' ? await folderModePageRecords(ctx, dirPath, parentConfig, isRoot) : []
+  const files = inheritedMode === 'pages' ? await folderModePageRecords(ctx, dirPath, parentConfig, isRoot) : []
+  const made = []
   const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts)
   // A folder inside a `[...path]` folder can never be reached, and `[dir]` /
   // `[path]` would name a route variable — refused here as the collector refuses
@@ -881,9 +886,9 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     const children = await walkPagesNested(ctx, f.childrenPath, slugPath, f.childMode, f.config, false)
     if (children.length > 0) record.$children = children
 
-    out.push(record)
+    made.push({ name: f.name, record })
   }
-  return out
+  return folderModeChildren(files, made, parentConfig).map((child) => child.record)
 }
 
 // layout_sections: top-level self-nesting, keyed by (layout_name, area) in data —
