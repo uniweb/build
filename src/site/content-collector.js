@@ -942,6 +942,19 @@ function parseWildcardArray(arr) {
 }
 
 /**
+ * A mounted route's pages come from the mount, so a folder beside its local stub is never read. An
+ * author's page simply isn't there, with no error, which is the worst way to learn it.
+ */
+async function warnOfLocalFoldersUnderAMount(localPath, name) {
+  for (const entry of await readdir(localPath)) {
+    if (isIgnoredFolder(entry)) continue
+    if ((await stat(join(localPath, entry))).isDirectory()) {
+      console.warn(`[content-collector] pages/${name}/${entry}/ is not read: pages/${name} is mounted, and a mounted route's pages come from the mount.`)
+    }
+  }
+}
+
+/**
  * A name in an order list that matches no page does nothing, and the list reads as if it worked:
  * every page is still there, in file order. The usual cause is a file's number, which isn't part of
  * its name, so `01-welcome` in a list names no page. Said here, or moving an entry changes nothing
@@ -2015,6 +2028,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const mounted = mountPath ? await readFolderConfig(mountPath, 'pages') : null
     const local = localPath ? await readFolderConfig(localPath, contentMode) : null
     const { dirConfig, dirMode, childMode } = layerMountedFolder(name, local, mounted, contentMode)
+    if (mountPath && localPath) await warnOfLocalFoldersUnderAMount(localPath, name)
 
     const folderLayout = normalizeLayoutConfig(dirConfig.layout)
 

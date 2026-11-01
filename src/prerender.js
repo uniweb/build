@@ -866,6 +866,8 @@ export async function prerenderSite(siteDir, options = {}) {
   }
 
   // Discover all locale content files
+  // Said once more at the end: a build's log is long, and these lines are in the middle of it.
+  const failedIcons = new Set()
   const localeConfigs = await discoverLocaleContents(distDir, defaultSiteContent)
   if (localeConfigs.length > 1) {
     onProgress(`Found ${localeConfigs.length} locales: ${localeConfigs.map(l => l.locale).join(', ')}`)
@@ -996,7 +998,7 @@ export async function prerenderSite(siteDir, options = {}) {
     const buildDataCache = new DataStore()
 
     // Pre-fetch icons for SSR embedding
-    await prefetchIcons(siteContent, uniweb, onProgress)
+    for (const ref of await prefetchIcons(siteContent, uniweb, onProgress) ?? []) failedIcons.add(ref)
 
     // Pre-render each page
     const website = uniweb.activeWebsite
@@ -1270,6 +1272,9 @@ export async function prerenderSite(siteDir, options = {}) {
   })
 
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
+  if (failedIcons.size > 0) {
+    console.warn(`[prerender] These icons could not be fetched and are missing from the pages: ${[...failedIcons].join(', ')}`)
+  }
 
   return {
     pages: renderedFiles.length,
