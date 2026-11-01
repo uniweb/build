@@ -447,8 +447,10 @@ export function foundationBuildPlugin(options = {}) {
       if (_buildingSSRBundle) return
 
       // kit's <Prose> / <Article> with no prose styles in the CSS: correct markup, unstyled page,
-      // and nothing else says so (`foundation/prose-styles.js`). Dev rebuilds included — that is
-      // where a developer sees it first.
+      // and nothing else says so (`foundation/prose-styles.js`). A dev rebuild says it too, when the
+      // foundation is linked at runtime. ⚠️ That is not the default: `uniweb dev` normally bundles the
+      // foundation's source into the site and runs no foundation build, so nothing here reaches it.
+      // A warning for that server belongs in the site's config (`site/config.js`).
       if (!warnedProseWithoutStyles.has(resolvedSrcDir) && proseWithoutStyles(bundle)) {
         warnedProseWithoutStyles.add(resolvedSrcDir)
         console.warn(PROSE_WITHOUT_STYLES_WARNING)
