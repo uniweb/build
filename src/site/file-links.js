@@ -56,12 +56,12 @@ const textOf = (node) =>
 
 /** What `headingId` in `@uniweb/kit` gives a heading. `_contracts/` holds the two together. */
 export function siteAnchor(text) {
-  return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return String(text).normalize('NFC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '-').replace(/^-|-$/g, '')
 }
 
 /** What GitHub gives a heading: punctuation gone, each space a hyphen, so `a — b` is `a--b`. */
 export function githubAnchor(text) {
-  return String(text).toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-')
+  return String(text).normalize('NFC').toLowerCase().trim().replace(/[^\p{L}\p{M}\p{N}\s_-]/gu, '').replace(/\s/g, '-')
 }
 
 /** Each anchor a link might name for a document's headings, and the id it has on the page. */
