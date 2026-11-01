@@ -25,6 +25,22 @@ const GOOD = '---\ntitle: Hello\nslug: hi\n---\nBody text\n'
 // The canonical author mistake: an unquoted value with a colon-space in it.
 const BAD = '---\ntitle: Building: everything hard\n  bad: [unclosed\n---\nBody text\n'
 
+describe('a file saved with Windows line endings', () => {
+  const CRLF = GOOD.replace(/\n/g, '\r\n')
+
+  it('has the same frontmatter', () => {
+    expect(parseFrontmatter(CRLF, 'a.md').frontmatter).toEqual({ title: 'Hello', slug: 'hi' })
+  })
+
+  it('and the same body', () => {
+    expect(parseFrontmatter(CRLF, 'a.md').body).toBe(parseFrontmatter(GOOD, 'a.md').body)
+  })
+
+  it('still stops on a block that does not parse', () => {
+    expect(() => parseFrontmatter(BAD.replace(/\n/g, '\r\n'), 'a.md')).toThrow(/not valid YAML/)
+  })
+})
+
 describe('the success path', () => {
   it('splits frontmatter from body', () => {
     const { frontmatter, body } = parseFrontmatter(GOOD, 'a.md')

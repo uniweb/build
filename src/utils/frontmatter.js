@@ -56,7 +56,10 @@ import { YAML_OPTIONS } from './yaml-schema.js'
  * @throws {Error} when a `---` block is present and does not parse as YAML
  */
 export function parseFrontmatter(raw, filepath) {
-  const text = raw ?? ''
+  // A file saved on Windows has CRLF line endings, so its fence is `---\r\n`. With `---\n` as
+  // the only fence it read as having no frontmatter at all: the opening `---` became a divider and
+  // the block a heading, so every `type:` and `title:` in the file was lost, with no error.
+  const text = (raw ?? '').replace(/\r\n/g, '\n')
   if (!text.trimStart().startsWith('---')) {
     return { frontmatter: {}, body: text, yaml: '' }
   }
