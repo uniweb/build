@@ -40,6 +40,7 @@ import { resolveDefaultLocale, resolvePublishableLocales, validateLanguageConfig
 import { authoredRedirectTarget } from '@uniweb/core/resolve-route'
 import { parentRouteOf } from '@uniweb/core/route-match'
 import { parseFrontmatter } from '../utils/frontmatter.js'
+import { noteSectionFile, rewriteFileLinks } from './file-links.js'
 import { valuesCutByComment } from '../utils/yaml-comment-trap.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
@@ -1234,6 +1235,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // Collect icons referenced in this section
   const iconCollection = collectSectionIcons(section)
 
+  noteSectionFile(section, filePath)
   return { section, assetCollection, iconCollection }
 }
 
@@ -2749,6 +2751,9 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Check if pages directory exists
   if (!existsSync(pagesPath)) {
+    if (mounts) {
+      console.warn(`[content-collector] ${relative(sitePath, pagesPath)}/ doesn't exist, so the site has no pages, and what paths: mounts is not read. Create the folder.`)
+    }
     return {
       config: payloadSiteConfig(siteConfig),
       theme: {
@@ -2863,6 +2868,12 @@ export async function collectSiteContent(sitePath, options = {}) {
   // 2. pages: array in parent config (wildcard-aware, overrides numeric order)
   // 3. order: [array] in parent config (non-strict, backward compat)
   // No global re-sort — collection order is authoritative.
+
+  // Links written as files, now that every file has its page.
+  rewriteFileLinks(pages, {
+    siteRoot: sitePath,
+    warn: (message) => console.warn(`[content-collector] ${message}`)
+  })
 
   // Log asset summary
   const assetCount = Object.keys(assetCollection.assets).length

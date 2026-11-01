@@ -73,6 +73,7 @@ import {
   isValidSlugSegment,
   authoredId,
 } from '../site/content-collector.js'
+import { carrySectionFile, rewriteFileLinks } from '../site/file-links.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder, layoutAreaRoute } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
@@ -584,6 +585,7 @@ function fillPageSectionTypes(pages, type) {
 function sectionToRecord(section, index) {
   const secId = section.stableId || `s${index}`
   const rec = withIdentity(secId, mapSectionData(section))
+  carrySectionFile(section, rec)
   if (Array.isArray(section.subsections) && section.subsections.length > 0) {
     rec.$children = section.subsections.map((c, j) => sectionToRecord(c, j))
   }
@@ -1691,6 +1693,19 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   const sectionType = await siteDefaultSectionType(siteRoot, siteYml)
   fillPageSectionTypes(pages, sectionType)
   fillSectionTypes(layoutSections, sectionType)
+
+  // Links written as files, now that every file has its page: the build's rule (`site/file-links.js`),
+  // so a site reads the same pushed as built.
+  const pagesWithRoutes = []
+  const withRoutes = (list, parentRoute) => {
+    for (const page of list || []) {
+      const route = buildRouteOf(page, parentRoute, sourceLocale)
+      pagesWithRoutes.push({ route, sections: page.page_sections })
+      withRoutes(page.$children, route)
+    }
+  }
+  withRoutes(pages, '/')
+  rewriteFileLinks(pagesWithRoutes, { siteRoot, warn: (message) => console.warn(`[push] ${message}`) })
 
   // Wrap each section's content into its per-locale form (source doc + target
   // structural maps from locales/{locale}.json, or a free-form body override from
