@@ -15,6 +15,7 @@ export { DEV_PORT_ENV, DEV_RECORD_ENV, runningDevServer, stopDevServer } from '.
 // Where a statically built site lives, as its deploy target or author states it (`./site-address.js`).
 export { ORIGIN_ENV, refuseUnreadableAddress } from './site-address.js'
 export { collectSiteContent, mountEntriesOf } from './content-collector.js'
+export { addVersion } from './add-version.js'
 // The favicon a build links when site.yml names none, for `uniweb doctor` (`./favicon.js`).
 export { findPublicFavicon } from './favicon.js'
 // The `agents:` vocabulary lives in @uniweb/projections (which owns the block);

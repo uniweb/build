@@ -40,8 +40,7 @@
 // they ride under their parent section's `$children` (page_sections is
 // self_nesting), via the same `processNesting` the normal build uses.
 //
-// v0 scope (stated, not silent): versioned scopes, and media/asset bytes
-// (favicon/assets — carried out of band). Folder-mode `.md`-as-pages and
+// v0 scope (stated, not silent): media/asset bytes (favicon/assets — carried out of band). Folder-mode `.md`-as-pages and
 // `paths: { pages/<segment> }` mounts are carried since 2026-10-23, read by the
 // build's own rules; a pull leaves those pages alone (`git-authored.js`).
 
@@ -83,6 +82,7 @@ import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uni
 import { emitEntitySyncPackage } from './entity-document.js'
 import { locateSectionMedia, siteTree } from './located-media.js'
 import { mapPageRefs, pageRefIndex, pageRefPages, storedPageRef } from './page-refs.js'
+import { warnOfDuplicatePageIds } from '../site/duplicate-page-ids.js'
 import { readKept, restoreKept, contextKey, loadLocaleTranslations, localizeScalar, localizeScalarList, localizeContentDoc, localesDir, isLocalizedContent, isProseMirrorDoc, plainTextTargets } from './locale-sync.js'
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
@@ -542,8 +542,7 @@ const CATCH_ALL_MARKER = '...path'
 //     `multi` section is read as new (inserted, stored counterpart deleted). See
 //     the IDENTITY note in the file header and `site-diff.js`.
 //
-// v0 deferrals: versioned scopes, and media/asset bytes (favicon/assets, carried
-// out of band). `@`-prefix `nest:` hierarchy, folder-mode `.md`-as-pages and
+// v0 deferral: media/asset bytes (favicon/assets, carried out of band). `@`-prefix `nest:` hierarchy, folder-mode `.md`-as-pages and
 // `paths: { pages/<segment> }` mounts are NOT deferred — each is read here by the
 // build's own rule (folder-mode pages and mounts since 2026-10-23).
 // ===========================================================================
@@ -1725,7 +1724,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
 
   // ⭐ A link to a page is stored by the page's id where it has one (`page-refs.js`), so it
   // survives a rename in an editor, and a pull writes it back as the path a file shows.
-  const refIndex = pageRefIndex(pageRefPages(pages, sourceLocale, buildRouteOf))
+  const refPages = pageRefPages(pages, sourceLocale, buildRouteOf)
+  warnOfDuplicatePageIds(refPages)
+  const refIndex = pageRefIndex(refPages)
   mapPageRefs({ pages, layoutSections }, (ref) => storedPageRef(ref, refIndex))
 
   // Collection DECLARATIONS — the merged collections.yml + site.yml::collections
