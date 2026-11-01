@@ -888,6 +888,9 @@ export async function prerenderSite(siteDir, options = {}) {
   const sitemapEntries = []
   // A redirect stub names its target as the target's own pages do: absolutely, on the site's address.
   const stubCanonical = (target) => absoluteUrl(defaultSiteContent.config?.url, target) || target
+  // With no icon named, a browser asks for `/favicon.ico` on its way through a stub, and logs a 404
+  // on any site whose icon is called something else. A stub is gone at once, so it names none.
+  const STUB_ICON = '<link rel="icon" href="data:,">'
 
   for (const localeConfig of localeConfigs) {
     const { locale, contentPath: localeContentPath, htmlPath, isDefault, routePrefix } = localeConfig
@@ -1042,7 +1045,7 @@ export async function prerenderSite(siteDir, options = {}) {
           ? (website.basePath || '') + location
           : location
         onProgress(`  Redirect ${outputRoute} → ${target}`)
-        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><link rel="canonical" href="${stubCanonical(target)}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${target}">${target}</a></p></body></html>`
+        const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><link rel="canonical" href="${stubCanonical(target)}">${STUB_ICON}<title>Redirecting...</title></head><body><p>Redirecting to <a href="${target}">${target}</a></p></body></html>`
         const outputPath = getOutputPath(distDir, outputRoute)
         await mkdir(dirname(outputPath), { recursive: true })
         await writeFile(outputPath, redirectHtml)
@@ -1075,7 +1078,7 @@ export async function prerenderSite(siteDir, options = {}) {
             routePrefix
           })
           onProgress(`  Auto-redirect ${outputRoute} → ${targetPath}`)
-          const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${targetPath}"><link rel="canonical" href="${stubCanonical(targetPath)}"><title>Redirecting...</title></head><body><p>Redirecting to <a href="${targetPath}">${targetPath}</a></p></body></html>`
+          const redirectHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${targetPath}"><link rel="canonical" href="${stubCanonical(targetPath)}">${STUB_ICON}<title>Redirecting...</title></head><body><p>Redirecting to <a href="${targetPath}">${targetPath}</a></p></body></html>`
           const outputPath = getOutputPath(distDir, outputRoute)
           await mkdir(dirname(outputPath), { recursive: true })
           await writeFile(outputPath, redirectHtml)
