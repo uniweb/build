@@ -112,6 +112,12 @@ function collectReferencedModels(node, acc) {
 // media extension) — so it covers PM image `src`, `background`/`params`, record
 // media fields, and localized `{locale: doc}` maps uniformly and safely (non-media
 // strings like `/data/x.json` never match). Mirrors the build's `walkDataAssets`.
+//
+// ⭐ A TEXT NODE'S TEXT IS WHAT A READER READS, never a reference, even when all of it is a path.
+// ⛔ Until 2026-11-01 both walks took it for one: `/assets/front.jpg` in a code span in a guide was
+// warned about as a missing file, and when the site had that file, the guide's words were replaced
+// with its serve URL.
+const isReadersText = (node, key) => key === 'text' && node.type === 'text'
 
 // Invoke visitor(ref) for every local asset path string anywhere in the document.
 function walkEntityAssets(node, visitor) {
@@ -124,7 +130,9 @@ function walkEntityAssets(node, visitor) {
     return
   }
   if (node && typeof node === 'object') {
-    for (const v of Object.values(node)) walkEntityAssets(v, visitor)
+    for (const [key, v] of Object.entries(node)) {
+      if (!isReadersText(node, key)) walkEntityAssets(v, visitor)
+    }
   }
 }
 
@@ -211,6 +219,7 @@ function rewriteEntityAssets(node, map, ids, bare = null) {
       }
     }
     for (const key of Object.keys(node)) {
+      if (isReadersText(node, key)) continue
       const v = node[key]
       if (typeof v === 'string') { if (map[v]) node[key] = map[v] }
       else rewriteEntityAssets(v, map, ids, bare)

@@ -342,6 +342,33 @@ describe('emitSyncPackages — local-media (Slice 5)', () => {
     expect(json).toContain('/images/banner.png')
   })
 
+  it('a path in a code span is words: not collected, not warned about, not rewritten', async () => {
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\nA cover goes at:\n\n`/images/cover.png`\n')
+    const unnamed = await emitSyncPackages(SITE)
+    expect(unnamed.localAssets).not.toContain('/images/cover.png')
+
+    // With a real reference to the same file beside it, the reference moves and the words stay.
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![cover](/images/cover.png)\n\n`/images/cover.png`\n')
+    const named = await emitSyncPackages(SITE)
+    expect(named.localAssets).toContain('/images/cover.png')
+    const serve = 'https://cdn.example/dist/abc123/base.png'
+    const pkg = await emitSyncPackages(SITE, { assetRewrite: { '/images/cover.png': serve } })
+    const json = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    expect(json).toContain(serve)
+    expect(json).toMatch(/"text":\s*"\/images\/cover\.png"/)
+  })
+
+  it('a link whose words are its own path: the address is a reference, the words are not', async () => {
+    w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\nGet [/files/guide.pdf](/files/guide.pdf).\n')
+    const named = await emitSyncPackages(SITE)
+    expect(named.localAssets).toContain('/files/guide.pdf')
+    const serve = 'https://cdn.example/dist/def456/base.pdf'
+    const pkg = await emitSyncPackages(SITE, { assetRewrite: { '/files/guide.pdf': serve } })
+    const json = readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8')
+    expect(json).toContain(serve)
+    expect(json).toMatch(/"text":\s*"\/files\/guide\.pdf"/)
+  })
+
   it('a ref the assetRewrite map omits is left untouched (no broken URL)', async () => {
     w('pages/1-home/1-hero.md', '---\ntype: Hero\nid: hero\n---\n# Hi\n\n![a](/images/a.png)\n\n![b](/images/b.png)\n')
     const pkg = await emitSyncPackages(SITE, { assetRewrite: { '/images/a.png': 'https://cdn/x/base.png' } })
