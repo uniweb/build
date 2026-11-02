@@ -63,6 +63,17 @@ describe('an image the build copies', () => {
     expect(drawn(built(ref, {}, pathMapping, files))).toMatchObject({ width: 64, height: 32 })
   })
 
+  // Only WebKit turns a WebP by its EXIF, so a size would have the wrong proportions in the others. It
+  // is copied as it is, so the file isn't turned to agree.
+  it('gives no size to a file browsers would draw differently', async () => {
+    const bytes = await solid(64, 32).withMetadata({ orientation: 6 }).webp().toBuffer()
+    const { ref, pathMapping, files } = await copied('turned.webp', bytes)
+    expect(files[ref]).not.toHaveProperty('width')
+    const image = drawn(built(ref, {}, pathMapping, files))
+    expect(image).not.toHaveProperty('width')
+    expect(image).not.toHaveProperty('height')
+  })
+
   it('leaves a size the author wrote, whole or in part', async () => {
     const { ref, pathMapping, files } = await copied('hero.png', await solid(780, 1170).png().toBuffer())
     expect(drawn(built(ref, { width: 300, height: 200 }, pathMapping, files))).toMatchObject({ width: 300, height: 200 })

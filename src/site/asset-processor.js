@@ -15,6 +15,7 @@ import { join, basename, extname, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { mimeFor } from '@uniweb/semantic-parser'
+import { drawnSize, RAN_OUT } from './drawn-size.js'
 
 // Image formats that can be converted to WebP
 const CONVERTIBLE_FORMATS = ['.png', '.jpg', '.jpeg', '.gif']
@@ -68,22 +69,12 @@ async function convertToWebp(input, options = {}) {
 }
 
 /**
- * The size an image draws at, read from the bytes the site serves, or null where the file has none
- * to give: a browser sizes a vector by its own rules, whatever size sharp would rasterize it at, and
- * sharp can't read every format (`.ico`). Quiet, because a file with no size is still copied.
- *
- * @param {Buffer} bytes
- * @param {string} ext - the extension of the file the site serves
- * @returns {Promise<{ width: number, height: number } | null>}
+ * The size of a file the site serves, whole, so running out of it means it has none. Quiet, because a
+ * file with no size is still copied.
  */
-async function drawnSize(bytes, ext) {
-  if (ext === '.svg') return null
-  try {
-    const { autoOrient } = await sharp(bytes).metadata()
-    return autoOrient?.width && autoOrient?.height ? { width: autoOrient.width, height: autoOrient.height } : null
-  } catch {
-    return null
-  }
+function sizeOfFile(bytes) {
+  const size = drawnSize(bytes)
+  return size === RAN_OUT ? null : size
 }
 
 /**
@@ -163,7 +154,7 @@ export async function processAsset(asset, options = {}) {
       processed: true,
       converted,
       size: outputBuffer.length,
-      ...(isImage ? await drawnSize(outputBuffer, outputExt) : null)
+      ...(isImage ? sizeOfFile(outputBuffer) : null)
     }
   } catch (error) {
     console.warn(`[asset-processor] Failed to process ${resolved}:`, error.message)
