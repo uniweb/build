@@ -58,9 +58,32 @@ async function getFileHash(filePath) {
 async function convertToWebp(input, options = {}) {
   const { quality = 80 } = options
 
-  return sharp(input)
+  // ⭐ The picture as the author saw it. The conversion drops the tag saying how to turn a phone's
+  // photo, so it's turned first, and sharp reads one frame unless told otherwise. ⛔ Until 2026-11-02
+  // a portrait photo was drawn on its side, and an animated GIF was its first frame.
+  return sharp(input, { animated: true })
+    .autoOrient()
     .webp({ quality })
     .toBuffer()
+}
+
+/**
+ * The size an image draws at, read from the bytes the site serves, or null where the file has none
+ * to give: a browser sizes a vector by its own rules, whatever size sharp would rasterize it at, and
+ * sharp can't read every format (`.ico`). Quiet, because a file with no size is still copied.
+ *
+ * @param {Buffer} bytes
+ * @param {string} ext - the extension of the file the site serves
+ * @returns {Promise<{ width: number, height: number } | null>}
+ */
+async function drawnSize(bytes, ext) {
+  if (ext === '.svg') return null
+  try {
+    const { autoOrient } = await sharp(bytes).metadata()
+    return autoOrient?.width && autoOrient?.height ? { width: autoOrient.width, height: autoOrient.height } : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -139,7 +162,8 @@ export async function processAsset(asset, options = {}) {
       outputPath,
       processed: true,
       converted,
-      size: outputBuffer.length
+      size: outputBuffer.length,
+      ...(isImage ? await drawnSize(outputBuffer, outputExt) : null)
     }
   } catch (error) {
     console.warn(`[asset-processor] Failed to process ${resolved}:`, error.message)
@@ -159,7 +183,8 @@ export async function processAsset(asset, options = {}) {
  * @param {Object} options - Processing options
  * @param {string} [options.basePath='/'] - Site base path for subdirectory deployments
  * @returns {Promise<Object>} `pathMapping` — original paths to output URLs — `results`, and
- *   `files`: what the build knows of each file it copied, by original path (`name`, `size`, `mime`)
+ *   `files`: what the build knows of each file it copied, by original path (`name`, `size`, `mime`,
+ *   and an image's `width` and `height`)
  */
 export async function processAssets(assetManifest, options = {}) {
   const pathMapping = {}
@@ -181,7 +206,12 @@ export async function processAssets(assetManifest, options = {}) {
     pathMapping[originalPath] = result.output
 
     if (result.processed) {
-      files[originalPath] = { name: basename(asset.resolved), size: result.size, mime: mimeFor(result.outputPath) }
+      files[originalPath] = {
+        name: basename(asset.resolved),
+        size: result.size,
+        mime: mimeFor(result.outputPath),
+        ...(result.width ? { width: result.width, height: result.height } : {})
+      }
       results.processed++
       results.totalSize += result.size || 0
       if (result.converted) {
@@ -267,6 +297,16 @@ export function rewriteContentPaths(content, pathMapping, files = null, made = n
         for (const key of ['name', 'mime', 'size']) {
           if (node.attrs[key] === undefined && file[key] !== undefined) node.attrs[key] = file[key]
         }
+      }
+      // An image the build copied, with no size from its author: its file's, which holds its place
+      // on the page while the file loads, so nothing under it jumps when it arrives (2026-11-02).
+      // Also only on the built output, and never for an icon, which its own `size` sizes. ⚠️ These
+      // reach the `<img>` as attributes, and a stylesheet that sets only the height then leaves the
+      // width at this one: a foundation drawing an image at `h-8` adds `w-auto`.
+      const picture = node.attrs.role === 'icon' ? null : files?.[original]
+      if (picture?.width && node.attrs.width == null && node.attrs.height == null) {
+        node.attrs.width = picture.width
+        node.attrs.height = picture.height
       }
     }
 
