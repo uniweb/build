@@ -1939,6 +1939,17 @@ function determineIndexPage(orderConfig, availableFolders) {
 }
 
 /**
+ * The pages of a folder promoted to `/` are at the root and are still its pages, as a push sends
+ * them, so their parent is the homepage. Their route can't say so: the one parent rule climbs a
+ * route, and `/about` has nothing above it.
+ */
+function notePagesOfHomepage(pages) {
+  for (const page of pages) {
+    if (page.route !== '/' && page.route.lastIndexOf('/') === 0) page.ofHomepage = true
+  }
+}
+
+/**
  * Recursively collect pages from a directory
  *
  * @param {string} dirPath - Directory to scan
@@ -1947,9 +1958,14 @@ function determineIndexPage(orderConfig, availableFolders) {
  * @param {Object} orderConfig - { pages: [...], index: 'name', order: [...] } from parent's config
  * @param {Object} parentFetch - Parent page's fetch config (for dynamic child routes)
  * @param {string} contentMode - 'sections' (default) or 'pages' (md files are child pages)
+ * @param {boolean} [isSiteRoot] - This is the pages directory itself, where a homepage is promoted
+ *   and a `404` folder is the site's not-found page. ⛔ Not `parentRoute === '/'`, which holds one
+ *   level down too, for the pages of a folder promoted to `/`. Until 2026-11-02 that promoted the
+ *   first page of a homepage folder with no content of its own, so a build served it at `/` with no
+ *   page at its own address, while a push kept the folder as a container at `/`, leading to it.
  * @returns {Promise<Object>} { pages, assetCollection, iconCollection, notFound }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, contentMode = 'sections', mounts = null, parentLayout = null) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, contentMode = 'sections', mounts = null, parentLayout = null, isSiteRoot = false) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -2053,7 +2069,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     // Index promotion only happens at the site root — at deeper levels,
     // pages: controls order only and every folder keeps its natural route.
     let indexName = null
-    if (parentRoute === '/') {
+    if (isSiteRoot) {
       indexName = homepageOf(orderConfig) ?? null
     }
 
@@ -2199,19 +2215,20 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       }
     }
 
+    if (parentRoute === '/' && !isSiteRoot) notePagesOfHomepage(pages)
     return { pages, assetCollection, iconCollection, notFound }
   }
 
   // --- Sections mode (default): existing behavior ---
 
   // Determine which page is the index for this level.
-  // Index promotion only happens at the site root (parentRoute === '/') — the
+  // Index promotion only happens at the site root — the
   // homepage needs to live at '/'.  At all other levels, folders keep their
   // natural route (1:1 folder-to-route mapping).  Content-less containers
   // exist in the hierarchy with hasContent: false and auto-redirect at runtime.
   const hasExplicitOrder = orderConfig?.index || (Array.isArray(orderConfig?.pages) && orderConfig.pages.length > 0)
   const hasMdContent = entries.some(e => isMarkdownFile(e))
-  const indexPageName = parentRoute === '/' && !hasMdContent
+  const indexPageName = isSiteRoot && !hasMdContent
     ? determineIndexPage(orderConfig, orderedFolders)
     : null
 
@@ -2264,7 +2281,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
       }
 
-      if (parentRoute === '/' && entry === '404') {
+      if (isSiteRoot && entry === '404') {
         notFound = containerPage
       } else {
         pages.push(containerPage)
@@ -2298,7 +2315,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         }
 
         // Handle 404 page - only at root level
-        if (parentRoute === '/' && entry === '404') {
+        if (isSiteRoot && entry === '404') {
           notFound = page
         } else {
           pages.push(page)
@@ -2336,6 +2353,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     }
   }
 
+  if (parentRoute === '/' && !isSiteRoot) notePagesOfHomepage(pages)
   return { pages, assetCollection, iconCollection, notFound }
 }
 
@@ -2686,7 +2704,7 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Recursively collect all pages
   let { pages, assetCollection, iconCollection, notFound } =
-    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, rootContentMode, mounts, siteLayout)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, rootContentMode, mounts, siteLayout, true)
 
   // The layout sections' assets and icons, beside the pages'.
   assetCollection = mergeAssetCollections(assetCollection, layoutAssets)
@@ -2750,8 +2768,9 @@ export async function collectSiteContent(sitePath, options = {}) {
   }
   const hasPage = (route) => pageRouteMap.has(route)
   for (const page of pages) {
-    const parentRoute = parentRouteOf(page.route, { has: hasPage })
+    const parentRoute = parentRouteOf(page.route, { declared: page.ofHomepage ? '/' : null, has: hasPage })
     page.parent = parentRoute ? pageRouteMap.get(parentRoute).route : null
+    delete page.ofHomepage
   }
 
   const siteFetch = parseFetchConfig(...fetchIn(siteConfig, 'site.yml', 'site'))

@@ -239,13 +239,15 @@ describe('where it goes', () => {
 
     const text = read('pages/docs/v1/start/1-start.md')
     expect(text).toContain('[Guide](page:v1/guide)')
-    expect(text).toContain('[home](page:v1/start)')
+    expect(text).toContain('[home](page:v1)')
     expect(text).toContain('[path](/v1/guide)')
 
     const { pages } = await collectSiteContent(root)
     const routes = pages.map((p) => p.route)
-    expect(routes).toEqual(expect.arrayContaining(['/', '/guide', '/v1/start', '/v1/guide']))
-    expect(pages.find((p) => p.route === '/').title).toBe('Start')
+    expect(routes).toEqual(expect.arrayContaining(['/', '/start', '/guide', '/v1', '/v1/start', '/v1/guide']))
+    // A folder with no content stays a container, leading to its first page, here and in the copy.
+    expect(pages.find((p) => p.route === '/').hasContent).toBe(false)
+    expect(pages.find((p) => p.route === '/v1').hasContent).toBe(false)
   })
 
   it('the whole site, when asked', async () => {
