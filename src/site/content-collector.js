@@ -187,7 +187,10 @@ function refuseVersionsKey(folderYml, pageYml, dirPath) {
   throw new Error(
     `[uniweb] ${file}: \`versions:\` is retired. A version is a folder named like \`v1\`, labelled by the ` +
       `\`title\` in its own page.yml, and the pages beside those folders are the latest. Move the latest ` +
-      `version's pages up beside the folders, and delete this key.`
+      `version's pages up beside the folders, and delete this key. A foundation that draws versions needs ` +
+      `the new \`useVersion\` too: \`versions\`, \`currentVersion\` and \`hierarchy\` are what it reads now, and ` +
+      `\`versionedScopes\` and \`getVersionUrl\` are gone, so a section still reading those fails to render. ` +
+      `See https://docs.uniweb.app/docs/reference/versioning`
   )
 }
 
