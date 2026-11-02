@@ -61,9 +61,10 @@ let _buildingSSRBundle = false
  * Emit dist/runtime-pin.json declaring the @uniweb/runtime version this
  * foundation was built against.
  *
- * ⛔ **NOTHING ENFORCES IT.** `uniweb register` reads the pin and carries it
- * with the foundation (as `info.runtime`), so the floor reaches a party that
- * could act on it — but no lane checks it yet. This header previously said a
+ * ⛔ **THE FRAMEWORK CHECKS NOTHING AGAINST IT.** `uniweb register` reads the pin
+ * and carries it with the foundation (as `info.runtime`), so the floor reaches a
+ * party that can act on it, and what that party does is its own to say. This
+ * header previously said a
  * server-side isolate read the pin to pick which runtime to side-load, and that
  * a "semver resolver" applied the policy. Neither existed, and for a while the
  * pin was written and read by nothing at all. The wrong version had reached
@@ -121,13 +122,15 @@ let _buildingSSRBundle = false
  * core. So this is the designated home for the answer; nothing has asked for the
  * answer yet.
  *
- * ⇒ **The event that gives it a consumer:**
- * when the runtime declares what it supplies — replacing today's `>=` version
+ * ⇒ **What would give it a consumer:**
+ * the runtime declaring what it supplies — replacing today's `>=` version
  * compare, which is a proxy that holds only while the runtime's version number
- * tracks its externals contract — **or** when the publish path starts consulting
- * floors at all, whichever lands first. Ask again then; until one of those, delivering
- * `policy` would add a field compared against a number already known to be a
- * stand-in. **Do not wire it, and do not remove it, without re-opening that.**
+ * tracks its externals contract. Until then, delivering `policy` would add a field
+ * compared against a number already known to be a stand-in.
+ * ⚠️ A publish path consulting floors was the other event named here, and it has
+ * happened: a backend's publish takes the floor into account (the backend's own
+ * measurement, 2026-08-25), and `policy` has not been re-opened since.
+ * **Do not wire it, and do not remove it, without re-opening that.**
  *
  * @param {string} outDir - dist/ directory to write to.
  * @param {string} projectRoot - foundation project root (where package.json lives).
