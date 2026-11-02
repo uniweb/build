@@ -4,13 +4,17 @@
  * Auto-generates the foundation entry point based on discovered components.
  *
  * Exports:
- * - `components` - Object map of component name -> React component
- * - `capabilities` - what the runtime reads of src/main.js (`extractFoundationRuntime`): the
- *   code it calls, referenced from the module, and its data, lean — plus the discovered layouts
- * - `meta` - Per-component runtime metadata extracted from meta.js files
+ * - each section type, by name: `export { Hero, Team }`
+ * - a default export, `{ meta, capabilities, layoutMeta }`:
+ *   - `capabilities` - what the runtime reads of src/main.js (`extractFoundationRuntime`): the
+ *     code it calls, referenced from the module, and its data, lean — plus the discovered layouts
+ *   - `meta` - per-component runtime metadata extracted from meta.js files
+ *   - `layoutMeta` - per-layout runtime metadata (transitions, layers, scroll, defaults)
+ * - what `HOST_SHAREABLE_PACKAGES` names of a package the foundation depends on
  *
- * The `meta` export contains only properties needed at runtime:
+ * `meta` contains only properties needed at runtime (`runtime-schema.js`):
  * - `background` - 'self' opt-out when component handles its own background
+ * - `sticky` - whether the section stays in view unless its author says otherwise
  * - `data` - the `content.data` keys the component declares, with their schema refs
  * - `vars` - the CSS variables the component declares, with their defaults
  * - `defaults` - Param default values
