@@ -884,6 +884,10 @@ export async function prerenderSite(siteDir, options = {}) {
 
   // Pre-render each locale
   const renderedFiles = []
+  // The pages that didn't render, and those left to the browser. Every page has its turn before the
+  // build fails, so the report can name them all.
+  const failedPages = []
+  const skippedPages = []
   // Each locale's sitemap entries, for the pages it wrote: the sitemap lists what this build serves.
   const sitemapEntries = []
   // A redirect stub names its target as the target's own pages do: absolutely, on the site's address.
@@ -1143,8 +1147,13 @@ export async function prerenderSite(siteDir, options = {}) {
             `  Skipped SSG for ${outputRoute} — ${message}. ` +
             `The page will render correctly client-side.`
           )
+          skippedPages.push(outputRoute)
         } else {
-          console.warn(`  Warning: Failed to render ${outputRoute}: ${message}`)
+          // `?.`: a lockfile can hold an older runtime patch than this build's, and the report
+          // shouldn't turn into its own failure then.
+          const section = renderer.failingSection?.(result.page || page, message) ?? null
+          failedPages.push({ route: outputRoute, message, section })
+          onProgress(`  ✗ ${outputRoute}: ${message}`)
         }
         continue
       }
@@ -1231,6 +1240,15 @@ export async function prerenderSite(siteDir, options = {}) {
     }
   }
 
+  // ⛔ A page that didn't render fails the build. Until 2026-11-02 it was a warning, and the build
+  // ended `Workspace build complete!` and exit 0 with the page missing from `dist/`, or an empty
+  // shell at `/`, so `uniweb deploy` went on to ship that. Only a page left to the browser above is
+  // allowed through, since it's written off by what the error says, not by this list.
+  if (failedPages.length > 0) {
+    const total = renderedFiles.length + skippedPages.length + failedPages.length
+    throw new Error(describeFailedPages(failedPages, total))
+  }
+
   // ⭐ The crawler files, from the pages just written (`./site/seo-files.js`). A site's own
   // `public/robots.txt` or `public/sitemap.xml` is its author's, and is left as it is.
   const crawl = crawlerFiles({ content: defaultSiteContent, entries: sitemapEntries })
@@ -1281,8 +1299,42 @@ export async function prerenderSite(siteDir, options = {}) {
 
   return {
     pages: renderedFiles.length,
-    files: renderedFiles
+    files: renderedFiles,
+    skipped: skippedPages,
   }
+}
+
+const BROWSER_ONLY = /\b(window|document|navigator|localStorage|sessionStorage) is not defined/
+
+/**
+ * What a build says about the pages it couldn't render: each thing that went wrong once, where it
+ * happened, and on which pages. One broken section in a layout fails every page, and that's one
+ * thing to fix, not 200 lines to read.
+ *
+ * @param {Array<{ route: string, message: string, section: string|null }>} failed
+ * @param {number} total - The pages the build tried
+ * @returns {string}
+ */
+function describeFailedPages(failed, total) {
+  const groups = new Map()
+  for (const { route, message, section } of failed) {
+    const key = JSON.stringify([message, section])
+    if (!groups.has(key)) groups.set(key, { message, section, routes: [] })
+    groups.get(key).routes.push(route)
+  }
+
+  const lines = [`${failed.length} of ${total} page${total === 1 ? '' : 's'} didn't render, so this build isn't complete.`]
+  for (const { message, section, routes } of groups.values()) {
+    const shown = routes.slice(0, 3).join(', ')
+    const more = routes.length > 3 ? ` and ${routes.length - 3} more` : ''
+    lines.push('', `  ${message}`)
+    lines.push(section ? `    in section type ${section}` : '    in the layout, or something every section shares')
+    lines.push(`    on ${shown}${more}`)
+    if (BROWSER_ONLY.test(message)) {
+      lines.push("    A page is rendered at build time too, where there's no browser: read this inside useEffect.")
+    }
+  }
+  return lines.join('\n')
 }
 
 export default prerenderSite
