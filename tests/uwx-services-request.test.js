@@ -16,7 +16,8 @@ import {
   refuseRetiredServiceKeys,
   unreadableServices,
   refuseUnreadableServices,
-  RENAMED_SERVICES
+  RENAMED_SERVICES,
+  RUNTIME_KEYS
 } from '../src/uwx/services-request.js'
 
 describe('readServicesRequest — what the host is asked', () => {
@@ -441,5 +442,65 @@ describe('sameServiceRow — a service written as a push sent it', () => {
     expect(sameServiceRow({ name: 'search' }, { name: 'search', enabled: false })).toBe(false)
     expect(sameServiceRow({ name: 'backend' }, { name: 'backend', config: { grade: 'pro' } })).toBe(false)
     expect(sameServiceRow({ name: 'backend', config: { grade: 'pro' } }, { name: 'backend', config: { grade: 'pro' } })).toBe(true)
+  })
+})
+
+describe('services.google, which a host serves', () => {
+  it('rides its row with no new code, on and off, and comes back the same', () => {
+    for (const services of [{ google: { id: 'G-ABCD123456' } }, { google: { enabled: false, id: 'G-ABCD123456' } }]) {
+      const rows = statedServices(readServicesRequest(services))
+      expect(rows[0].name).toBe('google')
+      expect(rows[0].config).toEqual({ id: 'G-ABCD123456' })
+      expect(servicesFromDocument({ rows, local: services })).toEqual(services)
+    }
+  })
+
+  it('carries nothing into a built site, which no host serves', () => {
+    expect(runtimeServiceConfig('google', { id: 'G-ABCD123456' })).toBeUndefined()
+    expect(runtimeServicesConfig({ google: { id: 'G-ABCD123456' } })).toEqual({})
+  })
+
+  it('says what to write when an ID is written as the whole entry', () => {
+    expect(unreadableServices({ google: 'G-ABCD123456' })).toEqual([
+      '`services.google` has no address of its own — your host provides it. Write `google: { id: G-ABCD123456 }`.'
+    ])
+  })
+
+  it('refuses an address in the map', () => {
+    expect(unreadableServices({ google: { endpoint: '/x' } })).toEqual([
+      '`services.google` has no address of its own — your host provides it. Remove `endpoint`.'
+    ])
+  })
+})
+
+describe('services.tracking.conversions', () => {
+  const good = [
+    { name: 'signup', link: 'https://app.test/signup' },
+    { name: 'call_office', link: 'tel:+15551234' },
+    { name: 'booked', page: '/thanks' }
+  ]
+
+  it('is an option the site reads, and rides the row and the built site whole', () => {
+    const services = { tracking: { conversions: good } }
+    expect(RUNTIME_KEYS.tracking).toContain('conversions')
+    expect(unreadableServices(services)).toEqual([])
+    expect(runtimeServiceConfig('tracking', services.tracking)).toEqual({ conversions: good })
+    const rows = statedServices(readServicesRequest(services))
+    expect(rows[0].config).toEqual({ conversions: good })
+    expect(servicesFromDocument({ rows, local: services })).toEqual(services)
+  })
+
+  it.each([
+    ['not a list', { name: 'x', page: '/x' }, /is a list/],
+    ['no name', [{ page: '/x' }], /\[0\] needs a `name`/],
+    ['an empty name', [{ name: ' ', page: '/x' }], /\[0\] needs a `name`/],
+    ['neither a link nor a page', [{ name: 'x' }], /\[0\] names one `link` or one `page`/],
+    ['both a link and a page', [{ name: 'x', link: 'https://a.test', page: '/x' }], /names one `link` or one `page`/],
+    ['a page with no leading slash', [{ name: 'x', page: 'thanks' }], /`page` is a path of this site/],
+    ['a link with no scheme', [{ name: 'x', link: '/signup' }], /`link` is a whole address.*use `page`/],
+    ['the second entry wrong', [{ name: 'x', page: '/x' }, { name: 'y' }], /\[1\] names one/]
+  ])('stops on %s', (_label, conversions, message) => {
+    const [problem] = unreadableServices({ tracking: { conversions } })
+    expect(problem).toMatch(message)
   })
 })

@@ -62,7 +62,7 @@ export const RUNTIME_KEYS = Object.freeze({
   search: Object.freeze(['enabled', 'provider', 'endpoint', 'include', 'exclude', 'fields', 'weight']),
   submit: Object.freeze(['enabled', 'endpoint']),
   assistant: Object.freeze(['enabled', 'endpoint']),
-  tracking: Object.freeze(['enabled', 'endpoint', 'emit', 'consent', 'scripts', 'flushIntervalMs', 'debug']),
+  tracking: Object.freeze(['enabled', 'endpoint', 'emit', 'consent', 'scripts', 'flushIntervalMs', 'debug', 'conversions']),
   backend: Object.freeze(['enabled', 'endpoint'])
 })
 
@@ -87,9 +87,15 @@ const RENAMED_SITE_KEYS = Object.freeze({ $devApi: '$devBackend' })
 /**
  * Services only a host provides, which a site never answers itself: no address, no
  * runtime part. A site does not declare its own record provider — a third-party
- * source is a foundation transport.
+ * source is a foundation transport. And a Google tag on a site its host publishes is
+ * the host's to serve; a site it does not publish installs one its own way (`head.html`).
+ *
+ * Each with what to write instead of an address.
  */
-const HOST_ONLY = new Set(['records'])
+const HOST_ONLY = new Map([
+  ['records', () => '`records: true`'],
+  ['google', (value) => `\`google: { id: ${value} }\``]
+])
 
 /**
  * Credential-shaped keys, mirroring the set the delivery edge strips on the reading
@@ -150,7 +156,7 @@ function entryProblem(name, value) {
   if (typeof value === 'string') {
     if (SWITCH_WORDS.test(value.trim())) return switchWord(`services.${name}`, name, value)
     if (!value.trim()) return `\`services.${name}\` is empty — write true, false, an address, or a map.`
-    if (HOST_ONLY.has(name)) return `\`services.${name}\` has no address of its own — your host provides it. Write \`${name}: true\`.`
+    if (HOST_ONLY.has(name)) return `\`services.${name}\` has no address of its own — your host provides it. Write ${HOST_ONLY.get(name)(value.trim())}.`
     return null
   }
   if (!isMap(value)) return `\`services.${name}\` is true, false, an address, or a map — not ${described(value)}.`
@@ -164,6 +170,45 @@ function entryProblem(name, value) {
   }
   if (HOST_ONLY.has(name) && addressOf(value)) {
     return `\`services.${name}\` has no address of its own — your host provides it. Remove \`endpoint\`.`
+  }
+  if (name === 'tracking') return conversionsProblem(value.conversions)
+  return null
+}
+
+/**
+ * What is wrong with `services.tracking.conversions`, or null.
+ *
+ * ⛔ Stopped here rather than ignored, for the reason `entryProblem` stops anything: at a
+ * visitor's browser a misread entry counts nothing, which looks exactly like a site where
+ * nobody converted.
+ *
+ * A link is a whole address because it is compared with where a click goes, and a path of
+ * the site's own is a `page`, whose rule already handles the base and the language.
+ *
+ * @param {*} list
+ * @returns {string|null}
+ */
+function conversionsProblem(list) {
+  if (list === undefined) return null
+  const path = '`services.tracking.conversions`'
+  if (!Array.isArray(list)) {
+    return `${path} is a list, each entry a name and a link or a page: \`- { name: booked, page: /thanks }\`.`
+  }
+  for (const [i, entry] of list.entries()) {
+    const at = `${path}[${i}]`
+    if (!isMap(entry) || typeof entry.name !== 'string' || !entry.name.trim()) {
+      return `${at} needs a \`name\`, which is what your reports show.`
+    }
+    const { link, page } = entry
+    if ((link === undefined) === (page === undefined)) {
+      return `${at} names one \`link\` or one \`page\`.`
+    }
+    if (page !== undefined && (typeof page !== 'string' || !page.startsWith('/'))) {
+      return `${at}: \`page\` is a path of this site, like \`/thanks\` — not ${described(page)}.`
+    }
+    if (link !== undefined && (typeof link !== 'string' || !/^[a-z][a-z0-9+.-]*:/i.test(link.trim()))) {
+      return `${at}: \`link\` is a whole address, like \`https://example.com/signup\` or \`tel:+15551234\` — not ${described(link)}. For a page of this site, use \`page\`.`
+    }
   }
   return null
 }
