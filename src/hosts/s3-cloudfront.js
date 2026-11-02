@@ -374,7 +374,7 @@ function validateDeployConfig(deployConfig, distDir) {
         `One-time setup walkthrough (S3 bucket, CloudFront distribution,`,
         `IAM user, directory-index Function, custom error responses):`,
         ``,
-        `  https://docs.uniweb.app/docs/reference/aws-s3-cloudfront-setup`,
+        `  https://uniweb.io/docs/reference/aws-s3-cloudfront-setup`,
         ``,
         `When done, fill these in deploy.yml next to site.yml:`,
         ``,

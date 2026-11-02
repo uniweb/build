@@ -190,7 +190,7 @@ function refuseVersionsKey(folderYml, pageYml, dirPath) {
       `version's pages up beside the folders, and delete this key. A foundation that draws versions needs ` +
       `the new \`useVersion\` too: \`versions\`, \`currentVersion\` and \`hierarchy\` are what it reads now, and ` +
       `\`versionedScopes\` and \`getVersionUrl\` are gone, so a section still reading those fails to render. ` +
-      `See https://docs.uniweb.app/docs/reference/versioning`
+      `See https://uniweb.io/docs/reference/versioning`
   )
 }
 
