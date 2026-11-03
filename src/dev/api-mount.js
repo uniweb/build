@@ -139,8 +139,10 @@ export function mountDevApi(server, { root }) {
       const response = await handler(new Request(new URL(inner, origin), init))
       res.statusCode = response.status
       response.headers.forEach((value, key) => res.setHeader(key, value))
-      const text = await response.text()
-      res.end(text || undefined)
+      // Bytes, never text: a handler may answer an image or a file, and reading it as
+      // text decodes it as UTF-8, turning every byte above 127 into U+FFFD.
+      const bytes = Buffer.from(await response.arrayBuffer())
+      res.end(bytes.length ? bytes : undefined)
     } catch (err) {
       res.statusCode = 500
       res.setHeader('content-type', 'application/json')

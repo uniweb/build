@@ -73,6 +73,21 @@ describe('mountDevApi', () => {
     expect(JSON.parse(res.body)).toEqual({ path: '/entities', method: 'GET' })
   })
 
+  it('⭐ passes a binary answer through as bytes, not as text decoded as UTF-8', async () => {
+    // An image answered by the handler must reach the browser byte for byte: read
+    // as text, every byte above 127 became U+FFFD.
+    const png = [137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 250, 251, 252]
+    const root = await site(
+      'name: S\n$devBackend: ./mock/api.js\n',
+      `export default () => new Response(new Uint8Array(${JSON.stringify(png)}), { headers: { 'content-type': 'image/png' } })`,
+    )
+    const server = fakeServer()
+    mountDevApi(server, { root })
+    const res = await server.call('/_api/assets/x')
+    expect(res.headers['content-type']).toBe('image/png')
+    expect([...res.body]).toEqual(png)
+  })
+
   it('⭐ strips the mount point, so a handler is not written against one deployment’s prefix', async () => {
     // Where a backend is exposed is the host's business. A handler that saw
     // `/_api/entities` would break the moment a deployment chose another prefix.
