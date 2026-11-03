@@ -71,6 +71,8 @@ import {
   rootOrderConfig,
   composeLocalizedRoute,
   isValidSlugSegment,
+  refuseUrlCharacters,
+  refuseUrlCharactersInTranslations,
   authoredId,
 } from '../site/content-collector.js'
 import { carrySectionFile, rewriteFileLinks } from '../site/file-links.js'
@@ -145,8 +147,9 @@ function localizeRouteSlugs(pages, siteYml, sourceLocale) {
   let ownForm = false
   visit(pages, '/', (record) => { if (record[AUTHORED_SLUG]) ownForm = true })
   if (ownForm) {
-    visit(pages, '/', (record) => {
+    visit(pages, '/', (record, route) => {
       for (const [locale, segment] of Object.entries(record[AUTHORED_SLUG] || {})) {
+        refuseUrlCharacters(segment, `\`slug.${locale}\` of the page at ${route}, \`${segment}\`,`)
         if (carried(locale, segment)) record.slug[locale] = segment
       }
     })
@@ -154,6 +157,7 @@ function localizeRouteSlugs(pages, siteYml, sourceLocale) {
   }
   const map = siteYml?.i18n?.routeTranslations
   if (!isPlainRecord(map)) return
+  refuseUrlCharactersInTranslations(map)
   const segments = new Map() // canonical route → { locale: segment }, as the build composes them
   visit(pages, '/', (record, route, parentRoute) => {
     if (record.is_dynamic || record.is_index) return

@@ -119,6 +119,48 @@ function extractRouteParam(folderName) {
   return match ? match[1] : null
 }
 
+/** `?` starts a URL's query, `#` its fragment and `%` an escape. */
+const URL_CHARACTER = /[?#%]/
+
+/**
+ * A route holds none of a URL's own characters [Diego, 2026-11-02]. Without them a route goes into
+ * a link as it is, whoever writes the link: kit, the runtime, or a foundation's own
+ * `href={page.route}`. With one, the page still answered and the links to it broke:
+ * `/What-is-this?` was linked as `/What-is-this`, and `/C#-guide` as `/C` and a fragment.
+ *
+ * Every place a route is made asks this, on a build and on a push: a folder's name
+ * (`assertRouteFolder`), a page file's name (`folderModePageFiles`), a page's `slug:`
+ * (`buildRouteTranslations`, and the push's `localizeRouteSlugs`) and `site.yml`'s
+ * `i18n.routeTranslations` (`collectSiteContent`, and the push's `localizeRouteSlugs`).
+ *
+ * @param {string} value - the name, slug or route
+ * @param {string} what - says where it is, with the value, e.g. "a folder named `faq?`"
+ */
+export function refuseUrlCharacters(value, what) {
+  const found = typeof value === 'string' ? value.match(URL_CHARACTER) : null
+  if (!found) return
+  throw new Error(
+    `[uniweb] pages: ${what} holds \`${found[0]}\`, and a route can't hold \`?\`, \`#\` or \`%\`: ` +
+      `a URL reads them as its own, so every link to the page would break. Rename it without them.`
+  )
+}
+
+/**
+ * `site.yml`'s `i18n.routeTranslations`, `{ <locale>: { <canonical route>: <its route there> } }`,
+ * refused when a route in it holds `?`, `#` or `%` (`refuseUrlCharacters`).
+ *
+ * @param {*} map
+ */
+export function refuseUrlCharactersInTranslations(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return
+  for (const [locale, table] of Object.entries(map)) {
+    if (!table || typeof table !== 'object' || Array.isArray(table)) continue
+    for (const [canonical, shown] of Object.entries(table)) {
+      refuseUrlCharacters(shown, `\`site.yml\`'s \`i18n.routeTranslations.${locale}\` gives ${canonical} the route \`${shown}\`, which`)
+    }
+  }
+}
+
 /**
  * Folders the build refuses on a route, ruled 2026-09-11 [Diego]:
  *
@@ -139,6 +181,7 @@ function extractRouteParam(folderName) {
  * @param {string} parentRoute - the route of the folder it sits in
  */
 function assertRouteFolder(name, parentRoute) {
+  refuseUrlCharacters(name, `a folder named \`${name}\``)
   if (name === '[dir]' || name === '[path]') {
     const hint = name === '[path]' ? ' Did you mean `[...path]`, which captures a path of any depth?' : ''
     throw new Error(
@@ -743,6 +786,7 @@ export function layerMountedFolder(name, local, mounted, contentMode) {
 export function folderModePageFiles(entries, orderConfig) {
   const items = entries.filter(isMarkdownFile).sort(compareFilenames).map((file) => {
     const { name } = parse(file)
+    refuseUrlCharacters(name, `a page file named \`${file}\``)
     return { file, name: parseNumericPrefix(name).name || name }
   })
   const parsed = Array.isArray(orderConfig?.pages) ? parseWildcardArray(orderConfig.pages) : null
@@ -2812,6 +2856,7 @@ export async function collectSiteContent(sitePath, options = {}) {
   // keeps the canonical (folder-based) route. Strip the build-time `slug` from
   // pages afterward — the runtime hydrates the precomputed map, not per-page
   // slugs (see "Minimize Runtime Payload").
+  refuseUrlCharactersInTranslations(siteConfig?.i18n?.routeTranslations)
   const defaultLocale = resolveDefaultLocale(siteConfig)
   const langValidation = validateLanguageConfig(siteConfig)
   for (const { message } of langValidation.warnings) {
@@ -3064,6 +3109,7 @@ function buildRouteTranslations(pages, { defaultLocale = 'en', languages = null 
         )
         continue
       }
+      refuseUrlCharacters(segment, `\`slug.${locale}\` of the page at ${canonicalRoute}, \`${segment}\`,`)
       if (!isValidSlugSegment(segment)) {
         console.warn(
           `[content-collector] invalid slug '${segment}' for '${canonicalRoute}' (${locale}) — must be a single URL-safe path segment`
