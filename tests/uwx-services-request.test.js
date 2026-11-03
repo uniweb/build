@@ -473,6 +473,55 @@ describe('services.google, which a host serves', () => {
   })
 })
 
+describe('services.meta and services.x, ad platforms a host tells of conversions', () => {
+  const meta = { pixel: '1234567890123456', events: { signup: 'CompleteRegistration', prompt_copied: 'Lead' } }
+  const x = { pixel: 'o1abc', events: { signup: 'tw-o1abc-o2def' } }
+
+  it('ride their rows with no new code, on and off, and come back the same', () => {
+    for (const services of [{ meta }, { x }, { meta: { enabled: false, ...meta } }]) {
+      const rows = statedServices(readServicesRequest(services))
+      const [name] = Object.keys(services)
+      expect(rows[0].name).toBe(name)
+      expect(rows[0].config).toEqual(name === 'meta' ? meta : x)
+      expect(servicesFromDocument({ rows, local: services })).toEqual(services)
+    }
+  })
+
+  it('never send a token typed into the file', () => {
+    const rows = statedServices(readServicesRequest({ meta: { ...meta, token: 'EAAB-not-a-real-token' } }))
+    expect(rows[0].config).toEqual(meta)
+    expect(JSON.stringify(rows)).not.toContain('EAAB')
+  })
+
+  it('carry nothing into a built site, which no host serves', () => {
+    expect(runtimeServiceConfig('meta', meta)).toBeUndefined()
+    expect(runtimeServicesConfig({ meta, x })).toEqual({})
+  })
+
+  it('say what to write when an ID is written as the whole entry, and refuse an address', () => {
+    expect(unreadableServices({ x: 'o1abc' })).toEqual([
+      "`services.x` has no address of its own — your host provides it. Write `x: { pixel: 'o1abc' }`."
+    ])
+    expect(unreadableServices({ meta: { endpoint: '/x' } })).toEqual([
+      '`services.meta` has no address of its own — your host provides it. Remove `endpoint`.'
+    ])
+  })
+
+  it('refuse a pixel YAML read as a number, without repeating digits it may have changed', () => {
+    // 2^53 + 1: YAML reads it, and JavaScript holds 9007199254740992.
+    const problems = unreadableServices({ meta: { pixel: 9007199254740993 } })
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('write it in quotes')
+    expect(problems[0]).not.toMatch(/900719925474099/)
+  })
+
+  it('refuse events that are not names mapped to events', () => {
+    expect(unreadableServices({ meta: { pixel: '1', events: ['signup'] } })[0]).toContain('`services.meta.events` names each conversion')
+    expect(unreadableServices({ x: { pixel: 'o1', events: { signup: '' } } })[0]).toContain('`services.x.events.signup`')
+    expect(unreadableServices({ meta: { pixel: ' ' } })).toEqual(['`services.meta.pixel` is empty.'])
+  })
+})
+
 describe('services.tracking.conversions', () => {
   const good = [
     { name: 'signup', link: 'https://app.test/signup' },

@@ -94,8 +94,19 @@ const RENAMED_SITE_KEYS = Object.freeze({ $devApi: '$devBackend' })
  */
 const HOST_ONLY = new Map([
   ['records', () => '`records: true`'],
-  ['google', (value) => `\`google: { id: ${value} }\``]
+  ['google', (value) => `\`google: { id: ${value} }\``],
+  ['meta', (value) => `\`meta: { pixel: '${value}' }\``],
+  ['x', (value) => `\`x: { pixel: '${value}' }\``]
 ])
+
+/**
+ * Ad platforms a host tells of a site's conversions, server-side: `pixel` is the platform's
+ * public ID for the site, `events` names each conversion the site reports
+ * (`services.tracking.conversions`, a foundation's `block.track('conversion', …)`) to the
+ * platform's own event. The platform's token is a secret, set where secrets are set and never
+ * in this file — `token` here is a credential key, which a push never sends.
+ */
+const AD_PLATFORMS = new Set(['meta', 'x'])
 
 /**
  * Credential-shaped keys, mirroring the set the delivery edge strips on the reading
@@ -172,6 +183,38 @@ function entryProblem(name, value) {
     return `\`services.${name}\` has no address of its own — your host provides it. Remove \`endpoint\`.`
   }
   if (name === 'tracking') return conversionsProblem(value.conversions)
+  if (AD_PLATFORMS.has(name)) return adPlatformProblem(name, value)
+  return null
+}
+
+/**
+ * What is wrong with an ad platform's entry, or null.
+ *
+ * ⛔ A pixel written as a bare number is refused, and not echoed back. YAML reads a long ID as a
+ * number, and an ID past 2^53 — a 16-digit dataset ID can be — is already a different number by
+ * the time this sees it, so repeating it would hand the author the wrong digits. Neither mistake
+ * shows anywhere a visitor goes: the platform hears nothing, which looks like no conversions.
+ *
+ * @param {string} name
+ * @param {object} value
+ * @returns {string|null}
+ */
+function adPlatformProblem(name, { pixel, events }) {
+  if (pixel !== undefined && typeof pixel !== 'string') {
+    return typeof pixel === 'number'
+      ? `\`services.${name}.pixel\` is a number, and YAML can change the last digits of a long one. Copy the ID from the platform again and write it in quotes: \`pixel: '…'\`.`
+      : `\`services.${name}.pixel\` is the platform's ID, in quotes — not ${described(pixel)}.`
+  }
+  if (typeof pixel === 'string' && !pixel.trim()) return `\`services.${name}.pixel\` is empty.`
+  if (events === undefined) return null
+  if (!isMap(events)) {
+    return `\`services.${name}.events\` names each conversion to the platform's event — \`events: { signup: <event> }\` — not ${described(events)}.`
+  }
+  for (const [conversion, event] of Object.entries(events)) {
+    if (typeof event !== 'string' || !event.trim()) {
+      return `\`services.${name}.events.${conversion}\` is the platform's event for \`${conversion}\` — not ${described(event)}.`
+    }
+  }
   return null
 }
 
