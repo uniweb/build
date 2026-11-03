@@ -23,7 +23,7 @@ import {
   deriveCacheKey,
   evaluateQuery,
 } from '@uniweb/core'
-import { recordTitle, recordImage, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
+import { isDynamicRoute, recordTitle, recordImage, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
 import DataStore from '@uniweb/core/datastore'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { createFileTransport } from './site/file-transport.js'
@@ -1031,7 +1031,7 @@ export async function prerenderSite(siteDir, options = {}) {
     for (const page of website.pages) {
       // Skip dynamic template pages — they exist in the content for runtime
       // route matching but can't be pre-rendered (no concrete route)
-      if (page.route.includes(':')) continue
+      if (isDynamicRoute(page.route)) continue
 
       // Build the output route with locale prefix
       // For non-default locales, translate route slugs (e.g., /about → /acerca-de)
