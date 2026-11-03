@@ -553,3 +553,31 @@ describe('services.tracking.conversions', () => {
     expect(problem).toMatch(message)
   })
 })
+
+describe('services.tracking.landing', () => {
+  const keys = ['utm_source', 'utm_campaign', 'utm_content', 'utm_term', 'twclid']
+
+  it('is an option the site reads, and rides the row and the built site whole', () => {
+    const services = { tracking: { landing: keys } }
+    expect(RUNTIME_KEYS.tracking).toContain('landing')
+    expect(unreadableServices(services)).toEqual([])
+    expect(runtimeServiceConfig('tracking', services.tracking)).toEqual({ landing: keys })
+    const rows = statedServices(readServicesRequest(services))
+    expect(rows[0].config).toEqual({ landing: keys })
+    expect(servicesFromDocument({ rows, local: services })).toEqual(services)
+  })
+
+  it.each([
+    ['not a list', 'twclid', /is a list of the landing address's query keys/],
+    ['a key that is not text', ['utm_source', 7], /\[1\] is a query key/],
+    ['an empty key', [' '], /\[0\] is a query key/]
+  ])('stops on %s', (_label, landing, message) => {
+    const [problem] = unreadableServices({ tracking: { landing } })
+    expect(problem).toMatch(message)
+  })
+
+  it('is checked beside conversions, each with its own message', () => {
+    const [problem] = unreadableServices({ tracking: { conversions: [{ name: 'x', page: '/x' }], landing: 'twclid' } })
+    expect(problem).toMatch(/`services.tracking.landing` is a list/)
+  })
+})

@@ -62,7 +62,7 @@ export const RUNTIME_KEYS = Object.freeze({
   search: Object.freeze(['enabled', 'provider', 'endpoint', 'include', 'exclude', 'fields', 'weight']),
   submit: Object.freeze(['enabled', 'endpoint']),
   assistant: Object.freeze(['enabled', 'endpoint']),
-  tracking: Object.freeze(['enabled', 'endpoint', 'emit', 'consent', 'scripts', 'flushIntervalMs', 'debug', 'conversions']),
+  tracking: Object.freeze(['enabled', 'endpoint', 'emit', 'consent', 'scripts', 'flushIntervalMs', 'debug', 'conversions', 'landing']),
   backend: Object.freeze(['enabled', 'endpoint'])
 })
 
@@ -182,7 +182,7 @@ function entryProblem(name, value) {
   if (HOST_ONLY.has(name) && addressOf(value)) {
     return `\`services.${name}\` has no address of its own — your host provides it. Remove \`endpoint\`.`
   }
-  if (name === 'tracking') return conversionsProblem(value.conversions)
+  if (name === 'tracking') return conversionsProblem(value.conversions) || landingProblem(value.landing)
   if (AD_PLATFORMS.has(name)) return adPlatformProblem(name, value)
   return null
 }
@@ -251,6 +251,28 @@ function conversionsProblem(list) {
     }
     if (link !== undefined && (typeof link !== 'string' || !/^[a-z][a-z0-9+.-]*:/i.test(link.trim()))) {
       return `${at}: \`link\` is a whole address, like \`https://example.com/signup\` or \`tel:+15551234\` — not ${described(link)}. For a page of this site, use \`page\`.`
+    }
+  }
+  return null
+}
+
+/**
+ * What is wrong with `services.tracking.landing`, or null: the query keys of the address a
+ * visitor arrived at that each conversion carries. Stopped here for the same reason as a
+ * conversion: at a visitor's browser a misread list carries nothing, and nothing says so.
+ *
+ * @param {*} list
+ * @returns {string|null}
+ */
+function landingProblem(list) {
+  if (list === undefined) return null
+  const path = '`services.tracking.landing`'
+  if (!Array.isArray(list)) {
+    return `${path} is a list of the landing address's query keys a conversion carries: \`[utm_source, utm_campaign]\` — not ${described(list)}.`
+  }
+  for (const [i, key] of list.entries()) {
+    if (typeof key !== 'string' || !key.trim()) {
+      return `${path}[${i}] is a query key, like \`utm_campaign\` — not ${described(key)}.`
     }
   }
   return null
