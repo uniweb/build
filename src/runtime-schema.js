@@ -256,8 +256,8 @@ export function extractLayoutRuntimeSchema(fullMeta) {
   // ⛔ No `areas`: the areas a page renders are its site's `layout/` folder
   // (`Website.getLayoutAreas`), and a layout's list of them is for the editor.
 
-  // `false` is a value, not an absence: it is the documented way a layout opts
-  // out of per-area view transitions. The previous guard was
+  // `false` is a value, not an absence: it is the documented way a layout gives
+  // up its body's wrapper along with any name. The previous guard was
   // `fullMeta.transitions && typeof … === 'object'`, which is false for `false`
   // — so the opt-out was dropped here and never reached the runtime, even
   // though `resolveLayoutTransitions` has always handled it. Same for `layers`.
