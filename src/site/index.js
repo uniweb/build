@@ -15,6 +15,9 @@ export { DEV_PORT_ENV, DEV_RECORD_ENV, runningDevServer, stopDevServer } from '.
 // Where a statically built site lives, as its deploy target or author states it (`./site-address.js`).
 export { ORIGIN_ENV, refuseUnreadableAddress } from './site-address.js'
 export { collectSiteContent, mountEntriesOf } from './content-collector.js'
+// Each mount with what its declaration says — whether a pull may write into it among it — for the
+// CLI, which decides which ones a pull can (`./mount-entries.js`).
+export { mountDeclarationsOf } from './mount-entries.js'
 export { addVersion } from './add-version.js'
 // The favicon a build links when site.yml names none, for `uniweb doctor` (`./favicon.js`).
 export { findPublicFavicon } from './favicon.js'

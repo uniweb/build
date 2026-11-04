@@ -10,7 +10,7 @@
  * The parity test holds the file map to the push: every page the push sends has a place, and each of
  * its sections was read from that place.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, dirname } from 'node:path'
 import yaml from 'js-yaml'
@@ -210,8 +210,11 @@ describe('⭐ a pull writes each page where the files keep it', () => {
     const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
 
     expect(report.held).toEqual([{ route: 'guide/use', uuids: [use.$uuid, use.page_sections[0].$uuid], what: ['a title its first heading does not give'] }])
-    const docs = report.mountedPages.find((p) => p.route === 'docs')
-    expect(docs.uuids).toEqual(expect.arrayContaining([at(doc, '/docs').$uuid, at(doc, '/docs/intro').$uuid]))
+    // A mount's page by page, each with its own items.
+    expect(report.mountedPages).toEqual([
+      { route: 'docs', uuids: [at(doc, '/docs').$uuid] },
+      { route: 'docs/intro', uuids: [at(doc, '/docs/intro').$uuid, at(doc, '/docs/intro').page_sections[0].$uuid] },
+    ])
   })
 
   it('a route the files give two pages for is left alone', async () => {
@@ -226,5 +229,167 @@ describe('⭐ a pull writes each page where the files keep it', () => {
 
     expect(changed(before, snapshot())).toEqual([])
     expect(report.leftAlone).toContain('guide/topics')
+  })
+})
+
+// A site whose docs are a mounted folder it may write: the route's stub says how this site presents
+// them, the mounted folder's config what they are.
+function writableMount({ declare = '\n    path: ../docs-repo\n    writable: true' } = {}) {
+  w('site/site.yml', `name: S\nfoundation: "@acme/base@1.0.0"\nindex: home\npaths:\n  pages/docs:${declare}\n`)
+  w('site/pages/home/page.yml', 'title: Home\n')
+  w('site/pages/home/hero.md', '# Welcome\n')
+  w('site/pages/about/page.yml', 'title: About\n')
+  w('site/pages/about/story.md', '## Our story\n')
+  w('site/pages/docs/folder.yml', 'title: Docs\nlayout: DocsLayout\n')
+  w('docs-repo/folder.yml', 'title: Help\npages:\n  - intro\n  - guide\n  - ...\n')
+  w('docs-repo/intro.md', '# Intro\n\nRead this first,\nthen the guide.\n')
+  w('docs-repo/guide/folder.yml', 'title: Guide\n')
+  w('docs-repo/guide/1-start.md', '# Start\n\nBegin here.\n')
+  w('docs-repo/guide/2-next.md', '# Next\n')
+  w('docs-repo/README.md', '# The repository\n')
+}
+const pullInto = (doc, opts = {}) => siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true, writableMounts: ['docs'], ...opts })
+const config = (rel) => yaml.load(readFileSync(join(ROOT, rel), 'utf8'))
+
+describe('⭐ a writable mount: a pull writes its pages where the push reads them', () => {
+  it('every page the push sends has a place, the mount\'s in the mounted folder', async () => {
+    writableMount()
+    const doc = await siteProjectToDocument(siteDir())
+    const files = sitePageFiles(yaml.load(readFileSync(join(siteDir(), 'site.yml'), 'utf8')), join(siteDir(), 'pages'), { siteRoot: siteDir(), writable: ['docs'] })
+    const seen = []
+    for (const { route, record } of pagesOf(doc)) {
+      const place = files.page(route)
+      expect(place, route).toBeTruthy()
+      seen.push(`${route}:${place.kind}`)
+      for (const section of record.page_sections || []) {
+        const file = sectionFileOf(section)
+        if (place.kind === 'md') expect(file, route).toBe(place.file)
+        else if (place.kind === 'folder') expect(dirname(file), route).toBe(place.dir)
+      }
+    }
+    expect(seen).toEqual(expect.arrayContaining(['docs:folder', 'docs/intro:md', 'docs/guide:folder', 'docs/guide/start:md', 'docs/guide/next:md']))
+    expect(files.page('docs/guide/start').file).toBe(join(realpathSync(ROOT), 'docs-repo/guide/1-start.md'))
+  })
+
+  it('a pull of what was pushed changes no file, in the site or the mounted folder', async () => {
+    writableMount()
+    const before = snapshot()
+    pullInto(await siteProjectToDocument(siteDir()))
+    expect(changed(before, snapshot())).toEqual([])
+  })
+
+  it('⭐ an app edit to a mounted page comes back into its file, which the next push sends', async () => {
+    writableMount()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    const intro = at(doc, '/docs/intro')
+    intro.page_sections[0].content = { en: { type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Intro' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Read this first, then the guide, then the rest.' }] },
+    ] } }
+    const report = pullInto(doc)
+
+    expect(changed(before, snapshot())).toEqual(['docs-repo/intro.md'])
+    expect(readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')).toContain('then the guide, then the rest.')
+    expect(report.mountedPages).toEqual([])
+    const again = await siteProjectToDocument(siteDir())
+    expect(JSON.stringify(at(again, '/docs/intro').page_sections[0].content)).toContain('then the rest.')
+  })
+
+  it('a page added in the app is a new file in the mounted folder, in its form', async () => {
+    writableMount()
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/docs').$children.push({
+      $id: 'faq', slug: { en: 'faq' }, mode: 'page', title: { en: 'FAQ' },
+      page_sections: [{ $id: 'faq', stable_id: 'faq', type: 'Section', content: { en: { type: 'doc', content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'FAQ' }] },
+      ] } } }],
+    })
+    pullInto(doc, { sectionType: 'Section' })
+
+    expect(readFileSync(join(ROOT, 'docs-repo/faq.md'), 'utf8')).toContain('# FAQ')
+    expect(existsSync(join(siteDir(), 'pages/docs/faq'))).toBe(false)
+    expect(await built()).toContain('/docs/faq')
+  })
+
+  it('a page deleted in the app goes from the mounted folder, where this copy saw the backend hold it', async () => {
+    writableMount()
+    const origin = 'https://backend.test'
+    const items = Object.fromEntries(['docs', 'docs/intro', 'docs/guide', 'docs/guide/start', 'docs/guide/next'].map((r, i) => [`pages/${r}/${['docs', 'docs/guide'].includes(r) ? 'folder' : 'page'}.yml`, `u-${i}`]))
+    w('site/sync.json', JSON.stringify({ backends: { [origin]: { items } } }))
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/docs/guide').$children = at(doc, '/docs/guide').$children.filter((c) => c.$id !== 'next')
+    pullInto(doc, { backend: origin })
+
+    expect(existsSync(join(ROOT, 'docs-repo/guide/2-next.md'))).toBe(false)
+    expect(existsSync(join(ROOT, 'docs-repo/guide/1-start.md'))).toBe(true)
+    expect(existsSync(join(ROOT, 'docs-repo/README.md'))).toBe(true)
+  })
+
+  it('the mount\'s pages reordered in the app say it in the `pages:` the mounted folder keeps', async () => {
+    writableMount()
+    const doc = await siteProjectToDocument(siteDir())
+    const docs = at(doc, '/docs')
+    docs.$children = [...docs.$children].reverse() // guide, intro
+    pullInto(doc)
+
+    expect(config('docs-repo/folder.yml').pages).toEqual(['guide', 'intro', '...'])
+    expect(readFileSync(join(siteDir(), 'pages/docs/folder.yml'), 'utf8')).toBe('title: Docs\nlayout: DocsLayout\n')
+    const again = await siteProjectToDocument(siteDir())
+    expect(at(again, '/docs').$children.map((c) => c.$id)).toEqual(['guide', 'intro'])
+  })
+
+  it('⭐ the route\'s own settings go to the file that says each — a new one by what it is', async () => {
+    writableMount()
+    const doc = await siteProjectToDocument(siteDir())
+    const docs = at(doc, '/docs')
+    docs.title = { en: 'Documentation' } // both files say a title, and the stub's wins
+    docs.layout = 'Wide' // the stub's
+    docs.description = { en: 'All of it.' } // neither says one: what the content is, the mounted folder's
+    pullInto(doc)
+
+    expect(config('site/pages/docs/folder.yml')).toEqual({ title: 'Documentation', layout: 'Wide' })
+    expect(config('docs-repo/folder.yml')).toEqual({ title: 'Help', description: 'All of it.', pages: ['intro', 'guide', '...'] })
+    const again = await siteProjectToDocument(siteDir())
+    expect(at(again, '/docs')).toMatchObject({ title: { en: 'Documentation' }, layout: 'Wide', description: { en: 'All of it.' } })
+  })
+
+  it('the site\'s pages reordered with the mount\'s route among them: its place is the stub\'s to say', async () => {
+    writableMount()
+    const doc = await siteProjectToDocument(siteDir())
+    const docs = doc.pages.find((p) => p.$id === 'docs')
+    doc.pages = [docs, ...doc.pages.filter((p) => p !== docs)]
+    const order = doc.pages.map((p) => p.$id)
+    pullInto(doc)
+
+    expect(config('site/pages/docs/folder.yml').order).toBe(1)
+    expect(config('docs-repo/folder.yml').order).toBeUndefined()
+    const again = await siteProjectToDocument(siteDir())
+    expect(again.pages.map((p) => p.$id)).toEqual(order)
+  })
+
+  it('a route the app gave another form is held whole, and said', async () => {
+    writableMount()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/docs').mode = 'page'
+    at(doc, '/docs/intro').title = { en: 'Changed' }
+    const report = pullInto(doc)
+
+    expect(changed(before, snapshot())).toEqual([])
+    expect(report.held.map((h) => [h.route, h.what])).toEqual([['docs', ['a page where its files keep a folder']]])
+  })
+
+  it('⛔ P4 — a mount the caller does not name, or the site does not declare writable, is left alone', async () => {
+    for (const [declare, writableMounts] of [['\n    path: ../docs-repo\n    writable: true', []], [' ../docs-repo', ['docs']]]) {
+      rmSync(ROOT, { recursive: true, force: true })
+      writableMount({ declare })
+      const before = snapshot()
+      const doc = await siteProjectToDocument(siteDir())
+      at(doc, '/docs/intro').page_sections[0].content = { en: para('Changed in the app.') }
+      const report = pullInto(doc, { writableMounts })
+      expect(changed(before, snapshot())).toEqual([])
+      expect(report.mountedPages.map((p) => p.route)).toEqual(['docs', 'docs/intro', 'docs/guide', 'docs/guide/start', 'docs/guide/next'])
+    }
   })
 })

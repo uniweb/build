@@ -1,4 +1,4 @@
-// ⭐ A PULL WRITES THE CHANGE, NOT A NEW RENDERING OF THE FILE (`kb` pulling-into-mounted-folders, P6).
+// ⭐ A PULL WRITES THE CHANGE, NOT A NEW RENDERING OF THE FILE.
 // A changed body keeps the author's text for every top-level block the backend's document still holds,
 // and takes the writer's form only for the blocks it changed, added or moved; a removed one goes.
 //
