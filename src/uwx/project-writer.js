@@ -19,6 +19,7 @@ import { proseMirrorToMarkdown, serializeFrontmatter } from '@uniweb/content-wri
 import { markdownToProseMirror } from '@uniweb/content-reader'
 import { parseFrontmatter } from './entity-source.js'
 import { canonicalJson, sameMarkdownDocument } from './same-content.js'
+import { spliceBody } from './body-splice.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -221,7 +222,9 @@ export function writeSectionFile({ filePath, content, params, declaration, reser
   // matched what a push had sent from it, and every pull rewrote it — trailing blank lines and all.
   const keepsBody = !content || sameMarkdownDocument(existingBody || '', content)
   if (existing && keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
-  const body = keepsBody ? authoredBody : proseMirrorToMarkdown(content)
+  // ⭐ A changed body is written block by block: what the change left keeps the author's text, and only
+  // the blocks it changed take the writer's form (`body-splice.js`) — whole only when that cannot be said.
+  const body = keepsBody ? authoredBody : (spliceBody(existingBody || '', content) ?? proseMirrorToMarkdown(content))
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))
 }
 

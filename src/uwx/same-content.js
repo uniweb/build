@@ -34,7 +34,7 @@ export function sameMarkdownDocument(markdown, doc) {
 // A document without the attributes that only restate a default: an inset's `embedKind: 'visual'`,
 // which the parser writes and the pull's re-inlining (retired 2026-09-28) left out — so a body holding
 // an inset never compared as unchanged (measured 2026-09-26 on the `marketing` template's hero).
-function withoutDefaults(doc) {
+export function withoutDefaults(doc) {
   return JSON.parse(JSON.stringify(doc), (_, v) => {
     if (v?.type !== 'inset_ref' || v.attrs?.embedKind !== 'visual') return v
     const { embedKind: _visual, ...attrs } = v.attrs
