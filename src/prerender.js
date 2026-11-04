@@ -25,6 +25,7 @@ import {
 } from '@uniweb/core'
 import { isDynamicRoute, recordTitle, recordImage, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
 import DataStore from '@uniweb/core/datastore'
+import { DEFAULT_ICON_BASE } from '@uniweb/core/icon-corpus'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
 import { createFileTransport } from './site/file-transport.js'
 import { shouldSplitContent } from './site/split-content.js'
@@ -685,6 +686,81 @@ function dedupeByAddress(entries) {
   return out
 }
 
+/**
+ * ⭐ THE ICON CORPUS, ASKED BY THE DATA STEP ONCE PER ICON AND NEVER WAITED FOR TWICE. The step asks
+ * for a page's icons on every page, skips the ones the graph holds and waits a moment for the rest
+ * (`loadPageData`, `icons: true`), so an icon that arrived is asked once. One that did not, a name
+ * the corpus lacks or a request the network drops, would be asked again by every page naming it,
+ * and a dropped one costs each of those pages the whole wait. So:
+ *
+ * - each icon address's answer is kept for the build, every locale's pages included, and a later
+ *   page gets it at once, a failure as well;
+ * - a request from an earlier page still on its way when the next page starts says the corpus
+ *   answers slower than the step waits, so the rest of the build asks it nothing and says so once.
+ *   Those icons stay on the browser's path, as every such icon was before the step asked for them.
+ *
+ * Measured 2026-11-04 with every icon request dropped, each failing at Node's 10 s connect timeout:
+ * a project of 13 pages built in 44 s with 104 icon requests while the step asked for icons this
+ * way, and in 26 s with 52 since, where it took 23 s and 38 when the step asked for none; one of 288
+ * pages in 24 languages, 450 s and 3,540 requests, then 246 s and 272, where none took 245 s and
+ * 264. What is left is the site-wide prefetch's, which waits once for each language. Built on a
+ * working network, both drew every icon either way, in the same time.
+ *
+ * @param {string} base - the icon corpus the step asks, as `iconUrl` builds its addresses
+ * @param {Function} warn - told once, when the corpus stops being asked
+ */
+function iconAsker(base, warn) {
+  const prefix = `${String(base).replace(/\/+$/, '')}/`
+  const answers = new Map()
+  // ⭐ What is still on its way is abandoned when the corpus stops being asked, and when the build
+  // is done: a request a page stopped waiting for otherwise holds the build open until the
+  // network gives up on it.
+  const abandon = new AbortController()
+  let onTheirWay = 0
+  let silent = false
+  const answered = (entry, url) => {
+    if (!entry.answer) throw new TypeError(`[prerender] no answer for ${url}`)
+    return new Response(entry.answer.body || null, { status: entry.answer.status })
+  }
+  return {
+    /** Abandons what is still on its way: the build has drawn its last page. */
+    done() {
+      abandon.abort()
+    },
+    /** The transport for one page's step, over the build's own (`createFileTransport`). */
+    forPage(transport) {
+      if (onTheirWay > 0 && !silent) {
+        silent = true
+        abandon.abort()
+        warn(`The icon corpus at ${base} is answering slower than a page waits; the rest of this build leaves the icons its pages name beyond their content for the browser to fetch.`)
+      }
+      return async function stepTransport(input, init) {
+        const url = typeof input === 'string' ? input : input?.url
+        if (typeof url !== 'string' || !url.startsWith(prefix)) return transport(input, init)
+        const known = answers.get(url)
+        if (known) {
+          if (known.answer === undefined) throw new TypeError(`[prerender] ${url} is still on its way`)
+          return answered(known, url)
+        }
+        if (silent) throw new TypeError(`[prerender] not asked, the icon corpus is not answering: ${url}`)
+        const entry = { answer: undefined }
+        answers.set(url, entry)
+        onTheirWay++
+        try {
+          const signal = init?.signal ? AbortSignal.any([init.signal, abandon.signal]) : abandon.signal
+          const response = await transport(input, { ...init, signal })
+          entry.answer = { status: response.status, body: response.ok ? await response.text() : null }
+        } catch {
+          entry.answer = null
+        } finally {
+          onTheirWay--
+        }
+        return answered(entry, url)
+      }
+    },
+  }
+}
+
 /** The icons a page's HTML already carries in `__ICON_CACHE__`, by key; none when it carries none. */
 function embeddedIcons(html) {
   const script = html.match(/<script[^>]*id="__ICON_CACHE__"[^>]*>([\s\S]*?)<\/script>/)
@@ -886,6 +962,8 @@ export async function prerenderSite(siteDir, options = {}) {
   // Discover all locale content files
   // Said once more at the end: a build's log is long, and these lines are in the middle of it.
   const failedIcons = new Set()
+  // The data step's way to the icon corpus, for every locale (`iconAsker`): made with the first.
+  let icons = null
   const localeConfigs = await discoverLocaleContents(distDir, defaultSiteContent)
   if (localeConfigs.length > 1) {
     onProgress(`Found ${localeConfigs.length} locales: ${localeConfigs.map(l => l.locale).join(', ')}`)
@@ -1027,6 +1105,10 @@ export async function prerenderSite(siteDir, options = {}) {
 
     // Pre-render each page
     const website = uniweb.activeWebsite
+    icons ??= iconAsker(website.config?.icons?.base || DEFAULT_ICON_BASE, (message) => {
+      console.warn(`[prerender] ${message}`)
+      onProgress(`  ${message}`)
+    })
 
     /**
      * ⭐ A PAGE RENDERS AGAINST WHAT IT CARRIES — the entries its HTML embeds, which are all the
@@ -1125,14 +1207,15 @@ export async function prerenderSite(siteDir, options = {}) {
       const asked = await loadPageData({
         website,
         route: page,
-        fetch: fileTransport,
+        fetch: icons.forPage(fileTransport),
         prerender: 'author',
         cache: buildDataCache,
         // ⭐ The icons the site names for this page beyond the ones `prefetchIcons` already holds,
         // the image icons of the whole site's content: a link's icon, a param's, a tagged data
-        // block's, a record's. One the graph holds is not asked again, so a build fetches each
-        // icon once. ⛔ Until 2026-11-04 this said `false`, and every such icon was a blank box in
-        // the built page until the browser fetched it.
+        // block's, a record's. One the graph holds is not asked again, and the transport keeps
+        // the answer to every other (`iconAsker`), so a build asks for each icon once.
+        // ⛔ Until 2026-11-04 this said `false`, and every such icon was a blank box in the built
+        // page until the browser fetched it.
         icons: true,
       })
       // Filed under this page, the way a route-bound view always has been: `scopeFetchedData`
@@ -1314,6 +1397,8 @@ export async function prerenderSite(siteDir, options = {}) {
     onProgress,
   })
 
+  // Every page is drawn: what the data step still waits on from the icon corpus is abandoned.
+  icons?.done()
   onProgress(`\nPre-rendered ${renderedFiles.length} pages across ${localeConfigs.length} locale(s)`)
   if (failedIcons.size > 0) {
     console.warn(`[prerender] These icons could not be fetched and are missing from the pages: ${[...failedIcons].join(', ')}`)
