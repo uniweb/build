@@ -77,9 +77,6 @@
         "og_title": [
           "site.yml::seo"
         ],
-        "paths": [
-          "site.yml::paths"
-        ],
         "placeholders": [
           "site.yml::placeholders"
         ],

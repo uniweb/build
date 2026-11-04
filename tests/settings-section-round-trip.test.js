@@ -100,9 +100,12 @@ describe('the info / settings split', () => {
 
     expect(Object.keys(doc.settings).sort()).toEqual([
       'agents', 'base', 'build', 'default_language', 'fetch', 'fetcher',
-      'head_html', 'keywords', 'languages', 'layout', 'paths', 'placeholders',
+      'head_html', 'keywords', 'languages', 'layout', 'placeholders',
       'publish_languages', 'seo', 'theme',
     ])
+    // ⛔ Where the project keeps its files stays in the project: `site.yml` above declares `paths`,
+    // and no document carries it (sent until 2026-11-04).
+    expect(doc.settings).not.toHaveProperty('paths')
     // …and where the deployment takes it, the touch icon beside them.
     const taken = await siteProjectToDocument(fullSite(), TAKES_ALL)
     expect(Object.keys(taken.settings).filter((k) => !(k in doc.settings))).toEqual(['touch_icon'])
@@ -153,7 +156,7 @@ describe('⛔ THE ROUND-TRIP LAW — push → pull → push is a fixed point', (
     // test above would compare two empty objects and pass. Assert the cycle actually
     // carried something substantial.
     const first = await siteProjectToDocument(fullSite(), TAKES_ALL)
-    expect(Object.keys(first.settings).length).toBeGreaterThanOrEqual(16)
+    expect(Object.keys(first.settings).length).toBeGreaterThanOrEqual(15)
     expect(first.services.length).toBe(4)
     expect(first.settings.theme).toEqual({ colors: { primary: '#000' } })
     expect(first.settings.touch_icon).toBe('/touch-icon.png')

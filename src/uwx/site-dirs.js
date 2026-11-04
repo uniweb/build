@@ -16,8 +16,8 @@ import { join, resolve } from 'node:path'
  * current.
  *
  * ⭐ Reading `site.yml` rather than the document is the fix, not a detour: it is the
- * file both readers use, and the pull writes the document's `settings.paths` into it
- * before it places a single page.
+ * file both readers use. And it is the project's own: no document carries `paths` since
+ * 2026-11-04, so a pull never moves where a project keeps its files.
  *
  * @param {string} siteRoot
  * @param {object|null} siteYml - the parsed `site.yml`

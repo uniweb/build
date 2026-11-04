@@ -1363,7 +1363,9 @@ function settingsNested(siteYml, { headHtml, themeYml, sourceLocale, translation
   setIf(settings, 'head_html', headHtml)
   setIf(settings, 'fetcher', siteYml.fetcher)
   setIf(settings, 'build', siteYml.build)
-  setIf(settings, 'paths', siteYml.paths)
+  // ⛔ Not `paths`: where a project keeps its files is the project's, and a pull reads it from the
+  // project's own `site.yml`. Sent until 2026-11-04, it reached a clone, which wrote its pages where
+  // another copy kept them — outside itself, pruning what was there.
   setIf(settings, 'base', siteYml.base)
 
   // Locale configuration.

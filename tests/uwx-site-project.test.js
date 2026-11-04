@@ -1710,29 +1710,52 @@ describe('pages and layout land where site.yml::paths puts them', () => {
     'chrome/header.md': '# Nav\n',
   }
 
-  it('a clone of a relocated site writes into the declared directories, builds, and pushes back unchanged', async () => {
+  // ⭐ WHERE A PROJECT KEEPS ITS FILES IS ITS OWN (2026-11-04). The author's `paths:` does not ride the
+  // wire, so a clone keeps its pages where a new project keeps them. ⛔ Until then it took the
+  // author's: the clone wrote into `content/` and `chrome/` here — and, for a `paths.pages` that
+  // left the site, outside itself, pruning what was there (the case below).
+  it('a clone of a relocated site writes into its own pages/ and layout/, builds, and pushes back unchanged', async () => {
     const src = join(dir, 'src')
     put(src, relocated)
     const doc = await siteProjectToDocument(src)
-    expect(doc.settings.paths).toEqual({ pages: 'content', layout: 'chrome' })
+    expect(doc.settings?.paths).toBeUndefined()
 
     // What `clone` does: scaffold a bare site.yml, then run the pull projection.
     const dest = join(dir, 'dest')
     put(dest, { 'site.yml': "name: S\nfoundation: '@a/base@1.0.0'\n" })
     siteContentDocumentToProject({ document: doc, siteRoot: dest, prune: true })
 
-    expect(existsSync(join(dest, 'content/home/hero.md'))).toBe(true)
-    expect(existsSync(join(dest, 'content/about/intro.md'))).toBe(true)
-    expect(existsSync(join(dest, 'chrome/header.md'))).toBe(true)
-    // CONTROL — nothing under the default names, which is where the stale read wrote.
-    expect(existsSync(join(dest, 'pages'))).toBe(false)
-    expect(existsSync(join(dest, 'layout'))).toBe(false)
+    expect(existsSync(join(dest, 'pages/home/hero.md'))).toBe(true)
+    expect(existsSync(join(dest, 'pages/about/intro.md'))).toBe(true)
+    expect(existsSync(join(dest, 'layout/header.md'))).toBe(true)
+    // CONTROL — nothing where the author keeps them, and no `paths:` in the clone's site.yml.
+    expect(existsSync(join(dest, 'content'))).toBe(false)
+    expect(existsSync(join(dest, 'chrome'))).toBe(false)
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).paths).toBeUndefined()
 
-    // The build reads the same place: before the fix this clone built ZERO pages.
     const built = await collectSiteContent(dest, {})
     expect(built.pages.filter((p) => p.hasContent)).toHaveLength(2)
     // And a push from the clone is the push that made it.
     expect(await siteProjectToDocument(dest)).toEqual(doc)
+  })
+
+  it('a document that still carries `settings.paths` writes and prunes nothing outside the project', () => {
+    // As a backend may still hold it from a push before 2026-11-04: the author's pages outside their site.
+    const docOf = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+    const document = {
+      info: { name: { en: 'S' }, foundation: '@a/base@1.0.0' },
+      settings: { paths: { pages: '../content/pages' } },
+      pages: [{ $id: 'home', slug: 'home', mode: 'page', stable_id: 'home', page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') }] }],
+    }
+    // The cloner's machine holds an unrelated folder where the author's path points.
+    put(dir, { 'clone/site.yml': "name: S\nfoundation: '@a/base@1.0.0'\n", 'content/pages/unrelated/notes.md': '# Not a page of this site\n' })
+
+    siteContentDocumentToProject({ document, siteRoot: join(dir, 'clone'), prune: true })
+
+    expect(existsSync(join(dir, 'clone/pages/home/hero.md'))).toBe(true)
+    expect(existsSync(join(dir, 'content/pages/unrelated/notes.md'))).toBe(true)
+    expect(existsSync(join(dir, 'content/pages/home'))).toBe(false)
+    expect(yaml.load(readFileSync(join(dir, 'clone/site.yml'), 'utf8')).paths).toBeUndefined()
   })
 
   it('a pull into a relocated project writes there even when the document carries no paths', () => {

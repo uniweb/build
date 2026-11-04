@@ -183,7 +183,9 @@ const SETTINGS_TO_SITE_YML = {
   base: 'base',
   fetcher: 'fetcher',
   build: 'build',
-  paths: 'paths',
+  // ⛔ Not `paths`: where this project keeps its files is its own `site.yml`'s to say, never a
+  // document's. Mapped until 2026-11-04, a clone took another copy's `paths.pages`, wrote its pages
+  // there — outside itself — and pruned what it found.
   seo: 'seo',
   layout: 'layout',
   // ⛔ `search` / `submit` / `assistant` / `tracking` are not here: each service rides
@@ -1415,9 +1417,8 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
   ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }
 
-  // Where the tree goes is what `site.yml` says NOW — `siteInfoToConfig` above has
-  // written the document's `settings.paths` into it — because that is the file the
-  // next push and the build read. See `siteContentDirs`.
+  // Where the tree goes is what this project's own `site.yml` says — the file the next push and the
+  // build read, and one a document never writes `paths` into. See `siteContentDirs`.
   const siteYml = readAuthoredYaml(join(siteRoot, 'site.yml'))
   const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, siteYml)
   // The tree a key names its file by: pages and layout wherever `paths:` puts them. (A mount's pages
