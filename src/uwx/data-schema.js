@@ -547,6 +547,10 @@ function lowerLeaf(field, resolve, optResolve, { multiple = false, path = '' } =
   if (field.label) out.label = field.label
   if (field.description) out.description = field.description
   if (field.required) out.required = true
+  // A value a site's visitor may fill, on any leaf kind, as authored [backend, 2026-11-04]. A type
+  // with one takes visitors' submissions; `@uniweb/schemas` refuses it where a registry would, and
+  // drops `false`, so only `true` is sent.
+  if (field.visitor_fills === true) out.visitor_fills = true
   // A field's rules, as written — `max_length`, `min`, `max`, `mime_types`, `max_size`,
   // `pattern` (`FIELD_RULES`): a registry keeps each as the field's own key and checks it on
   // every write. ⛔ Until 2026-10-15 the normalizer dropped them before this saw them.

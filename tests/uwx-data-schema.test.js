@@ -554,6 +554,28 @@ describe('toDataSchemaDeclaration — grantable & readable_with (2026-10-14)', (
     expect(f.related).not.toHaveProperty('sold_with')
     expect(() => lower({ fields: { title: { type: 'string', sold_with: true } } }, '@/x', '@acme/x')).toThrow(/only a reference can/)
   })
+
+  it('carries `visitor_fills: true` on a leaf, as authored, and sends no `false` (2026-11-04)', () => {
+    const d = lower(
+      {
+        fields: {
+          name: { type: 'string', required: true, visitor_fills: true },
+          tags: { type: 'string', many: true, visitor_fills: true },
+          car: { ref: '@/car', visitor_fills: true },
+          notes: { type: 'text', visitor_fills: false },
+          status: 'string',
+        },
+      },
+      '@/request',
+      '@acme/request'
+    )
+    const f = d.sections.brief.fields
+    expect(f.name).toEqual({ type: 'string', required: true, localized: true, visitor_fills: true })
+    expect(f.tags).toMatchObject({ type: 'string', multiple: true, visitor_fills: true })
+    expect(f.car).toEqual({ type: 'entity_ref', model: '@acme/car', visitor_fills: true })
+    expect(f.notes).not.toHaveProperty('visitor_fills')
+    expect(f.status).not.toHaveProperty('visitor_fills')
+  })
 })
 
 describe('toDataSchemaDeclaration — nesting → type: section fields', () => {
