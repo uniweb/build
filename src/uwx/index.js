@@ -89,6 +89,9 @@ export { dataBlockModels } from '../i18n/data-models.js'
 // The type a section that names none renders with — a push fills it in, and a pull, handed it up
 // front like the scope above, leaves it out of the section's file.
 export { siteDefaultSectionType } from '../site/queries-config.js'
+// Every place a push reads the site's content from, mounts included — the one answer the CLI's
+// committed-content check, a pull's merge and `uniweb status` read (`site-dirs.js`).
+export { siteContentRoots } from './site-dirs.js'
 export {
   siteInfoToConfig,
   sectionRecordToFile,
