@@ -685,6 +685,17 @@ function dedupeByAddress(entries) {
   return out
 }
 
+/** The icons a page's HTML already carries in `__ICON_CACHE__`, by key; none when it carries none. */
+function embeddedIcons(html) {
+  const script = html.match(/<script[^>]*id="__ICON_CACHE__"[^>]*>([\s\S]*?)<\/script>/)
+  if (!script) return {}
+  try {
+    return JSON.parse(script[1])
+  } catch {
+    return {}
+  }
+}
+
 /**
  * Inject build-specific data into HTML (theme CSS, __SITE_CONTENT__, icon cache).
  * Called after the shared injectPageContent for build-specific additions.
@@ -760,9 +771,16 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
     )
   }
 
-  // Inject icon cache so client can render icons immediately without CDN fetches
+  // ⭐ THE PAGE'S ICONS, so the browser draws them without fetching: the site's content icons,
+  // which every page embeds so the next page a visit opens has them too, and whatever else this
+  // page drew, which its render wrote here (`injectPageContent`): a link's icon, a param's, a
+  // record's. Those follow in key order, so a build writes the same page every time. Replacing the
+  // render's copy instead would blank them in the browser's first render.
   if (siteContent._iconCache) {
-    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${jsonForScript(siteContent._iconCache)}</script>`
+    const icons = { ...siteContent._iconCache }
+    const drawn = embeddedIcons(result)
+    for (const key of Object.keys(drawn).sort()) if (!(key in icons)) icons[key] = drawn[key]
+    const iconScript = `<script id="__ICON_CACHE__" type="application/json">${jsonForScript(icons)}</script>`
     if (result.includes('__ICON_CACHE__')) {
       result = result.replace(
         /<script[^>]*id="__ICON_CACHE__"[^>]*>[\s\S]*?<\/script>/,
@@ -1110,8 +1128,12 @@ export async function prerenderSite(siteDir, options = {}) {
         fetch: fileTransport,
         prerender: 'author',
         cache: buildDataCache,
-        // This lane's icons are `prefetchIcons`'s, the whole site's, which every page embeds.
-        icons: false,
+        // ⭐ The icons the site names for this page beyond the ones `prefetchIcons` already holds,
+        // the image icons of the whole site's content: a link's icon, a param's, a tagged data
+        // block's, a record's. One the graph holds is not asked again, so a build fetches each
+        // icon once. ⛔ Until 2026-11-04 this said `false`, and every such icon was a blank box in
+        // the built page until the browser fetched it.
+        icons: true,
       })
       // Filed under this page, the way a route-bound view always has been: `scopeFetchedData`
       // embeds it in this page's HTML and nowhere else, and one address embedded twice collapses.
