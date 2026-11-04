@@ -2,7 +2,7 @@
 
 import { addVersion } from '../src/site/add-version.js'
 import collectSiteContent from '../src/site/content-collector.js'
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'fs'
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
 import { dirname, join } from 'path'
 import { tmpdir } from 'os'
 import yaml from 'js-yaml'
@@ -225,6 +225,24 @@ describe('where it goes', () => {
 
   it('`docs` with none named and none yet', async () => {
     expect((await addVersion(root, { name: 'v2' })).folder).toBe('docs')
+  })
+
+  it('⭐ a numbered folder holds its pages at the route its name gives, number dropped, and the copy goes there', async () => {
+    // `pages/3-docs/` is `/docs`: its number orders it [2026-11-04].
+    for (const file of readdirSync(join(root, 'pages/docs'), { recursive: true })) {
+      const from = join(root, 'pages/docs', file)
+      if (statSync(from).isFile()) write(join('pages/3-docs', file), readFileSync(from, 'utf8'))
+    }
+    rmSync(join(root, 'pages/docs'), { recursive: true, force: true })
+    const report = await addVersion(root, { name: 'v1', folder: '3-docs' })
+    expect(report).toMatchObject({ folder: '3-docs', route: '/docs/v1', path: 'pages/3-docs/v1' })
+    expect(report.pages).toBe(3)
+
+    // A later one, with none named, finds the numbered folder by the route of its versions.
+    const again = await addVersion(root, { name: 'v2' })
+    expect(again).toMatchObject({ folder: '3-docs', route: '/docs/v2' })
+    const routes = (await collectSiteContent(root)).pages.map((p) => p.route)
+    expect(routes).toEqual(expect.arrayContaining(['/docs/start', '/docs/v1/start', '/docs/v2/start']))
   })
 
   it('a folder promoted to the homepage puts its copy at the root', async () => {

@@ -20,18 +20,50 @@
  * Nothing is written until the whole copy is planned, so a refusal leaves no trace.
  */
 
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, posix, resolve, relative } from 'node:path'
 import yaml from 'js-yaml'
 import { isVersionFolder } from '@uniweb/projections/versions'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { collectSiteContent, mountEntriesOf, readFolderConfig, readYamlFile, rootOrderConfig } from './content-collector.js'
+import { parseNumericPrefix } from '../utils/numeric-prefix.js'
 
 const routeKey = (route) => String(route).replace(/^\/+/, '').replace(/\/+$/, '')
 const CONFIG_FILES = new Set(['page.yml', 'folder.yml'])
 // What of the docs folder's own config still describes the copy. The rest names the folder itself.
 const CARRIED_KEYS = ['pages', 'sections', 'nest', 'redirect']
+
+// A page's name in a route: its folder's or file's, less the number that orders it (`2-guide` is `guide`).
+const pageNameOf = (entry) => parseNumericPrefix(entry).name || entry
+
+/**
+ * The folder holding a route's pages, as a path under `pages/` — each segment the folder whose page
+ * name it is, a mount's key where the first one is a mount — or null where no folder holds it.
+ */
+function folderOfRoute(segments, { pagesDir, mounts }) {
+  const named = (dir, segment) => {
+    try {
+      return readdirSync(dir, { withFileTypes: true }).find((e) => e.isDirectory() && (e.name === segment || pageNameOf(e.name) === segment))?.name ?? null
+    } catch {
+      return null
+    }
+  }
+  const out = []
+  let dir = pagesDir
+  for (const [i, segment] of segments.entries()) {
+    if (i === 0 && mounts.has(segment)) {
+      out.push(segment)
+      dir = mounts.get(segment)
+      continue
+    }
+    const hit = named(dir, segment)
+    if (!hit) return null
+    out.push(hit)
+    dir = join(dir, hit)
+  }
+  return out.join('/')
+}
 
 /**
  * The folder holding the docs, as a path under `pages/`.
@@ -52,8 +84,11 @@ function findFolder(named, { pages, pagesDir, mounts, homepage }) {
     const segments = route.split('/').filter(Boolean)
     const at = segments.findIndex(isVersionFolder)
     if (at === -1) continue
-    const above = segments.slice(0, at).join('/')
-    holding.add(!above && homepage && existsSync(join(pagesDir, homepage, segments[0])) ? homepage : above)
+    const above = segments.slice(0, at)
+    // A homepage's own pages sit at the root, so a version there is in the homepage's folder.
+    const inHomepage = !above.length && homepage && folderOfRoute([homepage, segments[0]], { pagesDir, mounts })
+    const folder = inHomepage ? folderOfRoute([homepage], { pagesDir, mounts }) : folderOfRoute(above, { pagesDir, mounts })
+    holding.add(folder ?? (inHomepage ? homepage : above.join('/')))
   }
   if (holding.size === 1) return [...holding][0]
   if (holding.size > 1) {
@@ -246,15 +281,17 @@ export async function addVersion(siteRoot, { name, folder: named, label, keepInS
     throw new Error(`pages/${posix.join(folder, name)} already exists. To freeze the docs again, name a new version.`)
   }
 
-  // Where the folder's pages are. A folder promoted to the homepage puts its pages at the root.
-  const isHomepage = segments[0] === homepage
-  const scope = `/${(isHomepage ? segments.slice(1) : segments).join('/')}`
+  // Where the folder's pages are, by their names as pages. A folder promoted to the homepage puts its
+  // pages at the root.
+  const routeSegments = segments.map(pageNameOf)
+  const isHomepage = routeSegments[0] === homepage
+  const scope = `/${(isHomepage ? routeSegments.slice(1) : routeSegments).join('/')}`
   const prefix = scope === '/' ? '' : scope
   const versionRoute = `${prefix}/${name}`
   const names = new Set(
     (await readdir(dir, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() || entry.name.endsWith('.md'))
-      .map((entry) => entry.name.replace(/^\d+(\.\d+)*-/, '').replace(/\.md$/, ''))
+      .map((entry) => pageNameOf(entry.name.replace(/\.md$/, '')))
       .filter((entry) => !isVersionFolder(entry) && !(folder === '' && entry === '404'))
   )
 

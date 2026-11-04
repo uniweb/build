@@ -1972,22 +1972,14 @@ function determineIndexPage(orderConfig, availableFolders) {
   const declared = homepageOf(orderConfig)
   if (declared !== undefined) return declared
 
-  // 3. Fallback: lowest order value, or first alphabetically
+  // 3. Fallback: the page that comes first, in the order the level's menu lists them (`compareFolders`):
+  // lowest `order:`, then a folder's number, then its name.
   // IMPORTANT: Dynamic route folders (e.g., [slug]) can never be index pages
   // They are templates for dynamic content, not actual navigable pages
   const staticFolders = availableFolders.filter(f => !isDynamicRoute(f.name))
   if (staticFolders.length === 0) return null
 
-  const sorted = [...staticFolders].sort((a, b) => {
-    // Sort by order (lower first), then alphabetically
-    // Pages without explicit order come after ordered pages
-    const orderA = a.order ?? Infinity
-    const orderB = b.order ?? Infinity
-    if (orderA !== orderB) return orderA - orderB
-    return versionFoldersLast(a.name, b.name) || a.name.localeCompare(b.name)
-  })
-
-  return sorted[0].name
+  return [...staticFolders].sort(compareFolders)[0].name
 }
 
 /**
@@ -2063,7 +2055,11 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const folderLayout = normalizeLayoutConfig(dirConfig.layout)
 
     pageFolders.push({
-      name,
+      // ⭐ ITS NAME AS A PAGE: the folder's, less the number that orders it — `2-about/` is `/about`, as
+      // `1-install.md` is `/install` — on every lane [Diego, 2026-11-04: "The build should drop the number
+      // too"]. ⛔ Until then the build served `2-about/` at `/2-about` while a push sent it as `about`.
+      name: isDynamicRoute(name) ? name : parseNumericPrefix(name).name,
+      dirName: name,
       path: localPath ?? mountPath,
       order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined,
       dirConfig,
@@ -2077,14 +2073,9 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     })
   }
 
-  // Sort page folders by order (ascending), then alphabetically
-  // Pages without explicit order come after ordered pages (order ?? Infinity)
-  pageFolders.sort((a, b) => {
-    const orderA = a.order ?? Infinity
-    const orderB = b.order ?? Infinity
-    if (orderA !== orderB) return orderA - orderB
-    return versionFoldersLast(a.name, b.name) || a.name.localeCompare(b.name)
-  })
+  // A level's folders in the order every lane reads them in (`compareFolders`): `order:`, then the
+  // number a folder's name starts with, then its name.
+  pageFolders.sort(compareFolders)
 
   // Apply ordering: pages: (wildcard-aware) > order: [array] (backward compat) > default
   let orderedFolders
@@ -2156,8 +2147,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         continue
       }
 
-      const { name: entry, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = child
-      assertRouteFolder(entry, parentRoute)
+      const { name: entry, dirName, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = child
+      assertRouteFolder(dirName, parentRoute)
       const isIndex = entry === indexName
       const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
 
@@ -2191,7 +2182,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           // Recurse into subdirectories (page mode). When the children come from
           // a mount, they are walked in the mount's own mode — it is the mount's
           // tree, and its root config is what declared how its content is shaped.
-          const childDirPath = mounts?.get(entry) || entryPath
+          const childDirPath = mounts?.get(dirName) || entryPath
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
           const childContentMode = childMode
@@ -2244,7 +2235,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         pages.push(containerPage)
 
         // Recurse in folder mode — pass container's own fetch config (or fall back to parent's)
-        const childDirPath = mounts?.get(entry) || entryPath
+        const childDirPath = mounts?.get(dirName) || entryPath
         const containerFetch = containerPage.fetch || parentFetch
         const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, childMode, null, effectiveLayout)
         pages.push(...subResult.pages)
@@ -2286,8 +2277,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
   // Second pass: process each page folder
   for (const folder of orderedFolders) {
-    const { name: entry, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = folder
-    assertRouteFolder(entry, parentRoute)
+    const { name: entry, dirName, path: entryPath, dirConfig, dirMode, childMode, childOrderConfig, childLayout } = folder
+    assertRouteFolder(dirName, parentRoute)
     const isIndex = entry === indexPageName
     const effectiveLayout = mergeLayoutConfig(parentLayout, childLayout)
 
@@ -2341,7 +2332,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
 
       // The container's own fetch config, or the parent's — as the folder-mode
       // container above passes it.
-      const childDirPath = mounts?.get(entry) || entryPath
+      const childDirPath = mounts?.get(dirName) || entryPath
       const containerFetch = containerPage.fetch || parentFetch
       const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, childMode, null, effectiveLayout)
       pages.push(...subResult.pages)
@@ -2377,7 +2368,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         // walked in the mount's own mode — its root config declared how its
         // content is shaped, and this local stub holds none of that content.
         {
-          const childDirPath = mounts?.get(entry) || entryPath
+          const childDirPath = mounts?.get(dirName) || entryPath
           const childParentRoute = isIndex
             ? (hasExplicitOrder ? parentRoute : (page.sourcePath || page.route))
             : page.route
@@ -3145,26 +3136,29 @@ function buildRouteTranslations(pages, { defaultLocale = 'en', languages = null 
 }
 
 /**
- * One level's pages in the order a push walks them, and a pull reproduces: explicit `order:`, then
- * numeric-prefix filename order, then the parent config's `pages:` list. Shared by the push's walk
- * (`uwx/site.js::orderedSubfolders`) and the pull (`uwx/site-project.js`), so the two cannot
- * disagree on what a level's order is.
+ * Two of a level's page folders, in the order every lane reads them: explicit `order:`, then version
+ * folders after the rest, then the number a folder's name starts with, then its name. The build's walk
+ * (`collectPagesRecursive`) sorts with it, and `orderFolders` below.
  *
- * ⚠️ The build's own page-folder sort (`collectPagesRecursive`) is not this function: it compares
- * folder names whole, as strings. The two differ only for numbered page folders — see the note at
- * `orderedSubfolders`.
+ * @param {{ dirName: string, order?: number }} a
+ * @param {{ dirName: string, order?: number }} b
+ */
+function compareFolders(a, b) {
+  return (a.order ?? Infinity) - (b.order ?? Infinity) || versionFoldersLast(a.dirName, b.dirName) || compareFilenames(a.dirName, b.dirName)
+}
+
+/**
+ * One level's pages in the order a push walks them, and a pull reproduces: `compareFolders`, then the
+ * parent config's `pages:` list — the order the build gives them too. Shared by the push's walk
+ * (`uwx/site.js::orderedSubfolders`) and the pull (`uwx/site-project.js`), so no two lanes can
+ * disagree on what a level's order is.
  *
  * @param {Array<{ dirName: string, name: string, order?: number }>} folders
  * @param {Array} [parentPages] - the parent config's `pages:`
  * @returns {Array} the folders, ordered
  */
 function orderFolders(folders, parentPages) {
-  const sorted = [...folders].sort(
-    (a, b) =>
-      (a.order ?? Infinity) - (b.order ?? Infinity) ||
-      versionFoldersLast(a.dirName, b.dirName) ||
-      compareFilenames(a.dirName, b.dirName)
-  )
+  const sorted = [...folders].sort(compareFolders)
   const parsed = Array.isArray(parentPages) ? parseWildcardArray(parentPages) : null
   return parsed && parsed.mode !== 'all' ? applyWildcardOrder(sorted, parsed) : sorted
 }
