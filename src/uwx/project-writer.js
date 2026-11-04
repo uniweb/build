@@ -20,6 +20,7 @@ import { markdownToProseMirror } from '@uniweb/content-reader'
 import { parseFrontmatter } from './entity-source.js'
 import { canonicalJson, sameMarkdownDocument } from './same-content.js'
 import { spliceBody } from './body-splice.js'
+import { fileLinksIn } from '../site/file-links.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -150,6 +151,15 @@ function assembleSection(frontmatter, body) {
   return ''
 }
 
+// The document a body reads to, or null where it reads to none.
+function readsTo(body) {
+  try {
+    return markdownToProseMirror(body)
+  } catch {
+    return null
+  }
+}
+
 /**
  * Write a section's `.md` file as the backend holds the section: its `params` and its
  * data `declaration` replace the file's, `content` (ProseMirror) becomes the markdown
@@ -174,7 +184,7 @@ function assembleSection(frontmatter, body) {
  *        value equal to it is not written into an existing file that leaves the key out
  * @returns {'updated'|'unchanged'}
  */
-export function writeSectionFile({ filePath, content, params, declaration, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null }) {
+export function writeSectionFile({ filePath, content, params, declaration, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null, fileLinks = null }) {
   let existing = ''
   try {
     existing = readFileSync(filePath, 'utf8')
@@ -220,11 +230,14 @@ export function writeSectionFile({ filePath, content, params, declaration, reser
   // Compared as a push reads it: the body as stored (`content-collector.js::processMarkdownFile`).
   // ⛔ Until 2026-10-08 the trimmed copy was compared, so a body whose last line ended in a space never
   // matched what a push had sent from it, and every pull rewrote it — trailing blank lines and all.
-  const keepsBody = !content || sameMarkdownDocument(existingBody || '', content)
+  // ⭐ Its links as the push reads them, and back (`fileLinks`, `site/file-links.js::fileLinksIn`): a link
+  // the file writes as a file is the page link the backend holds for it, and stays as the file wrote it.
+  const links = fileLinks && existingBody ? fileLinksIn(filePath, fileLinks, readsTo(existingBody)) : null
+  const keepsBody = !content || sameMarkdownDocument(existingBody || '', content, { resolve: links?.resolve })
   if (existing && keepsBody && canonicalJson(nextFrontmatter) === canonicalJson(frontmatter)) return 'unchanged'
   // ⭐ A changed body is written block by block: what the change left keeps the author's text, and only
   // the blocks it changed take the writer's form (`body-splice.js`) — whole only when that cannot be said.
-  const body = keepsBody ? authoredBody : (spliceBody(existingBody || '', content) ?? proseMirrorToMarkdown(content))
+  const body = keepsBody ? authoredBody : (spliceBody(existingBody || '', content, { links }) ?? proseMirrorToMarkdown(links ? links.restore(content) : content))
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))
 }
 

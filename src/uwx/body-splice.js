@@ -9,6 +9,10 @@
 // The blocks are the reader's (`markdownBlocks`, `@uniweb/content-reader`), so a block is what the
 // author's text reads as, and a body the reader cannot split so, or whose splice does not read back to
 // the document, is written whole as before.
+//
+// `links` reads a block as the push reads it, and writes a new one as the file writes its links
+// (`site/file-links.js::fileLinksIn`): a block linking another file by its file is the block the
+// backend holds with a page link, and keeps the author's link.
 
 import { markdownBlocks } from '@uniweb/content-reader'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
@@ -39,9 +43,10 @@ function commonPairs(a, b) {
  *
  * @param {string} authored - the body as the file holds it, frontmatter apart
  * @param {object} doc - the backend's ProseMirror document for it
+ * @param {{ links?: { resolve: Function, restore: Function }|null }} [opts]
  * @returns {string|null} the new body, with no trailing whitespace
  */
-export function spliceBody(authored, doc) {
+export function spliceBody(authored, doc, { links = null } = {}) {
   const split = markdownBlocks(authored)
   if (!split || !Array.isArray(doc?.content)) return null
   // Each block that reads to one node is an item; one that reads to none (a link reference) rides
@@ -55,7 +60,7 @@ export function spliceBody(authored, doc) {
       else head += block.text + block.after
       continue
     }
-    items.push({ text: block.text, after: block.after, key: keyOf(block.nodes[0]) })
+    items.push({ text: block.text, after: block.after, key: keyOf(links ? links.resolve(block.nodes[0]) : block.nodes[0]) })
   }
   const nodes = doc.content
   const kept = new Map(commonPairs(items.map((i) => i.key), nodes.map(keyOf)).map(([i, j]) => [j, i]))
@@ -69,11 +74,12 @@ export function spliceBody(authored, doc) {
   }
   let out = pieces[0]?.item === 0 ? head : ''
   pieces.forEach((piece, k) => {
-    out += piece.nodes ? proseMirrorToMarkdown({ type: 'doc', content: piece.nodes }).replace(/\s+$/, '') : items[piece.item].text
+    const written = links ? piece.nodes?.map((node) => links.restore(node)) : piece.nodes
+    out += written ? proseMirrorToMarkdown({ type: 'doc', content: written }).replace(/\s+$/, '') : items[piece.item].text
     const next = pieces[k + 1]
     // Two of the author's blocks still side by side keep what stood between them.
     if (next) out += piece.item !== undefined && next.item === piece.item + 1 ? items[piece.item].after : '\n\n'
   })
   const body = out.replace(/^\n+/, '').replace(/\s+$/, '')
-  return sameMarkdownDocument(body, doc) ? body : null
+  return sameMarkdownDocument(body, doc, { resolve: links?.resolve }) ? body : null
 }

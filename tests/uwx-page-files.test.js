@@ -380,7 +380,7 @@ describe('⭐ a writable mount: a pull writes its pages where the push reads the
     expect(report.held.map((h) => [h.route, h.what])).toEqual([['docs', ['a page where its files keep a folder']]])
   })
 
-  it('⛔ P4 — a mount the caller does not name, or the site does not declare writable, is left alone', async () => {
+  it('⛔ a mount the caller does not name, or the site does not declare writable, is left alone', async () => {
     for (const [declare, writableMounts] of [['\n    path: ../docs-repo\n    writable: true', []], [' ../docs-repo', ['docs']]]) {
       rmSync(ROOT, { recursive: true, force: true })
       writableMount({ declare })
@@ -391,5 +391,53 @@ describe('⭐ a writable mount: a pull writes its pages where the push reads the
       expect(changed(before, snapshot())).toEqual([])
       expect(report.mountedPages.map((p) => p.route)).toEqual(['docs', 'docs/intro', 'docs/guide', 'docs/guide/start', 'docs/guide/next'])
     }
+  })
+})
+
+describe('⭐ a link a file writes as a file stays as the file wrote it', () => {
+  // Docs that link each other by file, the way a repository's docs do for GitHub and an editor.
+  function linkedDocs() {
+    writableMount()
+    w('docs-repo/intro.md', '# Intro\n\nRead this first,\nthen [the guide](./guide/1-start.md).\n\nOr [the next step](guide/2-next.md#next).\n')
+    w('docs-repo/guide/1-start.md', '# Start\n\nBegin here, then go [back](../intro.md).\n')
+  }
+
+  it('CONTROL — the push sends each as the page it leads to', async () => {
+    linkedDocs()
+    const doc = await siteProjectToDocument(siteDir())
+    const hrefs = JSON.stringify(at(doc, '/docs/intro').page_sections[0].content).match(/"href":"[^"]+"/g)
+    expect(hrefs).toEqual(['"href":"/docs/guide/start"', '"href":"/docs/guide/next#next"'])
+  })
+
+  it('a pull of what was pushed changes no file', async () => {
+    linkedDocs()
+    const before = snapshot()
+    pullInto(await siteProjectToDocument(siteDir()))
+    expect(changed(before, snapshot())).toEqual([])
+  })
+
+  it('⭐ an app edit to a paragraph holding one writes the edit, and the link as the file wrote it', async () => {
+    linkedDocs()
+    const doc = await siteProjectToDocument(siteDir())
+    const intro = at(doc, '/docs/intro').page_sections[0].content
+    const body = intro.type === 'doc' ? intro : intro.en
+    const para = body.content.find((n) => n.type === 'paragraph')
+    para.content.unshift({ type: 'text', text: 'Please: ' })
+    pullInto(doc)
+
+    expect(readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')).toBe('# Intro\n\nPlease: Read this first, then [the guide](./guide/1-start.md).\n\nOr [the next step](guide/2-next.md#next).\n')
+    expect(readFileSync(join(ROOT, 'docs-repo/guide/1-start.md'), 'utf8')).toBe('# Start\n\nBegin here, then go [back](../intro.md).\n')
+  })
+
+  it('a link the app adds to a page the file links by file is written as the file writes it; to another, as the app\'s page link', async () => {
+    linkedDocs()
+    const doc = await siteProjectToDocument(siteDir())
+    const start = at(doc, '/docs/guide/start').page_sections[0].content
+    const body = start.type === 'doc' ? start : start.en
+    const link = (text, href) => ({ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] })
+    body.content.push({ type: 'paragraph', content: [{ type: 'text', text: 'See ' }, link('the intro', '/docs/intro'), { type: 'text', text: ' and ' }, link('the next step', '/docs/guide/next'), { type: 'text', text: '.' }] })
+    pullInto(doc)
+
+    expect(readFileSync(join(ROOT, 'docs-repo/guide/1-start.md'), 'utf8')).toBe('# Start\n\nBegin here, then go [back](../intro.md).\n\nSee [the intro](../intro.md) and [the next step](/docs/guide/next).\n')
   })
 })

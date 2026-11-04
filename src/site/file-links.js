@@ -14,6 +14,11 @@
  * The anchor is translated too. A link written for GitHub names GitHub's anchor for a heading, and a
  * page's heading has its own (`headingId`, `@uniweb/kit`): "it doesn't — matter" is
  * `it-doesnt--matter` on one and `it-doesn-t-matter` on the other.
+ *
+ * ⭐ AND A PULL PUTS EACH ONE BACK AS THE FILE WROTE IT (`fileLinksIn`). ⛔ Until 2026-11-04 a pull wrote
+ * the backend's page link into the file in its place, so every file of a docs folder linking another
+ * by file read as changed and came back with `/docs/...` links, which lead nowhere on GitHub: 68 of the
+ * framework's own docs, measured that day, the first time a pull wrote into a mounted docs folder.
  */
 import { realpathSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
@@ -103,6 +108,43 @@ function rewriteDoc(node, rewrite) {
 }
 
 /**
+ * The pages a site's files became, for the links written as files: each file by its real path, with
+ * its page's route, its section's id where the page is of several files, and its headings' anchors.
+ *
+ * @param {Array<{ route: string, files: Array<{ file: string, id: string|null, content: object }> }>} pages
+ * @returns {Map<string, { route: string, section: string|null, anchors: Map<string, string> }>}
+ */
+export function fileLinkTargets(pages) {
+  const files = new Map()
+  for (const { route, files: held } of pages) {
+    for (const { file, id, content } of held) {
+      // A page of several files: this file is a section of it, with an anchor of its own.
+      files.set(real(file), { route, section: held.length > 1 ? id || null : null, anchors: anchorsOf(content) })
+    }
+  }
+  return files
+}
+
+/**
+ * The page link a push writes for `href`, written in the file `from` — `{ href, missing }`, `missing`
+ * naming what it leads to that is not there (`'file'`, `'anchor'`) — or null for a link no file's.
+ *
+ * @param {string} href
+ * @param {string} from
+ * @param {Map} files - `fileLinkTargets`
+ * @returns {{ href: string, missing: 'file'|'anchor'|null }|null}
+ */
+export function pageLinkFor(href, from, files) {
+  const link = FILE_LINK.exec(href)
+  if (!link) return null
+  const target = files.get(real(resolve(dirname(from), decode(link[1]))))
+  if (!target) return { href, missing: 'file' }
+  if (!link[2]) return { href: target.section ? `${target.route}#section-${target.section}` : target.route, missing: null }
+  const anchor = target.anchors.get(decode(link[2]))
+  return { href: `${target.route}#${anchor ?? link[2]}`, missing: anchor ? null : 'anchor' }
+}
+
+/**
  * Rewrites every link written as a file, in the sections of a site's pages. Mutates the sections.
  *
  * @param {Array<{ route: string, sections: Array<object> }>} pages - each page's route and sections,
@@ -110,39 +152,57 @@ function rewriteDoc(node, rewrite) {
  * @param {{ siteRoot: string, warn: (message: string) => void }} options
  */
 export function rewriteFileLinks(pages, { siteRoot, warn }) {
-  const files = new Map()
-  for (const { route, sections } of pages) {
-    const held = []
-    eachSection(sections, (section) => {
-      if (FILES.has(section)) held.push(section)
-    })
-    for (const section of held) {
-      files.set(real(FILES.get(section)), {
-        route,
-        // A page of several files: this file is a section of it, with an anchor of its own.
-        section: held.length > 1 ? section.stableId || section.$id || null : null,
-        anchors: anchorsOf(section.content),
+  const files = fileLinkTargets(
+    pages.map(({ route, sections }) => {
+      const held = []
+      eachSection(sections, (section) => {
+        if (FILES.has(section)) held.push({ file: FILES.get(section), id: section.stableId || section.$id || null, content: section.content })
       })
-    }
-  }
-
+      return { route, files: held }
+    })
+  )
   for (const { sections } of pages) {
     eachSection(sections, (section) => {
       const from = FILES.get(section)
       if (!from) return
       rewriteDoc(section.content, (href) => {
-        const link = FILE_LINK.exec(href)
-        if (!link) return href
-        const target = files.get(real(resolve(dirname(from), decode(link[1]))))
-        if (!target) {
-          warn(`${relative(siteRoot, from)}: the link to ${href} names a file that is no page of this site, so it leads nowhere`)
-          return href
-        }
-        if (!link[2]) return target.section ? `${target.route}#section-${target.section}` : target.route
-        const anchor = target.anchors.get(decode(link[2]))
-        if (!anchor) warn(`${relative(siteRoot, from)}: the link to ${href}: that page has no such heading`)
-        return `${target.route}#${anchor ?? link[2]}`
+        const page = pageLinkFor(href, from, files)
+        if (page?.missing === 'file') warn(`${relative(siteRoot, from)}: the link to ${href} names a file that is no page of this site, so it leads nowhere`)
+        if (page?.missing === 'anchor') warn(`${relative(siteRoot, from)}: the link to ${href}: that page has no such heading`)
+        return page ? page.href : href
       })
     })
+  }
+}
+
+/**
+ * ⭐ A FILE'S LINKS AS A PUSH READS THEM, AND BACK, for a pull writing the backend's document into the
+ * file a section was read from (`uwx/project-writer.js`). `resolve` gives a node of the file the page
+ * links a push sends for its file links, so it compares with the backend's; `restore` writes each page
+ * link the file wrote as a file back in the file's own spelling — `../guide/deploying.md`, which works
+ * on GitHub and in an editor, never `/docs/guide/deploying`. A link the app added stays the app's.
+ *
+ * @param {string} from - the file
+ * @param {Map} files - `fileLinkTargets`
+ * @param {object|null} authored - the file's own document, as it reads
+ * @returns {{ resolve: (node: object) => object, restore: (node: object) => object }}
+ */
+export function fileLinksIn(from, files, authored) {
+  const back = new Map()
+  if (authored) {
+    rewriteDoc(structuredClone(authored), (href) => {
+      const page = pageLinkFor(href, from, files)
+      if (page && page.href !== href && !back.has(page.href)) back.set(page.href, href)
+      return href
+    })
+  }
+  const mapped = (node, rewrite) => {
+    const copy = structuredClone(node)
+    rewriteDoc(copy, rewrite)
+    return copy
+  }
+  return {
+    resolve: (node) => mapped(node, (href) => pageLinkFor(href, from, files)?.href ?? href),
+    restore: (node) => (back.size ? mapped(node, (href) => back.get(href) ?? href) : node),
   }
 }

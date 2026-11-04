@@ -17,15 +17,18 @@ export const canonicalJson = (value) =>
   )
 
 /**
- * Does this markdown parse to `doc`, the way a push parses it?
+ * Does this markdown parse to `doc`, the way a push parses it? `resolve` reads it on, as the push does
+ * after parsing — a link written as a file, as the page link it sends (`site/file-links.js::fileLinksIn`).
  *
  * @param {string} markdown - an author's markdown body
  * @param {object} doc - a ProseMirror document
+ * @param {{ resolve?: (doc: object) => object }} [opts]
  * @returns {boolean}
  */
-export function sameMarkdownDocument(markdown, doc) {
+export function sameMarkdownDocument(markdown, doc, { resolve = null } = {}) {
   try {
-    return canonicalJson(withoutDefaults(markdownToProseMirror(markdown))) === canonicalJson(withoutDefaults(doc))
+    const read = markdownToProseMirror(markdown)
+    return canonicalJson(withoutDefaults(resolve ? resolve(read) : read)) === canonicalJson(withoutDefaults(doc))
   } catch {
     return false
   }

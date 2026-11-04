@@ -49,6 +49,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { buildRouteOf } from './site.js'
+import { fileLinkTargets } from '../site/file-links.js'
 import { DEFAULT_SECTION_TYPE } from '@uniweb/core/section-type'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
@@ -401,7 +402,7 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  *        site (`siteDefaultSectionType`), which a file leaves out
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null, fileLinks = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
   // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
@@ -447,6 +448,8 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
     params: frontmatter,
     declaration: paramFetch ?? null,
     implied: { type: impliedType },
+    // The links the file writes as files, as the push reads them (`pageFileTargets`).
+    fileLinks,
   })
 }
 
@@ -594,6 +597,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         writeId: fileSectionName(filePath) !== stableId,
         context: pageContext ? translationContext({ stableId }, pageContext.route) : null,
         media: ctx?.media ?? null,
+        fileLinks: ctx?.fileLinks ?? null,
       })
       written.push(filePath)
       if (!top) childFiles.push(basename(filePath))
@@ -993,6 +997,7 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
     writeId: stableId !== name,
     context: translationContext({ stableId }, pageContext.route),
     media: ctx?.media ?? null,
+    fileLinks: ctx?.fileLinks ?? null,
   })
   report.sections.push(place.file)
   return true
@@ -1134,6 +1139,41 @@ function subtreeUuids(record) {
   }
   walk(record)
   return out
+}
+
+// ⭐ THE PAGES THE SITE'S FILES ARE, for the links a file writes as files (`site/file-links.js`): each page
+// of the document at the files the file map keeps it in — an `.md` page's own, a page folder's section
+// files as the writer finds them — so a pull reads a file's links as the push does, and writes them back
+// as the file wrote them.
+function pageFileTargets(ctx, pages, sourceLocale) {
+  const out = []
+  const contentOf = (section) => (isProseMirrorDoc(section?.content) ? section.content : unwrapLocalized(section?.content, sourceLocale))
+  const walk = (records, prefix, parentCanon) => {
+    for (const record of records || []) {
+      const route = prefix ? `${prefix}/${unwrapLocalized(record.slug, sourceLocale)}` : unwrapLocalized(record.slug, sourceLocale)
+      const canon = buildRouteOf(record, parentCanon, sourceLocale)
+      const place = ctx.files?.page(route)
+      const files = []
+      if (place?.kind === 'md' && record.page_sections?.length === 1) {
+        const section = record.page_sections[0]
+        files.push({ file: place.file, id: recordStableId(section), content: contentOf(section) })
+      } else if (place?.kind === 'folder' && record.mode === 'page') {
+        const bases = sectionFileBases(record.page_sections || [])
+        const visit = (list, child) => {
+          for (const section of list || []) {
+            const file = existingSectionFile(place.dir, bases.get(section), recordStableId(section), { child })
+            if (file) files.push({ file, id: recordStableId(section), content: contentOf(section) })
+            visit(section?.$children, true)
+          }
+        }
+        visit(record.page_sections, false)
+      }
+      if (files.length) out.push({ route: canon, files })
+      walk(record.$children, route, canon)
+    }
+  }
+  walk(pages, '', '/')
+  return fileLinkTargets(out)
 }
 
 // Each page of a subtree by its route, with its own items: the page's, and its sections' with theirs.
@@ -1704,6 +1744,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   ctx.seen = seenPageRoutes(backend ? readBackendState(siteRoot, backend).items : null)
   ctx.files = sitePageFiles(siteYml, pagesDir, { seen: ctx.seen, siteRoot, writable: writableMounts })
   ctx.places = new Map()
+  ctx.fileLinks = pageFileTargets(ctx, document?.pages, sourceLocale)
   // The tree a key names its file by: pages and layout wherever `paths:` puts them, and each mount
   // the pull writes into. (A read-only mount's pages are never written.)
   if (ctx.media) ctx.media.tree = siteTree(siteRoot, { pagesDir, layoutDir: layoutBaseDir, mounts: ctx.files.writable })
