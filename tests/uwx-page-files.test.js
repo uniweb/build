@@ -1,0 +1,210 @@
+/**
+ * ⭐ A PULL WRITES EACH PAGE WHERE THE FILES KEEP IT (`src/uwx/page-files.js`) — found by the build's
+ * rules, never computed from the document: a numbered folder keeps its number, and a folder-mode `.md`
+ * page is written back into its file.
+ *
+ * ⛔ Until 2026-11-04 a pull named a page's folder by its slug, so `pages/2-about/` came back as
+ * `pages/about/` with the numbered folder pruned (measured that day), and it left every folder-mode
+ * `.md` page alone, so an edit made to one in the app was undone by the next push.
+ *
+ * The parity test holds the file map to the push: every page the push sends has a place, and each of
+ * its sections was read from that place.
+ */
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, relative, dirname } from 'node:path'
+import yaml from 'js-yaml'
+import { siteProjectToDocument, siteContentDocumentToProject } from '../src/uwx/index.js'
+import { buildRouteOf } from '../src/uwx/site.js'
+import { sitePageFiles } from '../src/uwx/page-files.js'
+import { sectionFileOf } from '../src/site/file-links.js'
+import { collectSiteContent } from '../src/site/content-collector.js'
+
+let ROOT
+const w = (rel, body) => {
+  const p = join(ROOT, rel)
+  mkdirSync(dirname(p), { recursive: true })
+  writeFileSync(p, body)
+}
+const siteDir = () => join(ROOT, 'site')
+beforeEach(() => {
+  ROOT = mkdtempSync(join(tmpdir(), 'uwx-page-files-'))
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  vi.spyOn(console, 'log').mockImplementation(() => {})
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  rmSync(ROOT, { recursive: true, force: true })
+})
+
+const snapshot = () => {
+  const files = {}
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      if (name === '.uniweb') continue
+      if (statSync(p).isDirectory()) walk(p)
+      else files[relative(ROOT, p)] = readFileSync(p, 'utf8')
+    }
+  }
+  walk(ROOT)
+  return files
+}
+const changed = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((f) => a[f] !== b[f]).sort()
+// Each page of a document with its slug path (the pull's route) and the build's route.
+const pagesOf = (doc) => {
+  const out = []
+  const walk = (records, prefix, parent) => {
+    for (const r of records || []) {
+      const slug = r.slug?.en ?? r.slug
+      const route = prefix ? `${prefix}/${slug}` : slug
+      const canon = buildRouteOf(r, parent, 'en')
+      out.push({ route, canon, record: r })
+      walk(r.$children, route, canon)
+    }
+  }
+  walk(doc.pages, '', '/')
+  return out
+}
+const at = (doc, canon) => pagesOf(doc).find((p) => p.canon === canon)?.record
+const para = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+const built = async () => (await collectSiteContent(siteDir(), {})).pages.map((p) => p.route)
+
+// A site with every way a page is kept: numbered page folders, a child section, a parametric page,
+// a folder-mode folder of numbered `.md` pages with a folder inside it, and a mount.
+function everyKind() {
+  w('site/site.yml', 'name: S\nfoundation: "@acme/base@1.0.0"\nindex: home\npaths:\n  pages/docs: ../docs-repo\n')
+  w('site/pages/1-home/page.yml', 'title: Home\nnest:\n  grid: [card-a]\n')
+  w('site/pages/1-home/1-hero.md', '---\ntype: Hero\n---\n\n# Welcome\n')
+  w('site/pages/1-home/2-grid.md', '# Grid\n')
+  w('site/pages/1-home/@card-a.md', '# Card A\n')
+  w('site/pages/2-about/page.yml', 'title: About\n')
+  w('site/pages/2-about/1-story.md', '## Our story\n\nIt began in 2008.\n')
+  w('site/pages/blog/page.yml', 'title: Blog\n')
+  w('site/pages/blog/list.md', '# Posts\n')
+  w('site/pages/blog/[slug]/page.yml', 'title: Post\n')
+  w('site/pages/blog/[slug]/body.md', '# A post\n')
+  w('site/pages/guide/folder.yml', 'title: Guide\n')
+  w('site/pages/guide/1-install.md', '# Install it\n\nRun the command.\n')
+  w('site/pages/guide/2-use.md', '# Use it\n')
+  w('site/pages/guide/more/folder.yml', 'title: More\n')
+  w('site/pages/guide/more/tips.md', '# Tips\n')
+  w('docs-repo/folder.yml', 'title: Docs\n')
+  w('docs-repo/intro.md', '# Intro\n')
+}
+
+describe('the file map and the push say one thing', () => {
+  it('⭐ every page the push sends has a place, and its sections were read from it', async () => {
+    everyKind()
+    const doc = await siteProjectToDocument(siteDir())
+    const files = sitePageFiles(yaml.load(readFileSync(join(siteDir(), 'site.yml'), 'utf8')), join(siteDir(), 'pages'))
+    const seen = []
+    for (const { route, record } of pagesOf(doc)) {
+      const place = files.page(route)
+      expect(place, route).toBeTruthy()
+      seen.push(`${route}:${place.kind}`)
+      for (const section of record.page_sections || []) {
+        const file = sectionFileOf(section)
+        if (place.kind === 'md') expect(file, route).toBe(place.file)
+        else if (place.kind === 'folder') expect(dirname(file), route).toBe(place.dir)
+      }
+    }
+    expect(seen).toEqual(expect.arrayContaining([
+      'home:folder', 'about:folder', 'blog:folder', 'blog/slug:folder', 'guide:folder',
+      'guide/install:md', 'guide/use:md', 'guide/more:folder', 'guide/more/tips:md', 'docs:mounted', 'docs/intro:mounted',
+    ]))
+    expect(files.page('about').dir).toBe(join(siteDir(), 'pages/2-about'))
+  })
+})
+
+describe('⭐ a pull writes each page where the files keep it', () => {
+  it('a pull of what was pushed changes no file — numbered folders, a child section, `.md` pages and all', async () => {
+    everyKind()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+    expect(changed(before, snapshot())).toEqual([])
+  })
+
+  it('an app edit to a section in a numbered folder lands in that folder\'s file', async () => {
+    everyKind()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/about').page_sections[0].content = { en: para('It began in 2009.') }
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+    expect(changed(before, snapshot())).toEqual(['site/pages/2-about/1-story.md'])
+    expect(readFileSync(join(siteDir(), 'pages/2-about/1-story.md'), 'utf8')).toContain('It began in 2009.')
+  })
+
+  it('an app edit to a folder-mode page comes back into its `.md` file, and the next push sends it', async () => {
+    everyKind()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    const install = at(doc, '/guide/install')
+    install.page_sections[0].content = { en: { type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Install it' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Run the command twice.' }] },
+    ] } }
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    expect(changed(before, snapshot())).toEqual(['site/pages/guide/1-install.md'])
+    expect(readFileSync(join(siteDir(), 'pages/guide/1-install.md'), 'utf8')).toContain('Run the command twice.')
+    const again = await siteProjectToDocument(siteDir())
+    expect(JSON.stringify(at(again, '/guide/install').page_sections[0].content)).toContain('Run the command twice.')
+  })
+
+  it('a page added in the app to a folder-mode folder comes back as an `.md` file', async () => {
+    everyKind()
+    const doc = await siteProjectToDocument(siteDir())
+    const guide = at(doc, '/guide')
+    guide.$children.push({
+      $id: 'faq', slug: { en: 'faq' }, mode: 'page', title: { en: 'FAQ' },
+      page_sections: [{ $id: 'faq', stable_id: 'faq', type: 'Section', content: { en: { type: 'doc', content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'FAQ' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Asked often.' }] },
+      ] } } }],
+    })
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true, sectionType: 'Section' })
+
+    expect(readFileSync(join(siteDir(), 'pages/guide/faq.md'), 'utf8')).toContain('Asked often.')
+    expect(existsSync(join(siteDir(), 'pages/guide/faq'))).toBe(false)
+    expect(await built()).toContain('/guide/faq')
+  })
+
+  it('a title the first heading does not give is left as written, and said', async () => {
+    everyKind()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/guide/use').title = { en: 'Using it well' }
+    const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    expect(changed(before, snapshot())).toEqual([])
+    expect(report.cannotHold).toEqual([{ route: 'guide/use', what: ['a title its first heading does not give'] }])
+  })
+
+  it('a folder-mode folder reordered in the app says it in its `pages:`, and the build and the push follow it', async () => {
+    everyKind()
+    const doc = await siteProjectToDocument(siteDir())
+    const guide = at(doc, '/guide')
+    guide.$children = [...guide.$children].reverse() // more, use, install
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    expect(yaml.load(readFileSync(join(siteDir(), 'pages/guide/folder.yml'), 'utf8')).pages).toEqual(['more', 'use', 'install', '...'])
+    const again = await siteProjectToDocument(siteDir())
+    expect(at(again, '/guide').$children.map((c) => c.$id)).toEqual(['more', 'use', 'install'])
+  })
+
+  it('a route the files give two pages for is left alone', async () => {
+    everyKind()
+    w('site/pages/guide/topics.md', '# Topics, the file\n')
+    w('site/pages/guide/topics/folder.yml', 'title: Topics\n')
+    w('site/pages/guide/topics/a.md', '# A\n')
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    for (const p of pagesOf(doc).filter((p) => p.route === 'guide/topics')) p.record.title = { en: 'Changed' }
+    const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    expect(changed(before, snapshot())).toEqual([])
+    expect(report.leftAlone).toContain('guide/topics')
+  })
+})

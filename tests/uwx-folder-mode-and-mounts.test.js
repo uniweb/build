@@ -314,7 +314,7 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
   })
 })
 
-describe('a pull leaves the pages written in git alone', () => {
+describe('a pull leaves a mount\'s pages alone, and writes a folder of `.md` pages in place', () => {
   it('a pull of what was pushed writes nothing and deletes nothing in the mount, the stub or a folder of pages', async () => {
     docsSite()
     w('site/pages/blog/folder.yml', 'title: Blog\n')
@@ -335,7 +335,9 @@ describe('a pull leaves the pages written in git alone', () => {
     expect(Object.keys(after).filter((f) => f.startsWith('site/pages/docs/') || f.startsWith('site/pages/blog/')).sort())
       .toEqual(Object.keys(before).filter((f) => f.startsWith('site/pages/docs/') || f.startsWith('site/pages/blog/')).sort())
     expect(existsSync(join(siteDir(), 'pages/blog/newer'))).toBe(false)
-    expect(report.leftAlone).toEqual(expect.arrayContaining(['docs', 'blog/newer', 'blog/older']))
+    // The mount's pages are left alone; the blog's are written in place — and, unchanged, written as they were.
+    expect(report.leftAlone).toEqual(expect.arrayContaining(['docs']))
+    expect(report.leftAlone).not.toContain('blog/newer')
     expect(await built()).toEqual(buildBefore)
   })
 
@@ -362,9 +364,10 @@ describe('a pull leaves the pages written in git alone', () => {
     expect(readFileSync(join(siteDir(), 'pages/docs/folder.yml'), 'utf8')).toContain('title: Documentation')
   })
 
-  // ⛔ Until 2026-11-04 the prune removed the folder whole — measured: `guide/folder.yml`, `install.md`
-  // and `use.md` gone — though the pull writes none of those pages.
-  it('a document without a folder of `.md` pages prunes neither the folder nor its pages — at any depth', async () => {
+  // ⭐ A PAGE THIS COPY NEVER SAW THE BACKEND HOLD IS NOT READ AS DELETED: a push before 2026-10-23 sent no
+  // folder-mode page, so a backend can lack ones the files have always held. ⛔ Until 2026-11-04 the prune
+  // removed such a folder whole — measured: `guide/folder.yml`, `install.md` and `use.md` gone.
+  it('a document without a folder of `.md` pages this copy never saw prunes neither the folder nor its pages — at any depth', async () => {
     site('index: home\n')
     w('site/pages/home/page.yml', 'title: Home\n')
     w('site/pages/home/hero.md', '# Hi\n')
@@ -387,6 +390,30 @@ describe('a pull leaves the pages written in git alone', () => {
     for (const f of ['site/pages/guide/folder.yml', 'site/pages/guide/install.md', 'site/pages/guide/use.md', 'site/pages/about/notes/folder.yml', 'site/pages/about/notes/first.md']) {
       expect(after[f], f).toBe(before[f])
     }
+  })
+
+  it('a folder of `.md` pages this copy saw the backend hold, which the document no longer holds, is pruned with them', async () => {
+    site('index: home\n')
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('site/pages/home/hero.md', '# Hi\n')
+    w('site/pages/guide/folder.yml', 'title: Guide\n')
+    w('site/pages/guide/install.md', '# Install\n')
+    w('site/pages/guide/use.md', '# Use\n')
+    w('site/pages/notes/folder.yml', 'title: Notes\n')
+    w('site/pages/notes/kept.md', '# Kept\n')
+    w('site/pages/notes/gone.md', '# Gone\n')
+    const origin = 'https://backend.test'
+    const items = Object.fromEntries(['guide', 'guide/install', 'guide/use', 'notes', 'notes/kept', 'notes/gone'].map((r, i) => [`pages/${r}/${r.includes('/') ? 'page' : 'folder'}.yml`, `u-${i}`]))
+    w('site/sync.json', JSON.stringify({ backends: { [origin]: { items } } }))
+
+    const doc = await siteProjectToDocument(siteDir())
+    doc.pages = doc.pages.filter((p) => p.$id !== 'guide')
+    at(doc, '/notes').$children = at(doc, '/notes').$children.filter((c) => c.$id !== 'gone')
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), backend: origin, prune: true })
+
+    expect(existsSync(join(siteDir(), 'pages/guide'))).toBe(false)
+    expect(existsSync(join(siteDir(), 'pages/notes/gone.md'))).toBe(false)
+    expect(readFileSync(join(siteDir(), 'pages/notes/kept.md'), 'utf8')).toBe('# Kept\n')
   })
 
   it('CONTROL — a page folder the document no longer holds is still pruned', async () => {

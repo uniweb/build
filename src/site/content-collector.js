@@ -556,7 +556,7 @@ async function readFolderConfig(dirPath, inheritedMode) {
 /**
  * A folder's content mode from its two config files — `readFolderConfig`'s rule, as a pure
  * function, so a synchronous reader applies the same one: the pull, which must know which pages
- * a folder's `.md` files are (`uwx/git-authored.js`).
+ * a folder's `.md` files are (`uwx/page-files.js`).
  *
  * - a `folder.yml` with keys → folder mode
  * - else a `page.yml` with keys → page mode
@@ -3172,6 +3172,10 @@ export {
   resolveMounts,
   findSectionFile,
   processNesting,
+  // The title a folder-mode `.md` page gives — its first heading, else its name — which a pull asks
+  // before it writes one back (`uwx/page-files.js`).
+  extractH1,
+  prettifySlug,
 }
 
 export default collectSiteContent

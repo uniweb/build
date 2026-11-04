@@ -35,7 +35,7 @@
 
 import { foldOpenGraph } from './open-graph.js'
 import { isAuthoredPreview } from './authored-preview.js'
-import { join, relative, extname, basename, dirname } from 'node:path'
+import { join, relative, extname, basename, dirname, parse } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { mapPageRefs, pageRefIndex, pageRefPages, writtenPageRef } from './page-refs.js'
 import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
@@ -59,10 +59,10 @@ import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { documentLanguages, documentSourceLocale } from './source-locale.js'
 import { siteContentDirs } from './site-dirs.js'
-import { gitAuthoredPages } from './git-authored.js'
+import { sitePageFiles, mdPageCannotHold, folderModeOf } from './page-files.js'
 import { layoutAreaRoute, readLayoutFolderSync, DEFAULT_LAYOUT } from '../site/layout-folder.js'
 import { layoutNameKey } from '@uniweb/core/layout-name'
-import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames } from '../site/content-collector.js'
+import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames, folderModePageFiles, folderModeChildren } from '../site/content-collector.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 
 // The pull-side identity index: a per-clone, GITIGNORED `uuid → relative path`
@@ -822,8 +822,30 @@ function pruneOrphanSectionFiles(pageDir, keep, report) {
   }
 }
 
+// Delete a folder-mode level's `.md` pages that no incoming page is — each its own file — and only one
+// this copy has seen the backend hold (`ctx.seen`, its unit in `sync.json`'s `items`). ⛔ A push before
+// 2026-10-23 sent no folder-mode page, so a backend can lack one the files have always held: read as
+// the app's deletion, it would go. A page folder, and a file the build reads as no page, are not this.
+function pruneOrphanPageFiles(levelDir, keep, report, routePrefix, ctx) {
+  let entries
+  try {
+    entries = readdirSync(levelDir)
+  } catch {
+    return
+  }
+  for (const { file, name } of folderModePageFiles(entries).files) {
+    if (keep.has(file)) continue
+    const route = routePrefix ? `${routePrefix}/${name}` : name
+    if (!ctx?.seen?.has(route)) continue
+    const p = join(levelDir, file)
+    if (!statSync(p).isFile()) continue
+    unlinkSync(p)
+    report.deleted.push(p)
+  }
+}
+
 // Delete the page directories in `pagesDir` whose name isn't an incoming page dir — never one that
-// holds a page the pull leaves alone (`holds`, `git-authored.js`), which would go with it.
+// holds a page a prune must not take (`holds`, `page-files.js`), which would go with it.
 function pruneOrphanPageDirs(pagesDir, keepDirs, report, holds = () => false) {
   if (!existsSync(pagesDir)) return
   for (const entry of readdirSync(pagesDir)) {
@@ -848,8 +870,62 @@ function pruneOrphanPageDirs(pagesDir, keepDirs, report, holds = () => false) {
 // incoming level never nukes an existing one (a malformed/partial payload can't
 // wipe it).
 function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
-  writePagesTree(pages, pagesDir, sourceLocale, report, ctx, '', rootOrderList(ctx.siteRoot, pagesDir))
-  if (prune) prunePagesTree(pages, pagesDir, sourceLocale, report, ctx)
+  // The mode the build reads the pages directory in: `pages/folder.yml` puts the whole site in folder mode.
+  const rootMode = ctx.files?.levelMode(pagesDir) ?? folderModeOf(pagesDir, 'sections')
+  writePagesTree(pages, pagesDir, sourceLocale, report, ctx, '', rootOrderList(ctx.siteRoot, pagesDir), '/', rootMode)
+  if (prune) prunePagesTree(pages, pagesDir, sourceLocale, report, ctx, '', rootMode)
+}
+
+// ⭐ WHERE A PAGE GOES: where the files keep it (`page-files.js`) — a numbered folder, a folder-mode
+// `.md` file — else where the project's rules place a new one beside its siblings: in a folder-mode
+// level an `.md` file when it can be one, else a page folder named by its slug. ⛔ A page a folder-mode
+// level cannot hold as a file is not written there (`cannot`): a page folder below it, with nothing in
+// its `page.yml`, is read in folder mode, its sections as pages. A folder-mode folder is a folder.
+// ⛔ Until 2026-11-04 every page went to its slug's folder: `pages/2-about/` came back as `about/`.
+function placeOf(ctx, record, route, levelDir, levelMode, sourceLocale) {
+  const found = ctx.files?.page(route)
+  if (found) return found
+  if (levelMode === 'pages' && record.mode !== 'folder' && !record.is_dynamic) {
+    const name = unwrapLocalized(record.slug, sourceLocale)
+    const what = mdPageCannotHold(record, { name, sourceLocale })
+    return what.length ? { kind: 'cannot', what } : { kind: 'md', file: join(levelDir, `${name}.md`), dir: levelDir }
+  }
+  return { kind: 'folder', dir: join(levelDir, pageDirName(record, sourceLocale)) }
+}
+
+// ⭐ A FOLDER-MODE `.md` PAGE, WRITTEN BACK IN PLACE: the file is the page and its one section, so the
+// section is written into it as any section file is (`sectionRecordToFile`) — its text, its params —
+// and its frontmatter's `hidden:` says the page's. One the file cannot hold (`mdPageCannotHold`) is
+// left as written, and said. ⛔ Until 2026-11-04 a pull left every such page alone, so an edit made to
+// one in the app was undone by the next push. Returns whether it was written.
+function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLocale }) {
+  const own = parse(place.file).name
+  const name = parseNumericPrefix(own).name || own
+  const what = mdPageCannotHold(record, { name, sourceLocale })
+  if (what.length) {
+    report.leftAlone?.push(route)
+    report.cannotHold?.push({ route, what })
+    return false
+  }
+  const section = record.page_sections[0]
+  const stableId = recordStableId(section) || name
+  // A page renamed in the app moves its file, as a page folder moves (`placeByUuid`).
+  placeByUuid(ctx, record.$uuid, place.file)
+  sectionRecordToFile({
+    filePath: place.file,
+    record: { ...section, hidden: record.hidden === true },
+    sourceLocale: ctx?.sourceLocale,
+    collector: ctx?.collector,
+    dataModel: ctx?.dataModel,
+    impliedType: ctx?.sectionType,
+    freeformRelPath: buildFreeformPath({ stableId }, pageContext),
+    freeformCandidates: freeformPathsFor({ stableId }, pageContext),
+    writeId: stableId !== name,
+    context: translationContext({ stableId }, pageContext.route),
+    media: ctx?.media ?? null,
+  })
+  report.sections.push(place.file)
+  return true
 }
 
 // The directory name for a page record (slug, or `[param]/` for a dynamic page).
@@ -870,24 +946,25 @@ export function pageDirName(record, sourceLocale) {
 // section files, recursing into children. No deletes happen here. `routePrefix`
 // accumulates the slug-path route (for the free-form translation path; matches the
 // producer's slugPath, normalizeRouteForPath strips any leading slash on both).
-function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null, canonParent = '/') {
+function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix = '', list = null, canonParent = '/', levelMode = 'sections') {
   let leftAlone = false
   for (const record of pages || []) {
     const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
     const route = routePrefix ? `${routePrefix}/${slug}` : slug
-    // ⭐ A PAGE AUTHORED IN A FILE THE PULL CANNOT WRITE BACK IS LEFT ALONE — a mount's, or a
-    // folder-mode `.md` page (`git-authored.js`). Its children too: a mount's are the mount's.
-    if (ctx.leave?.has(route)) {
+    const place = placeOf(ctx, record, route, pagesDir, levelMode, sourceLocale)
+    ctx.places?.set(record, place)
+    // ⭐ A PAGE THE PULL MAY NOT OR CANNOT WRITE IS LEFT ALONE — a mount's, a route the files give two
+    // pages for (`page-files.js`), a page its folder-mode level cannot hold as a file. Its children too:
+    // a mount's are the mount's.
+    if (place.kind === 'mounted' || place.kind === 'twice' || place.kind === 'cannot') {
       report.leftAlone?.push(...subtreeRoutes(record, route, sourceLocale))
+      if (place.kind === 'cannot') report.cannotHold?.push({ route, what: place.what })
       leftAlone = true
       continue
     }
     // The route the build gives the page (`buildRouteOf`, the push's rule): an index page takes its
     // parent's, a parametric one is `:<param>`.
     const canon = buildRouteOf(record, canonParent, sourceLocale)
-    const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
-    // Relocate the whole page dir if this uuid moved to a new slug, then record it.
-    placeByUuid(ctx, record.$uuid, pageDir)
 
     // Capture target-locale translations of the page's localized scalars; the
     // source value goes inline into page.yml below (pageRecordToYml unwraps it). In the page's
@@ -908,6 +985,14 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // are keyed by the build's route. ⛔ Until 2026-09-26 this was the slug path — `home` for a
     // homepage the build reads at `/`.
     const pageContext = { route: canon, id: record.stable_id }
+
+    if (place.kind === 'md') {
+      if (!writeMdPage({ record, place, route, ctx, report, pageContext, sourceLocale })) leftAlone = true
+      continue
+    }
+    const pageDir = place.dir
+    // Relocate the whole page dir if this uuid moved to a new slug, then record it.
+    placeByUuid(ctx, record.$uuid, pageDir)
 
     let sectionsArray = []
     let filesGiveOrder = false
@@ -931,17 +1016,18 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // (`content-collector.js::readFolderConfig`). ⛔ Until 2026-10-08 a pull wrote `{}` into every page
     // whose folder had none. An empty `folder.yml` is written still — its presence is folder mode.
     if (ymlName === 'page.yml' && Object.keys(yml).length === 0 && !existsSync(ymlPath)) {
-      writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)
+      writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon, folderModeOf(pageDir, levelMode))
       continue
     }
     writeMergedYaml(ymlPath, yml, PAGE_YML_MANAGED_KEYS)
     report.pages.push(ymlPath)
 
-    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon)
+    // Its children are read in the mode the build reads its folder in now, its config just written.
+    writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon, folderModeOf(pageDir, levelMode))
   }
   // A level holding a page left alone keeps the order its files give: reconciling it would write an
   // `order:` into a page folder that does not exist, or rewrite a `pages:` list the author keeps.
-  if (!leftAlone) reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage })
+  if (!leftAlone) reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage, ctx, levelMode })
 }
 
 // A page's route and each of its descendants', as `writePagesTree` composes them.
@@ -1025,15 +1111,22 @@ const stableJson = (value) =>
 // the rest after them by filename (`orderFolders`), so the pages at the END that are already in
 // filename order, and carry no `order:`, need none — the way `international` numbers four pages and
 // leaves `404` and `home` to follow. ⛔ The first version of this numbered every page of the level.
-function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = null }) {
+function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = null, ctx = null, levelMode = 'sections' }) {
+  // Each page by the entry the files keep it as (`places`): `2-about`, `1-install.md`.
   const level = (pages || []).map((r) => {
-    const dirName = pageDirName(r, sourceLocale)
-    return { dirName, yml: join(pagesDir, dirName, r.mode === 'folder' ? 'folder.yml' : 'page.yml') }
+    const place = ctx?.places?.get(r)
+    if (place?.kind === 'md') {
+      const own = parse(place.file).name
+      return { md: true, dirName: basename(place.file), name: parseNumericPrefix(own).name || own, yml: null }
+    }
+    const dirName = place?.kind === 'folder' ? basename(place.dir) : pageDirName(r, sourceLocale)
+    return { md: false, dirName, name: parseNumericPrefix(dirName).name, yml: join(pagesDir, dirName, r.mode === 'folder' ? 'folder.yml' : 'page.yml') }
   })
   if (level.length < 2) return
-  const folders = level.map(({ dirName, yml }) => {
+  if (levelMode === 'pages') return reconcileFolderModeOrder({ level, pagesDir, list, homepage })
+  const folders = level.map(({ dirName, name, yml }) => {
     const order = readAuthoredYaml(yml)?.order
-    return { dirName, name: parseNumericPrefix(dirName).name, order: typeof order === 'number' ? order : undefined }
+    return { dirName, name, order: typeof order === 'number' ? order : undefined }
   })
   const ordered = orderFolders(folders, list?.pages).map((f) => f.dirName)
   if (ordered.join('\n') === level.map((l) => l.dirName).join('\n')) return
@@ -1057,6 +1150,36 @@ function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = n
     tail--
   }
   level.slice(0, tail).forEach(({ yml }, i) => writeMergedYaml(yml, { order: i + 1 }, ['order']))
+}
+
+// ⭐ A FOLDER-MODE LEVEL'S ORDER IS ONE LIST over its `.md` pages and its folders, as the build orders
+// them (`folderModeChildren`): when the files no longer give the backend's order, the level's `pages:`
+// says it, in its own config. A page's `order:` cannot — an `.md` page has no config to hold one — and
+// renaming numbered files would move every page's file for one change.
+function reconcileFolderModeOrder({ level, pagesDir, list, homepage }) {
+  let entries = []
+  try {
+    entries = readdirSync(pagesDir)
+  } catch {
+    return
+  }
+  const config = { pages: list?.pages }
+  const mine = new Set(level.filter((l) => l.md).map((l) => l.dirName))
+  const files = folderModePageFiles(entries, config).files.filter((f) => mine.has(f.file)).map((f) => ({ name: f.name, entry: f.file }))
+  const folders = orderFolders(
+    level.filter((l) => !l.md).map(({ dirName, name, yml }) => {
+      const order = readAuthoredYaml(yml)?.order
+      return { dirName, name, order: typeof order === 'number' ? order : undefined, entry: dirName }
+    }),
+    list?.pages
+  )
+  const given = folderModeChildren(files, folders, config).map((c) => c.entry)
+  if (given.join('\n') === level.map((l) => l.dirName).join('\n')) return
+  const names = level.map((l) => l.name)
+  const parsed = Array.isArray(list?.pages) ? parseWildcardArray(list.pages) : null
+  // A root list's first entry is the homepage (`reconcileLevelOrder`), so one that does not open with it opens with `...`.
+  if (homepage && names[0] !== homepage) list?.write(['...', ...names])
+  else list?.write(parsed?.mode === 'strict' ? names : [...names, '...'])
 }
 
 // The `pages:` list a level is ordered by, and how to rewrite it. The root's is the site config's,
@@ -1086,29 +1209,37 @@ function collectSectionFileBases(pageSections) {
 
 // Pass 2 — prune orphan section files (per page dir) and orphan page dirs (per
 // level), AFTER every relocation in pass 1. Guarded against wiping an empty level.
-function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null, routePrefix = '') {
+function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null, routePrefix = '', levelMode = 'sections') {
+  // Each incoming page by the entry the files keep it as (`places`): a folder's name, an `.md` page's file.
   const incomingDirs = new Set()
+  const incomingFiles = new Set()
   for (const record of pages || []) {
-    incomingDirs.add(pageDirName(record, sourceLocale))
     const slug = unwrapLocalized(record.slug, sourceLocale)
     const route = routePrefix ? `${routePrefix}/${slug}` : slug
-    // Left alone by pass 1, so nothing of it is pruned either (`git-authored.js`).
-    if (ctx?.leave?.has(route)) continue
-    const pageDir = join(pagesDir, pageDirName(record, sourceLocale))
+    const place = ctx?.places?.get(record) ?? { kind: 'folder', dir: join(pagesDir, pageDirName(record, sourceLocale)) }
+    if (place.kind === 'md') incomingFiles.add(basename(place.file))
+    else if (place.kind === 'twice') {
+      incomingDirs.add(basename(place.dir))
+      incomingFiles.add(basename(place.file))
+    } else incomingDirs.add(place.kind === 'folder' ? basename(place.dir) : pageDirName(record, sourceLocale))
+    // Left alone by pass 1 — and an `.md` page has nothing below it — so nothing of it is pruned.
+    if (place.kind !== 'folder') continue
+    const pageDir = place.dir
     if (record.mode === 'page') {
       // The files pass 1 wrote into — the author's own names among them — else the names it would give.
       const keep = ctx?.sectionFiles?.get(pageDir) || collectSectionFileBases(record.page_sections)
       if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
     }
-    prunePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route)
+    prunePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, folderModeOf(pageDir, levelMode))
   }
-  if (incomingDirs.size === 0) return
+  if (incomingDirs.size === 0 && incomingFiles.size === 0) return
+  if (levelMode === 'pages') pruneOrphanPageFiles(pagesDir, incomingFiles, report, routePrefix, ctx)
   // A mounted route's local folder is never an orphan, whatever the document holds: what it
-  // presents is another repository's (`git-authored.js`).
-  if (!routePrefix) for (const segment of ctx?.leave?.mounted ?? []) incomingDirs.add(segment)
+  // presents is another repository's (`page-files.js`).
+  if (!routePrefix) for (const segment of ctx?.files?.mounted ?? []) incomingDirs.add(segment)
   // ⛔ Nor is a folder that holds a folder-mode page, whatever the document holds: until 2026-11-04 a
   // document without that folder's own page removed it whole, its `.md` pages with it.
-  pruneOrphanPageDirs(pagesDir, incomingDirs, report, (dir) => Boolean(ctx?.leave?.holds?.(dir)))
+  pruneOrphanPageDirs(pagesDir, incomingDirs, report, (dir) => Boolean(ctx?.files?.holds?.(dir)))
 }
 
 /**
@@ -1350,6 +1481,18 @@ function refuseContentFilesCannotHold(document, sourceLocale) {
   )
 }
 
+// The routes of the pages a copy's `sync.json` names for a backend — each page unit, `pages/<route>/page.yml`
+// or `folder.yml`, a parametric folder's segment by its parameter (`[slug]` → `slug`), as `page-files.js`
+// names routes.
+function seenPageRoutes(items) {
+  const out = new Set()
+  for (const key of Object.keys(items || {})) {
+    const m = key.match(/^pages\/(.+)\/(?:page|folder)\.yml$/)
+    if (m) out.add(m[1].split('/').map((seg) => seg.match(/^\[(.+)\]$/)?.[1] ?? seg).join('/'))
+  }
+  return out
+}
+
 /**
  * Project a whole `@uniweb/site-content` document to a site's files: `info` →
  * config (siteInfoToConfig), `collections[]` declarations →
@@ -1382,7 +1525,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
-  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [] }
+  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [], cannotHold: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).
@@ -1427,9 +1570,14 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // The tree a key names its file by: pages and layout wherever `paths:` puts them. (A mount's pages
   // are never written, so the mounts need not join it.)
   if (ctx.media) ctx.media.tree = siteTree(siteRoot, { pagesDir, layoutDir: layoutBaseDir })
-  // ⭐ The pages authored in files a pull cannot write back — a mount's, a folder-mode folder's
-  // `.md` pages — are neither written nor pruned (`git-authored.js`).
-  ctx.leave = gitAuthoredPages(siteYml, pagesDir)
+  // ⭐ WHERE EACH PAGE IS KEPT — found in the files by the build's rules (`page-files.js`), so a page
+  // is written where it lives: a numbered folder, a folder-mode `.md` file. A mount's pages, and a route
+  // the files give two pages for, are neither written nor pruned. Each record's place, once decided, is
+  // the one every pass below reads (`places`).
+  // The pages this copy has seen the backend hold, by route: a prune deletes an `.md` page only then.
+  ctx.seen = seenPageRoutes(backend ? readBackendState(siteRoot, backend).items : null)
+  ctx.files = sitePageFiles(siteYml, pagesDir, { seen: ctx.seen })
+  ctx.places = new Map()
   // The root page the backend marks as the homepage, by the directory it is written to.
   const home = (document?.pages || []).find((p) => p?.is_index)
   ctx.homepage = home ? pageDirName(home, sourceLocale) : null
@@ -1442,7 +1590,8 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
     const root = rootOrderList(siteRoot, pagesDir)
     // A homepage marked `index: true` in its own config — where the push read it (`buildPageData`) —
     // is left marked there alone: a site.yml that names none is not given an `index:` it never had.
-    const marksItself = readAuthoredYaml(join(pagesDir, ctx.homepage, home.mode === 'folder' ? 'folder.yml' : 'page.yml'))?.index === true
+    const homePlace = ctx.places.get(home)
+    const marksItself = homePlace?.kind === 'folder' && readAuthoredYaml(join(homePlace.dir, home.mode === 'folder' ? 'folder.yml' : 'page.yml'))?.index === true
     if (root.homepage !== ctx.homepage && !(marksItself && root.homepage === undefined)) {
       const listed = Array.isArray(root.pages) ? parseWildcardArray(root.pages) : null
       // A list that names the homepage first beats `index:`, so it opens with `...` instead.

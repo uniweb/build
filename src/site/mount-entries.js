@@ -4,7 +4,7 @@
  * Split out from resolveMounts so the dev server can learn which directories a
  * site mounts without re-running resolveMounts' validation — that would repeat
  * its warnings on every startup, and the watcher only needs paths. Every reader —
- * the collector, the watcher, a pull (`uwx/git-authored.js`), the roots a push sends
+ * the collector, the watcher, a pull (`uwx/page-files.js`), the roots a push sends
  * and a pull merges (`uwx/site-dirs.js`) and `uniweb status` among them — shares this
  * one definition of what a mount key looks like, so the prefix can never mean one
  * thing to one of them and another to the next.

@@ -42,7 +42,8 @@
 //
 // v0 scope (stated, not silent): media/asset bytes (favicon/assets — carried out of band). Folder-mode `.md`-as-pages and
 // `paths: { pages/<segment> }` mounts are carried since 2026-10-23, read by the
-// build's own rules; a pull leaves those pages alone (`git-authored.js`).
+// build's own rules; a pull writes a folder-mode page back in place, and leaves a mount's alone
+// (`page-files.js`).
 
 import { readdir, readFile } from 'node:fs/promises'
 import { dataBlockModels } from '../i18n/data-models.js'

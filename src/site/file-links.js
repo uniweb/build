@@ -30,6 +30,11 @@ export function carrySectionFile(from, to) {
   if (FILES.has(from)) FILES.set(to, FILES.get(from))
 }
 
+/** The file a section — or a record the push made from one — was read from, or null. */
+export function sectionFileOf(section) {
+  return FILES.get(section) ?? null
+}
+
 // A relative path to a markdown file: no scheme, no leading `/`, `#` or `?`.
 const FILE_LINK = /^(?![a-z][a-z0-9+.-]*:|[/#?])([^#?]+\.md)(?:#(.*))?$/i
 
