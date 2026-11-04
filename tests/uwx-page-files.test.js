@@ -441,3 +441,97 @@ describe('⭐ a link a file writes as a file stays as the file wrote it', () => 
     expect(readFileSync(join(ROOT, 'docs-repo/guide/1-start.md'), 'utf8')).toBe('# Start\n\nBegin here, then go [back](../intro.md).\n\nSee [the intro](../intro.md) and [the next step](/docs/guide/next).\n')
   })
 })
+
+describe('⭐ a mount\'s own route renamed or removed in the app is said in paths:', () => {
+  const ORIGIN = 'https://backend.test'
+  // As a backend hands the site back: each item with its uuid, the mount's route among them known to
+  // this copy (`sync.json`'s `items`).
+  async function synced(declare) {
+    writableMount(declare ? { declare } : {})
+    const doc = await siteProjectToDocument(siteDir())
+    let n = 0
+    const stamp = (r) => {
+      r.$uuid = `u${n++}`
+      for (const s of r.page_sections || []) stamp(s)
+      for (const c of r.$children || []) stamp(c)
+    }
+    for (const p of doc.pages) stamp(p)
+    w('site/sync.json', JSON.stringify({ backends: { [ORIGIN]: { items: { 'pages/docs/folder.yml': at(doc, '/docs').$uuid } } } }))
+    return doc
+  }
+  const pullBack = (doc, opts = {}) => pullInto(doc, { backend: ORIGIN, ...opts })
+  const siteYml = () => yaml.load(readFileSync(join(siteDir(), 'site.yml'), 'utf8'))
+
+  it('⭐ renamed: its key and its local folder follow, its pages stay in the mounted folder, and none is copied', async () => {
+    const doc = await synced()
+    const docs = doc.pages.find((p) => p.$id === 'docs')
+    docs.slug = { en: 'help' }
+    const intro = docs.$children.find((c) => c.$id === 'intro')
+    intro.page_sections[0].content = { en: { type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Intro' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Read this first, please.' }] },
+    ] } }
+    const report = pullBack(doc)
+
+    expect(siteYml().paths).toEqual({ 'pages/help': { path: '../docs-repo', writable: true } })
+    expect(readFileSync(join(siteDir(), 'pages/help/folder.yml'), 'utf8')).toBe('title: Docs\nlayout: DocsLayout\n')
+    expect(existsSync(join(siteDir(), 'pages/docs'))).toBe(false)
+    expect(existsSync(join(siteDir(), 'pages/help/intro.md'))).toBe(false)
+    // Still writable under its new name: the app's edit is in the mounted folder.
+    expect(readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')).toContain('Read this first, please.')
+    expect(report.mountRoutes).toEqual([{ from: 'docs', to: 'help' }])
+    expect((await built()).filter((r) => r.includes('help') || r.includes('docs')).sort()).toEqual(['/help', '/help/guide', '/help/guide/next', '/help/guide/start', '/help/intro'])
+  })
+
+  it('renamed, a read-only mount: the same, and its folder is as it was', async () => {
+    const doc = await synced(' ../docs-repo')
+    const before = readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')
+    doc.pages.find((p) => p.$id === 'docs').slug = { en: 'help' }
+    pullBack(doc, { writableMounts: [] })
+
+    expect(siteYml().paths).toEqual({ 'pages/help': '../docs-repo' })
+    expect(existsSync(join(siteDir(), 'pages/help/intro.md'))).toBe(false)
+    expect(readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')).toBe(before)
+  })
+
+  it('⭐ removed: the mount leaves the site — its key and its local folder — and the mounted folder is untouched', async () => {
+    const doc = await synced()
+    const mounted = readdirSync(join(ROOT, 'docs-repo'))
+    doc.pages = doc.pages.filter((p) => p.$id !== 'docs')
+    const report = pullBack(doc)
+
+    expect(siteYml().paths).toBeUndefined()
+    expect(existsSync(join(siteDir(), 'pages/docs'))).toBe(false)
+    expect(readdirSync(join(ROOT, 'docs-repo'))).toEqual(mounted)
+    expect(report.mountRoutes).toEqual([{ from: 'docs', to: null }])
+    expect((await built()).some((r) => r.startsWith('/docs'))).toBe(false)
+  })
+
+  it('removed, with nothing pruned: it is left as it is', async () => {
+    const doc = await synced()
+    const before = snapshot()
+    doc.pages = doc.pages.filter((p) => p.$id !== 'docs')
+    pullBack(doc, { prune: false })
+    expect(changed(before, snapshot())).toEqual([])
+  })
+
+  it('moved below another page, where a mount cannot sit: held whole, and nothing copied', async () => {
+    const doc = await synced()
+    const before = snapshot()
+    const docs = doc.pages.find((p) => p.$id === 'docs')
+    doc.pages = doc.pages.filter((p) => p !== docs)
+    doc.pages.find((p) => p.$id === 'about').$children = [docs]
+    const report = pullBack(doc)
+
+    expect(changed(before, snapshot())).toEqual([])
+    expect(report.held.map((h) => h.route)).toEqual(['about/docs'])
+  })
+
+  it('CONTROL — a route this copy never saw the backend hold is no mount\'s: an app page of that name is a page', async () => {
+    writableMount()
+    const doc = await siteProjectToDocument(siteDir())
+    doc.pages.find((p) => p.$id === 'docs').slug = { en: 'help' }
+    pullInto(doc) // no backend: nothing tells this page from a new one
+    expect(siteYml().paths).toEqual({ 'pages/docs': { path: '../docs-repo', writable: true } })
+  })
+})

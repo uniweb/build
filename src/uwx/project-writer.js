@@ -303,6 +303,15 @@ function writeYamlIfChanged(filePath, value, prior) {
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 
 /**
+ * Write `site.yml`'s `paths:` whole, its comments and layout kept; with no entry left it goes. A
+ * mounted route renamed or removed in the app renames or removes its key (`site-project.js`).
+ * @returns {'updated'|'unchanged'}
+ */
+export function writeSitePaths(siteRoot, paths) {
+  return mergeYamlConfig(join(siteRoot, 'site.yml'), { paths: paths && Object.keys(paths).length ? paths : null }, { replace: ['paths'] })
+}
+
+/**
  * Merge `config` into `site.yml` (shallow). Preserves keys not present in the
  * update (foundation, base, paths, …).
  *

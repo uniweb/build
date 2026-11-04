@@ -46,7 +46,8 @@ import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
-import { writeSiteConfig, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
+import { writeSiteConfig, writeSitePaths, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
+import { mountDeclarationsOf } from '../site/mount-entries.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { buildRouteOf } from './site.js'
 import { fileLinkTargets } from '../site/file-links.js'
@@ -1032,6 +1033,8 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     if (place.mount && record.mode !== (place.mount.mode === 'pages' ? 'folder' : 'page')) {
       place = { kind: 'cannot', what: [record.mode === 'folder' ? 'a folder where its files keep a page' : 'a page where its files keep a folder'] }
     }
+    // A mount's own route the files cannot say where the app put it (`followMountRoutes`).
+    if (ctx.heldMounts?.has(record.$uuid)) place = { kind: 'cannot', what: ['a mounted route where a mount cannot sit, or by a name another page holds'] }
     ctx.places?.set(record, place)
     // ⭐ A PAGE THE PULL MAY NOT OR CANNOT WRITE IS LEFT ALONE — a mount's, a route the files give two
     // pages for (`page-files.js`), a page its folder-mode level cannot hold as a file. Its children too:
@@ -1138,6 +1141,73 @@ function subtreeUuids(record) {
     for (const c of r?.$children || []) walk(c)
   }
   walk(record)
+  return out
+}
+
+// A mount's segment, as `resolveMounts` takes one: a simple name, with no dot or underscore before it.
+const MOUNT_SEGMENT = /^[^/._][^/]*$/
+
+/**
+ * ⭐ A MOUNT'S OWN ROUTE, RENAMED OR REMOVED IN THE APP, is said where the files say that route: its
+ * key in `site.yml`'s `paths:`, and its local folder. Renamed, both follow; removed, the mount leaves
+ * the site, its key and its local folder, where the pull prunes. The mounted folder is never touched:
+ * nothing asked for its files to go, and `paths:` still points where it did. A route the files cannot
+ * say — moved below another page, where a mount cannot sit, or renamed to a name another page holds —
+ * is held whole. The route is known by its item, as the backend knows it (`sync.json`'s `items`), so
+ * one this copy never saw is no mount's.
+ * ⛔ Until 2026-11-04 a renamed one was written as a new page of the site's own: a copy of every
+ * mounted page beside the mount, under the new name, which the next push sent too. A removed one was
+ * left, and the next push put it back.
+ *
+ * @returns {{ siteYml: object, renamed: Map<string, string>, held: Set<string> }} the site config as it
+ *   now stands, each mount's segment renamed to its new one, and the items of the routes held
+ */
+function followMountRoutes({ siteRoot, siteYml, pagesDir, document, backend, sourceLocale, prune, report }) {
+  const out = { siteYml, renamed: new Map(), held: new Set() }
+  const declared = mountDeclarationsOf(siteYml?.paths)
+  const items = backend ? readBackendState(siteRoot, backend).items || {} : {}
+  if (!declared.length || !Object.keys(items).length) return out
+  const roots = document?.pages || []
+  const slugOf = (record) => unwrapLocalized(record?.slug, sourceLocale)
+  const anywhere = (records, uuid) => (records || []).some((r) => r?.$uuid === uuid || anywhere(r?.$children, uuid))
+  let paths = { ...siteYml.paths }
+  let changed = false
+  for (const { segment } of declared) {
+    if (roots.some((r) => slugOf(r) === segment)) continue // where it was
+    const uuid = items[`pages/${segment}/folder.yml`] ?? items[`pages/${segment}/page.yml`]
+    if (typeof uuid !== 'string') continue
+    const record = roots.find((r) => r?.$uuid === uuid)
+    const stub = join(pagesDir, segment)
+    if (record) {
+      const to = slugOf(record)
+      if (typeof to !== 'string' || !MOUNT_SEGMENT.test(to) || `pages/${to}` in paths || existsSync(join(pagesDir, to))) {
+        out.held.add(uuid)
+        continue
+      }
+      // The key renamed where it stands, its value as written.
+      paths = Object.fromEntries(Object.entries(paths).map(([key, value]) => [key === `pages/${segment}` ? `pages/${to}` : key, value]))
+      if (existsSync(stub)) {
+        renameSync(stub, join(pagesDir, to))
+        report.renamed.push({ from: stub, to: join(pagesDir, to) })
+      }
+      out.renamed.set(segment, to)
+      report.mountRoutes.push({ from: segment, to })
+      changed = true
+    } else if (anywhere(roots, uuid)) {
+      out.held.add(uuid)
+    } else if (prune) {
+      delete paths[`pages/${segment}`]
+      if (existsSync(stub)) {
+        rmSync(stub, { recursive: true, force: true })
+        report.deleted.push(stub)
+      }
+      report.mountRoutes.push({ from: segment, to: null })
+      changed = true
+    }
+  }
+  if (!changed) return out
+  writeSitePaths(siteRoot, paths)
+  out.siteYml = readAuthoredYaml(join(siteRoot, 'site.yml'))
   return out
 }
 
@@ -1694,7 +1764,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
-  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [], held: [], mountedPages: [] }
+  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [], held: [], mountedPages: [], mountRoutes: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).
@@ -1734,15 +1804,21 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
 
   // Where the tree goes is what this project's own `site.yml` says — the file the next push and the
   // build read, and one a document never writes `paths` into. See `siteContentDirs`.
-  const siteYml = readAuthoredYaml(join(siteRoot, 'site.yml'))
+  let siteYml = readAuthoredYaml(join(siteRoot, 'site.yml'))
   const { pagesDir, layoutDir: layoutBaseDir } = siteContentDirs(siteRoot, siteYml)
+  // A mount's own route renamed or removed in the app, said in `paths:` before any page is placed.
+  const mountRoutes = followMountRoutes({ siteRoot, siteYml, pagesDir, document, backend, sourceLocale, prune, report })
+  siteYml = mountRoutes.siteYml
+  ctx.heldMounts = mountRoutes.held
+  // A writable mount stays one under its new name.
+  const writable = (writableMounts || []).map((segment) => mountRoutes.renamed.get(segment) ?? segment)
   // ⭐ WHERE EACH PAGE IS KEPT — found in the files by the build's rules (`page-files.js`), so a page
   // is written where it lives: a numbered folder, a folder-mode `.md` file, a writable mount's folder.
   // A read-only mount's pages, and a route the files give two pages for, are neither written nor
   // pruned. Each record's place, once decided, is the one every pass below reads (`places`).
   // The pages this copy has seen the backend hold, by route: a prune deletes an `.md` page only then.
   ctx.seen = seenPageRoutes(backend ? readBackendState(siteRoot, backend).items : null)
-  ctx.files = sitePageFiles(siteYml, pagesDir, { seen: ctx.seen, siteRoot, writable: writableMounts })
+  ctx.files = sitePageFiles(siteYml, pagesDir, { seen: ctx.seen, siteRoot, writable })
   ctx.places = new Map()
   ctx.fileLinks = pageFileTargets(ctx, document?.pages, sourceLocale)
   // The tree a key names its file by: pages and layout wherever `paths:` puts them, and each mount
