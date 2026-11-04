@@ -43,9 +43,11 @@ const VERSION = 1
 /**
  * Map sections — merged entry by entry. Anything else in a patch replaces.
  * `recordItems` is keyed by a record's uuid here, each entry that record's list items
- * (`record-items.js`) — replaced whole, one record at a time.
+ * (`record-items.js`) — replaced whole, one record at a time. `types` is keyed by a record's
+ * uuid too, each entry the data schema the backend holds it as, which never changes
+ * (`records.js`, `heldTypes`).
  */
-const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files'])
+const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files', 'types'])
 
 const storePath = (siteDir) => join(siteDir, SYNC_STORE_FILE)
 

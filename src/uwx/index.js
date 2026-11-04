@@ -60,6 +60,7 @@ export {
 export { editYamlText, setYamlKey, replaceInYamlList } from './yaml-edit.js'
 export { buildFolderEntity,
   collectFolderItemUuids,
+  collectFolderRecordTypes,
   stampFolderItemUuids
 } from './folder.js'
 // The identity of a record's list items — banked per record from what a push sent and

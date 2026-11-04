@@ -554,7 +554,7 @@ function describeUnresolved({ path, model, value, invalid, ambiguous }) {
 // `{ $ref: <$id> }` for a record of the same package. A uuid it did not mint is never
 // sent (see `buildRecordEntities`).
 const AMBIGUOUS = Symbol('ambiguous')
-function refResolver(readSchemas, recordMap) {
+function refResolver(readSchemas, recordMap, moved = new Map()) {
   const byModel = new Map() // Model → handle → the record: its own id (null before its first push) and `$id`
   const byOwnId = new Map() // the record's own id → the record
   for (const { declaration, flat } of readSchemas) {
@@ -567,7 +567,8 @@ function refResolver(readSchemas, recordMap) {
       if (own) byOwnId.set(own, record)
     }
   }
-  const sent = ({ own, id }) => (own && recordMap[own] ? { uuid: recordMap[own] } : { ref: id })
+  // A record moved to another data schema is new on the wire, so a reference names it by `$id`.
+  const sent = ({ own, id }) => (own && recordMap[own] && !moved.has(own) ? { uuid: recordMap[own] } : { ref: id })
   return {
     resolve(model, value) {
       if (typeof value !== 'string' || value === '') return { invalid: true }
@@ -580,6 +581,22 @@ function refResolver(readSchemas, recordMap) {
       return { missing: true }
     },
   }
+}
+
+// A data schema's scoped name, `@scope/name` — not the unqualified `@/name`.
+const SCOPED = /^@[^/\s]+\/[^/\s]+$/
+
+// The fields of a record file holding `#ref`, the marker a pull writes for a set secret. A moved
+// record's entity is new, and a new entity holds no secret, so these arrive unset
+// [backend, 2026-11-04]: the push names them, to be set again.
+function setSecretFields(data, prefix = '') {
+  const out = []
+  for (const [key, value] of Object.entries(data && typeof data === 'object' ? data : {})) {
+    if (key.startsWith('$')) continue
+    if (value === '#ref') out.push(prefix + key)
+    else if (value && typeof value === 'object' && !Array.isArray(value)) out.push(...setSecretFields(value, `${prefix}${key}.`))
+  }
+  return out
 }
 
 // "a", "a and b", "a, b and c" — items are already formatted.
@@ -1058,6 +1075,20 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // file and the map is identity — exactly what happened before this change, so a
   // single-backend project behaves as it always did.
   const recordMap = opts.backend ? readBackendState(siteRoot, opts.backend).records || {} : {}
+  // ⭐ WHAT THIS BACKEND HOLDS EACH RECORD AS: its uuid → the data schema its folder entry names
+  // (`sync.json::backends.<B>.types`, banked from every folder a push or pull hands back). An
+  // entity keeps its data schema for life, so an entry never changes.
+  //
+  // A record whose file now sits under another schema has MOVED. It goes up as a new entity of
+  // the new schema (no `$uuid`, its `$id` for references), and its folder entry keeps its own
+  // `$uuid`, found by the record it held, so the entry stays the row it was whatever the file is
+  // now called. One push moves it (backend `entity-sync-wire.md` §11.3). The old entity is kept,
+  // in no folder. ⛔ Until 2026-11-04 the push sent it with its `$uuid` and was refused
+  // (`type_changed`), and the author's way round was to delete the line, which lost the entry
+  // too whenever the file was renamed in the same move.
+  const heldTypes = opts.backend ? readBackendState(siteRoot, opts.backend).types || {} : {}
+  // the record's own id → { uuid: the entity it was, from, to }
+  const moved = new Map()
 
   const entities = []
   const index = []
@@ -1186,6 +1217,14 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         } else if (ownId) {
           fileByOwnId.set(ownId, pooled.relPath)
         }
+        const held = ownId ? recordMap[ownId] : undefined
+        const heldAs = held ? heldTypes[held] : undefined
+        // ⛔ Only two fully scoped names compare. An unqualified `@/x` (a foundation whose scope is not
+        // known here) would differ from the backend's `@acme/x` without the record having moved, and
+        // read as a move it would send the record as new on every push.
+        if (heldAs && SCOPED.test(heldAs) && SCOPED.test(declaration.name) && heldAs !== declaration.name) {
+          moved.set(ownId, { uuid: held, from: heldAs, to: declaration.name })
+        }
         flat.push(rec)
         sourceBySlug.set(r.slug, r)
         produced.push({ id: rec.$id, slug: r.slug })
@@ -1194,14 +1233,14 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     }
     readSchemas.push({ label, declaration, flat, sourceBySlug })
   }
-  const refs = refResolver(readSchemas, recordMap)
+  const refs = refResolver(readSchemas, recordMap, moved)
 
   for (const { label, declaration, flat, sourceBySlug } of readSchemas) {
     const ownIds = new Map()
     const onWire = flat.map((rec) => {
       const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
       ownIds.set(rec.slug, own)
-      const minted = own ? recordMap[own] : undefined
+      const minted = own && !moved.has(own) ? recordMap[own] : undefined
       const { $uuid: _own, ...rest } = rec
       return minted ? { ...rest, $uuid: minted } : rest
     })
@@ -1236,6 +1275,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         )
       }
       seen.add(dupKey)
+      // A moved record's folder entry is found by the entity it held (`folder.js`).
+      const own = ownIds.get(e.slug) ?? null
+      const move = own ? moved.get(own) : undefined
+      if (move) e.movedFrom = move.uuid
       // The verb back-fills the minted `$uuid` into this source file, matched
       // back from the finalized response by ($schema, $id).
       const src = sourceBySlug.get(e.slug)
@@ -1254,6 +1297,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
         multiRecord: src ? src.multiRecord : false,
         // Sent disabled, so the back-fill can check that the backend kept it that way.
         draft: e.document.$disabled === true,
+        // Moved to another data schema: what it was held as, and what it is now.
+        ...(move ? { moved: { from: move.from, to: move.to, uuid: move.uuid, secrets: setSecretFields(src?.data) } } : {}),
       })
     }
     entities.push(...mappedOut.entities)

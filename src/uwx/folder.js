@@ -57,6 +57,12 @@ import { fileLeaf } from './file-records.js'
 export const FOLDER_MODEL_NAME = '@uniweb/folder'
 export const FOLDER_ENTITY_KEY = '@folder'
 
+// ⭐ A MOVED RECORD'S ENTRY IS FOUND BY THE ENTITY IT HELD. A record moved to another data schema
+// goes up as a new entity, so its leaf names it by `$ref` and carries no entity uuid to look the
+// entry up by. The entity it held does: this key, on the leaf, carries it to the stamping below.
+// A symbol, so it never reaches the wire (`JSON.stringify` skips it) or the folder's hash.
+const MOVED_FROM = Symbol('movedFrom')
+
 // Point one authored leaf at the record entity it names. The folder's `contents`
 // field is polymorphic (it can reference any data schema), so the ref uses the
 // entity_ref OPEN form `{ schema, entity }` — not a bare uuid (a bare uuid is only
@@ -129,6 +135,7 @@ function contentsFromNodes(nodes, byEntityId, missing, sourceLocale, byLinkId = 
       continue
     }
     const leaf = refLeaf(entity)
+    if (entity.movedFrom) leaf[MOVED_FROM] = entity.movedFrom
     // ⭐ What the folder says about the record (`records/folder.yml`, ruled 2026-09-27
     // [Diego]): its display text, localized as a branch's is, and its tags, in the order
     // written. A records service answers them beside the record as `$label` and `$tags`.
@@ -146,7 +153,8 @@ function recordOf(item) {
   if (item?.kind !== 'ref') return null
   const e = item.entry
   const uuid = e && typeof e === 'object' ? e.entity : e
-  return typeof uuid === 'string' && uuid ? uuid : null
+  if (typeof uuid === 'string' && uuid) return uuid
+  return typeof item[MOVED_FROM] === 'string' ? item[MOVED_FROM] : null
 }
 
 /**
@@ -194,6 +202,25 @@ export function collectFolderItemUuids(doc) {
     if (typeof item.$uuid !== 'string' || !item.$uuid) return
     if (record) out[`@${record}`] = item.$uuid
     if (unique) out[path] = item.$uuid
+  })
+  return out
+}
+
+/**
+ * What a stored folder says each record is: its entity's uuid → the data schema its entry names
+ * (`entry: { schema, entity }`, the schema's scoped name). Banked beside the placements, so a push
+ * can tell a record whose file moved to another schema (`records.js`, `heldTypes`).
+ *
+ * @param {object} doc - a stored `@uniweb/folder` document
+ * @returns {Record<string,string>}
+ */
+export function collectFolderRecordTypes(doc) {
+  const out = {}
+  walkFolderItems(doc?.contents, (_at, item) => {
+    const e = item?.kind === 'ref' ? item.entry : null
+    if (e && typeof e === 'object' && typeof e.entity === 'string' && e.entity && typeof e.schema === 'string' && e.schema) {
+      out[e.entity] = e.schema
+    }
   })
   return out
 }
