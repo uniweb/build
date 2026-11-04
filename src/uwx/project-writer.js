@@ -21,6 +21,7 @@ import { parseFrontmatter } from './entity-source.js'
 import { canonicalJson, sameMarkdownDocument } from './same-content.js'
 import { spliceBody } from './body-splice.js'
 import { fileLinksIn } from '../site/file-links.js'
+import { parseNumericPrefix } from '../utils/numeric-prefix.js'
 import { renderEntityDocument } from './backfill.js'
 import { queriesYmlPath } from './queries-config.js'
 import { folderYmlPath } from '../site/records-config.js'
@@ -90,8 +91,9 @@ export function resolveSectionFile(dirPath, stableId) {
     let name = base.startsWith('@') ? base.slice(1) : base
     if (name.toLowerCase() === target) return join(dirPath, entry)
 
-    const numMatch = name.match(/^\d+-(.+)$/)
-    if (numMatch && numMatch[1].toLowerCase() === target) return join(dirPath, entry)
+    // Its name with the number that orders it dropped, by the one rule: `2.5-setup.md` is `setup`.
+    const numbered = parseNumericPrefix(name)
+    if (numbered.prefix && numbered.name.toLowerCase() === target) return join(dirPath, entry)
   }
   return null
 }

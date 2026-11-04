@@ -854,10 +854,11 @@ function extractH1(proseMirrorDoc) {
 
 /**
  * Prettify a slug into a human-readable title.
- * Strips numeric prefixes, replaces hyphens with spaces, title-cases.
+ * Strips a numeric prefix (`parseNumericPrefix`, the one rule), replaces hyphens with spaces, title-cases.
+ * ⛔ Until 2026-11-04 it stripped by a rule of its own, so `2.5-setup` was titled "5 Setup".
  */
 function prettifySlug(slug) {
-  const stripped = slug.replace(/^\d+[-.]?\s*/, '')
+  const stripped = parseNumericPrefix(slug).name
   return stripped
     .split('-')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))

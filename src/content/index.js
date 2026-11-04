@@ -11,6 +11,9 @@
  */
 
 export { collectSiteContent, pageSectionFiles } from '../site/content-collector.js'
+// The one rule for a leading number that orders a name (`1-hero`, `2.5-x`, `404`), for a headless
+// caller that lists a folder as the collector reads it (`@uniweb/unipress`'s `materialize.js`).
+export { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 
 // Query + fetch resolution. Pure functions on the clean dep
 // chain — re-exported here so headless callers (unipress, sidecars)

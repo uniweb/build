@@ -12,7 +12,11 @@
 /**
  * Split a leading numeric prefix off a filename stem.
  *
- * Dots are sub-levels, so `1`, `1.5`, `2` order as you would read them.
+ * ⭐ A NUMBER ORDERS ONLY WHERE A DASH FOLLOWS IT, `1-hero`, or where it is the whole name, `404`,
+ * as the docs teach it [Diego, 2026-11-04: "tighten the rule"]. Dots are sub-levels, so `1`, `1.5`,
+ * `2` order as you would read them, and `2.5-x` slots between. ⛔ Until 2026-11-04 the dash was
+ * optional, so `3d-printing` read as 3 and `d-printing`, `100days` as `days`: every lane that drops
+ * the number dropped a name's own digits, and `05b-books.md` was a section called `b-books`.
  *
  * ⛔ THE RECORDS LANE USES THIS FOR ORDERING ONLY — it does NOT strip the prefix
  * from a record's slug. A record's slug is its filename stem, whole. An earlier
@@ -30,9 +34,9 @@
  * @returns {{ prefix: string|null, name: string }}
  */
 export function parseNumericPrefix(filename) {
-  const match = filename.match(/^(\d+(?:\.\d+)*)-?(.*)$/)
+  const match = filename.match(/^(\d+(?:\.\d+)*)(?:-(.+))?$/)
   if (match) {
-    return { prefix: match[1], name: match[2] || match[1] }
+    return { prefix: match[1], name: match[2] ?? match[1] }
   }
   return { prefix: null, name: filename }
 }
