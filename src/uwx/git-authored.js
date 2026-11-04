@@ -12,7 +12,9 @@
 //     folder of page folders.
 //
 // ⇒ An edit made to one of these pages in the app is not brought back, and the next push replaces
-// it with the file. Pruning skips them too: a pull never deletes what it does not write.
+// it with the file. Pruning skips them too, while the document holds the folder they are in. ⛔ A
+// folder-mode folder whose own page the document no longer holds is removed whole, these pages with
+// it (`pruneOrphanPageDirs`, `site-project.js`; measured 2026-11-04).
 //
 // A leaf module, read synchronously as the pull projects (`site-project.js`), through the build's
 // mode rule (`folderContentMode`) and its folder-mode page list (`folderModePageFiles`), so the set
