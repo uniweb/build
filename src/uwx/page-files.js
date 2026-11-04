@@ -8,10 +8,10 @@
 // in the app was undone by the next push.
 //
 // The pages a pull leaves alone are now those it may not or cannot write:
-//   · every page under a read-only `paths: { pages/<segment>: <dir> }` mount — any the site does not
-//     declare `writable: true`, or whose folder the caller may not write (`writable`). Its files are
-//     another repository's, or a folder outside the site; the local folder of that name holds only how
-//     this site presents them, and a pull writing the mounted pages into it would grow a second copy;
+//   · every page under a `paths: { pages/<segment>: <dir> }` mount the caller may not write
+//     (`writable`) — for a pull, one it cannot merge into: a clone beside the site, a folder in no
+//     repository. The local folder of that name holds only how this site presents the mount's pages,
+//     and a pull writing them into it would grow a second copy there;
 //   · a route the files give two pages for — a file and a folder of one name, `topics.md` beside
 //     `topics/` — since a page in the document cannot say which of the two it is.
 // A pull deletes neither, nor a folder that holds one (`holds`): a pull never deletes what it does not
@@ -23,7 +23,7 @@
 //
 // A leaf, read synchronously as the pull projects (`site-project.js`), through the rules the push's
 // walk reads with — `folderContentMode`, `folderModePageFiles`, `parseNumericPrefix`,
-// `layerMountedFolder`, `mountDeclarationsOf` — so the pages it finds are the ones the push sends
+// `layerMountedFolder`, `mountEntriesOf` — so the pages it finds are the ones the push sends
 // (`tests/uwx-page-files.test.js`).
 
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
@@ -32,7 +32,7 @@ import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { isIgnoredFolder } from '../utils/content-files.js'
 import { extractH1, folderContentMode, folderModePageFiles, layerMountedFolder, parseNumericPrefix, prettifySlug } from '../site/content-collector.js'
-import { mountDeclarationsOf } from '../site/mount-entries.js'
+import { mountEntriesOf } from '../site/mount-entries.js'
 import { unwrapLocalized } from './backfill.js'
 import { isProseMirrorDoc } from './locale-sync.js'
 
@@ -99,7 +99,7 @@ const isDirectory = (p) => {
  * @param {{ seen?: Set<string>|null, siteRoot?: string|null, writable?: Iterable<string>|null }} [opts] -
  *   `seen`, the routes of the pages this copy has seen the backend hold: a folder holding an `.md`
  *   page it never saw is one a prune keeps (`holds`). `writable`, the segments of the mounts the
- *   caller may write — each one the site declares `writable: true` is walked into, from `siteRoot`
+ *   caller may write, each walked into from `siteRoot`
  * @returns {{
  *   page: (route: string) => object|null,
  *   levelMode: (dir: string) => 'pages'|'sections'|undefined,
@@ -110,17 +110,17 @@ const isDirectory = (p) => {
  *   mount's segment and folder
  */
 export function sitePageFiles(siteYml, pagesDir, { seen = null, siteRoot = null, writable = null } = {}) {
-  const declared = mountDeclarationsOf(siteYml?.paths)
-  const mounted = new Set(declared.map((d) => d.segment))
-  // ⭐ A mount is written only where the site declares it `writable: true` AND the caller may write
-  // its folder — a pull decides that by the repository holding it, and any other caller writes none.
+  const declared = mountEntriesOf(siteYml?.paths)
+  const mounted = new Set(declared.map(([segment]) => segment))
+  // ⭐ A mount is written where the caller may write its folder — a pull decides that by the repository
+  // holding it — and any other caller writes none.
   const allowed = new Set(writable ?? [])
   const writableMounts = new Map()
-  for (const d of declared) {
-    if (!d.writable || !allowed.has(d.segment) || !siteRoot || typeof d.path !== 'string' || !d.path) continue
+  for (const [segment, folder] of declared) {
+    if (!allowed.has(segment) || !siteRoot || typeof folder !== 'string' || !folder) continue
     // The folder as the push reads it: through any link to it (`resolveMounts`).
-    const dir = resolve(siteRoot, d.path)
-    writableMounts.set(d.segment, existsSync(dir) ? realpathSync(dir) : dir)
+    const dir = resolve(siteRoot, folder)
+    writableMounts.set(segment, existsSync(dir) ? realpathSync(dir) : dir)
   }
   const places = new Map()
   const modes = new Map()

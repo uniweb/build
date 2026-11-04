@@ -234,8 +234,8 @@ describe('⭐ a pull writes each page where the files keep it', () => {
 
 // A site whose docs are a mounted folder it may write: the route's stub says how this site presents
 // them, the mounted folder's config what they are.
-function writableMount({ declare = '\n    path: ../docs-repo\n    writable: true' } = {}) {
-  w('site/site.yml', `name: S\nfoundation: "@acme/base@1.0.0"\nindex: home\npaths:\n  pages/docs:${declare}\n`)
+function writableMount() {
+  w('site/site.yml', 'name: S\nfoundation: "@acme/base@1.0.0"\nindex: home\npaths:\n  pages/docs: ../docs-repo\n')
   w('site/pages/home/page.yml', 'title: Home\n')
   w('site/pages/home/hero.md', '# Welcome\n')
   w('site/pages/about/page.yml', 'title: About\n')
@@ -380,17 +380,14 @@ describe('⭐ a writable mount: a pull writes its pages where the push reads the
     expect(report.held.map((h) => [h.route, h.what])).toEqual([['docs', ['a page where its files keep a folder']]])
   })
 
-  it('⛔ a mount the caller does not name, or the site does not declare writable, is left alone', async () => {
-    for (const [declare, writableMounts] of [['\n    path: ../docs-repo\n    writable: true', []], [' ../docs-repo', ['docs']]]) {
-      rmSync(ROOT, { recursive: true, force: true })
-      writableMount({ declare })
-      const before = snapshot()
-      const doc = await siteProjectToDocument(siteDir())
-      at(doc, '/docs/intro').page_sections[0].content = { en: para('Changed in the app.') }
-      const report = pullInto(doc, { writableMounts })
-      expect(changed(before, snapshot())).toEqual([])
-      expect(report.mountedPages.map((p) => p.route)).toEqual(['docs', 'docs/intro', 'docs/guide', 'docs/guide/start', 'docs/guide/next'])
-    }
+  it('⛔ a mount the caller does not name is left alone: a pull names each one it can merge into', async () => {
+    writableMount()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/docs/intro').page_sections[0].content = { en: para('Changed in the app.') }
+    const report = pullInto(doc, { writableMounts: [] })
+    expect(changed(before, snapshot())).toEqual([])
+    expect(report.mountedPages.map((p) => p.route)).toEqual(['docs', 'docs/intro', 'docs/guide', 'docs/guide/start', 'docs/guide/next'])
   })
 })
 
@@ -446,8 +443,8 @@ describe('⭐ a mount\'s own route renamed or removed in the app is said in path
   const ORIGIN = 'https://backend.test'
   // As a backend hands the site back: each item with its uuid, the mount's route among them known to
   // this copy (`sync.json`'s `items`).
-  async function synced(declare) {
-    writableMount(declare ? { declare } : {})
+  async function synced() {
+    writableMount()
     const doc = await siteProjectToDocument(siteDir())
     let n = 0
     const stamp = (r) => {
@@ -473,18 +470,18 @@ describe('⭐ a mount\'s own route renamed or removed in the app is said in path
     ] } }
     const report = pullBack(doc)
 
-    expect(siteYml().paths).toEqual({ 'pages/help': { path: '../docs-repo', writable: true } })
+    expect(siteYml().paths).toEqual({ 'pages/help': '../docs-repo' })
     expect(readFileSync(join(siteDir(), 'pages/help/folder.yml'), 'utf8')).toBe('title: Docs\nlayout: DocsLayout\n')
     expect(existsSync(join(siteDir(), 'pages/docs'))).toBe(false)
     expect(existsSync(join(siteDir(), 'pages/help/intro.md'))).toBe(false)
-    // Still writable under its new name: the app's edit is in the mounted folder.
+    // Still written under its new name: the app's edit is in the mounted folder.
     expect(readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')).toContain('Read this first, please.')
     expect(report.mountRoutes).toEqual([{ from: 'docs', to: 'help' }])
     expect((await built()).filter((r) => r.includes('help') || r.includes('docs')).sort()).toEqual(['/help', '/help/guide', '/help/guide/next', '/help/guide/start', '/help/intro'])
   })
 
-  it('renamed, a read-only mount: the same, and its folder is as it was', async () => {
-    const doc = await synced(' ../docs-repo')
+  it('renamed, a mount the pull does not write: the same, and its folder is as it was', async () => {
+    const doc = await synced()
     const before = readFileSync(join(ROOT, 'docs-repo/intro.md'), 'utf8')
     doc.pages.find((p) => p.$id === 'docs').slug = { en: 'help' }
     pullBack(doc, { writableMounts: [] })
@@ -532,6 +529,6 @@ describe('⭐ a mount\'s own route renamed or removed in the app is said in path
     const doc = await siteProjectToDocument(siteDir())
     doc.pages.find((p) => p.$id === 'docs').slug = { en: 'help' }
     pullInto(doc) // no backend: nothing tells this page from a new one
-    expect(siteYml().paths).toEqual({ 'pages/docs': { path: '../docs-repo', writable: true } })
+    expect(siteYml().paths).toEqual({ 'pages/docs': '../docs-repo' })
   })
 })

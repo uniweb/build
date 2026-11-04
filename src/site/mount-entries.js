@@ -9,38 +9,21 @@
  * one definition of what a mount key looks like, so the prefix can never mean one
  * thing to one of them and another to the next.
  *
- * A mount is a folder, `pages/docs: ../docs`, or an object saying more of it,
- * `pages/docs: { path: ../docs, writable: true }`: each reader here is handed the
- * folder, and `mountDeclarationsOf` the rest (`resolveMounts` refuses a malformed one).
+ * A mount is its folder, `pages/docs: ../docs`, and nothing else. ⭐ Whether a pull writes
+ * the app's edits into it is no setting: it does wherever it can merge them, a folder of
+ * the site's repository or of a submodule, and holds them where it cannot (the CLI's
+ * `utils/site-roots.js`) [Diego, 2026-11-04]. ⛔ An object, `{ path, writable }`, was a
+ * mount's form for part of that day; `resolveMounts` refuses it, saying so. Each value is
+ * handed over as written, so a reader never takes such an object for no mount at all.
  *
  * A leaf, with no imports, so a module that must stay light can ask it.
  *
  * @param {Object} pathsConfig - The paths: object from site.yml
- * @returns {Array<[string, string]>} [routeSegment, relativePath] pairs
+ * @returns {Array<[string, *]>} [routeSegment, folder] pairs — a folder is a string
  */
 export function mountEntriesOf(pathsConfig) {
-  return mountDeclarationsOf(pathsConfig).map(({ segment, path }) => [segment, path])
-}
-
-/**
- * Each mount with what its declaration says: its route `segment`, its folder's `path`, and whether
- * a pull may write into it (`writable`) — ⭐ a pull writes a mounted folder only where the site says
- * so; the string form only reads.
- *
- * @param {Object} pathsConfig - The paths: object from site.yml
- * @returns {Array<{ segment: string, path: string, writable: boolean, declared: unknown }>}
- */
-export function mountDeclarationsOf(pathsConfig) {
   if (!pathsConfig || typeof pathsConfig !== 'object') return []
   return Object.entries(pathsConfig)
     .filter(([key]) => key.startsWith('pages/'))
-    .map(([key, value]) => {
-      const object = value !== null && typeof value === 'object' && !Array.isArray(value)
-      return {
-        segment: key.slice('pages/'.length),
-        path: object ? value.path : value,
-        writable: object && value.writable === true,
-        declared: value,
-      }
-    })
+    .map(([key, value]) => [key.slice('pages/'.length), value])
 }

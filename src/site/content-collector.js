@@ -26,7 +26,7 @@ import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { readLayoutFolder, DEFAULT_LAYOUT, layoutAreaRoute } from './layout-folder.js'
-import { mountEntriesOf, mountDeclarationsOf } from './mount-entries.js'
+import { mountEntriesOf } from './mount-entries.js'
 import { basename, join, parse, relative, resolve, sep } from 'node:path'
 import { existsSync, statSync, realpathSync, readdirSync } from 'node:fs'
 import yaml from 'js-yaml'
@@ -628,14 +628,14 @@ function resolveMounts(pathsConfig, sitePath, pagesPath, { strict = false } = {}
   if (!pathsConfig || typeof pathsConfig !== 'object') return null
 
   // Extract entries with "pages/" prefix (e.g., "pages/docs": "../../../docs")
-  const mountEntries = mountDeclarationsOf(pathsConfig)
+  const mountEntries = mountEntriesOf(pathsConfig)
 
   if (mountEntries.length === 0) return null
 
   const resolved = new Map()
   const canonicalPagesPath = existsSync(pagesPath) ? realpathSync(pagesPath) : resolve(pagesPath)
 
-  for (const { segment: routeSegment, path: relativePath, declared } of mountEntries) {
+  for (const [routeSegment, relativePath] of mountEntries) {
     // Validate route segment (simple name, no slashes, no special chars)
     if (!routeSegment || routeSegment.includes('/') || routeSegment.startsWith('.') || routeSegment.startsWith('_')) {
       throw new Error(
@@ -644,24 +644,19 @@ function resolveMounts(pathsConfig, sitePath, pagesPath, { strict = false } = {}
       )
     }
 
-    // ⭐ The object form says more of the mount: its `path`, and whether a pull may write into it. Any
-    // other key is refused, so a misspelt `writable` is not a mount that reads as read-only.
-    if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
-      const unknown = Object.keys(declared).filter((k) => k !== 'path' && k !== 'writable')
-      if (unknown.length) {
-        throw new Error(
-          `[content-collector] The mount "pages/${routeSegment}" in site.yml paths has ${unknown.map((k) => `\`${k}\``).join(', ')}, which a mount does not take.\n` +
-          `  A mount takes \`path:\`, its folder, and \`writable: true\` to let a pull write into it.`
-        )
-      }
-      if (declared.writable !== undefined && typeof declared.writable !== 'boolean') {
-        throw new Error(`[content-collector] The mount "pages/${routeSegment}" in site.yml paths says \`writable: ${JSON.stringify(declared.writable)}\`; it takes true or false.`)
-      }
+    // ⛔ A mount is its folder. `{ path, writable }` was its form for part of 2026-11-04; whether a pull
+    // writes into a mount is no setting now, so the object is refused, saying what replaced it.
+    if (relativePath !== null && typeof relativePath === 'object' && !Array.isArray(relativePath)) {
+      const named = typeof relativePath.path === 'string' && relativePath.path ? relativePath.path : '../docs'
+      throw new Error(
+        `[content-collector] The mount "pages/${routeSegment}" in site.yml paths is an object. A mount is its folder: \`pages/${routeSegment}: ${named}\`.\n` +
+        `  \`writable\` is retired: a pull writes the app's edits into a mounted folder wherever it can merge them — a folder of the site's repository, or of a submodule — and holds them where it cannot.`
+      )
     }
     if (typeof relativePath !== 'string' || !relativePath) {
       throw new Error(
         `[content-collector] The mount "pages/${routeSegment}" in site.yml paths names no folder.\n` +
-        `  Give it one: \`pages/${routeSegment}: ../docs\`, or \`path: ../docs\` in its object.`
+        `  Give it one: \`pages/${routeSegment}: ../docs\`.`
       )
     }
 

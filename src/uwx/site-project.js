@@ -47,7 +47,7 @@ import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { writeSiteConfig, writeSitePaths, writeThemeFile, writeIfChanged, writeSectionFile, writeMergedYaml } from './project-writer.js'
-import { mountDeclarationsOf } from '../site/mount-entries.js'
+import { mountEntriesOf } from '../site/mount-entries.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { buildRouteOf } from './site.js'
 import { fileLinkTargets } from '../site/file-links.js'
@@ -1164,7 +1164,7 @@ const MOUNT_SEGMENT = /^[^/._][^/]*$/
  */
 function followMountRoutes({ siteRoot, siteYml, pagesDir, document, backend, sourceLocale, prune, report }) {
   const out = { siteYml, renamed: new Map(), held: new Set() }
-  const declared = mountDeclarationsOf(siteYml?.paths)
+  const declared = mountEntriesOf(siteYml?.paths)
   const items = backend ? readBackendState(siteRoot, backend).items || {} : {}
   if (!declared.length || !Object.keys(items).length) return out
   const roots = document?.pages || []
@@ -1172,7 +1172,7 @@ function followMountRoutes({ siteRoot, siteYml, pagesDir, document, backend, sou
   const anywhere = (records, uuid) => (records || []).some((r) => r?.$uuid === uuid || anywhere(r?.$children, uuid))
   let paths = { ...siteYml.paths }
   let changed = false
-  for (const { segment } of declared) {
+  for (const [segment] of declared) {
     if (roots.some((r) => slugOf(r) === segment)) continue // where it was
     const uuid = items[`pages/${segment}/folder.yml`] ?? items[`pages/${segment}/page.yml`]
     if (typeof uuid !== 'string') continue
@@ -1755,9 +1755,9 @@ function seenPageRoutes(items) {
  * @param {string} [params.sectionType] - the type a section that names none renders with on this
  *        site, which the push filled in and a section's file leaves out — `siteDefaultSectionType`,
  *        read by the caller since it reads the foundation's source
- * @param {string[]} [params.writableMounts] - the segments of the mounts the caller may write into. A
- *        mount is written only where the site declares it `writable: true` and it is named here — a
- *        pull names those the site's repository holds — so a caller that names none writes no mount
+ * @param {string[]} [params.writableMounts] - the segments of the mounts the caller may write into: a
+ *        pull names each one it can merge into, a folder of the site's repository or of a submodule.
+ *        A caller that names none writes no mount
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
 export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null, sectionType = DEFAULT_SECTION_TYPE, writableMounts = [] }) {

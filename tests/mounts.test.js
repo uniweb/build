@@ -269,37 +269,21 @@ describe('page mounts — structural validation', () => {
   })
 })
 
-describe('page mounts — the object form', () => {
-  it('reads `path:` as the folder, `writable` aside', async () => {
+describe('page mounts — a mount is its folder', () => {
+  it('⭐ refuses the object form, saying what replaced `writable`', async () => {
     const siteDir = await makeWorkspace({
       siteYml: 'name: Test\nindex: home\npaths:\n  pages/docs:\n    path: ../external/docs\n    writable: true\n',
       mountFiles: TWO_SECTIONS,
     })
 
-    expect(routes(await collectSiteContent(siteDir))).toEqual(expect.arrayContaining(['/docs/guides/intro', '/docs/api/reference']))
+    const refused = collectSiteContent(siteDir)
+    await expect(refused).rejects.toThrow(/is an object\. A mount is its folder: `pages\/docs: \.\.\/external\/docs`/)
+    await expect(collectSiteContent(siteDir)).rejects.toThrow(/`writable` is retired: a pull writes the app's edits into a mounted folder wherever it can merge them/)
   })
 
-  it('⭐ refuses a key a mount does not take, so a misspelt `writable` is not a mount that only reads', async () => {
+  it('refuses a mount that names no folder', async () => {
     const siteDir = await makeWorkspace({
-      siteYml: 'name: Test\nindex: home\npaths:\n  pages/docs:\n    path: ../external/docs\n    writeable: true\n',
-      mountFiles: TWO_SECTIONS,
-    })
-
-    await expect(collectSiteContent(siteDir)).rejects.toThrow(/`writeable`, which a mount does not take/)
-  })
-
-  it('refuses a `writable` that is not true or false', async () => {
-    const siteDir = await makeWorkspace({
-      siteYml: "name: Test\nindex: home\npaths:\n  pages/docs:\n    path: ../external/docs\n    writable: 'yes'\n",
-      mountFiles: TWO_SECTIONS,
-    })
-
-    await expect(collectSiteContent(siteDir)).rejects.toThrow(/takes true or false/)
-  })
-
-  it('refuses an object that names no folder', async () => {
-    const siteDir = await makeWorkspace({
-      siteYml: 'name: Test\nindex: home\npaths:\n  pages/docs:\n    writable: true\n',
+      siteYml: "name: Test\nindex: home\npaths:\n  pages/docs: ''\n",
       mountFiles: TWO_SECTIONS,
     })
 
