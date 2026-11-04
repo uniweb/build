@@ -888,9 +888,11 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // lists it and nothing leaves it out. `records/folder.yml` only sorts records into
   // sub-folders. A file named with a leading `_` is not read, so it is not a record.
   //
-  // ⛔ A PUSHED RECORD IS NOT LIVE. It sits in the site's folder on the backend and
-  // is served once the SITE is published — publishing the site publishes its folder
-  // and what is in it. Nothing here decides that for a record.
+  // ⛔ A RECORD IS NOT LIVE BECAUSE ITS FILE IS HERE. A push puts it in the site's folder on
+  // the backend, and the site's first publish opens that folder to the live site. From then on
+  // the live site reads its records from the folder as it stands, so a later push adds, changes
+  // or removes them there with no republish [backend, 2026-11-04 — `delivery-orientation.md`].
+  // Nothing here decides that for a record.
   //
   // ⛔ UNTIL 2026-09-21 THE SET WAS `records.yml`'s: an unlisted entity was not
   // pushed, and a missing `records.yml` pushed nothing. The inert state moved with
