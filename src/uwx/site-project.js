@@ -904,7 +904,7 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
   const what = mdPageCannotHold(record, { name, sourceLocale })
   if (what.length) {
     report.leftAlone?.push(route)
-    report.cannotHold?.push({ route, what })
+    report.held?.push({ route, uuids: subtreeUuids(record), what })
     return false
   }
   const section = record.page_sections[0]
@@ -958,7 +958,11 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // a mount's are the mount's.
     if (place.kind === 'mounted' || place.kind === 'twice' || place.kind === 'cannot') {
       report.leftAlone?.push(...subtreeRoutes(record, route, sourceLocale))
-      if (place.kind === 'cannot') report.cannotHold?.push({ route, what: place.what })
+      // ⭐ Each with its items, for the pull to bank by outcome (P5): a mount's page lets the folder win, and
+      // one the files cannot hold is held at the version this copy last agreed on.
+      const uuids = subtreeUuids(record)
+      if (place.kind === 'mounted') report.mountedPages?.push({ route, uuids })
+      else report.held?.push({ route, uuids, what: place.kind === 'twice' ? ['two pages on one route'] : place.what })
       leftAlone = true
       continue
     }
@@ -1028,6 +1032,18 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
   // A level holding a page left alone keeps the order its files give: reconciling it would write an
   // `order:` into a page folder that does not exist, or rewrite a `pages:` list the author keeps.
   if (!leftAlone) reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage: routePrefix ? null : ctx.homepage, ctx, levelMode })
+}
+
+// The items of a page and everything below it — its own, its sections', its pages' — by `$uuid`.
+function subtreeUuids(record) {
+  const out = []
+  const walk = (r) => {
+    if (typeof r?.$uuid === 'string') out.push(r.$uuid)
+    for (const s of r?.page_sections || []) walk(s)
+    for (const c of r?.$children || []) walk(c)
+  }
+  walk(record)
+  return out
 }
 
 // A page's route and each of its descendants', as `writePagesTree` composes them.
@@ -1525,7 +1541,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
-  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [], cannotHold: [] }
+  const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [], held: [], mountedPages: [] }
 
   // Collects target-locale translations of localized scalars as they're projected;
   // flushed to locales/{locale}.json at the end (the manifest stays derivable).

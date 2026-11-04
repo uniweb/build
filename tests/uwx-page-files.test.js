@@ -179,7 +179,7 @@ describe('⭐ a pull writes each page where the files keep it', () => {
     const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
 
     expect(changed(before, snapshot())).toEqual([])
-    expect(report.cannotHold).toEqual([{ route: 'guide/use', what: ['a title its first heading does not give'] }])
+    expect(report.held).toEqual([{ route: 'guide/use', uuids: [], what: ['a title its first heading does not give'] }])
   })
 
   it('a folder-mode folder reordered in the app says it in its `pages:`, and the build and the push follow it', async () => {
@@ -192,6 +192,26 @@ describe('⭐ a pull writes each page where the files keep it', () => {
     expect(yaml.load(readFileSync(join(siteDir(), 'pages/guide/folder.yml'), 'utf8')).pages).toEqual(['more', 'use', 'install', '...'])
     const again = await siteProjectToDocument(siteDir())
     expect(at(again, '/guide').$children.map((c) => c.$id)).toEqual(['more', 'use', 'install'])
+  })
+
+  it('⭐ the report names each page by its outcome, with its items: held, and a mount\'s', async () => {
+    everyKind()
+    const doc = await siteProjectToDocument(siteDir())
+    // As a backend hands it back: every item with its uuid.
+    let n = 0
+    const stamp = (r) => {
+      r.$uuid = `u${n++}`
+      for (const s of r.page_sections || []) stamp(s)
+      for (const c of r.$children || []) stamp(c)
+    }
+    for (const p of doc.pages) stamp(p)
+    const use = at(doc, '/guide/use')
+    use.title = { en: 'Using it well' }
+    const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    expect(report.held).toEqual([{ route: 'guide/use', uuids: [use.$uuid, use.page_sections[0].$uuid], what: ['a title its first heading does not give'] }])
+    const docs = report.mountedPages.find((p) => p.route === 'docs')
+    expect(docs.uuids).toEqual(expect.arrayContaining([at(doc, '/docs').$uuid, at(doc, '/docs/intro').$uuid]))
   })
 
   it('a route the files give two pages for is left alone', async () => {
