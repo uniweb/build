@@ -362,6 +362,48 @@ describe('a pull leaves the pages written in git alone', () => {
     expect(readFileSync(join(siteDir(), 'pages/docs/folder.yml'), 'utf8')).toContain('title: Documentation')
   })
 
+  // ⛔ Until 2026-11-04 the prune removed the folder whole — measured: `guide/folder.yml`, `install.md`
+  // and `use.md` gone — though the pull writes none of those pages.
+  it('a document without a folder of `.md` pages prunes neither the folder nor its pages — at any depth', async () => {
+    site('index: home\n')
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('site/pages/home/hero.md', '# Hi\n')
+    w('site/pages/guide/folder.yml', 'title: Guide\n')
+    w('site/pages/guide/install.md', '# Install\n')
+    w('site/pages/guide/use.md', '# Use\n')
+    // A folder of pages below a page-mode page: it holds pages too.
+    w('site/pages/about/page.yml', 'title: About\n')
+    w('site/pages/about/intro.md', '# About us\n')
+    w('site/pages/about/notes/folder.yml', 'title: Notes\n')
+    w('site/pages/about/notes/first.md', '# First\n')
+    const before = snapshot()
+
+    const doc = await siteProjectToDocument(siteDir())
+    doc.pages = doc.pages.filter((p) => p.$id !== 'guide')
+    at(doc, '/about').$children = []
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    const after = snapshot()
+    for (const f of ['site/pages/guide/folder.yml', 'site/pages/guide/install.md', 'site/pages/guide/use.md', 'site/pages/about/notes/folder.yml', 'site/pages/about/notes/first.md']) {
+      expect(after[f], f).toBe(before[f])
+    }
+  })
+
+  it('CONTROL — a page folder the document no longer holds is still pruned', async () => {
+    site('index: home\n')
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('site/pages/home/hero.md', '# Hi\n')
+    w('site/pages/old/page.yml', 'title: Old\n')
+    w('site/pages/old/body.md', '# Old\n')
+
+    const doc = await siteProjectToDocument(siteDir())
+    doc.pages = doc.pages.filter((p) => p.$id !== 'old')
+    siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
+
+    expect(existsSync(join(siteDir(), 'pages/old'))).toBe(false)
+    expect(existsSync(join(siteDir(), 'pages/home/hero.md'))).toBe(true)
+  })
+
   it('a level holding a folder-mode page keeps its own order — no `order:` written, no page folder made', async () => {
     site('index: home\n')
     w('site/pages/home/page.yml', 'title: Home\n')

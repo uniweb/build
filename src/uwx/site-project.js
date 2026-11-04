@@ -822,13 +822,14 @@ function pruneOrphanSectionFiles(pageDir, keep, report) {
   }
 }
 
-// Delete the page directories in `pagesDir` whose name isn't an incoming page dir.
-function pruneOrphanPageDirs(pagesDir, keepDirs, report) {
+// Delete the page directories in `pagesDir` whose name isn't an incoming page dir — never one that
+// holds a page the pull leaves alone (`holds`, `git-authored.js`), which would go with it.
+function pruneOrphanPageDirs(pagesDir, keepDirs, report, holds = () => false) {
   if (!existsSync(pagesDir)) return
   for (const entry of readdirSync(pagesDir)) {
     if (isIgnoredFolder(entry) || keepDirs.has(entry)) continue
     const p = join(pagesDir, entry)
-    if (!statSync(p).isDirectory()) continue
+    if (!statSync(p).isDirectory() || holds(p)) continue
     rmSync(p, { recursive: true, force: true })
     report.deleted.push(p)
   }
@@ -1105,7 +1106,9 @@ function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null, route
   // A mounted route's local folder is never an orphan, whatever the document holds: what it
   // presents is another repository's (`git-authored.js`).
   if (!routePrefix) for (const segment of ctx?.leave?.mounted ?? []) incomingDirs.add(segment)
-  pruneOrphanPageDirs(pagesDir, incomingDirs, report)
+  // ⛔ Nor is a folder that holds a folder-mode page, whatever the document holds: until 2026-11-04 a
+  // document without that folder's own page removed it whole, its `.md` pages with it.
+  pruneOrphanPageDirs(pagesDir, incomingDirs, report, (dir) => Boolean(ctx?.leave?.holds?.(dir)))
 }
 
 /**

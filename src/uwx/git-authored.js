@@ -12,16 +12,16 @@
 //     folder of page folders.
 //
 // ⇒ An edit made to one of these pages in the app is not brought back, and the next push replaces
-// it with the file. Pruning skips them too, while the document holds the folder they are in. ⛔ A
-// folder-mode folder whose own page the document no longer holds is removed whole, these pages with
-// it (`pruneOrphanPageDirs`, `site-project.js`; measured 2026-11-04).
+// it with the file. Pruning skips them too, and every folder that holds one (`holds`): a pull never
+// deletes what it does not write. ⛔ Until 2026-11-04 a folder-mode folder whose own page the
+// document no longer held was removed whole, these pages with it (measured that day).
 //
 // A leaf module, read synchronously as the pull projects (`site-project.js`), through the build's
 // mode rule (`folderContentMode`) and its folder-mode page list (`folderModePageFiles`), so the set
 // is the one the push walks.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { isIgnoredFolder } from '../utils/content-files.js'
@@ -51,13 +51,15 @@ function modeOf(dir, inheritedMode) {
  *
  * @param {object|null} siteYml - the parsed `site.yml`
  * @param {string} pagesDir - the site's pages directory (`siteContentDirs`)
- * @returns {{ mounted: Set<string>, files: Set<string>, has: (route: string) => boolean }}
+ * @returns {{ mounted: Set<string>, files: Set<string>, has: (route: string) => boolean, holds: (dir: string) => boolean }}
  *   `mounted` — the mounted segments, each leaving its whole route alone; `files` — the routes of
- *   folder-mode `.md` pages; `has` — whether a route is either
+ *   folder-mode `.md` pages; `has` — whether a route is either; `holds` — whether a folder under the
+ *   pages directory holds such a page, at any depth, so a prune leaves it
  */
 export function gitAuthoredPages(siteYml, pagesDir) {
   const mounted = new Set(mountEntriesOf(siteYml?.paths).map(([segment]) => segment))
   const files = new Set()
+  const holding = new Set()
   const walk = (dir, prefix, inheritedMode) => {
     let entries
     try {
@@ -67,9 +69,11 @@ export function gitAuthoredPages(siteYml, pagesDir) {
     }
     const mode = modeOf(dir, inheritedMode)
     if (mode === 'pages') {
-      for (const { name } of folderModePageFiles(entries.map((e) => e.name)).files) {
-        files.add(prefix + name)
-      }
+      const pages = folderModePageFiles(entries.map((e) => e.name)).files
+      for (const { name } of pages) files.add(prefix + name)
+      // The folder and each one above it, up to the pages directory: removing any of them would
+      // remove these pages with it.
+      if (pages.length) for (let d = dir; d !== pagesDir && d.startsWith(pagesDir); d = dirname(d)) holding.add(d)
     }
     for (const e of entries) {
       if (!e.isDirectory() || isIgnoredFolder(e.name)) continue
@@ -83,5 +87,6 @@ export function gitAuthoredPages(siteYml, pagesDir) {
     mounted,
     files,
     has: (route) => mounted.has(String(route).split('/')[0]) || files.has(route),
+    holds: (dir) => holding.has(dir),
   }
 }
