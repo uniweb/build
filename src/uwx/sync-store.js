@@ -44,10 +44,11 @@ const VERSION = 1
  * Map sections — merged entry by entry. Anything else in a patch replaces.
  * `recordItems` is keyed by a record's uuid here, each entry that record's list items
  * (`record-items.js`) — replaced whole, one record at a time. `types` is keyed by a record's
- * uuid too, each entry the data schema the backend holds it as, which never changes
- * (`records.js`, `heldTypes`).
+ * uuid too, each entry the data schema the backend holds it as, written whole from each folder the
+ * backend hands back (`setBackendMap`), so it names what the folder places. `retired` is the same
+ * shape: the records a push took out of the folder, which the backend keeps until they are deleted.
  */
-const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files', 'types'])
+const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files', 'types', 'retired'])
 
 const storePath = (siteDir) => join(siteDir, SYNC_STORE_FILE)
 
@@ -242,6 +243,32 @@ export function updateBackendMap(siteDir, origin, section, entries, merge) {
   backends[key] = { ...prior, [section]: map }
   return { added, changed, written: writeStore(siteDir, backends) }
 }
+
+/**
+ * Write one map section whole, replacing what it held — for a section that is a snapshot of what
+ * the backend says, such as `types`, rather than an accumulation. An empty map removes the section.
+ *
+ * @param {string} siteDir
+ * @param {string} origin
+ * @param {string} section - a map section
+ * @param {Record<string, *>} map
+ * @returns {{ prior: Record<string, *>, written: boolean }} the section as it was before
+ */
+export function setBackendMap(siteDir, origin, section, map) {
+  const key = normalizeOrigin(origin)
+  if (!key || !MAP_SECTIONS.has(section) || !map || typeof map !== 'object') return { prior: {}, written: false }
+  const { backends } = readSyncStore(siteDir)
+  const state = backends[key] || {}
+  const prior = state[section] || {}
+  const next = { ...state }
+  if (Object.keys(map).length) next[section] = { ...map }
+  else delete next[section]
+  if (JSON.stringify(sortedKeys(prior)) === JSON.stringify(sortedKeys(map))) return { prior, written: false }
+  backends[key] = next
+  return { prior, written: writeStore(siteDir, backends) }
+}
+
+const sortedKeys = (map) => Object.fromEntries(Object.keys(map).sort().map((k) => [k, map[k]]))
 
 /**
  * The merge rule for the `assets` section — pass it to `updateBackendMap`.

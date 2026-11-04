@@ -119,6 +119,7 @@ export {
   listSyncedBackends,
   updateBackendState,
   updateBackendMap,
+  setBackendMap,
   carryServed,
   clearBackend,
   clearBackendSections,
