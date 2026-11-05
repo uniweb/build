@@ -15,7 +15,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { siteProjectToDocument, siteContentDocumentToProject, collectSiteUnits } from '../src/uwx/index.js'
+import { siteProjectToDocument, siteContentDocumentToProject, collectSiteUnits, collectUnitUuids } from '../src/uwx/index.js'
 import { collectSiteContent } from '../src/site/content-collector.js'
 
 let dir
@@ -225,6 +225,66 @@ describe('what a pull writes, and holds', () => {
     ])
     expect(changed()).toEqual([])
   })
+})
+
+// ⭐ A PULL IN A REPOSITORY RUNS WITH NO RENAME INDEX (its stand-in has none), so where a page was is read
+// from this copy's item identity as it stood before the pull merged the pulled document's in (`priorItems`).
+// ⛔ Until 2026-11-05 a moved held page's files were pruned there, and a moved route took its `mode`'s form.
+describe('in a repository, where a pull has no rename index', () => {
+  const pullAsInARepository = (doc, before) => {
+    rmSync(join(dir, '.uniweb', 'pull-index.json'), { force: true })
+    return siteContentDocumentToProject({ document: structuredClone(doc), siteRoot: dir, prune: true, priorItems: collectUnitUuids(before) })
+  }
+
+  it('⭐ a page the app moves where its files cannot hold it is held, and keeps its files where they are', async () => {
+    const doc = await synced()
+    const before = structuredClone(doc)
+    attach(doc, '/guide', detach(doc, '/docs'))
+    attach(doc, '/guide', detach(doc, '/home'))
+    const report = pullAsInARepository(doc, before)
+    expect(report.held.map((h) => h.route).sort()).toEqual(['guide/docs', 'guide/home'])
+    expect(changed()).toEqual([])
+  })
+
+  it('a route the app moves keeps its form, stored in either spelling', async () => {
+    const doc = await synced()
+    const before = structuredClone(doc)
+    at(doc, '/guide/topics').rec.mode = 'folder'
+    attach(doc, '', detach(doc, '/guide/topics'))
+    const report = pullAsInARepository(doc, before)
+    expect(report.held).toEqual([])
+    expect(has('pages/topics/folder.yml')).toBe(true)
+    expect(has('pages/topics/routing.md')).toBe(true)
+    expect(has('pages/topics/page.yml')).toBe(false)
+    expect(has('pages/guide/topics')).toBe(false)
+  })
+
+  it('CONTROL — the same moves with the rename index, as a pull outside a repository has it', async () => {
+    const doc = await synced()
+    attach(doc, '/guide', detach(doc, '/docs'))
+    at(doc, '/guide/topics').rec.mode = 'folder'
+    attach(doc, '', detach(doc, '/guide/topics'))
+    const report = pull(doc)
+    expect(report.held.map((h) => h.route)).toEqual(['guide/docs'])
+    expect(has('pages/docs/one/content.md')).toBe(true)
+    expect(has('pages/topics/folder.yml')).toBe(true)
+  })
+})
+
+// A route new to the files takes its form from its `mode`, and in a fresh clone every route is new.
+// ⛔ Until 2026-11-05 only `single-section` read as a route of single-section pages, so a clone of a site
+// last pushed before the rename, still stored `folder`, wrote those routes in page mode.
+it('a fresh clone writes a route stored as `folder` in folder mode', async () => {
+  const doc = await synced()
+  at(doc, '/guide').rec.mode = 'folder'
+  at(doc, '/guide/topics').rec.mode = 'folder'
+  rmSync(join(dir, 'pages'), { recursive: true, force: true })
+  rmSync(join(dir, '.uniweb'), { recursive: true, force: true })
+  pull(doc)
+  expect(has('pages/guide/folder.yml')).toBe(true)
+  expect(has('pages/guide/page.yml')).toBe(false)
+  expect(has('pages/guide/install.md')).toBe(true)
+  expect(has('pages/guide/topics/routing.md')).toBe(true)
 })
 
 describe('⛔ a page with its own `page.yml` inside folder mode', () => {

@@ -977,7 +977,7 @@ function placeOf(ctx, record, route, levelDir, levelMode, sourceLocale) {
   if (levelMode === 'pages') {
     if (record.is_dynamic) return { kind: 'cannot', what: ['a parametric page, which a route of single-section pages holds none of'] }
     const was = oldForm(ctx, record)
-    if (was ? was !== 'pages' : record.mode !== SINGLE_SECTION) {
+    if (was ? was !== 'pages' : !isSingleSection(record)) {
       const name = unwrapLocalized(record.slug, sourceLocale)
       const what = mdPageCannotHold(record, { name, sourceLocale })
       return what.length ? { kind: 'cannot', what } : { kind: 'md', file: join(levelDir, `${name}.md`), dir: levelDir }
@@ -990,12 +990,29 @@ function placeOf(ctx, record, route, levelDir, levelMode, sourceLocale) {
 // `.md` page (`md`), or a folder read in folder mode (`pages`) or page mode (`sections`) where it was.
 // Null for a route new to them. Read before the move (`placeByUuid`), which takes the old place away.
 function oldForm(ctx, record) {
-  const rel = record?.$uuid ? ctx?.oldIndex?.[record.$uuid] : null
-  const old = rel ? join(ctx.siteRoot, rel) : null
+  const old = oldPlace(ctx, record?.$uuid)
   if (!old || !existsSync(old)) return null
   if (!statSync(old).isDirectory()) return 'md'
   return folderModeOf(old, ctx.files?.levelMode(dirname(old)) ?? 'sections')
 }
+
+// Where the files kept an item before the app moved it: by the rename index this copy wrote, else, for
+// a page, at the route this copy's sync state last saw it at (`ctx.itemRoutes`). ⭐ A pull in a repository
+// has no rename index, so the route is all it goes by. ⛔ Until 2026-11-05 `oldForm` read the index alone,
+// and in a repository a moved route took the form of its `mode`.
+function oldPlace(ctx, uuid) {
+  const rel = uuid ? ctx?.oldIndex?.[uuid] : null
+  if (rel) return join(ctx.siteRoot, rel)
+  const route = uuid ? ctx?.itemRoutes?.get(uuid) : null
+  const place = route == null ? null : ctx?.files?.page(route)
+  return place?.kind === 'md' ? place.file : place?.dir ?? null
+}
+
+// ⭐ A route whose pages are single-section, in either spelling: `folder` is the one a push wrote until
+// 2026-11-04, which a stored document carries until its site's next push. A route new to the files takes
+// its form from this — in a fresh clone, every route. ⛔ Until 2026-11-05 only `single-section` read so,
+// and a clone of a site last pushed before then wrote its single-section routes in page mode.
+const isSingleSection = (record) => record?.mode === SINGLE_SECTION || record?.mode === 'folder'
 
 // ⭐ A FOLDER'S FORM IS ITS FILES' WHERE THEY HOLD IT — folder mode (`pages`) or page mode (`sections`):
 // a mount's route by the mount, a folder the files hold by its own config, one the app moved by the form
@@ -1007,7 +1024,7 @@ function formOf(ctx, record, route, place, levelMode) {
   if (ctx.files?.page(route) === place) return ctx.files.levelMode(place.dir) ?? folderModeOf(place.dir, levelMode)
   const was = oldForm(ctx, record)
   if (was === 'pages' || was === 'sections') return was
-  return record.mode === SINGLE_SECTION ? 'pages' : 'sections'
+  return isSingleSection(record) ? 'pages' : 'sections'
 }
 
 // ⭐ A FOLDER-MODE `.md` PAGE, WRITTEN BACK IN PLACE: the file is the page and its one section, so the
@@ -1854,9 +1871,13 @@ function seenPageRoutes(items) {
  * @param {string[]} [params.writableMounts] - the segments of the mounts the caller may write into: a
  *        pull names each one it can merge into, a folder of the site's repository or of a submodule.
  *        A caller that names none writes no mount
+ * @param {Object<string,string>} [params.priorItems] - this copy's item identity (unit path → `$uuid`)
+ *        as it stood before the pull merged the pulled document's in: where each page was. A pull
+ *        passes it; without it the backend's state is read, which after that merge names a moved
+ *        page at both its routes
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null, sectionType = DEFAULT_SECTION_TYPE, writableMounts = [] }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null, sectionType = DEFAULT_SECTION_TYPE, writableMounts = [], priorItems = null }) {
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
@@ -1913,7 +1934,11 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // A read-only mount's pages, and a route the files give two pages for, are neither written nor
   // pruned. Each record's place, once decided, is the one every pass below reads (`places`).
   // The pages this copy has seen the backend hold, by route: a prune deletes an `.md` page only then.
-  const items = backend ? readBackendState(siteRoot, backend).items : null
+  // ⭐ AS THEY STOOD BEFORE THIS PULL (`priorItems`): in a repository the pull runs where there is no
+  // rename index, so where a page was is read from these alone. ⛔ Until 2026-11-05 they were read
+  // after the pull had merged the pulled document's in, so a page the app moved had both routes, and
+  // the one kept was whichever sorted last: a held page's files were pruned from where they were.
+  const items = priorItems ?? (backend ? readBackendState(siteRoot, backend).items : null)
   ctx.seen = seenPageRoutes(items)
   ctx.itemRoutes = itemRoutesOf(items)
   ctx.kept = new Set()
