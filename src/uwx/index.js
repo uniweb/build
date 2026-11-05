@@ -153,6 +153,8 @@ export {
   siteItemsByKey,
   stampUnitUuids,
 } from './site-diff.js'
+// What a pull held, and what a push leaves out of it (`held-units.js`).
+export { heldUnitsOf, leaveHeldOut } from './held-units.js'
 // What a backend that cleans rich text at write removed from a push, read against what was sent.
 export { siteContentRemovals, recordRemovals, cleanedRecord } from './cleaned.js'
 export {

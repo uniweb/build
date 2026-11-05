@@ -29,7 +29,8 @@ import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
 import { siteSourceLocale } from './source-locale.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
-import { stampUnitUuids, collectUnitUuids } from './site-diff.js'
+import { stampUnitUuids, collectUnitUuids, computeUnitHashes } from './site-diff.js'
+import { leaveHeldOut } from './held-units.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { recordQueriesShown } from './shown-records.js'
 import { isLocalAssetPath } from '../site/assets.js'
@@ -245,6 +246,13 @@ function rewriteEntityAssets(node, map, ids, bare = null) {
  *        stamped onto the site-content document so the backend matches our items
  *        instead of re-minting them (which deletes and recreates every page and
  *        section row). Sourced from a pull or a push response, cached by the caller.
+ * @param {Object<string,string>} [opts.heldUnits] - unit path → hash: what a pull held, where the
+ *        files keep it (`held-units.js::heldUnitsOf`). Those whose files still say it are left out
+ *        of the site-content document (`heldLeftOut`); when any changed, none is, and the result's
+ *        `heldChanged` names them. Omit to send them, as `--force` does.
+ * @param {boolean} [opts.unitHashes] - also return each unit of the files' document, before any
+ *        media is rewritten, by path: its hash and its `$uuid` from `opts.itemUuids`
+ *        (`unitHashes`, `unitUuids`), for a pull to record what it held.
  * @param {Object<string,Object<string,string>>} [opts.recordItemUuids] - record `$uuid` → the
  *        identity of its list items, as a previous push or pull banked it
  *        (`record-items.js`); stamped onto each record the backend holds, so a re-sent
@@ -395,9 +403,8 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
 
   // `queryUuids` — identity for the `queries` section, keyed by query
   // NAME because a declaration has no file of its own (see queriesNested).
-  const siteDoc = includeSite
-    ? await siteProjectToDocument(siteRoot, {
-        media,
+  const docOpts = includeSite
+    ? {
         sourceLocale,
         // Whose $uuid belongs on this wire document — see siteProjectToDocument.
         ...(opts.backend ? { backend: opts.backend } : {}),
@@ -416,8 +423,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),
         ...(Array.isArray(opts.pageFields) ? { pageFields: opts.pageFields } : {}),
         ...(Array.isArray(opts.settingsFields) ? { settingsFields: opts.settingsFields } : {})
-      })
+      }
     : null
+  const siteDoc = includeSite ? await siteProjectToDocument(siteRoot, { ...docOpts, media }) : null
   // Deploy-derived `info` fields are stamped here — NOT authored in site.yml, so they
   // ride the wire but never project back on pull. They are part of the hashed content,
   // so a changed value correctly re-fires the site-content lane.
@@ -563,6 +571,21 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     recordItemIdentity.unknown += n.unknown
   }
 
+  // ⭐ WHAT A PULL HELD STAYS AS THE APP HAS IT (`held-units.js`): a held unit whose files still say what
+  // they said at the pull is not sent, and one whose files changed is named for the caller to stop on.
+  // Compared on the document the files give before any media is rewritten (`plain`), which `unitHashes`
+  // hands a pull to record. A walk of its own, made only when a pull held something.
+  const heldUnits = opts.heldUnits && typeof opts.heldUnits === 'object' && Object.keys(opts.heldUnits).length ? opts.heldUnits : null
+  const plain = siteDoc && (heldUnits || opts.unitHashes) ? await siteProjectToDocument(siteRoot, { ...docOpts, media: null }) : null
+  const held = heldUnits ? leaveHeldOut(siteDoc, { held: heldUnits, plain, sourceLocale }) : { left: [], changed: [] }
+  let unitHashes = null
+  let unitUuids = null
+  if (plain && opts.unitHashes) {
+    stampUnitUuids(plain, opts.itemUuids && typeof opts.itemUuids === 'object' ? opts.itemUuids : {}, sourceLocale)
+    unitHashes = computeUnitHashes(plain, sourceLocale)
+    unitUuids = collectUnitUuids(plain, sourceLocale)
+  }
+
   const siteEntity = siteDoc
     ? { id: siteDoc.$id, model: siteDoc.$schema, file: 'entities/site-content.json', document: siteDoc }
     : null
@@ -702,5 +725,13 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // leaves the backend's folder exactly as it is — no records directory, or one holding files
     // that are not records — so a caller can say so where the backend still holds records.
     sendsFolder: folder !== null,
+    // What a pull held (`opts.heldUnits`): the paths this push left out, its files unchanged, and the paths
+    // that changed since the pull, for a caller that submits to stop on — none is left out then.
+    heldLeftOut: held.left,
+    heldChanged: held.changed,
+    // With `opts.unitHashes`: each unit of the files' document before any media is rewritten, by path —
+    // its hash, and its `$uuid` from `opts.itemUuids` — for a pull to record what it held (`held-units.js`).
+    unitHashes,
+    unitUuids,
   }
 }
