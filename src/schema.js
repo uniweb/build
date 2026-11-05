@@ -17,7 +17,7 @@ import { isFontVar } from '@uniweb/theming'
 import { join, dirname, extname, basename, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { jsxInJsMessage } from './jsx-extension.js'
-import { describeChildren, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
+import { areaNames, describeChildren, describePlacement, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
 import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { rootListSection } from '@uniweb/schemas/conform'
@@ -653,6 +653,7 @@ function buildComponentEntry(name, relativePath, meta) {
   if (meta.data !== undefined) entry.data = lowerData(meta.data)
   refuseDataDeclarations(`${name} (meta.js)`, entry.data)
   refuseStickyDeclaration(`${name} (meta.js)`, meta.sticky)
+  refuseAreaDeclaration(`${name} (meta.js)`, meta.area)
 
   const problems = [...content.problems, ...describeChildren(meta).problems]
   if (problems.length > 0) loweringProblems.set(entry, problems)
@@ -673,6 +674,51 @@ function refuseStickyDeclaration(owner, sticky) {
     stickyDeclaration(sticky)
   } catch (err) {
     throw new Error(`[uniweb] ${owner}: ${err.message}`)
+  }
+}
+
+/**
+ * Refuse a section type's `area:` that `areaNames` cannot read — anything but `true`, `false`, an
+ * area's name or a list of names. A refusal, not a warning: an editor reads such a value as no
+ * area, and would offer the type among a page's sections, the opposite of what was meant.
+ *
+ * @param {string} owner - who declares it, for the message
+ * @param {*} area - the `area:` value, as written
+ */
+function refuseAreaDeclaration(owner, area) {
+  try {
+    areaNames(area)
+  } catch (err) {
+    throw new Error(`[uniweb] ${owner}: ${err.message}`)
+  }
+}
+
+/**
+ * Warn about a section type whose `area:` names an area none of this foundation's layouts draws:
+ * an editor offers a type for the areas it names, and no page would have that one. What a layout
+ * draws is what its `meta.js` declares in `areas:`. Nothing is said for an extension, whose host's
+ * layouts it cannot see, for a foundation with no layouts, or when any layout declares no `areas`,
+ * since that one could draw any. A warning, never a refusal: the type still renders wherever an
+ * author places it.
+ *
+ * @param {Object} components - discovered section types, by name
+ * @param {Object} [layouts] - discovered layouts, by name
+ * @param {Object} [options]
+ * @param {boolean} [options.isExtension]
+ */
+export function reportAreaNames(components, layouts = {}, { isExtension = false } = {}) {
+  const all = Object.values(layouts || {})
+  if (isExtension || all.length === 0 || all.some((layout) => !Array.isArray(layout?.areas))) return
+  const drawn = new Set(all.flatMap((layout) => layout.areas))
+  for (const [name, entry] of Object.entries(components)) {
+    for (const area of describePlacement(entry).areas || []) {
+      if (drawn.has(area)) continue
+      console.warn(
+        `Warning: ${name} (meta.js): area names "${area}", which none of this foundation's layouts draws ` +
+          `(they declare ${[...drawn].join(', ')}). An editor offers the type only where an author fills an ` +
+          `area it names. Name one of those, or add "${area}" to the areas: of the layout that draws it.`
+      )
+    }
   }
 }
 
@@ -1284,6 +1330,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Determine extension role
   const isExtension = !!foundationConfig.extension
+  reportAreaNames(components, layouts, { isExtension })
 
   // Warn if extension declares things it shouldn't
   if (isExtension) {
