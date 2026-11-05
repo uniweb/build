@@ -68,6 +68,7 @@ import {
   assertRouteFolder,
   resolveMounts,
   layerMountedFolder,
+  refusePageInFolderMode,
   folderModePageFiles,
   folderModeChildren,
   rootOrderConfig,
@@ -481,7 +482,7 @@ function buildPageData(config, ctx) {
 // unless the local folder declares one, and the children read from the mount. ⛔ Until 2026-10-23
 // this lane read no mount, so a mounted route was pushed as an empty container (a local stub) or
 // not at all (none) — measured 2026-09-18 on a documentation site: 49 pages built, 2 pushed.
-async function orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts = null) {
+async function orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts = null, siteRoot = dirPath) {
   const entries = await readdir(dirPath, { withFileTypes: true })
   const local = new Map()
   for (const e of entries) {
@@ -494,6 +495,7 @@ async function orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts = 
     const localConfig = localPath ? await readFolderConfig(localPath, inheritedMode) : null
     const mountedConfig = mountPath ? await readFolderConfig(mountPath, 'pages') : null
     const { dirConfig, dirMode, childMode } = layerMountedFolder(dirName, localConfig, mountedConfig, inheritedMode)
+    refusePageInFolderMode(inheritedMode, dirMode, relative(siteRoot, localPath ?? mountPath))
     folders.push({
       dirName,
       name: parseNumericPrefix(dirName).name,
@@ -832,7 +834,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
   const { siteRoot, siteIndex, sourceLocale, translations, pageFields } = ctx
   const files = inheritedMode === 'pages' ? await folderModePageRecords(ctx, dirPath, parentConfig, isRoot) : []
   const made = []
-  const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts)
+  const folders = await orderedSubfolders(dirPath, inheritedMode, parentConfig, mounts, siteRoot)
   // A folder inside a `[...path]` folder can never be reached, and `[dir]` /
   // `[path]` would name a route variable — refused here as the collector refuses
   // them, so a site that cannot build cannot sync either (ruled 2026-09-11).

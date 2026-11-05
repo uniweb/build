@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { siteProjectToDocument, siteContentDocumentToProject, collectSiteUnits } from '../src/uwx/index.js'
+import { collectSiteContent } from '../src/site/content-collector.js'
 
 let dir
 beforeEach(() => {
@@ -223,5 +224,33 @@ describe('what a pull writes, and holds', () => {
       ['guide/slug', ['a parametric page, which a route of single-section pages holds none of']],
     ])
     expect(changed()).toEqual([])
+  })
+})
+
+describe('⛔ a page with its own `page.yml` inside folder mode', () => {
+  it('stops the push, naming the folder and what to do', async () => {
+    put({ ...TREE, 'pages/guide/reference/page.yml': 'title: Reference\n', 'pages/guide/reference/1-overview.md': '# Overview\n' })
+    await expect(siteProjectToDocument(dir)).rejects.toThrow(/`pages\/guide\/reference` has a page\.yml of its own inside folder mode/)
+  })
+
+  it('stops the build the same way', async () => {
+    put({ ...TREE, 'pages/guide/reference/page.yml': 'title: Reference\n', 'pages/guide/reference/1-overview.md': '# Overview\n' })
+    await expect(collectSiteContent(dir)).rejects.toThrow(/`pages\/guide\/reference` has a page\.yml of its own inside folder mode/)
+  })
+
+  it('…a parametric one too, which a folder of single-section pages holds none of', async () => {
+    put({ ...TREE, 'pages/guide/[slug]/page.yml': 'title: Post\n', 'pages/guide/[slug]/body.md': '# Post\n' })
+    await expect(siteProjectToDocument(dir)).rejects.toThrow(/`pages\/guide\/\[slug\]` has a page\.yml of its own inside folder mode/)
+  })
+
+  it("CONTROL — a document's content, in folder mode by default, keeps a chapter of several sections as a `page.yml`", async () => {
+    put({ 'document.yml': 'title: Book\n', 'content/book/page.yml': 'title: Book\n', 'content/book/1-one.md': '# One\n', 'content/book/2-two.md': '## Two\n' })
+    const content = await collectSiteContent(dir, { configFile: 'document.yml' })
+    expect(content.pages.map((p) => p.sections?.length)).toContain(2)
+  })
+
+  it('CONTROL — a folder below one, with its own `folder.yml` or none, is a folder of single-section pages', async () => {
+    put(TREE)
+    await expect(siteProjectToDocument(dir)).resolves.toBeTruthy()
   })
 })

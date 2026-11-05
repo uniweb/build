@@ -211,15 +211,13 @@ describe('folder-mode `.md` pages are pushed as the build makes them', () => {
     w('site/pages/folder.yml', 'title: Site\n')
     w('site/pages/intro.md', '# Intro\n')
     w('site/pages/about/about.md', '# About\n')
-    w('site/pages/contact/page.yml', 'title: Contact\n')
-    w('site/pages/contact/form.md', '# Form\n')
+    w('site/pages/contact.md', '# Contact\n')
 
     const doc = await siteProjectToDocument(siteDir())
 
     expect(routes(doc)).toEqual(await built())
     expect(doc.pages.find((p) => p.$id === 'intro').is_index).toBe(true)
     expect(at(doc, '/about/about').mode).toBe('page')
-    // A `page.yml` opts back into page mode, at the root as anywhere.
     expect(at(doc, '/contact').page_sections).toHaveLength(1)
   })
 

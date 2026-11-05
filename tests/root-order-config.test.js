@@ -123,8 +123,8 @@ describe('the build reads the pages directory\'s own `pages:` and `index:`', () 
   })
 
   it('⭐ a content directory keeps its order whether it is mounted below the root or IS the pages directory', async () => {
-    // The shape of a docs repository: its own root `folder.yml` orders its sections.
-    put(join(ROOT, 'content'), { 'folder.yml': 'title: Docs\npages: [start, api, ...]\n', ...page('api'), ...page('start'), ...page('zoo') })
+    // The shape of a docs repository: its own root `folder.yml` orders its pages, one `.md` file each.
+    put(join(ROOT, 'content'), { 'folder.yml': 'title: Docs\npages: [start, api, ...]\n', 'api.md': '# Api\n', 'start.md': '# Start\n', 'zoo.md': '# Zoo\n' })
 
     put(join(ROOT, 'mounted'), { 'site.yml': site('index: home\npaths:\n  pages/docs: ../content\n'), ...page('pages/home') })
     const mounted = await collect(join(ROOT, 'mounted'))

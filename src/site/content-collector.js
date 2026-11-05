@@ -773,6 +773,30 @@ export function layerMountedFolder(name, local, mounted, contentMode) {
 }
 
 /**
+ * ⛔ A page with a `page.yml` of its own inside folder mode stops a site's build, and with it a push: in
+ * folder mode each page is one `.md` file holding one section, so a page whose parent is in folder mode is
+ * always that, and the app offers no second section there. A document's content (`document.yml`) is in
+ * folder mode by default, and a chapter of several sections is a `page.yml` there, so this is a site's
+ * rule only. A page of several sections, or a parametric one,
+ * goes outside the folder. ⭐ One rule for the build's walk (`collectPagesRecursive`) and the push's
+ * (`uwx/site.js::orderedSubfolders`), so a site that cannot build cannot sync either [Diego, 2026-11-04:
+ * "we can agree with framework to forbid the case … We have never seen a need for it"]. ⛔ Until then a
+ * `page.yml` there switched its folder back to page mode.
+ *
+ * @param {string} contentMode - the mode of the level the folder is on
+ * @param {string} dirMode - the folder's own, from `layerMountedFolder`
+ * @param {string} where - the folder, as the message names it
+ */
+export function refusePageInFolderMode(contentMode, dirMode, where) {
+  if (contentMode !== 'pages' || dirMode !== 'sections') return
+  throw new Error(
+    `[uniweb] pages: \`${where}\` has a page.yml of its own inside folder mode, where each page is one \`.md\` ` +
+      `file holding one section — a folder.yml above it puts it there. Make it one \`.md\` file, or move it out ` +
+      `of the folder. A folder that holds no \`.md\` page of its own can take a page.yml instead of its folder.yml.`
+  )
+}
+
+/**
  * A folder-mode folder's `.md` pages, in the order the build lists them: by filename (numeric
  * prefix first), then by the folder's own `pages:`. Each name is the page's slug — the filename
  * without its numeric prefix. Shared by the build's walk and the push's, so the sync lane sends the
@@ -2005,7 +2029,7 @@ function notePagesOfHomepage(pages) {
  *   page at its own address, while a push kept the folder as a container at `/`, leading to it.
  * @returns {Promise<Object>} { pages, assetCollection, iconCollection, notFound }
  */
-async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, contentMode = 'sections', mounts = null, parentLayout = null, isSiteRoot = false) {
+async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig = {}, parentFetch = null, contentMode = 'sections', mounts = null, parentLayout = null, isSiteRoot = false, isSite = true) {
   const entries = await readdir(dirPath)
   const pages = []
   let assetCollection = {
@@ -2046,6 +2070,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
     const mounted = mountPath ? await readFolderConfig(mountPath, 'pages') : null
     const local = localPath ? await readFolderConfig(localPath, contentMode) : null
     const { dirConfig, dirMode, childMode } = layerMountedFolder(name, local, mounted, contentMode)
+    if (isSite) refusePageInFolderMode(contentMode, dirMode, relative(siteRoot, localPath ?? mountPath))
     if (mountPath && localPath) await warnOfLocalFoldersUnderAMount(localPath, name)
 
     const folderLayout = normalizeLayoutConfig(dirConfig.layout)
@@ -2182,7 +2207,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           const childParentRoute = isIndex ? parentRoute : page.route
           const childFetch = page.fetch || parentFetch
           const childContentMode = childMode
-          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, childContentMode, null, effectiveLayout)
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, childContentMode, null, effectiveLayout, false, isSite)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2233,7 +2258,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         // Recurse in folder mode — pass container's own fetch config (or fall back to parent's)
         const childDirPath = mounts?.get(dirName) || entryPath
         const containerFetch = containerPage.fetch || parentFetch
-        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, childMode, null, effectiveLayout)
+        const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, childMode, null, effectiveLayout, false, isSite)
         pages.push(...subResult.pages)
         assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
         iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2330,7 +2355,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       // container above passes it.
       const childDirPath = mounts?.get(dirName) || entryPath
       const containerFetch = containerPage.fetch || parentFetch
-      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, childMode, null, effectiveLayout)
+      const subResult = await collectPagesRecursive(childDirPath, containerRoute, siteRoot, childOrderConfig, containerFetch, childMode, null, effectiveLayout, false, isSite)
       pages.push(...subResult.pages)
       assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
       iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2370,7 +2395,7 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
             : page.route
           const childFetch = page.fetch || parentFetch
           const childContentMode = childMode
-          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, childContentMode, null, effectiveLayout)
+          const subResult = await collectPagesRecursive(childDirPath, childParentRoute, siteRoot, childOrderConfig, childFetch, childContentMode, null, effectiveLayout, false, isSite)
           pages.push(...subResult.pages)
           assetCollection = mergeAssetCollections(assetCollection, subResult.assetCollection)
           iconCollection = mergeIconCollections(iconCollection, subResult.iconCollection)
@@ -2743,7 +2768,7 @@ export async function collectSiteContent(sitePath, options = {}) {
 
   // Recursively collect all pages
   let { pages, assetCollection, iconCollection, notFound } =
-    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, rootContentMode, mounts, siteLayout, true)
+    await collectPagesRecursive(pagesPath, '/', sitePath, siteOrderConfig, null, rootContentMode, mounts, siteLayout, true, profile === CONTENT_PROFILES['site.yml'])
 
   // The layout sections' assets and icons, beside the pages'.
   assetCollection = mergeAssetCollections(assetCollection, layoutAssets)

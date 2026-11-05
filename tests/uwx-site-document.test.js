@@ -60,8 +60,9 @@ beforeAll(() => {
     ].join('\n')
   )
 
-  // docs (folder container) with a child page that has a section
-  w('pages/2-docs/folder.yml', 'title: Docs\n')
+  // docs (a container with no section of its own) with a child page that has a section. A page folder
+  // there is a page-mode container's: one inside folder mode stops the push (uwx-route-mode.test.js).
+  w('pages/2-docs/page.yml', 'title: Docs\n')
   w('pages/2-docs/1-intro/page.yml', 'id: intro\ntitle: Intro\n')
   w('pages/2-docs/1-intro/intro.md', '---\ntype: Prose\nid: body\n---\n# Intro\n')
 
@@ -154,7 +155,7 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
   it('nests a folder’s child pages under $children (same-section self-nesting)', async () => {
     const doc = await siteProjectToDocument(ROOT)
     const docs = doc.pages.find((p) => p.slug?.en === 'docs')
-    expect(docs.mode).toBe('single-section')
+    expect(docs.mode).toBe('page')
     expect(docs).not.toHaveProperty('page_sections') // folders host no sections
     expect(Array.isArray(docs.$children)).toBe(true)
     const intro = docs.$children[0]

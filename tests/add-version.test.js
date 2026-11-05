@@ -299,6 +299,8 @@ describe('where it goes', () => {
   it('a mounted folder gets the copy in the mount', async () => {
     rmSync(join(root, 'pages/docs'), { recursive: true, force: true })
     write('site.yml', 'name: test\nindex: home\npaths:\n  pages/docs: external/docs\n')
+    // A mount is read in folder mode unless its own config says otherwise: this one's is page mode.
+    write('external/docs/page.yml', 'title: Docs\n')
     write('external/docs/start/page.yml', 'title: Start\n')
     write('external/docs/start/1-start.md', body('Start'))
     const report = await addVersion(root, { name: 'v1' })
