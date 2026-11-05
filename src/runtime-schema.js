@@ -13,6 +13,8 @@
  * - defaults: param default values
  * - context: static capabilities for cross-block coordination
  * - initialState: initial values for mutable block state
+ * - header: true when the component draws the parser's pretitle, title and subtitle as its own
+ *     header, false when it draws the section as written; absent when it declares no content
  *
  * ⭐ `data:` IS THE DELIVERY — ruled 2026-09-14 [Diego]: a section's `content.data` holds
  * the keys its component declares and nothing else, and which fetch fills each is worked
@@ -35,7 +37,7 @@
  * for the visual editor.
  */
 
-import { lowerData } from '@uniweb/schemas/content'
+import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { stickyDeclaration } from '@uniweb/schemas/section'
 
@@ -211,8 +213,21 @@ export function extractRuntimeSchema(fullMeta) {
     runtime.initialState = fullMeta.initialState
   }
 
+  // ⭐ WHETHER THE COMPONENT DRAWS THE PARSER'S HEADER ITSELF. A type whose `content:` declares a
+  // pretitle, a title or a subtitle draws them as its header, not as headings of the page (`true`).
+  // One that declares a `sequence` and none of them draws the section as written (`false`). kit's
+  // contents rail reads it (`useHeadings`): a site's default section type can be either, and a rail
+  // entry for a header line would name an anchor the page doesn't have. Absent otherwise, since
+  // nothing is known: no content declared, or only what says nothing of either.
+  const declared = new Set(describeContent(fullMeta).elements.map((e) => e.element))
+  if ([...HEADER_ELEMENTS].some((element) => declared.has(element))) runtime.header = true
+  else if (declared.has('sequence')) runtime.header = false
+
   return Object.keys(runtime).length > 0 ? runtime : null
 }
+
+/** The parser's fields a component draws as its header when its `content:` declares them. */
+const HEADER_ELEMENTS = new Set(['pretitle', 'title', 'subtitle'])
 
 /**
  * Extract runtime schemas for all components

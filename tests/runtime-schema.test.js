@@ -32,6 +32,30 @@ describe('extractRuntimeSchema', () => {
     expect(extractRuntimeSchema({ inset: true, background: 'self' })).toEqual({ background: 'self' })
   })
 
+  // A contents rail must not list a line the component draws as its header (kit's `useHeadings`),
+  // and a site's default section type can draw one or draw the section as written (2026-11-05).
+  describe('`header` — whether the component draws the parser\'s header itself', () => {
+    it('⭐ true for a type that declares a pretitle, a title or a subtitle', () => {
+      const docSection = { content: { pretitle: 'Label', title: 'Page title', subtitle: 'Lead', sequence: 'The page, as written' } }
+      expect(extractRuntimeSchema(docSection)).toEqual({ header: true })
+      expect(extractRuntimeSchema({ content: { title: 'Headline', paragraphs: 'Intro' } })).toEqual({ header: true })
+    })
+
+    it('false for one that declares a sequence and none of them: it draws the section as written', () => {
+      expect(extractRuntimeSchema({ content: { sequence: 'The document' } })).toEqual({ header: false })
+    })
+
+    it('CONTROL — absent where nothing is known: no content, or none that says either', () => {
+      expect(extractRuntimeSchema({ background: 'self' })).toEqual({ background: 'self' })
+      expect(extractRuntimeSchema({ content: { paragraphs: 'Text', images: 'Photos' } })).toBeNull()
+    })
+
+    it('reads a lowered entry as it reads meta.js', () => {
+      expect(extractRuntimeSchema({ content: [{ element: 'sequence', kind: 'sequence', label: 'The document' }] })).toEqual({ header: false })
+      expect(extractRuntimeSchema({ content: [{ element: 'title', kind: 'heading' }] })).toEqual({ header: true })
+    })
+  })
+
   describe('background extraction', () => {
     it('extracts background: true', () => {
       const meta = { background: true }
