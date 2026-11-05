@@ -58,21 +58,36 @@ export function heldUnitsOf({ hashes = {}, uuids = {}, held = [] } = {}) {
  * @param {Object<string,string>} p.held - what the pull recorded (`heldUnitsOf`)
  * @param {object} [p.plain] - the same document before any media was rewritten; `doc` when absent
  * @param {string} [p.sourceLocale]
- * @returns {{ left: string[], changed: string[] }} the paths taken out, or the paths that changed
+ * @returns {{ left: string[], changed: string[], uuids: string[] }} the paths taken out, or the paths
+ *   that changed; and the `$uuid` of every item taken out, nested ones included, which the push sends
+ *   no version for
  */
 export function leaveHeldOut(doc, { held = {}, plain = null, sourceLocale } = {}) {
   const paths = Object.keys(held)
-  if (!doc || !paths.length) return { left: [], changed: [] }
+  if (!doc || !paths.length) return { left: [], changed: [], uuids: [] }
   const now = computeUnitHashes(plain ?? doc, sourceLocale)
   const changed = new Set(paths.filter((path) => now[path] !== held[path]))
   const pages = paths.filter(isPageUnit).map(belowPage)
   for (const path of Object.keys(now)) if (!(path in held) && pages.some((p) => path.startsWith(p))) changed.add(path)
-  if (changed.size) return { left: [], changed: [...changed].sort() }
+  if (changed.size) return { left: [], changed: [...changed].sort(), uuids: [] }
 
   const drop = new Set()
   walkSiteUnits(doc, (path, record) => {
     if (path in held) drop.add(record)
   }, sourceLocale)
+  // ⭐ WHAT IS TAKEN OUT IS SENT NO VERSION. The site-content entity sends every version this copy
+  // holds, and a version for an item the document leaves out makes leaving it out a deletion
+  // (`withBaseVersion`, `sync-package.js`). So every item taken out is named, the sections and child
+  // pages below a held page included, for the push to send none. ⛔ Until 2026-11-05 none was named:
+  // a forced push banked a version for each held page it sent, and the next push left the page out
+  // and sent that version, which deletes it.
+  const uuids = new Set()
+  const under = (record) => {
+    if (record?.$uuid) uuids.add(record.$uuid)
+    for (const s of record?.page_sections || []) under(s)
+    for (const c of record?.$children || []) under(c)
+  }
+  for (const record of drop) under(record)
   const keep = (list) => list.filter((r) => !drop.has(r))
   const sections = (list) => {
     for (const s of list || []) {
@@ -90,5 +105,5 @@ export function leaveHeldOut(doc, { held = {}, plain = null, sourceLocale } = {}
   }
   if (Array.isArray(doc.pages)) doc.pages = keep(doc.pages)
   walk(doc.pages)
-  return { left: paths.sort(), changed: [] }
+  return { left: paths.sort(), changed: [], uuids: [...uuids].sort() }
 }

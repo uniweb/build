@@ -50,6 +50,33 @@ describe('what a pull records', () => {
 })
 
 describe('what a push leaves out', () => {
+  // ⛔ Until 2026-11-05 the site-content entity sent every version this copy held, a held page's too:
+  // after a forced push had banked one, the next push left the page out with its version, a deletion.
+  it('⭐ no version for a held page, nor for what is below it: leaving it out keeps it', async () => {
+    const itemUuids = {
+      'pages/home/page.yml': 'U-home',
+      'pages/docs/page.yml': 'U-docs',
+      'pages/docs/one/page.yml': 'U-one',
+      'pages/docs/one/body.md': 'U-body'
+    }
+    const units = await held(['U-docs'], itemUuids)
+    const pkg = await emit({
+      heldUnits: units,
+      itemUuids,
+      itemBaseVersions: { 'U-home': 'v-home', 'U-docs': 'v-docs', 'U-one': 'v-one', 'U-body': 'v-body' }
+    })
+    expect(pkg.heldLeftOut).toEqual(['pages/docs/one/body.md', 'pages/docs/one/page.yml', 'pages/docs/page.yml'])
+    const manifest = JSON.parse(readZip(pkg.siteContent.buffer).get('manifest.json').toString('utf8'))
+    const sent = manifest.entries.find((e) => e.file === 'entities/site-content.json').item_base_versions
+    expect(sent).toEqual({ 'U-home': 'v-home' })
+  })
+
+  it('CONTROL — with nothing held, every version this copy holds is sent', async () => {
+    const pkg = await emit({ itemUuids: { 'pages/home/page.yml': 'U-home' }, itemBaseVersions: { 'U-home': 'v-home', 'U-gone': 'v-gone' } })
+    const manifest = JSON.parse(readZip(pkg.siteContent.buffer).get('manifest.json').toString('utf8'))
+    expect(manifest.entries.find((e) => e.file === 'entities/site-content.json').item_base_versions).toEqual({ 'U-home': 'v-home', 'U-gone': 'v-gone' })
+  })
+
   it('⭐ a held page whose files say what they said: not sent, and said', async () => {
     const units = await held(['U-install'], { 'pages/guide/install/page.yml': 'U-install' })
     const pkg = await emit({ heldUnits: units })

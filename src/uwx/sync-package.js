@@ -56,7 +56,8 @@ const withBaseVersion = (baseVersions, itemBaseVersions, { every = false } = {})
   // present AND for items the files dropped. A push deletes only the items it holds a
   // version for, and only while the site left them unchanged — so a dropped item's
   // version is what makes leaving it out a deletion, and without it the item is kept
-  // [Diego, 2026-10-07; backend's gate]. The
+  // [Diego, 2026-10-07; backend's gate]. One exception: an item a pull held and the push leaves out
+  // (`leaveHeldOut`), whose version the site-content lane drops, since its being left out keeps it. The
   // caller holds a version only for an item it has seen (`heldTokens`, cli), so none is
   // ever sent for an item the backend holds and this copy does not.
   // ⛔ Until then this narrowed to the units the document carried: a dropped page was
@@ -577,7 +578,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // hands a pull to record. A walk of its own, made only when a pull held something.
   const heldUnits = opts.heldUnits && typeof opts.heldUnits === 'object' && Object.keys(opts.heldUnits).length ? opts.heldUnits : null
   const plain = siteDoc && (heldUnits || opts.unitHashes) ? await siteProjectToDocument(siteRoot, { ...docOpts, media: null }) : null
-  const held = heldUnits ? leaveHeldOut(siteDoc, { held: heldUnits, plain, sourceLocale }) : { left: [], changed: [] }
+  const held = heldUnits ? leaveHeldOut(siteDoc, { held: heldUnits, plain, sourceLocale }) : { left: [], changed: [], uuids: [] }
   let unitHashes = null
   let unitUuids = null
   if (plain && opts.unitHashes) {
@@ -665,7 +666,17 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // --- site-content lane -------------------------------------------------------
   let siteContent = null
   if (siteEntity && changed(siteEntity)) {
-    siteContent = { ...emitLane([stampSite(siteEntity)], exporter, exportedAt), index: [{ kind: 'site' }] }
+    // ⭐ NO VERSION FOR WHAT A PULL HELD AND THIS PUSH LEAVES OUT (`leaveHeldOut`'s `uuids`): with one,
+    // leaving it out is a deletion, the opposite of keeping the app's version.
+    const leftOut = new Set(held.uuids || [])
+    const stamp = leftOut.size
+      ? withBaseVersion(
+          opts.baseVersions || {},
+          Object.fromEntries(Object.entries(opts.itemBaseVersions || {}).filter(([uuid]) => !leftOut.has(uuid))),
+          { every: true }
+        )
+      : stampSite
+    siteContent = { ...emitLane([stamp(siteEntity)], exporter, exportedAt), index: [{ kind: 'site' }] }
   }
 
   // The site's current uuid (from site.yml): the verb keys the folder push route on
