@@ -694,28 +694,39 @@ function refuseAreaDeclaration(owner, area) {
 }
 
 /**
- * Warn about a section type whose `area:` names an area none of this foundation's layouts draws:
- * an editor offers a type for the areas it names, and no page would have that one. What a layout
- * draws is what its `meta.js` declares in `areas:`. Nothing is said for an extension, whose host's
- * layouts it cannot see, for a foundation with no layouts, or when any layout declares no `areas`,
- * since that one could draw any. A warning, never a refusal: the type still renders wherever an
- * author places it.
+ * The areas the runtime's built-in layout draws (`runtime/src/default-layout.js`): a page renders with it
+ * when it names no layout and the foundation has no default one. Any other area is passed in and not drawn.
+ */
+const BUILT_IN_LAYOUT_AREAS = ['header', 'footer']
+
+/**
+ * Warn about a section type whose `area:` names an area no layout of this foundation draws: an editor
+ * offers a type for the areas it names, and no page would have that one. What a layout draws is what its
+ * `meta.js` declares in `areas:`. When the foundation has no default layout (`resolveDefaultLayout`), a
+ * page that names none renders with the built-in one, which draws the header and the footer, so those
+ * count too, and a foundation with no layouts has those alone. Nothing is said for an extension, whose
+ * host's layouts it cannot see, or when any layout declares no `areas`, since that one could draw any.
+ * A warning, never a refusal: the type still renders wherever an author places it.
+ * ⛔ Until 2026-11-05 the built-in layout was left out: a foundation with no layouts was never warned,
+ * a typo such as `area: 'heder'` included, and one whose layouts declare no header was warned for it.
  *
  * @param {Object} components - discovered section types, by name
  * @param {Object} [layouts] - discovered layouts, by name
  * @param {Object} [options]
  * @param {boolean} [options.isExtension]
+ * @param {string|null} [options.defaultLayout] - the layout a page that names none renders with, null for
+ *   the built-in one
  */
-export function reportAreaNames(components, layouts = {}, { isExtension = false } = {}) {
+export function reportAreaNames(components, layouts = {}, { isExtension = false, defaultLayout = null } = {}) {
   const all = Object.values(layouts || {})
-  if (isExtension || all.length === 0 || all.some((layout) => !Array.isArray(layout?.areas))) return
-  const drawn = new Set(all.flatMap((layout) => layout.areas))
+  if (isExtension || all.some((layout) => !Array.isArray(layout?.areas))) return
+  const drawn = new Set([...all.flatMap((layout) => layout.areas), ...(defaultLayout ? [] : BUILT_IN_LAYOUT_AREAS)])
   for (const [name, entry] of Object.entries(components)) {
     for (const area of describePlacement(entry).areas || []) {
       if (drawn.has(area)) continue
       console.warn(
-        `Warning: ${name} (meta.js): area names "${area}", which none of this foundation's layouts draws ` +
-          `(they declare ${[...drawn].join(', ')}). An editor offers the type only where an author fills an ` +
+        `Warning: ${name} (meta.js): area names "${area}", which no layout of this foundation draws ` +
+          `(they draw ${[...drawn].join(', ')}). An editor offers the type only where an author fills an ` +
           `area it names. Name one of those, or add "${area}" to the areas: of the layout that draws it.`
       )
     }
@@ -1330,7 +1341,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Determine extension role
   const isExtension = !!foundationConfig.extension
-  reportAreaNames(components, layouts, { isExtension })
+  reportAreaNames(components, layouts, { isExtension, defaultLayout })
 
   // Warn if extension declares things it shouldn't
   if (isExtension) {

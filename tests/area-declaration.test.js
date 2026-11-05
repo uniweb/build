@@ -54,21 +54,35 @@ describe("a section type's area", () => {
 
 describe('an area no layout draws', () => {
   const layouts = { DocsLayout: { name: 'DocsLayout', areas: ['header', 'footer', 'left'] } }
+  const asDefault = { defaultLayout: 'DocsLayout' }
 
-  it('⭐ is warned, naming the type, the area and the areas the layouts declare', () => {
-    const warned = warningsOf(() => reportAreaNames({ Nav: { area: ['left', 'right'] }, Header: { area: 'header' } }, layouts))
+  it('⭐ is warned, naming the type, the area and the areas the layouts draw', () => {
+    const warned = warningsOf(() => reportAreaNames({ Nav: { area: ['left', 'right'] }, Header: { area: 'header' } }, layouts, asDefault))
     expect(warned).toHaveLength(1)
-    expect(warned[0]).toMatch(/^Warning: Nav \(meta\.js\): area names "right", which none of this foundation's layouts draws \(they declare header, footer, left\)/)
+    expect(warned[0]).toMatch(/^Warning: Nav \(meta\.js\): area names "right", which no layout of this foundation draws \(they draw header, footer, left\)/)
   })
 
   it('CONTROL — names every layout draws, and `true`, say nothing', () => {
-    expect(warningsOf(() => reportAreaNames({ Header: { area: 'header' }, Any: { area: true }, Hero: {} }, layouts))).toEqual([])
+    expect(warningsOf(() => reportAreaNames({ Header: { area: 'header' }, Any: { area: true }, Hero: {} }, layouts, asDefault))).toEqual([])
   })
 
-  it('nothing is said where no answer is known: a layout declaring no areas, no layouts, an extension', () => {
+  // A page that names no layout renders with the runtime's built-in one when the foundation has no
+  // default: it draws the header and the footer (`runtime/src/default-layout.js`).
+  it('⭐ with no default layout, the built-in one draws the header and the footer', () => {
+    const sides = { SideLayout: { name: 'SideLayout', areas: ['left', 'right'] } }
+    expect(warningsOf(() => reportAreaNames({ Header: { area: 'header' }, Footer: { area: 'footer' } }, sides))).toEqual([])
+    expect(warningsOf(() => reportAreaNames({ Header: { area: 'header' } }, sides, { defaultLayout: 'SideLayout' }))).toHaveLength(1)
+  })
+
+  it('⭐ a foundation with no layouts has the built-in one alone: a typo is warned', () => {
+    const warned = warningsOf(() => reportAreaNames({ Header: { area: 'heder' }, Footer: { area: 'footer' } }, {}))
+    expect(warned).toHaveLength(1)
+    expect(warned[0]).toMatch(/Header \(meta\.js\): area names "heder".*\(they draw header, footer\)/)
+  })
+
+  it('nothing is said where no answer is known: a layout declaring no areas, an extension', () => {
     const types = { Nav: { area: 'right' } }
-    expect(warningsOf(() => reportAreaNames(types, { ...layouts, Plain: { name: 'Plain' } }))).toEqual([])
-    expect(warningsOf(() => reportAreaNames(types, {}))).toEqual([])
+    expect(warningsOf(() => reportAreaNames(types, { ...layouts, Plain: { name: 'Plain' } }, asDefault))).toEqual([])
     expect(warningsOf(() => reportAreaNames(types, layouts, { isExtension: true }))).toEqual([])
   })
 })
