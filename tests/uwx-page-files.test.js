@@ -368,16 +368,36 @@ describe('⭐ a writable mount: a pull writes its pages where the push reads the
     expect(again.pages.map((p) => p.$id)).toEqual(order)
   })
 
-  it('a route the app gave another form is held whole, and said', async () => {
+  it("a route's form is its files': a `mode` the app wrote otherwise is not read", async () => {
     writableMount()
     const before = snapshot()
     const doc = await siteProjectToDocument(siteDir())
     at(doc, '/docs').mode = 'page'
-    at(doc, '/docs/intro').title = { en: 'Changed' }
+    at(doc, '/docs/intro').page_sections[0].content = { en: { type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Intro' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Changed in the app.' }] },
+    ] } }
     const report = pullInto(doc)
 
-    expect(changed(before, snapshot())).toEqual([])
-    expect(report.held.map((h) => [h.route, h.what])).toEqual([['docs', ['a page where its files keep a folder']]])
+    expect(changed(before, snapshot())).toEqual(['docs-repo/intro.md'])
+    expect(report.held).toEqual([])
+  })
+
+  it('a section the app gives a route of single-section pages is held, and its pages written', async () => {
+    writableMount()
+    const before = snapshot()
+    const doc = await siteProjectToDocument(siteDir())
+    at(doc, '/docs').page_sections = [{ $uuid: 'u-new', stable_id: 'welcome', type: 'Section', content: { en: { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Welcome.' }] },
+    ] } } }]
+    at(doc, '/docs/intro').page_sections[0].content = { en: { type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Intro' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Changed in the app.' }] },
+    ] } }
+    const report = pullInto(doc)
+
+    expect(changed(before, snapshot())).toEqual(['docs-repo/intro.md'])
+    expect(report.held.map((h) => [h.route, h.uuids, h.what])).toEqual([['docs', ['u-new'], ['a section, which a route of single-section pages holds none of']]])
   })
 
   it('⛔ a mount the caller does not name is left alone: a pull names each one it can merge into', async () => {

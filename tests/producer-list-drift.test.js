@@ -126,7 +126,7 @@ describe('producer-side lists cannot drift silently', () => {
             page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: { type: 'doc', content: [] } }],
             $children: [{ $id: 'kid', slug: 'kid', mode: 'page', stable_id: 'kid', page_sections: [] }],
           },
-          { $id: 'blog', slug: 'blog', mode: 'folder', stable_id: 'blog' },
+          { $id: 'blog', slug: 'blog', mode: 'single-section', stable_id: 'blog' },
         ],
         layout_sections: [{ $id: 'header', stable_id: 'header', type: 'Header', content: { type: 'doc', content: [] } }],
       }

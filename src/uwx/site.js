@@ -47,6 +47,7 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { dataBlockModels } from '../i18n/data-models.js'
+import { SINGLE_SECTION } from './route-mode.js'
 import { existsSync } from 'node:fs'
 import { join, parse, relative } from 'node:path'
 import {
@@ -850,7 +851,11 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     // ONE page whose sections were its `.md` files while the build rendered each as a
     // page of its own. Nothing warned, and a pull then wrote a `page.yml` into the
     // folder, converting the author's own site to the wrong shape.
-    const mode = f.internalMode === 'pages' ? 'folder' : 'page'
+    // ⭐ WHAT ITS PAGES MAY HOLD, not how the files hold them: `single-section` where they are a folder-mode
+    // folder's `.md` files, one section each, else `page`. The mode its PAGES are read in (`childMode`), so
+    // a page above a mounted folder of `.md` pages says it too, with its own sections. The app reads it to
+    // offer no second section there. ⛔ Until 2026-11-04 it was the folder's own mode, spelled `folder`.
+    const mode = f.childMode === 'pages' ? SINGLE_SECTION : 'page'
     const slugPath = parentSlugPath ? `${parentSlugPath}/${slug}` : slug
 
     const data = buildPageData(f.config, {
@@ -880,7 +885,7 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     }
 
     // A folder-mode folder has no sections: its `.md` files are pages, sent among its children.
-    if (mode === 'page') {
+    if (f.internalMode !== 'pages') {
       const sections = await collectPageSectionsNested(f.path, siteRoot, f.config, ctx.media)
       if (sections.length > 0) record.page_sections = sections
     }

@@ -154,7 +154,7 @@ describe('folder-mode `.md` pages are pushed as the build makes them', () => {
 
     expect(routes(doc)).toEqual(await built())
     const guide = at(doc, '/guide')
-    expect(guide.mode).toBe('folder')
+    expect(guide.mode).toBe('single-section')
     expect(guide.page_sections).toBeUndefined()
 
     const install = at(doc, '/guide/install')
@@ -255,7 +255,7 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
     ]))
     // The configs layer: the stub says how this site presents the route, the repo what it holds.
     const docs = at(doc, '/docs')
-    expect(docs.mode).toBe('folder')
+    expect(docs.mode).toBe('single-section')
     expect(docs.title).toEqual({ en: 'Documentation' })
     expect(docs.label).toEqual({ en: 'Docs' })
     expect(docs.layout).toBe('DocsLayout')
@@ -290,7 +290,9 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
 
     expect(routes(doc)).toEqual(await built())
     const docs = at(doc, '/docs')
-    expect(docs.mode).toBe('page')
+    // Its pages hold one section each, as the mount's `.md` files: what its `mode` says. Its own sections
+    // are the stub's.
+    expect(docs.mode).toBe('single-section')
     expect(docs.page_sections.map((s) => s.$id)).toEqual(['landing'])
     expect(at(doc, '/docs/intro').mode).toBe('page')
   })

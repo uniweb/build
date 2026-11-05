@@ -99,12 +99,20 @@ describe('a page with nothing for its `page.yml` to say', () => {
     expect(yaml.load(read('pages/story/page.yml'))).toEqual({ title: 'Our Story' })
   })
 
-  it('CONTROL — an empty `folder.yml` is still written: its presence is folder mode', async () => {
+  it('CONTROL — an empty `folder.yml` is still written where its presence is what makes folder mode', async () => {
     put({ 'pages/notes/folder.yml': '', 'pages/notes/one.md': section('Section', 'One') })
     const document = await siteProjectToDocument(dir)
-    rmSync(join(dir, 'pages/notes/folder.yml'))
+    rmSync(join(dir, 'pages/notes'), { recursive: true })
     siteContentDocumentToProject({ document, siteRoot: dir })
-    expect(existsSync(join(dir, 'pages/notes/folder.yml'))).toBe(true)
+    expect(yaml.load(readFileSync(join(dir, 'pages/notes/folder.yml'), 'utf8')) ?? {}).toEqual({})
+    expect(existsSync(join(dir, 'pages/notes/one.md'))).toBe(true)
+  })
+
+  it('…and not inside folder mode, where a folder is in folder mode without one', async () => {
+    put({ 'pages/notes/folder.yml': 'title: Notes\n', 'pages/notes/one.md': section('Section', 'One'), 'pages/notes/more/two.md': section('Section', 'Two') })
+    const document = await siteProjectToDocument(dir)
+    siteContentDocumentToProject({ document, siteRoot: dir })
+    expect(existsSync(join(dir, 'pages/notes/more/folder.yml'))).toBe(false)
   })
 })
 

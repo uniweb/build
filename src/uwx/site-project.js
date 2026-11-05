@@ -35,7 +35,7 @@
 
 import { foldOpenGraph } from './open-graph.js'
 import { isAuthoredPreview } from './authored-preview.js'
-import { join, relative, extname, basename, dirname, parse } from 'node:path'
+import { join, relative, extname, basename, dirname, parse, sep } from 'node:path'
 import { restoreAssetRefs } from './asset-map.js'
 import { mapPageRefs, pageRefIndex, pageRefPages, writtenPageRef } from './page-refs.js'
 import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
@@ -50,6 +50,7 @@ import { writeSiteConfig, writeSitePaths, writeThemeFile, writeIfChanged, writeS
 import { mountEntriesOf } from '../site/mount-entries.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { buildRouteOf } from './site.js'
+import { SINGLE_SECTION } from './route-mode.js'
 import { fileLinkTargets } from '../site/file-links.js'
 import { DEFAULT_SECTION_TYPE } from '@uniweb/core/section-type'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
@@ -102,10 +103,18 @@ function renameInPlace(from, to, report) {
 // Place the item identified by `uuid` at `targetAbs`: if the index recorded it at
 // a different path, relocate it there first (git-mv-style), then record its new
 // path in the fresh index. No-op without a ctx (standalone callers / no uuid).
-function placeByUuid(ctx, uuid, targetAbs) {
+//
+// ⛔ Only a file to a file, and a folder to a folder: a page moved between a folder-mode `.md` file and
+// a page folder changes its form, so it is written new where it lands and its old form pruned. Until
+// 2026-11-04 the `.md` file was renamed to the page folder's path, and the pull stopped on it (ENOTDIR).
+function placeByUuid(ctx, uuid, targetAbs, { folder = false } = {}) {
   if (!ctx || !uuid) return
   const oldRel = ctx.oldIndex[uuid]
-  if (oldRel) renameInPlace(join(ctx.siteRoot, oldRel), targetAbs, ctx.report)
+  const from = oldRel ? join(ctx.siteRoot, oldRel) : null
+  if (from && existsSync(from)) {
+    if (statSync(from).isDirectory() === folder) renameInPlace(from, targetAbs, ctx.report)
+    else if (from !== targetAbs) ctx.formerly?.add(from) // its old form, for the prune to take
+  }
   ctx.newIndex[uuid] = relative(ctx.siteRoot, targetAbs)
 }
 
@@ -885,13 +894,13 @@ function nestSays(nest, list) {
 // now, which is also what the layout prune below already did.
 
 // Delete the section files in `pageDir` whose stableId isn't in `keep`.
-function pruneOrphanSectionFiles(pageDir, keep, report) {
+function pruneOrphanSectionFiles(pageDir, keep, report, kept = null) {
   if (!existsSync(pageDir)) return
   for (const entry of readdirSync(pageDir)) {
     if (!isMarkdownFile(entry)) continue
     if (keep.has(basename(entry, extname(entry)))) continue
     const p = join(pageDir, entry)
-    if (!statSync(p).isFile()) continue
+    if (kept?.has(p) || !statSync(p).isFile()) continue
     unlinkSync(p)
     report.deleted.push(p)
   }
@@ -909,9 +918,10 @@ function pruneOrphanPageFiles(levelDir, keep, report, routePrefix, ctx) {
     return
   }
   for (const { file, name } of folderModePageFiles(entries).files) {
-    if (keep.has(file)) continue
+    if (keep.has(file) || ctx?.kept?.has(join(levelDir, file))) continue
     const route = routePrefix ? `${routePrefix}/${name}` : name
-    if (!ctx?.seen?.has(route)) continue
+    // A page the app moved out of this level as a page folder is its old form, seen or not (`placeByUuid`).
+    if (!ctx?.seen?.has(route) && !ctx?.formerly?.has(join(levelDir, file))) continue
     const p = join(levelDir, file)
     if (!statSync(p).isFile()) continue
     unlinkSync(p)
@@ -957,15 +967,47 @@ function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
 // level cannot hold as a file is not written there (`cannot`): a page folder below it, with nothing in
 // its `page.yml`, is read in folder mode, its sections as pages. A folder-mode folder is a folder.
 // ⛔ Until 2026-11-04 every page went to its slug's folder: `pages/2-about/` came back as `about/`.
+//
+// In a folder-mode level a route is a folder only where the files keep one in folder mode, where it is
+// or where the app moved it from (`oldForm`), or, new to them, where its `mode` is `single-section`. A
+// page folder is no form there: a parametric page, or a page its file cannot hold, is `cannot`.
 function placeOf(ctx, record, route, levelDir, levelMode, sourceLocale) {
   const found = ctx.files?.page(route)
   if (found) return found
-  if (levelMode === 'pages' && record.mode !== 'folder' && !record.is_dynamic) {
-    const name = unwrapLocalized(record.slug, sourceLocale)
-    const what = mdPageCannotHold(record, { name, sourceLocale })
-    return what.length ? { kind: 'cannot', what } : { kind: 'md', file: join(levelDir, `${name}.md`), dir: levelDir }
+  if (levelMode === 'pages') {
+    if (record.is_dynamic) return { kind: 'cannot', what: ['a parametric page, which a route of single-section pages holds none of'] }
+    const was = oldForm(ctx, record)
+    if (was ? was !== 'pages' : record.mode !== SINGLE_SECTION) {
+      const name = unwrapLocalized(record.slug, sourceLocale)
+      const what = mdPageCannotHold(record, { name, sourceLocale })
+      return what.length ? { kind: 'cannot', what } : { kind: 'md', file: join(levelDir, `${name}.md`), dir: levelDir }
+    }
   }
   return { kind: 'folder', dir: join(levelDir, pageDirName(record, sourceLocale)) }
+}
+
+// The form the files kept a route in before the app moved it, by the rename index this copy wrote: an
+// `.md` page (`md`), or a folder read in folder mode (`pages`) or page mode (`sections`) where it was.
+// Null for a route new to them. Read before the move (`placeByUuid`), which takes the old place away.
+function oldForm(ctx, record) {
+  const rel = record?.$uuid ? ctx?.oldIndex?.[record.$uuid] : null
+  const old = rel ? join(ctx.siteRoot, rel) : null
+  if (!old || !existsSync(old)) return null
+  if (!statSync(old).isDirectory()) return 'md'
+  return folderModeOf(old, ctx.files?.levelMode(dirname(old)) ?? 'sections')
+}
+
+// ⭐ A FOLDER'S FORM IS ITS FILES' WHERE THEY HOLD IT — folder mode (`pages`) or page mode (`sections`):
+// a mount's route by the mount, a folder the files hold by its own config, one the app moved by the form
+// it had. Only a route new to the files takes the form its `mode` asks for, a route the app made. ⛔ Until
+// 2026-11-04 every folder took its `mode`'s form, so a stored route in another spelling would have had
+// a `page.yml` written beside its `folder.yml`.
+function formOf(ctx, record, route, place, levelMode) {
+  if (place.mount) return place.mount.mode
+  if (ctx.files?.page(route) === place) return ctx.files.levelMode(place.dir) ?? folderModeOf(place.dir, levelMode)
+  const was = oldForm(ctx, record)
+  if (was === 'pages' || was === 'sections') return was
+  return record.mode === SINGLE_SECTION ? 'pages' : 'sections'
 }
 
 // ⭐ A FOLDER-MODE `.md` PAGE, WRITTEN BACK IN PLACE: the file is the page and its one section, so the
@@ -1028,11 +1070,6 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     const slug = unwrapLocalized(record.slug, sourceLocale) // localized {lang:value} → canonical
     const route = routePrefix ? `${routePrefix}/${slug}` : slug
     let place = placeOf(ctx, record, route, pagesDir, levelMode, sourceLocale)
-    // ⛔ A writable mount's route takes its form from its files: one the app made a page where they keep
-    // a folder, or the reverse, cannot be written — its pages are the shape that form gives them.
-    if (place.mount && record.mode !== (place.mount.mode === 'pages' ? 'folder' : 'page')) {
-      place = { kind: 'cannot', what: [record.mode === 'folder' ? 'a folder where its files keep a page' : 'a page where its files keep a folder'] }
-    }
     // A mount's own route the files cannot say where the app put it (`followMountRoutes`).
     if (ctx.heldMounts?.has(record.$uuid)) place = { kind: 'cannot', what: ['a mounted route where a mount cannot sit, or by a name another page holds'] }
     ctx.places?.set(record, place)
@@ -1040,6 +1077,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // pages for (`page-files.js`), a page its folder-mode level cannot hold as a file. Its children too:
     // a mount's are the mount's.
     if (place.kind === 'mounted' || place.kind === 'twice' || place.kind === 'cannot') {
+      keepWhereTheFilesAre(ctx, subtreeUuids(record))
       report.leftAlone?.push(...subtreeRoutes(record, route, sourceLocale))
       // ⭐ Each with its items, for the pull to bank by its outcome: a mount's page lets the folder win, and
       // one the files cannot hold is held at the version this copy last agreed on.
@@ -1081,18 +1119,29 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // ⭐ A writable mount's own route is where the site's `paths:` puts it, never where a rename index
     // last saw it: no move is made, and none recorded.
     const mount = place.mount ?? null
+    // Its form, read before the move takes its old place away.
+    const form = formOf(ctx, record, route, place, levelMode)
+    ctx.forms?.set(record, form)
     // Relocate the whole page dir if this uuid moved to a new slug, then record it.
-    if (!mount) placeByUuid(ctx, record.$uuid, pageDir)
+    if (!mount) placeByUuid(ctx, record.$uuid, pageDir, { folder: true })
 
     let sectionsArray = []
     let filesGiveOrder = false
     let filesGiveTopOrder = false
-    if (record.mode === 'page' && Array.isArray(record.page_sections)) {
+    if (form === 'sections' && Array.isArray(record.page_sections)) {
       const r = pageSectionsToFiles({ pageDir, pageSections: record.page_sections, ctx, pageContext })
       sectionsArray = r.sections
       filesGiveOrder = r.filesGiveOrder
       filesGiveTopOrder = r.filesGiveTopOrder
       report.sections.push(...r.written)
+    } else if (Array.isArray(record.page_sections) && record.page_sections.length) {
+      // ⛔ A route of single-section pages holds no section of its own: its folder's `.md` files are its
+      // pages. One the app gives it is held, and the route and its pages are written as they are. Until
+      // 2026-11-04 it was dropped, and the next push removed it from the site.
+      const uuids = record.page_sections.flatMap((s) => subtreeUuids(s))
+      keepWhereTheFilesAre(ctx, uuids)
+      report.held?.push({ route, uuids, what: ['a section, which a route of single-section pages holds none of'] })
+      report.leftAlone?.push(route)
     }
 
     if (mount) {
@@ -1107,7 +1156,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
       continue
     }
 
-    const ymlName = record.mode === 'folder' ? 'folder.yml' : 'page.yml'
+    const ymlName = form === 'pages' ? 'folder.yml' : 'page.yml'
     const ymlPath = join(pageDir, ymlName)
     // Merge (not full-dump) so author-added keys survive a pull; the projector
     // owns only PAGE_YML_MANAGED_KEYS.
@@ -1116,8 +1165,10 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     const yml = pageRecordToYml(record, sectionsArray, sourceLocale, existing, { isRoot: !routePrefix, slug: pageSlug, filesGiveOrder, filesGiveTopOrder })
     // ⭐ A `page.yml` with nothing to say is not created: the build reads an empty one as none
     // (`content-collector.js::readFolderConfig`). ⛔ Until 2026-10-08 a pull wrote `{}` into every page
-    // whose folder had none. An empty `folder.yml` is written still — its presence is folder mode.
-    if (ymlName === 'page.yml' && Object.keys(yml).length === 0 && !existsSync(ymlPath)) {
+    // whose folder had none. An empty `folder.yml` is written only where its presence is what puts the
+    // folder in folder mode: not in a folder-mode level, where the folder is in folder mode without it.
+    // ⛔ Until 2026-11-04 a pull of what was pushed wrote one into every such folder.
+    if (Object.keys(yml).length === 0 && !existsSync(ymlPath) && (ymlName === 'page.yml' || levelMode === 'pages')) {
       writePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, parentOrderList(ymlPath), canon, folderModeOf(pageDir, levelMode))
       continue
     }
@@ -1141,6 +1192,44 @@ function subtreeUuids(record) {
     for (const c of r?.$children || []) walk(c)
   }
   walk(record)
+  return out
+}
+
+// ⭐ WHAT A PULL LEAVES ALONE STAYS WHERE THE FILES KEEP IT. A page the app moved where the files cannot
+// hold it is not written there, so its files at the old place are the files' version of it, and the prune
+// must keep them: found by the rename index this copy wrote, else, for a page, by the route its sync state
+// last saw it at (`ctx.itemRoutes`). ⛔ Until 2026-11-04 the prune took them: a page of two sections moved
+// into a folder of single-section pages was held there and deleted where it was.
+function keepWhereTheFilesAre(ctx, uuids) {
+  if (!ctx?.kept) return
+  for (const uuid of uuids) {
+    const old = ctx.oldIndex[uuid]
+    if (old) {
+      ctx.kept.add(join(ctx.siteRoot, old))
+      ctx.newIndex[uuid] ??= old
+      continue
+    }
+    const route = ctx.itemRoutes?.get(uuid)
+    const place = route == null ? null : ctx.files?.page(route)
+    if (place?.kind === 'md') ctx.kept.add(place.file)
+    else if (place?.dir) ctx.kept.add(place.dir)
+  }
+}
+
+// Whether a folder is, or holds, a path the prune must keep (`keepWhereTheFilesAre`).
+function holdsKept(ctx, dir) {
+  for (const path of ctx?.kept ?? []) if (path === dir || path.startsWith(dir + sep)) return true
+  return false
+}
+
+// Each page's route by its item, as this copy's sync state last saw it: `pages/<route>/page.yml` (or
+// `folder.yml`), a parametric segment by its name, as `seenPageRoutes` reads them.
+function itemRoutesOf(items) {
+  const out = new Map()
+  for (const [key, uuid] of Object.entries(items || {})) {
+    const m = key.match(/^pages\/(.+)\/(?:page|folder)\.yml$/)
+    if (m && typeof uuid === 'string') out.set(uuid, m[1].split('/').map((seg) => seg.match(/^\[(.+)\]$/)?.[1] ?? seg).join('/'))
+  }
   return out
 }
 
@@ -1227,7 +1316,7 @@ function pageFileTargets(ctx, pages, sourceLocale) {
       if (place?.kind === 'md' && record.page_sections?.length === 1) {
         const section = record.page_sections[0]
         files.push({ file: place.file, id: recordStableId(section), content: contentOf(section) })
-      } else if (place?.kind === 'folder' && record.mode === 'page') {
+      } else if (place?.kind === 'folder' && (place.mount ? place.mount.mode : ctx.files.levelMode(place.dir)) === 'sections') {
         const bases = sectionFileBases(record.page_sections || [])
         const visit = (list, child) => {
           for (const section of list || []) {
@@ -1353,7 +1442,7 @@ function reconcileLevelOrder({ pages, pagesDir, sourceLocale, list, homepage = n
       return { md: false, dirName: place.mount.segment, name: place.mount.segment, readOrder: () => config.read().order, writeOrder: (n) => config.write({ order: n }) }
     }
     const dirName = place?.kind === 'folder' ? basename(place.dir) : pageDirName(r, sourceLocale)
-    const yml = join(pagesDir, dirName, r.mode === 'folder' ? 'folder.yml' : 'page.yml')
+    const yml = join(pagesDir, dirName, ctx?.forms?.get(r) === 'pages' ? 'folder.yml' : 'page.yml')
     return { md: false, dirName, name: parseNumericPrefix(dirName).name, readOrder: () => readAuthoredYaml(yml)?.order, writeOrder: (n) => writeMergedYaml(yml, { order: n }, ['order']) }
   })
   if (level.length < 2) return
@@ -1459,14 +1548,21 @@ function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null, route
     // Left alone by pass 1 — and an `.md` page has nothing below it — so nothing of it is pruned.
     if (place.kind !== 'folder') continue
     const pageDir = place.dir
-    if (record.mode === 'page') {
+    if (ctx?.forms?.get(record) === 'sections') {
       // The files pass 1 wrote into — the author's own names among them — else the names it would give.
       const keep = ctx?.sectionFiles?.get(pageDir) || collectSectionFileBases(record.page_sections)
-      if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report)
+      if (keep.size > 0) pruneOrphanSectionFiles(pageDir, keep, report, ctx?.kept)
     }
     // A writable mount's pages are in the mounted folder (`page-files.js`).
     if (place.mount) prunePagesTree(record.$children || [], place.mount.dir, sourceLocale, report, ctx, route, place.mount.childMode)
     else prunePagesTree(record.$children || [], pageDir, sourceLocale, report, ctx, route, folderModeOf(pageDir, levelMode))
+  }
+  // A page the app moved that changed form, as this level kept it (`placeByUuid`): it goes, even from a
+  // level left with no page of its own, since the page itself was written where it lands.
+  for (const p of ctx?.formerly ?? []) {
+    if (dirname(p) !== pagesDir || !existsSync(p) || holdsKept(ctx, p) || ctx.files?.holds?.(p)) continue
+    rmSync(p, { recursive: true, force: true })
+    report.deleted.push(p)
   }
   if (incomingDirs.size === 0 && incomingFiles.size === 0) return
   if (levelMode === 'pages') pruneOrphanPageFiles(pagesDir, incomingFiles, report, routePrefix, ctx)
@@ -1475,7 +1571,7 @@ function prunePagesTree(pages, pagesDir, sourceLocale, report, ctx = null, route
   if (!routePrefix) for (const segment of ctx?.files?.mounted ?? []) incomingDirs.add(segment)
   // ⛔ Nor is a folder that holds a folder-mode page, whatever the document holds: until 2026-11-04 a
   // document without that folder's own page removed it whole, its `.md` pages with it.
-  pruneOrphanPageDirs(pagesDir, incomingDirs, report, (dir) => Boolean(ctx?.files?.holds?.(dir)))
+  pruneOrphanPageDirs(pagesDir, incomingDirs, report, (dir) => Boolean(ctx?.files?.holds?.(dir)) || holdsKept(ctx, dir))
 }
 
 /**
@@ -1817,7 +1913,12 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // A read-only mount's pages, and a route the files give two pages for, are neither written nor
   // pruned. Each record's place, once decided, is the one every pass below reads (`places`).
   // The pages this copy has seen the backend hold, by route: a prune deletes an `.md` page only then.
-  ctx.seen = seenPageRoutes(backend ? readBackendState(siteRoot, backend).items : null)
+  const items = backend ? readBackendState(siteRoot, backend).items : null
+  ctx.seen = seenPageRoutes(items)
+  ctx.itemRoutes = itemRoutesOf(items)
+  ctx.kept = new Set()
+  ctx.formerly = new Set()
+  ctx.forms = new Map()
   ctx.files = sitePageFiles(siteYml, pagesDir, { seen: ctx.seen, siteRoot, writable })
   ctx.places = new Map()
   ctx.fileLinks = pageFileTargets(ctx, document?.pages, sourceLocale)
@@ -1837,7 +1938,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
     // A homepage marked `index: true` in its own config — where the push read it (`buildPageData`) —
     // is left marked there alone: a site.yml that names none is not given an `index:` it never had.
     const homePlace = ctx.places.get(home)
-    const homeConfig = homePlace?.mount ? mountRouteConfig(homePlace.mount).read() : homePlace?.kind === 'folder' ? readAuthoredYaml(join(homePlace.dir, home.mode === 'folder' ? 'folder.yml' : 'page.yml')) : null
+    const homeConfig = homePlace?.mount ? mountRouteConfig(homePlace.mount).read() : homePlace?.kind === 'folder' ? readAuthoredYaml(join(homePlace.dir, ctx.forms.get(home) === 'pages' ? 'folder.yml' : 'page.yml')) : null
     const marksItself = homeConfig?.index === true
     if (root.homepage !== ctx.homepage && !(marksItself && root.homepage === undefined)) {
       const listed = Array.isArray(root.pages) ? parseWildcardArray(root.pages) : null

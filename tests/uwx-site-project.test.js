@@ -172,9 +172,16 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
         page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: docOf('Hi') }],
       },
       {
+        $id: 'notes',
+        slug: 'notes',
+        mode: 'single-section',
+        title: { en: 'Notes' },
+        $children: [{ $id: 'one', slug: 'one', mode: 'page', title: { en: 'One' }, page_sections: [{ $id: 'one', stable_id: 'one', type: 'Section', content: { type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'One' }] }] } }] }],
+      },
+      {
         $id: 'blog',
         slug: 'blog',
-        mode: 'folder',
+        mode: 'page',
         title: { en: 'Blog' },
         $children: [
           {
@@ -204,9 +211,14 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8')).index).toBe('home')
     expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
 
-    // blog (folder mode): folder.yml, no page.yml
-    expect(existsSync(join(dir, 'pages/blog/folder.yml'))).toBe(true)
-    expect(existsSync(join(dir, 'pages/blog/page.yml'))).toBe(false)
+    // notes (its pages single-section): folder.yml, no page.yml, and each page one `.md` file
+    expect(existsSync(join(dir, 'pages/notes/folder.yml'))).toBe(true)
+    expect(existsSync(join(dir, 'pages/notes/page.yml'))).toBe(false)
+    expect(existsSync(join(dir, 'pages/notes/one.md'))).toBe(true)
+
+    // blog (page mode): page.yml, no folder.yml
+    expect(existsSync(join(dir, 'pages/blog/page.yml'))).toBe(true)
+    expect(existsSync(join(dir, 'pages/blog/folder.yml'))).toBe(false)
 
     // dynamic child page → [slug]/ directory. Its record says nothing a page.yml would hold, so it gets
     // none: the build reads an empty one as none (`readFolderConfig`).
@@ -218,7 +230,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
 
     // and site.yml was written from info
     expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8'))).toMatchObject({ name: 'Site', foundation: '@a/base' })
-    expect(report.pages.length).toBe(2) // home, blog (folder) — [slug] has no page.yml to write
+    expect(report.pages.length).toBe(3) // home, notes, blog — [slug] has no page.yml to write
   })
 
   it('is idempotent across a second projection', () => {

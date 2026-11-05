@@ -49,6 +49,7 @@
 import { entityContentHash } from './records.js'
 import { sectionFileBases, pageDirName, layoutSectionPaths } from './site-project.js'
 import { documentSourceLocale } from './source-locale.js'
+import { SINGLE_SECTION } from './route-mode.js'
 
 // A unit's own content, with the nested collections that are their own units
 // removed — so editing a section never also marks its page (or its parent
@@ -112,8 +113,12 @@ export function walkSiteUnits(doc, cb, sourceLocale = documentSourceLocale(doc))
       const dirName = pageDirName(record, sourceLocale)
       if (!dirName) continue
       const dir = `${parentDir}/${dirName}`
-      cb(`${dir}/${record.mode === 'folder' ? 'folder.yml' : 'page.yml'}`, record, 'page')
-      if (record.mode !== 'folder') walkSections(record.page_sections, dir)
+      // A route of single-section pages is its `folder.yml`, in either spelling: `folder` is the one a
+      // push wrote until 2026-11-04, which a stored document carries until its site's next push, and a
+      // unit keyed otherwise would read as one the app changed. Delete `folder` here once no synced site's
+      // document carries it.
+      cb(`${dir}/${record.mode === SINGLE_SECTION || record.mode === 'folder' ? 'folder.yml' : 'page.yml'}`, record, 'page')
+      walkSections(record.page_sections, dir)
       walkPages(record.$children, dir)
     }
   }
