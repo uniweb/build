@@ -15,6 +15,9 @@
  * `meta` contains only properties needed at runtime (`runtime-schema.js`):
  * - `background` - 'self' opt-out when component handles its own background
  * - `sticky` - whether the section stays in view unless its author says otherwise
+ * - `underHeader` - whether the header lies over the section when it opens a page
+ * - `height` - a header type's height, for that page's first paint
+ * - `header` - whether the component draws the parser's header itself
  * - `data` - the `content.data` keys the component declares, with their schema refs
  * - `vars` - the CSS variables the component declares, with their defaults
  * - `defaults` - Param default values
@@ -207,7 +210,7 @@ function generateEntrySource(components, options = {}) {
     lines.push('const capabilities = null')
   }
 
-  // Per-component runtime metadata (defaults, context, initialState, background, data, vars)
+  // Per-component runtime metadata (`runtime-schema.js`)
   lines.push('')
   const metaJson = JSON.stringify(Object.keys(meta).length > 0 ? meta : {}, null, 2)
   lines.push(`const meta = ${metaJson}`)

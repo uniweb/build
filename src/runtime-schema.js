@@ -6,6 +6,9 @@
  *
  * - background: 'self' when component handles its own background
  * - sticky: { default, top? } — whether the section stays in view unless its author says
+ * - underHeader: true when the header lies over a section of this type that opens a page
+ * - height: a header type's height, a CSS length, for the first paint of a page whose opening
+ *     section lies under the header
  * - data: { <key>: <schema ref> | { schema, single?, whole? } | null } — every `content.data`
  *     key the component declares, in order, with its schema ref and the flags set on it (null for
  *     an inline shape)
