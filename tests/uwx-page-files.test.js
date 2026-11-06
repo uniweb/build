@@ -383,7 +383,7 @@ describe('⭐ a writable mount: a pull writes its pages where the push reads the
     expect(report.held).toEqual([])
   })
 
-  it('a section the app gives a route of single-section pages is held, and its pages written', async () => {
+  it('a section the app gives an atomic-parent is held, and its child pages written', async () => {
     writableMount()
     const before = snapshot()
     const doc = await siteProjectToDocument(siteDir())
@@ -397,7 +397,7 @@ describe('⭐ a writable mount: a pull writes its pages where the push reads the
     const report = pullInto(doc)
 
     expect(changed(before, snapshot())).toEqual(['docs-repo/intro.md'])
-    expect(report.held.map((h) => [h.route, h.uuids, h.what])).toEqual([['docs', ['u-new'], ['a section, which a route of single-section pages holds none of']]])
+    expect(report.held.map((h) => [h.route, h.uuids, h.what])).toEqual([['docs', ['u-new'], ['a section, which an atomic-parent holds none of']]])
   })
 
   it('⛔ a mount the caller does not name is left alone: a pull names each one it can merge into', async () => {

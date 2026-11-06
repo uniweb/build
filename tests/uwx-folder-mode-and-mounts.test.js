@@ -154,11 +154,11 @@ describe('folder-mode `.md` pages are pushed as the build makes them', () => {
 
     expect(routes(doc)).toEqual(await built())
     const guide = at(doc, '/guide')
-    expect(guide.mode).toBe('single-section')
+    expect(guide.mode).toBe('atomic-parent')
     expect(guide.page_sections).toBeUndefined()
 
     const install = at(doc, '/guide/install')
-    expect(install.mode).toBe('page')
+    expect(install.mode).toBe('atomic')
     expect(install.title).toEqual({ en: 'Install it' })
     expect(install.page_sections).toHaveLength(1)
     expect(install.page_sections[0].$id).toBe('install')
@@ -217,7 +217,9 @@ describe('folder-mode `.md` pages are pushed as the build makes them', () => {
 
     expect(routes(doc)).toEqual(await built())
     expect(doc.pages.find((p) => p.$id === 'intro').is_index).toBe(true)
-    expect(at(doc, '/about/about').mode).toBe('page')
+    expect(at(doc, '/about').mode).toBe('atomic-parent')
+    expect(at(doc, '/about/about').mode).toBe('atomic')
+    expect(at(doc, '/contact').mode).toBe('atomic')
     expect(at(doc, '/contact').page_sections).toHaveLength(1)
   })
 
@@ -235,7 +237,7 @@ describe('folder-mode `.md` pages are pushed as the build makes them', () => {
 
     expect(routes(doc)).toEqual(await built())
     for (const route of ['/a', '/a/b', '/a/b/c', '/a/b/c/d']) {
-      expect(at(doc, route).mode).toBe('page')
+      expect(at(doc, route).mode).toBe('regular')
       expect(at(doc, route).page_sections).toHaveLength(1)
     }
   })
@@ -253,7 +255,7 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
     ]))
     // The configs layer: the stub says how this site presents the route, the repo what it holds.
     const docs = at(doc, '/docs')
-    expect(docs.mode).toBe('single-section')
+    expect(docs.mode).toBe('atomic-parent')
     expect(docs.title).toEqual({ en: 'Documentation' })
     expect(docs.label).toEqual({ en: 'Docs' })
     expect(docs.layout).toBe('DocsLayout')
@@ -272,7 +274,7 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
 
     expect(routes(doc)).toEqual(await built())
     expect(at(doc, '/docs').title).toEqual({ en: 'Repo Docs' })
-    expect(at(doc, '/docs/intro').mode).toBe('page')
+    expect(at(doc, '/docs/intro').mode).toBe('atomic')
   })
 
   it('a `page.yml` stub is a landing page above the mounted pages', async () => {
@@ -288,11 +290,11 @@ describe('a `paths: { pages/<segment> }` mount is pushed as the build mounts it'
 
     expect(routes(doc)).toEqual(await built())
     const docs = at(doc, '/docs')
-    // Its pages hold one section each, as the mount's `.md` files: what its `mode` says. Its own sections
-    // are the stub's.
-    expect(docs.mode).toBe('single-section')
+    // A page with sections of its own is regular, and the mount's `.md` pages under it are atomic: each
+    // page says what it is. Its own sections are the stub's.
+    expect(docs.mode).toBe('regular')
     expect(docs.page_sections.map((s) => s.$id)).toEqual(['landing'])
-    expect(at(doc, '/docs/intro').mode).toBe('page')
+    expect(at(doc, '/docs/intro').mode).toBe('atomic')
   })
 
   it('a mount with nothing in it stops the push, naming the submodule — a push replaces the whole page tree', async () => {

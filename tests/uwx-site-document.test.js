@@ -155,12 +155,12 @@ describe('uwx/site siteProjectToDocument (nested $-document)', () => {
   it('nests a folder’s child pages under $children (same-section self-nesting)', async () => {
     const doc = await siteProjectToDocument(ROOT)
     const docs = doc.pages.find((p) => p.slug?.en === 'docs')
-    expect(docs.mode).toBe('page')
+    expect(docs.mode).toBe('regular')
     expect(docs).not.toHaveProperty('page_sections') // folders host no sections
     expect(Array.isArray(docs.$children)).toBe(true)
     const intro = docs.$children[0]
     expect(intro.$id).toBe('intro')
-    expect(intro.mode).toBe('page')
+    expect(intro.mode).toBe('regular')
     expect(intro.page_sections[0].$id).toBe('body') // its inline section
     expect(intro.page_sections[0].type).toBe('Prose')
   })

@@ -122,11 +122,11 @@ describe('producer-side lists cannot drift silently', () => {
         info: { name: { en: 'S' }, foundation: '@a/b' },
         pages: [
           {
-            $id: 'home', slug: 'home', mode: 'page', stable_id: 'home',
+            $id: 'home', slug: 'home', mode: 'regular', stable_id: 'home',
             page_sections: [{ $id: 'hero', stable_id: 'hero', type: 'Hero', content: { type: 'doc', content: [] } }],
-            $children: [{ $id: 'kid', slug: 'kid', mode: 'page', stable_id: 'kid', page_sections: [] }],
+            $children: [{ $id: 'kid', slug: 'kid', mode: 'regular', stable_id: 'kid', page_sections: [] }],
           },
-          { $id: 'blog', slug: 'blog', mode: 'single-section', stable_id: 'blog' },
+          { $id: 'blog', slug: 'blog', mode: 'atomic-parent', stable_id: 'blog' },
         ],
         layout_sections: [{ $id: 'header', stable_id: 'header', type: 'Header', content: { type: 'doc', content: [] } }],
       }

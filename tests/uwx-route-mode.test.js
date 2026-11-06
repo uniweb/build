@@ -1,13 +1,14 @@
 /**
- * A route's `mode` says what its pages may hold: `single-section` where each is one section, as a folder
- * in folder mode keeps them, one `.md` file each, else `page`. A push writes each route's own value; a
- * pull takes a route's form from its files wherever they hold it, where it is or where the app moved it
- * from, and reads `mode` only for a route new to them. What the files cannot hold is held: the site
- * keeps the app's version, and the files keep theirs, where they are.
+ * A page's `mode` says what the page itself is (2026-11-05): `atomic`, one `.md` file in
+ * folder mode; `atomic-parent`, a directory in folder mode, with no section; `regular`, every other page. A
+ * push writes each page's own value from its files; a pull takes a page's form from its files wherever they
+ * hold it, where it is or where the app moved it from, but for the app's switch of an empty page between
+ * atomic-parent and regular, and places a page new to them by its mode. What the files cannot hold is held:
+ * the site keeps the app's version, and the files keep theirs, where they are.
  *
  * ⛔ Measured 2026-11-04, offline, on a docs tree: a pull of what was pushed wrote an empty `folder.yml`
  * into a folder that is in folder mode by inheritance; a pull stopped (ENOTDIR) on an `.md` page the app
- * moved into page mode; a section the app gave a folder of single-section pages was dropped, and the
+ * moved into page mode; a section the app gave a page of single-section pages was dropped, and the
  * next push removed it; and a page the app moved where its files cannot hold it was deleted where it was.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -67,8 +68,8 @@ const doc1 = (text, heading) => ({ type: 'doc', content: [
   { type: 'paragraph', content: [{ type: 'text', text }] },
 ] })
 
-// Frontend's tree: a folder of single-section pages, one inheriting its mode, one declaring it, and pages
-// in page mode beside them.
+// Frontend's tree: atomic-parents, one inheriting folder mode, one declaring it, and regular pages beside
+// them.
 const TREE = {
   'pages/home/page.yml': 'title: Home\n',
   'pages/home/1-intro.md': '# Welcome\n\nHello.\n',
@@ -111,28 +112,32 @@ const changed = () =>
 const pull = (doc) => siteContentDocumentToProject({ document: structuredClone(doc), siteRoot: dir, prune: true })
 
 describe('what a push writes in `mode`', () => {
-  it('⭐ `single-section` on a folder of single-section pages, declared or inherited, and `page` on every page', async () => {
+  // Each page's own mode (2026-11-05). ⛔ Until then: `single-section` on the page
+  // whose child pages were in folder mode, and `page` on every other, the `.md` pages under it included.
+  it('⭐ `atomic` on each `.md` page, `atomic-parent` on its directory, declared or inherited, `regular` on the rest', async () => {
     put(TREE)
     const doc = await siteProjectToDocument(dir)
     expect(routes(doc)).toEqual({
-      '/home': 'page:2',
-      '/guide': 'single-section:0',
-      '/guide/install': 'page:1',
-      '/guide/quickstart': 'page:1',
-      '/guide/advanced': 'single-section:0',
-      '/guide/advanced/deploy': 'page:1',
-      '/guide/topics': 'single-section:0',
-      '/guide/topics/routing': 'page:1',
-      '/docs': 'page:0',
-      '/docs/one': 'page:1',
+      '/home': 'regular:2',
+      '/guide': 'atomic-parent:0',
+      '/guide/install': 'atomic:1',
+      '/guide/quickstart': 'atomic:1',
+      '/guide/advanced': 'atomic-parent:0',
+      '/guide/advanced/deploy': 'atomic:1',
+      '/guide/topics': 'atomic-parent:0',
+      '/guide/topics/routing': 'atomic:1',
+      '/docs': 'regular:0',
+      '/docs/one': 'regular:1',
     })
   })
 
-  it('a route in either spelling is one unit of a site\'s sync state, its `folder.yml`', () => {
+  it("an atomic-parent is its `folder.yml` in a site's sync state; every other page its `page.yml`", () => {
     const doc = (mode) => ({ info: { name: { en: 'S' } }, pages: [{ $id: 'guide', slug: { en: 'guide' }, mode }] })
-    expect([...collectSiteUnits(doc('single-section')).keys()]).toContain('pages/guide/folder.yml')
-    expect([...collectSiteUnits(doc('folder')).keys()]).toContain('pages/guide/folder.yml')
-    expect([...collectSiteUnits(doc('page')).keys()]).toContain('pages/guide/page.yml')
+    expect([...collectSiteUnits(doc('atomic-parent')).keys()]).toContain('pages/guide/folder.yml')
+    expect([...collectSiteUnits(doc('atomic')).keys()]).toContain('pages/guide/page.yml')
+    expect([...collectSiteUnits(doc('regular')).keys()]).toContain('pages/guide/page.yml')
+    // A value this framework doesn't know is regular's.
+    expect([...collectSiteUnits(doc('single-section')).keys()]).toContain('pages/guide/page.yml')
   })
 })
 
@@ -144,7 +149,7 @@ describe('what a pull writes, and holds', () => {
     expect(has('pages/guide/advanced/folder.yml')).toBe(false)
   })
 
-  it("a route's form is its files': a stored route in another spelling changes no file", async () => {
+  it("a page whose mode this framework doesn't know keeps its files' form: no file changes", async () => {
     const doc = await synced()
     at(doc, '/guide').rec.mode = 'folder'
     at(doc, '/guide/topics').rec.mode = 'page'
@@ -152,7 +157,7 @@ describe('what a pull writes, and holds', () => {
     expect(changed()).toEqual([])
   })
 
-  it('a folder of single-section pages the app moves into page mode stays one, its `folder.yml` written where it lands', async () => {
+  it('an atomic-parent the app moves under a regular page stays one, its `folder.yml` written where it lands', async () => {
     const doc = await synced()
     attach(doc, '', detach(doc, '/guide/advanced'))
     const report = pull(doc)
@@ -163,9 +168,10 @@ describe('what a pull writes, and holds', () => {
     expect(routes(await siteProjectToDocument(dir))).toEqual(routes(doc))
   })
 
-  it('⭐ an `.md` page the app moves into page mode becomes a page folder, and its file goes', async () => {
+  it('⭐ an atomic page the app moves under a regular page becomes regular there: a page folder, and its file goes', async () => {
     const doc = await synced()
     attach(doc, '', detach(doc, '/guide/install'))
+    at(doc, '/install').rec.mode = 'regular'
     const report = pull(doc)
     expect(report.held).toEqual([])
     expect(has('pages/install/install.md')).toBe(true)
@@ -173,9 +179,10 @@ describe('what a pull writes, and holds', () => {
     expect(routes(await siteProjectToDocument(dir))).toEqual(routes(doc))
   })
 
-  it('a page folder of one section the app moves into a folder of single-section pages becomes an `.md` file', async () => {
+  it('a page of one section the app moves into an atomic-parent becomes atomic: an `.md` file', async () => {
     const doc = await synced()
     attach(doc, '/guide', detach(doc, '/docs/one'))
+    at(doc, '/guide/one').rec.mode = 'atomic'
     const report = pull(doc)
     expect(report.held).toEqual([])
     expect(has('pages/guide/one.md')).toBe(true)
@@ -191,7 +198,7 @@ describe('what a pull writes, and holds', () => {
     expect(changed()).toEqual([])
   })
 
-  it('⭐ a section the app gives a folder of single-section pages is held, and its pages are written', async () => {
+  it('⭐ a section the app gives an atomic-parent is held, and its child pages are written', async () => {
     const doc = await synced()
     at(doc, '/guide').rec.page_sections = [{ $uuid: 'u-new', stable_id: 'welcome', type: 'Section', content: doc1('Welcome.') }]
     at(doc, '/guide/quickstart').rec.page_sections[0].content = doc1('Start here, now.', 'Quickstart')
@@ -200,28 +207,28 @@ describe('what a pull writes, and holds', () => {
     expect(changed()).toEqual(['M guide/2-quickstart.md'])
   })
 
-  it('a folder the app makes there with the parent\'s value is a folder; one written `page` is held', async () => {
+  it('a section-less page the app makes in an atomic-parent is one; one made regular there is held', async () => {
     const doc = await synced()
     const page = (slug, mode, sections, children) => ({ $uuid: `n-${slug}`, slug: { en: slug }, mode, title: { en: slug.toUpperCase() }, page_sections: sections, ...(children ? { $children: children } : {}) })
-    const faq = () => page('faq', 'page', [{ $uuid: 'n-faq#0', stable_id: 'faq', type: 'Section', content: doc1('Answers.', 'FAQ') }])
-    attach(doc, '/guide', page('extras', 'single-section', [], [faq()]))
-    attach(doc, '/guide/topics', page('more', 'page', [], [faq()]))
+    const faq = () => page('faq', 'atomic', [{ $uuid: 'n-faq#0', stable_id: 'faq', type: 'Section', content: doc1('Answers.', 'FAQ') }])
+    attach(doc, '/guide', page('extras', 'atomic-parent', [], [faq()]))
+    attach(doc, '/guide/topics', page('more', 'regular', [], [faq()]))
     const report = pull(doc)
     expect(has('pages/guide/extras/faq.md')).toBe(true)
     expect(report.held.map((h) => [h.route, h.what])).toEqual([['guide/topics/more', ['no section', 'pages below it']]])
   })
 
-  it('a parametric page, a second section, and a page below a single-section page are held', async () => {
+  it('a parametric page, a second section, and a page below an atomic page are held', async () => {
     const doc = await synced()
     const section = (id) => ({ $uuid: `n-${id}`, stable_id: id, type: 'Section', content: doc1('Made in the app.', 'Made') })
-    attach(doc, '/guide', { $uuid: 'n-post', slug: { en: 'slug' }, mode: 'page', is_dynamic: true, param_name: 'slug', page_sections: [section('post')] })
+    attach(doc, '/guide', { $uuid: 'n-post', slug: { en: 'slug' }, mode: 'regular', is_dynamic: true, param_name: 'slug', page_sections: [section('post')] })
     at(doc, '/guide/quickstart').rec.page_sections.push(section('second'))
-    attach(doc, '/guide/install', { $uuid: 'n-below', slug: { en: 'below' }, mode: 'page', title: { en: 'Made' }, page_sections: [section('below')] })
+    attach(doc, '/guide/install', { $uuid: 'n-below', slug: { en: 'below' }, mode: 'atomic', title: { en: 'Made' }, page_sections: [section('below')] })
     const report = pull(doc)
     expect(report.held.map((h) => [h.route, h.what]).sort()).toEqual([
       ['guide/install', ['pages below it']],
       ['guide/quickstart', ['more than one section']],
-      ['guide/slug', ['a parametric page, which a route of single-section pages holds none of']],
+      ['guide/slug', ['a parametric page, which an atomic-parent holds none of']],
     ])
     expect(changed()).toEqual([])
   })
@@ -271,13 +278,9 @@ describe('in a repository, where a pull has no rename index', () => {
   })
 })
 
-// A route new to the files takes its form from its `mode`, and in a fresh clone every route is new.
-// ⛔ Until 2026-11-05 only `single-section` read as a route of single-section pages, so a clone of a site
-// last pushed before the rename, still stored `folder`, wrote those routes in page mode.
-it('a fresh clone writes a route stored as `folder` in folder mode', async () => {
+// A page new to the files takes its form from its own mode, and in a fresh clone every page is new.
+it('a fresh clone writes each atomic-parent in folder mode and each atomic page as an `.md` file', async () => {
   const doc = await synced()
-  at(doc, '/guide').rec.mode = 'folder'
-  at(doc, '/guide/topics').rec.mode = 'folder'
   rmSync(join(dir, 'pages'), { recursive: true, force: true })
   rmSync(join(dir, '.uniweb'), { recursive: true, force: true })
   pull(doc)
@@ -285,6 +288,56 @@ it('a fresh clone writes a route stored as `folder` in folder mode', async () =>
   expect(has('pages/guide/page.yml')).toBe(false)
   expect(has('pages/guide/install.md')).toBe(true)
   expect(has('pages/guide/topics/routing.md')).toBe(true)
+  expect(has('pages/docs/one/page.yml')).toBe(true)
+})
+
+// ⭐ THE APP'S SWITCH ON AN EMPTY PAGE: a page with no section and no child page
+// is made an atomic-parent, or regular again. Nothing has to be converted: its config takes the other name.
+describe("the app's switch on an empty page", () => {
+  const withEmpty = async (config) => {
+    put({ ...TREE, ...config })
+    spawnSync('git', ['init', '-q'], { cwd: dir })
+    const doc = withUuids(await siteProjectToDocument(dir))
+    siteContentDocumentToProject({ document: structuredClone(doc), siteRoot: dir, prune: true })
+    return doc
+  }
+
+  it('⭐ an empty regular page made an atomic-parent: its `page.yml` becomes its `folder.yml`, as written', async () => {
+    const doc = await withEmpty({ 'pages/notes/page.yml': 'title: Notes\nlabel: My notes\n' })
+    expect(at(doc, '/notes').rec.mode).toBe('regular')
+    at(doc, '/notes').rec.mode = 'atomic-parent'
+    pull(doc)
+    expect(has('pages/notes/page.yml')).toBe(false)
+    expect(readFileSync(join(dir, 'pages/notes/folder.yml'), 'utf8')).toMatch(/label: My notes/)
+    expect(at(await siteProjectToDocument(dir), '/notes').rec.mode).toBe('atomic-parent')
+  })
+
+  it('an empty atomic-parent made regular again: its `folder.yml` becomes its `page.yml`', async () => {
+    const doc = await withEmpty({ 'pages/notes/folder.yml': 'title: Notes\n' })
+    expect(at(doc, '/notes').rec.mode).toBe('atomic-parent')
+    at(doc, '/notes').rec.mode = 'regular'
+    pull(doc)
+    expect(has('pages/notes/folder.yml')).toBe(false)
+    expect(has('pages/notes/page.yml')).toBe(true)
+    expect(at(await siteProjectToDocument(dir), '/notes').rec.mode).toBe('regular')
+  })
+
+  it('CONTROL — a page with sections or child pages keeps its files\' form', async () => {
+    const doc = await synced()
+    at(doc, '/docs').rec.mode = 'atomic-parent'
+    at(doc, '/guide').rec.mode = 'regular'
+    pull(doc)
+    expect(changed()).toEqual([])
+  })
+
+  it('an empty atomic-parent inside folder mode stays one: a regular page has no place there', async () => {
+    const doc = await withEmpty({ 'pages/guide/later/folder.yml': 'title: Later\n' })
+    expect(at(doc, '/guide/later').rec.mode).toBe('atomic-parent')
+    at(doc, '/guide/later').rec.mode = 'regular'
+    pull(doc)
+    expect(has('pages/guide/later/folder.yml')).toBe(true)
+    expect(has('pages/guide/later/page.yml')).toBe(false)
+  })
 })
 
 describe('⛔ a page with its own `page.yml` inside folder mode', () => {
@@ -298,7 +351,7 @@ describe('⛔ a page with its own `page.yml` inside folder mode', () => {
     await expect(collectSiteContent(dir)).rejects.toThrow(/`pages\/guide\/reference` has a page\.yml of its own inside folder mode/)
   })
 
-  it('…a parametric one too, which a folder of single-section pages holds none of', async () => {
+  it('…a parametric one too, which an atomic-parent holds none of', async () => {
     put({ ...TREE, 'pages/guide/[slug]/page.yml': 'title: Post\n', 'pages/guide/[slug]/body.md': '# Post\n' })
     await expect(siteProjectToDocument(dir)).rejects.toThrow(/`pages\/guide\/\[slug\]` has a page\.yml of its own inside folder mode/)
   })
@@ -309,7 +362,7 @@ describe('⛔ a page with its own `page.yml` inside folder mode', () => {
     expect(content.pages.map((p) => p.sections?.length)).toContain(2)
   })
 
-  it('CONTROL — a folder below one, with its own `folder.yml` or none, is a folder of single-section pages', async () => {
+  it('CONTROL — a directory below one, with its own `folder.yml` or none, is an atomic-parent', async () => {
     put(TREE)
     await expect(siteProjectToDocument(dir)).resolves.toBeTruthy()
   })

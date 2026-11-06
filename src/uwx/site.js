@@ -47,7 +47,7 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import { dataBlockModels } from '../i18n/data-models.js'
-import { SINGLE_SECTION } from './route-mode.js'
+import { ATOMIC, ATOMIC_PARENT, REGULAR } from './route-mode.js'
 import { existsSync } from 'node:fs'
 import { join, parse, relative } from 'node:path'
 import {
@@ -811,7 +811,8 @@ async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
     const data = buildPageData(config, {
       where: relative(siteRoot, filePath),
       slug: name,
-      mode: 'page',
+      // One `.md` file in folder mode: a page of exactly one section and no child page (`route-mode.js`).
+      mode: ATOMIC,
       isDynamic: false,
       isRoot,
       siteIndex,
@@ -853,11 +854,12 @@ async function walkPagesNested(ctx, dirPath, parentSlugPath, inheritedMode, pare
     // ONE page whose sections were its `.md` files while the build rendered each as a
     // page of its own. Nothing warned, and a pull then wrote a `page.yml` into the
     // folder, converting the author's own site to the wrong shape.
-    // ⭐ WHAT ITS PAGES MAY HOLD, not how the files hold them: `single-section` where they are a folder-mode
-    // folder's `.md` files, one section each, else `page`. The mode its PAGES are read in (`childMode`), so
-    // a page above a mounted folder of `.md` pages says it too, with its own sections. The app reads it to
-    // offer no second section there. ⛔ Until 2026-11-04 it was the folder's own mode, spelled `folder`.
-    const mode = f.childMode === 'pages' ? SINGLE_SECTION : 'page'
+    // ⭐ THE PAGE'S OWN MODE (`route-mode.js`): `atomic-parent` for a directory in folder mode, which holds
+    // no section and whose child pages are its `.md` files and directories; else `regular` — a page above
+    // a mounted folder of `.md` pages included, since it holds sections of its own. Its `.md` pages are
+    // `atomic` (`folderModePageRecords`). ⛔ Until 2026-11-05 this was what its pages may hold, read from the
+    // mode they are read in (`childMode`): `single-section` here, and `page` on the pages under it.
+    const mode = f.internalMode === 'pages' ? ATOMIC_PARENT : REGULAR
     const slugPath = parentSlugPath ? `${parentSlugPath}/${slug}` : slug
 
     const data = buildPageData(f.config, {

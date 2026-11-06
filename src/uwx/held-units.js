@@ -1,6 +1,6 @@
 /**
  * ⭐ WHAT A PUSH LEAVES OUT: a page or a section a pull HELD. The app changed it in a way its files
- * cannot say — a second section in a folder of single-section pages, a setting an `.md` page has no
+ * cannot say — a second section on an atomic page, a setting an `.md` page has no
  * place for, a move to where a page cannot sit — so the pull wrote nothing for it, and the site keeps
  * the app's version (`site-project.js`, `report.held`).
  *

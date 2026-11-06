@@ -50,7 +50,7 @@ import { writeSiteConfig, writeSitePaths, writeThemeFile, writeIfChanged, writeS
 import { mountEntriesOf } from '../site/mount-entries.js'
 import { declarationsToQueriesYml } from './records-project.js'
 import { buildRouteOf } from './site.js'
-import { SINGLE_SECTION } from './route-mode.js'
+import { ATOMIC_PARENT, knownMode } from './route-mode.js'
 import { fileLinkTargets } from '../site/file-links.js'
 import { DEFAULT_SECTION_TYPE } from '@uniweb/core/section-type'
 import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
@@ -968,16 +968,18 @@ function projectPages(pages, pagesDir, sourceLocale, report, prune, ctx) {
 // its `page.yml`, is read in folder mode, its sections as pages. A folder-mode folder is a folder.
 // ⛔ Until 2026-11-04 every page went to its slug's folder: `pages/2-about/` came back as `about/`.
 //
-// In a folder-mode level a route is a folder only where the files keep one in folder mode, where it is
-// or where the app moved it from (`oldForm`), or, new to them, where its `mode` is `single-section`. A
-// page folder is no form there: a parametric page, or a page its file cannot hold, is `cannot`.
+// In a folder-mode level a page is a directory only when it is an atomic-parent: by its own mode, or,
+// where its mode is none this framework knows, by the form the files kept it in where the app moved it
+// from (`oldForm`). Any other page is an `.md` file there when it can be one. A page folder is no form
+// there: a parametric page, or a page its file cannot hold, is `cannot`.
 function placeOf(ctx, record, route, levelDir, levelMode, sourceLocale) {
   const found = ctx.files?.page(route)
   if (found) return found
   if (levelMode === 'pages') {
-    if (record.is_dynamic) return { kind: 'cannot', what: ['a parametric page, which a route of single-section pages holds none of'] }
-    const was = oldForm(ctx, record)
-    if (was ? was !== 'pages' : !isSingleSection(record)) {
+    if (record.is_dynamic) return { kind: 'cannot', what: ['a parametric page, which an atomic-parent holds none of'] }
+    const mode = knownMode(record)
+    const parent = mode ? mode === ATOMIC_PARENT : oldForm(ctx, record) === 'pages'
+    if (!parent) {
       const name = unwrapLocalized(record.slug, sourceLocale)
       const what = mdPageCannotHold(record, { name, sourceLocale })
       return what.length ? { kind: 'cannot', what } : { kind: 'md', file: join(levelDir, `${name}.md`), dir: levelDir }
@@ -1008,23 +1010,41 @@ function oldPlace(ctx, uuid) {
   return place?.kind === 'md' ? place.file : place?.dir ?? null
 }
 
-// ⭐ A route whose pages are single-section, in either spelling: `folder` is the one a push wrote until
-// 2026-11-04, which a stored document carries until its site's next push. A route new to the files takes
-// its form from this — in a fresh clone, every route. ⛔ Until 2026-11-05 only `single-section` read so,
-// and a clone of a site last pushed before then wrote its single-section routes in page mode.
-const isSingleSection = (record) => record?.mode === SINGLE_SECTION || record?.mode === 'folder'
-
-// ⭐ A FOLDER'S FORM IS ITS FILES' WHERE THEY HOLD IT — folder mode (`pages`) or page mode (`sections`):
-// a mount's route by the mount, a folder the files hold by its own config, one the app moved by the form
-// it had. Only a route new to the files takes the form its `mode` asks for, a route the app made. ⛔ Until
-// 2026-11-04 every folder took its `mode`'s form, so a stored route in another spelling would have had
-// a `page.yml` written beside its `folder.yml`.
+// ⭐ A DIRECTORY'S FORM — folder mode (`pages`) or page mode (`sections`) — by the page's own mode: an
+// atomic-parent's is folder mode, any other page's page mode (`route-mode.js`). Where the files hold the
+// page, their form stands, but for the switch the app makes on an empty page, between atomic-parent and
+// regular: there is nothing to convert, so the page's config follows. A mount's
+// route is the mount's. Where its mode is none this framework knows, a page the app moved keeps the form
+// the files kept it in where it was, and a page new to them is regular.
+// ⛔ Until 2026-11-05 the form came from the files alone wherever they held the page, and a mode was read
+// only for a page new to them, as `single-section` on its parent.
 function formOf(ctx, record, route, place, levelMode) {
   if (place.mount) return place.mount.mode
-  if (ctx.files?.page(route) === place) return ctx.files.levelMode(place.dir) ?? folderModeOf(place.dir, levelMode)
+  const mode = knownMode(record)
+  const asked = mode === ATOMIC_PARENT ? 'pages' : mode ? 'sections' : null
+  if (ctx.files?.page(route) === place) {
+    const held = ctx.files.levelMode(place.dir) ?? folderModeOf(place.dir, levelMode)
+    // A regular page has no place inside folder mode (`refusePageInFolderMode`), so there the files stand.
+    const fits = asked === 'pages' || levelMode !== 'pages'
+    return asked && asked !== held && fits && isEmptyPage(record, place.dir) ? asked : held
+  }
+  if (asked) return asked
   const was = oldForm(ctx, record)
   if (was === 'pages' || was === 'sections') return was
-  return isSingleSection(record) ? 'pages' : 'sections'
+  return 'sections'
+}
+
+// A page with no section and no child page, on the site and in the files: the only one the app switches
+// between atomic-parent and regular, and the only one a pull changes the form of in place.
+function isEmptyPage(record, dir) {
+  if ((record?.page_sections || []).length || (record?.$children || []).length) return false
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return false
+  }
+  return !entries.some((e) => (e.isFile() && isMarkdownFile(e.name)) || (e.isDirectory() && !isIgnoredFolder(e.name)))
 }
 
 // ⭐ A FOLDER-MODE `.md` PAGE, WRITTEN BACK IN PLACE: the file is the page and its one section, so the
@@ -1152,12 +1172,12 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
       filesGiveTopOrder = r.filesGiveTopOrder
       report.sections.push(...r.written)
     } else if (Array.isArray(record.page_sections) && record.page_sections.length) {
-      // ⛔ A route of single-section pages holds no section of its own: its folder's `.md` files are its
-      // pages. One the app gives it is held, and the route and its pages are written as they are. Until
-      // 2026-11-04 it was dropped, and the next push removed it from the site.
+      // ⛔ An atomic-parent holds no section: its directory's `.md` files are its child pages. One the app
+      // gives it is held, and the page and its child pages are written as they are. Until 2026-11-04 it was
+      // dropped, and the next push removed it from the site.
       const uuids = record.page_sections.flatMap((s) => subtreeUuids(s))
       keepWhereTheFilesAre(ctx, uuids)
-      report.held?.push({ route, uuids, what: ['a section, which a route of single-section pages holds none of'] })
+      report.held?.push({ route, uuids, what: ['a section, which an atomic-parent holds none of'] })
       report.leftAlone?.push(route)
     }
 
@@ -1175,6 +1195,13 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
 
     const ymlName = form === 'pages' ? 'folder.yml' : 'page.yml'
     const ymlPath = join(pageDir, ymlName)
+    // ⭐ THE APP'S SWITCH ON AN EMPTY PAGE (`formOf`): its config file takes the other name, as the author
+    // wrote it, so the directory is read in the form the app made it — folder mode for an atomic-parent.
+    const oldYmlPath = join(pageDir, ymlName === 'folder.yml' ? 'page.yml' : 'folder.yml')
+    if (existsSync(oldYmlPath) && !existsSync(ymlPath)) {
+      renameSync(oldYmlPath, ymlPath)
+      report.deleted.push(oldYmlPath)
+    }
     // Merge (not full-dump) so author-added keys survive a pull; the projector
     // owns only PAGE_YML_MANAGED_KEYS.
     const existing = readAuthoredYaml(ymlPath)
@@ -1216,7 +1243,7 @@ function subtreeUuids(record) {
 // hold it is not written there, so its files at the old place are the files' version of it, and the prune
 // must keep them: found by the rename index this copy wrote, else, for a page, by the route its sync state
 // last saw it at (`ctx.itemRoutes`). ⛔ Until 2026-11-04 the prune took them: a page of two sections moved
-// into a folder of single-section pages was held there and deleted where it was.
+// into an atomic-parent was held there and deleted where it was.
 function keepWhereTheFilesAre(ctx, uuids) {
   if (!ctx?.kept) return
   for (const uuid of uuids) {

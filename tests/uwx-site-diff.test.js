@@ -19,7 +19,7 @@ const section = (id, body) => ({
   content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] },
 })
 const page = (id, slug, sections, extra = {}) => ({
-  mode: 'page', stable_id: id, slug: { en: slug }, title: { en: slug }, page_sections: sections, ...extra,
+  mode: 'regular', stable_id: id, slug: { en: slug }, title: { en: slug }, page_sections: sections, ...extra,
 })
 const doc = (...pages) => ({ $model: '@uniweb/site-content', pages })
 // The same document as the backend stores it: fields we never emit, its own uuids.
@@ -55,7 +55,7 @@ describe('collectSiteUnits — the unit is the file', () => {
     const d = {
       $model: '@uniweb/site-content',
       pages: [
-        { mode: 'folder', stable_id: 'f', slug: { en: 'blog' } },
+        { mode: 'atomic-parent', stable_id: 'f', slug: { en: 'blog' } },
         page('d', 'entry', [section('article', 'X')], { is_dynamic: true, param_name: 'slug' }),
       ],
     }
@@ -194,7 +194,7 @@ describe('per-item identity — stamping and harvesting', () => {
   it('a page moved between page.yml and folder.yml keeps its identity', () => {
     // One directory, one page. The move pushed a new page under the stored page's slug, and the
     // backend refused the push (409, `unique_field`).
-    const toFolder = doc({ ...page('d', 'docs', []), mode: 'folder' })
+    const toFolder = doc({ ...page('d', 'docs', []), mode: 'atomic-parent' })
     expect(stampUnitUuids(toFolder, { 'pages/docs/page.yml': 'u-docs' }).stamped).toBe(1)
     expect(toFolder.pages[0].$uuid).toBe('u-docs')
 
@@ -203,7 +203,7 @@ describe('per-item identity — stamping and harvesting', () => {
     expect(toPage.pages[0].$uuid).toBe('u-docs')
 
     // Its own name wins, and the next sync records the page under the name it has now.
-    const both = doc({ ...page('d', 'docs', []), mode: 'folder' })
+    const both = doc({ ...page('d', 'docs', []), mode: 'atomic-parent' })
     stampUnitUuids(both, { 'pages/docs/page.yml': 'u-old', 'pages/docs/folder.yml': 'u-docs' })
     expect(both.pages[0].$uuid).toBe('u-docs')
     expect(collectUnitUuids(both)).toEqual({ 'pages/docs/folder.yml': 'u-docs' })

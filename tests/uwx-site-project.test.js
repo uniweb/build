@@ -174,9 +174,9 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
       {
         $id: 'notes',
         slug: 'notes',
-        mode: 'single-section',
+        mode: 'atomic-parent',
         title: { en: 'Notes' },
-        $children: [{ $id: 'one', slug: 'one', mode: 'page', title: { en: 'One' }, page_sections: [{ $id: 'one', stable_id: 'one', type: 'Section', content: { type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'One' }] }] } }] }],
+        $children: [{ $id: 'one', slug: 'one', mode: 'atomic', title: { en: 'One' }, page_sections: [{ $id: 'one', stable_id: 'one', type: 'Section', content: { type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'One' }] }] } }] }],
       },
       {
         $id: 'blog',
@@ -211,7 +211,7 @@ describe('siteContentDocumentToProject — pages tree + layout', () => {
     expect(yaml.load(readFileSync(join(dir, 'site.yml'), 'utf8')).index).toBe('home')
     expect(existsSync(join(dir, 'pages/home/hero.md'))).toBe(true)
 
-    // notes (its pages single-section): folder.yml, no page.yml, and each page one `.md` file
+    // notes (an atomic-parent): folder.yml, no page.yml, and each page one `.md` file
     expect(existsSync(join(dir, 'pages/notes/folder.yml'))).toBe(true)
     expect(existsSync(join(dir, 'pages/notes/page.yml'))).toBe(false)
     expect(existsSync(join(dir, 'pages/notes/one.md'))).toBe(true)
