@@ -23,7 +23,7 @@ import {
   deriveCacheKey,
   evaluateQuery,
 } from '@uniweb/core'
-import { isDynamicRoute, recordTitle, recordImage, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
+import { isDynamicRoute, recordTitle, recordImage, recordDescription, routePatternToRegex, routeFieldOf } from '@uniweb/core/route-match'
 import DataStore from '@uniweb/core/datastore'
 import { DEFAULT_ICON_BASE } from '@uniweb/core/icon-corpus'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './site/data-fetcher.js'
@@ -483,7 +483,11 @@ export function expandDynamicPages(pages, fetched, onProgress = () => {}, stats 
         // `title` alone, so a person record's page kept the template's own title.
         const title = recordTitle(item)
         if (title) concretePage.title = title
-        if (item.description || item.excerpt) concretePage.description = item.description || item.excerpt
+        // Described by the SPA's rule too (`recordDescription`): text only. ⛔ Until 2026-11-06 a
+        // rich-text `description` was taken as it came, and the page's meta description read
+        // `[object Object]`.
+        const description = recordDescription(item)
+        if (description) concretePage.description = description
         // ⭐ And its picture is what a link to the page shows (`recordImage`) — the SPA's rule.
         const image = recordImage(item)
         if (image) concretePage.seo = { ...(concretePage.seo || {}), image }

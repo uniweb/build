@@ -125,6 +125,20 @@ describe('expandDynamicPages', () => {
     // the page's own image serves a record that has none
     expect(seo('/blog/bare').image).toBe('/og/blog.png')
   })
+
+  it('describes each page by its record\'s text — `recordDescription`, the SPA\'s rule (2026-11-06)', () => {
+    // ⛔ Until then a rich-text `description` was taken as it came: `[object Object]`.
+    const body = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Body' }] }] }
+    const out = expandDynamicPages([blog(), template], parentData([
+      { $name: 'plain', title: 'P', description: 'Short.' },
+      { $name: 'rich', title: 'R', description: body, excerpt: 'In short.' },
+      { $name: 'body-only', title: 'B', description: body },
+    ]), noop)
+    const description = (route) => out.find((p) => p.route === route).description
+    expect(description('/blog/plain')).toBe('Short.')
+    expect(description('/blog/rich')).toBe('In short.')
+    expect(description('/blog/body-only')).toBeUndefined()
+  })
 })
 
 describe('the route query decides what a parametric page expands over (ruled 2026-09-11)', () => {
