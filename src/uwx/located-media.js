@@ -17,8 +17,9 @@
  * so a site that showed its media under `uniweb dev` and in a static build lost it when published.
  *
  * ⚠️ A file outside both the site's folder and every folder its `paths:` names has no such key, and
- * stays warned and skipped. Two files with the same bytes are one asset, so a pull may write either
- * one's path.
+ * stays warned and skipped. Two files with the same bytes are one asset. A pull keeps the path a
+ * section, its translations and `site.yml` already name (`asset-map.js::sameStoredFile`). A reference
+ * new to the files, and a record's, takes the first path `sync.json` lists.
  */
 
 import { existsSync } from 'node:fs'

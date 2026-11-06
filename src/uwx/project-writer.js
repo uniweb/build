@@ -20,6 +20,7 @@ import { markdownToProseMirror } from '@uniweb/content-reader'
 import { parseFrontmatter } from './entity-source.js'
 import { canonicalJson, sameMarkdownDocument } from './same-content.js'
 import { spliceBody } from './body-splice.js'
+import { keepAuthoredRefs } from './asset-map.js'
 import { fileLinksIn } from '../site/file-links.js'
 import { parseNumericPrefix } from '../utils/numeric-prefix.js'
 import { renderEntityDocument } from './backfill.js'
@@ -184,9 +185,11 @@ function readsTo(body) {
  * @param {Set<string>} [opts.reserved] - keys preserved when already present
  * @param {object} [opts.implied] - `{ key: value }` a file means by leaving `key` out; an incoming
  *        value equal to it is not written into an existing file that leaves the key out
+ * @param {(a: string, b: string) => boolean} [opts.sameFile] - whether two references name the same
+ *        stored file, read from this file (`asset-map.js::sameStoredFile`)
  * @returns {'updated'|'unchanged'}
  */
-export function writeSectionFile({ filePath, content, params, declaration, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null, fileLinks = null }) {
+export function writeSectionFile({ filePath, content, params, declaration, reserved = DEFAULT_RESERVED_FRONTMATTER, implied = null, fileLinks = null, sameFile = null }) {
   let existing = ''
   try {
     existing = readFileSync(filePath, 'utf8')
@@ -194,6 +197,13 @@ export function writeSectionFile({ filePath, content, params, declaration, reser
     // new file
   }
   const { frontmatter, body: existingBody } = parseFrontmatter(existing, filePath)
+  // ⭐ A FILE OF THE SAME BYTES AS ONE THIS FILE NAMES IS THAT FILE (`sameFile`, `asset-map.js::sameStoredFile`):
+  // a backend keeps both as one asset, and the pull reads it back as the first path it knows, so the
+  // file keeps its own. ⛔ Until 2026-11-06 a pull wrote that first path over the author's.
+  if (sameFile && existing) {
+    if (params) params = keepAuthoredRefs(params, frontmatter, sameFile)
+    if (content && existingBody) content = keepAuthoredRefs(content, authoredDocument(existingBody), sameFile)
+  }
 
   const nextFrontmatter = { ...frontmatter }
   if (params) {
@@ -243,6 +253,15 @@ export function writeSectionFile({ filePath, content, params, declaration, reser
   return writeIfChanged(filePath, assembleSection(nextFrontmatter, body))
 }
 
+
+// A body as the push reads it, or null where it cannot be read.
+function authoredDocument(body) {
+  try {
+    return markdownToProseMirror(body)
+  } catch {
+    return null
+  }
+}
 
 // Shallow-merge `changes` into a YAML config file and write idempotently. A key
 // whose value is null/undefined is deleted; an object value is shallow-merged one

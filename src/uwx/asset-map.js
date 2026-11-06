@@ -1,5 +1,5 @@
 /**
- * Asset reference helpers — two pure functions, no file.
+ * Asset reference helpers — pure functions, no file.
  *
  * ⚠️ **The MAP moved to `sync.json` on 2026-09-20** (`sync-store.js`,
  * `backends.<origin>.assets`). It lived here as `assets.json`, a single flat
@@ -23,12 +23,18 @@
  * ⭐ **`restoreAssetRefs` no-ops on an empty map**, which is what makes the store's
  * `backend` parameter honest: a projection not tied to a backend has no known
  * assets, so it restores nothing rather than guessing.
+ * - **`sameStoredFile`** / **`keepAuthoredRefs`** — keep the author's path where the
+ *   files already name one of the same bytes. A backend keeps a file by its content, so
+ *   two such files are one asset, and `restoreAssetRefs` can give each reference only
+ *   the first of their paths.
  *
  * @module
  */
 
 import { createHash } from 'node:crypto'
+import { dirname, resolve } from 'node:path'
 import { ASSET_SLOTS } from '@uniweb/semantic-parser'
+import { siteFileKey } from './located-media.js'
 
 /**
  * The fingerprint the asset map in `sync.json` keeps of the URL a host serves an
@@ -148,3 +154,62 @@ export function restoreAssetRefs(document, map) {
 
 // Only a string that could be a served address is worth hashing.
 const looksLikeAddress = (v) => v.startsWith('/') || /^https?:\/\//i.test(v)
+
+/**
+ * Whether two references name the same stored file: the same string, or two references the map gives
+ * one asset id. A backend keeps a file by its bytes, so two files with the same bytes are one asset, with
+ * one id and one served address. A stored reference to it says nothing of which path it came from, and
+ * `restoreAssetRefs` gives it the first path the map lists.
+ *
+ * A relative reference is read from the file it is written in (`fromFile`), as the push keyed it
+ * (`located-media.js::siteFileKey`).
+ *
+ * ⛔ Measured 2026-11-05 on a docs site whose French screenshot was the English one's bytes: the French
+ * translation's image came back as the English path, so the pull wrote the translation as its words
+ * alone, and took that as the app's change.
+ *
+ * @param {Record<string, { id: string }>} map - `sync.json`'s assets for the backend
+ * @param {{ siteRoot?: string|null, tree?: () => Array<[string, string]> }} [opts] - for a relative
+ *   reference: the site's folder, and its tree (`located-media.js::siteTree`)
+ * @returns {(a: string, b: string, fromFile?: string|null) => boolean}
+ */
+export function sameStoredFile(map, { siteRoot = null, tree = () => [] } = {}) {
+  const idOf = (ref, fromFile) => {
+    if (typeof ref !== 'string' || !ref) return null
+    const own = map?.[ref]?.id
+    if (own) return own
+    if (!siteRoot || !fromFile || ref.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(ref)) return null
+    const key = siteFileKey(siteRoot, resolve(dirname(fromFile), ref), tree())
+    return (key && map?.[key]?.id) || null
+  }
+  return (a, b, fromFile = null) => {
+    if (a === b) return true
+    const id = idOf(a, fromFile)
+    return !!id && id === idOf(b, fromFile)
+  }
+}
+
+/**
+ * A value a pull writes over an authored one, with each reference that names the same stored file as
+ * the authored value at the same place given back as the author wrote it (`sameStoredFile`). Nothing
+ * else changes, so a file the app changed to another asset is written.
+ *
+ * @param {*} incoming - what the pull writes: a document, frontmatter, a config
+ * @param {*} authored - what the file says now, in the same shape
+ * @param {(a: string, b: string) => boolean} same
+ * @returns {*} `incoming`, or a copy with those references kept
+ */
+export function keepAuthoredRefs(incoming, authored, same) {
+  if (typeof incoming === 'string') {
+    return typeof authored === 'string' && incoming !== authored && same(incoming, authored) ? authored : incoming
+  }
+  if (Array.isArray(incoming)) {
+    return Array.isArray(authored) ? incoming.map((v, i) => keepAuthoredRefs(v, authored[i], same)) : incoming
+  }
+  if (incoming && typeof incoming === 'object' && authored && typeof authored === 'object' && !Array.isArray(authored)) {
+    const out = {}
+    for (const [key, value] of Object.entries(incoming)) out[key] = keepAuthoredRefs(value, authored[key], same)
+    return out
+  }
+  return incoming
+}

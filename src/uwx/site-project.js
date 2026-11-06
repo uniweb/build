@@ -36,7 +36,7 @@
 import { foldOpenGraph } from './open-graph.js'
 import { isAuthoredPreview } from './authored-preview.js'
 import { join, relative, extname, basename, dirname, parse, sep } from 'node:path'
-import { restoreAssetRefs } from './asset-map.js'
+import { restoreAssetRefs, sameStoredFile, keepAuthoredRefs } from './asset-map.js'
 import { mapPageRefs, pageRefIndex, pageRefPages, writtenPageRef } from './page-refs.js'
 import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
@@ -236,7 +236,7 @@ function readAuthoredYaml(filePath) {
  * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
  *          write status ('updated' | 'unchanged')
  */
-export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false, sameFile = null }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -363,7 +363,12 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // back where the translation files the pull wrote made the same one, so a clone of a site that
   // declared `languages: [en, fr]` had no `languages:` at all — and followed its translation files
   // where the site it came from had a fixed list.
-  const result = { siteConfig: writeSiteConfig(siteRoot, siteChanges) }
+  // ⭐ A file of the same bytes as one `site.yml` names is that file (`asset-map.js::sameStoredFile`): a
+  // favicon, a preview, a share image stays as the author wrote it.
+  const siteYmlPath = join(siteRoot, 'site.yml')
+  const authoredSite = sameFile ? readAuthoredYaml(siteYmlPath) : null
+  const written = authoredSite ? keepAuthoredRefs(siteChanges, authoredSite, (a, b) => sameFile(a, b, siteYmlPath)) : siteChanges
+  const result = { siteConfig: writeSiteConfig(siteRoot, written) }
 
   // theme (whole object) → theme.yml.
   if (settingsSection.theme && typeof settingsSection.theme === 'object') {
@@ -412,7 +417,7 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  *        site (`siteDefaultSectionType`), which a file leaves out
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null, fileLinks = null }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null, fileLinks = null, sameFile = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
   // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
@@ -460,6 +465,8 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
     implied: { type: impliedType },
     // The links the file writes as files, as the push reads them (`pageFileTargets`).
     fileLinks,
+    // A file of the same bytes as one this file names is that file (`asset-map.js::sameStoredFile`).
+    sameFile: sameFile ? (a, b) => sameFile(a, b, filePath) : null,
   })
 }
 
@@ -607,6 +614,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         writeId: fileSectionName(filePath) !== stableId,
         context: pageContext ? translationContext({ stableId }, pageContext.route) : null,
         media: ctx?.media ?? null,
+        sameFile: ctx?.sameFile ?? null,
         fileLinks: ctx?.fileLinks ?? null,
       })
       written.push(filePath)
@@ -1077,6 +1085,7 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
     writeId: stableId !== name,
     context: translationContext({ stableId }, pageContext.route),
     media: ctx?.media ?? null,
+    sameFile: ctx?.sameFile ?? null,
     fileLinks: ctx?.fileLinks ?? null,
   })
   report.sections.push(place.file)
@@ -1797,6 +1806,7 @@ function projectLayout(layoutSections, layoutBaseDir, report, prune, ctx) {
       freeformCandidates: stableId ? freeformPathsFor({ stableId }, page) : null,
       context: translationContext({ stableId }, page.route),
       media: ctx?.media ?? null,
+      sameFile: ctx?.sameFile ?? null,
     })
     report.layout.push(filePath)
     written.push(filePath)
@@ -1910,10 +1920,6 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
 
   const report = { config: null, collections: null, locales: null, assets: null, pages: [], sections: [], layout: [], deleted: [], renamed: [], leftAlone: [], held: [], mountedPages: [], mountRoutes: [] }
 
-  // Collects target-locale translations of localized scalars as they're projected;
-  // flushed to locales/{locale}.json at the end (the manifest stays derivable).
-  const collector = createTranslationCollector(sourceLocale, { siteRoot, languages: documentLanguages(document, sourceLocale) })
-
   // Put the author's own asset paths back before anything is serialized. Stored
   // content carries an id and a serve URL; only the committed map knows the ref
   // the author wrote. Without this a push/pull cycle rewrites every image in a
@@ -1924,7 +1930,14 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // not tied to one has no known assets and restores nothing. Every caller that
   // pulls has an origin; the ones that do not are projecting a document in the
   // abstract.
+  // ⭐ Two files of the same bytes are one asset, so `restoreAssetRefs` gives every reference to it the
+  // first of their paths, and each writer keeps the one the files name (`sameStoredFile`).
   const assetMap = backend ? readBackendState(siteRoot, backend).assets || {} : {}
+
+  // Collects target-locale translations of localized scalars as they're projected;
+  // flushed to locales/{locale}.json at the end (the manifest stays derivable).
+  const collector = createTranslationCollector(sourceLocale, { siteRoot, languages: documentLanguages(document, sourceLocale), sameFile: sameStoredFile(assetMap) })
+
   report.assets = restoreAssetRefs(document, assetMap)
   // ⭐ And each stored link to a page as the page's path (`page-refs.js`): what a file shows, where
   // the store keeps the id an editor links by.
@@ -1934,7 +1947,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // section's writer to make relative to its own file (`located-media.js`).
   const mediaKeys = siteFileKeys(assetMap)
 
-  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation })
+  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, sameFile: sameStoredFile(assetMap, { siteRoot }) })
   report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
@@ -1942,6 +1955,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // re-projected (deleted) drop out naturally. `collector` rides along to capture
   // localized scalars during the page walk.
   const ctx = { siteRoot, oldIndex: readPullIndex(siteRoot), newIndex: {}, report, collector, sourceLocale, sectionFiles: new Map(), dataModel, sectionType, media: mediaKeys.size ? { siteRoot, keys: mediaKeys } : null }
+  ctx.sameFile = sameStoredFile(assetMap, { siteRoot, tree: () => ctx.media?.tree ?? [] })
   // Where the site keeps its localized URLs — `site.yml`'s map, when it has one (`pageSlugToYml`).
   const siteMap = readAuthoredYaml(join(siteRoot, 'site.yml'))?.i18n?.routeTranslations
   ctx.routes = { siteMap: isPlainRecord(siteMap) && Object.keys(siteMap).length ? siteMap : null, slugs: new Map() }

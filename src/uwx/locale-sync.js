@@ -485,8 +485,11 @@ export function isLocalizedContent(value) {
  * With `languages` (`documentLanguages`), a value in any other language is left out of the
  * translation files, and the language is named in `outside` for the caller to report. A whole document
  * in one is kept (`keepLanguage`, `readKept`), so a push sends it back.
+ *
+ * With `sameFile` (`asset-map.js::sameStoredFile`), an image an author's entry names by a file of the
+ * same bytes as the one the pull read says the same thing, and the entry is kept (`saysImage`).
  */
-export function createTranslationCollector(sourceLocale, { siteRoot = null, languages = null } = {}) {
+export function createTranslationCollector(sourceLocale, { siteRoot = null, languages = null, sameFile = null } = {}) {
   const byLocale = {} // { locale: { hash: target } }
   const outside = new Set() // the languages read that the site does not have
   const kept = {} // { place: { '@'?, languages? } }, what `readKept` gives back
@@ -601,7 +604,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
     return null
   }
 
-  return { add, addStructuralMap, noteFreeform, keptFreeform, keepMeta, keepLanguage, has, byLocale, says, marks, freeformPending, outside, kept, keptRead }
+  return { add, addStructuralMap, noteFreeform, keptFreeform, keepMeta, keepLanguage, has, byLocale, says, marks, freeformPending, outside, kept, keptRead, sameFile }
 }
 
 /**
@@ -625,7 +628,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
  * ⭐ TWO ROWS OF ONE SOURCE TEXT THAT READ DIFFERENTLY cannot be said by one entry, so the target is
  * free-form. ⛔ Until 2026-10-31 the last one won: `(zh_A, zh_B)` became `(zh_B, zh_B)` on the next push.
  */
-function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks = {}, notes = { cleared: {}, outdated: {} }, olderSource = () => null) {
+function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks = {}, notes = { cleared: {}, outdated: {} }, olderSource = () => null, sameFile = null) {
   if (!isProseMirrorDoc(sourceDoc) || !isProseMirrorDoc(targetDoc)) return null
   const src = blockElements(sourceDoc)
   const tgt = blockElements(targetDoc)
@@ -657,7 +660,7 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks
     return null
   }
   const withData = addDataBlockStrings(map, sourceDoc, targetDoc, modelFor, checks)
-  return withData && addImageTranslations(withData, sourceDoc, targetDoc, checks)
+  return withData && addImageTranslations(withData, sourceDoc, targetDoc, checks, sameFile)
 }
 
 // ⭐ AN IMAGE's translation, read pairwise — what a translation may give it (`merge.js::translateImages`):
@@ -666,7 +669,7 @@ function deriveStructuralMap(sourceDoc, targetDoc, modelFor = () => null, checks
 // A target whose images differ in anything else — their number, a role, a size — or that changed an
 // image with no alt text cannot be said per image, and the whole translation is free-form.
 // ⛔ Until 2026-10-28 an image was not read here, and its translation was not sent either.
-function addImageTranslations(map, sourceDoc, targetDoc, checks = null) {
+function addImageTranslations(map, sourceDoc, targetDoc, checks = null, sameFile = null) {
   const src = imageNodes(sourceDoc)
   const tgt = imageNodes(targetDoc)
   if (src.length !== tgt.length) return null
@@ -685,7 +688,7 @@ function addImageTranslations(map, sourceDoc, targetDoc, checks = null) {
     // words match, and a text element reads an image value as its words (`merge.js::translatedInline`).
     if (map[key] !== undefined && map[key] !== value && toPlainText(map[key]).trim() !== words) return null
     map[key] = value
-    if (checks) checks[key] = saysImage(s, t)
+    if (checks) checks[key] = saysImage(s, t, sameFile)
   }
   return map
 }
@@ -702,13 +705,22 @@ function untranslated(attrs) {
   return out
 }
 
-// Whether a value, pushed onto the source image, gives it what the pull read.
-function saysImage(source, read) {
+// Whether a value, pushed onto the source image, gives it what the pull read. ⭐ A file of the same
+// bytes as the one read is that file (`sameFile`, `asset-map.js::sameStoredFile`): a backend keeps both
+// as one asset, and the pull reads it back as the first path it knows. ⛔ Until 2026-11-06 a file was
+// its path, and an entry naming its language's copy of the source's image was replaced by its words.
+const IMAGE_FILES = new Set(['src', 'poster', 'preview'])
+function saysImage(source, read, sameFile = null) {
   return (value) => {
     if (typeof value !== 'string') return false
     const given = translatedImage(value)
     if (!given) return false
-    return TRANSLATED_IMAGE_ATTRS.every((attr) => (given[attr] ?? source[attr] ?? null) === (read[attr] ?? null))
+    return TRANSLATED_IMAGE_ATTRS.every((attr) => {
+      const said = given[attr] ?? source[attr] ?? null
+      const got = read[attr] ?? null
+      if (said === got) return true
+      return !!sameFile && IMAGE_FILES.has(attr) && typeof said === 'string' && typeof got === 'string' && sameFile(said, got)
+    })
   }
 }
 
@@ -846,7 +858,7 @@ export function unwrapLocalizedContent(content, sourceLocale, collector, freefor
       const kept = collector?.keptFreeform?.(locale, freeformCandidates || freeformRelPath) || null
       const checks = {}
       const notes = { cleared: {}, outdated: {} }
-      const map = kept ? null : deriveStructuralMap(source, value, modelFor, checks, notes, olderSourceOf(content['@'], locale))
+      const map = kept ? null : deriveStructuralMap(source, value, modelFor, checks, notes, olderSourceOf(content['@'], locale), collector?.sameFile ?? null)
       if (map) collector?.addStructuralMap?.(locale, map, context, checks, notes)
       else collector?.noteFreeform?.(locale, value, source, kept || freeformRelPath)
     } else {
