@@ -245,10 +245,19 @@ export function unreadFolders(stylesPath) {
     }))
 }
 
+/**
+ * The one line that ends the problem, rather than a folder at a time: Tailwind then reads the whole
+ * foundation in a site build too, and `unreadFolders` has nothing to look for. The scaffold and the
+ * starter templates write it since 2026-11-06.
+ */
+export const READ_WHOLE_FOUNDATION = '@import "tailwindcss" source("./");'
+
 /** What a site build and `uniweb dev` print when `unreadFolders` finds any: it is them that lose the classes. */
 export function unreadFoldersWarning(unread) {
   return [
-    "[uniweb] The foundation's styles.css names no @source for code that writes classes, so a site build and `uniweb dev` miss any class only that code uses, though the foundation's own build has it. Add:",
+    "[uniweb] The foundation's styles.css names no @source for code that writes classes, so a site build and `uniweb dev` miss any class only that code uses, though the foundation's own build has it. Have Tailwind read the whole foundation, and no folder can be left out:",
+    `  ${READ_WHOLE_FOUNDATION}`,
+    '  Or add:',
     ...unread.map(({ line }) => `  ${line}`)
   ].join('\n')
 }

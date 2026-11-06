@@ -297,4 +297,13 @@ describe('what no @source reads', () => {
     expect(said).toContain('a site build and `uniweb dev`')
     expect(said).toContain('\n  @source "./components/**/*.{js,jsx}";')
   })
+
+  test('⭐ …and first the one line that ends it: Tailwind reading the whole foundation, which then has nothing unread', () => {
+    const said = unreadFoldersWarning(unreadFolders(writing(SECTIONS, CARDS)))
+    expect(said).toContain('\n  @import "tailwindcss" source("./");')
+    expect(said.indexOf('source("./")')).toBeLessThan(said.indexOf('@source "./components'))
+    // with that line, the same foundation has nothing unread
+    const whole = writing(SECTIONS.replace(TAILWIND, TAILWIND.replace('"tailwindcss"', '"tailwindcss" source("./")')), CARDS)
+    expect(unreadFolders(whole)).toEqual([])
+  })
 })
