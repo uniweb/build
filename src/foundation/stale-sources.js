@@ -131,6 +131,30 @@ const SETS_ITS_ROOT = /@import\s+["']tailwindcss[^"']*["'][^;]*\bsource\(/
 // with that name (`className: { type: 'string' }`).
 const WRITES_CLASSES = /\bclassName\s*(?:=\s*\{[^}]*["'`]|[=:]\s*["'`])|\bcn\(|\bclass=["']/
 
+// Or classes kept in a string, for code that hands them out: a colour's classes in a map,
+// `{ amber: 'text-amber-600 bg-amber-50' }`, which a component in another folder then writes.
+// ⚖️ A string counts when a class in it has a shade (`text-amber-600`) or an arbitrary value
+// (`w-[42px]`), or when two of its words are classes and one has a number in it (`rounded-xl p-6`) —
+// not a word with hyphens, an icon's name (`lu-house`) or a status (`to-verify`).
+// ⛔ Until 2026-11-06 only a class written in place counted, so a `utils/` folder holding such a map
+// was never named, and a site's CSS was missing its classes: an amber icon came out grey.
+const STRING = /(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/g
+const SHADE = /^!?(?:[\w-]+:)*-?(?:bg|text|border|ring|fill|stroke|from|via|to|outline|divide|accent|caret|decoration|shadow|placeholder)-[a-z]+-(?:50|[1-9]00|950)(?:\/\d+)?$/
+const ARBITRARY = /^!?(?:[\w-]+:)*-?[a-z]+(?:-[a-z]+)*-\[[^\]\s]+\]$/
+const UTILITY = /^!?(?:[\w-]+:)*-?[a-z]+(?:-[\w./[\]#%]+)+$/
+
+/** Whether code writes a class, or keeps one in a string. */
+function writesClasses(code) {
+  if (WRITES_CLASSES.test(code)) return true
+  for (const [, , text] of code.matchAll(STRING)) {
+    const words = text.trim().split(/\s+/)
+    if (words.some((word) => SHADE.test(word) || ARBITRARY.test(word))) return true
+    const classes = words.filter((word) => UTILITY.test(word))
+    if (classes.length >= 2 && classes.some((word) => /\d/.test(word))) return true
+  }
+  return false
+}
+
 const NOT_THE_FOUNDATIONS_CODE = new Set(['node_modules', 'dist', 'public', 'test', 'tests', '__tests__'])
 
 function codeFiles(dir, found = []) {
@@ -205,7 +229,7 @@ export function unreadFolders(stylesPath) {
   const unread = new Map()
   for (const file of codeFiles(dir)) {
     if (read.some((path) => file === path || file.startsWith(path + sep))) continue
-    if (!WRITES_CLASSES.test(withoutComments(readFileSync(file, 'utf8')))) continue
+    if (!writesClasses(withoutComments(readFileSync(file, 'utf8')))) continue
     const [top, ...below] = relative(dir, file).split(sep)
     const entry = unread.get(top) ?? { path: top, files: 0, isFolder: below.length > 0, typed: false }
     entry.files++

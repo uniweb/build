@@ -222,7 +222,19 @@ describe('what no @source reads', () => {
   })
 
   test.each([
+    ["a colour's classes in a map", "export const ICON = { amber: 'text-amber-600 bg-amber-50' }"],
+    ['one class with a shade', 'export const accent = "hover:text-amber-600"'],
+    ['classes with a size', 'export const panel = `rounded-xl p-6`'],
+    ['an arbitrary value', "export const w = ['w-[42px]', 'h-full'].join(' ')"]
+  ])('⭐ %s keeps classes for code elsewhere to write (2026-11-06)', (_, code) => {
+    expect(unreadFolders(writing(SECTIONS, { 'utils/x.js': code })).map((u) => u.path)).toEqual(['utils'])
+  })
+
+  test.each([
     ['logic alone', 'export const add = (a, b) => a + b'],
+    ["an icon's name", "export const icon = 'lu-graduation-cap'"],
+    ['a status, and words with hyphens', "export const states = ['to-verify', 'well-known co-founder']"],
+    ['a date and an address', "export const at = '2026-11-06 https://example.com/a-1'"],
     ['a class passed along', 'export default ({ className }) => <div className={className} />'],
     ['a param declared with that name', "export default { params: { className: { type: 'string' } } }"],
     ['a comment about one', '/**\n * <span class="x">y</span> becomes y\n */\nexport const strip = (html) => html']
