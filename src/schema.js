@@ -21,7 +21,7 @@ import { areaNames, describeChildren, describePlacement, describeVisuals, lowerC
 import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { rootListSection } from '@uniweb/schemas/conform'
-import { SECTION_PARAMS, SECTION_KEYS, stickyDeclaration } from '@uniweb/schemas/section'
+import { SECTION_PARAMS, SECTION_KEYS, stickyDeclaration, underHeaderDeclaration, heightDeclaration } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import {
   composeSupports,
@@ -653,6 +653,8 @@ function buildComponentEntry(name, relativePath, meta) {
   if (meta.data !== undefined) entry.data = lowerData(meta.data)
   refuseDataDeclarations(`${name} (meta.js)`, entry.data)
   refuseStickyDeclaration(`${name} (meta.js)`, meta.sticky)
+  refuseDeclaration(`${name} (meta.js)`, underHeaderDeclaration, meta.underHeader)
+  refuseDeclaration(`${name} (meta.js)`, heightDeclaration, meta.height)
   refuseAreaDeclaration(`${name} (meta.js)`, meta.area)
 
   const problems = [...content.problems, ...describeChildren(meta).problems]
@@ -672,6 +674,23 @@ function refuseStickyDeclaration(owner, sticky) {
   if (sticky === undefined) return
   try {
     stickyDeclaration(sticky)
+  } catch (err) {
+    throw new Error(`[uniweb] ${owner}: ${err.message}`)
+  }
+}
+
+/**
+ * Refuse a declaration its one rule cannot read — `underHeader`, `height` (`@uniweb/schemas/section`) —
+ * naming the component. Nothing declared, nothing checked.
+ *
+ * @param {string} owner - who declares it, for the message
+ * @param {(declared: *) => *} rule
+ * @param {*} declared - the value, as written
+ */
+function refuseDeclaration(owner, rule, declared) {
+  if (declared === undefined) return
+  try {
+    rule(declared)
   } catch (err) {
     throw new Error(`[uniweb] ${owner}: ${err.message}`)
   }

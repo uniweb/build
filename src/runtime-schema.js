@@ -39,7 +39,7 @@
 
 import { describeContent, lowerData } from '@uniweb/schemas/content'
 import { schemaDeclarationOf } from '@uniweb/schemas/foundation'
-import { stickyDeclaration } from '@uniweb/schemas/section'
+import { stickyDeclaration, underHeaderDeclaration, heightDeclaration } from '@uniweb/schemas/section'
 
 /**
  * A `data:` entry as the runtime reads it: its schema ref, with the flags set on it — or null for an
@@ -145,6 +145,16 @@ export function extractRuntimeSchema(fullMeta) {
     } catch (err) {
       throw new Error(`[uniweb] ${err.message}`)
     }
+  }
+
+  // Whether the header lies over the section when it opens a page, unless its author says
+  // otherwise (`Block#initComponent`), and a header type's height for that page's first paint,
+  // before the browser measures it. The runtime reads both in each renderer (`under-header.js`).
+  try {
+    if (fullMeta.underHeader !== undefined) runtime.underHeader = underHeaderDeclaration(fullMeta.underHeader)
+    if (fullMeta.height !== undefined) runtime.height = heightDeclaration(fullMeta.height)
+  } catch (err) {
+    throw new Error(`[uniweb] ${err.message}`)
   }
 
   // Data. `data:` is the single declaration surface for a section's structured

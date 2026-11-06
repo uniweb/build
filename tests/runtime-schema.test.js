@@ -412,3 +412,22 @@ describe('`sticky` — whether a section type stays in view by default (2026-10-
     expect(() => extractRuntimeSchema({ sticky: { top: '0; background: red' } })).toThrow(/sticky\.top/)
   })
 })
+
+describe('`underHeader` and `height` — the header over a page\'s opening section (2026-11-06)', () => {
+  it('carries each to the runtime, read by its one rule', () => {
+    expect(extractRuntimeSchema({ underHeader: true }).underHeader).toBe(true)
+    expect(extractRuntimeSchema({ underHeader: false }).underHeader).toBe(false)
+    expect(extractRuntimeSchema({ height: ' var(--header-height) ' }).height).toBe('var(--header-height)')
+  })
+
+  it('CONTROL — a type that declares neither carries neither', () => {
+    const schema = extractRuntimeSchema({ background: 'self' })
+    expect(schema.underHeader).toBeUndefined()
+    expect(schema.height).toBeUndefined()
+  })
+
+  it('refuses a value no type may declare', () => {
+    expect(() => extractRuntimeSchema({ underHeader: 'yes' })).toThrow(/Invalid 'underHeader'/)
+    expect(() => extractRuntimeSchema({ height: '4rem; color: red' })).toThrow(/Invalid 'height'/)
+  })
+})
