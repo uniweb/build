@@ -424,7 +424,19 @@ function schemaFilesIn(dir) {
  * @returns {string[]}
  */
 export function ownSchemaRefs(srcDir) {
-  return schemaFilesIn(join(srcDir, 'schemas')).map(({ name }) => `@/${name}`)
+  return ownSchemaFiles(srcDir).map(({ name }) => `@/${name}`)
+}
+
+/**
+ * The files `ownSchemaRefs` reads its names from: each schema a foundation defines, by name, with the
+ * file that defines it.
+ *
+ * @param {string} srcDir - the foundation's source root (a schemas package's own folder)
+ * @returns {{ name: string, file: string }[]}
+ */
+export function ownSchemaFiles(srcDir) {
+  const dir = join(srcDir, 'schemas')
+  return schemaFilesIn(dir).map(({ name, file }) => ({ name, file: join(dir, file) }))
 }
 
 // Resolve a package's module entry FILE (absolute) from its package.json —
