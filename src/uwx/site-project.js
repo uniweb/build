@@ -62,7 +62,9 @@ import { unwrapLocalized, unwrapLocalizedList } from './backfill.js'
 import { LOCALIZED_FIELD_ASSUMPTION } from './localize.js'
 import { documentLanguages, documentSourceLocale } from './source-locale.js'
 import { siteContentDirs } from './site-dirs.js'
-import { sitePageFiles, mdPageCannotHold, folderModeOf } from './page-files.js'
+import { sitePageFiles, mdPageCannotHold, mdPageImpliedTitle, folderModeOf } from './page-files.js'
+import { ATOMIC_PAGE_KEYS, isAtomicPageKey } from '../site/page-settings.js'
+import { isSectionKey } from '@uniweb/schemas/section'
 import { layoutAreaRoute, readLayoutFolderSync, DEFAULT_LAYOUT } from '../site/layout-folder.js'
 import { layoutNameKey } from '@uniweb/core/layout-name'
 import { orderFolders, rootOrderConfig, parseNumericPrefix, parseWildcardArray, composeLocalizedRoute, stripAtPrefix, compareFilenames, folderModePageFiles, folderModeChildren } from '../site/content-collector.js'
@@ -415,9 +417,11 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
  *        structural maps on a localized `content` field are captured into it
  * @param {string} [params.impliedType] - the type a section that names none renders with on this
  *        site (`siteDefaultSectionType`), which a file leaves out
+ * @param {object} [params.page] - for a page that is this one file, its settings as its frontmatter
+ *        says them (`atomicPageSettings`): each page key, `undefined` for one the page does not have
  * @returns {'updated'|'unchanged'}
  */
-export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null, fileLinks = null, sameFile = null }) {
+export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED_FIELD_ASSUMPTION.defaultSourceLocale, collector, freeformRelPath, freeformCandidates = null, writeId = true, context = null, dataModel = null, impliedType = DEFAULT_SECTION_TYPE, media = null, fileLinks = null, sameFile = null, page = null }) {
   // ⛔ A stored `preset` or `input` is not written back: neither has an effect, and the build
   // would only warn about it (2026-09-27).
   // ⛔ No `background` / `theme_override` / `insets` / `fetch`: the site-content Model dropped all
@@ -438,14 +442,26 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
   const sourceContent = unwrapLocalizedContent(content, sourceLocale, collector, freeformRelPath, freeformCandidates, context, (tag) => dataModel?.(type, tag) ?? null)
 
   const { hidden: paramHidden, fetch: paramFetch, ...paramsRest } = params && typeof params === 'object' ? params : {}
-  const frontmatter = {}
+  // ⭐ A PARAM WHOSE NAME THE FILE GIVES SOMETHING ELSE IS WRITTEN UNDER `props:`, which the build merges
+  // into the params (`SECTION_KEYS.props`): a section key's name, and in a page that is this one file a
+  // page setting's (`site/page-settings.js`). So is a param the file already keeps there. ⛔ Until
+  // 2026-11-08 every param went at the top, so one named `type` or `id` replaced the section's own.
+  const kept = readFrontmatterQuietly(filePath)?.props
+  const inProps = (key) =>
+    isSectionKey(key) || (page !== null && isAtomicPageKey(key)) || (isPlainRecord(kept) && Object.prototype.hasOwnProperty.call(kept, key))
+  const top = {}
+  const props = {}
+  for (const [key, value] of Object.entries(paramsRest)) (inProps(key) ? props : top)[key] = value
+  // The page's settings first, where the file is the page (`writeMdPage`).
+  const frontmatter = page ? { ...page } : {}
   if (type !== undefined) frontmatter.type = type
   // ⭐ `hidden:` says what the store says: written for a hidden section, and removed from the
   // file of a visible one — an editor toggles it [2026-09-28]. ⛔ Until then a pull dropped it,
   // and the next push un-hid the section. A push before that day sent a file's `hidden:` inside
   // `params`, so one stored there counts when the field is absent.
   frontmatter.hidden = (typeof hidden === 'boolean' ? hidden : paramHidden === true) ? true : undefined
-  Object.assign(frontmatter, paramsRest)
+  Object.assign(frontmatter, top)
+  frontmatter.props = Object.keys(props).length ? props : undefined
   // `id:` only where the file's name does not already give it (`writeId`, `pageSectionsToFiles`).
   if (stable_id !== undefined && writeId) frontmatter.id = stable_id
 
@@ -468,6 +484,15 @@ export function sectionRecordToFile({ filePath, record, sourceLocale = LOCALIZED
     // A file of the same bytes as one this file names is that file (`asset-map.js::sameStoredFile`).
     sameFile: sameFile ? (a, b) => sameFile(a, b, filePath) : null,
   })
+}
+
+// A file's frontmatter as written, or null where there is no file or it cannot be read.
+function readFrontmatterQuietly(filePath) {
+  try {
+    return parseFrontmatter(readFileSync(filePath, 'utf8'), filePath).frontmatter || null
+  } catch {
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,9 +1082,11 @@ function isEmptyPage(record, dir) {
 
 // ⭐ A FOLDER-MODE `.md` PAGE, WRITTEN BACK IN PLACE: the file is the page and its one section, so the
 // section is written into it as any section file is (`sectionRecordToFile`) — its text, its params —
-// and its frontmatter's `hidden:` says the page's. One the file cannot hold (`mdPageCannotHold`) is
-// left as written, and said. ⛔ Until 2026-11-04 a pull left every such page alone, so an edit made to
-// one in the app was undone by the next push. Returns whether it was written.
+// and its frontmatter says the page's settings (`atomicPageSettings`), `hidden:` among them. One the
+// file cannot hold (`mdPageCannotHold`) is left as written, and said. ⛔ Until 2026-11-08 a page the app
+// gave a description, a label or a title of its own was held. Until 2026-11-04 a pull left every such
+// page alone, so an edit made to one in the app was undone by the next push. Returns whether it was
+// written.
 function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLocale }) {
   const own = parse(place.file).name
   const name = parseNumericPrefix(own).name || own
@@ -1073,7 +1100,9 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
   const stableId = recordStableId(section) || name
   // A page renamed in the app moves its file, as a page folder moves (`placeByUuid`).
   placeByUuid(ctx, record.$uuid, place.file)
+  const page = atomicPageSettings(record, { name, sourceLocale, existing: readFrontmatterQuietly(place.file), canon: pageContext.route, ctx })
   sectionRecordToFile({
+    page,
     filePath: place.file,
     record: { ...section, hidden: record.hidden === true },
     sourceLocale: ctx?.sourceLocale,
@@ -1090,6 +1119,25 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
   })
   report.sections.push(place.file)
   return true
+}
+
+/**
+ * An atomic page's settings as its frontmatter says them (`site/page-settings.js`), by the inverse a
+ * `page.yml` is written by (`pageRecordToYml`): each page key, `undefined` for one the page does not
+ * have, so the file's is removed. Its `title:` only where its first heading, else its name, does not
+ * give it, and its localized URL segments added and never removed, as a `page.yml`'s are
+ * (`pageSlugToYml`).
+ *
+ * @returns {object}
+ */
+function atomicPageSettings(record, { name, sourceLocale, existing, canon, ctx }) {
+  const slug = pageSlugToYml(record, canon, existing, sourceLocale, ctx)
+  const yml = pageRecordToYml(record, null, sourceLocale, existing, { slug })
+  const out = {}
+  for (const key of ATOMIC_PAGE_KEYS) out[key] = yml[key]
+  if (out.title === mdPageImpliedTitle(record, { name, sourceLocale })) out.title = undefined
+  if (out.slug === undefined && existing?.slug !== undefined) out.slug = existing.slug
+  return out
 }
 
 // The directory name for a page record (slug, or `[param]/` for a dynamic page).

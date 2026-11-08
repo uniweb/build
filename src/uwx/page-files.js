@@ -204,10 +204,13 @@ export function sitePageFiles(siteYml, pagesDir, { seen = null, siteRoot = null,
   }
 }
 
-// The page fields a push sends for a folder-mode `.md` page are its title and `hidden`
-// (`folderModePageRecords`, `site.js`), and `is_index` where it is the homepage. A page carrying any of
-// these needs a page folder to hold it.
-const NOT_IN_AN_MD_PAGE = ['description', 'label', 'keywords', 'hide_in', 'knowledge', 'track_sections', 'redirect', 'rewrite', 'layout', 'og_title', 'og_description', 'seo', 'fetch']
+// ⭐ A folder-mode `.md` page's frontmatter holds its page's settings (`site/page-settings.js`): its title,
+// description, label, keywords, `hideIn`, `knowledge`, `trackSections`, layout and `seo` with its Open
+// Graph title and description, sent as a `page.yml`'s are (`folderModePageRecords`, `site.js`). These page
+// fields have no place in one: a redirect or a rewrite makes a page that holds no section, and the page's
+// own data is its one section's (`query:` in its frontmatter). ⛔ Until 2026-11-08 every page setting was
+// here but its title and `hidden`, and a page the app gave a description was held.
+const NOT_IN_AN_MD_PAGE = ['redirect', 'rewrite', 'fetch']
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
 
@@ -224,12 +227,10 @@ function holdsValue(value, sourceLocale) {
 
 /**
  * What of a page a folder-mode `.md` file cannot hold — none, when it can be written as one. The file is
- * the page and its one section: its title is its first heading, else its name prettified, and its
- * frontmatter's `hidden:` drafts it. A second section, pages below it, a route parameter, a title its
- * heading does not give, or any other page setting, it cannot say.
- *
- * ⚖️ A setting such a page might hold in its frontmatter is project-file-organization's §10 decision 1,
- * not settled; until it is, a pull writes none.
+ * the page and its one section: its frontmatter holds the page's settings, a `title:` among them where
+ * its first heading, else its name prettified, does not give it, and its `hidden:` drafts the page. A
+ * second section, pages below it, a route parameter, an id its file name does not give, a redirect, a
+ * rewrite or data of the page's own, it cannot say.
  *
  * @param {object} record - the page's record
  * @param {{ name: string, sourceLocale: string }} opts - `name`, the file's page name (`1-install.md` → `install`)
@@ -241,15 +242,24 @@ export function mdPageCannotHold(record, { name, sourceLocale }) {
   if (sections.length !== 1) out.push(sections.length ? 'more than one section' : 'no section')
   if (Array.isArray(record?.$children) && record.$children.length) out.push('pages below it')
   if (record?.is_dynamic) out.push('a route parameter')
-  // Its id is its file's name; one the name does not give needs a page folder's `id:`.
+  // Its id is its file's name, and the file's `id:` is its section's (`site/page-settings.js`); one the
+  // name does not give needs a page folder's `id:`.
   if (typeof record?.stable_id === 'string' && record.stable_id && record.stable_id !== name) out.push('an id its file name does not give')
   for (const key of NOT_IN_AN_MD_PAGE) if (holdsValue(record?.[key], sourceLocale)) out.push(key)
-  if (sections.length === 1) {
-    const content = sections[0]?.content
-    const doc = isProseMirrorDoc(content) ? content : unwrapLocalized(content, sourceLocale)
-    const given = extractH1(doc) || prettifySlug(name)
-    const title = unwrapLocalized(record?.title, sourceLocale)
-    if (typeof title === 'string' && title && title !== given) out.push('a title its first heading does not give')
-  }
   return out
+}
+
+/**
+ * The title a folder-mode `.md` page has without a `title:` — its first heading, else its name
+ * prettified, as the build gives it (`processFileAsPage`). A pull writes `title:` only where the
+ * page's differs.
+ *
+ * @param {object} record - the page's record
+ * @param {{ name: string, sourceLocale: string }} opts
+ * @returns {string}
+ */
+export function mdPageImpliedTitle(record, { name, sourceLocale }) {
+  const content = (Array.isArray(record?.page_sections) ? record.page_sections : [])[0]?.content
+  const doc = isProseMirrorDoc(content) ? content : unwrapLocalized(content, sourceLocale)
+  return extractH1(doc) || prettifySlug(name)
 }

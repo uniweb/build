@@ -171,15 +171,19 @@ describe('⭐ a pull writes each page where the files keep it', () => {
     expect(await built()).toContain('/guide/faq')
   })
 
-  it('a title the first heading does not give is left as written, and said', async () => {
+  // ⛔ Until 2026-11-08 such a page was held, its file left as written (`site/page-settings.js`).
+  it('⭐ a title the first heading does not give goes into the file\'s frontmatter, and the next push sends it', async () => {
     everyKind()
     const before = snapshot()
     const doc = await siteProjectToDocument(siteDir())
     at(doc, '/guide/use').title = { en: 'Using it well' }
     const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
 
-    expect(changed(before, snapshot())).toEqual([])
-    expect(report.held).toEqual([{ route: 'guide/use', uuids: [], what: ['a title its first heading does not give'] }])
+    expect(changed(before, snapshot())).toEqual(['site/pages/guide/2-use.md'])
+    expect(report.held).toEqual([])
+    expect(readFileSync(join(siteDir(), 'pages/guide/2-use.md'), 'utf8')).toBe('---\ntitle: Using it well\n---\n\n# Use it\n')
+    const again = await siteProjectToDocument(siteDir())
+    expect(at(again, '/guide/use').title).toEqual({ en: 'Using it well' })
   })
 
   it('a folder-mode folder reordered in the app says it in its `pages:`, and the build and the push follow it', async () => {
@@ -206,10 +210,10 @@ describe('⭐ a pull writes each page where the files keep it', () => {
     }
     for (const p of doc.pages) stamp(p)
     const use = at(doc, '/guide/use')
-    use.title = { en: 'Using it well' }
+    use.redirect = '/guide/install'
     const report = siteContentDocumentToProject({ document: doc, siteRoot: siteDir(), prune: true })
 
-    expect(report.held).toEqual([{ route: 'guide/use', uuids: [use.$uuid, use.page_sections[0].$uuid], what: ['a title its first heading does not give'] }])
+    expect(report.held).toEqual([{ route: 'guide/use', uuids: [use.$uuid, use.page_sections[0].$uuid], what: ['redirect'] }])
     // A mount's page by page, each with its own items.
     expect(report.mountedPages).toEqual([
       { route: 'docs', uuids: [at(doc, '/docs').$uuid] },

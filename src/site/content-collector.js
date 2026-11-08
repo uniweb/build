@@ -50,6 +50,7 @@ import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServic
 import { refuseUnreadableAddress } from './site-address.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 import { warnPlacementsNotOffered } from './placement-warnings.js'
+import { atomicPageConfig, isAtomicPageKey, warnPageKeysNamingParams } from './page-settings.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 
 /**
@@ -922,6 +923,56 @@ function resolveDisplayTitle(declaredTitle, segment, sections) {
   return extractH1(first?.content) || prettifySlug(segment)
 }
 
+/**
+ * ⭐ A PAGE'S SETTINGS, read from its config by one rule: a `page.yml` or `folder.yml`, or the
+ * frontmatter of a page that is one `.md` file (`page-settings.js`). Its title is the caller's,
+ * worked out from what the page holds.
+ *
+ * ⛔ Until 2026-11-08 a page's `keywords:` was read by nothing here: a push sent it and a backend's
+ * page stated it, while a static build left it out of the page, and so out of its head.
+ *
+ * @param {object} config - the page's settings as written
+ * @param {string} title - the page's title
+ * @returns {object} the page's setting fields, as the page payload carries them
+ */
+function pageSettingFields(config, title) {
+  const seo = config.seo && typeof config.seo === 'object' && !Array.isArray(config.seo) ? config.seo : {}
+  const keywords = Array.isArray(config.keywords) ? config.keywords.filter((k) => typeof k === 'string' && k) : config.keywords
+  return {
+    id: authoredId(config.id), // Stable page ID for page: links (survives reorganization)
+    title,
+    description: config.description || '',
+    label: config.label || null, // Short label for navigation (defaults to title)
+    ...((Array.isArray(keywords) ? keywords.length > 0 : typeof keywords === 'string' && keywords) ? { keywords } : {}),
+    // Localized URL slug overrides: { <locale>: <segment> }. Compiled into
+    // config.i18n.routeTranslations by collectSiteContent, then stripped from
+    // the page payload (build is authoritative; runtime hydrates the map).
+    ...(config.slug && typeof config.slug === 'object' && !Array.isArray(config.slug) ? { slug: config.slug } : {}),
+    hidden: config.hidden || false, // Hide from all navigation
+    hideIn: normalizeHideIn(config), // Named nav areas to suppress this page from
+    // Knowledge page — content feeds AI pipeline instead of (or in addition to) rendering
+    ...(config.knowledge != null ? { knowledge: config.knowledge } : {}),
+    // Per-page section instrumentation opt-in. ⛔ PAGE-LEVEL ONLY, and it must
+    // stay that way: a site-wide form would emit one event per section on every
+    // page, whose cardinality a counter-based collector cannot store (measured:
+    // ~160 distinct values against a 50-value cap folds ~70% into `(other)`).
+    // Deliberately NOT part of the site → page → section cascade that
+    // `prerender:` uses, even though that is the local convention — following it
+    // would re-create the unscoped mode through the front door.
+    // the tracking design, §10b.
+    ...(config.trackSections != null ? { trackSections: config.trackSections } : {}),
+    seo: {
+      noindex: seo.noindex || false,
+      image: seo.image || null,
+      ogTitle: seo.ogTitle || null,
+      ogDescription: seo.ogDescription || null,
+      canonical: seo.canonical || null,
+      changefreq: seo.changefreq || null,
+      priority: seo.priority || null
+    }
+  }
+}
+
 // ⭐ The rule now lives in `utils/numeric-prefix.js` — `records/folder.yml` needs the
 // identical one, and a records reader cannot import this module without closing
 // a cycle. Imported at the top; still re-exported below for existing callers.
@@ -1103,14 +1154,21 @@ function getDirectChildName(route, parentRoute) {
 }
 
 /**
- * Process a markdown file as a standalone page (folder mode).
- * Creates a page with a single section from the markdown content.
+ * Process a markdown file as a page of its own (folder mode): an atomic page, whose one section is
+ * the file.
+ *
+ * ⭐ Its frontmatter holds the page's settings beside the section's type and params
+ * (`page-settings.js`): a `title:`, else the file's first heading, else its name prettified; a
+ * `description:`, a `label:`, `seo:` and the rest a `page.yml` gives a page. They are the page's, not
+ * the section's params. `pageConfig` is them as written, which the push sends as the page's
+ * (`uwx/site.js::folderModePageRecords`). ⛔ Until 2026-11-08 the page took only its title from the
+ * file, and every one of those keys reached the section as a param.
  *
  * @param {string} filePath - Path to markdown file
  * @param {string} fileName - Filename (e.g., "getting-started.md")
  * @param {string} siteRoot - Site root directory for asset resolution
  * @param {string} parentRoute - Parent route (e.g., '/docs')
- * @returns {Promise<Object>} Page data with assets manifest
+ * @returns {Promise<Object>} Page data with assets manifest, and the page's settings as written
  */
 async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
   const { name } = parse(fileName)
@@ -1118,41 +1176,36 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
   const pageName = stableName || name
   const route = parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`
 
-  // Process the markdown as a single section
-  const { section, assetCollection, iconCollection } = await processMarkdownFile(
-    filePath, '1', siteRoot, pageName
+  // Process the markdown as a single section — the page's own settings taken out of its params
+  const { section, assetCollection, iconCollection, pageConfig } = await processMarkdownFile(
+    filePath, '1', siteRoot, pageName, { atomic: true }
   )
 
   const fileStat = await stat(filePath)
+  const settings = pageSettingFields(pageConfig, pageConfig.title || extractH1(section.content) || prettifySlug(pageName))
 
   return {
     page: {
       route,
       sourcePath: null,
-      id: null,
       isIndex: false,
-      title: extractH1(section.content) || prettifySlug(pageName),
-      description: '',
-      label: null,
+      ...settings,
+      // ⭐ Its id is its section's (`page-settings.js`): a page in an atomic-parent is known by its file.
+      id: null,
       lastModified: fileStat.mtime?.toISOString() || null,
       isDynamic: false,
       paramName: null,
       // The file IS the page, so its `hidden: true` drafts the page — left out of a published
       // build, kept in dev — rather than leaving a page with no section (2026-09-28).
       hidden: section.hidden === true,
-      hideIn: [],
-      layout: {},
-      seo: {
-        noindex: false,
-        image: null,
-        changefreq: null,
-        priority: null
-      },
+      // As written: the caller lays the folder's and the site's under it (`mergeLayoutConfig`).
+      layout: pageConfig.layout ?? {},
       fetch: null,
       hasContent: true,
       sections: [section],
       order: prefix ? parseFloat(prefix) : undefined
     },
+    pageConfig,
     assetCollection,
     iconCollection
   }
@@ -1165,9 +1218,13 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
  * @param {string} id - Section ID (numeric/positional)
  * @param {string} siteRoot - Site root directory for asset resolution
  * @param {string} defaultStableId - Default stable ID from filename (can be overridden in frontmatter)
- * @returns {Object} Section data with assets manifest
+ * @param {Object} [options]
+ * @param {boolean} [options.atomic] - the file is a page of its own (`processFileAsPage`): its
+ *   frontmatter's page keys are the page's settings, not params (`page-settings.js`)
+ * @returns {Object} Section data with assets manifest, and for an atomic page its page's settings
+ *   as written (`pageConfig`)
  */
-async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = null) {
+async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = null, { atomic = false } = {}) {
   const content = await readFile(filePath, 'utf8')
   let frontMatter = {}
   let markdown = content
@@ -1194,10 +1251,12 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   // ⭐ WHAT IS NOT A PARAM is `SECTION_KEYS` (`@uniweb/schemas/section`) — the list the build's
   // warning on a component's `params:` reads too — and `fetch`, one of the section's settings,
   // kept on the section as a field of its own. `query:` / `fetch:` declare the section's own
-  // data, and a leftover `data:` is refused (`declaredFetch`).
+  // data, and a leftover `data:` is refused (`declaredFetch`). ⭐ In a page that is one file, nor are
+  // its page's settings (`page-settings.js`): a param of one of those names is written under `props:`.
   const { type, hidden, preset, input, props, fetch, query, data, id: frontmatterId } = frontMatter
+  const pageConfig = atomic ? atomicPageConfig(frontMatter) : null
   const params = Object.fromEntries(
-    Object.entries(frontMatter).filter(([key]) => !isSectionKey(key) && key !== 'fetch')
+    Object.entries(frontMatter).filter(([key]) => !isSectionKey(key) && key !== 'fetch' && !(atomic && isAtomicPageKey(key)))
   )
   // ⭐ `hidden: true` — a draft section, the page's meaning one level down: left out of a
   // published build, kept by `uniweb dev`, and synced as the section's own `hidden`
@@ -1247,6 +1306,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const proseMirrorContent = markdownToProseMirror(markdown, { onWarning: warnHere })
   warnOutsideVocabulary(proseMirrorContent, warnHere)
   warnPlacementsNotOffered(proseMirrorContent, type || null, sectionTypes, warnHere)
+  if (pageConfig) warnPageKeysNamingParams(pageConfig, type || null, sectionTypes, warnHere)
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's
@@ -1277,7 +1337,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const iconCollection = collectSectionIcons(section)
 
   noteSectionFile(section, filePath)
-  return { section, assetCollection, iconCollection }
+  return { section, assetCollection, iconCollection, pageConfig }
 }
 
 /**
@@ -1796,7 +1856,7 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
   const sourcePath = isIndex ? folderRoute : null
 
   // Extract configuration
-  const { seo = {}, layout: layoutConfig, ...restConfig } = pageConfig
+  const { layout: layoutConfig } = pageConfig
 
   // Resolve the effective layout by cascading site → folder → page, per field.
   // ⛔ Until 2026-09-09 only `name` cascaded and `hide` / `params` were read from
@@ -1818,55 +1878,20 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
     page: {
       route,
       sourcePath, // Original folder-based path (for ancestor checking in navigation)
-      id: authoredId(pageConfig.id), // Stable page ID for page: links (survives reorganization)
       isIndex, // Marks this page as the index for its parent route
-      title: resolveDisplayTitle(pageConfig.title, pageName, hierarchicalSections),
-      description: pageConfig.description || '',
-      label: pageConfig.label || null, // Short label for navigation (defaults to title)
-      // Localized URL slug overrides: { <locale>: <segment> }. Compiled into
-      // config.i18n.routeTranslations by collectSiteContent, then stripped from
-      // the page payload (build is authoritative; runtime hydrates the map).
-      ...(pageConfig.slug && typeof pageConfig.slug === 'object' && !Array.isArray(pageConfig.slug)
-        ? { slug: pageConfig.slug }
-        : {}),
+      // Its settings, by the one rule a page of one `.md` file is read by too (`pageSettingFields`)
+      ...pageSettingFields(pageConfig, resolveDisplayTitle(pageConfig.title, pageName, hierarchicalSections)),
       lastModified: lastModified?.toISOString(),
 
       // Parametric route metadata
       isDynamic,
       paramName, // e.g., "slug" from [slug]; a nested page's ancestor's
 
-      // Navigation options
-      hidden: pageConfig.hidden || false, // Hide from all navigation
-      hideIn: normalizeHideIn(pageConfig), // Named nav areas to suppress this page from
-
-      // Knowledge page — content feeds AI pipeline instead of (or in addition to) rendering
-      ...(pageConfig.knowledge != null ? { knowledge: pageConfig.knowledge } : {}),
-
-      // Per-page section instrumentation opt-in. ⛔ PAGE-LEVEL ONLY, and it must
-      // stay that way: a site-wide form would emit one event per section on every
-      // page, whose cardinality a counter-based collector cannot store (measured:
-      // ~160 distinct values against a 50-value cap folds ~70% into `(other)`).
-      // Deliberately NOT part of the site → page → section cascade that
-      // `prerender:` uses, even though that is the local convention — following it
-      // would re-create the unscoped mode through the front door.
-      // the tracking design, §10b.
-      ...(pageConfig.trackSections != null ? { trackSections: pageConfig.trackSections } : {}),
-
       // Layout options (named layout + per-page overrides)
       layout: {
         ...(resolvedLayoutName ? { name: resolvedLayoutName } : {}),
         ...(layoutObj.hide ? { hide: layoutObj.hide } : {}),
         ...(layoutObj.params ? { params: layoutObj.params } : {}),
-      },
-
-      seo: {
-        noindex: seo.noindex || false,
-        image: seo.image || null,
-        ogTitle: seo.ogTitle || null,
-        ogDescription: seo.ogDescription || null,
-        canonical: seo.canonical || null,
-        changefreq: seo.changefreq || null,
-        priority: seo.priority || null
       },
 
       // Data fetching — `fetch:`, or the `query:` shorthand (`declaredFetch`)
@@ -2223,27 +2248,18 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         const containerPage = {
           route: containerRoute,
           sourcePath: isIndex ? (parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`) : null,
-          id: dirConfig.id || null,
           isIndex,
-          title: resolveDisplayTitle(dirConfig.title, entry, null),
-          description: dirConfig.description || '',
-          label: dirConfig.label || null,
+          // ⭐ Its settings by the one rule every page is read by (`pageSettingFields`). ⛔ Until
+          // 2026-11-08 this read its own few: a `folder.yml`'s `keywords`, `slug`, `trackSections`
+          // and Open Graph title and description reached a backend on a push, and no static build.
+          ...pageSettingFields(dirConfig, resolveDisplayTitle(dirConfig.title, entry, null)),
           lastModified: null,
           isDynamic: false,
           paramName: null,
-          hidden: dirConfig.hidden || false,
-          hideIn: normalizeHideIn(dirConfig),
-          ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
           // `effectiveLayout` is ALREADY this container's resolved layout —
           // `mergeLayoutConfig(parentLayout, normalizeLayoutConfig(dirConfig.layout))`
           // — so re-reading `dirConfig.layout` here would drop the inherited half.
           layout: effectiveLayout,
-          seo: {
-            noindex: dirConfig.seo?.noindex || false,
-            image: dirConfig.seo?.image || null,
-            changefreq: dirConfig.seo?.changefreq || null,
-            priority: dirConfig.seo?.priority || null
-          },
           // ⭐ `declaredFetch`, as every other level: this read `dirConfig.fetch`
           // alone until 2026-09-11, so a container's `folder.yml` shorthand reached
           // a backend on `push` and was dropped from a static build.
@@ -2315,25 +2331,15 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
       const containerPage = {
         route: containerRoute,
         sourcePath: isIndex ? (parentRoute === '/' ? `/${entry}` : `${parentRoute}/${entry}`) : null,
-        id: dirConfig.id || null,
         isIndex,
-        title: resolveDisplayTitle(dirConfig.title, entry, null),
-        description: dirConfig.description || '',
-        label: dirConfig.label || null,
+        // Its settings by the one rule every page is read by (`pageSettingFields`) — see the note
+        // on the sibling container above.
+        ...pageSettingFields(dirConfig, resolveDisplayTitle(dirConfig.title, entry, null)),
         lastModified: null,
         isDynamic: false,
         paramName: null,
-        hidden: dirConfig.hidden || false,
-        hideIn: normalizeHideIn(dirConfig),
-        ...(dirConfig.knowledge != null ? { knowledge: dirConfig.knowledge } : {}),
         // Already resolved — see the note on the sibling container above.
         layout: effectiveLayout,
-        seo: {
-          noindex: dirConfig.seo?.noindex || false,
-          image: dirConfig.seo?.image || null,
-          changefreq: dirConfig.seo?.changefreq || null,
-          priority: dirConfig.seo?.priority || null
-        },
         // ⭐ The folder's own declaration, as the folder-mode container above and
         // every other level read it. ⛔ This was `fetch: null` until 2026-09-11:
         // a `folder.yml` here lost its `fetch:` (and its shorthand) on a static

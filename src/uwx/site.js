@@ -792,10 +792,13 @@ async function collectPageSectionsNested(pageDir, siteRoot, pageConfig, media = 
 }
 
 // A folder-mode folder's `.md` files, as the pages the build makes of them (`processFileAsPage`):
-// each a page whose one section is the file, titled by its first heading, a draft when the file
-// says `hidden: true`, slugged by the filename without its numeric prefix — and in the build's
-// order (`folderModePageFiles`). ⛔ Until 2026-10-23 this lane sent none of them and warned instead;
-// a documentation site — folder-mode pages in a mounted repo — published 2 of its 49 pages.
+// each a page whose one section is the file, a draft when the file says `hidden: true`, slugged by
+// the filename without its numeric prefix — and in the build's order (`folderModePageFiles`).
+// ⭐ The page's settings are what its frontmatter gives the page (`page-settings.js`) — a `title:`
+// else its first heading, a `description:`, a `label:` and the rest — sent as a `page.yml`'s are.
+// ⛔ Until 2026-11-08 it sent the title alone, and those keys went as the section's params. Until
+// 2026-10-23 this lane sent none of these pages and warned instead; a documentation site —
+// folder-mode pages in a mounted repo — published 2 of its 49 pages.
 //
 // Each comes with the name a `pages:` list knows it by.
 async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
@@ -804,9 +807,9 @@ async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
   const records = []
   for (const { file, name } of files) {
     const filePath = join(dirPath, file)
-    const { page, assetCollection } = await processFileAsPage(filePath, file, siteRoot, '/')
+    const { page, pageConfig, assetCollection } = await processFileAsPage(filePath, file, siteRoot, '/')
     locateSectionMedia(assetCollection, { siteRoot, filePath, sink: ctx.media })
-    const config = { title: page.title }
+    const config = { ...pageConfig, title: page.title }
     if (page.hidden) config.hidden = true
     const data = buildPageData(config, {
       where: relative(siteRoot, filePath),
@@ -821,6 +824,8 @@ async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
       pageFields,
     })
     const record = withIdentity(data.stable_id || name, data)
+    // Its localized URL segments, as a folder's `slug:` gives them (`localizeRouteSlugs`).
+    if (isPlainRecord(pageConfig.slug)) record[AUTHORED_SLUG] = pageConfig.slug
     record.page_sections = page.sections.map((s, i) => sectionToRecord(s, i))
     records.push({ name, record })
   }
