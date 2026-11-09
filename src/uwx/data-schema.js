@@ -48,6 +48,15 @@ const OPEN_MAP_KEY = 'name'
 // a section is (`isPlainMapSection`).
 const PLAIN_MAP_VALUE = 'value'
 
+// ⭐ THE SCOPE OF AN OPEN MAP'S KEY: unique within the map, which is the one place the rule can say
+// two ways. A backend's `unique_field` keys rows by `scope`: `section` across every row of the section
+// in the entity, `siblings` by the row's parent item (backend, 2026-11-08). One map per entity, at the
+// top or under a single section, is `section`, as every open map was lowered until then. A map under a
+// list, or under another map, is one map per item, and `section` would refuse the second item that
+// reuses a key: `tiers[].price` with a `small` in two tiers. ⛔ That is what it did until 2026-11-08.
+const OPEN_MAP_SCOPES = new Set(['section', 'siblings'])
+const openMapScope = (underList) => (underList ? 'siblings' : 'section')
+
 /**
  * ⭐ AN OPEN MAP'S LOWERED SECTION. `values:` lowers to rows (`lowerField`): a `multiple` section
  * whose required string `name` — the map's key — is made each row's identity by a `unique_field`
@@ -59,7 +68,7 @@ export function isOpenMapSection(def) {
   if (def?.multiple !== true || def.self_nesting === true) return false
   const key = def.fields?.[OPEN_MAP_KEY]
   if (key?.type !== 'string' || key.required !== true || key.localized === true) return false
-  return (def.constraints || []).some((c) => c?.kind === 'unique_field' && c.field === OPEN_MAP_KEY && c.scope === 'section')
+  return (def.constraints || []).some((c) => c?.kind === 'unique_field' && c.field === OPEN_MAP_KEY && OPEN_MAP_SCOPES.has(c.scope))
 }
 
 /**
@@ -355,9 +364,10 @@ function lowerSectionsForm(sectionsMap, resolve, optResolve) {
 // are type: section"); `nestable` → `self_nesting`; `append_only` (insert-only
 // records) passes through; authored cross-cutting `constraints` pass through as a
 // bare array. Leaves and nested sections share one ordered `fields:` namespace.
-function lowerSection(def, resolve, optResolve, path = '') {
+function lowerSection(def, resolve, optResolve, path = '', underList = false) {
   const out = {}
-  if ((def.kind || 'single') === 'multi') out.multiple = true
+  const many = (def.kind || 'single') === 'multi'
+  if (many) out.multiple = true
   if (def.brief === true) out.brief = true
   // Display prose IS a section key — the registry stores it and keys it for
   // translation as `section.<name>.label` / `.description` (confirmed 2026-08-05).
@@ -385,14 +395,14 @@ function lowerSection(def, resolve, optResolve, path = '') {
   for (const part of Object.keys(def)) {
     if (part === 'fields') {
       for (const [key, rawField] of Object.entries(def.fields || {})) {
-        fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key)
+        fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key, underList || many)
       }
     } else if (part === 'sections') {
       for (const [childName, childDef] of Object.entries(def.sections || {})) {
         const childPath = path ? `${path}/${childName}` : childName
         fields[childName] = {
           type: 'section',
-          ...lowerSection(childDef, resolve, optResolve, childPath)
+          ...lowerSection(childDef, resolve, optResolve, childPath, underList || many)
         }
       }
     }
@@ -439,15 +449,16 @@ function lowerSection(def, resolve, optResolve, path = '') {
 // a section is the consumer's contract to state, not ours to assume. Until it
 // does, an authored `required: true` on a nested object or a list of records is
 // still dropped here. `@std/publication`'s `authors` is exactly that case.
-function lowerField(rawField, resolve, optResolve, path = '') {
+function lowerField(rawField, resolve, optResolve, path = '', underList = false) {
   const field = asField(rawField)
   const type = field.type
 
   if (type === 'object') {
     // An OPEN MAP (`values:`) is ROWS, not a singleton. Its keys belong to the
     // author, which makes them data — so the map lowers to a `multi` section whose
-    // key field carries what was the object key, with a section-scoped uniqueness
-    // rule making that key the row's identity. This is the same shape `array of
+    // key field carries what was the object key, with a uniqueness rule making that
+    // key the row's identity within its map (`openMapScope`: the section's, or under a
+    // list or another map, the item's). This is the same shape `array of
     // object` already lowers to, and the idiom the backend's own site-content
     // `collections` section uses; no new wire construct is involved.
     //
@@ -475,13 +486,14 @@ function lowerField(rawField, resolve, optResolve, path = '') {
                 [PLAIN_MAP_VALUE]: field.values,
               },
               constraints: [
-                { kind: 'unique_field', field: OPEN_MAP_KEY, scope: 'section' },
+                { kind: 'unique_field', field: OPEN_MAP_KEY, scope: openMapScope(underList) },
                 ...(sectionAttrsFromField(field).constraints || [])
               ]
             },
             resolve,
             optResolve,
-            path
+            path,
+            underList
           )
         }
       }
@@ -523,19 +535,20 @@ function lowerField(rawField, resolve, optResolve, path = '') {
             // row's identity — so it is prepended rather than assigned: an author's
             // own constraints on this field add to it and can never replace it.
             constraints: [
-              { kind: 'unique_field', field: OPEN_MAP_KEY, scope: 'section' },
+              { kind: 'unique_field', field: OPEN_MAP_KEY, scope: openMapScope(underList) },
               ...(sectionAttrsFromField(field).constraints || [])
             ]
           },
           resolve,
           optResolve,
-          path
+          path,
+          underList
         )
       }
     }
     return {
       type: 'section',
-      ...lowerSection({ kind: 'single', ...sectionAttrsFromField(field), fields: field.fields }, resolve, optResolve, path)
+      ...lowerSection({ kind: 'single', ...sectionAttrsFromField(field), fields: field.fields }, resolve, optResolve, path, underList)
     }
   }
   if (type === 'array') {
@@ -543,7 +556,7 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     if (items && items.type === 'object') {
       return {
         type: 'section',
-        ...lowerSection({ kind: 'multi', ...sectionAttrsFromField(field), fields: items.fields }, resolve, optResolve, path)
+        ...lowerSection({ kind: 'multi', ...sectionAttrsFromField(field), fields: items.fields }, resolve, optResolve, path, underList)
       }
     }
     // A multi-valued LEAF or REFERENCE. `normalizeField` split this field in two

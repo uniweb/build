@@ -312,3 +312,83 @@ describe('⭐ a record holding a map of plain values', () => {
     expect(courses.brief.suits[0].value).toEqual({ en: line, es })
   })
 })
+
+// ⭐ A MAP UNDER A LIST is one map per item, so its key is unique within its item: a backend's
+// `unique_field` with `scope: section` keys every row of the section across the whole entity, and
+// refused the second tier that reused `small` [backend, 2026-11-08]. `siblings` keys by the parent item.
+const BUNDLE = validateAndNormalizeSchema(
+  {
+    name: 'bundle',
+    fields: {
+      title: { type: 'string' },
+      tiers: {
+        type: 'array',
+        items: {
+          type: 'object',
+          fields: { label: { type: 'string' }, price: { type: 'object', values: { type: 'number' } } },
+        },
+      },
+    },
+  },
+  '@/bundle'
+)
+const BUNDLE_DECLARATION = toDataSchemaDeclaration(BUNDLE, { name: '@acme/bundle' })
+const BUNDLE_FILE = `title: Courses
+tiers:
+  - label: Starter
+    price:
+      small: 59
+      medium: 99
+  - label: Growth
+    price:
+      small: 79
+      medium: 129
+`
+
+describe('⭐ a map under a list', () => {
+  const nested = BUNDLE_DECLARATION.sections.brief.fields.tiers.fields.price
+
+  it('⭐ is unique within its item: `scope: siblings`', () => {
+    expect(nested.constraints[0]).toEqual({ kind: 'unique_field', field: 'name', scope: 'siblings' })
+    expect(isOpenMapSection(nested)).toBe(true)
+    expect(isPlainMapSection(nested)).toBe(true)
+  })
+
+  it('CONTROL — a map at the top of a record keeps `scope: section`, as it was declared before', () => {
+    expect(PLAN_DECLARATION.sections.brief.fields.price.constraints[0]).toEqual({
+      kind: 'unique_field',
+      field: 'name',
+      scope: 'section',
+    })
+    expect(MEASUREMENTS.constraints[0].scope).toBe('section')
+  })
+
+  it('⭐ is pushed as rows in each item, a key repeated across items, and pulled back as the maps', async () => {
+    w('site/site.yml', 'name: T\nfoundation: fnd\n')
+    w('site/package.json', { name: 'site', dependencies: { fnd: 'file:../fdn' } })
+    w('site/queries.yml', "bundles:\n  schema: '@/bundle'\n")
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('site/records/bundle/courses.yml', BUNDLE_FILE)
+    w('fdn/package.json', { name: 'fnd', type: 'module', main: './_entry.generated.js' })
+    w('fdn/main.js', "export default { name: '@acme/fnd' }\n")
+    w('fdn/dist/meta/schema.json', {
+      _self: { name: '@acme/fnd', version: '1.0.0', role: 'foundation' },
+      dataSchemas: { '@/bundle': BUNDLE },
+    })
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND })
+    expect(pkg.refusals).toEqual([])
+    const [courses] = [...readZip(pkg.records.buffer)]
+      .filter(([name]) => name.startsWith('entities/'))
+      .map(([, buf]) => JSON.parse(buf.toString('utf8')))
+      .filter((d) => d.$schema === '@acme/bundle')
+    expect(courses.brief.tiers.map((t) => t.price)).toEqual([
+      [{ name: 'small', value: 59 }, { name: 'medium', value: 99 }],
+      [{ name: 'small', value: 79 }, { name: 'medium', value: 129 }],
+    ])
+    const text = renderEntityDocument({ document: courses, declaration: BUNDLE_DECLARATION, format: 'yml', sourceLocale: 'en' })
+    expect(yaml.load(text).tiers.map((t) => t.price)).toEqual([
+      { small: 59, medium: 99 },
+      { small: 79, medium: 129 },
+    ])
+  })
+})
