@@ -69,9 +69,11 @@ function typeRoot(dir, kind) {
  * Each name of a scope that two or more of the packages define, with the files that define it and
  * whether they say the same thing.
  *
- * @param {{ dir: string, kind: 'foundation'|'schemas', scope?: string|null }[]} packages - the
- *   workspace's foundations and schemas packages; a `scope` given is used over what the package says
- *   (a name `register` has just settled)
+ * A package whose name gives no scope yet is left out: until `register` writes one into its name, its
+ * types have no full name to compare.
+ *
+ * @param {{ dir: string, kind: 'foundation'|'schemas' }[]} packages - the workspace's foundations and
+ *   schemas packages
  * @returns {Promise<{ ref: string, files: string[], differ: boolean }[]>} by name
  */
 export async function typesDefinedTwice(packages) {
@@ -81,7 +83,7 @@ export async function typesDefinedTwice(packages) {
     const dir = real(pkg.dir)
     if (seen.has(dir)) continue
     seen.add(dir)
-    const scope = asScope(pkg.scope) || (await packageTypeScope(dir, pkg.kind))
+    const scope = await packageTypeScope(dir, pkg.kind)
     if (!scope) continue
     const root = typeRoot(dir, pkg.kind)
     if (!existsSync(join(root, 'schemas'))) continue

@@ -55,11 +55,15 @@ describe('typesDefinedTwice', () => {
     expect(found.map((t) => t.ref)).toEqual(['@acme/member'])
   })
 
-  it('a scope given is used over the package\'s, as `register` settles a bare name', async () => {
+  it('a foundation whose name gives no scope yet is left out, until `register` writes one into its name', async () => {
     const a = foundation('hub', 'hub', { 'member.yml': MEMBER })
-    const b = foundation('press', '@acme/press', { 'member.yml': MEMBER })
+    const b = foundation('press', 'press', { 'member.yml': MEMBER })
+    // Neither type has a full name to compare yet.
     expect(await typesDefinedTwice([a, b])).toEqual([])
-    expect((await typesDefinedTwice([{ ...a, scope: '@acme' }, b])).map((t) => t.ref)).toEqual(['@acme/member'])
+    // Once `register` has written each one's scope, they are one type.
+    const c = foundation('hub2', '@acme/hub', { 'member.yml': MEMBER })
+    const d = foundation('press2', '@acme/press', { 'member.yml': MEMBER })
+    expect((await typesDefinedTwice([c, d])).map((t) => t.ref)).toEqual(['@acme/member'])
   })
 
   it('CONTROL — one name in two scopes is two types, and one foundation\'s own types are one each', async () => {
