@@ -517,7 +517,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   if (media) warnings.push(...media.warnings)
   // ⭐ What a backend started from the site would leave out of its blueprint, said while the author is
   // still at the file. Never a refusal: the backend leaves such a line out and says so (`./blueprint.js`).
-  if (includeSite) warnings.push(...(await siteBlueprintWarnings(siteRoot, { scope, foundationDir: opts.foundationDir })))
+  if (includeSite) warnings.push(...(await siteBlueprintWarnings(siteRoot, { scope, foundationDir: opts.foundationDir, sending: true })))
   const localAssetSet = new Set()
   const colocatedSeen = new Set()
   const collectFrom = (doc, taken = null) =>

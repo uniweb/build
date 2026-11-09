@@ -20,6 +20,7 @@
     "./hosts": "./src/hosts/index.js",
     "./i18n": "./src/i18n/index.js",
     "./uwx": "./src/uwx/index.js",
+    "./blueprint": "./src/uwx/blueprint-file.js",
     "./import-map-plugin": "./src/import-map-plugin.js",
     "./emit-surface": "./src/uwx/emit-surface.json"
   },

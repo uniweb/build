@@ -351,10 +351,12 @@ describe('what a backend would leave out', () => {
     expect(blueprintWarnings({ access: { '@/anything': {} } }, { scope: '@acme', declared: { types: null } })).toEqual([])
   })
 
-  it('says an `@/x` goes as written while the foundation has no scope', () => {
-    expect(blueprintWarnings({ access: { '@/vehicle': {} } }, { scope: null, declared: { types: null } })).toEqual([
+  it('says, at a push, that an `@/x` goes as written while the foundation has no scope', () => {
+    expect(blueprintWarnings({ access: { '@/vehicle': {} } }, { scope: null, declared: { types: null }, sending: true })).toEqual([
       expect.stringMatching(/the foundation has no scope yet/)
     ])
+    // A build sends nothing, and a project's foundation has no scope until its first register.
+    expect(blueprintWarnings({ access: { '@/vehicle': {} } }, { scope: null, declared: { types: null } })).toEqual([])
   })
 
   it("reads the types a local foundation declares from its source — its `schemas/`", async () => {
