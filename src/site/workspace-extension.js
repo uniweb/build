@@ -64,6 +64,20 @@ function isWorkspaceRoot(dir) {
   }
 }
 
+/**
+ * The workspace a folder is in: the nearest folder at or above it that holds a workspace manifest,
+ * the marker the CLI finds a workspace by. Null when no workspace holds it.
+ *
+ * @param {string} fromDir
+ * @returns {string|null}
+ */
+export function workspaceRootOf(fromDir) {
+  for (let dir = resolve(fromDir); ; dir = dirname(dir)) {
+    if (isWorkspaceRoot(dir)) return dir
+    if (dirname(dir) === dir) return null
+  }
+}
+
 /** One folder name — never a path, so a declaration cannot walk the search out of a folder. */
 function isExtensionName(name) {
   return typeof name === 'string' && name !== '' && name !== '.' && name !== '..' && !/[\\/]/.test(name)

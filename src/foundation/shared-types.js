@@ -13,13 +13,16 @@
  * changed definition does is the registry's to judge.
  */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { join, relative, resolve, isAbsolute, sep } from 'node:path'
 import { readFoundationName } from '../schema.js'
 import { splitFoundationName } from '../foundation-name.js'
 import { ownSchemaFiles, resolveSchemaRef } from '../resolve-data-schema.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 import { canonicalJson } from '../uwx/same-content.js'
+import { workspacePackages } from '../workspace-patterns.js'
+import { workspaceRootOf } from '../site/workspace-extension.js'
+import { classifyPackage, isSchemasPackage } from '../utils/classify-package.js'
 
 const real = (path) => {
   try {
@@ -110,4 +113,72 @@ export async function typesDefinedTwice(packages) {
     out.push({ ref, files: defs.map((d) => d.file), differ: said.size > 1 })
   }
   return out
+}
+
+// A package's scope, read again only when its `main.js` or `package.json` changes: reading a
+// foundation's name loads its `main.js`, and a dev server asks for every type it resolves.
+const scopeCache = new Map()
+
+function changedAt(dir) {
+  let t = 0
+  for (const f of ['package.json', 'main.js', 'src/main.js']) {
+    try {
+      t = Math.max(t, statSync(join(dir, f)).mtimeMs)
+    } catch {
+      // absent
+    }
+  }
+  return t
+}
+
+async function cachedTypeScope(dir, kind) {
+  const at = changedAt(dir)
+  const hit = scopeCache.get(dir)
+  if (hit && hit.at === at && hit.kind === kind) return hit.scope
+  const scope = await packageTypeScope(dir, kind)
+  scopeCache.set(dir, { at, kind, scope })
+  return scope
+}
+
+const within = (dir, path) => {
+  const rel = relative(dir, path)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+/**
+ * ⭐ A TYPE ANOTHER PACKAGE OF THE WORKSPACE DEFINES, found with nothing configured. Foundations a
+ * team develops together share a type by its full name, `@acme/member`, and a local build reads it
+ * from the package that defines it: a foundation whose name gives the `@acme` scope and whose own
+ * `schemas/` holds `member`, or a schemas package of that scope. No `schemas.config.js`, no package to
+ * install, nothing registered: sharing a type never needs a backend *[Diego, 2026-11-08: "it should be
+ * easy and good DX to share schemas"]*.
+ *
+ * Only packages of one workspace share this way: `fromDir` must be in one of the workspace's
+ * packages, as pnpm reads its list (`../workspace-patterns.js`), so a copy kept outside the list, a
+ * backup folder say, is never read. Found by the same rule `typesDefinedTwice` names copies by.
+ *
+ * @param {string} ref - `@scope/name`
+ * @param {string} fromDir - the foundation (its source folder) or site asking
+ * @returns {Promise<string[]>} the files that define it, each once; the caller refuses more than one
+ */
+export async function workspaceTypeFiles(ref, fromDir) {
+  const m = /^(@[^/]+)\/(.+)$/.exec(ref || '')
+  if (!m) return []
+  const [, scope, name] = m
+  const root = workspaceRootOf(fromDir)
+  if (!root) return []
+  const packages = workspacePackages(root).map((rel) => join(root, rel))
+  if (!packages.some((dir) => within(dir, resolve(fromDir)))) return []
+  const files = new Map()
+  for (const dir of packages) {
+    const kind = classifyPackage(dir) === 'foundation' ? 'foundation' : isSchemasPackage(dir) ? 'schemas' : null
+    if (!kind) continue
+    if ((await cachedTypeScope(dir, kind)) !== scope) continue
+    const typesAt = typeRoot(dir, kind)
+    if (!existsSync(join(typesAt, 'schemas'))) continue
+    for (const own of ownSchemaFiles(typesAt)) {
+      if (own.name === name) files.set(real(own.file), own.file)
+    }
+  }
+  return [...files.values()]
 }

@@ -11,10 +11,13 @@
  *   '@std/name'      → the shared standard schemas, shipped in the framework's
  *                      `@uniweb/schemas` package (resolved from the FOUNDATION's
  *                      node_modules)
- *   '@org/name'      → an org's own schemas, resolved from that org's
- *                      `@org/schemas` package — define schemas once and share
- *                      them across foundations, locally, no backend. (The org
- *                      becomes a real registry scope at publish time.)
+ *   '@org/name'      → an org's own schemas: the package of this workspace whose
+ *                      name gives the scope and that defines `name` (a foundation's
+ *                      own `schemas/`, or a schemas package), with nothing
+ *                      configured; else that org's installed `@org/schemas`
+ *                      package. Either way shared across foundations locally, no
+ *                      backend. (The org becomes a real registry scope at publish
+ *                      time.)
  *   '@uniweb/name'   → reserved: the platform system namespace, not a data
  *                      schema source (rejected, with a pointer to '@std').
  *
@@ -22,8 +25,9 @@
  * directory of schema files ('@org' → a folder), so '@org/name' resolves to a
  * bare folder anywhere on disk — no package, no install. It may also override a
  * SINGLE schema to an exact file ('@org/name' → a file), which wins over the
- * scope directory for that one name. Both take precedence over the '@org/schemas'
- * package convention (file over directory over package); see `loadSchemaAliases`.
+ * scope directory for that one name. Both take precedence over the workspace and
+ * the '@org/schemas' package (file over directory over workspace over package); see
+ * `loadSchemaAliases` and `workspaceTypeFiles`.
  *
  * The authoring format itself — the type vocabulary and the normalization of its
  * friendly aliases to canonical kinds — lives in `@uniweb/schemas/format`, and is
@@ -35,6 +39,7 @@
  * disk: finding a ref's file, alias routing, and closing the resolution graph.
  */
 
+import { workspaceTypeFiles } from './foundation/shared-types.js'
 import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, isAbsolute, extname, basename } from 'node:path'
@@ -280,11 +285,38 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
     return normalizeNamedSchema(await loadSchemaFile(file), ref)
   }
 
+  // ⭐ A type another package of this workspace defines: a foundation whose name gives the scope,
+  // or a schemas package of it, read with nothing configured (`workspaceTypeFiles`). After the
+  // routes `schemas.config.js` gives, which are explicit, and before an installed package, since a
+  // workspace is the copy being worked on. Two packages defining it are refused, naming both:
+  // there is one definition of a type.
+  const inWorkspace = await workspaceTypeFiles(`@${scope}/${name}`, srcDir)
+  if (inWorkspace.length > 1) {
+    throw new Error(
+      `Data schema '${ref}' is defined by ${inWorkspace.length} packages of this workspace: ` +
+        `${inWorkspace.join(', ')}. A type has one definition: keep one file, and name the type in ` +
+        `full in the others (\`uniweb doctor\` lists them as type-defined-twice).`
+    )
+  }
+  if (inWorkspace.length === 1) return normalizeNamedSchema(await loadSchemaFile(inWorkspace[0]), ref)
+
   // Every other scope is an org namespace: '@org/name' resolves `name` from that
   // org's '@org/schemas' package (the standards live under '@std', which ships in
   // '@uniweb/schemas'). Resolved from the foundation's node_modules, so a
   // workspace package shared across foundations works locally with no backend.
   const pkg = packageForScope(scope)
+  if (pkg !== SCOPE_PACKAGE.std && !isScopePackageInstalled(scope, srcDir)) {
+    throw Object.assign(
+      new Error(
+        `Data schema '${ref}' is defined nowhere this foundation can read: no package of its workspace ` +
+          `whose name gives the scope '@${scope}' defines '${name}', and '${pkg}' is not installed. ` +
+          `Name the foundation that defines it '@${scope}/<name>' in its main.js, route the type with ` +
+          `schemas.config.js ('@${scope}/${name}': '<its file>'), or add '${pkg}' to the foundation's ` +
+          `devDependencies.`
+      ),
+      { code: SCHEMA_NOT_FOUND }
+    )
+  }
   const schema = await resolveScopedSchema(pkg, name, srcDir)
   if (!schema) {
     throw new Error(`Unknown data schema '${ref}': '${pkg}' exports no schema named '${name}'.`)
