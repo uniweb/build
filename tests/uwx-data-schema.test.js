@@ -257,15 +257,6 @@ describe('toDataSchemaDeclaration — section prose travels, section `required` 
     expect(out).toMatchObject({ type: 'section', multiple: true, label: 'L', description: 'D' })
   })
 
-  it('an open map carries the field prose onto its rows section', () => {
-    const out = field({
-      type: 'object',
-      description: 'The form controls',
-      values: { type: 'object', fields: { type: { type: 'string', required: true } } },
-    })
-    expect(out).toMatchObject({ type: 'section', multiple: true, description: 'The form controls' })
-  })
-
   it('an authored ROOT section keeps its prose through normalize + lower', () => {
     // The normalizer used to drop these before the lowering could see them, so
     // this asserts the whole path rather than just the second half.
@@ -316,20 +307,6 @@ describe('toDataSchemaDeclaration — a section-shaped field carries its constra
 
   it('a nested object carries them too', () => {
     expect(field({ type: 'object', constraints: MIN1, fields: { a: 'string' } }).constraints).toEqual(MIN1)
-  })
-
-  it('an open map MERGES them with its structural uniqueness rule', () => {
-    // The `unique_field` rule is what makes the map's key the row identity, so an
-    // author's own constraints must add to it and can never replace it.
-    const out = field({
-      type: 'object',
-      constraints: MIN1,
-      values: { type: 'object', fields: { t: { type: 'string', required: true } } },
-    })
-    expect(out.constraints).toEqual([
-      { kind: 'unique_field', field: 'name', scope: 'section' },
-      { kind: 'min_items', value: 1 },
-    ])
   })
 
   it('a leaf refuses them — a section key, with no slot on a value', () => {
@@ -673,144 +650,36 @@ describe('toDataSchemaDeclaration — guards', () => {
 })
 
 /**
- * An OPEN MAP (`values:`) — an object whose keys belong to the author and whose
- * values share one schema.
- *
- * It lowers to ROWS: a `multi` section whose key field carries what was the object
- * key, with a section-scoped uniqueness rule making that key the row's identity.
- * That is the same shape `array of object` already lowers to, and the idiom the
- * store already uses for this (its site-content `collections` section), so an open
- * map and a hand-authored row set produce one wire shape rather than two spellings.
- *
- * Until 2026-08-05 `values:` had no lowering at all: the object branch read
- * `field.fields`, which an open map does not declare, so the section was emitted
- * with no fields. `@std/form` shipped that way and a consumer's validator rejected
- * it at restore — correctly, and at the last possible moment.
+ * A GROUP OF FIELDS — `type: object` with `fields:` — is what a registry calls a section with no
+ * `multiple`: `license: { small, medium }` lowers to `{ type: 'section', fields: { small, medium } }`,
+ * one record of the entity, served as the object a component reads. Keys the schema knows are its
+ * fields; keys that are data make a list (`many: true`). `values:`, an open map, was retired
+ * 2026-11-09 and is refused before the lowering (`@uniweb/schemas/format`).
  */
-describe('toDataSchemaDeclaration — open map (values:)', () => {
-  const decl = lower(
-    {
-      name: 'form',
-      fields: {
-        title: { type: 'string' },
-        fields: {
-          type: 'object',
-          required: true,
-          values: {
-            type: 'object',
-            fields: {
-              type: { type: 'string', required: true },
-              label: { type: 'string' },
-              required: { type: 'bool' }
-            }
-          }
-        }
-      }
-    },
-    '@std/form',
-    '@std/form'
-  )
-  const map = decl.sections.brief.fields.fields
+describe('toDataSchemaDeclaration — a group of fields', () => {
+  const brief = (fields) => lower({ name: 'x', fields }, '@t/x', '@t/x').sections.brief.fields
 
-  test('lowers to a nested section, not a leaf', () => {
-    expect(map.type).toBe('section')
+  test('⭐ lowers to one nested section, a field per key, with no `multiple`', () => {
+    const { license } = brief({
+      license: { type: 'object', label: 'License', fields: { small: { type: 'number', label: 'Small' }, 'extra-large': 'number' } },
+    })
+    expect(license).toMatchObject({ type: 'section', label: 'License' })
+    expect(license).not.toHaveProperty('multiple')
+    expect(Object.keys(license.fields)).toEqual(['small', 'extra-large'])
+    expect(license.fields.small).toMatchObject({ type: 'decimal', label: 'Small' })
   })
 
-  test('the section is MULTI — an open map is rows, not a singleton', () => {
-    // The original bug: lowered as `kind: single`, which is a collection lowered
-    // as one record.
-    expect(map.multiple).toBe(true)
+  test('a text field in a group is translated on its own, as any text field is', () => {
+    const { suits } = brief({ suits: { type: 'object', fields: { small: 'string', medium: 'string' } } })
+    expect(suits.fields.small).toMatchObject({ type: 'string', localized: true })
   })
 
-  test('the map key becomes a required `name` field, first in the namespace', () => {
-    expect(Object.keys(map.fields)[0]).toBe('name')
-    expect(map.fields.name.type).toBe('string')
-    expect(map.fields.name.required).toBe(true)
-  })
-
-  test('the key is NOT localized — a per-locale key would destroy identity', () => {
-    // String fields localize by default. A key that differed per locale would mean
-    // the same row is two rows, which is exactly what the key exists to prevent.
-    expect(map.fields.name.localized).toBeUndefined()
-  })
-
-  test('the key carries a section-scoped uniqueness rule', () => {
-    expect(map.constraints).toEqual([
-      { kind: 'unique_field', field: 'name', scope: 'section' }
-    ])
-  })
-
-  test('the value schema becomes ordinary declared fields beside the key', () => {
-    // The point of rows over `type: json`: every value field stays a real field the
-    // store validates, rather than an opaque blob.
-    expect(Object.keys(map.fields)).toEqual(['name', 'type', 'label', 'required'])
-    expect(map.fields.type.required).toBe(true)
-    expect(map.fields.required.type).toBe('bool')
-  })
-
-  test('a value schema declaring its own `name` is an error, not a silent overwrite', () => {
-    expect(() =>
-      lower(
-        {
-          name: 'x',
-          fields: {
-            m: {
-              type: 'object',
-              values: { type: 'object', fields: { name: { type: 'string' } } }
-            }
-          }
-        },
-        '@t/x',
-        '@t/x'
-      )
-    ).toThrow(/value field named 'name'/)
-  })
-
-  // ⭐ A map of plain values — a price per tier — is the same rows with one column for the value.
-  // ⛔ Until 2026-11-08 it was refused here ("not an object with 'fields'"), so a type holding one
-  // built, and could be neither pushed nor registered.
-  test('⭐ a map of plain values lowers to rows of its key and one `value` column', () => {
-    const plain = lower(
-      { name: 'x', fields: { license: { type: 'object', values: { type: 'number' } } } },
-      '@t/x',
-      '@t/x'
-    ).sections.brief.fields.license
-    expect(plain.type).toBe('section')
-    expect(plain.multiple).toBe(true)
-    expect(Object.keys(plain.fields)).toEqual(['name', 'value'])
-    expect(plain.fields.name).toMatchObject({ type: 'string', required: true })
-    expect(plain.fields.name.localized).not.toBe(true)
-    expect(plain.fields.value.type).toBe('decimal')
-    expect(plain.constraints[0]).toEqual({ kind: 'unique_field', field: 'name', scope: 'section' })
-  })
-
-  test('a map of text keeps its value translatable, as a text field is', () => {
-    const plain = lower(
-      { name: 'x', fields: { suits: { type: 'object', values: { type: 'string' } } } },
-      '@t/x',
-      '@t/x'
-    ).sections.brief.fields.suits
-    expect(plain.fields.value).toMatchObject({ type: 'string', localized: true })
-  })
-
-  test('a map of records whose one field is `value` is refused, as the plain map written long', () => {
-    expect(() =>
-      lower(
-        { name: 'x', fields: { m: { type: 'object', values: { type: 'object', fields: { value: { type: 'number' } } } } } },
-        '@t/x',
-        '@t/x'
-      )
-    ).toThrow(/map of plain values written long/)
-  })
-
-  test('a list of records as a map\'s value is an error — a row\'s column is a field', () => {
-    expect(() =>
-      lower(
-        { name: 'x', fields: { m: { type: 'object', values: { type: 'array', items: { type: 'object', fields: { a: { type: 'string' } } } } } } },
-        '@t/x',
-        '@t/x'
-      )
-    ).toThrow(/neither a plain value nor a record/)
+  test('keys that are data make a list of records, each carrying its key', () => {
+    const { specs } = brief({
+      specs: { type: 'object', many: true, fields: { label: { type: 'string', required: true }, value: 'string' } },
+    })
+    expect(specs).toMatchObject({ type: 'section', multiple: true })
+    expect(Object.keys(specs.fields)).toEqual(['label', 'value'])
   })
 })
 

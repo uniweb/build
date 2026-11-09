@@ -234,7 +234,7 @@ describe('validateAndNormalizeSchema — errors', () => {
     )
   })
   it('requires nested fields on an object', () => {
-    expect(bad({ fields: { x: { type: 'object' } } })).toThrow(/object field 'x' must declare nested 'fields'/)
+    expect(bad({ fields: { x: { type: 'object' } } })).toThrow(/object field 'x' must declare its 'fields'/)
   })
   it('requires a target on a ref', () => {
     expect(bad({ fields: { x: { type: 'ref' } } })).toThrow(/ref field 'x' must name a target/)

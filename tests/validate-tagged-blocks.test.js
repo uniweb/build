@@ -40,8 +40,15 @@ const siteWith = (tag, data, { type = 'Form', language = 'yaml' } = {}) => ({
   ],
 })
 
+// A form's block: its title and a list of controls, each naming its own field.
 const FORM = validateAndNormalizeSchema(
-  { name: 'form', fields: { title: { type: 'string' }, fields: { type: 'object', values: { type: 'object', fields: { type: { type: 'string', required: true } } } } } },
+  {
+    name: 'form',
+    fields: {
+      title: { type: 'string' },
+      controls: { type: 'object', many: true, fields: { name: { type: 'string', required: true }, type: { type: 'string', required: true } } },
+    },
+  },
   '@std/form'
 )
 const NAV = validateAndNormalizeSchema(
@@ -57,18 +64,18 @@ const run = (site) => validateTaggedDataBlocks(site, foundation, schemas)
 
 describe('a bound tagged block is finally checked', () => {
   it('catches a control with no type — the case @std/form exists for', () => {
-    const out = run(siteWith('form', { title: 'Contact', fields: { email: { label: 'Email' } } }))
-    expect(out.violations.map((v) => `${v.field}:${v.rule}`)).toEqual(['fields.email.type:required'])
+    const out = run(siteWith('form', { title: 'Contact', controls: [{ name: 'email', label: 'Email' }] }))
+    expect(out.violations.map((v) => `${v.field}:${v.rule}`)).toEqual(['controls[0].type:required'])
     expect(out.checked).toBe(1)
   })
 
   it('passes a well-formed block', () => {
-    const out = run(siteWith('form', { title: 'Contact', fields: { email: { type: 'string' } } }))
+    const out = run(siteWith('form', { title: 'Contact', controls: [{ name: 'email', type: 'string' }] }))
     expect(out.violations).toEqual([])
   })
 
   it('attributes the finding to the page, section and fence', () => {
-    const [v] = run(siteWith('form', { fields: { a: {} } })).violations
+    const [v] = run(siteWith('form', { controls: [{ name: 'a' }] })).violations
     expect(v.file).toBe('/contact › Form › yaml:form')
     expect(v.schema).toBe('@std/form')
     expect(v.users).toEqual([{ route: '/contact', section: 'Form', key: 'form' }])
@@ -127,11 +134,11 @@ describe('what it deliberately stays silent about', () => {
   })
 
   it('a section type the foundation does not declare data for', () => {
-    expect(run(siteWith('form', { fields: { a: {} } }, { type: 'Unbound' })).violations).toEqual([])
+    expect(run(siteWith('form', { controls: [{ name: 'a' }] }, { type: 'Unbound' })).violations).toEqual([])
   })
 
   it('a ref that resolves to no schema', () => {
-    const out = validateTaggedDataBlocks(siteWith('form', { fields: { a: {} } }), foundation, {})
+    const out = validateTaggedDataBlocks(siteWith('form', { controls: [{ name: 'a' }] }), foundation, {})
     expect(out.violations).toEqual([])
   })
 
@@ -158,15 +165,15 @@ describe('what it deliberately stays silent about', () => {
 
 describe('it finds blocks wherever they sit', () => {
   it('nested inside other content', () => {
-    const site = siteWith('form', { fields: { a: {} } })
+    const site = siteWith('form', { controls: [{ name: 'a' }] })
     site.pages[0].sections[0].content.content = [
-      { type: 'blockquote', content: [{ type: 'dataBlock', attrs: { tag: 'form', language: 'yaml', data: { fields: { a: {} } } } }] },
+      { type: 'blockquote', content: [{ type: 'dataBlock', attrs: { tag: 'form', language: 'yaml', data: { controls: [{ name: 'a' }] } } }] },
     ]
     expect(run(site).violations.map((v) => v.rule)).toEqual(['required'])
   })
 
   it('and reports the authored serialization in the label', () => {
-    const [v] = run(siteWith('form', { fields: { a: {} } }, { language: 'json' })).violations
+    const [v] = run(siteWith('form', { controls: [{ name: 'a' }] }, { language: 'json' })).violations
     expect(v.file).toContain('json:form')
   })
 })

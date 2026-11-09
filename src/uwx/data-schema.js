@@ -34,93 +34,6 @@ const TEXT_KINDS = new Set(['string', 'text'])
 // ⛔ `html` was one until 2026-10-14; `@uniweb/schemas` refuses it by name since.
 const CONTENT_TEXT_FORMATS = new Set(['markdown'])
 
-// The field an open map's key lowers into. `name` matches the idiom already in use
-// for this shape (the backend's site-content `collections` section), so an open map
-// and a hand-authored row set produce the same wire shape rather than two spellings
-// of one thing. Not configurable on purpose: a second way to spell it would be a
-// vocabulary addition for a collision that does not exist yet — a value schema that
-// declares its own `name` is an error instead, which names the problem precisely.
-const OPEN_MAP_KEY = 'name'
-
-// The column a MAP OF PLAIN VALUES' value lowers into, beside the key: `{ small: 59 }` is the row
-// `{ name: 'small', value: 59 }`. A map of records whose one field is `value` would lower to the same
-// rows, so it is refused as that map written long (`lowerField`), and the two columns alone say which
-// a section is (`isPlainMapSection`).
-const PLAIN_MAP_VALUE = 'value'
-
-// ⭐ THE SCOPE OF AN OPEN MAP'S KEY: unique within the map, which is the one place the rule can say
-// two ways. A backend's `unique_field` keys rows by `scope`: `section` across every row of the section
-// in the entity, `siblings` by the row's parent item (backend, 2026-11-08). One map per entity, at the
-// top or under a single section, is `section`, as every open map was lowered until then. A map under a
-// list, or under another map, is one map per item, and `section` would refuse the second item that
-// reuses a key: `tiers[].price` with a `small` in two tiers. ⛔ That is what it did until 2026-11-08.
-const OPEN_MAP_SCOPES = new Set(['section', 'siblings'])
-const openMapScope = (underList) => (underList ? 'siblings' : 'section')
-
-/**
- * ⭐ AN OPEN MAP'S LOWERED SECTION. `values:` lowers to rows (`lowerField`): a `multiple` section
- * whose required string `name` — the map's key — is made each row's identity by a `unique_field`
- * rule. A record FILE holds it as the author wrote it, a map from key to value; the WIRE holds the
- * rows. This is the one test, read off the declaration alone, because a pull into a clone has
- * nothing else: the push turns a file's map into rows by it, and the pull the rows back into a map.
- */
-export function isOpenMapSection(def) {
-  if (def?.multiple !== true || def.self_nesting === true) return false
-  const key = def.fields?.[OPEN_MAP_KEY]
-  if (key?.type !== 'string' || key.required !== true || key.localized === true) return false
-  return (def.constraints || []).some((c) => c?.kind === 'unique_field' && c.field === OPEN_MAP_KEY && OPEN_MAP_SCOPES.has(c.scope))
-}
-
-/**
- * ⭐ A MAP OF PLAIN VALUES' LOWERED SECTION: an open map whose rows hold the key and one column,
- * `value`, and nothing else — a price per tier, `{ small: 59, medium: 99 }`. Read off the declaration
- * alone, as `isOpenMapSection` is, since a pull reads the declaration as registered.
- */
-export function isPlainMapSection(def) {
-  if (!isOpenMapSection(def)) return false
-  const columns = Object.keys(def.fields || {})
-  return columns.length === 2 && columns.includes(PLAIN_MAP_VALUE)
-}
-
-/**
- * A file's open map as the rows it lowers to, in the map's key order: each key is its row's `name`,
- * and its value the row's other fields, or, in a map of plain values, the row's `value`.
- *
- * @param {object} map
- * @param {{ plain?: boolean }} [opts] - `plain`: a map of plain values (`isPlainMapSection`)
- */
-export function openMapEntries(map, { plain = false } = {}) {
-  return Object.entries(map).map(([key, value]) => ({
-    key,
-    value,
-    row: plain ? { [OPEN_MAP_KEY]: key, [PLAIN_MAP_VALUE]: value } : { ...value, [OPEN_MAP_KEY]: key },
-  }))
-}
-
-/**
- * Rows back as the map a file holds, or null when they cannot be one — a row with no key, or a key
- * two rows share — so a caller keeps them a list, which a push reads too, and nothing is lost. In a
- * map of plain values each key takes its row's `value`; a row with none (a translatable value with no
- * text) leaves its key out, as a record leaves out a field with no value.
- *
- * @param {object[]} rows
- * @param {{ plain?: boolean }} [opts] - `plain`: a map of plain values (`isPlainMapSection`)
- */
-export function openMapFromRows(rows, { plain = false } = {}) {
-  const map = {}
-  for (const row of rows || []) {
-    const key = row?.[OPEN_MAP_KEY]
-    if (typeof key !== 'string' || key === '' || Object.hasOwn(map, key)) return null
-    if (plain) {
-      if (row[PLAIN_MAP_VALUE] !== undefined) map[key] = row[PLAIN_MAP_VALUE]
-      continue
-    }
-    const { [OPEN_MAP_KEY]: _key, ...value } = row
-    map[key] = value
-  }
-  return map
-}
-
 /**
  * A `text` field marked as rich content (`format: markdown` or `html`): the
  * file-based body target. Round-trips as the raw source string — what the retired
@@ -364,10 +277,9 @@ function lowerSectionsForm(sectionsMap, resolve, optResolve) {
 // are type: section"); `nestable` → `self_nesting`; `append_only` (insert-only
 // records) passes through; authored cross-cutting `constraints` pass through as a
 // bare array. Leaves and nested sections share one ordered `fields:` namespace.
-function lowerSection(def, resolve, optResolve, path = '', underList = false) {
+function lowerSection(def, resolve, optResolve, path = '') {
   const out = {}
-  const many = (def.kind || 'single') === 'multi'
-  if (many) out.multiple = true
+  if ((def.kind || 'single') === 'multi') out.multiple = true
   if (def.brief === true) out.brief = true
   // Display prose IS a section key — the registry stores it and keys it for
   // translation as `section.<name>.label` / `.description` (confirmed 2026-08-05).
@@ -395,14 +307,14 @@ function lowerSection(def, resolve, optResolve, path = '', underList = false) {
   for (const part of Object.keys(def)) {
     if (part === 'fields') {
       for (const [key, rawField] of Object.entries(def.fields || {})) {
-        fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key, underList || many)
+        fields[key] = lowerField(rawField, resolve, optResolve, path ? `${path}/${key}` : key)
       }
     } else if (part === 'sections') {
       for (const [childName, childDef] of Object.entries(def.sections || {})) {
         const childPath = path ? `${path}/${childName}` : childName
         fields[childName] = {
           type: 'section',
-          ...lowerSection(childDef, resolve, optResolve, childPath, underList || many)
+          ...lowerSection(childDef, resolve, optResolve, childPath)
         }
       }
     }
@@ -449,106 +361,14 @@ function lowerSection(def, resolve, optResolve, path = '', underList = false) {
 // a section is the consumer's contract to state, not ours to assume. Until it
 // does, an authored `required: true` on a nested object or a list of records is
 // still dropped here. `@std/publication`'s `authors` is exactly that case.
-function lowerField(rawField, resolve, optResolve, path = '', underList = false) {
+function lowerField(rawField, resolve, optResolve, path = '') {
   const field = asField(rawField)
   const type = field.type
 
   if (type === 'object') {
-    // An OPEN MAP (`values:`) is ROWS, not a singleton. Its keys belong to the
-    // author, which makes them data — so the map lowers to a `multi` section whose
-    // key field carries what was the object key, with a uniqueness rule making that
-    // key the row's identity within its map (`openMapScope`: the section's, or under a
-    // list or another map, the item's). This is the same shape `array of
-    // object` already lowers to, and the idiom the backend's own site-content
-    // `collections` section uses; no new wire construct is involved.
-    //
-    // Identity is the KEY, never row position — a round-trip that rebuilds the map
-    // from order looks correct and drifts the first time rows are reordered.
-    // Authoring order is still preserved into row order, because for a form the
-    // field order is what the visitor sees.
-    if (field.values !== undefined) {
-      const value = asField(field.values)
-      // ⭐ A MAP OF PLAIN VALUES — a price per tier, `{ small: 59, medium: 99 }` — is the same rows,
-      // with one column for the value, `value`, as a list of plain values has a rule of its own (a
-      // multi-valued field). ⛔ Until 2026-11-08 it was refused, "not an object with 'fields'", so a
-      // type holding one built, and could never be pushed or registered.
-      const recordsAsValue = value.type === 'array' && asField(value.items || {}).type === 'object'
-      if (value.type !== 'object' && !recordsAsValue) {
-        return {
-          type: 'section',
-          ...lowerSection(
-            {
-              kind: 'multi',
-              ...sectionAttrsFromField(field),
-              // The key is an identifier, never content: `translatable: false`, as below.
-              fields: {
-                [OPEN_MAP_KEY]: { type: 'string', required: true, translatable: false },
-                [PLAIN_MAP_VALUE]: field.values,
-              },
-              constraints: [
-                { kind: 'unique_field', field: OPEN_MAP_KEY, scope: openMapScope(underList) },
-                ...(sectionAttrsFromField(field).constraints || [])
-              ]
-            },
-            resolve,
-            optResolve,
-            path,
-            underList
-          )
-        }
-      }
-      if (value.type !== 'object' || !value.fields) {
-        throw new Error(
-          `Data schema: open map at '${path}' declares 'values' that is neither a plain value nor a ` +
-            `record with 'fields'. An open map lowers to rows: its key and the value's columns.`
-        )
-      }
-      const own = Object.keys(value.fields)
-      if (own.length === 1 && own[0] === PLAIN_MAP_VALUE) {
-        throw new Error(
-          `Data schema: open map at '${path}' holds records whose one field is '${PLAIN_MAP_VALUE}', ` +
-            `which is a map of plain values written long: write 'values:' as that field. Both lower to ` +
-            `the same rows, and a pull can write only one of them back.`
-        )
-      }
-      if (value.fields[OPEN_MAP_KEY]) {
-        throw new Error(
-          `Data schema: open map at '${path}' has a value field named '${OPEN_MAP_KEY}', which ` +
-            `is the field the map's key lowers into. Rename that field.`
-        )
-      }
-      return {
-        type: 'section',
-        ...lowerSection(
-          {
-            kind: 'multi',
-            ...sectionAttrsFromField(field),
-            // `translatable: false` is load-bearing, not tidiness: a string field is
-            // localized by default, and a localized key could differ per locale —
-            // which would destroy the identity the key exists to carry. The key is an
-            // identifier, never content.
-            fields: {
-              [OPEN_MAP_KEY]: { type: 'string', required: true, translatable: false },
-              ...value.fields
-            },
-            // The uniqueness rule is STRUCTURAL — it is what makes the map's key the
-            // row's identity — so it is prepended rather than assigned: an author's
-            // own constraints on this field add to it and can never replace it.
-            constraints: [
-              { kind: 'unique_field', field: OPEN_MAP_KEY, scope: openMapScope(underList) },
-              ...(sectionAttrsFromField(field).constraints || [])
-            ]
-          },
-          resolve,
-          optResolve,
-          path,
-          underList
-        )
-      }
-    }
     return {
       type: 'section',
-      ...lowerSection({ kind: 'single', ...sectionAttrsFromField(field), fields: field.fields }, resolve, optResolve, path, underList)
+      ...lowerSection({ kind: 'single', ...sectionAttrsFromField(field), fields: field.fields }, resolve, optResolve, path)
     }
   }
   if (type === 'array') {
@@ -556,7 +376,7 @@ function lowerField(rawField, resolve, optResolve, path = '', underList = false)
     if (items && items.type === 'object') {
       return {
         type: 'section',
-        ...lowerSection({ kind: 'multi', ...sectionAttrsFromField(field), fields: items.fields }, resolve, optResolve, path, underList)
+        ...lowerSection({ kind: 'multi', ...sectionAttrsFromField(field), fields: items.fields }, resolve, optResolve, path)
       }
     }
     // A multi-valued LEAF or REFERENCE. `normalizeField` split this field in two
@@ -775,13 +595,12 @@ export function assertOptionsTargets(dataSchemas) {
 }
 
 // Every field of a normalized schema that declares `options:`, with its dotted path — in any
-// section, nested object, list of records or open map.
+// section, nested object or list of records.
 function forEachOptionsField(schema, fn) {
   const visitField = (raw, path) => {
     const field = asField(raw)
     if (typeof field.options === 'string') fn(path, field.options)
     if (field.items) visitField(field.items, path)
-    if (field.values) visitField(field.values, path)
     for (const [key, child] of Object.entries(field.fields || {})) visitField(child, `${path}.${key}`)
   }
   const visitSection = (section, prefix) => {
@@ -794,8 +613,7 @@ function forEachOptionsField(schema, fn) {
 
 // The sections of a normalized Model by the path the registry names each one by, and whether each
 // holds items — the lowering's own shapes (`lowerField`): a child in `sections:`, a nested object
-// (one record), a list of records, an open map (rows). A section holding only sections — a binder —
-// holds none.
+// (one record), a list of records. A section holding only sections — a binder — holds none.
 function sectionPathsOf(normalized) {
   const out = []
   const visit = (path, node) => {
@@ -814,10 +632,7 @@ function sectionPathsOf(normalized) {
 // The section a section-shaped FIELD lowers into (`lowerField`), or null for a leaf.
 function sectionOfField(raw) {
   const field = asField(raw)
-  if (field.type === 'object') {
-    if (field.values !== undefined) return { kind: 'multi', fields: { [OPEN_MAP_KEY]: { type: 'string' }, ...asField(field.values).fields } }
-    return { kind: 'single', fields: field.fields }
-  }
+  if (field.type === 'object') return { kind: 'single', fields: field.fields }
   if (field.type === 'array' && field.items && asField(field.items).type === 'object') {
     return { kind: 'multi', fields: asField(field.items).fields }
   }

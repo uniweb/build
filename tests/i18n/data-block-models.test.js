@@ -9,7 +9,6 @@
  * does not know a field called `style`, and a translated one fell back to the default look.
  */
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { isPlainMapSection } from '../../src/uwx/data-schema.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { markdownToProseMirror } from '@uniweb/content-reader'
@@ -165,16 +164,26 @@ describe('a declared shape the translation step cannot read is said aloud', () =
     spy.mockRestore()
   })
 
-  // ⛔ Until 2026-11-08 the lowering refused a map of plain values, so this step read none of the
-  // block's fields and guessed its strings, and said so.
-  it('⭐ an open map of plain values is read, as a push lowers it: its key and one `value` column', async () => {
+  // `values:`, an open map, was retired 2026-11-09: a block that declares one has no model, and
+  // the warning carries the refusal, which names what to write instead.
+  it('an open map is said aloud with its refusal', async () => {
     declare('Hours', "{ office: { labels: { type: 'object', values: 'string' }, note: 'string' } }")
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const models = await dataBlockModels(SITE)
+    expect(models('Hours', 'office')).toBeNull()
+    expect(said(spy)).toHaveLength(1)
+    expect(said(spy)[0]).toMatch(/declares 'values', which a data schema does not take/)
+    spy.mockRestore()
+  })
+
+  it('a group of fields is read, each key a field of its own', async () => {
+    declare('Hours', "{ office: { labels: { type: 'object', fields: { open: 'string', closed: 'string' } }, note: 'string' } }")
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const models = await dataBlockModels(SITE)
     const model = models('Hours', 'office')
     expect(model).not.toBeNull()
     const labels = Object.values(model.sections).map((s) => s.fields?.labels).find(Boolean)
-    expect(isPlainMapSection(labels)).toBe(true)
+    expect(labels).toMatchObject({ type: 'section', fields: { open: { localized: true }, closed: { localized: true } } })
     expect(said(spy)).toEqual([])
     spy.mockRestore()
   })

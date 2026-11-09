@@ -137,7 +137,7 @@ function normalizeNamedSchema(schema, ref) {
   return normalized
 }
 
-// A field that lowers into a section — a nested object, an open map, a list of records — and so
+// A field that lowers into a section — a nested object, a list of records — and so
 // may carry a section's `constraints`.
 function isSectionShaped(spec) {
   if (spec.type === 'object') return true
@@ -156,7 +156,6 @@ function fieldsWhere(schema, test) {
     if (test(spec)) found.push(path)
     walkFields(spec.fields, `${path}.`)
     if (spec.items) walkSpec(spec.items, `${path}[]`)
-    if (spec.values) walkSpec(spec.values, `${path}{}`)
   }
   const walkSections = (sections, prefix) => {
     if (!sections || typeof sections !== 'object') return

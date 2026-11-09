@@ -9,7 +9,7 @@
  * Two layers, and only the second one lives here:
  *   - `validateItem(schema, item)` — pure, facet-driven: walks a normalized
  *     schema's declared facets (required / type / enum / format / nested
- *     object+array / open map) and emits one finding per failed facet. No I/O.
+ *     object+array) and emits one finding per failed facet. No I/O.
  *     It now lives in `@uniweb/schemas/conform`, beside the vocabulary it must
  *     agree with, and is re-exported below so every caller here is unchanged.
  *   - `validateDataInputs({ siteRoot, foundationPath })` — the join: pairs each
