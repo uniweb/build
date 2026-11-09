@@ -232,6 +232,17 @@ describe('a push', () => {
     expect(said[0]).toMatch(/`access\.@\/vehicel` names a type none of this site's foundations declares/)
     expect(pkg.siteContent).not.toBe(null)
   })
+
+  it('⭐ warns of it while the foundation has no scope, as every project has until its first register', async () => {
+    makeSite({ foundationName: 'fnd', blueprint: "access:\n  '@/vehicle': { add: open }\n  '@/vehicel': { add: open }\n" })
+    const pkg = await emitSyncPackages(SITE, { backend: BACKEND })
+    const said = pkg.warnings.filter((m) => m.startsWith('blueprint.yml'))
+    expect(said.filter((m) => /names a type none of this site's foundations declares/.test(m))).toEqual([
+      expect.stringMatching(/^blueprint\.yml: `access\.@\/vehicel` names a type/)
+    ])
+    // …beside the push's word on each `@/x` that goes as written — the declared one included.
+    expect(said.filter((m) => /has no scope yet/.test(m))).toHaveLength(2)
+  })
 })
 
 describe('a pull', () => {
@@ -357,6 +368,21 @@ describe('what a backend would leave out', () => {
     ])
     // A build sends nothing, and a project's foundation has no scope until its first register.
     expect(blueprintWarnings({ access: { '@/vehicle': {} } }, { scope: null, declared: { types: null } })).toEqual([])
+  })
+
+  it('⭐ with no scope, still names an `@/x` the foundation does not declare — its own types are `@/x` too', () => {
+    const declared = { types: new Set(['@/vehicle']) }
+    const blueprint = { access: { '@/vehicle': {}, '@/vehicel': {} } }
+    // CONTROL: the declared one is not named.
+    expect(blueprintWarnings(blueprint, { scope: null, declared })).toEqual([
+      expect.stringMatching(/^blueprint\.yml: `access\.@\/vehicel` names a type none of this site's foundations declares/)
+    ])
+  })
+
+  it('reads the types a foundation with no scope declares as its own, `@/x`', async () => {
+    makeSite({ foundationName: 'fnd' })
+    const declared = await siteDeclaredTypes(SITE, yaml.load(read('site/site.yml')), { scope: null })
+    expect([...declared.types].sort()).toEqual(['@/store', '@/vehicle'])
   })
 
   it("reads the types a local foundation declares from its source — its `schemas/`", async () => {

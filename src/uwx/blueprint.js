@@ -245,14 +245,15 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
     if (!isMap(blueprint[key])) continue
     for (const type of Object.keys(blueprint[key])) {
       const at = `${key}.${type}`
-      if (!scoped && type.startsWith('@/')) {
-        if (sending) out.push(
+      if (!scoped && type.startsWith('@/') && sending) {
+        out.push(
           `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own type, and the foundation has no scope yet, ` +
             "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
             "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
         )
-        continue
       }
+      // With no scope the foundation's own types are read as `@/x` too (`siteDeclaredTypes`), so an
+      // `@/x` is checked as written: every project's foundation has no scope until its first register.
       if (declared?.types && !declared.types.has(qualifyRef(type, scope))) {
         out.push(
           `${BLUEPRINT_FILE}: \`${at}\` names a type none of this site's foundations declares, so a backend ` +
