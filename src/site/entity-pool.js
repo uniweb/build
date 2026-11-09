@@ -54,7 +54,7 @@
 // otherwise hold records nothing reads, silently.
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, extname, basename, resolve } from 'node:path'
+import { join, extname, basename, resolve, dirname } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
@@ -167,6 +167,71 @@ export function resolveRecordsDir(siteRoot, paths) {
   refuseRetiredLayout(siteRoot, rel)
   return { rel, abs: resolve(siteRoot, rel) }
 }
+
+/**
+ * ⭐ ANOTHER SITE'S RECORDS, MOUNTED — `site.yml::paths`, as a pages folder is mounted:
+ *
+ *     paths:
+ *       records/acme/member: ../../hub/site/records/acme/member
+ *
+ * The mounted directory is this site's records of that type: the build, `uniweb dev`, `validate`
+ * and translation read its files where the key puts them. They stay the owning site's, so a push
+ * links the entities the owner's push made rather than sending them again, and a pull writes
+ * nothing into the directory (`uwx/records.js`, `uwx/records-project.js`). On a backend a site's
+ * folder is references to entities, and one entity can be in several sites' folders
+ * *[Diego, 2026-11-08: "the same entities can be reference from more than one sites records
+ * (folder of entity references)"]*.
+ *
+ * A key names one type, as a records folder does: `records/<name>` or `records/<org>/<name>`. Link
+ * and file records are not mounted: they are entries of a site's own folder. The site's own folder
+ * at that path holds no records of its own (`readEntityPoolSync` says so). The owner is the nearest
+ * folder at or above the mounted directory holding a `site.yml`.
+ *
+ * @param {string} siteRoot
+ * @param {object} [paths] - `site.yml::paths`, when the caller has already read it
+ * @returns {Array<{ key: string, dirs: string[], abs: string, owner: string|null }>}
+ */
+export function resolveRecordMounts(siteRoot, paths) {
+  const p = paths === undefined ? readSitePaths(siteRoot) : paths || {}
+  const mounts = []
+  for (const [key, value] of Object.entries(p)) {
+    if (!key.startsWith(`${RECORDS_DIR}/`)) continue
+    const dirs = key.slice(RECORDS_DIR.length + 1).replace(/\/+$/, '').split('/')
+    const named = schemaForPoolDirs(dirs)
+    if (!named || dirs.some((d) => !d || d === '.' || d === '..' || isHidden(d))) {
+      throw new Error(
+        `[uniweb] site.yml: \`paths.${key}\` names no type. A records mount is one type's folder: ` +
+          `\`${RECORDS_DIR}/<name>\` for \`@/<name>\`, or \`${RECORDS_DIR}/<org>/<name>\` for \`@<org>/<name>\`.`
+      )
+    }
+    if (named === LINK_RECORDS || isFileRecordDir(dirs)) {
+      throw new Error(
+        `[uniweb] site.yml: \`paths.${key}\` mounts link or file records, which are entries of a site's ` +
+          `own folder. Mount a type of data records.`
+      )
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new Error(`[uniweb] site.yml: \`paths.${key}\` must be the path of the directory it mounts.`)
+    }
+    const abs = resolve(siteRoot, value.trim())
+    if (!isDirectory(abs)) {
+      throw new Error(`[uniweb] site.yml: \`paths.${key}\` mounts \`${value.trim()}\`, which is not a directory here.`)
+    }
+    mounts.push({ key, dirs, abs, owner: owningSiteRoot(abs) })
+  }
+  return mounts
+}
+
+// The site a mounted records directory belongs to: the nearest folder at or above it with a site.yml.
+function owningSiteRoot(dir) {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, 'site.yml'))) return d
+    if (dirname(d) === d) return null
+  }
+}
+
+// A link record's type, which no mount takes (`resolveRecordMounts`).
+const LINK_RECORDS = '@uniweb/link'
 
 /** Source extensions a record file may have. Mirrors the sync-lane reader. */
 export const ENTITY_EXTENSIONS = new Set(['.md', '.yml', '.yaml', '.json', '.bib'])
@@ -283,10 +348,14 @@ export function readEntityPoolSync(siteRoot, opts = {}) {
   // ⛔ `resolve`, not `join`: an absolute `paths.records` is supported, and
   // `join(siteRoot, '/abs')` is a path under the site root that does not exist.
   const base = resolve(siteRoot, rel)
-  if (!isDirectory(base)) return { entities: [], errors: [], exists: false, dir: rel }
+  const mounts = opts.mounts !== undefined ? opts.mounts : resolveRecordMounts(siteRoot)
+  if (!isDirectory(base) && mounts.length === 0) return { entities: [], errors: [], exists: false, dir: rel }
 
   const entities = []
   const errors = []
+  // A mounted type's folder, by its path below the records directory.
+  const mountAt = new Map(mounts.map((m) => [m.dirs.join('/'), m]))
+  let mountedFrom = null
   // A file record is named by its stem, so two files of one stem cannot both be one.
   const fileStems = new Map()
 
@@ -301,6 +370,19 @@ export function readEntityPoolSync(siteRoot, opts = {}) {
       if (isHidden(e.name)) continue
       const full = join(dir, e.name)
       if (e.isDirectory()) {
+        // ⭐ A mounted type's folder is read from its mount (below), never from here.
+        const mount = mountedFrom ? null : mountAt.get([...dirs, e.name].join('/'))
+        if (mount) {
+          const own = readdirSync(full).filter((n) => !isHidden(n))
+          if (own.length) {
+            errors.push(
+              `${rel}/${[...dirs, e.name].join('/')}/ is mounted from ${mount.abs} (site.yml \`paths.${mount.key}\`), ` +
+                `and holds ${own.length} file(s) of its own, which are not read. A mounted type's records are ` +
+                `the owner's: move these to the owning site, or remove the mount.`
+            )
+          }
+          continue
+        }
         if (dirs.length >= 2) {
           // Deeper than a schema dir. Say what the path was read AS, because the
           // author's intent (organising records inside a schema) is the reading
@@ -362,11 +444,17 @@ export function readEntityPoolSync(siteRoot, opts = {}) {
         absPath: full,
         ext,
         ...(fileRecord ? { fileRecord: true } : {}),
+        ...(mountedFrom ? { mounted: mountedFrom } : {}),
       })
     }
   }
 
-  walk(base, [])
+  if (isDirectory(base)) walk(base, [])
+  for (const mount of mounts) {
+    mountedFrom = { from: mount.abs, owner: mount.owner, key: mount.key }
+    walk(mount.abs, [...mount.dirs])
+  }
+  mountedFrom = null
   return { entities, errors, exists: true, dir: rel }
 }
 

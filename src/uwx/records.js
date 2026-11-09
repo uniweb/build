@@ -556,12 +556,12 @@ function describeUnresolved({ path, model, value, invalid, ambiguous }) {
 // `{ $ref: <$id> }` for a record of the same package. A uuid it did not mint is never
 // sent (see `buildRecordEntities`).
 const AMBIGUOUS = Symbol('ambiguous')
-function refResolver(readSchemas, recordMap, moved = new Map()) {
+function refResolver(readSchemas, recordMap, moved = new Map(), shared = []) {
   const byModel = new Map() // Model → handle → the record: its own id (null before its first push) and `$id`
   const byOwnId = new Map() // the record's own id → the record
+  const namesOf = (model) => byModel.get(model) || byModel.set(model, new Map()).get(model)
   for (const { declaration, flat } of readSchemas) {
-    let names = byModel.get(declaration.name)
-    if (!names) byModel.set(declaration.name, (names = new Map()))
+    const names = namesOf(declaration.name)
     for (const rec of flat) {
       const own = typeof rec.$uuid === 'string' && rec.$uuid ? rec.$uuid : null
       const record = { own, id: rec.$id }
@@ -569,8 +569,19 @@ function refResolver(readSchemas, recordMap, moved = new Map()) {
       if (own) byOwnId.set(own, record)
     }
   }
+  // A mounted record is named by its handle too, and answers with the uuid its owner's push was given.
+  for (const s of shared) {
+    const names = namesOf(s.model)
+    names.set(s.slug, names.has(s.slug) ? AMBIGUOUS : { uuid: s.uuid })
+    if (s.own) byOwnId.set(s.own, { uuid: s.uuid })
+  }
   // A record moved to another data schema is new on the wire, so a reference names it by `$id`.
-  const sent = ({ own, id }) => (own && recordMap[own] && !moved.has(own) ? { uuid: recordMap[own] } : { ref: id })
+  const sent = (record) =>
+    record.uuid
+      ? { uuid: record.uuid }
+      : record.own && recordMap[record.own] && !moved.has(record.own)
+        ? { uuid: recordMap[record.own] }
+        : { ref: record.id }
   return {
     resolve(model, value) {
       if (typeof value !== 'string' || value === '') return { invalid: true }
@@ -1123,6 +1134,11 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // label and tags.
   const links = []
   const linkNames = new Map() // slug → the file that gave it, so two files cannot claim one name
+  // ⭐ A MOUNTED RECORD IS ANOTHER SITE'S ENTITY (`site/entity-pool.js::resolveRecordMounts`): this
+  // site's folder holds a reference to it, never a second copy. Its leaf names the uuid the owning
+  // site's push was given on this backend, read from the owner's `sync.json`; its file is the
+  // owner's, so nothing is written back into it.
+  const shared = []
   for (const pooled of poolBySchema.get(LINK_MODEL) || []) {
     const produced = []
     for (const r of await readEntityFile(pooled.absPath)) {
@@ -1193,6 +1209,28 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     const sourceBySlug = new Map()
     for (const pooled of poolEntities) {
       const produced = []
+      if (pooled.mounted) {
+        const { owner, from } = pooled.mounted
+        const ownerMap = opts.backend && owner ? readBackendState(owner, opts.backend).records || {} : {}
+        for (const r of await readEntityFile(pooled.absPath)) {
+          if (!r.slug) continue
+          const own = typeof r.data?.$uuid === 'string' && r.data.$uuid ? r.data.$uuid : null
+          const uuid = own ? ownerMap[own] : undefined
+          if (!uuid) {
+            refusals.push(
+              `${pooled.relPath}: mounted from ${from}, a record of ${owner ? `the site in ${owner}` : 'another site'} ` +
+                `that ${own ? 'is not on this backend yet' : 'has never been pushed'}. Push that site first, and this ` +
+                `site's folder then holds the entity its push made.`
+            )
+            continue
+          }
+          const id = [...pooled.dirs, r.slug].join('/')
+          shared.push({ id, slug: r.slug, model: declaration.name, uuid, own })
+          produced.push({ id, slug: r.slug })
+        }
+        producedBy.set(pooled.id, produced)
+        continue
+      }
       for (const r of await readEntityFile(pooled.absPath)) {
         if (!r.slug) {
           warnings.push(`${pooled.relPath}: a record without a slug was skipped`)
@@ -1237,7 +1275,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     }
     readSchemas.push({ label, declaration, flat, sourceBySlug })
   }
-  const refs = refResolver(readSchemas, recordMap, moved)
+  const refs = refResolver(readSchemas, recordMap, moved, shared)
 
   for (const { label, declaration, flat, sourceBySlug } of readSchemas) {
     const ownIds = new Map()
@@ -1365,7 +1403,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     colConfig,
     folder: { ...folder, nodes },
     recordsDirExists: pool.exists,
-    sendFolder: sendsFolder(pool, entities, [...links, ...files]),
+    sendFolder: sendsFolder(pool, entities, [...links, ...files, ...shared]),
     // Each entity's declaration, by its Model — what walks a record's lists
     // (`record-items.js`).
     declarations: new Map(readSchemas.map(({ declaration }) => [declaration.name, declaration])),
@@ -1376,6 +1414,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     links,
     // The file records, likewise (`./file-records.js`).
     files,
+    // Mounted records: another site's entities, placed in this site's folder by reference.
+    shared,
   }
 }
 

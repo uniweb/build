@@ -363,7 +363,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   const { values: fileValues, uploads: localFiles } = await fileRecordUploads({ files: col.files || [], siteRoot })
   const files = (col.files || []).map((f) => ({ ...f, value: fileValues.get(f.poolPath) }))
   const folder = buildFolderEntity({
-    recordEntities: col.entities,
+    // ⭐ With the mounted records: another site's entities, placed by reference to the uuid its push
+    // was given, and never sent as entities of this site (`records.js`, `shared`).
+    recordEntities: [...col.entities, ...(col.shared || [])],
     // Link records ride the folder as entries of their own kind (`./link-records.js`).
     links: col.links || [],
     files,

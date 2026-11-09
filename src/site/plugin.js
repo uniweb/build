@@ -37,7 +37,7 @@ import { collectTranslatedAssets } from './assets.js'
 import { processAdvancedAssets } from './advanced-processors.js'
 import { devMediaPaths } from './dev-media.js'
 import { processQueries, writeQueryFiles } from './query-processor.js'
-import { RECORDS_DIR, resolveRecordsDir } from './entity-pool.js'
+import { RECORDS_DIR, resolveRecordsDir, resolveRecordMounts } from './entity-pool.js'
 import { executeFetch, mergeDataIntoContent, toFetchList } from './data-fetcher.js'
 import { shouldSplitContent } from './split-content.js'
 import { jsonForScript } from '@uniweb/core/data-script'
@@ -938,6 +938,13 @@ export function siteContentPlugin(options = {}) {
           const contentPaths = new Set([
             resolve(resolvedSitePath, resolvedRecordsDir || RECORDS_DIR)
           ])
+          // ⭐ And each records directory the site mounts from another site (`site.yml::paths`),
+          // so an edit to the owner's file reaches this site's pages too.
+          try {
+            for (const mount of resolveRecordMounts(resolvedSitePath)) contentPaths.add(mount.abs)
+          } catch (err) {
+            console.warn(`[site-content] ${err.message}`)
+          }
 
           for (const contentPath of contentPaths) {
             if (existsSync(contentPath)) {

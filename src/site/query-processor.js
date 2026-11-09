@@ -813,7 +813,10 @@ function readPooledRecords(pooled, config, siteDir, recordsRoot, basePath) {
     pooled.map((e) => {
       // ⭐ The file itself is the record (`file-records.js`) — nothing in it is read.
       if (e.fileRecord) return processFileRecord(e, config, siteDir, recordsRoot, basePath)
-      const dir = resolve(recordsRoot, ...e.dirs)
+      // Where the pool found the file: under the records root, or in a mounted directory, another
+      // site's (`entity-pool.js::resolveRecordMounts`). An asset beside a mounted record is outside
+      // the root, so it publishes as `_external/…` (`recordAssetPath`).
+      const dir = dirname(e.absPath)
       const file = `${e.slug}${e.ext}`
       if (e.ext === '.bib') {
         return processBibtexItem(dir, file, siteDir, config.includeDrafts)

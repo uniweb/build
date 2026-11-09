@@ -43,7 +43,7 @@ import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
-import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir, readEntityPoolSync } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir, readEntityPoolSync, resolveRecordMounts } from '../site/entity-pool.js'
 import { folderYmlPath, resolveFolder } from '../site/records-config.js'
 import { canonicalJson } from './same-content.js'
 import { contentBodyTarget } from './record-layout.js'
@@ -778,6 +778,14 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   }
   // BibTeX files holding a pulled record — never rewritten by a pull, and said once each.
   const keptBib = new Set()
+  // ⭐ ANOTHER SITE'S RECORDS, MOUNTED (`site/entity-pool.js::resolveRecordMounts`): their files are
+  // the owner's, so a pull writes nothing there. It finds each one's file by the owner's id for it
+  // (the owner's `sync.json`), so the folder is written with the record where it is.
+  const mounts = resolveRecordMounts(siteRoot).map((m) => {
+    const ownerMap = opts.backend && m.owner ? readBackendState(m.owner, opts.backend).records || {} : {}
+    return { ...m, at: resolve(recordsRoot, ...m.dirs), ownerOwnId: new Map(Object.entries(ownerMap).map(([o, t]) => [t, o])) }
+  })
+  const leftToOwner = []
 
   for (const document of recordDocs) {
     const where = locate(document, folderIndex)
@@ -799,6 +807,22 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
         slug: where.slug,
         reason: `model ${schema} names no pool folder (expected @/name or @org/name)`,
       })
+      continue
+    }
+    const mount = mounts.find((m) => m.at === resolve(poolDir))
+    if (mount) {
+      const theirs = document.$uuid || null
+      const hit = theirs ? findRecordFileByUuid(mount.abs, mount.ownerOwnId.get(theirs) || theirs) : null
+      if (!hit) {
+        skipped.push({
+          uuid: theirs,
+          slug: where.slug,
+          reason: `a record of a type mounted from ${mount.abs} (site.yml \`paths.${mount.key}\`), which holds no file for it`,
+        })
+        continue
+      }
+      poolPathByUuid.set(theirs, [...mount.dirs, basename(hit.path)].join('/'))
+      leftToOwner.push(hit.path)
       continue
     }
     // ⭐ The incoming `$uuid` is the BACKEND's. The file holds the record's OWN id, so
@@ -916,5 +940,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
     updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status, recordsFile: records.file,
     // The file records' bytes to fetch — `{ url, path, poolPath }` each (`./file-records.js`).
     fileDownloads: pulledFiles.downloads,
+    // Mounted records, another site's files, which this pull read and left as they are.
+    leftToOwner,
   }
 }
