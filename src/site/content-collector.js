@@ -1582,13 +1582,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       page: {
         route,
         sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
-        id: authoredId(pageConfig.id),
         isIndex,
-        title: resolveDisplayTitle(pageConfig.title, pageName, null),
-        description: pageConfig.description || '',
-        label: pageConfig.label || null,
-        hidden: pageConfig.hidden || false,
-        hideIn: normalizeHideIn(pageConfig),
+        // Its settings by the one rule every page's are read by, so a localized `slug:` gives it
+        // its routes in each language, as a push sends it. A page with no content is never indexed.
+        ...pageSettingFields(pageConfig, resolveDisplayTitle(pageConfig.title, pageName, null)),
         layout: {},
         seo: { noindex: true },
         redirect: target,
@@ -1608,13 +1605,10 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       page: {
         route,
         sourcePath: parentRoute === '/' ? `/${pageName}` : `${parentRoute}/${pageName}`,
-        id: authoredId(pageConfig.id),
         isIndex,
-        title: resolveDisplayTitle(pageConfig.title, pageName, null),
-        description: pageConfig.description || '',
-        label: pageConfig.label || null,
-        hidden: pageConfig.hidden || false,
-        hideIn: normalizeHideIn(pageConfig),
+        // Its settings by the one rule every page's are read by, so a localized `slug:` gives it
+        // its routes in each language, as a push sends it. A page with no content is never indexed.
+        ...pageSettingFields(pageConfig, resolveDisplayTitle(pageConfig.title, pageName, null)),
         layout: {},
         seo: { noindex: true },
         rewrite: pageConfig.rewrite,

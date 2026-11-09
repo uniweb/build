@@ -1124,9 +1124,14 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
 /**
  * An atomic page's settings as its frontmatter says them (`site/page-settings.js`), by the inverse a
  * `page.yml` is written by (`pageRecordToYml`): each page key, `undefined` for one the page does not
- * have, so the file's is removed. Its `title:` only where its first heading, else its name, does not
- * give it, and its localized URL segments added and never removed, as a `page.yml`'s are
- * (`pageSlugToYml`).
+ * have, so the file's is removed. Its localized URL segments are added and never removed, as a
+ * `page.yml`'s are (`pageSlugToYml`).
+ *
+ * Its `title:` is kept as the author wrote it: a file that holds one keeps it, holding the page's
+ * title, and a file that holds none gains one only where its first heading, else its name, does not
+ * give the title. So a pull of what was pushed leaves the file as it was, and a title the author fixed
+ * in the file stays fixed when the heading changes. ⛔ Until 2026-11-09 a `title:` equal to the
+ * heading's was removed, a change nobody made, after which the heading named the page.
  *
  * @returns {object}
  */
@@ -1135,7 +1140,7 @@ function atomicPageSettings(record, { name, sourceLocale, existing, canon, ctx }
   const yml = pageRecordToYml(record, null, sourceLocale, existing, { slug })
   const out = {}
   for (const key of ATOMIC_PAGE_KEYS) out[key] = yml[key]
-  if (out.title === mdPageImpliedTitle(record, { name, sourceLocale })) out.title = undefined
+  if (existing?.title === undefined && out.title === mdPageImpliedTitle(record, { name, sourceLocale })) out.title = undefined
   if (out.slug === undefined && existing?.slug !== undefined) out.slug = existing.slug
   return out
 }

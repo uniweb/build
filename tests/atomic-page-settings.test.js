@@ -161,6 +161,18 @@ describe('one rule for every page\'s settings (`pageSettingFields`)', () => {
     expect(await builtPage('/docs')).toMatchObject({ keywords: ['manual'], seo: { ogTitle: 'The manual' } })
   })
 
+  it('⭐ a redirect page\'s localized `slug:` gives it its route in each language, as a push sends it', async () => {
+    w('site/site.yml', 'name: S\nfoundation: "@acme/base@1.0.0"\nindex: home\nlanguages: [en, fr]\n')
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('site/pages/home/hero.md', '# Welcome\n')
+    w('site/pages/old/page.yml', 'redirect: /\nslug: { fr: ancien }\nkeywords: [legacy]\n')
+    const content = await collectSiteContent(siteDir(), {})
+    expect(content.config.i18n.routeTranslations.fr['/old']).toBe('/ancien')
+    const page = content.pages.find((p) => p.route === '/old')
+    expect(page).toMatchObject({ redirect: '/', keywords: ['legacy'], seo: { noindex: true } })
+    expect(pageAt(await siteProjectToDocument(siteDir()), '/old').slug).toMatchObject({ fr: 'ancien' })
+  })
+
   it('a page with no keywords carries none', async () => {
     manual()
     expect('keywords' in (await builtPage('/'))).toBe(false)
@@ -210,7 +222,7 @@ describe('⭐ the pull writes them back into the file', () => {
     expect(pageAt(await siteProjectToDocument(siteDir()), '/docs/selling').description).toEqual({ en: 'Sell what you teach.' })
   })
 
-  it('a setting the app removes goes from the file, and a title back to its heading\'s is left out', async () => {
+  it('a setting the app removes goes from the file, and a `title:` the file holds takes the app\'s title', async () => {
     manual()
     const doc = await siteProjectToDocument(siteDir())
     const setup = pageAt(doc, '/docs/setting-up')
@@ -224,8 +236,18 @@ describe('⭐ the pull writes them back into the file', () => {
     expect(fm).not.toContain('label:')
     expect(fm).not.toContain('hideIn:')
     expect(fm).toContain('description: Set up your academy')
-    expect(read('site/pages/docs/selling.md')).toBe('---\ntype: Article\n---\n\n# Selling\n\nYour store.\n')
+    // The title is now its heading's, and stays written: the author fixed it in the file, so a heading
+    // changed later doesn't rename the page.
+    expect(read('site/pages/docs/selling.md')).toBe('---\ntitle: Selling\ntype: Article\n---\n\n# Selling\n\nYour store.\n')
     expect((await builtPage('/docs/selling')).title).toBe('Selling')
+  })
+
+  it('⭐ a `title:` its heading also gives is left as the author wrote it', async () => {
+    manual()
+    w('site/pages/docs/install.md', '---\ntitle: Install\n---\n\n# Install\n\nRun it.\n')
+    const before = snapshot()
+    siteContentDocumentToProject({ document: await siteProjectToDocument(siteDir()), siteRoot: siteDir(), prune: true })
+    expect(changed(before, snapshot())).toEqual([])
   })
 
   it('⭐ a param the app gives the section, named like a page setting, is written under `props:` and comes back a param', async () => {
