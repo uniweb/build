@@ -1130,7 +1130,7 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
  * Its `title:` is kept as the author wrote it: a file that holds one keeps it, holding the page's
  * title, and a file that holds none gains one only where its first heading, else its name, does not
  * give the title. So a pull of what was pushed leaves the file as it was, and a title the author fixed
- * in the file stays fixed when the heading changes. ⛔ Until 2026-11-09 a `title:` equal to the
+ * in the file stays fixed when the heading changes. ⛔ Until 2026-11-08 a `title:` equal to the
  * heading's was removed, a change nobody made, after which the heading named the page.
  *
  * @returns {object}
