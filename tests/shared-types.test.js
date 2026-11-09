@@ -1,8 +1,8 @@
 /**
- * ⭐ ONE NAME IN A SCOPE IS ONE TYPE (`src/foundation/shared-types.js`): the names two packages of one
- * scope in a workspace each define — two foundations, or a foundation and the scope's schemas package —
- * with whether the definitions agree. A register of either decides what the type is for the other's
- * sites too.
+ * `typesDefinedTwice` (`src/foundation/shared-types.js`): the names two packages of one scope in a
+ * workspace each define — two foundations, or a foundation and the scope's schemas package — with whether
+ * the definitions agree. Any foundation may use another's registered type by its full name, so such a
+ * name is a copy, which `uniweb doctor` points out.
  *
  * Measured 2026-11-08: one workspace of the 51 scanned had them, three foundations of one scope holding
  * copies of four types, all agreeing that day.

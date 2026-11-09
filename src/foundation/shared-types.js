@@ -1,20 +1,14 @@
 /**
- * ⭐ ONE NAME IN A SCOPE IS ONE TYPE. A data schema registers by its name alone — `@acme/member`, its
- * scope and its name — and a registry holds one type under each. A register whose declaration of it
- * differs from the one held makes a new version of that type, which every site using it then reads.
- * So two packages of one scope in a workspace that each define `member` — two foundations, or a
- * foundation and the scope's schemas package — are two definitions of one type, and whichever
- * registers last decides what it is for the other's sites too. Copies that agree today come apart the
- * first time one is edited.
+ * ⭐ A REGISTERED DATA SCHEMA IS USABLE BY ANY FOUNDATION OR SITE, by its full name — `@acme/member`.
+ * Its scope is a namespace, so that names never collide, and says who may publish under it, never who
+ * may use it *[Diego, 2026-09-25; 2026-11-08]*. A foundation that renders another's type declares it by
+ * that name, and a register names it and sends no definition of it (`uwx/registry-package.js`).
  *
- * A type several foundations of a scope use is defined once — in the scope's schemas package, or in
- * the one foundation that owns it — and every other foundation names it in full (`@acme/member`), with
- * `schemas.config.js` routing the scope to the folder that holds it (`resolve-data-schema.js`). A full
- * name is a reference, which a register names and does not send (`uwx/registry-package.js`).
- *
- * `uniweb register` refuses a definition that differs from another of the same name in the workspace,
- * since that is when a register changes what another foundation's sites read; `uniweb doctor` names
- * every name defined twice, agreeing or not.
+ * So a copy of a type's file in a second package of the same scope is a second definition of one type,
+ * and the copies come apart the first time one is edited. `typesDefinedTwice` names each such type, for
+ * `uniweb doctor` to recommend one definition, named in full elsewhere, with `schemas.config.js`
+ * giving a local build the file (`resolve-data-schema.js`). It refuses nothing: what a register of a
+ * changed definition does is the registry's to judge.
  */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
