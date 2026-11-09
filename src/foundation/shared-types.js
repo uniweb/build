@@ -1,8 +1,10 @@
 /**
- * ⭐ A REGISTERED DATA SCHEMA IS USABLE BY ANY FOUNDATION OR SITE, by its full name — `@acme/member`.
- * Its scope is a namespace, so that names never collide, and says who may publish under it, never who
- * may use it *[Diego, 2026-09-25; 2026-11-08]*. A foundation that renders another's type declares it by
- * that name, and a register names it and sends no definition of it (`uwx/registry-package.js`).
+ * ⭐ A DATA SCHEMA IS USABLE BY ANY FOUNDATION OR SITE, by its full name — `@acme/member`: locally,
+ * through `schemas.config.js` or a shared `@acme/schemas` package, with no backend, and from a backend
+ * once it is registered, which is optional. Its scope is a namespace, so that names never collide, and
+ * says who may publish under it, never who may use it *[Diego, 2026-09-25; 2026-11-08]*. A foundation
+ * that renders another's type declares it by that name, and a register names it and sends no
+ * definition of it (`uwx/registry-package.js`).
  *
  * So a copy of a type's file in a second package of the same scope is a second definition of one type,
  * and the copies come apart the first time one is edited. `typesDefinedTwice` names each such type, for
