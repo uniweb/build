@@ -111,7 +111,7 @@ function warnUnreadable(siteRoot, where, reason, declaration) {
   const hint = fieldsCalledType
     ? ` A data key is declared as its block's fields: { type: '${declaration.type}', values: … } declares two fields, named "type" and "values" — name the block's fields instead ({ email: 'string', time: 'string' }).`
     : /open map/.test(reason)
-      ? " An open map is read when its values are records: values: { type: 'object', fields: { … } }."
+      ? " An open map is read when its values are plain values or records: values: { type: 'number' }, or values: { type: 'object', fields: { … } }."
       : ''
   console.warn(
     `Warning: ${who} declares data key "${key}" with a shape the translation step cannot read (${reason}), so its blocks' strings are guessed — a field named email, time, href or the like is never offered for translation.${hint}`

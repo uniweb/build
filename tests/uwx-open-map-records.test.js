@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { emitSyncPackages, readZip, recordsToProject, renderEntityDocument } from '../src/uwx/index.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
-import { toDataSchemaDeclaration, isOpenMapSection, openMapFromRows } from '../src/uwx/data-schema.js'
+import { toDataSchemaDeclaration, isOpenMapSection, isPlainMapSection, openMapFromRows } from '../src/uwx/data-schema.js'
 import { computeHash } from '../src/i18n/hash.js'
 import { extractRecordContent, buildLocalizedRecords } from '../src/i18n/records.js'
 
@@ -193,3 +193,122 @@ sections:
             unit: { type: string, translatable: false }
             note: { type: string }
 `
+
+// ⭐ A MAP OF PLAIN VALUES: a price per tier and who each tier suits, keyed by the author's tier names,
+// in a type written with the root `fields:` form. Its rows are the key and one `value` column.
+// ⛔ Until 2026-11-08 the lowering refused it, so a type holding one built and could not be pushed.
+const PLAN_YML = `name: plan
+fields:
+  title: { type: string }
+  price:
+    type: object
+    values: { type: number }
+  suits:
+    type: object
+    values: { type: string }
+`
+const PLAN = validateAndNormalizeSchema(yaml.load(PLAN_YML), '@/plan')
+const PLAN_DECLARATION = toDataSchemaDeclaration(PLAN, { name: '@acme/plan' })
+const PLAN_FILE = `title: Courses
+price:
+  small: 59
+  medium: 99
+suits:
+  small: A solo teacher
+  medium: A school
+`
+
+function makePlans(translations = {}) {
+  w('site/site.yml', 'name: T\nfoundation: fnd\n')
+  w('site/package.json', { name: 'site', dependencies: { fnd: 'file:../fdn' } })
+  w('site/queries.yml', "plans:\n  schema: '@/plan'\n")
+  w('site/pages/home/page.yml', 'title: Home\n')
+  w('site/records/plan/courses.yml', PLAN_FILE)
+  if (Object.keys(translations).length) w('site/locales/records/es.json', translations)
+  w('fdn/package.json', { name: 'fnd', type: 'module', main: './_entry.generated.js' })
+  w('fdn/main.js', "export default { name: '@acme/fnd' }\n")
+  w('fdn/dist/meta/schema.json', {
+    _self: { name: '@acme/fnd', version: '1.0.0', role: 'foundation' },
+    dataSchemas: { '@/plan': PLAN },
+  })
+}
+
+async function pushPlans() {
+  const pkg = await emitSyncPackages(SITE, { backend: BACKEND })
+  expect(pkg.refusals).toEqual([])
+  return [...readZip(pkg.records.buffer)]
+    .filter(([name]) => name.startsWith('entities/'))
+    .map(([, buf]) => JSON.parse(buf.toString('utf8')))
+    .filter((d) => d.$schema === '@acme/plan')
+}
+
+function pullPlans(siteRoot, entities) {
+  const recordDocs = entities.map((e) => ({ ...e, $uuid: `U-${e.$id.split('/').pop()}` }))
+  return recordsToProject({
+    folderDoc: {
+      contents: recordDocs.map((d) => ({ kind: 'ref', name: d.$uuid.slice(2), entry: { schema: '@acme/plan', entity: d.$uuid } })),
+    },
+    recordDocs,
+    siteRoot,
+    opts: { backend: BACKEND, resolveDeclaration: () => PLAN_DECLARATION, scope: '@acme' },
+  })
+}
+
+describe('⭐ a record holding a map of plain values', () => {
+  const price = PLAN_DECLARATION.sections.brief.fields.price
+
+  it('is known off the declaration alone, as its key and one `value` column', () => {
+    expect(isOpenMapSection(price)).toBe(true)
+    expect(isPlainMapSection(price)).toBe(true)
+    // CONTROL — a map of records with a `value` among their fields is a map of records
+    expect(isPlainMapSection(MEASUREMENTS)).toBe(false)
+  })
+
+  it('⭐ is pushed — each key its row’s `name`, each value its row’s `value`, in the map’s order', async () => {
+    makePlans()
+    const [courses] = await pushPlans()
+    expect(courses.brief.price).toEqual([
+      { name: 'small', value: 59 },
+      { name: 'medium', value: 99 },
+    ])
+    expect(courses.brief.suits).toEqual([
+      { name: 'small', value: { en: 'A solo teacher' } },
+      { name: 'medium', value: { en: 'A school' } },
+    ])
+  })
+
+  it('⭐ a pull writes the rows back as the map', async () => {
+    makePlans()
+    const [courses] = await pushPlans()
+    const text = renderEntityDocument({ document: courses, declaration: PLAN_DECLARATION, format: 'yml', sourceLocale: 'en' })
+    expect(yaml.load(text)).toMatchObject({
+      price: { small: 59, medium: 99 },
+      suits: { small: 'A solo teacher', medium: 'A school' },
+    })
+  })
+
+  it('a pull into the author’s copy leaves the file as it was', async () => {
+    makePlans()
+    const report = pullPlans(SITE, await pushPlans())
+    expect(report.skipped).toEqual([])
+    // As written, with the one line a first pull adds: the record's identity, which it learned.
+    expect(readFileSync(join(SITE, 'records/plan/courses.yml'), 'utf8')).toBe(`$uuid: U-courses\n${PLAN_FILE}`)
+  })
+
+  it('a value in a map of text is offered for translation, translated by the build, and pushed', async () => {
+    const line = 'A solo teacher'
+    const es = 'Un profesor por su cuenta'
+    makePlans({ [computeHash(line)]: es })
+    w('fdn/schemas/plan.yml', PLAN_YML)
+    w('site/public/data/plans.json', [{ slug: 'courses', ...yaml.load(PLAN_FILE) }])
+    const sources = Object.values((await extractRecordContent(SITE)).units).map((u) => u.source)
+    expect(sources).toContain(line)
+    const outputs = await buildLocalizedRecords(SITE, { locales: ['es'] })
+    const [built] = JSON.parse(readFileSync(outputs.es.plans, 'utf8'))
+    expect(built.suits.small).toBe(es)
+    expect(built.price.small).toBe(59)
+
+    const [courses] = await pushPlans()
+    expect(courses.brief.suits[0].value).toEqual({ en: line, es })
+  })
+})

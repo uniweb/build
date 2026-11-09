@@ -9,6 +9,7 @@
  * does not know a field called `style`, and a translated one fell back to the default look.
  */
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { isPlainMapSection } from '../../src/uwx/data-schema.js'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { markdownToProseMirror } from '@uniweb/content-reader'
@@ -164,14 +165,17 @@ describe('a declared shape the translation step cannot read is said aloud', () =
     spy.mockRestore()
   })
 
-  it('an open map of plain values — a valid schema, which a push cannot lower', async () => {
+  // ⛔ Until 2026-11-08 the lowering refused a map of plain values, so this step read none of the
+  // block's fields and guessed its strings, and said so.
+  it('⭐ an open map of plain values is read, as a push lowers it: its key and one `value` column', async () => {
     declare('Hours', "{ office: { labels: { type: 'object', values: 'string' }, note: 'string' } }")
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const models = await dataBlockModels(SITE)
-    expect(models('Hours', 'office')).toBeNull()
-    expect(said(spy)).toHaveLength(1)
-    expect(said(spy)[0]).toMatch(/open map/)
-    expect(said(spy)[0]).toMatch(/values: \{ type: 'object', fields/)
+    const model = models('Hours', 'office')
+    expect(model).not.toBeNull()
+    const labels = Object.values(model.sections).map((s) => s.fields?.labels).find(Boolean)
+    expect(isPlainMapSection(labels)).toBe(true)
+    expect(said(spy)).toEqual([])
     spy.mockRestore()
   })
 

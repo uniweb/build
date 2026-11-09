@@ -42,6 +42,12 @@ const CONTENT_TEXT_FORMATS = new Set(['markdown'])
 // declares its own `name` is an error instead, which names the problem precisely.
 const OPEN_MAP_KEY = 'name'
 
+// The column a MAP OF PLAIN VALUES' value lowers into, beside the key: `{ small: 59 }` is the row
+// `{ name: 'small', value: 59 }`. A map of records whose one field is `value` would lower to the same
+// rows, so it is refused as that map written long (`lowerField`), and the two columns alone say which
+// a section is (`isPlainMapSection`).
+const PLAIN_MAP_VALUE = 'value'
+
 /**
  * ⭐ AN OPEN MAP'S LOWERED SECTION. `values:` lowers to rows (`lowerField`): a `multiple` section
  * whose required string `name` — the map's key — is made each row's identity by a `unique_field`
@@ -56,20 +62,50 @@ export function isOpenMapSection(def) {
   return (def.constraints || []).some((c) => c?.kind === 'unique_field' && c.field === OPEN_MAP_KEY && c.scope === 'section')
 }
 
-/** A file's open map as the rows it lowers to, in the map's key order: each key is its row's `name`. */
-export function openMapEntries(map) {
-  return Object.entries(map).map(([key, value]) => ({ key, value, row: { ...value, [OPEN_MAP_KEY]: key } }))
+/**
+ * ⭐ A MAP OF PLAIN VALUES' LOWERED SECTION: an open map whose rows hold the key and one column,
+ * `value`, and nothing else — a price per tier, `{ small: 59, medium: 99 }`. Read off the declaration
+ * alone, as `isOpenMapSection` is, since a pull reads the declaration as registered.
+ */
+export function isPlainMapSection(def) {
+  if (!isOpenMapSection(def)) return false
+  const columns = Object.keys(def.fields || {})
+  return columns.length === 2 && columns.includes(PLAIN_MAP_VALUE)
+}
+
+/**
+ * A file's open map as the rows it lowers to, in the map's key order: each key is its row's `name`,
+ * and its value the row's other fields, or, in a map of plain values, the row's `value`.
+ *
+ * @param {object} map
+ * @param {{ plain?: boolean }} [opts] - `plain`: a map of plain values (`isPlainMapSection`)
+ */
+export function openMapEntries(map, { plain = false } = {}) {
+  return Object.entries(map).map(([key, value]) => ({
+    key,
+    value,
+    row: plain ? { [OPEN_MAP_KEY]: key, [PLAIN_MAP_VALUE]: value } : { ...value, [OPEN_MAP_KEY]: key },
+  }))
 }
 
 /**
  * Rows back as the map a file holds, or null when they cannot be one — a row with no key, or a key
- * two rows share — so a caller keeps them a list, which a push reads too, and nothing is lost.
+ * two rows share — so a caller keeps them a list, which a push reads too, and nothing is lost. In a
+ * map of plain values each key takes its row's `value`; a row with none (a translatable value with no
+ * text) leaves its key out, as a record leaves out a field with no value.
+ *
+ * @param {object[]} rows
+ * @param {{ plain?: boolean }} [opts] - `plain`: a map of plain values (`isPlainMapSection`)
  */
-export function openMapFromRows(rows) {
+export function openMapFromRows(rows, { plain = false } = {}) {
   const map = {}
   for (const row of rows || []) {
     const key = row?.[OPEN_MAP_KEY]
     if (typeof key !== 'string' || key === '' || Object.hasOwn(map, key)) return null
+    if (plain) {
+      if (row[PLAIN_MAP_VALUE] !== undefined) map[key] = row[PLAIN_MAP_VALUE]
+      continue
+    }
     const { [OPEN_MAP_KEY]: _key, ...value } = row
     map[key] = value
   }
@@ -421,10 +457,46 @@ function lowerField(rawField, resolve, optResolve, path = '') {
     // field order is what the visitor sees.
     if (field.values !== undefined) {
       const value = asField(field.values)
+      // ⭐ A MAP OF PLAIN VALUES — a price per tier, `{ small: 59, medium: 99 }` — is the same rows,
+      // with one column for the value, `value`, as a list of plain values has a rule of its own (a
+      // multi-valued field). ⛔ Until 2026-11-08 it was refused, "not an object with 'fields'", so a
+      // type holding one built, and could never be pushed or registered.
+      const recordsAsValue = value.type === 'array' && asField(value.items || {}).type === 'object'
+      if (value.type !== 'object' && !recordsAsValue) {
+        return {
+          type: 'section',
+          ...lowerSection(
+            {
+              kind: 'multi',
+              ...sectionAttrsFromField(field),
+              // The key is an identifier, never content: `translatable: false`, as below.
+              fields: {
+                [OPEN_MAP_KEY]: { type: 'string', required: true, translatable: false },
+                [PLAIN_MAP_VALUE]: field.values,
+              },
+              constraints: [
+                { kind: 'unique_field', field: OPEN_MAP_KEY, scope: 'section' },
+                ...(sectionAttrsFromField(field).constraints || [])
+              ]
+            },
+            resolve,
+            optResolve,
+            path
+          )
+        }
+      }
       if (value.type !== 'object' || !value.fields) {
         throw new Error(
-          `Data schema: open map at '${path}' declares 'values' that is not an object with ` +
-            `'fields'. An open map lowers to rows, and a row needs declared columns.`
+          `Data schema: open map at '${path}' declares 'values' that is neither a plain value nor a ` +
+            `record with 'fields'. An open map lowers to rows: its key and the value's columns.`
+        )
+      }
+      const own = Object.keys(value.fields)
+      if (own.length === 1 && own[0] === PLAIN_MAP_VALUE) {
+        throw new Error(
+          `Data schema: open map at '${path}' holds records whose one field is '${PLAIN_MAP_VALUE}', ` +
+            `which is a map of plain values written long: write 'values:' as that field. Both lower to ` +
+            `the same rows, and a pull can write only one of them back.`
         )
       }
       if (value.fields[OPEN_MAP_KEY]) {

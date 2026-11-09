@@ -41,7 +41,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { proseMirrorToMarkdown } from '@uniweb/content-writer'
 import { parseFrontmatter } from './entity-source.js'
 import { setYamlKeyFirst } from './yaml-edit.js'
-import { isProseMirrorField, isOpenMapSection, openMapFromRows } from './data-schema.js'
+import { isProseMirrorField, isOpenMapSection, isPlainMapSection, openMapFromRows } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { recordFieldPlace, unwrapLocalizedContent } from './locale-sync.js'
 import { parseBibtex, exportBibtex } from '@citestyle/bibtex'
@@ -360,11 +360,12 @@ function decodeRecord(fields, value, dec, sectionName) {
 }
 
 // A `many` field's records — an OPEN MAP's written back as the author's map, keyed by each row's
-// `name` (`isOpenMapSection`), which is what the push reads a map from. Rows that cannot be a map
-// stay a list, which the push reads too.
+// `name` (`isOpenMapSection`), which is what the push reads a map from, and each row's `value` the
+// key's in a map of plain values (`isPlainMapSection`). Rows that cannot be a map stay a list, which
+// the push reads too.
 function decodeSectionList(def, value, dec) {
   const list = decodeList(def, value, dec)
-  return (isOpenMapSection(def) && openMapFromRows(list)) || list
+  return (isOpenMapSection(def) && openMapFromRows(list, { plain: isPlainMapSection(def) })) || list
 }
 
 // The records of a `many` section; a self-nesting one's `$children` nest back under

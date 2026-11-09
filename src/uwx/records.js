@@ -56,7 +56,7 @@ import {
   poolPathReadings,
   poolDirsForSchema,
 } from '../site/entity-pool.js'
-import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isOpenMapSection, openMapEntries } from './data-schema.js'
+import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField, isOpenMapSection, isPlainMapSection, openMapEntries } from './data-schema.js'
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { qualifyRef } from '@uniweb/schemas/refs'
@@ -432,11 +432,13 @@ function encodeSection(def, value, enc, path) {
   if (def.multiple === true) {
     // ⭐ AN OPEN MAP is the author's map in a file and rows on the wire (`isOpenMapSection`): each
     // key becomes its row's `name`. ⛔ Until 2026-09-26 the map was refused as "a list of records",
-    // so no record holding one could be pushed. Rows written as a list are read as they are.
+    // so no record holding one could be pushed. Rows written as a list are read as they are. A map
+    // of plain values sends each value as its row's `value` (`isPlainMapSection`).
     if (isOpenMapSection(def) && isPlainObject(value)) {
+      const plain = isPlainMapSection(def)
       const rows = []
-      for (const { key, value: entry, row } of openMapEntries(value)) {
-        if (!isPlainObject(entry)) {
+      for (const { key, value: entry, row } of openMapEntries(value, { plain })) {
+        if (!plain && !isPlainObject(entry)) {
           enc.shape.push(`"${path}.${key}" is one entry of a map — write it as a map of its fields.`)
           continue
         }

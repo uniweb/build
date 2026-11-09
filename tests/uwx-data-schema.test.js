@@ -766,14 +766,51 @@ describe('toDataSchemaDeclaration — open map (values:)', () => {
     ).toThrow(/value field named 'name'/)
   })
 
-  test('`values` that is not an object with fields is an error — a row needs columns', () => {
+  // ⭐ A map of plain values — a price per tier — is the same rows with one column for the value.
+  // ⛔ Until 2026-11-08 it was refused here ("not an object with 'fields'"), so a type holding one
+  // built, and could be neither pushed nor registered.
+  test('⭐ a map of plain values lowers to rows of its key and one `value` column', () => {
+    const plain = lower(
+      { name: 'x', fields: { license: { type: 'object', values: { type: 'number' } } } },
+      '@t/x',
+      '@t/x'
+    ).sections.brief.fields.license
+    expect(plain.type).toBe('section')
+    expect(plain.multiple).toBe(true)
+    expect(Object.keys(plain.fields)).toEqual(['name', 'value'])
+    expect(plain.fields.name).toMatchObject({ type: 'string', required: true })
+    expect(plain.fields.name.localized).not.toBe(true)
+    expect(plain.fields.value.type).toBe('decimal')
+    expect(plain.constraints[0]).toEqual({ kind: 'unique_field', field: 'name', scope: 'section' })
+  })
+
+  test('a map of text keeps its value translatable, as a text field is', () => {
+    const plain = lower(
+      { name: 'x', fields: { suits: { type: 'object', values: { type: 'string' } } } },
+      '@t/x',
+      '@t/x'
+    ).sections.brief.fields.suits
+    expect(plain.fields.value).toMatchObject({ type: 'string', localized: true })
+  })
+
+  test('a map of records whose one field is `value` is refused, as the plain map written long', () => {
     expect(() =>
       lower(
-        { name: 'x', fields: { m: { type: 'object', values: { type: 'string' } } } },
+        { name: 'x', fields: { m: { type: 'object', values: { type: 'object', fields: { value: { type: 'number' } } } } } },
         '@t/x',
         '@t/x'
       )
-    ).toThrow(/lowers to rows/)
+    ).toThrow(/map of plain values written long/)
+  })
+
+  test('a list of records as a map\'s value is an error — a row\'s column is a field', () => {
+    expect(() =>
+      lower(
+        { name: 'x', fields: { m: { type: 'object', values: { type: 'array', items: { type: 'object', fields: { a: { type: 'string' } } } } } } },
+        '@t/x',
+        '@t/x'
+      )
+    ).toThrow(/neither a plain value nor a record/)
   })
 })
 

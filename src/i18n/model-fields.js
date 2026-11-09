@@ -7,7 +7,7 @@
  * One walk for two things a model describes: a record (`records.js`), and a tagged data block whose
  * key a section type declares the shape of (`data-strings.js::visitDataBlockStrings`).
  */
-import { isOpenMapSection } from '../uwx/data-schema.js'
+import { isOpenMapSection, isPlainMapSection } from '../uwx/data-schema.js'
 
 export function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -51,8 +51,15 @@ function eachSectionValue(value, section, path, visit) {
   if (!section?.multiple) return eachSectionField(value, section?.fields, path, visit)
   if (Array.isArray(value)) value.forEach((item, i) => eachSectionField(item, section.fields, `${path}[${i}]`, visit))
   // An open map as its file holds it: each entry is one of the rows a push sends (`isOpenMapSection`).
+  // In a map of plain values each entry is its row's `value` (`isPlainMapSection`), so the map is
+  // its holder.
   else if (isOpenMapSection(section) && isPlainObject(value)) {
-    for (const [key, item] of Object.entries(value)) eachSectionField(item, section.fields, `${path}.${key}`, visit)
+    if (isPlainMapSection(section)) {
+      const field = section.fields.value || {}
+      for (const key of Object.keys(value)) if (value[key] != null) visit(value, key, field, `${path}.${key}`)
+    } else {
+      for (const [key, item] of Object.entries(value)) eachSectionField(item, section.fields, `${path}.${key}`, visit)
+    }
   }
 }
 
