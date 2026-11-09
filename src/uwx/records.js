@@ -1010,16 +1010,26 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // resolves as `@person/2024` — the rule is total, so it is not ambiguous — but an
   // author who meant "records organised by year inside the `person` schema" needs to
   // be told what the build actually read, not only that something failed to resolve.
+  //
+  // ⛔ A resolver that never asks the backend says so (`resolveModel.offline`, set by the
+  // CLI for `-o`, `--dry-run` and `status`), and then the message must not say the backend
+  // has no such Model: it was never asked. Until 2026-11-09 it did, so an offline run that
+  // could not resolve a Model (a query naming a type the site's foundation does not declare,
+  // or `status` in a clone whose kept Models were deleted) said the backend had none.
   const unresolvedExplicit = (modelName, queryName) => {
     const dirs = poolDirsForSchema(modelName)
     const { alternative } = dirs ? poolPathReadings(dirs) : { alternative: null }
     return new Error(
       `uwx/records: Model "${modelName}" (query "${queryName}") could not be ` +
-        'resolved — not defined by a local foundation' +
-        (resolveModel
-          ? ', and the backend has no such Model (register it first).'
-          : '. Run via `uniweb sync` (which fetches non-local Models from the ' +
-            'registry), or provide a local foundation that defines it.') +
+        "resolved — the site's foundation does not define it" +
+        (resolveModel?.offline === true
+          ? '. This run does not ask the backend: `-o`, `--dry-run` and `status` know only ' +
+            'the Models a push or a pull of this copy read. A push reads it from the backend, ' +
+            'and stops if the backend has none.'
+          : resolveModel
+            ? ', and the backend has no such Model (register the foundation that defines it first).'
+            : '. Run via `uniweb sync` (which fetches non-local Models from the ' +
+              'registry), or provide a local foundation that defines it.') +
         (alternative
           ? ` If you meant \`${pool.dir}/${dirs[0]}/\` (${alternative}) organised by ` +
             `\`${dirs[1]}\`, note that a folder inside a schema folder is read as an ` +

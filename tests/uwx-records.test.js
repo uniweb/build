@@ -858,8 +858,17 @@ describe('emitRecordSyncPackage — non-local Model via resolveModel', () => {
 
   it('errors clearly when the resolver returns null (Model not registered)', async () => {
     await expect(emitRecordSyncPackage(siteDir, { resolveModel: async () => null })).rejects.toThrow(
-      /register it first/
+      /the backend has no such Model \(register the foundation that defines it first\)/
     )
+  })
+
+  it('says a resolver that never asked the backend never asked it, rather than that the backend has none', async () => {
+    // `-o`, `--dry-run` and `status` resolve offline: the CLI marks that resolver `offline`.
+    const resolveModel = Object.assign(async () => null, { offline: true })
+    const err = await emitRecordSyncPackage(siteDir, { resolveModel }).catch((e) => e)
+    expect(err.message).toMatch(/Model "@std\/product" \(query "products"\) could not be resolved/)
+    expect(err.message).toMatch(/This run does not ask the backend/)
+    expect(err.message).not.toMatch(/the backend has no such Model|register/)
   })
 
   it('prefers a local foundation when it defines the Model (resolver untouched)', async () => {
