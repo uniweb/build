@@ -141,6 +141,17 @@ export {
   servicesFromDocument,
   sameServiceRow,
 } from './services-request.js'
+// A site's backend blueprint — `blueprint.yml`, beside `site.yml`: how a backend started from the
+// site begins. It rides the `backend` row of the services request.
+export {
+  BLUEPRINT_FILE,
+  readBlueprint,
+  blueprintProblems,
+  refuseUnreadableBlueprint,
+  blueprintWarnings,
+  siteBlueprintWarnings,
+  siteDeclaredTypes,
+} from './blueprint.js'
 export {
   diffSiteUnits,
   describeSiteDiff,

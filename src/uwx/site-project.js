@@ -41,6 +41,10 @@ import { mapPageRefs, pageRefIndex, pageRefPages, writtenPageRef } from './page-
 import { siteFileKeys, siteTree, writtenRefs } from './located-media.js'
 import { readBackendState, updateBackendState } from './sync-store.js'
 import { servicesFromDocument, heldServices } from './services-request.js'
+import { liftBlueprint, writePulledBlueprint } from './blueprint.js'
+import { ownSchemaNames } from './self-scope.js'
+import { foundationDataSchemas } from '../site/queries-config.js'
+import { parseCatalogRef } from '../site/foundation-ref.js'
 import { readFileSync, existsSync, unlinkSync, renameSync, rmSync, readdirSync, statSync, mkdirSync } from 'node:fs'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
 import { createHash } from 'node:crypto'
@@ -235,10 +239,13 @@ function readAuthoredYaml(filePath) {
  *        (`{ info, extensions?, … }`)
  * @param {string} params.siteRoot
  * @param {string} [params.sourceLocale] - locale to unwrap localized fields to
- * @returns {{ siteConfig: string, theme?: string, headHtml?: string }} per-file
- *          write status ('updated' | 'unchanged')
+ * @param {string|null} [params.scope] - the scope the push qualified the blueprint's types with, so
+ *        they are written back as `@/x`; by default the pinned foundation's, as for the queries
+ * @returns {{ siteConfig: string, theme?: string, headHtml?: string, blueprint?: { file: string|null, note?: string } }}
+ *          per-file write status ('updated' | 'unchanged'); `blueprint` when the document has a
+ *          `services` Section (`./blueprint.js`, `writePulledBlueprint`)
  */
-export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false, sameFile = null }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false, sameFile = null, scope }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -340,10 +347,15 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   // app, `$id` dropped. ⛔ *Until 2026-10-07 `services` held the rows themselves, the
   // record a push compared the file against, with `servicesNamed` beside it.*
   // ⛔ What is held needs a backend: with none there is nowhere coherent to file it.
-  if (Array.isArray(document?.services)) {
+  // ⭐ THE `backend` ROW'S BLUEPRINT GOES TO `blueprint.yml`, NEVER INTO `site.yml` (`./blueprint.js`,
+  // written below). A row that carried one keeps its line in `site.yml` even when it is off, so the next
+  // push has the row to send the file on.
+  const lifted = Array.isArray(document?.services) ? liftBlueprint(document.services) : null
+  if (lifted) {
     siteChanges.services = servicesFromDocument({
-      rows: document.services,
-      local: readAuthoredYaml(join(siteRoot, 'site.yml'))?.services
+      rows: lifted.rows,
+      local: readAuthoredYaml(join(siteRoot, 'site.yml'))?.services,
+      named: lifted.blueprint !== undefined ? ['backend'] : []
     })
     for (const retired of ['search', 'submit', 'assistant', 'tracking', 'api']) siteChanges[retired] = null
   }
@@ -371,6 +383,20 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
   const authoredSite = sameFile ? readAuthoredYaml(siteYmlPath) : null
   const written = authoredSite ? keepAuthoredRefs(siteChanges, authoredSite, (a, b) => sameFile(a, b, siteYmlPath)) : siteChanges
   const result = { siteConfig: writeSiteConfig(siteRoot, written) }
+
+  // `blueprint.yml` — the `backend` row's blueprint, its types of the foundation's own as `@/x` again, by
+  // the scope the push qualified them with (`declarationsToQueriesYml` reads it the same way). A
+  // document with no `services` Section says nothing of it, and the file is not touched.
+  if (lifted) {
+    const blueprintScope = scope !== undefined ? scope : (parseCatalogRef(document?.info?.foundation)?.scope ?? null)
+    const siteYmlNow = readAuthoredYaml(siteYmlPath)
+    result.blueprint = writePulledBlueprint({
+      siteRoot,
+      rows: document.services,
+      scope: blueprintScope,
+      own: siteYmlNow ? ownSchemaNames(foundationDataSchemas(siteRoot, siteYmlNow)) : null
+    })
+  }
 
   // theme (whole object) → theme.yml.
   if (settingsSection.theme && typeof settingsSection.theme === 'object') {
@@ -2000,7 +2026,7 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // section's writer to make relative to its own file (`located-media.js`).
   const mediaKeys = siteFileKeys(assetMap)
 
-  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, sameFile: sameStoredFile(assetMap, { siteRoot }) })
+  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, sameFile: sameStoredFile(assetMap, { siteRoot }), scope })
   report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor

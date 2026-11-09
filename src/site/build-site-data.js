@@ -118,7 +118,9 @@ export async function buildSiteData({
   //    No vite needed — collectSiteContent is a plain async function.
   //    dropUnpublished: link mode is the build `publish` runs, so it reads
   //    the site as published — hidden pages and their subtree pruned.
-  let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true, base: basePath, strict: true })
+  //    warnBlueprint: the push that follows says what a backend would leave out of
+  //    `blueprint.yml` (`uwx/blueprint.js`); said here too, a publish said it twice.
+  let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true, base: basePath, strict: true, warnBlueprint: false })
 
   // 2. Compile content collections (file-based markdown/yaml/json).
   //    `writeQueryFiles` lands them under `<siteRoot>/public/data/`;

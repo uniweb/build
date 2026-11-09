@@ -91,7 +91,9 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   // that type when no data schema has its name (`uwx/data-key-types.js`).
   const keyTypes = dataKeyTypes(foundation)
 
-  const site = await collectSiteContent(siteRoot, { foundationPath })
+  // warnBlueprint: what a backend would leave out of `blueprint.yml` is not this check's to say — the
+  // push it gates says it (`uwx/blueprint.js`), and `uniweb doctor` does; said here too, a push said it twice.
+  const site = await collectSiteContent(siteRoot, { foundationPath, warnBlueprint: false })
   const config = site.config || {}
   const basePath = typeof config.base === 'string' ? config.base : '/'
 

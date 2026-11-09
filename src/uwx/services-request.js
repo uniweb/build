@@ -529,6 +529,10 @@ function keepCredentials(entry, local) {
 /**
  * The site's rows → the `site.yml::services` map — what a pull writes.
  *
+ * ⭐ `named` lists services written even when off with no settings here: the `backend` row whose
+ * blueprint went to its own file (`./blueprint.js`). Without its line, the next push would state it
+ * off with no settings, dropping the blueprint the file still holds.
+ *
  * ⭐ AN OFF SERVICE WITH NO SETTINGS IS WRITTEN ONLY WHERE `site.yml` ALREADY NAMES IT
  * [Diego, 2026-10-07]. Every service is on or off, and off by default, so a `false` line
  * adds nothing — and writing one for every service switched off in the app, or for each
@@ -546,15 +550,16 @@ function keepCredentials(entry, local) {
  * @param {object[]} [p.rows] - the `services` Section: the site's rows
  * @param {object} [p.local] - the `services:` the pull writes over — which services it
  *   names, and the credentials a push never sends (`keepCredentials`)
+ * @param {string[]} [p.named] - services written even when off with no settings
  * @returns {object|null} null when there is nothing to write
  */
-export function servicesFromDocument({ rows, local } = {}) {
+export function servicesFromDocument({ rows, local, named = [] } = {}) {
   const before = isMap(local) ? local : {}
   const out = {}
   for (const row of Array.isArray(rows) ? rows : []) {
     if (!isMap(row) || typeof row.name !== 'string' || !row.name || row.name in out) continue
     const entry = entryFromRow(row)
-    if (entry === false && !(row.name in before)) continue
+    if (entry === false && !(row.name in before) && !named.includes(row.name)) continue
     out[row.name] = keepCredentials(entry, before[row.name])
   }
   return Object.keys(out).length ? out : null

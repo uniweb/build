@@ -103,6 +103,7 @@ import {
   refuseRetiredServiceKeys,
   refuseUnreadableServices
 } from './services-request.js'
+import { readBlueprint, refuseUnreadableBlueprint, blueprintForWire } from './blueprint.js'
 import { refuseUnreadableAddress } from '../site/site-address.js'
 import { resolveQueriesConfig } from './queries-config.js'
 import { qualifyRef } from '@uniweb/schemas/refs'
@@ -1297,15 +1298,23 @@ function servicesNested(rows) {
  * The `services` Section for this push — the file's services, and the held ones it no
  * longer lists stated off (`statedServices`) — or undefined when there is nothing to state.
  *
+ * ⭐ `blueprint.yml` rides the `backend` row, as its `config.blueprint` (`./blueprint.js`),
+ * whether the row is on or off. A blueprint beside a `site.yml` that names no `backend` was
+ * refused before this (`refuseUnreadableBlueprint`).
+ *
  * @param {object} siteYml
  * @param {object|null} provisioned - the backend's entry in `sync.json`; its `services`
  *   is `{ <name>: <$uuid> }`, the services this copy holds
+ * @param {object} [blueprint] - the blueprint as it goes on the wire, types in full
  * @returns {object[]|undefined}
  */
-function requestedServices(siteYml, provisioned) {
+function requestedServices(siteYml, provisioned, blueprint) {
   const held = provisioned?.services
+  const asks = readServicesRequest(siteYml.services)
   const rows = statedServices(
-    readServicesRequest(siteYml.services),
+    blueprint
+      ? (asks || []).map((ask) => (ask.name === 'backend' ? { ...ask, config: { ...ask.config, blueprint } } : ask))
+      : asks,
     held && typeof held === 'object' && !Array.isArray(held) ? held : {}
   )
   // `$uuid` rides beside the payload-local `$id`, as on a query's row.
@@ -1515,6 +1524,9 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   refuseRetiredServiceKeys(siteYml)
   refuseUnreadableAddress(siteYml)
   refuseUnreadableServices(siteYml)
+  // How a backend started from this site begins — its own file, checked before anything is read.
+  const blueprint = readBlueprint(siteRoot)
+  refuseUnreadableBlueprint(blueprint, { siteYml })
   const sourceLocale = opts.sourceLocale || resolveDefaultLocale(siteYml)
   if (!siteYml.name) {
     throw new Error('uwx/site: site.yml::name is required')
@@ -1794,7 +1806,8 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // the backend that sold it — and the request is one, in `site.yml`. Push, publish,
   // `status` and a pull's re-bank all build it alike, from the file and `sync.json`.
   const provisioned = opts.backend ? readBackendState(siteRoot, opts.backend) : null
-  const services = requestedServices(siteYml, provisioned)
+  // ⭐ The blueprint's types named in full by the scope the records and the queries take.
+  const services = requestedServices(siteYml, provisioned, blueprint ? blueprintForWire(blueprint, scope) : undefined)
   if (services) doc.services = services
   const secrets = secretsNested(provisioned)
   if (secrets) doc.secrets = secrets

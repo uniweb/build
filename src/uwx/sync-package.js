@@ -27,6 +27,7 @@ import { fileRecordUploads } from './file-records.js'
 import { locatedMediaSink } from './located-media.js'
 import { buildFolderEntity } from './folder.js'
 import { siteProjectToDocument } from './site.js'
+import { siteBlueprintWarnings } from './blueprint.js'
 import { siteSourceLocale } from './source-locale.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { stampUnitUuids, collectUnitUuids, computeUnitHashes } from './site-diff.js'
@@ -514,6 +515,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
   // record's, `site.yml`'s — needs a location the entity does not carry, so it is warned
   // once and skipped. ⛔ Until 2026-10-28 a section's were skipped too.
   if (media) warnings.push(...media.warnings)
+  // ⭐ What a backend started from the site would leave out of its blueprint, said while the author is
+  // still at the file. Never a refusal: the backend leaves such a line out and says so (`./blueprint.js`).
+  if (includeSite) warnings.push(...(await siteBlueprintWarnings(siteRoot, { scope, foundationDir: opts.foundationDir })))
   const localAssetSet = new Set()
   const colocatedSeen = new Set()
   const collectFrom = (doc, taken = null) =>

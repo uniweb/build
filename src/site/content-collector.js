@@ -47,6 +47,8 @@ import { noteSectionFile, rewriteFileLinks } from './file-links.js'
 import { valuesCutByComment } from '../utils/yaml-comment-trap.js'
 import { parseGrid } from '@uniweb/schemas/grid'
 import { runtimeServicesConfig, refuseRetiredServiceKeys, refuseUnreadableServices } from '../uwx/services-request.js'
+import { readBlueprint, refuseUnreadableBlueprint, siteBlueprintWarnings } from '../uwx/blueprint.js'
+import { siteSelfScope } from '../uwx/self-scope.js'
 import { refuseUnreadableAddress } from './site-address.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 import { warnPlacementsNotOffered } from './placement-warnings.js'
@@ -2600,8 +2602,11 @@ function payloadSiteConfig(siteConfig) {
   return runtimeSiteConfig
 }
 
+/** What this process has said of a site's `blueprint.yml` (`collectSiteContent`). */
+const saidOfBlueprint = new Set()
+
 export async function collectSiteContent(sitePath, options = {}) {
-  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/', strict = false } = options
+  const { foundationPath, configFile = 'site.yml', profile: profileName, dropUnpublished = false, base = '/', strict = false, warnBlueprint = true } = options
 
   // Fresh accounting per collect — see `yamlFailures`. A dev rebuild runs this
   // function again, so without the reset a typo fixed three saves ago would
@@ -2619,6 +2624,20 @@ export async function collectSiteContent(sitePath, options = {}) {
   refuseRetiredIconKey(siteConfig, configFile)
   refuseUnreadableAddress(siteConfig, configFile)
   refuseUnreadableServices(siteConfig, configFile)
+  // How a backend started from this site begins (`uwx/blueprint.js`): checked as a push checks it,
+  // and then left out of everything the build writes, since no page reads it.
+  const blueprint = readBlueprint(sitePath)
+  refuseUnreadableBlueprint(blueprint, { siteYml: siteConfig })
+  // ⭐ Each said once a process, as the dev server's other notes about a file that seldom changes:
+  // it collects the site again on every edit.
+  if (blueprint && warnBlueprint) {
+    const scope = await siteSelfScope(sitePath)
+    for (const line of await siteBlueprintWarnings(sitePath, { scope, siteYml: siteConfig, primary: sectionTypes })) {
+      if (saidOfBlueprint.has(line)) continue
+      saidOfBlueprint.add(line)
+      console.warn(`[content-collector] ${line}`)
+    }
+  }
 
   // Queries are declared in TWO files — `site.yml::queries` and `queries.yml`,
   // the latter winning per key — and resolving them is one question with one
