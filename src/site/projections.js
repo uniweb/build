@@ -28,7 +28,7 @@ import {
   renderSiteIndex,
   renderPageMarkdown,
   resolveAgentsConfig,
-  selectIndexablePages,
+  markdownPageRule,
   selectIndexBranches,
   pageMarkdownFilename,
   branchIndexFilename,
@@ -136,15 +136,18 @@ export function agentFiles(content, records, { sections = null } = {}) {
   }
 
   if (agents.markdown) {
-    for (const page of selectIndexablePages(content.pages, { exclude: agents.exclude })) {
+    // ⭐ Which pages have one is `markdownPageRule`'s: the rule a host answers a request for one by
+    // (`resolvePageMarkdown`), so a static build writes a page's markdown exactly where a host
+    // serves one for the same content.
+    const rule = markdownPageRule(content)
+    for (const page of content.pages.filter(rule.page)) {
       const markdown = renderPageMarkdown(page, { sections: sections?.get(page.route) })
       if (markdown) files.push({ kind: 'markdown', fileName: `${prefix}${pageMarkdownFilename(at(page.route))}`, source: markdown, route: page.route })
     }
-    // Each record's page, held to the exclusions a page is held to — the site's pages among them,
-    // so a record under a branch `llms.txt` leaves out gets no file, as it gets no line there.
-    const listed = indexableRecordRoutes(content.pages, records?.pages, agents.exclude)
+    // Each record's page, by the same rule: a record under a branch `llms.txt` leaves out gets no
+    // file, as it gets no line there.
     for (const { route, markdown } of records?.pages || []) {
-      if (!listed.has(route)) continue
+      if (!rule.record(route)) continue
       files.push({ kind: 'markdown', fileName: `${prefix}${pageMarkdownFilename(routeOnDisk(at(route)))}`, source: markdown, route })
     }
   }
@@ -183,16 +186,4 @@ export function describeProjections(files) {
   // knows them, and a build has one only once it prerenders, which then rewrites those pages.
   if (markdown) lines.push(`Generated ${markdown} page markdown projections (the records their sections show are added by prerendering)`)
   return lines
-}
-
-/** The routes of the record pages `llms.txt` lists, judged among the site's own pages. */
-function indexableRecordRoutes(pages = [], recordPages = [], exclude) {
-  if (!recordPages?.length) return new Set()
-  const routes = new Set(recordPages.map((page) => page.route))
-  const candidates = [...pages, ...recordPages.map(({ route }) => ({ route }))]
-  return new Set(
-    selectIndexablePages(candidates, { exclude })
-      .map((page) => page.route)
-      .filter((route) => routes.has(route))
-  )
 }
