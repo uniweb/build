@@ -21,7 +21,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, sep } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { unreadFolders, unreadFoldersWarning, unreadLibraries, unreadLibrariesWarning } from '../foundation/stale-sources.js'
@@ -37,11 +37,21 @@ import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
 import { detectFoundationType } from './foundation-ref.js'
+import { librariesOf } from '../foundation/libraries.js'
 import { readPreview, PREVIEW_ENV } from './preview.js'
 import { previewMediaPlugin } from './preview-media.js'
 import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
 import { devServerRecordPlugin, requestedDevPort } from './dev-server.js'
 import { refuseSearchOption } from './search-declared.js'
+
+/** A folder's real path, or the path itself when it cannot be read. */
+const realpathOr = (path) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
 
 /**
  * Normalize a base path for Vite compatibility
@@ -575,6 +585,16 @@ export async function defineSiteConfig(options = {}) {
               if (!resolved.startsWith(parentDir)) {
                 allowed.push(resolved)
               }
+            }
+          }
+          // ⭐ And each library the bundled foundation imports, from wherever it is (`librariesOf`).
+          // Vite serves what an import reaches anyway; this is for what only a stylesheet names.
+          // ⛔ Until 2026-11-09 an image or font a library outside the workspace names in its CSS
+          // was refused, "403 … outside of Vite serving allow list" (measured under npm, `file:`).
+          if (!isRuntimeMode && foundationInfo.type === 'local' && foundationInfo.path) {
+            const within = realpathOr(parentDir)
+            for (const { dir } of librariesOf(foundationInfo.path)) {
+              if (dir !== within && !dir.startsWith(within + sep)) allowed.push(dir)
             }
           }
           return allowed
