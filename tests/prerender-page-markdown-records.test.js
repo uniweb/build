@@ -144,7 +144,7 @@ describe('a prerendered page\'s markdown carries the records its sections show',
       // Its tagged block once, as written; not again as records.
       expect(md.match(/comparison/g)).toHaveLength(1)
       expect(md).toContain('From {price}')
-      expect(lines.some((line) => /Page markdown: \d+ pages? now carry the records their sections show/.test(line))).toBe(true)
+      expect(lines.some((line) => /Page markdown: (1 page now carries|\d+ pages now carry) the records their sections show/.test(line))).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

@@ -1322,7 +1322,7 @@ export async function prerenderSite(siteDir, options = {}) {
         locale,
       })
       if (count > 0) {
-        onProgress(`  Page markdown: ${count} page${count === 1 ? '' : 's'} now carry the records their sections show`)
+        onProgress(`  Page markdown: ${count === 1 ? '1 page now carries' : `${count} pages now carry`} the records their sections show`)
       }
     }
 
