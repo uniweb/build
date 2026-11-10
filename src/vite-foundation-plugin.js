@@ -22,6 +22,7 @@ import { nodeEnvDefine } from './foundation/node-env.js'
 import { foundationScopeDefine } from './foundation/scope-define.js'
 import { ssrDormantDynamicImports } from './foundation/ssr-dormant-imports.js'
 import { compactOutput } from './foundation/compact-output.js'
+import { libraryImports, libraryAliases } from './foundation/library-imports.js'
 import { DEV_REBUILD_MARKER, hasDevRebuildMarker } from './foundation/dev-rebuild.js'
 
 // Foundations already told that their prose has no stylesheet — once per process, so a dev
@@ -364,13 +365,15 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
     const svgr = (await import('vite-plugin-svgr')).default
     // ssrDormantDynamicImports: a package imported dynamically stays `import('pkg')`, dormant,
     // rather than folded in to run at load (see its module).
-    plugins.push(react(), svgr(), nodeEnvDefine(), foundationScopeDefine({ foundationDir: foundationRoot }), ssrDormantDynamicImports(), compactOutput())
+    plugins.push(libraryImports({ foundationDir: foundationRoot }), react(), svgr(), nodeEnvDefine(), foundationScopeDefine({ foundationDir: foundationRoot }), ssrDormantDynamicImports(), compactOutput())
+    const fromLibraries = libraryAliases(foundationRoot)
 
     await viteBuild({
       root: foundationRoot,
       configFile: false,
       logLevel: 'warn',
       plugins,
+      ...(fromLibraries.length && { resolve: { alias: fromLibraries } }),
       build: {
         outDir: tmpDir,
         emptyOutDir: true,

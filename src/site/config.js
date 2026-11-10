@@ -38,6 +38,7 @@ import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
 import { detectFoundationType } from './foundation-ref.js'
 import { librariesOf } from '../foundation/libraries.js'
+import { libraryImports, libraryAliases, libraryNames } from '../foundation/library-imports.js'
 import { readPreview, PREVIEW_ENV } from './preview.js'
 import { previewMediaPlugin } from './preview-media.js'
 import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
@@ -336,9 +337,13 @@ export async function defineSiteConfig(options = {}) {
   } : null
 
   // Build the plugins array
+  // ⭐ The bundled foundation's libraries build as part of it, wherever they are (`library-imports.js`).
+  const bundledFoundation = !isRuntimeMode && foundationInfo.type === 'local' && foundationInfo.path ? foundationInfo.path : null
+
   const plugins = [
     // Ensure foundation entry exists first (bundled mode only)
     ensureFoundationEntryPlugin,
+    bundledFoundation && libraryImports({ foundationDir: bundledFoundation }),
 
     // Standard plugins
     // JSX compiles only in .jsx files — a bundled foundation's too.
@@ -565,10 +570,13 @@ export async function defineSiteConfig(options = {}) {
       // Foundation externalizes React; when site bundles it, CJS and ESM
       // copies can coexist without this, causing "useRef of null" errors
       dedupe: ['react', 'react-dom', 'react-dom/server', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
-      alias: {
-        ...alias,
-        ...resolveOverrides?.alias
-      }
+      alias: (() => {
+        const own = { ...alias, ...resolveOverrides?.alias }
+        // A library installed as a copy has its stylesheets read from its folder; with none, the
+        // aliases are the site's own, as they were.
+        const fromLibraries = bundledFoundation ? libraryAliases(bundledFoundation) : []
+        return fromLibraries.length ? [...fromLibraries, ...Object.entries(own).map(([find, replacement]) => ({ find, replacement }))] : own
+      })()
     },
 
     server: {
@@ -625,7 +633,8 @@ export async function defineSiteConfig(options = {}) {
         'react', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-router-dom',
         ...(optimizeDepsOverrides.include || [])
       ]),
-      exclude: unique(['#foundation', ...(optimizeDepsOverrides.exclude || [])])
+      // A library is the foundation's source, served as it is edited, never pre-bundled.
+      exclude: unique(['#foundation', ...(bundledFoundation ? libraryNames(bundledFoundation) : []), ...(optimizeDepsOverrides.exclude || [])])
     },
 
     ...restOptions

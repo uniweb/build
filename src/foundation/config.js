@@ -30,6 +30,7 @@ import { nodeEnvDefine } from './node-env.js'
 import { foundationScopeDefine } from './scope-define.js'
 import { compactOutput } from './compact-output.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
+import { libraryImports, libraryAliases } from './library-imports.js'
 // The ONE definition. This list used to be re-typed here, and again in
 // vite-foundation-plugin.js — three hand-synced copies of "what a foundation
 // externalizes", with nothing binding them. The failure mode of a drift is not
@@ -80,8 +81,16 @@ export async function defineFoundationConfig(options = {}) {
     sourcemap = 'hidden',
     build: buildOverrides = {},
     experimental: experimentalOverrides = {},
+    resolve: resolveOverrides,
     ...restOptions
   } = options
+
+  // A library installed as a copy has its stylesheets read from its folder (`library-imports.js`).
+  // With none, `resolve` is what the caller gave, untouched.
+  const fromLibraries = libraryAliases(foundationRoot)
+  const resolveConfig = fromLibraries.length
+    ? { ...resolveOverrides, alias: [...fromLibraries, ...aliasEntries(resolveOverrides?.alias)] }
+    : resolveOverrides
 
   // Build externals list
   const externals = includeDefaultExternals
@@ -116,6 +125,8 @@ export async function defineFoundationConfig(options = {}) {
   // foundationPlugin handles entry generation and schema building
   const plugins = [
     foundationPlugin({ srcDir, sections: sectionPaths }),
+    // A library builds as part of this foundation, wherever it is (`library-imports.js`).
+    libraryImports({ foundationDir: foundationRoot }),
     // JSX compiles only in .jsx files: a .js file holding it fails with that said.
     jsxExtensionGuard(),
     nodeEnvDefine(),
@@ -130,6 +141,7 @@ export async function defineFoundationConfig(options = {}) {
 
   return {
     plugins,
+    ...(resolveConfig && { resolve: resolveConfig }),
 
     // ⭐ A FOUNDATION NAMES ITS OWN FILES FROM WHERE ITS CODE IS. A host serves it from an
     // address of its own, never the page's, so a file its code references — a worker; library
@@ -165,6 +177,13 @@ export async function defineFoundationConfig(options = {}) {
 
     ...restOptions
   }
+}
+
+/** Vite's `resolve.alias` in either of its forms, as the array form. */
+function aliasEntries(alias) {
+  if (!alias) return []
+  if (Array.isArray(alias)) return alias
+  return Object.entries(alias).map(([find, replacement]) => ({ find, replacement }))
 }
 
 /**

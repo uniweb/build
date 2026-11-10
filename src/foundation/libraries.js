@@ -92,3 +92,45 @@ export function librariesOf(packageDir) {
   visit(start, ['dependencies', 'devDependencies', 'optionalDependencies'])
   return found
 }
+
+/** The folder of the package `file` is in: the nearest one above it holding a package.json. */
+function packageRootOf(file) {
+  for (let at = dirname(file); ; at = dirname(at)) {
+    if (existsSync(join(at, 'package.json'))) return at
+    if (dirname(at) === at) return null
+  }
+}
+
+/**
+ * ⭐ A LIBRARY IS READ FROM ITS FOLDER. A package manager may install a copy of one: pnpm copies a
+ * `file:` package from outside the workspace into its store, hard-linked, so a file added to the
+ * library, or one an editor saves by writing a new file over the old, reaches the copy only with the
+ * next install. A path into such a copy is the same path in the library's folder, the one a developer
+ * edits, so whatever resolves a library's files maps what it found through here.
+ *
+ * @param {string} file - an absolute path, as a resolver gives it
+ * @param {Array<{ name: string, dir: string }>} libraries - `librariesOf(...)`
+ * @returns {string} the path in the library's folder, or `file` itself when it is in no copy of one
+ */
+export function inLibraryFolder(file, libraries) {
+  if (!libraries.length || !file.split(sep).includes('node_modules')) return file
+  const root = packageRootOf(file)
+  if (!root) return file
+  const installedAs = (name) => root.endsWith(`${sep}node_modules${sep}${name.split('/').join(sep)}`)
+  const lib = libraries.find((l) => installedAs(l.name))
+  if (!lib || (real(root) ?? root) === lib.dir) return file
+  return join(lib.dir, relative(root, file))
+}
+
+/**
+ * Where Node finds a library from the package that depends on it, followed: its folder when the
+ * package manager linked it, and a copy when it copied it.
+ *
+ * @param {string} fromDir - the depending package
+ * @param {string} name - the name it depends on the library by
+ * @returns {string|null}
+ */
+export function installedLibrary(fromDir, name) {
+  return installedAt(real(fromDir) ?? fromDir, name)
+}
+

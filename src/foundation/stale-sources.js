@@ -28,7 +28,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { librariesOf } from './libraries.js'
+import { librariesOf, inLibraryFolder } from './libraries.js'
 
 // `@source not "…"` excludes a path and `@source inline("…")` names no path: neither has a quote
 // right after the keyword.
@@ -170,7 +170,7 @@ function codeFiles(dir, found = []) {
 }
 
 /** The paths a stylesheet's `@source` lines start from, and those of the stylesheets it imports. */
-function pathsRead(file, seen = new Set()) {
+function pathsRead(file, seen = new Set(), libraries = []) {
   if (seen.has(file)) return []
   seen.add(file)
   let css
@@ -190,7 +190,8 @@ function pathsRead(file, seen = new Set()) {
     } catch {
       continue
     }
-    read.push(...pathsRead(imported, seen))
+    // A library's stylesheet, from its folder, as the build reads it (`inLibraryFolder`).
+    read.push(...pathsRead(inLibraryFolder(imported, libraries), seen, libraries))
   }
   return read
 }
@@ -312,9 +313,10 @@ export function unreadLibraries(stylesPath, packageDir) {
   if (!USES_TAILWIND.test(css)) return []
 
   const dir = dirname(stylesheet)
-  const read = pathsRead(stylesheet)
+  const libraries = librariesOf(packageDir)
+  const read = pathsRead(stylesheet, new Set(), libraries)
   const unread = []
-  for (const lib of librariesOf(packageDir)) {
+  for (const lib of libraries) {
     if (lib.dir === dir || lib.dir.startsWith(dir + sep)) continue
     if (read.some((path) => lib.dir === path || lib.dir.startsWith(path + sep) || path.startsWith(lib.dir + sep))) continue
     let files = 0
