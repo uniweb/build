@@ -47,8 +47,10 @@ const VERSION = 1
  * uuid too, each entry the data schema the backend holds it as, written whole from each folder the
  * backend hands back (`setBackendMap`), so it names what the folder places. `retired` is the same
  * shape: the records a push took out of the folder, which the backend keeps until they are deleted.
+ * `deleting` too: retired records this copy chose to delete that the backend kept, because another
+ * site's folder still placed them; a later push deletes them once none does (`retired-records.js`).
  */
-const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files', 'types', 'retired'])
+const MAP_SECTIONS = new Set(['records', 'items', 'queries', 'folders', 'assets', 'recordItems', 'files', 'types', 'retired', 'deleting'])
 
 const storePath = (siteDir) => join(siteDir, SYNC_STORE_FILE)
 
