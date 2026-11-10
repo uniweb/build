@@ -85,7 +85,7 @@ export {
 
 // Foundation source root resolution (reads package.json::main)
 export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'
-export { staleSources, staleSourceNote, unreadFolders } from './foundation/stale-sources.js'
+export { staleSources, staleSourceNote, unreadFolders, unreadLibraries } from './foundation/stale-sources.js'
 
 // A library is any local package a foundation depends on: the one rule for what else a foundation's
 // build reads, which the CLI's freshness check asks

@@ -19,7 +19,8 @@
  * is missing classes would be false. With a kit from before that, the loss is real: its stylesheet
  * names nothing, so the line is still reported.
  *
- * A folder no `@source` names is the same loss from the other side: see `unreadFolders`.
+ * A folder no `@source` names is the same loss from the other side: see `unreadFolders`, and
+ * `unreadLibraries` for the local packages a foundation bundles.
  *
  * @module @uniweb/build/foundation/stale-sources
  */
@@ -27,6 +28,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { librariesOf } from './libraries.js'
 
 // `@source not "…"` excludes a path and `@source inline("…")` names no path: neither has a quote
 // right after the keyword.
@@ -258,6 +260,87 @@ export function unreadFoldersWarning(unread) {
     "[uniweb] The foundation's styles.css names no @source for code that writes classes, so a site build and `uniweb dev` miss any class only that code uses, though the foundation's own build has it. Have Tailwind read the whole foundation, and no folder can be left out:",
     `  ${READ_WHOLE_FOUNDATION}`,
     '  Or add:',
+    ...unread.map(({ line }) => `  ${line}`)
+  ].join('\n')
+}
+
+/** The library's own stylesheet, when importing it reads the library: its line, else null. */
+function libraryStylesheetLine(lib) {
+  const sheet = join(lib.dir, 'styles.css')
+  if (!existsSync(sheet)) return null
+  // ⛔ An `exports` map without the stylesheet refuses the import, in Tailwind and in Node alike.
+  let pkg = null
+  try {
+    pkg = JSON.parse(readFileSync(join(lib.dir, 'package.json'), 'utf8'))
+  } catch {
+    // no manifest to refuse it
+  }
+  const exp = pkg?.exports
+  if (exp && typeof exp === 'object' && !Object.keys(exp).some((k) => k === './styles.css' || k === './*')) return null
+  const covers = pathsRead(sheet).some((path) => lib.dir === path || lib.dir.startsWith(path + sep))
+  return covers ? `@import "${lib.name}/styles.css";` : null
+}
+
+/**
+ * ⭐ The libraries a foundation bundles whose classes no `@source` reads: local packages it depends
+ * on (`librariesOf`), outside the stylesheet's folder, that write classes.
+ *
+ * Tailwind reads the folder it is rooted in and whatever `@source` names, and a library is outside
+ * the foundation. So a class only a library uses is in no CSS at all: not the foundation's own,
+ * which a hosted site loads with the foundation, and not a site build's. Measured 2026-11-09 on a
+ * foundation whose sections render a library's component, with the library's stylesheet left out
+ * of the foundation's: both builds exited 0, and `ring-primary-500`, `tracking-tight` and
+ * `space-y-1`, used only in the library, were in neither CSS.
+ *
+ * ⚖️ It errs toward saying nothing, as `unreadFolders` does: any `@source` at, above or inside a
+ * library reads it, and a library that writes no classes needs none. A library inside the
+ * stylesheet's folder is the foundation's code to `unreadFolders`.
+ *
+ * @param {string} stylesPath - the foundation's stylesheet; none there, nothing to say
+ * @param {string} packageDir - the foundation's folder, the one its package.json is in
+ * @returns {Array<{ name: string, files: number, line: string }>} each library by the name the
+ *   foundation depends on it by, how many of its files write classes, and the line that reads it
+ */
+export function unreadLibraries(stylesPath, packageDir) {
+  let stylesheet, css
+  try {
+    stylesheet = realpathSync(stylesPath)
+    css = withoutComments(readFileSync(stylesheet, 'utf8'))
+  } catch {
+    return []
+  }
+  if (!USES_TAILWIND.test(css)) return []
+
+  const dir = dirname(stylesheet)
+  const read = pathsRead(stylesheet)
+  const unread = []
+  for (const lib of librariesOf(packageDir)) {
+    if (lib.dir === dir || lib.dir.startsWith(dir + sep)) continue
+    if (read.some((path) => lib.dir === path || lib.dir.startsWith(path + sep) || path.startsWith(lib.dir + sep))) continue
+    let files = 0
+    for (const file of codeFiles(lib.dir)) {
+      if (writesClasses(withoutComments(readFileSync(file, 'utf8')))) files++
+    }
+    if (!files) continue
+    const rel = relative(dir, lib.dir).split(sep).join('/')
+    unread.push({ name: lib.name, files, line: libraryStylesheetLine(lib) ?? `@source "${rel.startsWith('.') ? rel : `./${rel}`}";` })
+  }
+  return unread
+}
+
+/**
+ * What a foundation build, a site build and `uniweb dev` print when `unreadLibraries` finds any,
+ * each the CSS it makes: a site build of a stale foundation runs both builds, and says both.
+ *
+ * @param {Array<{ name: string, line: string }>} unread
+ * @param {{ build?: 'foundation'|'site' }} [options] - the build that prints it
+ */
+export function unreadLibrariesWarning(unread, { build = 'site' } = {}) {
+  const named = unread.map(({ name }) => name).join(', ')
+  const many = unread.length > 1
+  const lost = build === 'foundation' ? "the foundation's CSS, which a hosted site loads with it" : "this site's CSS, and from the foundation's own"
+  return [
+    `[uniweb] The foundation bundles ${named}, and its styles.css reads no classes from ${many ? 'them' : 'it'}, so any class only ${many ? 'they write is' : 'it writes is'} missing from ${lost}. Add to the foundation's styles.css:`,
     ...unread.map(({ line }) => `  ${line}`)
   ].join('\n')
 }

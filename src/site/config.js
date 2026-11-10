@@ -24,7 +24,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
-import { unreadFolders, unreadFoldersWarning } from '../foundation/stale-sources.js'
+import { unreadFolders, unreadFoldersWarning, unreadLibraries, unreadLibrariesWarning } from '../foundation/stale-sources.js'
 import {
   generateEntryPoint,
   shouldRegenerateForFile,
@@ -292,6 +292,9 @@ export async function defineSiteConfig(options = {}) {
         // missing, in a site build and under `uniweb dev`, while its own build has them all.
         const unread = unreadFolders(join(srcDir, 'styles.css'))
         if (unread.length) console.warn(unreadFoldersWarning(unread))
+        // And a library it bundles that no `@source` reads, whose classes no CSS has.
+        const libraries = unreadLibraries(join(srcDir, 'styles.css'), foundationInfo.path)
+        if (libraries.length) console.warn(unreadLibrariesWarning(libraries))
       }
     },
 

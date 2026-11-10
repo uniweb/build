@@ -17,7 +17,7 @@ import { generateFoundationVars } from './theme/index.js'
 import { DEFAULT_EXTERNALS } from './import-map-plugin.js'
 import { deriveSupports } from './foundation/derive-supports.js'
 import { proseWithoutStyles, PROSE_WITHOUT_STYLES_WARNING } from './foundation/prose-styles.js'
-import { staleSources, staleSourcesWarning } from './foundation/stale-sources.js'
+import { staleSources, staleSourcesWarning, unreadLibraries, unreadLibrariesWarning } from './foundation/stale-sources.js'
 import { nodeEnvDefine } from './foundation/node-env.js'
 import { foundationScopeDefine } from './foundation/scope-define.js'
 import { ssrDormantDynamicImports } from './foundation/ssr-dormant-imports.js'
@@ -29,6 +29,7 @@ import { DEV_REBUILD_MARKER, hasDevRebuildMarker } from './foundation/dev-rebuil
 const warnedProseWithoutStyles = new Set()
 // Likewise for a `@source` that finds nothing.
 const warnedStaleSources = new Set()
+const warnedUnreadLibraries = new Set()
 
 /**
  * Build schema.json with preview image references
@@ -466,6 +467,16 @@ export function foundationBuildPlugin(options = {}) {
         if (stale.length) {
           warnedStaleSources.add(resolvedSrcDir)
           console.warn(staleSourcesWarning(stale))
+        }
+      }
+
+      // A library it bundles whose classes no `@source` reads: missing from this CSS, which a hosted
+      // site loads with the foundation, and from a site build's (`unreadLibraries`).
+      if (!warnedUnreadLibraries.has(resolvedSrcDir)) {
+        const unread = unreadLibraries(join(resolvedSrcDir, 'styles.css'), resolvedRoot)
+        if (unread.length) {
+          warnedUnreadLibraries.add(resolvedSrcDir)
+          console.warn(unreadLibrariesWarning(unread, { build: 'foundation' }))
         }
       }
 
