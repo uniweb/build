@@ -148,7 +148,7 @@ describe('a language\'s projections', () => {
     expect(describeProjections(files)).toEqual([
       `Generated fr/search-index.json (${count} entries)`,
       'Generated fr/llms.txt',
-      'Generated 4 page markdown projections'
+      'Generated 4 page markdown projections (the records their sections show are added by prerendering)'
     ])
   })
 })

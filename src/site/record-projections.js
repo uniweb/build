@@ -66,11 +66,14 @@ export function compiledData(root) {
  *   one too (`compiledData`)
  * @param {string} [options.locale] - the content's language, `config.activeLocale` by default, else
  *   the site's default
+ * @param {Map<string, Array<{ id: string, data: Object }>>} [options.sections] - by a record page's
+ *   route, the records its sections showed in its render, which its markdown carries
+ *   (`renderPageMarkdown`'s `sections`)
  * @returns {Promise<{ indexes: Object[], entries: Object[], pages: Array<{ route: string, markdown: string }> }>}
  */
 export async function recordProjections(
   content,
-  { read, locale = content?.config?.activeLocale || resolveDefaultLocale(content?.config || {}) } = {}
+  { read, locale = content?.config?.activeLocale || resolveDefaultLocale(content?.config || {}), sections = null } = {}
 ) {
   const queries = content?.config?.queries || {}
   const indexes = []
@@ -92,7 +95,7 @@ export async function recordProjections(
       if (!route) continue
       const handle = recordHandle(brief)
       const record = (handle && (await read(`${wholeDir}/${handle}.json`))) || brief
-      const markdown = renderPageMarkdown(template, { record })
+      const markdown = renderPageMarkdown(template, { record, sections: sections?.get(route) })
       if (markdown) pages.push({ route, markdown })
     }
   }

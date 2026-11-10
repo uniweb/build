@@ -36,6 +36,8 @@ import { detectCiContext } from './hosts/detect-ci-context.js'
 import { stripBasePath } from './site/extension-urls.js'
 import { isSiteRelative, resolveExtensionDist } from './site/emit-extensions.js'
 import { crawlerFiles, sitemapEntriesOf } from './site/seo-files.js'
+import { agentFiles } from './site/projections.js'
+import { recordProjections, compiledData } from './site/record-projections.js'
 import { absoluteUrl } from '@uniweb/core/site-address'
 
 /**
@@ -1132,6 +1134,8 @@ export async function prerenderSite(siteDir, options = {}) {
 
     // The route of each page written, as its head states it (`Page#getNavRoute`).
     const written = new Set()
+    // By a page's route, the records each of its sections showed: what its markdown carries.
+    const shownRecords = new Map()
     for (const page of website.pages) {
       // Skip dynamic template pages — they exist in the content for runtime
       // route matching but can't be pre-rendered (no concrete route)
@@ -1247,7 +1251,10 @@ export async function prerenderSite(siteDir, options = {}) {
       // is how the two lanes drift. This lane passes the Page it already holds; the
       // isolate passes a route. See `runtime/src/page-renderer.js` for what it leaves
       // to the host.
-      const result = renderer.render(page, { fetchedData: carried })
+      // ⭐ `sectionData`: and which records each section showed, which the page's markdown carries
+      // after it (`writePageMarkdown`, below). An older runtime returns none, and the markdown stays
+      // as the content alone makes it.
+      const result = renderer.render(page, { fetchedData: carried, sectionData: true })
 
       if (result.outcome === 'failed') {
         const { type, message } = result.error
@@ -1298,6 +1305,25 @@ export async function prerenderSite(siteDir, options = {}) {
       onProgress(`  → ${outputPath.replace(distDir, 'dist')}`)
       // The page whose head was written — a content-less folder renders its index child.
       written.add((result.page || page).getNavRoute())
+      if (Array.isArray(result.sections) && result.sections.length > 0) {
+        shownRecords.set((result.page || page).route, result.sections)
+      }
+    }
+
+    // ⭐ THE PAGES' MARKDOWN, WITH THE RECORDS THEIR SECTIONS SHOWED — only a page's render knows
+    // those, so a page whose sections showed any has its markdown written again, now, by the one
+    // writer every language's projections are made by (`./site/projections.js`).
+    if (shownRecords.size > 0) {
+      const count = await writePageMarkdown({
+        content: { ...siteContent, pages: authoredPages },
+        shownRecords,
+        distDir,
+        dataRoots: isDefault ? [distDir, join(siteDir, 'public')] : [join(distDir, locale)],
+        locale,
+      })
+      if (count > 0) {
+        onProgress(`  Page markdown: ${count} page${count === 1 ? '' : 's'} now carry the records their sections show`)
+      }
     }
 
     sitemapEntries.push(...sitemapEntriesOf({ ...siteContent, pages: authoredPages }, {
@@ -1413,6 +1439,41 @@ export async function prerenderSite(siteDir, options = {}) {
     files: renderedFiles,
     skipped: skippedPages,
   }
+}
+
+/**
+ * Write again the markdown of each page whose sections showed records, carrying them (`agentFiles`,
+ * fed what each page's render read). A record page's markdown is its record's as before, then its
+ * sections' records (`recordProjections`). Every other page's markdown is left as the bundle step
+ * wrote it, which is what this would write too.
+ *
+ * @param {Object} where
+ * @param {Object} where.content - one language's site content, its pages as authored
+ * @param {Map<string, Array<{ id: string, data: Object }>>} where.shownRecords - by page route
+ * @param {string} where.distDir
+ * @param {string[]} where.dataRoots - where the language's compiled data files are, searched in order
+ * @param {string} where.locale
+ * @returns {Promise<number>} the pages written
+ */
+async function writePageMarkdown({ content, shownRecords, distDir, dataRoots, locale }) {
+  const readers = dataRoots.map((root) => compiledData(root))
+  const read = (path) => {
+    for (const reader of readers) {
+      const found = reader(path)
+      if (found !== null && found !== undefined) return found
+    }
+    return null
+  }
+  const records = await recordProjections(content, { read, locale, sections: shownRecords })
+  let count = 0
+  for (const file of agentFiles(content, records, { sections: shownRecords })) {
+    if (file.kind !== 'markdown' || !shownRecords.has(file.route)) continue
+    const target = join(distDir, file.fileName)
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(target, file.source)
+    count++
+  }
+  return count
 }
 
 const BROWSER_ONLY = /\b(window|document|navigator|localStorage|sessionStorage) is not defined/

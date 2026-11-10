@@ -92,11 +92,19 @@ export function searchFiles(content, records) {
  * then, and `uniweb doctor` warns. An agent that arrived through the index can follow a relative
  * link, and a silently absent index is the failure the whole feature exists to prevent.
  *
+ * ⭐ A page's markdown carries the records its sections showed where the caller hands them in
+ * (`sections`): what a page's render read, which a build has only once it prerenders
+ * (`../prerender.js`). Without them, each page reads as its content alone.
+ *
  * @param {Object} content - one language's site content
  * @param {Object} [records] - its record pages (`recordProjections`), listed and written as pages
- * @returns {Array<{ kind: 'index'|'branch'|'markdown', fileName: string, source: string }>}
+ * @param {Object} [options]
+ * @param {Map<string, Array<{ id: string, data: Object }>>} [options.sections] - by a page's route,
+ *   the records each of its sections showed (`render(…, { sectionData: true })`)
+ * @returns {Array<{ kind: 'index'|'branch'|'markdown', fileName: string, source: string, route?: string }>}
+ *   a markdown file says the route it is for
  */
-export function agentFiles(content, records) {
+export function agentFiles(content, records, { sections = null } = {}) {
   const agents = resolveAgentsConfig(content?.config)
   if (!agents.index && !agents.markdown) return []
   if (!content?.pages?.length) return []
@@ -129,15 +137,15 @@ export function agentFiles(content, records) {
 
   if (agents.markdown) {
     for (const page of selectIndexablePages(content.pages, { exclude: agents.exclude })) {
-      const markdown = renderPageMarkdown(page)
-      if (markdown) files.push({ kind: 'markdown', fileName: `${prefix}${pageMarkdownFilename(at(page.route))}`, source: markdown })
+      const markdown = renderPageMarkdown(page, { sections: sections?.get(page.route) })
+      if (markdown) files.push({ kind: 'markdown', fileName: `${prefix}${pageMarkdownFilename(at(page.route))}`, source: markdown, route: page.route })
     }
     // Each record's page, held to the exclusions a page is held to — the site's pages among them,
     // so a record under a branch `llms.txt` leaves out gets no file, as it gets no line there.
     const listed = indexableRecordRoutes(content.pages, records?.pages, agents.exclude)
     for (const { route, markdown } of records?.pages || []) {
       if (!listed.has(route)) continue
-      files.push({ kind: 'markdown', fileName: `${prefix}${pageMarkdownFilename(routeOnDisk(at(route)))}`, source: markdown })
+      files.push({ kind: 'markdown', fileName: `${prefix}${pageMarkdownFilename(routeOnDisk(at(route)))}`, source: markdown, route })
     }
   }
 
@@ -171,7 +179,9 @@ export function describeProjections(files) {
     lines.push(`Generated ${branches.length} branch index(es): ${branches.map((b) => `${b.route} (${b.count})`).join(', ')}`)
   }
   const markdown = files.filter((file) => file.kind === 'markdown').length
-  if (markdown) lines.push(`Generated ${markdown} page markdown projections`)
+  // ⭐ Never silent that the records a page's sections show are not in it yet: only a page's render
+  // knows them, and a build has one only once it prerenders, which then rewrites those pages.
+  if (markdown) lines.push(`Generated ${markdown} page markdown projections (the records their sections show are added by prerendering)`)
   return lines
 }
 
