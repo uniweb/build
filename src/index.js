@@ -98,7 +98,7 @@ export { classifyPackage, isExtensionPackage, isSchemasPackage } from './utils/c
 export { collectStandaloneSchemas } from './resolve-data-schema.js'
 
 // One name in a scope is one type: the names a workspace's packages define twice
-export { typesDefinedTwice, packageTypeScope } from './foundation/shared-types.js'
+export { typesDefinedTwice, packageTypeScope, workspaceTypeFiles } from './foundation/shared-types.js'
 
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'
