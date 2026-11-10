@@ -85,17 +85,17 @@ export {
 
 // Foundation source root resolution (reads package.json::main)
 export { resolveFoundationSrcDir, resolveFoundationSrcPath } from './utils/foundation-source-root.js'
-export { staleSources, staleSourceNote, unreadFolders, unreadLibraries } from './foundation/stale-sources.js'
+export { staleSources, staleSourceNote, unreadFolders, unreadLibraries, libraryLine } from './foundation/stale-sources.js'
 
 // A library is any local package a foundation depends on: the one rule for what else a foundation's
 // build reads, which the CLI's freshness check asks
-export { librariesOf } from './foundation/libraries.js'
+export { librariesOf, copiedLibraries, copiedLibrariesWarning } from './foundation/libraries.js'
 
 // Package classification (foundation vs site vs standalone schemas package)
 export { classifyPackage, isExtensionPackage, isSchemasPackage } from './utils/classify-package.js'
 
 // Standalone schemas-package discovery (the foundation-less register input)
-export { collectStandaloneSchemas } from './resolve-data-schema.js'
+export { collectStandaloneSchemas, routedSchema } from './resolve-data-schema.js'
 
 // One name in a scope is one type: the names a workspace's packages define twice
 export { typesDefinedTwice, packageTypeScope, workspaceTypeFiles } from './foundation/shared-types.js'

@@ -11,7 +11,11 @@ import { describe, test, expect, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { librariesOf } from '../src/foundation/libraries.js'
+import { librariesOf as librariesWithDependents } from '../src/foundation/libraries.js'
+
+// Each library as these tests name it: by its name and folder (`from`, the package depending on
+// it, has a test of its own below).
+const librariesOf = (dir) => librariesWithDependents(dir).map(({ name, dir: at }) => ({ name, dir: at }))
 
 const roots = []
 afterEach(() => roots.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true })))
@@ -39,6 +43,18 @@ function link(fromDir, name, target) {
 const names = (libs) => libs.map((l) => l.name)
 
 describe('a local package a foundation depends on is a library', () => {
+  test('each with the package that depends on it: the foundation, or the library that uses it', () => {
+    const ws = workspace()
+    const tokens = pkg(join(ws, 'tokens'), { name: 'tokens' })
+    const ui = pkg(join(ws, 'ui'), { name: 'ui', dependencies: { tokens: 'file:../tokens' } })
+    const classic = pkg(join(ws, 'classic'), { name: 'classic', dependencies: { ui: 'file:../ui' } })
+    expect(librariesWithDependents(classic).map(({ name, from }) => [name, from])).toEqual([
+      ['ui', classic],
+      ['tokens', ui]
+    ])
+    expect(tokens).toBe(join(ws, 'tokens'))
+  })
+
   test('⭐ the recipe: a package beside it, by a `file:` path', () => {
     const ws = workspace()
     const shared = pkg(join(ws, 'shared'), { name: '@acme/shared' })

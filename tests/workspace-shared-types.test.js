@@ -167,10 +167,18 @@ describe('a type a library the foundation bundles defines', () => {
   })
 
   it('a site reads its foundation\'s libraries too, for its records and queries', async () => {
-    const lib = library('acme-shared', { name: '@acme/shared', uniweb: { scope: '@acme' } })
-    classic({ '@acme/shared': 'file:../../acme-shared' })
+    // Through the route a build takes (`resolveRecordSchemas` asks from the foundation's source
+    // folder), with the library among the foundation's devDependencies, which a foundation's build
+    // bundles as it bundles its dependencies.
+    library('acme-shared', { name: '@acme/shared', uniweb: { scope: '@acme' } })
+    const dir = classic({})
+    w('project/classic/package.json', { name: 'classic', main: './_entry.generated.js', devDependencies: { '@acme/shared': 'file:../../acme-shared' } })
     w('project/site/package.json', { name: 'site', dependencies: { classic: 'file:../classic' } })
     w('project/site/site.yml', 'foundation: classic\n')
-    expect(await workspaceTypeFiles('@acme/plan', join(ROOT, 'project/site'))).toEqual([realpathSync(join(lib, 'schemas/plan.yml'))])
+    const { resolveRecordSchemas } = await import('../src/site/queries-config.js')
+    const { schemas, failures } = await resolveRecordSchemas(join(ROOT, 'project/site'), ['@acme/plan'])
+    expect(failures).toEqual([])
+    expect(Object.keys(schemas)).toContain('@acme/plan')
+    expect(dir).toBe(join(ROOT, 'project/classic'))
   })
 })

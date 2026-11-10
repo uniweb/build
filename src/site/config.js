@@ -38,7 +38,9 @@ import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
 import { detectFoundationType } from './foundation-ref.js'
 import { librariesOf } from '../foundation/libraries.js'
-import { libraryImports, libraryAliases, libraryNames } from '../foundation/library-imports.js'
+import { libraryImports } from '../foundation/library-imports.js'
+import { copiedLibraries, copiedLibrariesWarning } from '../foundation/libraries.js'
+import { workspaceRootOf } from './workspace-extension.js'
 import { readPreview, PREVIEW_ENV } from './preview.js'
 import { previewMediaPlugin } from './preview-media.js'
 import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
@@ -303,9 +305,12 @@ export async function defineSiteConfig(options = {}) {
         // missing, in a site build and under `uniweb dev`, while its own build has them all.
         const unread = unreadFolders(join(srcDir, 'styles.css'))
         if (unread.length) console.warn(unreadFoldersWarning(unread))
-        // And a library it bundles that no `@source` reads, whose classes no CSS has.
+        // And a library it bundles that no `@source` reads, whose classes no CSS has, or one the
+        // package manager copied, which a change to its folder doesn't reach.
         const libraries = unreadLibraries(join(srcDir, 'styles.css'), foundationInfo.path)
         if (libraries.length) console.warn(unreadLibrariesWarning(libraries))
+        const copied = copiedLibraries(foundationInfo.path)
+        if (copied.length) console.warn(copiedLibrariesWarning(copied, workspaceRootOf(foundationInfo.path)))
       }
     },
 
@@ -337,7 +342,8 @@ export async function defineSiteConfig(options = {}) {
   } : null
 
   // Build the plugins array
-  // ⭐ The bundled foundation's libraries build as part of it, wherever they are (`library-imports.js`).
+  // ⭐ A library of the bundled foundation outside the workspace's folder resolves what it imports as
+  // the foundation does (`library-imports.js`).
   const bundledFoundation = !isRuntimeMode && foundationInfo.type === 'local' && foundationInfo.path ? foundationInfo.path : null
 
   const plugins = [
@@ -570,13 +576,10 @@ export async function defineSiteConfig(options = {}) {
       // Foundation externalizes React; when site bundles it, CJS and ESM
       // copies can coexist without this, causing "useRef of null" errors
       dedupe: ['react', 'react-dom', 'react-dom/server', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
-      alias: (() => {
-        const own = { ...alias, ...resolveOverrides?.alias }
-        // A library installed as a copy has its stylesheets read from its folder; with none, the
-        // aliases are the site's own, as they were.
-        const fromLibraries = bundledFoundation ? libraryAliases(bundledFoundation) : []
-        return fromLibraries.length ? [...fromLibraries, ...Object.entries(own).map(([find, replacement]) => ({ find, replacement }))] : own
-      })()
+      alias: {
+        ...alias,
+        ...resolveOverrides?.alias
+      }
     },
 
     server: {
@@ -633,8 +636,7 @@ export async function defineSiteConfig(options = {}) {
         'react', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-router-dom',
         ...(optimizeDepsOverrides.include || [])
       ]),
-      // A library is the foundation's source, served as it is edited, never pre-bundled.
-      exclude: unique(['#foundation', ...(bundledFoundation ? libraryNames(bundledFoundation) : []), ...(optimizeDepsOverrides.exclude || [])])
+      exclude: unique(['#foundation', ...(optimizeDepsOverrides.exclude || [])])
     },
 
     ...restOptions

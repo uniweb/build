@@ -22,7 +22,9 @@ import { nodeEnvDefine } from './foundation/node-env.js'
 import { foundationScopeDefine } from './foundation/scope-define.js'
 import { ssrDormantDynamicImports } from './foundation/ssr-dormant-imports.js'
 import { compactOutput } from './foundation/compact-output.js'
-import { libraryImports, libraryAliases } from './foundation/library-imports.js'
+import { libraryImports } from './foundation/library-imports.js'
+import { copiedLibraries, copiedLibrariesWarning } from './foundation/libraries.js'
+import { workspaceRootOf } from './site/workspace-extension.js'
 import { DEV_REBUILD_MARKER, hasDevRebuildMarker } from './foundation/dev-rebuild.js'
 
 // Foundations already told that their prose has no stylesheet — once per process, so a dev
@@ -366,14 +368,12 @@ async function buildEntrySSR(foundationRoot, entrySourcePath, outDir) {
     // ssrDormantDynamicImports: a package imported dynamically stays `import('pkg')`, dormant,
     // rather than folded in to run at load (see its module).
     plugins.push(libraryImports({ foundationDir: foundationRoot }), react(), svgr(), nodeEnvDefine(), foundationScopeDefine({ foundationDir: foundationRoot }), ssrDormantDynamicImports(), compactOutput())
-    const fromLibraries = libraryAliases(foundationRoot)
 
     await viteBuild({
       root: foundationRoot,
       configFile: false,
       logLevel: 'warn',
       plugins,
-      ...(fromLibraries.length && { resolve: { alias: fromLibraries } }),
       build: {
         outDir: tmpDir,
         emptyOutDir: true,
@@ -474,13 +474,14 @@ export function foundationBuildPlugin(options = {}) {
       }
 
       // A library it bundles whose classes no `@source` reads: missing from this CSS, which a hosted
-      // site loads with the foundation, and from a site build's (`unreadLibraries`).
+      // site loads with the foundation, and from a site build's (`unreadLibraries`). And one the
+      // package manager copied, which a change to its folder doesn't reach (`copiedLibraries`).
       if (!warnedUnreadLibraries.has(resolvedSrcDir)) {
         const unread = unreadLibraries(join(resolvedSrcDir, 'styles.css'), resolvedRoot)
-        if (unread.length) {
-          warnedUnreadLibraries.add(resolvedSrcDir)
-          console.warn(unreadLibrariesWarning(unread, { build: 'foundation' }))
-        }
+        const copied = copiedLibraries(resolvedRoot)
+        if (unread.length || copied.length) warnedUnreadLibraries.add(resolvedSrcDir)
+        if (unread.length) console.warn(unreadLibrariesWarning(unread, { build: 'foundation' }))
+        if (copied.length) console.warn(copiedLibrariesWarning(copied, workspaceRootOf(resolvedRoot)))
       }
 
       // What host services this foundation actually reaches for, read off the

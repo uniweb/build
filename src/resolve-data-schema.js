@@ -294,7 +294,7 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
     throw new Error(
       `Data schema '${ref}' is defined by ${inWorkspace.length} packages this foundation reads: ` +
         `${inWorkspace.join(', ')}. A type has one definition: keep one file, and name the type in ` +
-        `full in the others (\`uniweb doctor\` lists them as type-defined-twice).`
+        `full in the others (\`uniweb doctor\` lists the types the workspace's packages define twice).`
     )
   }
   if (inWorkspace.length === 1) return normalizeNamedSchema(await loadSchemaFile(inWorkspace[0]), ref)
@@ -532,6 +532,22 @@ function findSchemaFileInDir(dir, name) {
  * @param {string} srcDir - Foundation source root (where main.js lives).
  * @returns {Promise<Record<string, string>>}
  */
+/**
+ * Whether the foundation's `schemas.config.js` routes `ref`: the type to a file, or its scope to a
+ * folder. A routed type is read from where the route says, ahead of the workspace, a library or a
+ * package (`resolveSchemaRef`), so whatever asks which package defines a type asks this first.
+ *
+ * @param {string} ref - `@scope/name`
+ * @param {string} srcDir - the foundation's source folder, which holds `schemas.config.js`
+ * @returns {Promise<boolean>}
+ */
+export async function routedSchema(ref, srcDir) {
+  const m = /^@([^/]+)\/(.+)$/.exec(ref || '')
+  if (!m) return false
+  const aliases = await loadSchemaAliases(srcDir)
+  return !!(aliases[ref] || aliases[`@${m[1]}`])
+}
+
 async function loadSchemaAliases(srcDir) {
   const file = join(srcDir, 'schemas.config.js')
   if (!existsSync(file)) return {}

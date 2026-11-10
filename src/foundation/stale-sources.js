@@ -28,7 +28,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { librariesOf, inLibraryFolder } from './libraries.js'
+import { librariesOf } from './libraries.js'
 
 // `@source not "…"` excludes a path and `@source inline("…")` names no path: neither has a quote
 // right after the keyword.
@@ -160,13 +160,52 @@ function writesClasses(code) {
 const NOT_THE_FOUNDATIONS_CODE = new Set(['node_modules', 'dist', 'public', 'test', 'tests', '__tests__'])
 
 function codeFiles(dir, found = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    // A folder it may not read is no code it writes: said by nothing, and stopping nothing.
+    return found
+  }
+  for (const entry of entries) {
     if (entry.name.startsWith('.') || NOT_THE_FOUNDATIONS_CODE.has(entry.name)) continue
     const path = join(dir, entry.name)
     if (entry.isDirectory()) codeFiles(path, found)
     else if (/\.[jt]sx?$/.test(entry.name) && !/\.(?:test|spec|generated)\./.test(entry.name)) found.push(path)
   }
   return found
+}
+
+/**
+ * The file a library's `exports` gives a subpath (`./styles.css`), or null when the map refuses it.
+ * With no map, every file is reachable by its path. A string or an array, or a map of conditions
+ * alone, exports `.` only.
+ */
+function exportedFile(libDir, subpath) {
+  let pkg = null
+  try {
+    pkg = JSON.parse(readFileSync(join(libDir, 'package.json'), 'utf8'))
+  } catch {
+    // no manifest to refuse it
+  }
+  const exp = pkg?.exports
+  if (exp === undefined || exp === null) return join(libDir, subpath)
+  if (typeof exp !== 'object' || Array.isArray(exp) || !Object.keys(exp).some((k) => k.startsWith('.'))) return null
+  const target = (value) =>
+    typeof value === 'string' ? value : value && typeof value === 'object' && !Array.isArray(value) ? [value.style, value.default, value.import].find((v) => typeof v === 'string') ?? null : null
+  if (subpath in exp) {
+    const t = target(exp[subpath])
+    return t ? join(libDir, t) : null
+  }
+  // A pattern: the longest key whose part before the star the subpath starts with, as Node takes it.
+  let best = null
+  for (const [key, value] of Object.entries(exp)) {
+    const t = target(value)
+    if (!key.endsWith('*') || !t?.includes('*')) continue
+    const prefix = key.slice(0, -1)
+    if (subpath.startsWith(prefix) && (!best || prefix.length > best.prefix.length)) best = { prefix, t }
+  }
+  return best ? join(libDir, best.t.replace('*', subpath.slice(best.prefix.length))) : null
 }
 
 /** The paths a stylesheet's `@source` lines start from, and those of the stylesheets it imports. */
@@ -184,14 +223,19 @@ function pathsRead(file, seen = new Set(), libraries = []) {
   for (const [, , specifier] of css.matchAll(IMPORT)) {
     // ⛔ Only a `.css` specifier, as in `readByAnImport`.
     if (!specifier.endsWith('.css')) continue
-    let imported
-    try {
-      imported = require.resolve(specifier)
-    } catch {
-      continue
+    // ⭐ A library's stylesheet is read from the library's folder, by its `exports`, so the answer
+    // holds before an install too. ⛔ Until 2026-11-10 it was resolved through `node_modules` alone,
+    // and in a fresh clone the import a foundation already had was the line it was told to add.
+    const lib = libraries.find((l) => specifier.startsWith(`${l.name}/`))
+    let imported = lib ? exportedFile(lib.dir, `.${specifier.slice(lib.name.length)}`) : null
+    if (!imported || !existsSync(imported)) {
+      try {
+        imported = require.resolve(specifier)
+      } catch {
+        continue
+      }
     }
-    // A library's stylesheet, from its folder, as the build reads it (`inLibraryFolder`).
-    read.push(...pathsRead(inLibraryFolder(imported, libraries), seen, libraries))
+    read.push(...pathsRead(imported, seen, libraries))
   }
   return read
 }
@@ -265,21 +309,31 @@ export function unreadFoldersWarning(unread) {
   ].join('\n')
 }
 
-/** The library's own stylesheet, when importing it reads the library: its line, else null. */
+/**
+ * The library's own stylesheet, when importing it reads the library: its line, else null. ⛔ An
+ * `exports` map that doesn't give `./styles.css` refuses the import, in Tailwind and in Node alike,
+ * and so does an `exports` that is a string (until 2026-11-10 that one was read as no map at all).
+ */
 function libraryStylesheetLine(lib) {
-  const sheet = join(lib.dir, 'styles.css')
-  if (!existsSync(sheet)) return null
-  // ⛔ An `exports` map without the stylesheet refuses the import, in Tailwind and in Node alike.
-  let pkg = null
-  try {
-    pkg = JSON.parse(readFileSync(join(lib.dir, 'package.json'), 'utf8'))
-  } catch {
-    // no manifest to refuse it
-  }
-  const exp = pkg?.exports
-  if (exp && typeof exp === 'object' && !Object.keys(exp).some((k) => k === './styles.css' || k === './*')) return null
+  const sheet = exportedFile(lib.dir, './styles.css')
+  if (!sheet || !existsSync(sheet)) return null
   const covers = pathsRead(sheet).some((path) => lib.dir === path || lib.dir.startsWith(path + sep))
   return covers ? `@import "${lib.name}/styles.css";` : null
+}
+
+/**
+ * ⭐ THE LINE THAT HAS A FOUNDATION'S STYLESHEET READ A LIBRARY'S CLASSES: the library's own
+ * stylesheet imported, when it reads the library's files and the library exports it, else a
+ * `@source` to the library's folder. One rule, which `uniweb add library` writes and
+ * `unreadLibraries` names.
+ *
+ * @param {{ name: string, dir: string }} lib
+ * @param {string} stylesDir - the folder of the foundation's `styles.css`
+ * @returns {string}
+ */
+export function libraryLine(lib, stylesDir) {
+  const rel = relative(stylesDir, lib.dir).split(sep).join('/')
+  return libraryStylesheetLine(lib) ?? `@source "${rel.startsWith('.') ? rel : `./${rel}`}";`
 }
 
 /**
@@ -324,8 +378,7 @@ export function unreadLibraries(stylesPath, packageDir) {
       if (writesClasses(withoutComments(readFileSync(file, 'utf8')))) files++
     }
     if (!files) continue
-    const rel = relative(dir, lib.dir).split(sep).join('/')
-    unread.push({ name: lib.name, files, line: libraryStylesheetLine(lib) ?? `@source "${rel.startsWith('.') ? rel : `./${rel}`}";` })
+    unread.push({ name: lib.name, files, line: libraryLine(lib, dir) })
   }
   return unread
 }
