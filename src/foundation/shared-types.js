@@ -14,7 +14,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { join, relative, resolve, isAbsolute, sep } from 'node:path'
+import { dirname, join, relative, resolve, isAbsolute, sep } from 'node:path'
 import { readFoundationName } from '../schema.js'
 import { splitFoundationName } from '../foundation-name.js'
 import { ownSchemaFiles, resolveSchemaRef } from '../resolve-data-schema.js'
@@ -23,6 +23,7 @@ import { canonicalJson } from '../uwx/same-content.js'
 import { workspacePackages } from '../workspace-patterns.js'
 import { workspaceRootOf } from '../site/workspace-extension.js'
 import { classifyPackage, isSchemasPackage } from '../utils/classify-package.js'
+import { librariesOf } from './libraries.js'
 
 const real = (path) => {
   try {
@@ -145,17 +146,31 @@ const within = (dir, path) => {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
+/** The package `dir` is in: the nearest folder at or above it that holds a package.json. */
+function packageDirOf(dir) {
+  for (let at = resolve(dir); ; at = dirname(at)) {
+    if (existsSync(join(at, 'package.json'))) return at
+    if (dirname(at) === at) return null
+  }
+}
+
 /**
- * ⭐ A TYPE ANOTHER PACKAGE OF THE WORKSPACE DEFINES, found with nothing configured. Foundations a
- * team develops together share a type by its full name, `@acme/member`, and a local build reads it
- * from the package that defines it: a foundation whose name gives the `@acme` scope and whose own
- * `schemas/` holds `member`, or a schemas package of that scope. No `schemas.config.js`, no package to
- * install, nothing registered: sharing a type never needs a backend *[Diego, 2026-11-08: "it should be
- * easy and good DX to share schemas"]*.
+ * ⭐ A TYPE ANOTHER PACKAGE OF THE WORKSPACE, OR A LIBRARY THE ASKING PACKAGE BUNDLES, DEFINES,
+ * found with nothing configured. Foundations a team develops together share a type by its full
+ * name, `@acme/member`, and a local build reads it from the package that defines it: a foundation
+ * whose name gives the `@acme` scope and whose own `schemas/` holds `member`, or a schemas package
+ * of that scope. No `schemas.config.js`, no package to install, nothing registered: sharing a type
+ * never needs a backend *[Diego, 2026-11-08: "it should be easy and good DX to share schemas"]*.
  *
- * Only packages of one workspace share this way: `fromDir` must be in one of the workspace's
- * packages, as pnpm reads its list (`../workspace-patterns.js`), so a copy kept outside the list, a
- * backup folder say, is never read. Found by the same rule `typesDefinedTwice` names copies by.
+ * Two kinds of package are read, each one the asker's to read:
+ *   - the workspace's packages, as pnpm reads its list (`../workspace-patterns.js`), when `fromDir`
+ *     is in one of them, so a copy kept outside the list, a backup folder say, is never read;
+ *   - each library the asking package bundles (`librariesOf`), wherever it is: in another
+ *     repository beside the workspace, say, linked with `file:` or `link:`. A library is such a
+ *     schemas package when it gives its scope in its `package.json` (`uniweb.scope`) and holds
+ *     `schemas/`. ⛔ Until 2026-11-09 only the workspace's were, and a library outside it needed
+ *     `schemas.config.js` in every foundation that named its types.
+ * Found by the same rule `typesDefinedTwice` names copies by.
  *
  * @param {string} ref - `@scope/name`
  * @param {string} fromDir - the foundation (its source folder) or site asking
@@ -165,12 +180,20 @@ export async function workspaceTypeFiles(ref, fromDir) {
   const m = /^(@[^/]+)\/(.+)$/.exec(ref || '')
   if (!m) return []
   const [, scope, name] = m
+  const candidates = []
   const root = workspaceRootOf(fromDir)
-  if (!root) return []
-  const packages = workspacePackages(root).map((rel) => join(root, rel))
-  if (!packages.some((dir) => within(dir, resolve(fromDir)))) return []
+  if (root) {
+    const packages = workspacePackages(root).map((rel) => join(root, rel))
+    if (packages.some((dir) => within(dir, resolve(fromDir)))) candidates.push(...packages)
+  }
+  const asking = packageDirOf(fromDir)
+  if (asking) candidates.push(...librariesOf(asking).map((lib) => lib.dir))
   const files = new Map()
-  for (const dir of packages) {
+  const seen = new Set()
+  for (const dir of candidates) {
+    const at = real(dir)
+    if (seen.has(at)) continue
+    seen.add(at)
     const kind = classifyPackage(dir) === 'foundation' ? 'foundation' : isSchemasPackage(dir) ? 'schemas' : null
     if (!kind) continue
     if ((await cachedTypeScope(dir, kind)) !== scope) continue

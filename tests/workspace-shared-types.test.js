@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resolveSchemaRef, buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../src/resolve-data-schema.js'
@@ -61,7 +61,7 @@ describe('a type another foundation of the workspace defines', () => {
     foundation('crm', '@acme/crm', { 'member.yml': OTHER_MEMBER })
     const press = foundation('press', '@acme/press')
     await expect(resolveSchemaRef('@acme/member', { srcDir: press, aliases: {} })).rejects.toThrow(
-      /defined by 2 packages of this workspace: .*crm.*hub|defined by 2 packages of this workspace: .*hub.*crm/
+      /defined by 2 packages this foundation reads: .*crm.*hub|defined by 2 packages this foundation reads: .*hub.*crm/
     )
   })
 
@@ -83,7 +83,8 @@ describe('a type another foundation of the workspace defines', () => {
     const press = foundation('press', '@acme/press')
     const error = await resolveSchemaRef('@acme/member', { srcDir: press, aliases: {} }).catch((e) => e)
     expect(error.code).toBe(SCHEMA_NOT_FOUND)
-    expect(error.message).toMatch(/no package of its workspace whose name gives the scope '@acme' defines 'member'/)
+    expect(error.message).toMatch(/no package of its workspace, and no library it bundles, whose name gives the scope '@acme' defines 'member'/)
+    expect(error.message).toMatch(/"uniweb": \{ "scope": "@acme" \}/)
     expect(error.message).toMatch(/schemas\.config\.js/)
   })
 
@@ -100,5 +101,76 @@ describe('a type another foundation of the workspace defines', () => {
     foundation('hub', '@acme/hub', { 'member.yml': MEMBER })
     const loose = foundation('loose', '@acme/loose')
     expect(await workspaceTypeFiles('@acme/member', loose)).toEqual([])
+  })
+})
+
+/**
+ * ⭐ A library the foundation bundles serves its scope wherever it is: a local package it depends
+ * on, giving its scope in its package.json (`uniweb.scope`), with the types in its `schemas/`.
+ * ⛔ Until 2026-11-09 one outside the workspace served nothing, and the first build stopped: "Data
+ * schema '@acme/plan' is defined nowhere this foundation can read" (measured, a library beside the
+ * workspace linked with `file:`).
+ */
+describe('a type a library the foundation bundles defines', () => {
+  const PLAN = 'name: plan\nfields:\n  title: { type: string }\n'
+  const library = (dir, json, schemas = { 'plan.yml': PLAN }) => {
+    w(`${dir}/package.json`, json)
+    for (const [file, body] of Object.entries(schemas)) w(`${dir}/schemas/${file}`, body)
+    return join(ROOT, dir)
+  }
+  const classic = (deps) => {
+    w('project/pnpm-workspace.yaml', 'packages:\n  - classic\n')
+    w('project/classic/package.json', { name: 'classic', main: './_entry.generated.js', dependencies: deps })
+    w('project/classic/main.js', "export default { name: '@acme/classic' }\n")
+    return join(ROOT, 'project/classic')
+  }
+
+  it('⭐ outside the workspace, by its `file:` path', async () => {
+    library('acme-shared', { name: '@acme/shared', uniweb: { scope: '@acme' } })
+    const dir = classic({ '@acme/shared': 'file:../../acme-shared' })
+    const schema = await resolveSchemaRef('@acme/plan', { srcDir: dir, aliases: {} })
+    expect(Object.keys(schema.fields)).toEqual(['title'])
+  })
+
+  it('linked where pnpm or npm put it, by any other spec', async () => {
+    const lib = library('acme-shared', { name: '@acme/shared', uniweb: { scope: '@acme' } })
+    const dir = classic({ '@acme/shared': 'link:../../acme-shared' })
+    const file = realpathSync(join(lib, 'schemas/plan.yml'))
+    expect(await workspaceTypeFiles('@acme/plan', dir)).toEqual([file])
+    w('project/classic/package.json', { name: 'classic', main: './_entry.generated.js', dependencies: { '@acme/shared': '*' } })
+    mkdirSync(join(ROOT, 'project/node_modules/@acme'), { recursive: true })
+    symlinkSync(lib, join(ROOT, 'project/node_modules/@acme/shared'), 'dir')
+    expect(await workspaceTypeFiles('@acme/plan', dir)).toEqual([file])
+  })
+
+  it('and a library in the workspace and listed is read once', async () => {
+    w('pnpm-workspace.yaml', 'packages:\n  - classic\n  - shared\n')
+    library('shared', { name: 'shared', uniweb: { scope: '@acme' } })
+    foundation('classic', '@acme/classic')
+    w('classic/package.json', { name: 'classic', main: './_entry.generated.js', dependencies: { shared: 'file:../shared' } })
+    expect(await workspaceTypeFiles('@acme/plan', join(ROOT, 'classic'))).toEqual([join(ROOT, 'shared/schemas/plan.yml')])
+  })
+
+  it('CONTROL: a library that gives another scope, or none, serves nothing under this one', async () => {
+    library('other', { name: 'other', uniweb: { scope: '@zeta' } })
+    library('bare', { name: 'bare' })
+    const dir = classic({ other: 'file:../../other', bare: 'file:../../bare' })
+    expect(await workspaceTypeFiles('@acme/plan', dir)).toEqual([])
+    const error = await resolveSchemaRef('@acme/plan', { srcDir: dir, aliases: {} }).catch((e) => e)
+    expect(error.code).toBe(SCHEMA_NOT_FOUND)
+  })
+
+  it('CONTROL: a package beside it that the foundation does not depend on is never read', async () => {
+    library('acme-shared', { name: '@acme/shared', uniweb: { scope: '@acme' } })
+    const dir = classic({})
+    expect(await workspaceTypeFiles('@acme/plan', dir)).toEqual([])
+  })
+
+  it('a site reads its foundation\'s libraries too, for its records and queries', async () => {
+    const lib = library('acme-shared', { name: '@acme/shared', uniweb: { scope: '@acme' } })
+    classic({ '@acme/shared': 'file:../../acme-shared' })
+    w('project/site/package.json', { name: 'site', dependencies: { classic: 'file:../classic' } })
+    w('project/site/site.yml', 'foundation: classic\n')
+    expect(await workspaceTypeFiles('@acme/plan', join(ROOT, 'project/site'))).toEqual([realpathSync(join(lib, 'schemas/plan.yml'))])
   })
 })
