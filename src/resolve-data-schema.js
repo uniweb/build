@@ -362,16 +362,23 @@ export async function buildDataSchemaMap(refs, { srcDir }) {
 /**
  * Collect every data schema a STANDALONE schemas package defines, normalized and
  * keyed by self-ref (`@/<name>`) — the input to a foundation-less registry
- * publish (buildSchemaOnlyPackage). A schemas package exposes its schemas one of
- * two ways, tried in order:
+ * publish (buildSchemaOnlyPackage). A package registers the schemas a foundation's
+ * build reads from it, so they are found where the build finds them:
  *
- *   1. Module exports — the package entry exports `getSchemaNames()` + `getSchema()`
- *      (or a `schemas` map / a default map). This is the same `@org/schemas`
- *      package contract that foundations already consume through `@std/x` /
- *      `@org/x` refs (`resolveScopedSchema` below), so a package registers exactly
- *      the schemas it offers consumers (e.g. `@uniweb/schemas` → the standards).
- *   2. A `schemas/` directory of `*.{js,json,yml,yaml}` files — one schema per
- *      file, named by basename. For a bare folder of schema files with no index.
+ *   1. A `schemas/` directory of `*.{js,json,yml,yaml}` files — one schema per
+ *      file, named by basename. A foundation's build reads a local package's types
+ *      from it: a package of its workspace, or a library it bundles
+ *      (`foundation/shared-types.js`).
+ *   2. Otherwise, module exports — the package entry exports `getSchemaNames()` +
+ *      `getSchema()` (or a `schemas` map / a default map): the `@org/schemas`
+ *      package contract a foundation consumes from an installed package
+ *      (`resolveScopedSchema` below), e.g. `@uniweb/schemas` → the standards.
+ *
+ * ⭐ THE DIRECTORY FIRST. A library holds code and types, and its entry is its code:
+ * React components, which Node does not load. ⛔ Until 2026-11-10 the entry was
+ * imported first, so `uniweb register` in a library whose `index.js` exports a
+ * component stopped with "Unknown file extension .jsx" — and a package holding both
+ * registered its exports, which no local build had read.
  *
  * Names only, no uuids; normalization only (no lowering to any storage model).
  * Each schema is validated, so a malformed one throws a clear error before publish.
@@ -380,12 +387,12 @@ export async function buildDataSchemaMap(refs, { srcDir }) {
  * @returns {Promise<Record<string, object>>} `{ '@/<name>': normalizedSchema }`
  */
 export async function collectStandaloneSchemas(packageDir) {
-  const fromExports = await collectSchemasFromExports(packageDir)
-  if (Object.keys(fromExports).length > 0) return fromExports
-  return collectSchemasFromDir(join(packageDir, 'schemas'))
+  const dir = join(packageDir, 'schemas')
+  if (schemaFilesIn(dir).length > 0) return collectSchemasFromDir(dir)
+  return collectSchemasFromExports(packageDir)
 }
 
-// Source 1: a package whose entry exports schemas. Mirrors how a foundation
+// Source 2: a package whose entry exports schemas. Mirrors how a foundation
 // consumes an `@org/schemas` package (getSchema / schemas / default), plus
 // `getSchemaNames()` for enumeration. Returns `{}` when the package exports none.
 async function collectSchemasFromExports(packageDir) {
@@ -422,7 +429,7 @@ async function collectSchemasFromExports(packageDir) {
   return out
 }
 
-// Source 2: a bare `schemas/` directory of schema files, one schema per file
+// Source 1: a `schemas/` directory of schema files, one schema per file
 // (named by basename). Returns `{}` when the directory is absent.
 async function collectSchemasFromDir(dir) {
   const out = {}

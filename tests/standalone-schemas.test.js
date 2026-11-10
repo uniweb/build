@@ -2,7 +2,7 @@
  * Tests for the standalone (foundation-less) data-schema register inputs:
  *   - isSchemasPackage    — detect a schemas-only package (not a foundation/site)
  *   - collectStandaloneSchemas — enumerate + normalize a package's own schemas,
- *     keyed by self-ref ('@/<name>'), from module exports or a schemas/ dir.
+ *     keyed by self-ref ('@/<name>'), from a schemas/ dir, else module exports.
  *
  * These feed `buildSchemaOnlyPackage` (see uwx-registry-package.test.js) to make
  * the foundation-less `.uwx` `uniweb register` submits for a schemas package.
@@ -99,12 +99,26 @@ describe('collectStandaloneSchemas', () => {
     expect(map['@/review'].fields.rating.type).toBe('decimal')
   })
 
-  test('module exports win over a schemas/ dir when both are present', async () => {
+  test('a schemas/ dir wins over module exports when both are present: a local build reads the dir', async () => {
     await makeExportsPackage(root)
     await mkdir(join(root, 'schemas'), { recursive: true })
-    await writeFile(join(root, 'schemas', 'ignored.yml'), 'name: ignored\nfields:\n  x: { type: string }\n')
+    await writeFile(join(root, 'schemas', 'plan.yml'), 'name: plan\nfields:\n  x: { type: string }\n')
     const map = await collectStandaloneSchemas(root)
-    expect(Object.keys(map).sort()).toEqual(['@/gadget', '@/widget']) // dir not consulted
+    expect(Object.keys(map)).toEqual(['@/plan']) // the entry is not consulted
+  })
+
+  test('a library: its entry exports components, which are never loaded, and its types are its schemas/', async () => {
+    await mkdir(join(root, 'components'), { recursive: true })
+    await mkdir(join(root, 'schemas'), { recursive: true })
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'data', type: 'module', exports: { '.': './index.js' }, uniweb: { scope: '@acme' } })
+    )
+    await writeFile(join(root, 'index.js'), "export { default as PlanCard } from './components/PlanCard.jsx'\n")
+    await writeFile(join(root, 'components', 'PlanCard.jsx'), 'export default function PlanCard() { return <div /> }\n')
+    await writeFile(join(root, 'schemas', 'plan.yml'), 'fields:\n  name: { type: string }\n')
+    expect(isSchemasPackage(root)).toBe(true)
+    expect(Object.keys(await collectStandaloneSchemas(root))).toEqual(['@/plan'])
   })
 
   test('returns {} for a package with neither exports nor a schemas/ dir', async () => {
