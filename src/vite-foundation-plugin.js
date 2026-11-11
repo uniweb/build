@@ -602,8 +602,15 @@ export function foundationDevPlugin(options = {}) {
       if (reason) {
         console.log(`[foundation] ${reason}, regenerating entry...`)
         const entryPath = join(resolvedSrcDir, entryFileName)
-        await generateEntryPoint(resolvedSrcDir, entryPath, { sectionPaths })
-        server.ws.send({ type: 'full-reload' })
+        try {
+          await generateEntryPoint(resolvedSrcDir, entryPath, { sectionPaths })
+          server.ws.send({ type: 'full-reload' })
+        } catch (err) {
+          // The last good entry stays, and the page shows why: a `meta.js` that does not load, or a
+          // declaration the build cannot use, stops the build (schema.js), and the dev server lives on.
+          console.warn('[foundation] Failed to regenerate the entry:', err.message)
+          server.ws.send({ type: 'error', err: { message: err.message, stack: '' } })
+        }
       }
     },
   }

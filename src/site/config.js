@@ -334,7 +334,10 @@ export async function defineSiteConfig(options = {}) {
             await generateEntryPoint(srcDir, entryPath)
             server.ws.send({ type: 'full-reload' })
           } catch (err) {
+            // The last good entry stays, and the page shows why it did not move: a `meta.js` that
+            // does not load, or a declaration the build cannot use, stops the build (schema.js).
             console.warn('[site] Failed to regenerate foundation entry:', err.message)
+            server.ws.send({ type: 'error', err: { message: err.message, stack: '' } })
           }
         }
       })

@@ -171,15 +171,13 @@ describe('a key\'s declaration is refused when the runtime would misread it', ()
   })
 })
 
-describe('a data: value register will refuse is said when the schema is built', () => {
-  it('an inline field map that is not a data schema — the build goes on, and says register stops', async () => {
+describe('a data: value register will refuse stops the build', () => {
+  // ⭐ Since 2026-11-11 [Diego: "It's okay for the foundation build to fail if it has problems in any
+  // `meta.js` or elsewhere."]; until then the build went on and only `register` stopped.
+  it('an inline field map that is not a data schema — named, with register refusing it too', async () => {
     meta('Article', { content: {}, data: { articles: { content: { type: 'object', default: null } } } })
-    const warnings = []
-    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
-    const schema = await buildSchema(dir)
-    expect(schema.Article.content).toEqual([])
-    expect(warnings.join('\n')).toMatch(
-      /Article \(meta\.js\): data\.articles is an inline field map that is not a valid data schema: object field 'content'.*`uniweb register` refuses it/
+    await expect(buildSchema(dir)).rejects.toThrow(
+      /Article \(meta\.js\): data\.articles is an inline field map that is not a valid data schema: object field 'content'.*`uniweb register` refuses it too/
     )
   })
 
@@ -192,8 +190,8 @@ describe('a data: value register will refuse is said when the schema is built', 
   })
 })
 
-describe('what lowering could not read is said once, when the schema is built', () => {
-  it('not at discovery, and once by buildSchema', async () => {
+describe('what lowering could not read stops the build, said once, when the schema is built', () => {
+  it('not at discovery, and every problem at once by buildSchema', async () => {
     meta('Hero', { content: { title: 'T', media: 'M [1]', image: 'I [1]', zork: 'Z' }, children: { colums: 2 } })
     const warnings = []
     vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
@@ -201,19 +199,45 @@ describe('what lowering could not read is said once, when the schema is built', 
     await discoverComponents(dir)
     expect(warnings).toEqual([])
 
-    await buildSchema(dir)
-    const said = warnings.filter((w) => w.startsWith('Warning: Hero (meta.js):'))
-    expect(said).toHaveLength(3)
-    expect(said.join('\n')).toMatch(/`content.media` and `content.image` both take an image/)
-    expect(said.join('\n')).toMatch(/`content.zork` is not a content element/)
-    expect(said.join('\n')).toMatch(/children\.colums/)
+    const said = await buildSchema(dir).then(() => null, (err) => err.message)
+    expect(said.match(/^ {2}- Hero \(meta\.js\):/gm)).toHaveLength(3)
+    expect(said).toMatch(/`content.media` and `content.image` both take an image/)
+    expect(said).toMatch(/`content.zork` is not a content element/)
+    expect(said).toMatch(/children\.colums/)
+  })
+
+  // ⭐ A site reading its foundation's declarations (`foundationSections`, `validate`) is not the
+  // foundation's build: it warns of each, as the build did until 2026-11-11, and reads on, since a
+  // site step that threw would lose every declaration in silence.
+  it('a site reading its foundation (strict: false) warns of each and reads on', async () => {
+    meta('Hero', { content: { title: 'T', zork: 'Z' }, data: { team: '@std/person' } })
+    const warnings = []
+    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
+    const schema = await buildSchema(dir, undefined, null, { strict: false })
+    expect(schema.Hero.data).toEqual({ team: '@std/person' })
+    expect(warnings.join('\n')).toMatch(/Warning: Hero \(meta\.js\): `content.zork` is not a content element.*The foundation's build stops on it/)
   })
 
   it('an entry handed in as written is read the same way', () => {
-    const warnings = []
-    vi.spyOn(console, 'warn').mockImplementation((message) => warnings.push(message))
-    reportPlacementDeclarations({ Hero: { name: 'Hero', content: { sequence: 'Prose [1]' } } })
-    expect(warnings).toEqual([expect.stringMatching(/Hero \(meta\.js\):.*count.*means nothing/)])
+    expect(() => reportPlacementDeclarations({ Hero: { name: 'Hero', content: { sequence: 'Prose [1]' } } })).toThrow(
+      /Hero \(meta\.js\):.*count.*means nothing/
+    )
+  })
+})
+
+describe('a meta.js or a package.json that cannot be read stops the build', () => {
+  // ⛔ Until 2026-11-11 the build warned and went on as if the meta.js were not there, so the type
+  // lost its declarations — its data keys too — under a green build [Diego: the build may fail].
+  it('a meta.js that throws as it loads, named with its error', async () => {
+    write('sections/Broken/Broken.jsx', 'export default function Broken() { return null }\n')
+    write('sections/Broken/meta.js', "export default { title: 'Broken', params: { size: } }\n")
+    await expect(discoverComponents(dir)).rejects.toThrow(/sections\/Broken\/meta\.js could not be loaded: /)
+    await expect(buildSchema(dir)).rejects.toThrow(/sections\/Broken\/meta\.js could not be loaded: /)
+  })
+
+  it('a package.json that is there and is not JSON', async () => {
+    writeFileSync(join(dir, 'package.json'), '{ "name": "kit-site", }\n')
+    await expect(buildSchema(dir)).rejects.toThrow(/package\.json could not be read: /)
   })
 })
 

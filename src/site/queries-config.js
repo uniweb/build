@@ -459,7 +459,9 @@ export async function foundationSections(siteRoot, siteYml = null) {
   const srcDir = localFoundationSrcDir(siteRoot, yml)
   if (srcDir) {
     try {
-      return await buildSchema(srcDir)
+      // Not strict: a declaration the foundation's build stops on is warned of here, and read
+      // (`buildSchema`'s `strict`).
+      return await buildSchema(srcDir, undefined, null, { strict: false })
     } catch {
       // a foundation whose source does not read is reported by the build that builds it
     }

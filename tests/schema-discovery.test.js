@@ -422,14 +422,22 @@ describe('reportPlacementDeclarations', () => {
     expect(warnings[0]).toMatch(/Tabs.*"TabPanel".*not a section type/)
   })
 
-  it('warns about a children or content declaration it cannot read', () => {
-    reportPlacementDeclarations({
-      Grid: { name: 'Grid', children: { grid: ['40/'], colums: 2 } },
-      Split: { name: 'Split', content: { media: { types: ['chart'] } } },
-    })
-    expect(warnings.join('\n')).toMatch(/Grid.*children\.grid.*"40\/"/)
-    expect(warnings.join('\n')).toMatch(/Grid.*children\.colums/)
-    expect(warnings.join('\n')).toMatch(/Split.*chart/)
+  // ⭐ A warning that a child type is missing stays one (an extension may provide it); a
+  // declaration the build cannot read stops it, every one named at once [Diego, 2026-11-11].
+  it('stops the build on a children or content declaration it cannot read, naming each', () => {
+    let said = null
+    try {
+      reportPlacementDeclarations({
+        Grid: { name: 'Grid', children: { grid: ['40/'], colums: 2 } },
+        Split: { name: 'Split', content: { media: { types: ['chart'] } } },
+      })
+    } catch (err) {
+      said = err.message
+    }
+    expect(said).toMatch(/Grid.*children\.grid.*"40\/"/)
+    expect(said).toMatch(/Grid.*children\.colums/)
+    expect(said).toMatch(/Split.*chart/)
+    expect(warnings).toEqual([])
   })
 
   it('says nothing about declarations it can read', () => {

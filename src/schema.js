@@ -89,6 +89,12 @@ async function loadMetaFile(filePath) {
 /**
  * Find and load meta file for a component directory
  * Returns null if no meta file found
+ *
+ * ⭐ A `meta.js` that does not load STOPS THE BUILD, naming the file and the error [Diego,
+ * 2026-11-11: "It's okay for the foundation build to fail if it has problems in any `meta.js` or
+ * elsewhere."]. ⛔ Until then it warned and went on as if the file were not there: a type at the
+ * root of `sections/` lost everything its `meta.js` declares, its name, params, presets, labels and
+ * data keys (so it was given no records), and a nested one vanished, under a green build.
  */
 export async function loadComponentMeta(componentDir) {
   const filePath = join(componentDir, META_FILE_NAME)
@@ -99,8 +105,7 @@ export async function loadComponentMeta(componentDir) {
     const meta = await loadMetaFile(filePath)
     return { meta, fileName: META_FILE_NAME, filePath }
   } catch (error) {
-    console.warn(`Warning: Failed to load ${filePath}:`, error.message)
-    return null
+    throw new Error(`[uniweb] ${filePath} could not be loaded: ${error.message}`, { cause: error })
   }
 }
 
@@ -232,8 +237,9 @@ export async function loadPackageJson(srcDir) {
       ...normalizeSupports(pkg.uniweb?.supports, packagePath),
     }
   } catch (error) {
-    console.warn(`Warning: Failed to load package.json:`, error.message)
-    return {}
+    // A package.json that is there and cannot be read stops the build, as a `meta.js` does
+    // (`loadComponentMeta`): it holds the foundation's identity, and an empty one is a quiet lie.
+    throw new Error(`[uniweb] ${packagePath} could not be read: ${error.message}`, { cause: error })
   }
 }
 
@@ -1220,43 +1226,73 @@ function reportSupports(srcDir, authored, derived, emitted) {
 }
 
 /**
- * Warn of a `data:` value `register` will refuse — one the normalized form it sends cannot
- * write (`@uniweb/schemas/foundation`): an inline field map that is not a valid data schema.
- * The build goes on; the site renders the map as before. `register` is where it stops, since
- * a registered schema is written in one spelling per meaning or not at all.
+ * Stop the build on a `data:` value `register` will refuse — one the normalized form it sends
+ * cannot write (`@uniweb/schemas/foundation`): an inline field map that is not a valid data schema.
+ * Every such value is named at once. ⛔ Until 2026-11-11 the build warned and went on, since the
+ * site renders the map as before, and `register` was where it stopped; a foundation build now fails
+ * on a problem in its declarations [Diego, 2026-11-11], as it already did for the other `data:`
+ * declarations it cannot read.
  *
  * @param {Object} components - discovered section types, by name
  * @param {Object} [layouts] - discovered layouts, by name
  * @param {Object} [foundationConfig] - the foundation's `main.js`, whose `data:` reaches every section
  */
-export function reportUnregistrableData(components, layouts = {}, foundationConfig = {}) {
+export function reportUnregistrableData(components, layouts = {}, foundationConfig = {}, { strict = true } = {}) {
   const owners = [
     ...Object.entries(components).map(([name, entry]) => [`${name} (meta.js)`, entry?.data]),
     ...Object.entries(layouts || {}).map(([name, entry]) => [`layout ${name} (meta.js)`, entry?.data]),
     ['the foundation (main.js)', foundationConfig?.data],
   ]
+  const problems = []
   for (const [owner, data] of owners) {
     try {
       normalizeData(data, { owner })
     } catch (err) {
-      console.warn(`Warning: ${err.message} \`uniweb register\` refuses it until it is one.`)
+      problems.push(`${err.message} \`uniweb register\` refuses it too.`)
     }
   }
+  stopOrWarn(problems, strict)
 }
 
 /**
- * Warn about `content` and `children` declarations an editor cannot use — what lowering
- * them could not read (`@uniweb/schemas`, the grammar the editor reads them with). The
- * entry is emitted lowered either way; these are warnings, never refusals.
+ * One error naming every declaration problem the build found, so a developer fixes them in one
+ * pass rather than one build at a time.
+ *
+ * @param {string[]} problems - each a sentence that names its owner (`Hero (meta.js): …`)
+ */
+function declarationsError(problems) {
+  return [`[uniweb] The foundation declares what its build cannot use:`, ...problems.map((p) => `  - ${p}`)].join('\n')
+}
+
+/**
+ * The foundation's build stops on them; a site reading its foundation warns of each and goes on
+ * (`buildSchema`'s `strict`).
+ *
+ * @param {string[]} problems
+ * @param {boolean} strict
+ */
+function stopOrWarn(problems, strict) {
+  if (!problems.length) return
+  if (strict) throw new Error(declarationsError(problems))
+  for (const problem of problems) console.warn(`Warning: ${problem} The foundation's build stops on it.`)
+}
+
+/**
+ * Stop the build on `content`, `children` and `params` declarations a section type cannot use:
+ * what lowering them could not read (`@uniweb/schemas`, the grammar the editor reads them with),
+ * and a param the component is never given. Every one is named at once [Diego, 2026-11-11: "It's
+ * okay for the foundation build to fail if it has problems in any `meta.js` or elsewhere."]. ⛔ Until
+ * then these were warnings under a green build, and a foundation registered with them.
  *
  * ⭐ A `children.types` entry must name one of this foundation's section types. A hidden
  * one is not a section type at all, and a child of a type nothing provides renders
- * "Component not found". The one false alarm is a type an extension provides, which
- * this foundation cannot see — the message says so.
+ * "Component not found". It stays a WARNING, since it has one false alarm: a type an extension
+ * provides, which this foundation cannot see — the message says so.
  *
  * @param {Object} components - discovered section types, by name
  */
-export function reportPlacementDeclarations(components) {
+export function reportPlacementDeclarations(components, { strict = true } = {}) {
+  const errors = []
   for (const [name, entry] of Object.entries(components)) {
     // An entry built here was lowered, and kept what it could not read aside; one handed
     // in as written is read now. (A lowered entry reads as itself, with no problems.)
@@ -1267,7 +1303,7 @@ export function reportPlacementDeclarations(components) {
       ...children.problems,
     ]
     for (const problem of problems) {
-      console.warn(`Warning: ${name} (meta.js): ${problem}`)
+      errors.push(`${name} (meta.js): ${problem}`)
     }
     for (const type of children.types || []) {
       if (components[type]) continue
@@ -1285,8 +1321,8 @@ export function reportPlacementDeclarations(components) {
     const params = entry.params && typeof entry.params === 'object' ? entry.params : {}
     for (const [param, reserved] of Object.entries(SECTION_PARAMS)) {
       if (reserved.component || !Object.hasOwn(params, param)) continue
-      console.warn(
-        `Warning: ${name} (meta.js): params declares "${param}", a setting of the section, not of its ` +
+      errors.push(
+        `${name} (meta.js): params declares "${param}", a setting of the section, not of its ` +
           `component — framework applies an author's ${param}: to the section and never passes it to the ` +
           `component, and an editor offers it for every section (@uniweb/schemas/section). Remove it from params:.` +
           (param === 'grid'
@@ -1298,12 +1334,13 @@ export function reportPlacementDeclarations(components) {
     // takes it out before the params are stored, so a param of that name is never given one.
     for (const [key, { is }] of Object.entries(SECTION_KEYS)) {
       if (!Object.hasOwn(params, key)) continue
-      console.warn(
-        `Warning: ${name} (meta.js): params declares "${key}", a key a section's frontmatter keeps for ` +
+      errors.push(
+        `${name} (meta.js): params declares "${key}", a key a section's frontmatter keeps for ` +
           `itself — ${is} — so the component is never given it (@uniweb/schemas/section). Remove it from params:.`
       )
     }
   }
+  stopOrWarn(errors, strict)
 }
 
 /**
@@ -1319,8 +1356,14 @@ export function reportPlacementDeclarations(components) {
  * @param {{services: string[], blind: boolean}} [derivedSupports] - what the
  *   module graph says this foundation reaches for (`foundation/derive-supports.js`).
  *   Omitted on a dev rebuild, where nothing reads the result.
+ * @param {Object} [options]
+ * @param {boolean} [options.strict=true] - stop on a declaration the build cannot use (the
+ *   foundation's own build, `register`). ⭐ A SITE reading its foundation's declarations passes
+ *   false (`foundationSections`, `validate`): it warns as it always did and keeps reading, since
+ *   the foundation's build is what stops, and a site step that threw would lose every
+ *   declaration in silence (it falls back to a schema.json, or to none).
  */
-export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) {
+export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, { strict = true } = {}) {
   // Load identity from package.json
   const identity = await loadPackageJson(srcDir)
 
@@ -1331,7 +1374,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
 
   // Discover section types
   const components = await discoverComponents(srcDir, sectionPaths)
-  reportPlacementDeclarations(components)
+  reportPlacementDeclarations(components, { strict })
 
   // Resolve the data schemas the foundation DEFINES — every file in its `schemas/`
   // folder (`ownSchemaRefs`) — and the ones its section bindings reference, carried
@@ -1361,7 +1404,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
     dataSchemas,
     srcDir,
   )
-  reportUnregistrableData(components, layouts, foundationConfig)
+  reportUnregistrableData(components, layouts, foundationConfig, { strict })
 
   // Determine extension role
   const isExtension = !!foundationConfig.extension

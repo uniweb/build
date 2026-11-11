@@ -83,17 +83,19 @@ describe('the sync wire', () => {
 })
 
 describe('a component param named grid', () => {
-  it('is warned about — grid: is the section’s setting, never passed to the component', () => {
-    reportPlacementDeclarations({ Grid: { name: 'Grid', params: { grid: { type: 'number' } } } })
-    expect(warnings.join('\n')).toMatch(/Grid.*params declares "grid", a setting of the section/)
-    expect(warnings.join('\n')).toMatch(/children: \{ grid: \[\.\.\.\] \}/)
+  // ⭐ It stops the build since 2026-11-11 — a param the component is never given [Diego]; a warning before.
+  it('stops the build — grid: is the section’s setting, never passed to the component', () => {
+    const declare = () => reportPlacementDeclarations({ Grid: { name: 'Grid', params: { grid: { type: 'number' } } } })
+    expect(declare).toThrow(/Grid.*params declares "grid", a setting of the section/)
+    expect(declare).toThrow(/children: \{ grid: \[\.\.\.\] \}/)
   })
 
   // The same for theme and background — ⛔ worded until 2026-09-28 as if the section lost the
   // author's value; the section keeps it, and framework applies it.
   it('and theme or background the same way: the section applies it, so the declaration goes', () => {
-    reportPlacementDeclarations({ CTA: { name: 'CTA', params: { theme: { type: 'select', options: ['light', 'dark'] } } } })
-    expect(warnings.join('\n')).toMatch(/CTA.*params declares "theme", a setting of the section.*framework applies an author's theme: to the section.*Remove it from params:/)
-    expect(warnings.join('\n')).not.toMatch(/Rename the param/)
+    const declare = () => reportPlacementDeclarations({ CTA: { name: 'CTA', params: { theme: { type: 'select', options: ['light', 'dark'] } } } })
+    expect(declare).toThrow(/CTA.*params declares "theme", a setting of the section.*framework applies an author's theme: to the section.*Remove it from params:/)
+    const said = (() => { try { declare() } catch (err) { return err.message } })()
+    expect(said).not.toMatch(/Rename the param/)
   })
 })

@@ -85,7 +85,9 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   if (!foundationPath) throw new Error('validateDataInputs: foundationPath is required')
 
   const srcDir = resolveFoundationSrcPath(foundationPath)
-  const foundation = await buildSchema(srcDir)
+  // Not strict: validating a site's records reads its foundation's declarations, and warns of one
+  // the foundation's build stops on rather than refusing the site (`buildSchema`'s `strict`).
+  const foundation = await buildSchema(srcDir, undefined, null, { strict: false })
   const dataSchemas = foundation.dataSchemas || {}
   // The type each data key names — a records folder named for a typed key holds records of
   // that type when no data schema has its name (`uwx/data-key-types.js`).
