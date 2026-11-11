@@ -294,6 +294,25 @@ describe('recordsToEntities — flat record → brief section `$`-document', () 
     ])
   })
 
+  // ⛔ "Declare it in the schema" cannot be done to a type the site's foundation does not define —
+  // a standard one, or another scope's — so the refusal says what the type has, and what else to do.
+  // Until 2026-11-11 it said "Declare it" for every type.
+  it("for a type the site does not define, names what the type has and a type of the site's own", () => {
+    const testimonial = lower({ name: 'testimonial', fields: { quote: 'text', name: 'string' } }, '@std/testimonial', '@std/testimonial')
+    const { refusals } = recordsToEntities({
+      label: 'std/testimonial',
+      records: [{ slug: 'claude', quote: 'It just works.', name: 'Claude', order: 3, logo: 'claude.svg' }],
+      declaration: testimonial,
+      owned: false,
+    })
+    expect(refusals).toEqual([
+      'std/testimonial/claude: "order" and "logo" are not fields of @std/testimonial — a push cannot carry them, ' +
+        'and the next pull would drop them from the file. @std/testimonial is a standard type, and a site cannot ' +
+        'add a field to it. It has quote and name: move the values into one of those, remove them, or give these ' +
+        'records a type of your own (`schemas/<name>.yml` in the foundation, the records in `records/<name>/`).',
+    ])
+  })
+
   it('skips a record without a slug (with a warning)', () => {
     const { entities, warnings } = recordsToEntities({
       label: 'products',

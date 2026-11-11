@@ -61,6 +61,7 @@ import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { qualifyRef } from '@uniweb/schemas/refs'
 import { standardTypeFor } from '../site/standard-type-for.js'
+import { ownsType, undeclaredAdvice } from '../site/undeclared-fields.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { isUuid } from './uuid.js'
@@ -238,6 +239,8 @@ function encodeFieldValue(value, field, sourceLocale, translations, context = nu
  *        localized scalar fields per-locale (from loadLocaleTranslations)
  * @param {{ resolve: (model: string, value: *) => object }} [params.refs] - what a
  *        reference sends (`refResolver`). Without it a reference is sent as written.
+ * @param {boolean} [params.owned=true] - whether the site's foundation defines the Model
+ *        (`ownsType`), so a field it lacks can be declared on it; a refusal says what else to do
  * @returns {{ entities: object[], warnings: string[], refusals: string[] }} each
  *   entity is `{ id, uuid, slug, model, file, document, namesNew }` — `document` is the
  *   section-keyed body, and `namesNew` how many of its references name a record this
@@ -252,6 +255,7 @@ export function recordsToEntities({
   translations,
   refs = null,
   kept = null,
+  owned = true,
 }) {
   if (!declaration || !declaration.name) {
     throw new Error('uwx/records: a declaration with a name is required')
@@ -329,11 +333,14 @@ export function recordsToEntities({
     if (enc.misplaced.length) refusals.push(bySectionRefusal(where, declaration.name, layout, enc.misplaced))
     if (enc.undeclared.length) {
       const one = enc.undeclared.length === 1
+      // What the type has where the keys were written, named when they all sit at the top.
+      const top = enc.undeclared.every((path) => !/[.[]/.test(path))
+      const declared = !top ? [] : layout.flat ? Object.keys(layout.sections[0][1].fields || {}) : layout.sections.map(([n]) => n)
       refusals.push(
         `${where}: ${quoted(enc.undeclared)} ${one ? 'is not a field' : 'are not fields'} of ` +
           `${declaration.name} — a push cannot carry ${one ? 'it' : 'them'}, and the next pull would ` +
-          `drop ${one ? 'it' : 'them'} from the file. Declare ${one ? 'it' : 'them'} in the schema, ` +
-          `or remove ${one ? 'it' : 'them'}.`
+          `drop ${one ? 'it' : 'them'} from the file. ` +
+          undeclaredAdvice({ type: declaration.name, owned, declared, count: enc.undeclared.length })
       )
     }
     for (const problem of enc.shape) refusals.push(`${where}: ${problem}`)
@@ -1308,6 +1315,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       translations,
       refs,
       kept,
+      owned: ownsType(declaration.name, scope),
     })
     // Free-form per-locale body overrides (a full localized doc beats the structural
     // map) — only meaningful for a multi-locale site with a prosemirror content field.

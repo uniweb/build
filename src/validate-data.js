@@ -31,7 +31,7 @@ import { YAML_OPTIONS } from './utils/yaml-schema.js'
 import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRouteQuery } from '@uniweb/core'
 import { parentRouteOf } from '@uniweb/core/route-match'
 
-import { validateItem, validateRecordFile, validateBound, validateKeyValue, contentBodyField, rootListSection, referencesOf } from '@uniweb/schemas/conform'
+import { validateItem, validateRecordFile, validateBound, validateKeyValue, contentBodyField, rootListSection, referencesOf, undeclaredFields } from '@uniweb/schemas/conform'
 import { normalizeData } from '@uniweb/schemas/foundation'
 import { isUuid } from './uwx/uuid.js'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
@@ -48,6 +48,8 @@ import { toFetchList } from './site/data-fetcher.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 import { collectSiteContent } from './site/content-collector.js'
 import { processQueries } from './site/query-processor.js'
+import { ownsType, undeclaredAdvice } from './site/undeclared-fields.js'
+import { siteSelfScope } from './uwx/self-scope.js'
 
 // --- the join: sections ↔ schemas -------------------------------------------
 
@@ -146,7 +148,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   if (config.queries && typeof config.queries === 'object') {
 
     // Drafts included: a draft is content the site will deliver, so it is checked now.
-    byQuery = await processQueries(siteRoot, config.queries, resolveRecordsDir(siteRoot, config.paths).rel, basePath, { includeDrafts: true })
+    // noteUnsendable: what a push cannot carry is reported below, as a violation (`validateRecordFiles`).
+    byQuery = await processQueries(siteRoot, config.queries, resolveRecordsDir(siteRoot, config.paths).rel, basePath, { includeDrafts: true, noteUnsendable: false })
   }
 
   // Declared here rather than beside pass 2's other accumulators because pass 1
@@ -355,7 +358,9 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   // its folder names. ⭐ The set a push sends: every file in the records directory is
   // a record and every record is pushed, whether or not a section reads it — and
   // until 2026-09-24 one that no section read was never checked here.
-  const files = await validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes, paths: config.paths, checked: checkedRecords })
+  // The foundation's scope says which types it defines, and so which can be given a field.
+  const scope = await siteSelfScope(siteRoot, { foundationDir: foundationPath })
+  const files = await validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes, paths: config.paths, checked: checkedRecords, scope })
   violations.push(...files.violations)
   setupErrors.push(...files.setupErrors)
   for (const ref of files.schemas) schemasSeen.add(ref)
@@ -410,7 +415,7 @@ function listViolation(finding, label, base) {
  *
  * @returns {Promise<{ violations: object[], setupErrors: object[], schemas: Set<string>, checked: number }>}
  */
-async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes = new Map(), paths, checked }) {
+async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes = new Map(), paths, checked, scope = null }) {
   const out = { violations: [], setupErrors: [], schemas: new Set(), checked: 0 }
   const pool = await readEntityPool(siteRoot, { dir: resolveRecordsDir(siteRoot, paths).rel })
   // Every record is read first: a reference names a record of another schema by its
@@ -465,6 +470,37 @@ async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes = n
         for (const finding of validateRecordFile(schema, record)) {
           out.violations.push({ file: pooled.relPath, schema: ref, item: r.slug, users: [], ...finding })
         }
+      }
+      // ⭐ WHAT A PUSH CANNOT CARRY, in every record file, whichever pass checked the rest: a key
+      // its schema has no place for (`undeclaredFields`), and a markdown body with no field to hold
+      // it. The push refuses both (`uwx/records.js`), and runs this check first. ⛔ Until 2026-11-11
+      // neither was reported here, so `uniweb validate` passed a site whose push then stopped.
+      const owned = ownsType(ref, scope)
+      for (const { path, declared } of undeclaredFields(schema, record)) {
+        out.violations.push({
+          file: pooled.relPath,
+          schema: ref,
+          item: r.slug,
+          users: [],
+          field: path,
+          rule: 'undeclared',
+          message:
+            `not a field of ${ref}, so a push cannot carry it, and a pull would drop it from the file. ` +
+            undeclaredAdvice({ type: ref, owned, declared: path.includes('.') || path.includes('[') ? [] : declared }),
+        })
+      }
+      if (typeof r.body === 'string' && r.body.trim() !== '' && !contentBodyField(schema)) {
+        out.violations.push({
+          file: pooled.relPath,
+          schema: ref,
+          item: r.slug,
+          users: [],
+          field: '',
+          rule: 'body',
+          message:
+            `the file has a markdown body, and ${ref} has no field for it (a \`markdown\` or \`richtext\` field), ` +
+            `so a push cannot carry it. ${owned ? 'Add one to the schema, or move the text into a field.' : 'Move the text into a field, or give these records a type of your own.'}`,
+        })
       }
       // ⭐ A reference must name a record — a push refuses one that does not. A uuid is
       // left alone: it may be a record the backend holds and this project does not.
