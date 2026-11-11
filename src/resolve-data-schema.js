@@ -82,9 +82,10 @@ export {
 const SCOPE_PACKAGE = { std: '@uniweb/schemas' }
 
 /**
- * The `code` of the error a `@/name` ref raises when the foundation defines no schema of
- * that name — the one failure that is an answer rather than a fault: a query named after
- * no schema is a query over schema-less records.
+ * The `code` of the error a ref raises when nothing this foundation reads defines it — the
+ * one failure that is an answer rather than a fault. For a `@/name` a folder or a query
+ * named, it is the answer a build refuses with: every record has a data schema
+ * (`site/query-processor.js::refuseRecordsWithoutSchema`).
  */
 export const SCHEMA_NOT_FOUND = 'SCHEMA_NOT_FOUND'
 const RESERVED_SYSTEM_SCOPE = 'uniweb'

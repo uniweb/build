@@ -96,9 +96,9 @@ describe('a push sends each link as a folder entry, never an entity', () => {
     expect(media.$children[1]).not.toHaveProperty('$uuid')
   })
 
-  it('a query over link records is not schema-less, and names @uniweb/link', async () => {
+  it('a query over link records has its data schema, and names @uniweb/link', async () => {
     const pkg = await emitSyncPackages(SITE)
-    expect(pkg.schemaless).toEqual([])
+    expect(pkg.refusals).toEqual([])
     const site = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
     expect(site.queries.find((q) => q.name === 'videos').schema).toBe('@uniweb/link')
   })

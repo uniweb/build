@@ -6,7 +6,8 @@
  *
  * A query `team:` with no `schema:` defaults to `@/team`, and so does `records/team/`. A
  * section type declaring `data: { team: '@/member' }` says what those records are; until then
- * a push found no `@/team` and shipped them as static files.
+ * a push found no `@/team` and shipped them as static files (refused since 2026-11-11: every record
+ * has a data schema).
  */
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -84,22 +85,21 @@ describe('push — a query named for a typed data key sends records of the type'
     makeSite()
     const pkg = await emitSyncPackages(SITE, { backend: BACKEND })
     expect(pkg.refusals).toEqual([])
-    expect(pkg.schemaless).toEqual([])
     const wei = docs(pkg).find((d) => d.$id === 'team/wei')
     expect(wei.$schema).toBe('@acme/member')
     expect(siteDocOf(pkg).queries.find((q) => q.name === 'team').schema).toBe('@acme/member')
   })
 
-  it('CONTROL — an untyped key names no type: `team` still ships as static files', async () => {
+  it('CONTROL — an untyped key names no type: `team`’s records have no data schema, and are refused', async () => {
     makeSite({ teamType: {} })
     const pkg = await emitSyncPackages(SITE, { backend: BACKEND })
-    expect(pkg.schemaless.map((q) => q.name)).toEqual(['team'])
+    expect(pkg.refusals).toEqual([expect.stringMatching(/^records\/team\/: no data schema resolves for @acme\/team/)])
   })
 
   it('CONTROL — a key two section types type differently names no type', async () => {
     makeSite({ sections: { Team: { data: { team: '@/member' } }, Grid: { data: { team: '@/other' } } } })
     const pkg = await emitSyncPackages(SITE, { backend: BACKEND })
-    expect(pkg.schemaless.map((q) => q.name)).toEqual(['team'])
+    expect(pkg.refusals).toEqual([expect.stringMatching(/^records\/team\/: no data schema resolves for @acme\/team/)])
   })
 
   it('⛔ a schema the query names EXPLICITLY is the author’s — it fails loudly, never falls back', async () => {

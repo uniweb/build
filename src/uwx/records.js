@@ -740,7 +740,7 @@ function siteQueries(declarations) {
 // those files, and on every push once every file in the directory is placed.
 //
 // ⚠️ A file that produced nothing is dropped WITHOUT a warning here: its schema did
-// not resolve (reported as schemaless), or its records were skipped (reported while
+// not resolve (refused, `noDataSchema`), or its records were skipped (reported while
 // reading them). Saying it a second time, as a folder problem, names the wrong cause.
 function placeProducedRecords(nodes, producedBy) {
   const out = []
@@ -869,12 +869,9 @@ function resolveDeclaration(schema, modelName) {
  *        Defaults to the site's foundation's (`siteSelfScope`); a caller that has it
  *        already passes it, so one emit reads it once.
  * @returns {Promise<{ entities: object[], index: object[], warnings: string[],
- *   refusals: string[], schemaless: Array<{name: string, model: string}>,
- *   colConfig: object, folder: object, recordsDirExists: boolean }>}
- *   `refusals` — records that cannot be sent as written (`recordsToEntities`).
- *   `schemaless` lists the QUERIES whose schema resolved to nothing (the
- *   convention-default soft-skip) — their records are not pushed as entities, and
- *   the composite deploy delivers those queries statically instead.
+ *   refusals: string[], colConfig: object, folder: object, recordsDirExists: boolean }>}
+ *   `refusals` — records that cannot be sent as written (`recordsToEntities`), and the
+ *   folders and queries whose data schema resolves to nothing (`noDataSchema`).
  *   `recordsDirExists` is false for a site with no records directory at all.
  *   `sendFolder` is whether a push sends the folder — see `sendsFolder`.
  */
@@ -922,7 +919,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       index: [],
       warnings,
       refusals,
-      schemaless: [],
       colConfig,
       folder: { ...folder, nodes: [] },
       recordsDirExists: pool.exists,
@@ -941,8 +937,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const resolveModel = typeof opts.resolveModel === 'function' ? opts.resolveModel : null
   // The local foundation is REQUIRED only when a query asked for a schema
   // EXPLICITLY (and there's no remote resolver). A schema that only a folder name
-  // or a query name supplied soft-skips when nothing resolves, so a delivery-only
-  // site with no foundation must not be forced to have one.
+  // or a query name supplied and that nothing resolves is refused per folder and per
+  // query below (`noDataSchema`), which says which records it is about.
   const explicitBy = new Map() // schema (as written) → the first query that asked for it
   for (const { name, decl } of queries) {
     if (decl.schemaExplicit && !explicitBy.has(decl.schema)) explicitBy.set(decl.schema, name)
@@ -1004,6 +1000,21 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     }
     return modelName
   }
+
+  // ⭐ EVERY RECORD HAS A DATA SCHEMA [Diego, 2026-11-11]. A schema only a folder's name or a
+  // query's name supplied, which resolves to nothing, is refused, one line per folder and per
+  // query that reads no folder: the push sends nothing, and says what to write. ⛔ Until
+  // 2026-11-11 it was a soft skip: the records were not sent, a publish uploaded their compiled
+  // files instead, in the site's own language only, and the app could not edit them.
+  const noDataSchema = (where, modelName) =>
+    `${where}: no data schema resolves for ${modelName}` +
+    (resolveModel?.offline === true
+      ? ' here (this run does not ask the backend)'
+      : resolveModel
+        ? ', in the foundation or on the backend'
+        : '') +
+    ', and every record needs one. Define it in the foundation (`schemas/<name>.yml`), or name a ' +
+    'registered one on the query (`schema:` in queries.yml) — `uniweb guide data`.'
 
   // ⚠️ AN EXPLICIT SCHEMA THAT RESOLVES TO NOTHING IS THE AUTHOR'S ERROR — and a
   // depth-2 folder has two readings worth naming. `records/person/2024/ada.md`
@@ -1103,7 +1114,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   const index = []
   // pool id (the FILE) → the records it produced, so the folder places records.
   const producedBy = new Map()
-  // Schemas (as written) whose Model resolved to nothing — soft-skipped.
+  // Schemas (as written) whose Model resolved to nothing — refused (`noDataSchema`).
   const unresolved = new Set()
   // The sync response is keyed per ($schema, $id), so the pair must be unique
   // within one submission.
@@ -1188,9 +1199,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     const declaration = (await declarationFor(modelName)) || (await typedFor(schema))
     if (!declaration) {
       // An explicit schema the author asked for is a hard error; one only the
-      // folder's name supplied is a soft skip, reported below.
+      // folder's name supplied is refused for the folder, with the rest of the push.
       if (explicitBy.has(schema)) throw unresolvedExplicit(modelName, explicitBy.get(schema))
       unresolved.add(schema)
+      refusals.push(noDataSchema(`${pool.dir}/${label}/`, modelName))
       continue
     }
 
@@ -1342,18 +1354,10 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     refusals.push(...mappedOut.refusals)
   }
 
-  // Queries whose schema resolved to nothing — not pushed as entities. Their compiled
-  // data is delivered as static files instead (`site/schemaless-data.js`), so the caller
-  // can route it there; and their declarations are sent naming no Model
-  // (`site.js::queriesNested`).
-  //
-  // ⛔ Deliberately NOT a `warnings` string. This is a product decision the author
-  // is making — entities or static files — and it needs to be reported at a
-  // prominence a prose warning cannot carry. Callers get the structured entry and
-  // say it themselves (`cli/src/commands/{publish,push}.js`). It used to push
-  // `"… — not synced"`, printed dim among everything else, and an author read that
-  // as "my data did not upload" when it is delivered, as static files.
-  const schemaless = []
+  // A query reads records of one data schema, so its schema must resolve too. A query over a
+  // folder whose schema resolved to nothing is refused with the folder, above; one that reads no
+  // folder is refused here (`noDataSchema`). ⛔ Until 2026-11-11 such a query was "schema-less":
+  // its declaration went up naming no Model and a publish uploaded its compiled files.
   for (const { name, decl } of queries) {
     const schema = decl.schema || decl.model
     const hasRecords = poolBySchema.has(schema)
@@ -1363,7 +1367,7 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema))))
     if (!resolved) {
       if (decl.schemaExplicit) throw unresolvedExplicit(qualifyRef(schema, scope), name)
-      schemaless.push({ name, model: qualifyRef(schema, scope) })
+      if (!hasRecords) refusals.push(noDataSchema(`query "${name}"`, qualifyRef(schema, scope)))
       continue
     }
     if (!hasRecords) {
@@ -1375,16 +1379,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       )
     }
   }
-  // Records whose schema resolved to nothing and that no query reads: they are not
-  // pushed, and no static file carries them either — say so, once per folder.
-  for (const schema of unresolved) {
-    if (queries.some(({ decl }) => (decl.schema || decl.model) === schema)) continue
-    const n = poolBySchema.get(schema).length
-    warnings.push(
-      `${pool.dir}/${poolBySchema.get(schema)[0].dirs.join('/')}/: no data schema resolves for ${schema}, ` +
-        `and no query reads ${n === 1 ? 'this record' : `these ${n} records`} — not pushed.`
-    )
-  }
 
   const nodes = placeProducedRecords(folder.nodes, producedBy)
 
@@ -1393,7 +1387,6 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     index,
     warnings,
     refusals,
-    schemaless,
     colConfig,
     folder: { ...folder, nodes },
     recordsDirExists: pool.exists,
@@ -1419,10 +1412,12 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
 // the records directory is there and holds nothing at all (the deliberate empty,
 // which removes what the backend has — the CLI asks first).
 //
-// ⛔ NOT when every record's schema resolved to nothing, nor when the directory
-// holds only files that are not records (warned). Neither is an author emptying
-// the folder, and sending one would remove the backend's records — including any
-// authored there — for a state nobody chose. Inert instead, like no directory.
+// ⛔ NOT when the directory holds only files that are not records (warned), nor when
+// every record's schema resolved to nothing — which a push refuses (`noDataSchema`),
+// and which a comparison that does not stop on refusals (`status`) must not read as
+// an emptied folder. Neither is an author emptying the folder, and sending one would
+// remove the backend's records — including any authored there — for a state nobody
+// chose. Inert instead, like no directory.
 function sendsFolder(pool, entities, links = []) {
   if (!pool.exists) return false
   if (entities.length > 0 || links.length > 0) return true

@@ -131,9 +131,9 @@ describe('a push sends each as a folder entry of kind `file`, its value an asset
     })
   })
 
-  it('a query over file records is not schema-less, and names @uniweb/file', async () => {
+  it('a query over file records has its data schema, and names @uniweb/file', async () => {
     const pkg = await emitSyncPackages(SITE)
-    expect(pkg.schemaless).toEqual([])
+    expect(pkg.refusals).toEqual([])
     const site = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
     expect(site.queries.find((q) => q.name === 'downloads').schema).toBe('@uniweb/file')
   })

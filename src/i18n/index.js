@@ -407,12 +407,15 @@ function declaredLanguages(config, defaultLocale, locales) {
  * @param {string} [options.outputDir] - the built site, `<siteRoot>/dist` by default
  * @param {boolean} [options.projections=false] - write each language's projections. The bundle
  *   lane's: a static host serves them. The link lane builds for a host, which derives its own.
+ * @param {boolean} [options.records=true] - translate each language's compiled records
+ *   (`dist/<locale>/data/`). The bundle lane's: a static host serves them. The link lane compiles
+ *   none — a push sends each record, in every language, to a host's records service.
  * @returns {Promise<{ content: Object, records: Object, projections: Object }>} what each step
  *   wrote, by language — `projections[locale]` the files (`projectionFiles`), each `fileName`
  *   from `outputDir`
  */
 export async function buildLocalizedSite(siteRoot, options = {}) {
-  const { localesDir = DEFAULTS.localesDir, outputDir = join(siteRoot, 'dist'), projections = false } = options
+  const { localesDir = DEFAULTS.localesDir, outputDir = join(siteRoot, 'dist'), projections = false, records: withRecords = true } = options
 
   // The default language is the root tree, never a subdirectory — by the default the content step
   // reads (`buildLocalizedContent`), so the records step writes no `dist/<default>/data/` either.
@@ -422,12 +425,14 @@ export async function buildLocalizedSite(siteRoot, options = {}) {
 
   // Records first: a language's projections list its record pages, and translating them reads
   // the site's own files alone — never a translated page.
-  const records = await buildLocalizedRecords(siteRoot, {
-    locales,
-    outputDir,
-    recordLocalesDir: join(siteRoot, localesDir, RECORD_LOCALES_DIR),
-    localesDir: join(siteRoot, localesDir)
-  })
+  const records = withRecords
+    ? await buildLocalizedRecords(siteRoot, {
+        locales,
+        outputDir,
+        recordLocalesDir: join(siteRoot, localesDir, RECORD_LOCALES_DIR),
+        localesDir: join(siteRoot, localesDir)
+      })
+    : {}
   const content = await buildLocalizedContent(siteRoot, { localesDir, locales, outputDir, fallbackToSource: true })
 
   const written = {}

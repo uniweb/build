@@ -140,10 +140,27 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     expect(textOf(course.content)).toEqual(['No field holds this.'])
   })
 
-  it('CONTROL — a record with no data schema is compiled as its file holds it', async () => {
+  it('⛔ a record with no data schema stops the build, naming its folder and the file to write', async () => {
     site('notes:\n  schema: "@/note"\n')
     w('site/records/note/hi.md', '---\ntitle: Hi\n---\n\nText.\n')
-    const [note] = (await compile({ notes: { schema: '@/note' } })).notes
+    await expect(compile({ notes: { schema: '@/note' } })).rejects.toThrow(
+      /Every record needs a data schema[\s\S]*records\/note\/ — @\/note, read by query "notes"[\s\S]*schemas\/note\.yml/
+    )
+  })
+
+  it('⛔ …and so does a folder no query reads', async () => {
+    site('posts:\n  schema: "@/post"\n')
+    w('site/records/post/hello.md', '---\ncard:\n  title: Hello\n---\n\nThe body.\n')
+    w('site/records/note/hi.md', '---\ntitle: Hi\n---\n\nText.\n')
+    await expect(compile({ posts: { schema: '@/post' } })).rejects.toThrow(/records\/note\/ — @\/note\n/)
+  })
+
+  it('CONTROL — a record whose data schema the build cannot read is compiled as its file holds it', async () => {
+    // A schema of another scope may be registered where this build cannot read it: the push
+    // checks it against the backend, so the build does not refuse it.
+    site('notes:\n  schema: "@other/note"\n')
+    w('site/records/other/note/hi.md', '---\ntitle: Hi\n---\n\nText.\n')
+    const [note] = (await compile({ notes: { schema: '@other/note' } })).notes
     expect(note).toMatchObject({ title: 'Hi', $name: 'hi' })
     expect(textOf(note.content)).toEqual(['Text.'])
   })
@@ -218,9 +235,9 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     w('fdn/sections/Article/meta.js', "export default { title: 'Article', data: { articles: { schema: '@/post', whole: true } } }\n")
     w('fdn/sections/Article/index.jsx', 'export default function Article() { return null }\n')
     w('site/records/articles/hello.md', '---\ntitle: Hello\n---\n\nThe body.\n')
-    await compile({ articles: { schema: '@/articles' } })
-    // compiled as its file holds it: no data schema has the name, and the author named one
-    expect(read('public/data/articles/hello.json')).toMatchObject({ $name: 'hello', title: 'Hello' })
+    // The author named `@/articles`, which no data schema defines: the build stops, rather than
+    // reading the records as the key's `@/post`.
+    await expect(compile({ articles: { schema: '@/articles' } })).rejects.toThrow(/records\/articles\/ — @\/articles/)
   })
 
   it('@std schemas resolve without a foundation of their own — from the build\'s copy', async () => {

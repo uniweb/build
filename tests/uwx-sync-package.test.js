@@ -143,48 +143,39 @@ describe('emitSyncPackages — two directional lanes', () => {
     expect(folder).not.toHaveProperty('$uuid')
   })
 
-  it('a collection that resolves no schema is reported in `schemaless`, WITH the model it looked for', async () => {
-    // `notes` declares no schema and the foundation defines none → it resolves via
-    // the subfolder-name convention, finds nothing, and soft-skips the sync. It
-    // surfaces in `schemaless` so the composite deploy can deliver it via the ball.
+  it('⛔ records whose data schema resolves to nothing are refused — every record needs one', async () => {
+    // `notes` declares no schema and the foundation defines none, so its folder's name
+    // (`@/notes`) resolves to nothing. ⛔ Until 2026-11-11 that was a soft skip: the query was
+    // "schema-less", went up naming no Model, and a publish uploaded its compiled files.
     w('queries.yml', 'articles:\n  schema: "@/article"\nnotes: {}\n')
     w('records/notes/first.md', '---\ntitle: First\n---\nNote body\n')
     const pkg = await emitSyncPackages(SITE)
 
-    // `model` carries the name the convention looked for and did not find. The CLI
-    // needs it to tell the author what to declare — a bare name cannot say that,
-    // and this entry replaced a prose warning precisely so the message could.
-    // ⭐ Note the SINGULARIZATION: collection `notes` looks for model `@/note`.
-    // That is exactly why the name has to travel — an author told only "no data
-    // schema" would declare `@/notes` and still not resolve.
-    expect(pkg.schemaless).toEqual([{ name: 'notes', model: '@/notes' }])
-
-    // ⛔ And it is NOT also a prose warning. It used to push
-    // `"… — not synced"` into `warnings`, printed dim; that read as "my data did
-    // not upload" when the data ships as static files. One signal, reported by
-    // the CLI at warn level — see cli/src/utils/schemaless-report.js.
-    expect((pkg.warnings || []).join('\n')).not.toMatch(/not synced/i)
-    // articles still syncs as entities — the partition routes each collection to one lane
+    // One refusal for the folder, naming the Model it looked for and what to write.
+    expect(pkg.refusals).toHaveLength(1)
+    expect(pkg.refusals[0]).toMatch(/^records\/notes\/: no data schema resolves for @\/notes/)
+    expect(pkg.refusals[0]).toMatch(/every record needs one/)
+    expect(pkg.refusals[0]).toMatch(/schemas\/<name>\.yml/)
+    expect(pkg).not.toHaveProperty('schemaless')
+    // CONTROL — a folder whose schema resolves still maps its records.
     expect(pkg.records.index.slice(1).map((e) => e.id)).toEqual(['article/hello', 'article/world'])
   })
 
-  it('⛔ a query whose records resolved no schema goes up naming NO Model', async () => {
-    // Its name-defaulted `schema` names a Model nothing declares, and a store that checks a
-    // query's `schema` against the site's declared types refused the whole content push for
-    // it (`videos` → `@std/videos`, 2026-09-28). Its records are not pushed; its data travels
-    // as static files; its declaration keeps everything but the Model.
+  it('⛔ a query that reads no folder and resolves no data schema is refused too', async () => {
     w('queries.yml', 'articles:\n  schema: "@/article"\nnotes:\n  sort: title\n')
-    w('records/notes/first.md', '---\ntitle: First\n---\nNote body\n')
     const pkg = await emitSyncPackages(SITE)
-    expect(pkg.schemaless.map((q) => q.name)).toEqual(['notes'])
+    expect(pkg.refusals).toEqual([expect.stringMatching(/^query "notes": no data schema resolves for @\/notes/)])
+  })
 
+  it('every record query names its Model on the `queries` Section', async () => {
+    w('queries.yml', 'articles:\n  schema: "@/article"\n  sort: title\n')
+    const pkg = await emitSyncPackages(SITE)
+    expect(pkg.refusals).toEqual([])
     const body = JSON.parse(readZip(pkg.siteContent.buffer).get('entities/site-content.json').toString('utf8'))
-    const notes = body.queries.find((q) => q.name === 'notes')
-    expect(notes).not.toHaveProperty('schema')
-    expect(notes.sort).toBe('title')
-    // CONTROL — a query that resolves its Model still names it (unqualified here: this
-    // fixture's foundation states no name in its source, so `@/x` ships as written).
-    expect(body.queries.find((q) => q.name === 'articles').schema).toBe('@/article')
+    const articles = body.queries.find((q) => q.name === 'articles')
+    // Unqualified here: this fixture's foundation states no name in its source, so `@/x` ships as written.
+    expect(articles.schema).toBe('@/article')
+    expect(articles.sort).toBe('title')
   })
 
   it('the folder lane declares referenced Models even when their records are cache-filtered (re-push)', async () => {

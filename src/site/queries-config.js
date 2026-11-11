@@ -43,6 +43,8 @@ import { readFile } from 'node:fs/promises'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { dataKeyTypes } from '../uwx/data-key-types.js'
+import { siteSelfScope } from '../uwx/self-scope.js'
+import { qualifyRef } from '@uniweb/schemas/refs'
 
 // Read its own YAML rather than importing the site build's helper. That import
 // pointed the wrong way — a config resolver reaching into the collector that
@@ -403,33 +405,57 @@ export async function dataKeyTyping(siteRoot, declarations, opts = {}) {
  * built would compile its records in one shape under `pnpm dev` and another in
  * production — and a component reads them in exactly one.
  *
- * A `@/name` ref the foundation defines no schema for is absent without a word: a query
- * is named after no schema when its records have none. Any other ref that does not
- * resolve is absent too, and reported in `failures`. With no local foundation only
- * `@std/*` refs resolve — from the build's own copy of the standard schemas — and the
- * system Models a record may name (`@uniweb/link`), since nothing else is on disk.
+ * A `@/name` ref the foundation's own `schemas/` does not define is looked for under the
+ * foundation's scope (`@acme/name`), as a push names it — a library of that scope may define
+ * it. When neither does, it is in `missing`: a ref this build could check, and found nothing
+ * for, which a record cannot be of (`query-processor.js` refuses it). A ref of another scope
+ * found nowhere on disk is absent without a word, since it may be registered where this build
+ * cannot read; one that fails to load is reported in `failures`. With no local foundation only
+ * `@std/*` refs resolve — from the build's own copy of the standard schemas — and the system
+ * Models a record may name (`@uniweb/link`), since nothing else is on disk; nothing is `missing`
+ * then, as nothing could be checked.
  *
  * @param {string} siteRoot
  * @param {Iterable<string>} refs - the `schema:` refs of the site's queries
  * @param {{ siteYml?: object }} [opts] - an already-read site.yml
- * @returns {Promise<{ schemas: object, failures: Array<{ ref: string, message: string }> }>}
+ * @returns {Promise<{ schemas: object, failures: Array<{ ref: string, message: string }>, missing: string[] }>}
  */
 export async function resolveRecordSchemas(siteRoot, refs, opts = {}) {
   const wanted = [...new Set([...(refs || [])].filter((r) => typeof r === 'string' && r))]
   const schemas = {}
   const failures = []
-  if (wanted.length === 0) return { schemas, failures }
+  const missing = []
+  if (wanted.length === 0) return { schemas, failures, missing }
   const siteYml = opts.siteYml || (await readYamlFile(join(siteRoot, 'site.yml')))
   const srcDir = localFoundationSrcDir(siteRoot, siteYml)
+  let scope // the foundation's, read once, when a foundation-relative ref needs it
   for (const ref of wanted) {
     if (!srcDir && !ref.startsWith('@std/') && !isSystemRecordRef(ref)) continue
     try {
       Object.assign(schemas, await buildDataSchemaMap([ref], { srcDir: srcDir ?? siteRoot }))
     } catch (err) {
-      if (err?.code !== SCHEMA_NOT_FOUND) failures.push({ ref, message: err?.message || String(err) })
+      if (err?.code !== SCHEMA_NOT_FOUND) {
+        failures.push({ ref, message: err?.message || String(err) })
+        continue
+      }
+      if (!srcDir || !ref.startsWith('@/')) continue
+      if (scope === undefined) scope = (await siteSelfScope(siteRoot)) ?? null
+      const qualified = scope ? qualifyRef(ref, scope) : ref
+      if (qualified !== ref && (await definedOnDisk(qualified, srcDir))) continue
+      missing.push(ref)
     }
   }
-  return { schemas, failures }
+  return { schemas, failures, missing }
+}
+
+/** Whether a scoped ref resolves on disk — a package of the foundation's workspace or a library. */
+async function definedOnDisk(ref, srcDir) {
+  try {
+    await buildDataSchemaMap([ref], { srcDir })
+    return true
+  } catch (err) {
+    return err?.code !== SCHEMA_NOT_FOUND
+  }
 }
 
 /** The source directory of the site's foundation when it is local, else null. */

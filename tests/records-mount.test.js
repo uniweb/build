@@ -54,6 +54,9 @@ function press() {
   w('press/site/records/article/launch.md', '---\ntitle: Launch\nauthor: ada\n---\n')
   w('press/fdn/package.json', { name: 'fnd', type: 'module', main: './_entry.generated.js' })
   w('press/fdn/main.js', "export default { name: '@acme/fnd' }\n")
+  // The source a build reads its data schemas from, and the built schema a push reads them from.
+  w('press/fdn/schemas/member.yml', 'name: member\nfields:\n  name: string\n')
+  w('press/fdn/schemas/article.yml', "name: article\nfields:\n  title: string\n  author: { type: ref, ref: '@/member' }\n")
   w('press/fdn/dist/meta/schema.json', {
     _self: { name: '@acme/fnd', version: '1.0.0', role: 'foundation' },
     dataSchemas: { '@/member': MEMBER, '@/article': ARTICLE },

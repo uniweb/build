@@ -1,6 +1,8 @@
 /**
  * A query's `sort` orders its compiled file in the site's default language, on every lane that
- * compiles one. Core collates a text in English when it is given no language (`sortRecords`).
+ * compiles one — the bundle build and dev; the link build `uniweb publish` runs compiles none since
+ * 2026-11-11 (`build-site-data.test.js`). Core collates a text in English when it is given no
+ * language (`sortRecords`).
  *
  * ⛔ Until 2026-10-25 the bundle build compiled its queries with no language, so a Swedish site's
  * titles came out in English order (`Äpple` first), while dev and the build `uniweb publish` runs
@@ -11,7 +13,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { siteContentPlugin } from '../src/site/plugin.js'
-import { buildSiteData } from '../src/site/build-site-data.js'
 
 let ROOT
 let saved
@@ -62,11 +63,5 @@ describe('a query sort in the site\'s language', () => {
     notesSite('en')
     await bundleBuildStart()
     expect(compiledTitles()).toEqual(['Äpple', 'Banan', 'Zebra'])
-  })
-
-  test('and the link lane agrees', async () => {
-    notesSite('sv')
-    await buildSiteData({ siteRoot: ROOT, distDir: join(ROOT, 'dist') })
-    expect(compiledTitles()).toEqual(['Banan', 'Zebra', 'Äpple'])
   })
 })

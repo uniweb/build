@@ -82,17 +82,16 @@ describe('no directory vs an empty one — ruled, and both pinned', () => {
     expect(folderDoc(pkg).contents.map((c) => c.entry?.$ref)).toEqual(['article/hello', 'article/world'])
   })
 
-  it('⛔ records whose schema resolves to nothing do not send an EMPTY folder', async () => {
-    // Nobody emptied anything — the file side just has no records the backend can
-    // hold. Sending an empty folder would remove the backend's for a state nobody
-    // chose, so it is inert, like no directory.
+  it('⛔ records whose schema resolves to nothing are refused, and do not state an EMPTY folder', async () => {
+    // Every record needs a data schema, so a push refuses these (2026-11-11). A comparison that
+    // does not stop on refusals (`status`) must still not read them as an emptied folder:
+    // sending one would remove the backend's for a state nobody chose, so it is inert.
     const root = site({ records: false, queries: '' })
     w('site/records/untyped/a.yml', 'title: A\n')
     const pkg = await emitSyncPackages(root)
+    expect(pkg.refusals).toEqual([expect.stringMatching(/^records\/untyped\/: no data schema resolves for @\/untyped/)])
     expect(pkg.records).toBeNull()
-    // The case an author who took the records out and kept other files meets: said, by the CLI.
     expect(pkg.sendsFolder).toBe(false)
-    expect(pkg.warnings.some((x) => x.includes('no data schema resolves') && x.includes('not pushed'))).toBe(true)
   })
 
   it('⛔ …nor a folder of EMPTY BRANCHES when folder.yml organizes those records', async () => {

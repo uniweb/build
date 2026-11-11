@@ -295,8 +295,7 @@ function rewriteEntityAssets(node, map, ids, bare = null) {
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   records: { buffer, entityCount, index, models, links }|null,
  *   hashes: Object<string,string>, warnings: string[], refusals: string[],
- *   skipped: number, schemaless: Array<{name: string, model: string}>,
- *   localAssets: string[], applied: object, namesNew: string[],
+ *   skipped: number, localAssets: string[], applied: object, namesNew: string[],
  *   recordItemIdentity: { stamped: number, unknown: number, unbanked: string[] } }>}
  *   Each record entry of `records.index` carries `lists`: the record's list items as
  *   sent (`record-items.js::recordItemLists`), for the caller to bank against the
@@ -305,11 +304,11 @@ function rewriteEntityAssets(node, map, ids, bare = null) {
  *   creates — by `$ref`, where the next push will send a uuid — as keys of `hashes`. A
  *   caller that banks `hashes` re-banks these once the push is applied.
  *   `refusals` names the records that cannot be sent as written, one line each
- *   (`records.js::recordsToEntities`). A caller that submits must not submit while
- *   any is present: the backend would refuse the records lane — or, for a record
- *   written by section whose brief requires nothing, store it empty.
- *   `schemaless` lists queries that resolved no data schema (soft-skipped from
- *   the sync) — the composite deploy delivers these statically via the data ball.
+ *   (`records.js::recordsToEntities`), and each folder or query whose data schema
+ *   resolves to nothing, since every record needs one (`records.js::noDataSchema`). A
+ *   caller that submits must not submit while any is present: the backend would refuse
+ *   the records lane — or, for a record written by section whose brief requires nothing,
+ *   store it empty.
  *   `localAssets` lists the site-root local media refs (`/images/x.png`) the deploy
  *   must upload + rewrite to serve URLs. A section's co-located files ride `localFiles`,
  *   under their keys from the site root (`located-media.js`); any other co-located ref is
@@ -420,8 +419,6 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
         // …and the same data schema, where a name stands for the type of its data key
         // (`@/team` → `@/member`, `data-key-types.js`): decided once, by the records.
         keyTyped: col.keyTyped,
-        // …and which queries resolved NO data schema — their declarations go up naming none.
-        schemaless: col.schemaless.map((q) => q.name),
         // …and whether this deployment takes the key that says so (`siteContent.queryFields`) —
         // and the page and `settings` keys that carry Open Graph texts per language.
         ...(Array.isArray(opts.queryFields) ? { queryFields: opts.queryFields } : {}),
@@ -722,7 +719,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // Records that name a record this push creates — see `namesNew` above.
     namesNew,
     refusals,
-    schemaless: col.schemaless, localAssets, applied,
+    localAssets, applied,
     // The files a push uploads for its file records, each `{ ref, path, contentType }` — the file, and
     // a PDF's preview — and for its sections' co-located media, each `{ ref, path }`. Uploaded through
     // the media lane; `ref` is the key the second emit rewrites.

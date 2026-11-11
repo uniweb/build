@@ -588,9 +588,10 @@ export const WHOLE_RECORD = Symbol.for('uniweb.query.whole')
  * `$name` is the record's handle, taken BEFORE the lift: a brief may declare a `slug`
  * field of its own (`@std/article`'s does), and the lift puts that one over the file's.
  *
- * A record whose query has no data schema (`resolveRecordSchemas`) is delivered as its
- * file holds it, a markdown body as `content`, which is what the static lane always did;
- * so is a body its schema has no field for — a push refuses that one. A markdown record
+ * A record whose data schema this build cannot read (`resolveRecordSchemas`: a foundation that
+ * is not local, a schema registered under another scope) is delivered as its file holds it, a
+ * markdown body as `content`; so is a body its schema has no field for — a push refuses that one.
+ * One whose schema the build can read and finds nothing for stops the build (`processQueries`). A markdown record
  * also gets `excerpt` and `image` where it states none, derived from its body: the
  * static lane's own, and not what a host adds.
  *
@@ -1203,9 +1204,20 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   }
 
   // ⭐ THE DATA SCHEMA EACH QUERY'S RECORDS ARE DELIVERED IN (`deliverRecord`) — resolved
-  // from the foundation's source once for every query. A query with none compiles its
-  // records as their files hold them.
-  const dataSchemas = options.dataSchemas ?? (await querySchemas(siteDir, queriesConfig, typing))
+  // from the foundation's source once for every query and every folder of records.
+  //
+  // ⭐ EVERY RECORD HAS A DATA SCHEMA [Diego, 2026-11-11]: a folder or a query whose schema the
+  // build can check and finds nothing for stops it (`refuseRecordsWithoutSchema`), as a push
+  // refuses it (`uwx/records.js`). One the build cannot check — a foundation that is not local,
+  // a schema registered under another scope — compiles its records as their files hold them,
+  // and the push checks it against the backend. ⛔ Until 2026-11-11 a folder with no schema was
+  // "schema-less": compiled as files, which a publish uploaded in one language.
+  let dataSchemas = options.dataSchemas
+  if (!dataSchemas) {
+    const resolved = await querySchemas(siteDir, queriesConfig, typing, poolBySchema)
+    refuseRecordsWithoutSchema(resolved.missing, { dir: pool.dir, poolBySchema, queriesConfig })
+    dataSchemas = resolved.schemas
+  }
   const references = referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts })
 
   const results = {}
@@ -1243,26 +1255,58 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
 }
 
 /**
- * The data schemas of the site's record queries, by ref (`resolveRecordSchemas`). A ref
- * that is not a schema-less query's name and still does not resolve is warned about:
- * its records are compiled as their files hold them, which is not the shape a
- * component receives from a host.
+ * The data schemas of the site's record queries and of its folders of records, by ref
+ * (`resolveRecordSchemas`), and the refs it checked and found nothing for (`missing`). A ref of
+ * another scope found nowhere on disk is left to the push, which may find it registered; one
+ * that fails to load is warned about. Either way its records are compiled as their files hold
+ * them, which is not the shape a component receives from a host.
  */
-async function querySchemas(siteDir, queriesConfig, typing = new Map()) {
+async function querySchemas(siteDir, queriesConfig, typing = new Map(), poolBySchema = new Map()) {
   const refs = [...typing.values()]
   for (const config of Object.values(queriesConfig)) {
     if (config && typeof config === 'object' && config.url !== undefined) continue
     const ref = typeof config === 'string' ? config : config?.schema
     if (typeof ref === 'string' && !typing.has(ref)) refs.push(ref)
   }
-  const { schemas, failures } = await resolveRecordSchemas(siteDir, refs)
+  // A folder no query reads is checked too, for a schema it names relative to the foundation —
+  // the only kind this build can find missing; a scoped one is resolved where a query reads it.
+  for (const ref of poolBySchema.keys()) if (ref.startsWith('@/')) refs.push(ref)
+  const { schemas, failures, missing } = await resolveRecordSchemas(siteDir, refs)
   for (const { ref, message } of failures) {
     console.warn(
       `[query-processor] Data schema ${ref} did not resolve, so its records are compiled as ` +
         `their files hold them rather than as a component receives them: ${message}`
     )
   }
-  return schemas
+  return { schemas, missing }
+}
+
+/**
+ * Stop the build for records whose data schema resolves to nothing, naming each folder and
+ * query and what to write: every record has a data schema [Diego, 2026-11-11]. `missing` holds
+ * only what the build could check (`resolveRecordSchemas`).
+ *
+ * @param {string[]} missing - foundation-relative refs no schema answers
+ * @param {{ dir: string, poolBySchema: Map<string, Array>, queriesConfig: Object }} ctx
+ */
+export function refuseRecordsWithoutSchema(missing, { dir, poolBySchema, queriesConfig }) {
+  if (!missing?.length) return
+  const lines = missing.map((ref) => {
+    const readers = Object.entries(queriesConfig || {})
+      .filter(([, c]) => (typeof c === 'string' ? c : c?.schema) === ref)
+      .map(([name]) => `query "${name}"`)
+    const held = poolBySchema.get(ref)
+    const where = held?.length ? `${dir}/${held[0].dirs.join('/')}/` : readers.shift()
+    return `  ${where} — ${ref}${readers.length ? `, read by ${readers.join(', ')}` : ''}`
+  })
+  const name = missing[0].replace(/^@\//, '')
+  throw new Error(
+    `[uniweb] Every record needs a data schema, and nothing defines ${missing.length === 1 ? 'this one' : 'these'}:\n` +
+      `${lines.join('\n')}\n` +
+      `  A folder's name is its records' data schema. Define it in the foundation, as schemas/${name}.yml ` +
+      '(`uniweb guide data` shows one), or keep records of a data schema registered under another scope ' +
+      'in records/<scope>/<name>/.'
+  )
 }
 
 /**

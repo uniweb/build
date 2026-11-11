@@ -41,9 +41,8 @@ describe('validateDataInputs — a folder named for a typed data key', () => {
     expect(report.summary.records).toBe(2)
   })
 
-  it('CONTROL — an untyped key names no schema: the folder is left out, as before', async () => {
-    const report = await validate({ typed: false })
-    expect(report.violations).toEqual([])
-    expect(report.summary.records).toBe(0)
+  it('CONTROL — an untyped key names no schema: its folder has no data schema, and the check stops', async () => {
+    // Every record needs a data schema (2026-11-11). ⛔ Until then the folder was left out in silence.
+    await expect(validate({ typed: false })).rejects.toThrow(/Every record needs a data schema[\s\S]*records\/invoices\/ — @\/invoices/)
   })
 })

@@ -1162,7 +1162,7 @@ function externalSource(d) {
   return source
 }
 
-function queriesNested(declarations, uuids = null, scope = null, keyTyped = null, queryFields = null, schemaless = null) {
+function queriesNested(declarations, uuids = null, scope = null, keyTyped = null, queryFields = null) {
   const out = []
   for (const [name, d] of Object.entries(declarations)) {
     refuseUnder(d.where, `queries.${name}`)
@@ -1183,14 +1183,11 @@ function queriesNested(declarations, uuids = null, scope = null, keyTyped = null
     // names that type — the data schema its records are sent as (`data-key-types.js`).
     const typed = (!d.schemaExplicit && keyTyped?.get(d.schema)) || null
     const schema = typed || d.schema
-    // ⛔ NO MODEL FOR A QUERY WHOSE RECORDS RESOLVED NONE (`schemaless`, decided by the records
-    // lane — `records.js`). Its name-defaulted `schema` names a Model nothing declares, its records
-    // are not pushed, and its compiled data travels as static files — so the declaration goes up
-    // with no `schema`. ⛔ Until 2026-09-28 it named that Model anyway (`videos` → `@std/videos`),
-    // and a store that checks a query's `schema` against the site's declared types refused the
-    // whole content push for it. An explicit `schema:` that does not resolve never reaches here:
-    // the records lane refuses it.
-    if (!schemaless?.has(name)) setIf(data, 'schema', qualifyRef(schema, scope))
+    // ⭐ EVERY RECORD QUERY NAMES ITS MODEL. One whose schema resolves to nothing never reaches a
+    // backend: the records lane refuses it (`records.js::noDataSchema`), since every record has a
+    // data schema [Diego, 2026-11-11]. ⛔ Until then such a query was "schema-less" and went up
+    // naming no `schema` here, while a publish uploaded its compiled files.
+    setIf(data, 'schema', qualifyRef(schema, scope))
     // ⭐ …AND SAYS SO, so a pull can tell the author's form (`team:`, no schema) from an explicit
     // one — sent only where the deployment's `queries` Section declares the key (`GET /dev/config`
     // → `siteContent.queryFields`), since one that does not refuses a push carrying it.
@@ -1537,8 +1534,6 @@ function touchIconValue(named, settingsFields) {
  *        resolves into (`@/x` → `@scope/x`): the site's foundation's. Defaults to
  *        `siteSelfScope`; pass the scope the records are emitted with. With none
  *        known, `@/x` ships as written.
- * @param {string[]} [opts.schemaless] - the queries whose records resolved no data schema
- *        (the records lane's `schemaless`): their declarations name no `schema`.
  * @param {object} [opts.media] - a push's sink for the sections' co-located media
  *        (`located-media.js::locatedMediaSink`): each file to upload, and — where its upload
  *        map names the file — the reference replaced by the file's key. Absent, nothing is located.
@@ -1826,8 +1821,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
     opts.queryUuids,
     scope,
     opts.keyTyped,
-    opts.queryFields,
-    Array.isArray(opts.schemaless) ? new Set(opts.schemaless) : null
+    opts.queryFields
   )
   // Emitted only when there is something to state — see the header above
   // `serviceRecords`. ⭐ What this copy holds is per backend — a service is bought on

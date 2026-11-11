@@ -402,6 +402,16 @@ export function readEntityPoolSync(siteRoot, opts = {}) {
       if (!e.isFile()) continue
       // The folder's organization, not a record — see the header.
       if (dirs.length === 0 && e.name === FOLDER_YML) continue
+      // ⛔ A COMPANION SCHEMA IS RETIRED (2026-11-11): every record has a data schema, which says
+      // how it is translated, so `records/<query>.schema.js` is read by nothing and said so.
+      if (dirs.length === 0 && e.name.endsWith('.schema.js')) {
+        errors.push(
+          `${rel}/${e.name} is not read: a companion schema is retired. A record's data schema says ` +
+            `which of its fields are translated — define it in the foundation's schemas/ ` +
+            `(\`uniweb guide data\`), and delete this file.`
+        )
+        continue
+      }
       const ext = extname(e.name).toLowerCase()
       const fileRecord = isFileRecordDir(dirs)
       if (!fileRecord && !ENTITY_EXTENSIONS.has(ext)) continue

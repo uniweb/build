@@ -21,11 +21,6 @@
 
 import { visitModelStrings } from './model-fields.js'
 
-/** Types that are never translatable regardless of schema. */
-export const NON_TRANSLATABLE_TYPES = new Set([
-  'number', 'boolean', 'date', 'datetime', 'url', 'email', 'image'
-])
-
 /** Field names skipped by the heuristic extractor (structural, not human-readable). */
 export const HEURISTIC_SKIP_FIELDS = new Set([
   'slug', 'id', 'type', 'status', 'href', 'url', 'src', 'icon',

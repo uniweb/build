@@ -7,8 +7,8 @@
  * site needs it is what its published pages fetch — never whether it has records to sync.
  * A query counts when a page, a section or the site fetches it, and its records have a
  * data schema (the declaration names one) and come from the site's own folder (no `url:`).
- * A schema-less query's records are delivered as static files, which `records` does not
- * touch; an external query is fetched from its own address.
+ * Every such query names one, since every record has a data schema [Diego, 2026-11-11];
+ * an external query is fetched from its own address.
  *
  * @module
  */

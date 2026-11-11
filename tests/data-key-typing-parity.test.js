@@ -98,7 +98,8 @@ describe('a query a data key types — one schema on both lanes', () => {
     await makeSite('articles:\n  schema: "@/articles"\n')
     const queries = await payloadQueries()
     expect(queries.articles.schema).toBe('@/articles')
-    const byQuery = await processQueries(SITE, queries, undefined, '/')
-    expect(byQuery.articles.map((r) => r.$name).sort()).toEqual(['hello', 'world'])
+    // …and since no data schema defines `@/articles`, the build stops: every record needs one
+    // (2026-11-11), and the author named this one rather than the key's type.
+    await expect(processQueries(SITE, queries, undefined, '/')).rejects.toThrow(/records\/articles\/ — @\/articles/)
   })
 })

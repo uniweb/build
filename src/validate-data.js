@@ -355,8 +355,9 @@ function listViolation(finding, label, base) {
  * ⭐ A folder named for a data key the foundation types, when no data schema has its name,
  * holds records of that type and is checked against it — `records/team/` against `@/member`
  * for `data: { team: '@/member' }` — the way a push sends them [Diego, 2026-09-25]
- * (`uwx/data-key-types.js`). A folder whose schema resolves to nothing even so is left out in
- * silence: its records are schema-less, delivered as files, and the push says so itself.
+ * (`uwx/data-key-types.js`). A folder whose schema this check cannot read (a foundation that is
+ * not local) is left out in silence; one it can read and finds nothing for has already stopped
+ * `processQueries`, since every record has a data schema [Diego, 2026-11-11].
  *
  * @returns {Promise<{ violations: object[], setupErrors: object[], schemas: Set<string>, checked: number }>}
  */

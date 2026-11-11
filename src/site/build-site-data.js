@@ -17,25 +17,20 @@
  * path (where the static-host extras — sitemap, robots, search-index,
  * `llms.txt` and the `.md` projections, `_pages/*` for split content — are
  * actually consumed). Both paths use
- * the same underlying building blocks (`collectSiteContent`,
- * `processQueries`, etc.), so behavior stays consistent without forcing
- * one path through the other's lifecycle. Media processing — WebP copies and
- * video posters — is the bundle path's alone (below).
+ * the same underlying building blocks (`collectSiteContent`, etc.), so behavior
+ * stays consistent without forcing one path through the other's lifecycle. Media
+ * processing — WebP copies and video posters — and the records' compiled query
+ * files are the bundle path's alone (below).
  */
 
-import { writeFile, mkdir, cp } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { writeFile, mkdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { resolveDefaultLocale, DATA_DIR } from '@uniweb/core'
 import { collectSiteContent } from './content-collector.js'
-import { processQueries, writeQueryFiles } from './query-processor.js'
-import { resolveRecordsDir } from './entity-pool.js'
 
 /**
  * Build the site data for `uniweb build --link`, which `uniweb publish` runs.
- * `publish` reads two things back from `distDir`: the files of the queries that
- * have no data schema, which it uploads, and the languages to make live.
+ * `publish` reads one thing back from `distDir`: the languages to make live.
  *
  * Emits to `distDir`:
  *   - `site-content.json` — full content tree, sections always inlined.
@@ -60,13 +55,13 @@ import { resolveRecordsDir } from './entity-pool.js'
  *
  *     ⇒ The rule stands on its own: we do not know which consumers
  *     re-derive, so we always ship enough for the ones that do.
- *   - `data/<query>.json` (+ each record's own file, `data/<query>/<$name>.json`) —
- *     same shape `processQueries` produces today. `publish` uploads the files of
- *     the queries that have no data schema (`collectSchemalessData`).
- *   - `records/<path under the records directory>` — the records' co-located assets, where
- *     the compiled records point.
  *
  * Does NOT emit:
+ *   - `data/<query>.json` and each record's own file — the compiled queries. Every
+ *     record has a data schema [Diego, 2026-11-11], so a push sends it as an entity and
+ *     a host's records service answers its queries. ⛔ *Until 2026-11-11 this lane
+ *     compiled them, with the records' co-located assets, for `publish` to upload the
+ *     files of a query with no data schema.*
  *   - `assets/<media>` — no media is processed here, and a media ref in
  *     `site-content.json` stays the site's own path. `publish` uploads a
  *     site's media from the site's own files (the CLI's `uploadSiteMedia`), so
@@ -122,42 +117,7 @@ export async function buildSiteData({
   //    `blueprint.yml` (`uwx/blueprint.js`); said here too, a publish said it twice.
   let siteContent = await collectSiteContent(resolvedSiteRoot, { foundationPath, dropUnpublished: true, base: basePath, strict: true, warnBlueprint: false })
 
-  // 2. Compile content collections (file-based markdown/yaml/json).
-  //    `writeQueryFiles` lands them under `<siteRoot>/public/data/`;
-  //    in the vite plugin path that's fine because vite copies
-  //    `public/` into `dist/` at build time. The link-mode pipeline
-  //    has no vite, so we mirror that copy ourselves into
-  //    `<distDir>/data/` — the set the CLI's `site-data-upload` lane walks at
-  //    publish time. (This named `uniweb deploy::collectDataFiles` until
-  //    2026-08-18; no such function has existed for some time.) Same output bytes, same paths, just
-  //    without the vite intermediary.
-  if (siteContent.config?.queries) {
-    const byQuery = await processQueries(
-      resolvedSiteRoot,
-      siteContent.config.queries,
-      resolveRecordsDir(resolvedSiteRoot, siteContent.config?.paths).rel,
-      basePath,
-      { locale: resolveDefaultLocale(siteContent.config) ?? null }
-    )
-    await writeQueryFiles(resolvedSiteRoot, byQuery, siteContent.config.queries)
-
-    const publicDataDir = join(resolvedSiteRoot, 'public', DATA_DIR)
-    const distDataDir = join(resolvedDistDir, DATA_DIR)
-    if (existsSync(publicDataDir)) {
-      await cp(publicDataDir, distDataDir, { recursive: true })
-    }
-
-    // ⭐ AND THE RECORDS' CO-LOCATED ASSETS — `public/records/<path under records/>`,
-    // where the compiled records point (`/records/…`), mirrored the way vite mirrors
-    // all of `public/` on the bundle lane. ⛔ Until 2026-09-14 only `public/data` was
-    // copied, so a record's image URL named a file this lane's `dist/` did not have.
-    const publicRecordsDir = join(resolvedSiteRoot, 'public', 'records')
-    if (existsSync(publicRecordsDir)) {
-      await cp(publicRecordsDir, join(resolvedDistDir, 'records'), { recursive: true })
-    }
-  }
-
-  // 3. No media processing (header, "Does NOT emit"). The collector's asset
+  // 2. No media processing (header, "Does NOT emit"). The collector's asset
   //    manifest is internal, so it is dropped — as the vite plugin drops it
   //    when processing is off.
   let finalContent = { ...siteContent }
@@ -196,7 +156,7 @@ export async function buildSiteData({
     finalContent = { ...finalContent, config: configWithoutIcons }
   }
 
-  // 4. Write `dist/site-content.json` with FULL sections inlined.
+  // 3. Write `dist/site-content.json` with FULL sections inlined.
   //    Important: do NOT strip sections per the split-content rule here.
   //    Stripping would silently break split-mode sites on any consumer that
   //    re-derives split content from the full payload. See the header for
@@ -204,7 +164,7 @@ export async function buildSiteData({
   const contentPath = join(resolvedDistDir, 'site-content.json')
   await writeFile(contentPath, JSON.stringify(finalContent, null, 2))
 
-  // 5. (removed 2026-08-01) This lane used to emit a search index — the split
+  // (removed 2026-08-01) This lane used to emit a search index — the split
   //    `_search/{locale}/*.json` for a server, and `search-index.json` for the
   //    browser — gated by `features: [search]`.
   //
@@ -216,7 +176,7 @@ export async function buildSiteData({
   //    identically on both lanes.
   //
   //    The browser one was doubly dead: nothing ever uploaded it. `dist/` on
-  //    this lane reaches a backend only through the data ball and the media
+  //    this lane reached a backend only through the data ball and the media
   //    refs, and the ball read `dist/data` and `dist/_search` — never the dist
   //    root. So it was serialized on every publish and dropped.
   //
@@ -225,9 +185,9 @@ export async function buildSiteData({
   //    That is what GitHub Pages and every other static target serve, and the
   //    framework has more targets than one backend.
 
-  // 6. (removed 2026-10-25) This lane wrote `llms.txt` and a `.md` per page, for the default
+  // (removed 2026-10-25) This lane wrote `llms.txt` and a `.md` per page, for the default
   //    language only, on the ground that both lanes publish a site. Nothing read them: `publish`
-  //    reads the schema-less query files and the languages, and a host that serves the site
+  //    reads the languages, and a host that serves the site
   //    derives its projections from the content, as it derives its search. The static host’s are
   //    the bundle lane’s, in every language (`./projections.js`).
 

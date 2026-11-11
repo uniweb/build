@@ -10,11 +10,10 @@ import { DATA_DIR } from '@uniweb/core'
 // Pins the contract for the link-mode data pipeline:
 //   - `dist/site-content.json` always emitted, sections always inlined
 //     (never stripped per the split-content rule).
-//   - `dist/data/<query>.json` emitted when queries are declared.
 //   - HTML, JS, CSS, _importmap/, _pages/, sitemap, robots, search-index,
-//     llms.txt and page markdown are NEVER emitted (those are
-//     static-host-bundle concerns), and no media is processed (no
-//     `dist/assets/`).
+//     llms.txt, page markdown and compiled query files (`dist/data/`) are
+//     NEVER emitted (those are static-host-bundle concerns), and no media is
+//     processed (no `dist/assets/`).
 //
 // See `src/site/build-site-data.js` for the why.
 
@@ -140,50 +139,23 @@ A short tagline.
     expect(readdirSync(distDir)).toContain('site-content.json')
   })
 
-  it('emits dist/data/<collection>.json when collections are declared', async () => {
-    // Add a tiny file-based collection.
-    writeFileSync(join(siteRoot, 'site.yml'), `name: test-site
-foundation: src
-index: home
-queries:
-  articles:
-    schema: '@/article'
-`)
-    const poolDir = join(siteRoot, 'records', 'article')
-    mkdirSync(poolDir, { recursive: true })
-    writeFileSync(join(poolDir, 'first.md'), `---
-title: First Article
----
-Body text.
-`)
-
-    await buildSiteData({ siteRoot, distDir })
-
-    const collectionFile = join(distDir, DATA_DIR, 'articles.json')
-    expect(existsSync(collectionFile)).toBe(true)
-    const articles = JSON.parse(readFileSync(collectionFile, 'utf8'))
-    expect(Array.isArray(articles) || typeof articles === 'object').toBe(true)
-  })
-
-  // ⛔ A RECORD'S CO-LOCATED ASSETS SHIP WITH IT. The query compiler copies them to
-  // `public/records/<path under records/>` and points the record at `/records/…`; this
-  // lane copied `public/data` into `dist/` and not `public/records`, so a record's image
-  // URL named a file the link lane's `dist/` did not have (until 2026-09-14).
-  it('copies a record\'s co-located assets to dist/records/, where its URLs point', async () => {
+  // ⛔ THE LINK BUILD COMPILES NO QUERY FILES (2026-11-11). Every record has a data schema, so a
+  // push sends it as an entity and a host's records service answers its queries; nothing reads
+  // compiled files back from this lane. Until then it compiled them, with the records' co-located
+  // assets, for `uniweb publish` to upload a query's files when it had no data schema.
+  it('compiles no query files: no dist/data/, no dist/records/, nothing in public/', async () => {
     writeFileSync(join(siteRoot, 'site.yml'), `name: test-site\nfoundation: src\nindex: home\nqueries:\n  articles:\n    schema: '@/article'\n`)
     const poolDir = join(siteRoot, 'records', 'article')
-    mkdirSync(join(poolDir, 'img'), { recursive: true })
-    writeFileSync(join(poolDir, 'first.md'), `---\ntitle: First Article\nimage: ./cover.jpg\n---\n\n![diagram](./img/diagram.png)\n`)
+    mkdirSync(poolDir, { recursive: true })
+    writeFileSync(join(poolDir, 'first.md'), `---\ntitle: First Article\nimage: ./cover.jpg\n---\n\nBody text.\n`)
     writeFileSync(join(poolDir, 'cover.jpg'), 'JPG')
-    writeFileSync(join(poolDir, 'img', 'diagram.png'), 'PNG')
 
     await buildSiteData({ siteRoot, distDir })
 
-    const [article] = JSON.parse(readFileSync(join(distDir, DATA_DIR, 'articles.json'), 'utf8'))
-    expect(article.image).toBe('/records/article/cover.jpg')
-    expect(JSON.stringify(article.content)).toContain('/records/article/img/diagram.png')
-    expect(readFileSync(join(distDir, 'records', 'article', 'cover.jpg'), 'utf8')).toBe('JPG')
-    expect(readFileSync(join(distDir, 'records', 'article', 'img', 'diagram.png'), 'utf8')).toBe('PNG')
+    expect(existsSync(join(distDir, 'site-content.json'))).toBe(true)
+    expect(existsSync(join(distDir, DATA_DIR))).toBe(false)
+    expect(existsSync(join(distDir, 'records'))).toBe(false)
+    expect(existsSync(join(siteRoot, 'public', DATA_DIR))).toBe(false)
   })
 
   // ⛔ THE LINK BUILD PROCESSES NO MEDIA (2026-10-19). `uniweb publish` uploads a site's

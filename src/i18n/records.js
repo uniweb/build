@@ -4,17 +4,18 @@
  * Extract translatable strings from collection items and merge translations.
  * Collections are separate from page content (stored in public/data/*.json).
  *
- * Supports three extraction modes:
- * 1. Schema-guided — companion .schema.js or standard @uniweb/schemas
- * 2. Heuristic — recursive walk, extract all strings, skip structural patterns
- * 3. Legacy — flat field list (fallback within heuristic)
+ * A record is translated as its data schema says: by the model a push sends it as, which marks
+ * the fields that travel per language (`extractByModel`, `translateByModel`). Every record has a
+ * data schema [Diego, 2026-11-11]; where this build cannot read it — a site whose foundation is
+ * not in the project, such as a clone — a heuristic walk reads the record instead (`extractHeuristic`).
+ * ⛔ Until 2026-11-11 a record with no data schema was read by a companion `records/<query>.schema.js`,
+ * or by a standard schema guessed from the query's name made singular (`events` → `@std/event`).
  */
 
 import { readFile, writeFile, readdir, mkdir, rm } from 'fs/promises'
 import { RESERVED_LOCALE_FILES } from './locales.js'
 import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { DATA_DIR, resolveDefaultLocale } from '@uniweb/core'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
@@ -30,7 +31,7 @@ import { toDeliveredRecord, contentBodyField, misplacedFields, mergedFromStored,
 import { resolveDocForLocale } from './merge.js'
 import { extractUnitsFromDoc } from './extract.js'
 import { flatFormRefusal, extractExcerpt } from '../site/query-processor.js'
-import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir, readEntityPool, groupPoolBySchema } from '../site/entity-pool.js'
+import { poolDirsForSchema, schemaForPoolDirs, readEntityPool, groupPoolBySchema } from '../site/entity-pool.js'
 import { readRecordsConfig, resolveFolder } from '../site/records-config.js'
 import { labelIn } from '../site/entry-label.js'
 // The heuristic judgement about which strings inside structured data are prose.
@@ -39,7 +40,6 @@ import { labelIn } from '../site/entry-label.js'
 // is not, wherever the value came from. Moved rather than copied: two tuned
 // denylists would drift, and drift here is silent.
 import {
-  NON_TRANSLATABLE_TYPES,
   HEURISTIC_SKIP_FIELDS,
   MAX_HEURISTIC_DEPTH,
   isStructuralString,
@@ -56,113 +56,6 @@ import {
 // site's own `records/` directory now (`site/entity-pool.js`), and this one is
 // `locales/records/` — two directories, one word, so the constant says which.
 export const RECORD_LOCALES_DIR = 'records'
-
-// ---------------------------------------------------------------------------
-// Schema resolution
-// ---------------------------------------------------------------------------
-
-/** Cache for resolved schemas (query name → schema or null) */
-const schemaCache = new Map()
-
-/**
- * Resolve schema for a collection.
- *
- * Discovery order:
- * 1. Companion file: public/data/<name>.schema.js (ESM default export)
- * 2. Standard schema: @uniweb/schemas by collection name (with naive singularization)
- * 3. null (no schema found → heuristic fallback)
- *
- * @param {string} queryName
- * @param {string} siteRoot
- * @returns {Promise<Object|null>}
- */
-async function resolveSchema(queryName, siteRoot) {
-  if (schemaCache.has(queryName)) {
-    return schemaCache.get(queryName)
-  }
-
-  let schema = null
-
-  // 1. Companion schema file, beside the collection it describes.
-  //
-  // This used to be looked up in `public/<DATA_DIR>/` — next to the compiled
-  // output rather than the source. That directory is the build's, and asking
-  // an author to write into it was the one remaining place the framework
-  // contradicted its own rule that `collections/` is the only way to provide
-  // structured data. The schema describes the source, so it lives with it.
-  const companionPath = join(resolveRecordsDir(siteRoot).abs, `${queryName}.schema.js`)
-  if (existsSync(companionPath)) {
-    try {
-      const mod = await import(pathToFileURL(companionPath).href)
-      schema = mod.default || mod
-      schemaCache.set(queryName, schema)
-      return schema
-    } catch (err) {
-      console.warn(`[i18n] Failed to load companion schema ${companionPath}: ${err.message}`)
-    }
-  }
-
-  // 2. Standard schema from @uniweb/schemas (try exact name + singularized)
-  const schemasModule = await import('@uniweb/schemas')
-  const names = [queryName, singularize(queryName)]
-
-  for (const name of names) {
-    if (schemasModule.schemas[name]) {
-      schema = schemasModule.schemas[name]
-      break
-    }
-  }
-
-  schemaCache.set(queryName, schema)
-  return schema
-}
-
-/**
- * Naive singularization for schema lookup.
- * Handles common plural suffixes: articles→article, opportunities→opportunity
- */
-function singularize(name) {
-  if (name.endsWith('ies')) return name.slice(0, -3) + 'y'
-  if (name.endsWith('ses') || name.endsWith('xes') || name.endsWith('zes')) return name.slice(0, -2)
-  if (name.endsWith('s') && !name.endsWith('ss')) return name.slice(0, -1)
-  return name
-}
-
-// ---------------------------------------------------------------------------
-// Field translatability
-// ---------------------------------------------------------------------------
-
-/**
- * Determine if a schema field should be extracted for translation.
- *
- * @param {Object} fieldDef - Schema field definition
- * @returns {'yes'|'no'|'recurse'} Whether the field is translatable
- */
-function isFieldTranslatable(fieldDef) {
-  // Explicit override always wins
-  if (fieldDef.translatable === true) return 'yes'
-  if (fieldDef.translatable === false) return 'no'
-
-  const type = fieldDef.type
-
-  // Types that are never translatable
-  if (NON_TRANSLATABLE_TYPES.has(type)) return 'no'
-
-  // Markdown is always translatable
-  if (type === 'markdown') return 'yes'
-
-  // Strings with enum default to NOT translatable (status codes, types)
-  if (type === 'string' && fieldDef.enum) return 'no'
-
-  // Plain strings default to translatable
-  if (type === 'string') return 'yes'
-
-  // Objects and arrays: recurse into their nested definitions
-  if (type === 'object' || type === 'array') return 'recurse'
-
-  // Unknown types: skip
-  return 'no'
-}
 
 // ---------------------------------------------------------------------------
 // A record's model — what a push sends it as
@@ -393,74 +286,14 @@ function translateDocs(value, context, translations, depth = 0) {
 // Schema-guided extraction
 // ---------------------------------------------------------------------------
 
-/**
- * Extract translatable fields from an item using a schema.
- *
- * @param {Object} item - Data item
- * @param {Object} schema - Schema with `fields`
- * @param {string} queryName
- * @param {Object} units - Accumulator
- */
-function extractWithSchema(item, schema, recordDir, units) {
-  const context = { record: `${recordDir}/${recordHandle(item)}` }
-
-  extractFromItemWithSchema(item, schema.fields, '', context, units)
-
-  // Also extract the record's ProseMirror documents (not covered by schema fields)
-  for (const { path, doc } of proseMirrorDocs(item)) extractFromProseMirrorDoc(doc, context, units, path)
-}
-
-/**
- * Recursively extract translatable fields guided by schema.
- */
-function extractFromItemWithSchema(data, fields, pathPrefix, context, units) {
-  if (!data || typeof data !== 'object') return
-
-  for (const [fieldName, fieldDef] of Object.entries(fields)) {
-    if (isRecordSystemField(fieldName, !pathPrefix)) continue
-    const value = data[fieldName]
-    if (value === undefined || value === null) continue
-
-    const fieldPath = pathPrefix ? `${pathPrefix}.${fieldName}` : fieldName
-    const translatable = isFieldTranslatable(fieldDef)
-
-    if (translatable === 'yes') {
-      if (typeof value === 'string' && value.trim()) {
-        addUnit(units, value, fieldPath, context)
-      }
-    } else if (translatable === 'recurse') {
-      if (fieldDef.type === 'object' && fieldDef.fields && typeof value === 'object' && !Array.isArray(value)) {
-        extractFromItemWithSchema(value, fieldDef.fields, fieldPath, context, units)
-      } else if (fieldDef.type === 'array' && Array.isArray(value)) {
-        const itemDef = fieldDef.items
-        if (itemDef) {
-          value.forEach((elem, i) => {
-            const elemPath = `${fieldPath}[${i}]`
-            if (itemDef.type === 'object' && itemDef.fields && typeof elem === 'object') {
-              extractFromItemWithSchema(elem, itemDef.fields, elemPath, context, units)
-            } else if (itemDef.type === 'string') {
-              // Array of strings — check item-level translatable
-              const itemTranslatable = isFieldTranslatable(itemDef)
-              if (itemTranslatable === 'yes' && typeof elem === 'string' && elem.trim()) {
-                addUnit(units, elem, elemPath, context)
-              }
-            }
-          })
-        }
-      }
-    }
-    // translatable === 'no' → skip
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Heuristic extraction (no schema)
+// Heuristic extraction (a data schema this build cannot read)
 // ---------------------------------------------------------------------------
 
 /**
- * Extract translatable fields from an item using heuristics — a record with no data schema, which
- * says nothing of its fields. Recursively walks the data, extracting strings that look like
- * human-readable text.
+ * Extract translatable fields from an item using heuristics — a record whose data schema this
+ * build cannot read (a foundation not in the project, such as a clone's). Recursively walks the
+ * data, extracting strings that look like human-readable text.
  *
  * @param {Set<string>|null} skip - fields of the record's own level to leave out (`EXCERPT`)
  */
@@ -516,59 +349,7 @@ function extractFromItemHeuristic(data, pathPrefix, context, units, depth, skip 
 }
 
 // ---------------------------------------------------------------------------
-// Schema-guided translation
-// ---------------------------------------------------------------------------
-
-/**
- * Translate item fields using schema guidance.
- */
-function translateWithSchema(item, schema, context, translations) {
-  const translated = translateDocs(item, context, translations)
-  translateItemWithSchema(translated, schema.fields, context, translations)
-  return translated
-}
-
-/**
- * Recursively translate fields guided by schema.
- */
-function translateItemWithSchema(data, fields, context, translations, topLevel = true) {
-  if (!data || typeof data !== 'object') return
-
-  for (const [fieldName, fieldDef] of Object.entries(fields)) {
-    if (isRecordSystemField(fieldName, topLevel)) continue
-    const value = data[fieldName]
-    if (value === undefined || value === null) continue
-
-    const translatable = isFieldTranslatable(fieldDef)
-
-    if (translatable === 'yes') {
-      if (typeof value === 'string') {
-        data[fieldName] = lookupTranslation(value, context, translations)
-      }
-    } else if (translatable === 'recurse') {
-      if (fieldDef.type === 'object' && fieldDef.fields && typeof value === 'object' && !Array.isArray(value)) {
-        translateItemWithSchema(value, fieldDef.fields, context, translations, false)
-      } else if (fieldDef.type === 'array' && Array.isArray(value)) {
-        const itemDef = fieldDef.items
-        if (itemDef) {
-          value.forEach((elem, i) => {
-            if (itemDef.type === 'object' && itemDef.fields && typeof elem === 'object') {
-              translateItemWithSchema(elem, itemDef.fields, context, translations, false)
-            } else if (itemDef.type === 'string') {
-              const itemTranslatable = isFieldTranslatable(itemDef)
-              if (itemTranslatable === 'yes' && typeof elem === 'string') {
-                value[i] = lookupTranslation(elem, context, translations)
-              }
-            }
-          })
-        }
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Heuristic translation (no schema)
+// Heuristic translation (a data schema this build cannot read)
 // ---------------------------------------------------------------------------
 
 /**
@@ -774,8 +555,6 @@ export async function extractRecordContent(siteRoot, options = {}) {
 
       if (!Array.isArray(items)) continue
 
-      // Resolve schema once per collection
-      const schema = await resolveSchema(queryName, siteRoot)
       const recordDir = poolDirs.get(queryName) ?? queryName
       const model = models.get(queryName) ?? null
       // ⭐ AND THE QUERY'S PER-RECORD FILES. A query with `deferred:` fields writes each
@@ -788,8 +567,6 @@ export async function extractRecordContent(siteRoot, options = {}) {
         const skip = derivesExcerpt(item, whole, dataSchemas.get(queryName), excerpts.get(queryName)) ? EXCERPT : null
         if (model) {
           extractByModel(item, model, { record: `${recordDir}/${recordHandle(item)}` }, units, skip)
-        } else if (schema?.fields) {
-          extractWithSchema(item, schema, recordDir, units)
         } else {
           extractHeuristic(item, recordDir, units, skip)
         }
@@ -1007,8 +784,6 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
           continue
         }
 
-        // Resolve schema once per collection
-        const schema = await resolveSchema(queryName, siteRoot)
         const recordDir = poolDirs.get(queryName) ?? queryName
         const recordOptions = {
           locale,
@@ -1040,7 +815,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
             const { dataSchema } = recordOptions
             const record = dataSchema && isPlainObject(stored) ? mergedFromStored(dataSchema, stored) : stored
             const translatedRecord = isPlainObject(record)
-              ? await translateItemAsync(record, recordDir, translations, schema, recordOptions)
+              ? await translateItemAsync(record, recordDir, translations, recordOptions)
               : record
             if (isPlainObject(record)) wholes.set(recordHandle(record), { source: record, translated: translatedRecord })
             const written = relabel(
@@ -1062,7 +837,7 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
         // Translate each item (with free-form support)
         const translatedItems = await Promise.all(
           items.map((item) =>
-            translateItemAsync(item, recordDir, translations, schema, { ...recordOptions, whole: wholes.get(recordHandle(item)) })
+            translateItemAsync(item, recordDir, translations, { ...recordOptions, whole: wholes.get(recordHandle(item)) })
           )
         )
 
@@ -1110,10 +885,10 @@ export async function buildLocalizedRecords(siteRoot, options = {}) {
  * @param {{ source: Object, translated: Object }} [options.whole] - for an item of a lean list, its
  *   record whole and translated, whose body a derived excerpt is derived from
  */
-async function translateItemAsync(item, recordDir, translations, schema, options = {}) {
+async function translateItemAsync(item, recordDir, translations, options = {}) {
   const { locale, localesDir, freeformEnabled, dataSchema = null, model = null, targets = null, excerpt = null, whole = null } = options
   const derived = derivesExcerpt(item, whole?.source, dataSchema, excerpt)
-  let translated = translateItemSync(item, recordDir, translations, schema, { model, targets, skip: derived ? EXCERPT : null })
+  let translated = translateItemSync(item, recordDir, translations, { model, targets, skip: derived ? EXCERPT : null })
   if (freeformEnabled && locale && localesDir) translated = await applyFreeformFile(translated, item, recordDir, locale, localesDir, dataSchema)
   if (!derived) return translated
   return { ...translated, excerpt: derivedExcerptOf(whole ? whole.translated : translated, dataSchema, excerpt) }
@@ -1170,17 +945,13 @@ function applyFreeform(record, freeform, dataSchema, schemaRef) {
 
 /**
  * Apply translations to a collection item (sync, hash-based only) — by the model it is pushed as
- * when it has one (`translateByModel`), else a companion schema's fields, else the heuristic.
+ * (`translateByModel`), or by the heuristic where this build cannot read its data schema.
  */
-function translateItemSync(item, recordDir, translations, schema, { model = null, targets = null, skip = null } = {}) {
+function translateItemSync(item, recordDir, translations, { model = null, targets = null, skip = null } = {}) {
   const context = { record: `${recordDir}/${recordHandle(item)}` }
 
   if (model) return translateByModel(item, model, context, translations, targets, skip)
-  const translated = { ...item }
-  if (schema?.fields) {
-    return translateWithSchema(translated, schema, context, translations)
-  }
-  return translateHeuristic(translated, context, translations, skip)
+  return translateHeuristic({ ...item }, context, translations, skip)
 }
 
 // ---------------------------------------------------------------------------
@@ -1264,7 +1035,6 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
   const one = !!items && typeof items === 'object' && !Array.isArray(items)
   if (!Array.isArray(items) && !one) return items
 
-  const schema = await resolveSchema(queryName, siteRoot)
   const { poolDirs, schemas: dataSchemas, models, targets, excerpts, labels, defaultLocale } = await recordQueries(siteRoot)
   const recordDir = poolDirs.get(queryName) ?? queryName
   const recordOptions = {
@@ -1285,11 +1055,11 @@ export async function translateRecordData(items, queryName, siteRoot, options = 
   const wholes = new Map()
   if (!one) {
     for (const [handle, record] of await wholeRecords(join(siteRoot, 'public', DATA_DIR), queryName, dataSchema)) {
-      wholes.set(handle, { source: record, translated: await translateItemAsync(record, recordDir, translations, schema, recordOptions) })
+      wholes.set(handle, { source: record, translated: await translateItemAsync(record, recordDir, translations, recordOptions) })
     }
   }
   const translated = await Promise.all(
-    records.map((item) => translateItemAsync(item, recordDir, translations, schema, { ...recordOptions, whole: wholes.get(recordHandle(item)) }))
+    records.map((item) => translateItemAsync(item, recordDir, translations, { ...recordOptions, whole: wholes.get(recordHandle(item)) }))
   )
 
   const labelsOf = labels.get(queryName)

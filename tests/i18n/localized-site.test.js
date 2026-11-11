@@ -75,6 +75,16 @@ afterEach(() => {
 })
 
 describe('buildLocalizedSite', () => {
+  it('the link lane builds each language\'s content and no records (`records: false`)', async () => {
+    // A push sends each record in every language; nothing reads compiled query files back from
+    // the build `uniweb publish` runs (2026-11-11).
+    await bundledSite()
+    const built = await buildLocalizedSite(ROOT, { locales: ['es'], records: false })
+    expect(built.records).toEqual({})
+    expect(has('dist/es/site-content.json')).toBe(true)
+    expect(has('dist/es/data')).toBe(false)
+  })
+
   it('⭐ a language\'s search index and agent files list its records, in its language', async () => {
     await bundledSite()
     const built = await buildLocalizedSite(ROOT, { locales: ['es'], projections: true })
