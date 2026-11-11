@@ -2607,6 +2607,28 @@ function payloadSiteConfig(siteConfig) {
   return runtimeSiteConfig
 }
 
+/**
+ * Warn when a page writes `{name}` for one of the site's placeholders and the foundation has no
+ * content handler to resolve it, so the page prints the braces. A placeholder no page writes
+ * says nothing: a foundation may read it as a site value (`website.config.placeholders`).
+ *
+ * @param {string[]} names - the site's placeholder names, or none when the foundation resolves them
+ * @param {Array<object>} pages - the collected pages
+ */
+function warnUnresolvedPlaceholders(names, pages) {
+  if (!names.length) return
+  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const written = new RegExp(`\\{\\s*(${escaped.join('|')})(?=[\\s.}])`, 'g')
+  const text = JSON.stringify(pages)
+  const used = [...new Set([...text.matchAll(written)].map((m) => m[1]))]
+  if (!used.length) return
+  console.warn(
+    `[uniweb] Pages write ${used.map((n) => `\`{${n}}\``).join(', ')}, which site.yml declares under \`placeholders:\`, ` +
+      `but the foundation has no \`handlers.content\` to resolve them — those pages render the braces as text.\n` +
+      `[uniweb]   A foundation opts in with \`handlers: createLoomHandlers({ vars })\` from @uniweb/loom.`
+  )
+}
+
 /** What this process has said of a site's `blueprint.yml` (`collectSiteContent`). */
 const saidOfBlueprint = new Set()
 
@@ -2727,13 +2749,16 @@ export async function collectSiteContent(sitePath, options = {}) {
   // ⚖️ A WARNING, never an error: the site may be mid-migration, or the author
   // may be about to switch foundations, and a declared-but-unread value harms
   // nothing. Same rule as the retired-`fetcher:` keys above — warn once, carry on.
-  if (siteConfig.placeholders && !hasContentHandler) {
-    console.warn(
-      `[uniweb] site.yml declares \`placeholders:\` but the foundation has no \`handlers.content\`, ` +
-        `so nothing will resolve them — pages will render the literal \`{name}\` text.\n` +
-        `[uniweb]   A foundation opts in with \`handlers: createLoomHandlers({ vars })\` from @uniweb/loom.`
-    )
-  }
+  //
+  // ⭐ ONLY WHEN A PAGE WRITES ONE (`warnUnresolvedPlaceholders`, once the pages are read). A
+  // foundation's components may read a site's placeholders themselves
+  // (`website.config.placeholders.currency`), with no content handler: a site value set once.
+  // ⛔ Until 2026-11-11 the warning fired on any `placeholders:`, and told such a site its pages
+  // would print `{name}` when none did.
+  const placeholderNames =
+    !hasContentHandler && siteConfig.placeholders && typeof siteConfig.placeholders === 'object' && !Array.isArray(siteConfig.placeholders)
+      ? Object.keys(siteConfig.placeholders)
+      : []
   // `base` reaches the theme because self-hosted font faces are authored
   // root-relative (`/fonts/x.woff2`) and the emitted @font-face lives in an
   // inline <style> — under a subdirectory deployment it must carry the base.
@@ -2797,6 +2822,8 @@ export async function collectSiteContent(sitePath, options = {}) {
   // The layout sections' assets and icons, beside the pages'.
   assetCollection = mergeAssetCollections(assetCollection, layoutAssets)
   iconCollection = mergeIconCollections(iconCollection, layoutIcons)
+
+  warnUnresolvedPlaceholders(placeholderNames, pages)
 
   // One manifest key per file: a co-located ref written the same way in two
   // folders (`./media/shot.png`) names two files, and would otherwise share one
