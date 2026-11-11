@@ -180,8 +180,8 @@ function buildDataSchemaEntities(dataSchemas, scope) {
  * One `@uniweb/mapping-schema` entity per mapping the foundation defines (`schema._mappings`,
  * `foundation/mappings.js`): its identity flat, as a data schema's is, and the rest of the file under
  * `rules` — the envelope's `model:` names the exchange type, so the mapping's own `model:` cannot sit
- * beside it. `rules.model` and `rules.keys_from` are named in full; nothing else in `rules` is
- * touched, since a backend judges it. A mapping another one names in `keys_from` comes first.
+ * beside it. `rules.model`, `rules.keys_from` and a reverse `follow` line's `model` are named in
+ * full; nothing else in `rules` is touched, since a backend judges it. A mapping another one names in `keys_from` comes first.
  *
  * @param {Object<string, object>} mappings - `{ '@/<name>': declaration }`
  * @param {(ref: string) => string} scoped - `@/x` → the registration scope's name
@@ -195,6 +195,7 @@ function buildMappingEntities(mappings, scoped) {
       const { label, description, ...rules } = decl
       if (typeof rules.model === 'string') rules.model = scoped(rules.model)
       if (typeof rules.keys_from === 'string') rules.keys_from = scoped(rules.keys_from)
+      if (Array.isArray(rules.follow)) rules.follow = rules.follow.map((line) => followNamed(line, scoped))
       return {
         model: MAPPING_SCHEMA,
         name: scoped(ref),
@@ -215,6 +216,18 @@ function buildMappingEntities(mappings, scoped) {
   }
   for (const entity of entities) visit(entity)
   return ordered
+}
+
+/** One `follow` line, `{ alias: { model?, … } }`, with each `model` named in full; a copy, never the file's. */
+function followNamed(line, scoped) {
+  if (line === null || typeof line !== 'object' || Array.isArray(line)) return line
+  return Object.fromEntries(
+    Object.entries(line).map(([alias, spec]) =>
+      spec && typeof spec === 'object' && !Array.isArray(spec) && typeof spec.model === 'string'
+        ? [alias, { ...spec, model: scoped(spec.model) }]
+        : [alias, spec]
+    )
+  )
 }
 
 /**

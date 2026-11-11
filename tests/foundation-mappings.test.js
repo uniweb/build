@@ -49,6 +49,15 @@ describe('src/mappings/', () => {
     expect(err.message).toMatch(/d\.yml: `model` names no type/)
   })
 
+  it("checks a reverse `follow` line's `model` as it checks `model`; the rest of `follow` is the backend's", async () => {
+    w('a.yml', "model: '@/vehicle'\nfollow:\n  - { quiz: { field: identity.quiz_ref } }\n  - { key: { model: '@/vehicle', field: identity.quiz, names: quiz } }\n  - { std: { model: '@std/person', field: identity.x } }\n")
+    expect(Object.keys(await buildMappingMap(SRC, { ownTypes: ['@/vehicle'] }))).toEqual(['@/a'])
+    w('b.yml', "model: '@/vehicle'\nfollow:\n  - { key: { model: '@/nope', field: identity.quiz } }\n  - { k2: { model: nope, field: x } }\n")
+    const err = await buildMappingMap(SRC, { ownTypes: ['@/vehicle'] }).catch((e) => e)
+    expect(err.message).toMatch(/b\.yml: `follow\[0\]\.key\.model` is `@\/nope`, which is not one of the foundation's types/)
+    expect(err.message).toMatch(/b\.yml: `follow\[1\]\.k2\.model` names no type/)
+  })
+
   it('a keys_from naming another of its mappings is taken', async () => {
     w('a.yml', "model: '@/vehicle'\n")
     w('b.yml', "model: '@/vehicle'\nkeys_from: '@/a'\n")

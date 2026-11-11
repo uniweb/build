@@ -26,8 +26,9 @@
  * full name for any other, as `data:` and `queries.yml` name types — and a push names each in full
  * by the rule every ref it sends follows (`qualifyRef`, with the scope `siteSelfScope` reads). The
  * backend never resolves an `@/x`. A pull writes `@/x` back, and keeps a name the file already
- * spells another way when it names the same type. An integration's `mapping:` — one of the
- * foundation's mappings (`src/mappings/`) — is named the same way; nothing in its `filter` is.
+ * spells another way when it names the same type. An integration's `mapping:` and `reply:` — each
+ * one of the foundation's mappings (`src/mappings/`) — are named the same way; its `reply_about`
+ * (a field) and nothing in its `filter` are.
  *
  * ⭐ ITS SHAPE IS THE BACKEND'S, AND THE BACKEND CHECKS IT AT EVERY DOOR THAT WRITES THE ROW. The
  * checks here come earlier — a build, a push, `uniweb doctor`, offline — and refuse no more than
@@ -97,12 +98,21 @@ export function blueprintForWire(blueprint, scope) {
   return out
 }
 
-/** Each integration line with its `mapping:` renamed by `rename`; nothing else in the line moves. */
+/** The keys of an integration line that name a mapping. */
+const MAPPING_KEYS = Object.freeze(['mapping', 'reply'])
+
+/**
+ * Each integration line with the mappings it names (`mapping:`, `reply:`) renamed by `rename`;
+ * nothing else in the line moves — `reply_about` is a field, and a `filter` names fields.
+ */
 function mappingsNamed(integrations, rename) {
   return Object.fromEntries(
-    Object.entries(integrations).map(([id, line]) =>
-      isMap(line) && typeof line.mapping === 'string' ? [id, { ...line, mapping: rename(line.mapping) }] : [id, line]
-    )
+    Object.entries(integrations).map(([id, line]) => {
+      if (!isMap(line)) return [id, line]
+      const out = { ...line }
+      for (const key of MAPPING_KEYS) if (typeof line[key] === 'string') out[key] = rename(line[key])
+      return [id, out]
+    })
   )
 }
 
@@ -175,7 +185,10 @@ export function blueprintFromWire(wire, { scope = null, own = null, local = null
 function mappingAsFileSpells(full, localIntegrations, scope) {
   if (isMap(localIntegrations)) {
     for (const line of Object.values(localIntegrations)) {
-      if (isMap(line) && typeof line.mapping === 'string' && qualifyRef(line.mapping, scope) === full) return line.mapping
+      if (!isMap(line)) continue
+    for (const key of MAPPING_KEYS) {
+      if (typeof line[key] === 'string' && qualifyRef(line[key], scope) === full) return line[key]
+    }
     }
   }
   const org = bareOrg(scope)
@@ -310,22 +323,29 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
     }
   }
   for (const [id, line] of Object.entries(isMap(blueprint.integrations) ? blueprint.integrations : {})) {
-    const mapping = isMap(line) ? line.mapping : null
-    if (typeof mapping !== 'string') continue
-    const at = `integrations.${id}.mapping`
-    if (!scoped && mapping.startsWith('@/') && sending) {
-      out.push(
-        `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own mapping, and the foundation has no scope yet, ` +
-          "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
-          "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
-      )
-    }
-    if (declared?.mappings && !declared.mappings.has(qualifyRef(mapping, scope))) {
-      out.push(
-        `${BLUEPRINT_FILE}: \`${at}\` names a mapping none of this site's foundations declares, so a backend ` +
-          `started from this site leaves the line out. Check the name against the foundation's src/mappings/.`
-      )
-    }
+    for (const key of MAPPING_KEYS) out.push(...mappingWarnings(line, id, key, { scoped, scope, declared, sending }))
+  }
+  return out
+}
+
+/** What one mapping an integration line names (`mapping:`, `reply:`) warns of. */
+function mappingWarnings(line, id, key, { scoped, scope, declared, sending }) {
+  const mapping = isMap(line) ? line[key] : null
+  if (typeof mapping !== 'string') return []
+  const out = []
+  const at = `integrations.${id}.${key}`
+  if (!scoped && mapping.startsWith('@/') && sending) {
+    out.push(
+      `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own mapping, and the foundation has no scope yet, ` +
+        "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
+        "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
+    )
+  }
+  if (declared?.mappings && !declared.mappings.has(qualifyRef(mapping, scope))) {
+    out.push(
+      `${BLUEPRINT_FILE}: \`${at}\` names a mapping none of this site's foundations declares, so a backend ` +
+        `started from this site leaves the line out. Check the name against the foundation's src/mappings/.`
+    )
   }
   return out
 }

@@ -451,6 +451,10 @@ describe('integrations', () => {
       'meta-catalog': { label: 'Meta catalog', mapping: '@/vehicle-to-meta', channel: 'feed', trigger: 'on_fetch', enabled: true },
       'dms-sold': { label: 'Sold to the DMS', mapping: '@/vehicle-to-dms', channel: 'http', trigger: 'on_match', filter: { where: { status: 'sold' } } },
       'by-hand': { mapping: '@other/thing', channel: 'file', trigger: 'manual' },
+      'auto-grade': {
+        mapping: '@/submission-to-grader', channel: 'http', trigger: 'on_change',
+        reply: '@/grade-back', reply_about: 'identity.submission',
+      },
     },
   }
   const WIRE_I = {
@@ -458,6 +462,7 @@ describe('integrations', () => {
       'meta-catalog': { ...FILE.integrations['meta-catalog'], mapping: '@acme/vehicle-to-meta' },
       'dms-sold': { ...FILE.integrations['dms-sold'], mapping: '@acme/vehicle-to-dms' },
       'by-hand': FILE.integrations['by-hand'],
+      'auto-grade': { ...FILE.integrations['auto-grade'], mapping: '@acme/submission-to-grader', reply: '@acme/grade-back' },
     },
   }
 
@@ -476,6 +481,11 @@ describe('integrations', () => {
         e: { mapping: '@/x', channel: 'http', trigger: 'on_create', enabled: true },
         f: { mapping: '@/x', channel: 'file', trigger: 'manual', enabled: false },
         g: { mapping: '@/x', channel: 'file', trigger: 'manual', filter: 'sold' },
+        h: { mapping: '@/x', channel: 'feed', trigger: 'on_change' },
+        i: { mapping: '@/x', channel: 'email', trigger: 'on_create', reply: '@/y' },
+        j: { mapping: '@/x', channel: 'http', trigger: 'on_create', reply_about: 'identity.x' },
+        k: { mapping: '@/x', channel: 'http', trigger: 'on_create', reply: '@/y', reply_about: 'submission' },
+        l: { mapping: '@/x', channel: 'http', trigger: 'on_create', reply: 'y' },
       },
     })
     expect(found).toEqual([
@@ -487,6 +497,11 @@ describe('integrations', () => {
       expect.stringMatching(/^`integrations\.e\.enabled`: a `http` integration is switched on by its owner/),
       expect.stringMatching(/^`integrations\.f\.enabled` is `true`, or left out/),
       expect.stringMatching(/^`integrations\.g\.filter` is a map/),
+      expect.stringMatching(/^`integrations\.h`: a `feed` integration's trigger is one of `on_fetch` — not `on_change`/),
+      expect.stringMatching(/^`integrations\.i\.reply`: only an `http` integration is answered/),
+      expect.stringMatching(/^`integrations\.j\.reply_about` names a field of the reply's type, so it goes with a `reply`/),
+      expect.stringMatching(/^`integrations\.k\.reply_about` is a field of the reply's type, `section\.field`/),
+      expect.stringMatching(/^`integrations\.l\.reply` names no mapping/),
     ])
   })
 
@@ -509,5 +524,9 @@ describe('integrations', () => {
       expect.stringMatching(/^blueprint\.yml: `integrations\.b\.mapping` names a mapping none of this site's foundations declares/),
     ])
     expect(blueprintWarnings(blueprint, { scope: '@acme', declared: { types: null, mappings: null } })).toEqual([])
+    const replying = { integrations: { g: { ...FILE.integrations['auto-grade'], mapping: '@/vehicle-to-meta' } } }
+    expect(blueprintWarnings(replying, { scope: '@acme', declared })).toEqual([
+      expect.stringMatching(/^blueprint\.yml: `integrations\.g\.reply` names a mapping none of this site's foundations declares/),
+    ])
   })
 })

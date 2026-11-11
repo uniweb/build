@@ -25,7 +25,8 @@
  *
  *   - a file that is not a map, or a `label`/`description` that is not text;
  *   - a `model` that is missing or names no type, or an `@/x` the foundation doesn't define;
- *   - a `keys_from` that names no mapping, or an `@/x` that isn't one of the foundation's.
+ *   - a `keys_from` that names no mapping, or an `@/x` that isn't one of the foundation's;
+ *   - a reverse `follow` line's `model` that names no type, or an `@/x` the foundation doesn't define.
  *
  * Mappings are editor-time only: they ride in `schema.json` as `_mappings` and never reach a page.
  *
@@ -134,6 +135,36 @@ export function mappingProblems(decl, { types, names }) {
     if (problem) found.push(problem)
     else if (decl.keys_from.startsWith('@/') && !names.has(decl.keys_from)) {
       found.push(`\`keys_from\` is \`${decl.keys_from}\`, which is not one of the foundation's mappings (src/${MAPPINGS_DIR}/).`)
+    }
+  }
+  found.push(...followProblems(decl.follow, types))
+  return found
+}
+
+/**
+ * `follow` — a list of one-entry maps, `{ alias: { field, from? } }` forward, or
+ * `{ alias: { model, field, names? } }` reverse. Only a reverse line's `model` is a name (a type);
+ * the rest is local and the backend's to judge, as is a `follow` shaped any other way.
+ */
+export function followModels(follow) {
+  if (!Array.isArray(follow)) return []
+  const out = []
+  for (const [i, line] of follow.entries()) {
+    if (!isMap(line)) continue
+    for (const [alias, spec] of Object.entries(line)) {
+      if (isMap(spec) && 'model' in spec) out.push({ at: `follow[${i}].${alias}.model`, spec })
+    }
+  }
+  return out
+}
+
+function followProblems(follow, types) {
+  const found = []
+  for (const { at, spec } of followModels(follow)) {
+    const problem = refProblem(at, spec.model, 'type')
+    if (problem) found.push(problem)
+    else if (spec.model.startsWith('@/') && !types.has(spec.model)) {
+      found.push(`\`${at}\` is \`${spec.model}\`, which is not one of the foundation's types (src/schemas/).`)
     }
   }
   return found

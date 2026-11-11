@@ -38,15 +38,19 @@ const TEAM_KEYS = Object.freeze(['label'])
  * An integration line, as a backend takes it. Refused here exactly as a backend refuses them, and no
  * more: a line this takes, a backend takes.
  */
-const INTEGRATION_KEYS = Object.freeze(['label', 'mapping', 'channel', 'trigger', 'filter', 'enabled'])
+const INTEGRATION_KEYS = Object.freeze(['label', 'mapping', 'channel', 'trigger', 'filter', 'enabled', 'reply', 'reply_about'])
+/** The one channel whose endpoint answers, so the one a `reply` mapping may sit on. */
+const REPLYING = 'http'
+/** `reply_about`: a field of the reply's type, `section.field`. */
+const SECTION_FIELD = /^[^.\s]+\.[^.\s]+$/
 const CHANNELS = Object.freeze(['file', 'feed', 'email', 'http'])
-const TRIGGERS = Object.freeze(['manual', 'on_fetch', 'on_create', 'on_match'])
+const TRIGGERS = Object.freeze(['manual', 'on_fetch', 'on_create', 'on_match', 'on_change'])
 /** Each channel → the triggers it pairs with. */
 const PAIRS = Object.freeze({
   file: ['manual'],
   feed: ['on_fetch'],
-  email: ['on_create', 'on_match', 'manual'],
-  http: ['on_create', 'on_match', 'manual'],
+  email: ['on_create', 'on_match', 'on_change', 'manual'],
+  http: ['on_create', 'on_match', 'on_change', 'manual'],
 })
 /** The channels a line may switch on with `enabled: true`. */
 const ENABLEABLE = Object.freeze(['file', 'feed'])
@@ -327,6 +331,20 @@ function integrationProblems(integrations) {
     if (!triggerOk) found.push(`\`${at}.trigger\` is one of ${listed(TRIGGERS)} — not ${described(line.trigger)}.`)
     if (channelOk && triggerOk && !PAIRS[line.channel].includes(line.trigger)) {
       found.push(`\`${at}\`: a \`${line.channel}\` integration's trigger is one of ${listed(PAIRS[line.channel])} — not \`${line.trigger}\`.`)
+    }
+    if ('reply' in line) {
+      const name = refNameProblem(`${at}.reply`, line.reply, 'mapping')
+      if (name) found.push(name)
+      if (channelOk && line.channel !== REPLYING) {
+        found.push(`\`${at}.reply\`: only an \`${REPLYING}\` integration is answered, so only one takes a \`reply\` — not a \`${line.channel}\` one.`)
+      }
+    }
+    if ('reply_about' in line) {
+      if (!('reply' in line)) {
+        found.push(`\`${at}.reply_about\` names a field of the reply's type, so it goes with a \`reply\` mapping — the line has none.`)
+      } else if (typeof line.reply_about !== 'string' || !SECTION_FIELD.test(line.reply_about)) {
+        found.push(`\`${at}.reply_about\` is a field of the reply's type, \`section.field\` — \`identity.submission\` — not ${described(line.reply_about)}.`)
+      }
     }
     if ('filter' in line && !isMap(line.filter)) {
       found.push(`\`${at}.filter\` is a map — \`filter: { where: { status: sold } }\` — not ${described(line.filter)}.`)

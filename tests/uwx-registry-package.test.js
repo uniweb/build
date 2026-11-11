@@ -508,6 +508,14 @@ describe('buildRegistryPackage — mappings', () => {
         fields: [{ title: 'listing.title' }],
       },
       '@/dms-inventory': { model: '@std/person', direction: 'in', shape: 'list', format: { type: 'csv' } },
+      '@/submission-to-grader': {
+        model: '@/article',
+        follow: [
+          { quiz: { field: 'identity.quiz_ref' } },
+          { key: { model: '@/article', field: 'identity.quiz', names: 'quiz' } },
+          { other: { model: '@std/person', field: 'identity.x' } },
+        ],
+      },
     },
   }
   const doc = buildRegistryPackage({ schema, exportedAt: '2026-11-11T00:00:00Z' })
@@ -530,6 +538,15 @@ describe('buildRegistryPackage — mappings', () => {
     })
   })
 
+  it("a reverse `follow` line's `model` is named in full; nothing else in `follow` is touched", () => {
+    expect(doc.entities.find((e) => e.name === '@acme/submission-to-grader').rules.follow).toEqual([
+      { quiz: { field: 'identity.quiz_ref' } },
+      { key: { model: '@acme/article', field: 'identity.quiz', names: 'quiz' } },
+      { other: { model: '@std/person', field: 'identity.x' } },
+    ])
+    expect(schema._mappings['@/submission-to-grader'].follow[1].key.model).toBe('@/article')
+  })
+
   it('a full name passes through; an absent label stays absent', () => {
     const e = doc.entities.find((x) => x.name === '@acme/dms-inventory')
     expect(e.rules.model).toBe('@std/person')
@@ -540,12 +557,14 @@ describe('buildRegistryPackage — mappings', () => {
     expect(kinds.lastIndexOf('@uniweb/data-schema')).toBeLessThan(kinds.indexOf('@uniweb/mapping-schema'))
     expect(kinds.at(-1)).toBe('@uniweb/foundation-schema')
     const names = doc.entities.filter((e) => e.model === '@uniweb/mapping-schema').map((e) => e.name)
-    expect(names).toEqual(['@acme/dms-inventory', '@acme/vehicle-to-meta'])
+    expect(names).toEqual(['@acme/dms-inventory', '@acme/submission-to-grader', '@acme/vehicle-to-meta'])
   })
 
   it('the foundation names them in a sorted `mappings.refs`, and its editor blob does not carry them', () => {
     const f = doc.entities.at(-1)
-    expect(f.mappings).toEqual({ refs: [{ name: '@acme/dms-inventory' }, { name: '@acme/vehicle-to-meta' }] })
+    expect(f.mappings).toEqual({
+      refs: [{ name: '@acme/dms-inventory' }, { name: '@acme/submission-to-grader' }, { name: '@acme/vehicle-to-meta' }],
+    })
     expect(JSON.stringify(f.schema)).not.toContain('vehicle-to-meta')
   })
 
