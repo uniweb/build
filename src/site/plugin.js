@@ -246,13 +246,14 @@ import { mountDevApi } from '../dev/api-mount.js'
 import { mountDevSubmit } from '../dev/submit-mount.js'
 
 /**
- * The pre-paint appearance script for a shell, the runtime's own (`@uniweb/runtime/ssr`, which a
- * prerendered page's seam writes too), or '' for a site with no dark scheme. Loaded once.
+ * A shell carrying the page's look by the runtime's own rule (`@uniweb/runtime/ssr`, which a
+ * prerendered page's seam writes too): the scheme class on its `<html>`, and the pre-paint script
+ * where the browser decides. Unchanged for a site with no dark scheme. Loaded once.
  */
-let bootScriptOf = null
-async function appearanceBootScript(appearance) {
-  bootScriptOf ||= import('@uniweb/runtime/ssr').then((runtime) => runtime.renderAppearanceBootScript)
-  return (await bootScriptOf)(appearance)
+let writeAppearanceOf = null
+async function writeShellAppearance(html, appearance) {
+  writeAppearanceOf ||= import('@uniweb/runtime/ssr').then((runtime) => runtime.writePageAppearance)
+  return (await writeAppearanceOf)(html, appearance)
 }
 
 /**
@@ -1165,14 +1166,6 @@ export function siteContentPlugin(options = {}) {
         headInjection += `    <style id="uniweb-theme">\n${contentToInject.theme.css}\n    </style>\n`
       }
 
-      // ⭐ THE PRE-PAINT APPEARANCE SCRIPT, so a page the browser renders itself — every page under
-      // `uniweb dev`, and a build that doesn't prerender — shows the site's look before the bundle
-      // boots. A prerendered page keeps this one: its render adds none where the shell has it
-      // (`injectPageContent`). ⛔ Until 2026-11-11 only a prerendered page had it, so a dark site
-      // under `uniweb dev` painted light for about 0.4 s on every load.
-      const bootScript = await appearanceBootScript(contentToInject.theme?.appearance)
-      if (bootScript) headInjection += `    ${bootScript}\n`
-
       // ⛔ No page's head tags — canonical, Open Graph, hreflang — go into the shell, which every
       // page is rendered into: the prerender writes each page's own (`injectPageContent`), and the
       // browser keeps them (`useHeadMeta`). Until 2026-10-25 the home page's were written here.
@@ -1211,11 +1204,18 @@ export function siteContentPlugin(options = {}) {
         result = result.replace(/<title>[\s\S]*?<\/title>/, () => `<title>${escapeHtml(siteName)}</title>`)
       }
 
-      if (!headInjection) return result
-
       // Insert before </head>
       // A replacer function: `$$` or `$&` in the content, the theme or head.html is text, not a pattern.
-      return result.replace('</head>', () => headInjection + '  </head>')
+      if (headInjection) result = result.replace('</head>', () => headInjection + '  </head>')
+
+      // ⭐ THE PAGE'S LOOK, so a page the browser renders itself — every page under `uniweb dev`, and
+      // a build that doesn't prerender — shows the site's look before the bundle boots: the scheme
+      // class on `<html>` where every first visit gets one look, and the pre-paint script where the
+      // browser decides (`writePageAppearance`). A prerendered page is rendered into this shell and
+      // keeps both; its render adds neither again. ⛔ Until 2026-11-11 the shell carried no class,
+      // and at first no script either, so a dark site under `uniweb dev` painted light for about
+      // 0.4 s on every load.
+      return writeShellAppearance(result, contentToInject.theme?.appearance)
     },
 
     async generateBundle() {

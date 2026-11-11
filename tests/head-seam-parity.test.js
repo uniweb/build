@@ -106,6 +106,16 @@ describe('head-injection seam parity', () => {
     expect(out).toContain('id="uniweb-appearance"')
   })
 
+  it("the page's scheme class reaches it too, and the build lane keeps it", () => {
+    // A site set to dark is dark before any script runs, on every lane.
+    const page = makePage()
+    page.website.themeData.appearance = { default: 'dark', allowToggle: true }
+    const shared = injectPageContent(SHELL, '<p>hi</p>', page, {})
+
+    expect(shared).toContain('<html class="scheme-dark">')
+    expect(injectBuildData(shared, siteContent)).toContain('<html class="scheme-dark">')
+  })
+
   it('font <link>s reach it too — the second half of the same fix', () => {
     // Graph-derived like the theme CSS, so a lane that never runs this build
     // still gets its webfonts rather than falling back to system faces.
