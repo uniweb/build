@@ -75,6 +75,7 @@ export {
 export {
   recordsToProject,
   declarationsToQueriesYml,
+  readSiteFoundationDeclarations,
   folderToFolderYml,
   findRecordFileByUuid,
   indexFolder,

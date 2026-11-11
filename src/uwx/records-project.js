@@ -42,6 +42,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { parseFrontmatter } from './entity-source.js'
 import { writeRecordFile, writeQueriesConfig, writeRecordsConfig } from './project-writer.js'
 import { foundationDataSchemas, foundationSchemaJson, QUERIES_YML_RELPATH } from './queries-config.js'
+import { foundationSections } from '../site/queries-config.js'
 import { dataKeyTypes } from './data-key-types.js'
 import { poolDirsForSchema, schemaForPoolDirs, resolveRecordsDir, readEntityPoolSync, resolveRecordMounts } from '../site/entity-pool.js'
 import { folderYmlPath, resolveFolder } from '../site/records-config.js'
@@ -232,9 +233,43 @@ function recordDirsReadingAs(recordsRoot, model, scope, { own = null, keyTypes =
   return dirs
 }
 
-// What the site's foundation declares, when its declarations are in this project: its own
-// data-schema names (`ownSchemaNames`) and the types of its data keys (`dataKeyTypes`). Both
-// null otherwise — a clone's foundation is not in the project.
+/**
+ * What the site's foundation declares, read as the build reads it (`foundationSections`): from its
+ * SOURCE when it is local, else from the registered version a clone keeps. Its own data-schema names
+ * (`ownSchemaNames`) and the types of its data keys (`dataKeyTypes`); both null when neither is there,
+ * or before a clone's `site.yml` exists. A pull reads it once and hands it to `recordsToProject`
+ * (`opts.foundation`) and `siteContentDocumentToProject` (`foundation`).
+ *
+ * ⛔ Until 2026-11-11 the pull read only a built `dist/meta/schema.json`, so in a copy whose local
+ * foundation had not been built — every fresh clone — it knew no data key's type: a record kept in
+ * a folder named for a typed key (`records/articles/` for `articles: '@/blog-post'`) was written
+ * again in its type's folder (`records/blog-post/`), two files for one record, and `queries.yml`
+ * gained a `schema:` the author had not written.
+ *
+ * @param {string} siteRoot
+ * @returns {Promise<{ own: Set<string>|null, keyTypes: Map<string, string>|null }>}
+ */
+export async function readSiteFoundationDeclarations(siteRoot) {
+  let siteYml = null
+  try {
+    siteYml = yaml.load(readFileSync(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || null
+  } catch {
+    return { own: null, keyTypes: null }
+  }
+  let schema = null
+  try {
+    schema = siteYml ? await foundationSections(siteRoot, siteYml) : null
+  } catch {
+    schema = null // a foundation that does not read is reported by the build that builds it
+  }
+  // ⛔ Own names only from a schema that carries its data schemas — see `siteFoundationDeclarations`.
+  return schema ? { own: ownSchemaNames(schema.dataSchemas), keyTypes: dataKeyTypes(schema) } : { own: null, keyTypes: null }
+}
+
+// What the site's foundation declares, from its BUILT or registered `schema.json` — what a projection
+// reads when its caller hands it nothing (`readSiteFoundationDeclarations`): its own data-schema names
+// (`ownSchemaNames`) and the types of its data keys (`dataKeyTypes`). Both null otherwise — a clone's
+// foundation is not in the project.
 function siteFoundationDeclarations(siteRoot) {
   let siteYml = null
   try {
@@ -460,7 +495,7 @@ function typedQueryFolders(siteRoot, recordsRoot, scope, own, keyTypes) {
   return out
 }
 
-export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest }) {
+export function declarationsToQueriesYml({ document, siteRoot, scope, foundation = null, ...rest }) {
   refuseOrgOption(rest, 'declarationsToQueriesYml')
   const decls = Array.isArray(document?.queries) ? document.queries : []
   const report = {}
@@ -474,13 +509,13 @@ export function declarationsToQueriesYml({ document, siteRoot, scope, ...rest })
   } catch {
     siteYml = null
   }
-  const dataSchemas = siteYml ? foundationDataSchemas(siteRoot, siteYml) : null
   const selfScope =
     scope !== undefined ? scope : (parseCatalogRef(document?.info?.foundation)?.scope ?? null)
   // Which of the scope's schemas are the foundation's own — the rest keep their scope
-  // (`unresolveSelfScope`) — and the types of its data keys.
-  const own = ownSchemaNames(dataSchemas)
-  const keyTypes = siteYml ? dataKeyTypes(foundationSchemaJson(siteRoot, siteYml)) : null
+  // (`unresolveSelfScope`) — and the types of its data keys: as the caller read them, from the
+  // foundation's source where it is local (`readSiteFoundationDeclarations`), else its built schema.
+  const own = foundation?.own ?? ownSchemaNames(siteYml ? foundationDataSchemas(siteRoot, siteYml) : null)
+  const keyTypes = foundation?.keyTypes ?? (siteYml ? dataKeyTypes(foundationSchemaJson(siteRoot, siteYml)) : null)
   const authored = authoredQuerySchemas(siteRoot, siteYml)
   // The key types a catalog-ref foundation has come from the registered version the project keeps.
   const markedOnly = Boolean(parseCatalogRef(siteYml?.foundation))
@@ -700,6 +735,8 @@ function holdsPattern(abs) {
  *        back where the author wrote it. The caller resolves it up front, as it does
  *        Models (`siteSelfScope`); absent, a model is placed under its own scope.
  * @param {string} [params.opts.backend] - whose record map to read and extend
+ * @param {{ own: Set<string>|null, keyTypes: Map<string, string>|null }} [params.opts.foundation] - what the
+ *        site's foundation declares, as `readSiteFoundationDeclarations` reads it; absent, its built schema
  * @param {string} [params.opts.sourceLocale]
  * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
  */
@@ -715,7 +752,10 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   // Which of that scope's Models are the foundation's own — the rest keep their scope, so
   // a standard `@std/person` under a foundation in `@std` is placed in `records/std/person/`
   // (`unresolveSelfScope`).
-  const { own, keyTypes } = siteFoundationDeclarations(siteRoot)
+  // …as the caller read them, from the foundation's source where it is local
+  // (`readSiteFoundationDeclarations`); else from its built or registered schema.
+  const declared = opts.foundation?.keyTypes || opts.foundation?.own ? opts.foundation : siteFoundationDeclarations(siteRoot)
+  const { own, keyTypes } = declared
   if (typeof resolveDeclaration !== 'function') {
     throw new Error('uwx/records-project: opts.resolveDeclaration(modelName) is required')
   }

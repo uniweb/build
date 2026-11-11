@@ -245,7 +245,7 @@ function readAuthoredYaml(filePath) {
  *          per-file write status ('updated' | 'unchanged'); `blueprint` when the document has a
  *          `services` Section (`./blueprint.js`, `writePulledBlueprint`)
  */
-export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false, sameFile = null, scope }) {
+export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), collector, keepAuthoredFoundation = false, sameFile = null, scope, foundation = null }) {
   const info = document?.info || {}
   const settingsSection = document?.settings || {}
 
@@ -394,7 +394,7 @@ export function siteInfoToConfig({ document, siteRoot, backend = null, sourceLoc
       siteRoot,
       rows: document.services,
       scope: blueprintScope,
-      own: siteYmlNow ? ownSchemaNames(foundationDataSchemas(siteRoot, siteYmlNow)) : null
+      own: foundation?.own ?? (siteYmlNow ? ownSchemaNames(foundationDataSchemas(siteRoot, siteYmlNow)) : null)
     })
   }
 
@@ -1993,7 +1993,7 @@ function seenPageRoutes(items) {
  *        page at both its routes
  * @returns {{ config: object, collections: object, locales: object, pages: string[], sections: string[], layout: string[], deleted: string[], renamed: object[] }}
  */
-export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null, sectionType = DEFAULT_SECTION_TYPE, writableMounts = [], priorItems = null }) {
+export function siteContentDocumentToProject({ document, siteRoot, backend = null, sourceLocale = documentSourceLocale(document), prune = false, keepAuthoredFoundation = false, scope, dataModel = null, sectionType = DEFAULT_SECTION_TYPE, writableMounts = [], priorItems = null, foundation = null }) {
   // Before anything is written: a pull that would leave content out of the files stops here.
   refuseContentFilesCannotHold(document, sourceLocale)
 
@@ -2026,8 +2026,10 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   // section's writer to make relative to its own file (`located-media.js`).
   const mediaKeys = siteFileKeys(assetMap)
 
-  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, sameFile: sameStoredFile(assetMap, { siteRoot }), scope })
-  report.queries = declarationsToQueriesYml({ document, siteRoot, scope })
+  // What the site's foundation declares, as the caller read it from the foundation's source where it
+  // is local (`readSiteFoundationDeclarations`): absent, each projection reads the built schema.
+  report.config = siteInfoToConfig({ document, siteRoot, backend, sourceLocale, collector, keepAuthoredFoundation, sameFile: sameStoredFile(assetMap, { siteRoot }), scope, foundation })
+  report.queries = declarationsToQueriesYml({ document, siteRoot, scope, foundation })
 
   // The uuid identity index (gitignored `.uniweb/`): read the prior map to anchor
   // rename detection, build a fresh one as we project, then persist it. Items not

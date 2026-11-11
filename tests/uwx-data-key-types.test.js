@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
-import { emitSyncPackages, readZip, declarationsToQueriesYml, recordsToProject } from '../src/uwx/index.js'
+import { emitSyncPackages, readZip, declarationsToQueriesYml, recordsToProject, readSiteFoundationDeclarations } from '../src/uwx/index.js'
 import { dataKeyTypes } from '../src/uwx/data-key-types.js'
 import { validateAndNormalizeSchema } from '../src/resolve-data-schema.js'
 
@@ -149,6 +149,65 @@ describe('pull — the same rule, backwards', () => {
     expect(report.skipped).toEqual([])
     expect(report.placed.map((p) => p.slice(SITE.length + 1))).toEqual(['records/team/lin.yml'])
     expect(existsSync(join(SITE, 'records/member'))).toBe(false)
+  })
+})
+
+// A site on a local foundation that has not been built — no `dist/`, as in a fresh clone of the
+// project — whose section type reads the data key `team` typed `@/member`.
+function makeSourceOnlySite() {
+  w('site/site.yml', 'name: T\nfoundation: fnd\n')
+  w('site/package.json', { name: 'site', dependencies: { fnd: 'file:../fdn' } })
+  w('site/queries.yml', 'team: {}\n')
+  w('site/pages/home/page.yml', 'title: Home\n')
+  w('site/records/team/wei.yml', 'name: Wei\n')
+  w('fdn/package.json', { name: 'fnd', type: 'module', main: './_entry.generated.js' })
+  w('fdn/main.js', "export default { name: '@acme/fnd' }\n")
+  w('fdn/schemas/member.yml', 'name: member\nfields:\n  name: string\n')
+  w('fdn/sections/Team/meta.js', "export default { data: { team: '@/member' } }\n")
+  w('fdn/sections/Team/index.jsx', 'export default function Team() { return null }\n')
+}
+
+// ⛔ Until 2026-11-11 a pull read the key types only from a BUILT foundation, so in a fresh clone it
+// wrote a typed folder's records again in their type's folder, and `queries.yml` a `schema:`.
+describe('pull — in a copy whose foundation has not been built', () => {
+  it('⭐ reads what the foundation declares from its source, as the build does', async () => {
+    makeSourceOnlySite()
+    const { own, keyTypes } = await readSiteFoundationDeclarations(SITE)
+    expect(keyTypes.get('team')).toBe('@/member')
+    expect([...own]).toEqual(['member'])
+  })
+
+  it('a pulled `team` is written back terse', async () => {
+    makeSourceOnlySite()
+    declarationsToQueriesYml({
+      document: { info: { foundation: '@acme/fnd@1.0.0' }, queries: [{ name: 'team', schema: '@acme/member' }] },
+      siteRoot: SITE,
+      foundation: await readSiteFoundationDeclarations(SITE),
+    })
+    const q = yaml.load(readFileSync(join(SITE, 'queries.yml'), 'utf8'))
+    expect(q.team?.schema).toBeUndefined()
+  })
+
+  it('a new member is placed where the project keeps them — `records/team/`, not `records/member/`', async () => {
+    makeSourceOnlySite()
+    const report = recordsToProject({
+      folderDoc: { contents: [{ kind: 'ref', name: 'lin', entry: { schema: '@acme/member', entity: 'U-LIN' } }] },
+      recordDocs: [{ $uuid: 'U-LIN', $schema: '@acme/member', member: { name: 'Lin' } }],
+      siteRoot: SITE,
+      opts: {
+        backend: BACKEND,
+        resolveDeclaration: () => ({ name: '@acme/member', sections: { member: { brief: true, fields: { name: { type: 'string' } } } } }),
+        scope: '@acme',
+        foundation: await readSiteFoundationDeclarations(SITE),
+      },
+    })
+    expect(report.skipped).toEqual([])
+    expect(report.placed.map((p) => p.slice(SITE.length + 1))).toEqual(['records/team/lin.yml'])
+    expect(existsSync(join(SITE, 'records/member'))).toBe(false)
+  })
+
+  it('CONTROL — before a clone\'s `site.yml` exists there is nothing to read', async () => {
+    expect(await readSiteFoundationDeclarations(SITE)).toEqual({ own: null, keyTypes: null })
   })
 })
 
