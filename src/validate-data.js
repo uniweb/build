@@ -144,13 +144,11 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
   // Compile file-based byQuery in-memory (the same step the data-only
   // pipeline runs). Full records — `writeQueryFiles` is the stage that
   // strips `deferred:` fields, and we skip it.
-  let byQuery = {}
-  if (config.queries && typeof config.queries === 'object') {
-
-    // Drafts included: a draft is content the site will deliver, so it is checked now.
-    // noteUnsendable: what a push cannot carry is reported below, as a violation (`validateRecordFiles`).
-    byQuery = await processQueries(siteRoot, config.queries, resolveRecordsDir(siteRoot, config.paths).rel, basePath, { includeDrafts: true, noteUnsendable: false })
-  }
+  // Drafts included: a draft is content the site will deliver, so it is checked now.
+  // noteUnsendable: what a push cannot carry is reported below, as a violation (`validateRecordFiles`).
+  // ⭐ Run with no queries too: it stops on a records folder whose data schema resolves to nothing,
+  // as a push does. ⛔ Until 2026-11-11 it ran only for a site that declares queries.
+  const byQuery = await processQueries(siteRoot, config.queries || {}, resolveRecordsDir(siteRoot, config.paths).rel, basePath, { includeDrafts: true, noteUnsendable: false })
 
   // Declared here rather than beside pass 2's other accumulators because pass 1
   // now writes to it as well — see THE JOIN, RUN THE OTHER WAY below.

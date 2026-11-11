@@ -487,8 +487,10 @@ export function siteContentPlugin(options = {}) {
    * @param {Object|undefined} config - the collected `config`, for the default locale a `sort` collates in
    */
   async function materializeQueries(queries, config) {
-    if (!queries) return
-    const byQuery = await processQueries(resolvedSitePath, queries, resolvedRecordsDir, basePath, {
+    // A site with no queries still has its records checked: `processQueries` stops on a folder
+    // whose data schema resolves to nothing, as a push does, and compiles nothing.
+    if (queries) console.log('[site-content] Materializing queries...')
+    const byQuery = await processQueries(resolvedSitePath, queries || {}, resolvedRecordsDir, basePath, {
       locale: resolveDefaultLocale(config ?? {}) ?? null,
       // ⭐ A draft is previewable here, as a hidden page is — `pnpm dev` is where the
       // author looks at it. A production build leaves it out (`buildStart`).
@@ -676,10 +678,7 @@ export function siteContentPlugin(options = {}) {
           resolvedRecordsDir = resolveRecordsDir(resolvedSitePath, paths).rel
           resolvedMountPaths = mountEntriesOf(paths).map(([, rel]) => resolve(resolvedSitePath, rel))
 
-          if (queriesConfig) {
-            console.log('[site-content] Materializing queries...')
-            await materializeQueries(queriesConfig, earlyContent.config)
-          }
+          await materializeQueries(queriesConfig, earlyContent.config)
         } catch (err) {
           console.warn('[site-content] Early query materialization failed:', err.message)
         }
@@ -717,9 +716,8 @@ export function siteContentPlugin(options = {}) {
         // In production, do it here — by the same call, so a `sort` collates in the site's default
         // language in both. ⛔ Until 2026-10-25 this called `processQueries` with no language, and
         // the built file was collated in English whatever the site's language.
-        if (isProduction && siteContent.config?.queries) {
-          console.log('[site-content] Materializing queries...')
-          await materializeQueries(siteContent.config.queries, siteContent.config)
+        if (isProduction) {
+          await materializeQueries(siteContent.config?.queries, siteContent.config)
         }
 
         // Execute data fetches in dev mode

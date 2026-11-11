@@ -1203,11 +1203,15 @@ function briefBuilder(schema) {
  * })
  * // { articles: [...] }
  */
-export async function processQueries(siteDir, queriesConfig, recordsDir, basePath = '/', options = {}) {
+export async function processQueries(siteDir, queriesConfigIn, recordsDir, basePath = '/', options = {}) {
   const { locale = null, includeDrafts = false, noteUnsendable: noting = true } = options
-  if (!queriesConfig || typeof queriesConfig !== 'object') {
-    return {}
-  }
+  // ⭐ A SITE WITH NO QUERIES STILL HAS ITS RECORDS CHECKED. Every file in the records directory is
+  // a record a push sends, read by a query or not, so a folder whose data schema resolves to nothing
+  // stops this as it stops the push (`refuseRecordsWithoutSchema`), and nothing is compiled. ⛔ Until
+  // 2026-11-11 this returned at once with no queries, and so did `uniweb validate`, which compiles
+  // through it: a site whose records no query read built, and conformed, and its push refused them.
+  const queriesConfig = queriesConfigIn && typeof queriesConfigIn === 'object' ? queriesConfigIn : {}
+  const hasQueries = Object.keys(queriesConfig).length > 0
 
   // ⭐ ONE WALK FOR EVERY QUERY. Two queries over the same schema read one set of
   // files; a query reads none of another schema's.
@@ -1215,6 +1219,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
   if (pool.errors.length) {
     for (const e of pool.errors) console.warn(`[query-processor] ${e}`)
   }
+  if (!hasQueries && pool.entities.length === 0) return {}
 
   // ⭐ EVERY FILE IN `records/` IS A RECORD (ruled 2026-09-21 [Diego]), so every one
   // is compiled; `records/folder.yml` only says which folder each sits in (`$branch`),
