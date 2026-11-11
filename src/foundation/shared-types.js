@@ -24,6 +24,7 @@ import { workspacePackages } from '../workspace-patterns.js'
 import { workspaceRootOf } from '../site/workspace-extension.js'
 import { classifyPackage, isSchemasPackage } from '../utils/classify-package.js'
 import { librariesOf } from './libraries.js'
+import { MAPPINGS_DIR, ownMappingFiles } from './mappings.js'
 
 const real = (path) => {
   try {
@@ -177,6 +178,25 @@ function packageDirOf(dir) {
  * @returns {Promise<string[]>} the files that define it, each once; the caller refuses more than one
  */
 export async function workspaceTypeFiles(ref, fromDir) {
+  return workspaceDeclarationFiles(ref, fromDir, 'schemas', ownSchemaFiles)
+}
+
+/**
+ * ⭐ A MAPPING ANOTHER PACKAGE DEFINES, found by the rule `workspaceTypeFiles` finds a type by: a
+ * foundation whose name gives the scope and whose own `mappings/` holds it, or a library (a schemas
+ * package) of that scope that holds `mappings/` (`foundation/mappings.js`). A foundation names one in
+ * its `main.js` (`mappings: ['@acme/vehicle-to-meta']`); the build reads it from there.
+ *
+ * @param {string} ref - `@scope/name`
+ * @param {string} fromDir - the foundation (its source folder) or site asking
+ * @returns {Promise<string[]>} the files that define it, each once; the caller refuses more than one
+ */
+export async function workspaceMappingFiles(ref, fromDir) {
+  return workspaceDeclarationFiles(ref, fromDir, MAPPINGS_DIR, ownMappingFiles)
+}
+
+/** The files of the packages a package may read that define `ref` in their `folder`. */
+async function workspaceDeclarationFiles(ref, fromDir, folder, ownFiles) {
   const m = /^(@[^/]+)\/(.+)$/.exec(ref || '')
   if (!m) return []
   const [, scope, name] = m
@@ -198,8 +218,8 @@ export async function workspaceTypeFiles(ref, fromDir) {
     if (!kind) continue
     if ((await cachedTypeScope(dir, kind)) !== scope) continue
     const typesAt = typeRoot(dir, kind)
-    if (!existsSync(join(typesAt, 'schemas'))) continue
-    for (const own of ownSchemaFiles(typesAt)) {
+    if (!existsSync(join(typesAt, folder))) continue
+    for (const own of ownFiles(typesAt)) {
       if (own.name === name) files.set(real(own.file), own.file)
     }
   }

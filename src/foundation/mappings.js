@@ -61,7 +61,8 @@ export function ownMappingFiles(srcDir) {
     .map((file) => ({ name: basename(file, extname(file)), file: join(dir, file) }))
 }
 
-async function loadMappingFile(file) {
+/** One mapping file, as written. */
+export async function loadMappingFile(file) {
   if (file.endsWith('.js')) return (await import(pathToFileURL(file).href)).default
   const text = await readFile(file, 'utf8')
   return file.endsWith('.json') ? JSON.parse(text) : yaml.load(text, YAML_OPTIONS)
@@ -73,10 +74,11 @@ async function loadMappingFile(file) {
  * @param {string} srcDir - the foundation's source root
  * @param {object} [opts]
  * @param {Iterable<string>} [opts.ownTypes] - the `@/x` data schemas the foundation defines
+ * @param {string} [opts.shownIn] - the folder as its errors name it (a library's is `mappings`)
  * @returns {Promise<Object<string, object>>} `{ '@/<name>': declaration }` as written (`@/x` unqualified)
  * @throws {Error} naming every mapping that cannot be registered, and why
  */
-export async function buildMappingMap(srcDir, { ownTypes = [] } = {}) {
+export async function buildMappingMap(srcDir, { ownTypes = [], shownIn = `src/${MAPPINGS_DIR}` } = {}) {
   const files = ownMappingFiles(srcDir)
   if (!files.length) return {}
   const types = new Set(ownTypes)
@@ -84,7 +86,7 @@ export async function buildMappingMap(srcDir, { ownTypes = [] } = {}) {
   const map = {}
   const found = []
   for (const { name, file } of files) {
-    const at = `src/${MAPPINGS_DIR}/${basename(file)}`
+    const at = `${shownIn}/${basename(file)}`
     let decl
     try {
       decl = await loadMappingFile(file)
@@ -139,6 +141,33 @@ export function mappingProblems(decl, { types, names }) {
   }
   found.push(...followProblems(decl.follow, types))
   return found
+}
+
+/**
+ * A mapping with every type and mapping it names in full (`scoped`: `@/x` → `@scope/x`): its `model`,
+ * its `keys_from` and a reverse `follow` line's `model`. Nothing else moves, and the file's own object
+ * is never touched.
+ *
+ * @param {object} decl - as written
+ * @param {(ref: string) => string} scoped
+ * @returns {object}
+ */
+export function mappingInFull(decl, scoped) {
+  const out = { ...decl }
+  if (typeof out.model === 'string') out.model = scoped(out.model)
+  if (typeof out.keys_from === 'string') out.keys_from = scoped(out.keys_from)
+  if (Array.isArray(out.follow)) {
+    out.follow = out.follow.map((line) =>
+      isMap(line)
+        ? Object.fromEntries(
+            Object.entries(line).map(([alias, spec]) =>
+              isMap(spec) && typeof spec.model === 'string' ? [alias, { ...spec, model: scoped(spec.model) }] : [alias, spec]
+            )
+          )
+        : line
+    )
+  }
+  return out
 }
 
 /**

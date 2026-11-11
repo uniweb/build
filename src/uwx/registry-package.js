@@ -31,6 +31,7 @@ import { join } from 'node:path'
 import { normalizeFoundationSchema } from '@uniweb/schemas/foundation'
 import { parseOptionsRef } from '@uniweb/schemas/format'
 import { qualifyRef } from '@uniweb/schemas/refs'
+import { mappingInFull } from '../foundation/mappings.js'
 import { toDataSchemaDeclaration, optionsSectionPath } from './data-schema.js'
 import { checkFoundationName, checkRegistrationScope, splitFoundationName } from '../foundation-name.js'
 
@@ -85,6 +86,16 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
   )
 
   const mappingEntities = buildMappingEntities(schema._mappings || {}, scoped)
+  // Its own, and the library mappings its main.js carries (`_mappings` keys in full), which their
+  // library registers: a foundation names those, and registers none.
+  const mappingRefs = [
+    ...new Set([
+      ...mappingEntities.map((e) => e.name),
+      ...Object.keys(schema._mappings || {}).filter((ref) => !ref.startsWith('@/')),
+    ]),
+  ]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({ name }))
 
   const foundationEntity = {
     model: FOUNDATION_SCHEMA,
@@ -92,9 +103,7 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
     schema: buildSchemaBlob(schema, org),
     i18n: { locales: loadI18nLocales(foundationDir) },
     'data-schemas': { refs: buildRefs(dataSchemas, scoped) },
-    ...(mappingEntities.length && {
-      mappings: { refs: mappingEntities.map((e) => ({ name: e.name })).sort((a, b) => a.name.localeCompare(b.name)) },
-    }),
+    ...(mappingRefs.length && { mappings: { refs: mappingRefs } }),
   }
 
   // Data schemas, then mappings, then the foundation: a backend installs them in the order they
@@ -103,31 +112,36 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
 }
 
 /**
- * Assemble a foundation-LESS registry-publish `.uwx` — only `@uniweb/data-schema`
- * entities, no foundation-schema. `uniweb register` submits this for a
- * schemas-only package (the standard schemas under `@std`, or an org's own
- * `@org/schemas`). A data-schema may be published on its own (`uwx-format.md` §2
- * "A data-schema may also be published on its own", §5) — the wire shape is a
- * names-only `.uwx` whose entities are all data-schemas.
+ * Assemble a foundation-LESS registry-publish `.uwx` — `@uniweb/data-schema` entities,
+ * then a library's `@uniweb/mapping-schema` ones, and no foundation-schema. `uniweb
+ * register` submits this for a schemas-only package (the standard schemas under `@std`,
+ * an org's own `@org/schemas`, a library). A data-schema may be published on its own
+ * (`uwx-format.md` §2 "A data-schema may also be published on its own", §5), and a
+ * library may hold mappings alone — the wire shape is a names-only `.uwx` with no
+ * foundation.
  *
  * @param {Object} params
  * @param {Object} params.schemas - map `{ '@/<name>': normalizedSchema }` of the
  *   schemas the package defines (from `collectStandaloneSchemas`).
+ * @param {Object} [params.mappings] - map `{ '@/<name>': declaration }` of the
+ *   mappings it defines (`buildMappingMap` over its `mappings/`).
  * @param {string} [params.scope] - org scope (`@std`/`std`) resolving `@/x` -> `@std/x`.
  * @param {Object} [params.exporter] - `{ tool, version, instance }` envelope.
  * @param {string} [params.exportedAt] - ISO timestamp (default: now).
- * @returns {Object} the `.uwx` document (uwx/1; only data-schema entities, no uuids).
+ * @returns {Object} the `.uwx` document (uwx/1; no foundation, no uuids).
  */
-export function buildSchemaOnlyPackage({ schemas, scope, exporter, exportedAt } = {}) {
+export function buildSchemaOnlyPackage({ schemas, mappings, scope, exporter, exportedAt } = {}) {
   // ⛔ The producer's own guard, as `buildInfo`'s name check is for a foundation:
   // `uniweb register` refuses a reserved scope before it gets here.
   const reserved = checkRegistrationScope(scope)
   if (reserved) throw new Error(`buildSchemaOnlyPackage: ${reserved}`)
-  const { entities } = buildDataSchemaEntities(schemas || {}, scope)
-  if (entities.length === 0) {
-    throw new Error('buildSchemaOnlyPackage: no data schemas to register (expected a map of "@/<name>" -> schema).')
+  const { entities, scoped } = buildDataSchemaEntities(schemas || {}, scope)
+  // A library's mappings (its `mappings/`) after its types, as in a foundation's package.
+  const mappingEntities = buildMappingEntities(mappings || {}, scoped)
+  if (entities.length === 0 && mappingEntities.length === 0) {
+    throw new Error('buildSchemaOnlyPackage: no data schemas or mappings to register (expected a map of "@/<name>" -> declaration).')
   }
-  return wrapEntities(entities, exporter, exportedAt)
+  return wrapEntities([...entities, ...mappingEntities], exporter, exportedAt)
 }
 
 // The scope a foundation registers under: the one in its name, else `scope`.
@@ -192,10 +206,7 @@ function buildMappingEntities(mappings, scoped) {
     .filter(([ref]) => ref.startsWith('@/'))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([ref, decl]) => {
-      const { label, description, ...rules } = decl
-      if (typeof rules.model === 'string') rules.model = scoped(rules.model)
-      if (typeof rules.keys_from === 'string') rules.keys_from = scoped(rules.keys_from)
-      if (Array.isArray(rules.follow)) rules.follow = rules.follow.map((line) => followNamed(line, scoped))
+      const { label, description, ...rules } = mappingInFull(decl, scoped)
       return {
         model: MAPPING_SCHEMA,
         name: scoped(ref),
@@ -216,18 +227,6 @@ function buildMappingEntities(mappings, scoped) {
   }
   for (const entity of entities) visit(entity)
   return ordered
-}
-
-/** One `follow` line, `{ alias: { model?, … } }`, with each `model` named in full; a copy, never the file's. */
-function followNamed(line, scoped) {
-  if (line === null || typeof line !== 'object' || Array.isArray(line)) return line
-  return Object.fromEntries(
-    Object.entries(line).map(([alias, spec]) =>
-      spec && typeof spec === 'object' && !Array.isArray(spec) && typeof spec.model === 'string'
-        ? [alias, { ...spec, model: scoped(spec.model) }]
-        : [alias, spec]
-    )
-  )
 }
 
 /**

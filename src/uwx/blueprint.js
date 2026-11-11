@@ -179,8 +179,9 @@ export function blueprintFromWire(wire, { scope = null, own = null, local = null
 
 /**
  * A mapping's full name → as a pull writes it: as the file already spells it when it names the same
- * one, else `@/x` when it is in the site's foundation's scope. A foundation registers only its own
- * mappings, so every mapping in that scope is the foundation's.
+ * one, else `@/x` when it is in the site's foundation's scope — which a push names in full the same
+ * way, so the two agree whoever registered it. A library's mapping, in its own scope, comes back in
+ * full, as the file wrote it.
  */
 function mappingAsFileSpells(full, localIntegrations, scope) {
   if (isMap(localIntegrations)) {

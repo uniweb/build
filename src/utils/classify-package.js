@@ -89,7 +89,8 @@ export function classifyPackage(packagePath) {
  *      framework's `@uniweb/schemas`, referenced as `@std`) — the same convention
  *      `@org/x` data-schema refs already resolve through.
  *   2. a `schemas/` directory at the package root holding ≥1 schema file
- *      (`*.{js,json,yml,yaml}`) — a bare folder of schema files with no index.
+ *      (`*.{js,json,yml,yaml}`) — a bare folder of schema files with no index —
+ *      or a `mappings/` directory holding ≥1 mapping file.
  *
  * Gated on the directory NOT already classifying as a foundation/site, so a
  * foundation that happens to carry schemas is never misread. The enumeration of
@@ -113,13 +114,15 @@ export function isSchemasPackage(packagePath) {
     }
   }
 
-  // 2. A schemas/ directory of schema files.
-  const dir = join(packagePath, 'schemas')
-  if (existsSync(dir)) {
+  // 2. A schemas/ directory of schema files, or a mappings/ one of mappings (a library of
+  //    mappings alone is one too: `register` in it registers them).
+  for (const folder of ['schemas', 'mappings']) {
+    const dir = join(packagePath, folder)
+    if (!existsSync(dir)) continue
     try {
-      return readdirSync(dir).some((f) => /\.(js|json|ya?ml)$/.test(f))
+      if (readdirSync(dir).some((f) => /\.(js|json|ya?ml)$/.test(f))) return true
     } catch {
-      return false
+      // unreadable: not this signal
     }
   }
   return false

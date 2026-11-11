@@ -287,8 +287,8 @@ describe('buildSchemaOnlyPackage (foundation-less — schemas only)', () => {
   })
 
   it('throws when there are no schemas to register', () => {
-    expect(() => buildSchemaOnlyPackage({ schemas: {} })).toThrow(/no data schemas to register/)
-    expect(() => buildSchemaOnlyPackage({})).toThrow(/no data schemas to register/)
+    expect(() => buildSchemaOnlyPackage({ schemas: {} })).toThrow(/no data schemas or mappings to register/)
+    expect(() => buildSchemaOnlyPackage({})).toThrow(/no data schemas or mappings to register/)
   })
 })
 

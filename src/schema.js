@@ -1409,6 +1409,17 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
   // The mappings it defines — every file in its `mappings/` folder (`foundation/mappings.js`),
   // registered beside its data schemas. Editor-time: `_mappings`, never on a page.
   const mappings = await buildMappingMap(srcDir, { ownTypes: ownSchemaRefs(srcDir) })
+  // And the library mappings its main.js carries (`mappings: ['@acme/x']`), in full — imported
+  // here, not above, since what finds them reads foundations' names through this module.
+  if (foundationConfig.mappings !== undefined) {
+    const { resolveLibraryMappings } = await import('./foundation/library-mappings.js')
+    const { map, warnings } = await resolveLibraryMappings(foundationConfig.mappings, {
+      srcDir,
+      ownScope: splitFoundationName(foundationNameOf({ config: foundationConfig, pkg: identity }).name || '').scope,
+    })
+    for (const warning of warnings) console.warn(`[uniweb] ${warning}`)
+    Object.assign(mappings, map)
+  }
 
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
@@ -1442,7 +1453,8 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
 
   // Build _self, stripping the raw extension boolean in favor of normalized role, and the
   // declared `defaultLayout` in favor of the resolved one (`resolveDefaultLayout`)
-  const { extension: _ext, defaultLayout: _declaredLayout, ...configWithoutExtension } = foundationConfig
+  // `mappings` goes to `_mappings` with the foundation's own, each fact once.
+  const { extension: _ext, defaultLayout: _declaredLayout, mappings: _libraryMappings, ...configWithoutExtension } = foundationConfig
 
   // `supports` is the one identity field the build knows better than the file.
   // `identity.supports` is already normalized (absent stays absent, `[]` stays
