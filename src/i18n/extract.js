@@ -9,6 +9,7 @@ import { resolveDefaultLocale } from '@uniweb/core'
 import { computeHash, stripInlineTags } from './hash.js'
 import { visitDataBlockStrings } from './data-strings.js'
 import { serializeInlineContent } from '@uniweb/content-writer'
+import { isInExcludedBranch } from '@uniweb/projections'
 
 /**
  * Extract all translatable units from site content
@@ -22,11 +23,19 @@ import { serializeInlineContent } from '@uniweb/content-writer'
 export function extractTranslatableContent(siteContent, { dataModel = null } = {}) {
   const units = {}
 
+  // ⭐ `i18n.exclude` — branches the site doesn't translate, such as a mounted repo's docs it shows in
+  // their own language: their pages give no strings, so `init`, `status` and the rest, which read the
+  // manifest, leave them alone. Routes as `agents.exclude` takes them (`isInExcludedBranch`). Their
+  // pages show the source in every language, but for a string the site translates elsewhere, since a
+  // translation is the text's wherever it appears.
+  const exclude = siteContent.config?.i18n?.exclude
+
   // The site's own Open Graph title and description (`site.yml` `seo:`), in the site's context.
   extractFromSiteMeta(siteContent.config, units)
 
   for (const page of siteContent.pages || []) {
     const pageRoute = page.route || '/'
+    if (isInExcludedBranch(pageRoute, exclude)) continue
 
     // Extract page metadata (title, description, keywords from page.yml)
     extractFromPageMeta(page, pageRoute, units)
@@ -38,7 +47,7 @@ export function extractTranslatableContent(siteContent, { dataModel = null } = {
   }
 
   // Extract from 404 page (stored as top-level notFound)
-  if (siteContent.notFound) {
+  if (siteContent.notFound && !isInExcludedBranch(siteContent.notFound.route || '/404', exclude)) {
     const notFoundPage = siteContent.notFound
     const pageRoute = notFoundPage.route || '/404'
     extractFromPageMeta(notFoundPage, pageRoute, units)

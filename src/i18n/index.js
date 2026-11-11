@@ -256,6 +256,21 @@ export async function extractRecordManifest(siteRoot, options = {}) {
  * @param {Object} options - Options
  * @returns {Object} Status per locale
  */
+/**
+ * A language's words for a text, from its entry: the string, or an entry's `default`; an entry
+ * that gives only context-specific `overrides` gives words too. '' for none.
+ *
+ * @param {*} entry
+ * @returns {string}
+ */
+function entryWords(entry) {
+  if (typeof entry === 'string') return entry
+  if (!entry || typeof entry !== 'object') return ''
+  if (typeof entry.default === 'string' && entry.default.trim()) return entry.default
+  const overrides = entry.overrides && typeof entry.overrides === 'object' ? Object.values(entry.overrides) : []
+  return overrides.find((value) => typeof value === 'string' && value.trim()) || ''
+}
+
 export async function getTranslationStatus(siteRoot, options = {}) {
   const {
     localesDir = DEFAULTS.localesDir,
@@ -296,16 +311,22 @@ export async function getTranslationStatus(siteRoot, options = {}) {
     let translated = 0
     let missing = 0
     let outdated = 0
+    let unchanged = 0
 
-    for (const hash of Object.keys(manifest.units)) {
+    for (const [hash, unit] of Object.entries(manifest.units)) {
       // An entry flagged `outdated` still renders, and is not this text's translation.
       if (Object.keys(standingFlags(translations[hash], translations, locale, kept)).length) {
         outdated++
-      } else if (translatedHashes.has(hash)) {
-        translated++
-      } else {
-        missing++
+        continue
       }
+      const words = translatedHashes.has(hash) ? entryWords(translations[hash]) : null
+      // ⭐ An empty entry is none: the build shows the source for it. And an entry that is the
+      // source's own text is what `uniweb i18n init` writes, so it is counted apart, not as a
+      // translation, whether the language says it the same way or nobody has translated it yet.
+      // ⛔ Until 2026-11-11 any entry counted, so a file `init` had just made read as all done.
+      if (words === null || !words.trim()) missing++
+      else if (words === unit.source || words === unit.markup) unchanged++
+      else translated++
     }
 
     status[locale] = {
@@ -313,6 +334,7 @@ export async function getTranslationStatus(siteRoot, options = {}) {
       translated,
       missing,
       ...(outdated ? { outdated } : {}),
+      ...(unchanged ? { unchanged } : {}),
       coverage: totalUnits > 0 ? Math.round((translated / totalUnits) * 100) : 100
     }
   }
@@ -676,6 +698,9 @@ export function formatTranslationStatus(status) {
       }
       if (info.outdated > 0) {
         lines.push(`       ${info.outdated} outdated: the old translation still shows, and its source has changed`)
+      }
+      if (info.unchanged > 0) {
+        lines.push(`       ${info.unchanged} the same as the source: what \`uniweb i18n init\` wrote, or words that stay the same in ${locale}`)
       }
     }
   }
