@@ -82,7 +82,8 @@ import { carrySectionFile, rewriteFileLinks } from '../site/file-links.js'
 import { refuseBinding, refuseUnder, refuseOutsideLanguage, warnDuplicateBindings } from '../site/data-fetcher.js'
 import { readLayoutFolder, layoutAreaRoute } from '../site/layout-folder.js'
 import { normalizeHideIn } from '../site/nav-visibility.js'
-import { siteDefaultSectionType } from '../site/queries-config.js'
+import { siteDefaultSectionType, foundationSchemaJson } from '../site/queries-config.js'
+import { noteParamsNamedForContent } from '../site/params-named-for-content.js'
 import { resolveDefaultLocale, validateLanguageConfig, queryDataUrl } from '@uniweb/core'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { locateSectionMedia, siteTree } from './located-media.js'
@@ -604,7 +605,32 @@ function sectionToRecord(section, index) {
 async function readSectionFile(filePath, id, siteRoot, stableId, media) {
   const read = await processMarkdownFile(filePath, id, siteRoot, stableId)
   locateSectionMedia(read.assetCollection, { siteRoot, filePath, sink: media })
+  await noteSectionParams(read.section, filePath, siteRoot)
   return read
+}
+
+// The site's foundation's section types, read once per site in a process: its built or registered
+// `schema.json` (`foundationSchemaJson`), never its source, whose read reports the foundation's own
+// `meta.js` — a push of the site is not the time for that.
+const sectionTypesOfSite = new Map()
+function sectionTypesOf(siteRoot) {
+  if (!sectionTypesOfSite.has(siteRoot)) {
+    const read = readYamlFile(join(siteRoot, 'site.yml'))
+      .then((yml) => foundationSchemaJson(siteRoot, yml))
+      .catch(() => null)
+    sectionTypesOfSite.set(siteRoot, read)
+  }
+  return sectionTypesOfSite.get(siteRoot)
+}
+
+// ⭐ What a section's frontmatter names like a field of its content, said on a push as the build says
+// it (`../site/params-named-for-content.js`): a `title:` there is a param, never the section's title.
+async function noteSectionParams(section, filePath, siteRoot) {
+  if (!section) return
+  noteParamsNamedForContent(section.params, section.type, await sectionTypesOf(siteRoot), {
+    file: filePath,
+    warn: (message) => console.warn(`[push] ${relative(siteRoot, filePath)}: ${message}`),
+  })
 }
 
 // Resolve a section's logical name (`hero`, `card-a`) to its file in `mdFiles`, in the
@@ -810,6 +836,7 @@ async function folderModePageRecords(ctx, dirPath, orderConfig, isRoot) {
     const filePath = join(dirPath, file)
     const { page, pageConfig, assetCollection } = await processFileAsPage(filePath, file, siteRoot, '/')
     locateSectionMedia(assetCollection, { siteRoot, filePath, sink: ctx.media })
+    await noteSectionParams(page.sections?.[0], filePath, siteRoot)
     const config = { ...pageConfig, title: page.title }
     if (page.hidden) config.hidden = true
     const data = buildPageData(config, {

@@ -53,6 +53,7 @@ import { refuseUnreadableAddress } from './site-address.js'
 import { warnOutsideVocabulary } from './vocabulary-warnings.js'
 import { warnPlacementsNotOffered } from './placement-warnings.js'
 import { atomicPageConfig, isAtomicPageKey, warnPageKeysNamingParams } from './page-settings.js'
+import { noteParamsNamedForContent } from './params-named-for-content.js'
 import { markdownToProseMirror } from '@uniweb/content-reader'
 
 /**
@@ -1312,6 +1313,7 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const typesHere = collectRoot === siteRoot ? sectionTypes : null
   warnPlacementsNotOffered(proseMirrorContent, type || null, typesHere, warnHere)
   if (pageConfig) warnPageKeysNamingParams(pageConfig, type || null, typesHere, warnHere)
+  noteParamsNamedForContent({ ...params, ...props }, type || null, typesHere, { file: filePath, warn: warnHere })
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's
