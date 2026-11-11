@@ -151,6 +151,11 @@ export {
   blueprintWarnings,
   siteBlueprintWarnings,
   siteDeclaredTypes,
+  // What a push sends and a site holds, compared as a pull compares them: the CLI says from these
+  // when a changed file reaches no backend already started from the site.
+  blueprintForWire,
+  liftBlueprint,
+  sameBlueprint,
 } from './blueprint.js'
 export {
   diffSiteUnits,

@@ -92,6 +92,20 @@ export function blueprintForWire(blueprint, scope) {
   return out
 }
 
+/**
+ * Whether two blueprints, each as a `backend` row holds it (`blueprintForWire`), say the same: keys in
+ * any order, lists in theirs. `undefined` and `null` are no blueprint, the same as each other and
+ * never the same as one. A pull asks it before it writes the file (`writePulledBlueprint`), and the
+ * CLI before it says that a change reaches no backend already started from the site.
+ *
+ * @param {object|null|undefined} a
+ * @param {object|null|undefined} b
+ * @returns {boolean}
+ */
+export function sameBlueprint(a, b) {
+  return stable(a) === stable(b)
+}
+
 /** A map of types with each key in full. ⛔ Two keys for one type cannot both go: refused by name. */
 function qualifiedTypes(key, map, scope) {
   const out = {}
@@ -210,7 +224,7 @@ export function writePulledBlueprint({ siteRoot, rows, scope = null, own = null 
 /** Whether the file, as a push would send it, is what the row holds. */
 function saysTheSame(local, wire, scope) {
   try {
-    return stable(blueprintForWire(local, scope)) === stable(wire)
+    return sameBlueprint(blueprintForWire(local, scope), wire)
   } catch {
     return false
   }

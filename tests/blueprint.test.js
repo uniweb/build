@@ -23,7 +23,9 @@ import {
   blueprintFromWire,
   blueprintWarnings,
   siteDeclaredTypes,
-  writePulledBlueprint
+  writePulledBlueprint,
+  sameBlueprint,
+  liftBlueprint
 } from '../src/uwx/blueprint.js'
 import { siteProjectToDocument } from '../src/uwx/site.js'
 import { emitSyncPackages, siteContentDocumentToProject, siteSelfScope } from '../src/uwx/index.js'
@@ -333,6 +335,35 @@ describe('the wire, both ways', () => {
     const rows = [{ name: 'backend', config: { blueprint: WIRE } }]
     expect(writePulledBlueprint({ siteRoot: SITE, rows, scope: '@acme' })).toEqual({ file: 'updated' })
     expect(yaml.load(read('site/blueprint.yml'))).toEqual(yaml.load(BLUEPRINT))
+  })
+
+  it('⭐ two blueprints say the same whatever order a backend keeps their keys in', () => {
+    // A backend's status returned the starter's `signup` after its `access` (measured 2026-11-10 on a
+    // local backend), so a comparison by bytes would read every pushed blueprint as changed.
+    const reordered = Object.fromEntries(Object.entries(WIRE).reverse())
+    expect(Object.keys(reordered)).not.toEqual(Object.keys(WIRE)) // CONTROL — the order differs
+    expect(sameBlueprint(reordered, WIRE)).toBe(true)
+    expect(sameBlueprint({ ...WIRE, signup: 'open' }, { ...WIRE, signup: 'invite_only' })).toBe(false)
+  })
+
+  it('a list keeps its order: teams listed in another order are another line', () => {
+    expect(sameBlueprint({ access: { '@acme/x': { add: ['a', 'b'] } } }, { access: { '@acme/x': { add: ['b', 'a'] } } })).toBe(false)
+  })
+
+  it('no blueprint is never the same as one, and none is the same as none', () => {
+    expect(sameBlueprint(undefined, WIRE)).toBe(false)
+    expect(sameBlueprint(WIRE, null)).toBe(false)
+    expect(sameBlueprint(undefined, null)).toBe(true)
+  })
+
+  it("the row's blueprint is lifted out of the `backend` row, the rest left as it was", () => {
+    const rows = [{ name: 'google', config: { id: 'G-1' } }, { name: 'backend', config: { grade: 'pro', blueprint: WIRE } }]
+    expect(liftBlueprint(rows)).toEqual({
+      rows: [{ name: 'google', config: { id: 'G-1' } }, { name: 'backend', config: { grade: 'pro' } }],
+      blueprint: WIRE,
+      backend: true
+    })
+    expect(liftBlueprint([{ name: 'backend' }])).toEqual({ rows: [{ name: 'backend' }], blueprint: undefined, backend: true })
   })
 })
 
