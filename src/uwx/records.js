@@ -60,6 +60,7 @@ import { toDataSchemaDeclaration, isProseMirrorField, isMarkupTextField } from '
 import { recordFileLayout, contentBodyTarget } from './record-layout.js'
 import { emitEntitySyncPackage } from './entity-document.js'
 import { qualifyRef } from '@uniweb/schemas/refs'
+import { standardTypeFor } from '../site/standard-type-for.js'
 import { siteSelfScope, refuseOrgOption } from './self-scope.js'
 import { sha256Hex, toJsonBuffer } from './manifest.js'
 import { isUuid } from './uuid.js'
@@ -1006,15 +1007,21 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // query that reads no folder: the push sends nothing, and says what to write. ⛔ Until
   // 2026-11-11 it was a soft skip: the records were not sent, a publish uploaded their compiled
   // files instead, in the site's own language only, and the app could not edit them.
-  const noDataSchema = (where, modelName) =>
-    `${where}: no data schema resolves for ${modelName}` +
-    (resolveModel?.offline === true
-      ? ' here (this run does not ask the backend)'
-      : resolveModel
-        ? ', in the foundation or on the backend'
-        : '') +
-    ', and every record needs one. Define it in the foundation (`schemas/<name>.yml`), or name a ' +
-    'registered one on the query (`schema:` in queries.yml) — `uniweb guide data`.'
+  const noDataSchema = (where, modelName) => {
+    const std = standardTypeFor(String(modelName).split('/').pop())
+    return (
+      `${where}: no data schema resolves for ${modelName}` +
+      (resolveModel?.offline === true
+        ? ' here (this run does not ask the backend)'
+        : resolveModel
+          ? ', in the foundation or on the backend'
+          : '') +
+      ', and every record needs one. ' +
+      (std ? `A standard type fits its name: @std/${std}, kept in ${pool.dir}/std/${std}/. ` : '') +
+      'Use a standard type where one fits (`records/std/<name>/`; `uniweb guide data` lists them), name a ' +
+      'registered one on the query (`schema:` in queries.yml), or define your own in the foundation (`schemas/<name>.yml`).'
+    )
+  }
 
   // ⚠️ AN EXPLICIT SCHEMA THAT RESOLVES TO NOTHING IS THE AUTHOR'S ERROR — and a
   // depth-2 folder has two readings worth naming. `records/person/2024/ada.md`

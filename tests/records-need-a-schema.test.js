@@ -16,6 +16,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resolveRecordSchemas } from '../src/site/queries-config.js'
 import { readEntityPool } from '../src/site/entity-pool.js'
+import { processQueries } from '../src/site/query-processor.js'
+import { emitSyncPackages } from '../src/uwx/index.js'
 
 let ROOT
 const w = (rel, body) => {
@@ -89,5 +91,44 @@ describe('a companion schema is retired', () => {
     const pool = await readEntityPool(site)
     expect(pool.errors).toEqual([expect.stringMatching(/records\/notes\.schema\.js is not read: a companion schema is retired.*schemas\//)])
     expect(pool.entities.map((e) => e.relPath)).toEqual(['records/note/hi.md'])
+  })
+})
+
+describe('a refusal names the standard type a folder\'s name points to', () => {
+  it('⭐ the build: `records/testimonials/` with no schema of its own points to @std/testimonial', async () => {
+    const site = workspace()
+    w('site/records/testimonials/ada.md', '---\nname: Ada\nquote: Hi\n---\n')
+    w('site/queries.yml', 'testimonials: {}\n')
+    const log = console.log
+    console.log = () => {}
+    try {
+      await expect(processQueries(site, { testimonials: { schema: '@/testimonials' } }, undefined, '/')).rejects.toThrow(
+        /records\/testimonials\/ — @\/testimonials, read by query "testimonials" — a standard type fits: @std\/testimonial, kept in records\/std\/testimonial\//
+      )
+    } finally {
+      console.log = log
+    }
+  })
+
+  it('…and the push says the same', async () => {
+    const site = workspace()
+    w('site/records/testimonials/ada.md', '---\nname: Ada\nquote: Hi\n---\n')
+    w('site/queries.yml', 'testimonials: {}\n')
+    w('site/pages/home/page.yml', 'title: Home\n')
+    w('press/dist/meta/schema.json', { _self: { name: '@acme/press', version: '1.0.0', role: 'foundation' }, dataSchemas: {} })
+    const pkg = await emitSyncPackages(site)
+    expect(pkg.refusals).toEqual([expect.stringMatching(/A standard type fits its name: @std\/testimonial, kept in records\/std\/testimonial\//)])
+  })
+
+  it('CONTROL — a name no standard type has gets the general advice alone', async () => {
+    const site = workspace()
+    w('site/records/notes/hi.md', '---\ntitle: Hi\n---\n')
+    const log = console.log
+    console.log = () => {}
+    try {
+      await expect(processQueries(site, { notes: { schema: '@/notes' } }, undefined, '/')).rejects.toThrow(/records\/notes\/ — @\/notes, read by query "notes"\n/)
+    } finally {
+      console.log = log
+    }
   })
 })

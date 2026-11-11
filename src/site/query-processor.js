@@ -68,6 +68,7 @@ import { isDraftRecord } from './record-draft.js'
 import { refuseNotOneRecord } from './record-file.js'
 import { resolveRecordSchemas, resolveQueriesConfig, dataKeyTyping } from './queries-config.js'
 import { keyOfDefaultRef } from '../uwx/data-key-types.js'
+import { standardTypeFor } from './standard-type-for.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { collectNestedRefs } from '@uniweb/schemas/format'
@@ -1297,15 +1298,20 @@ export function refuseRecordsWithoutSchema(missing, { dir, poolBySchema, queries
       .map(([name]) => `query "${name}"`)
     const held = poolBySchema.get(ref)
     const where = held?.length ? `${dir}/${held[0].dirs.join('/')}/` : readers.shift()
-    return `  ${where} — ${ref}${readers.length ? `, read by ${readers.join(', ')}` : ''}`
+    const std = standardTypeFor(ref.replace(/^@\//, ''))
+    return (
+      `  ${where} — ${ref}${readers.length ? `, read by ${readers.join(', ')}` : ''}` +
+      (std ? ` — a standard type fits: @std/${std}, kept in ${dir}/std/${std}/` : '')
+    )
   })
   const name = missing[0].replace(/^@\//, '')
   throw new Error(
     `[uniweb] Every record needs a data schema, and nothing defines ${missing.length === 1 ? 'this one' : 'these'}:\n` +
       `${lines.join('\n')}\n` +
-      `  A folder's name is its records' data schema. Define it in the foundation, as schemas/${name}.yml ` +
-      '(`uniweb guide data` shows one), or keep records of a data schema registered under another scope ' +
-      'in records/<scope>/<name>/.'
+      `  A folder's name is its records' data schema. Use a standard type where one fits: records/std/<name>/ ` +
+      'holds @std/<name>, which the app edits with its own form (`uniweb guide data` lists them). Keep records ' +
+      'of a type registered under another scope in records/<scope>/<name>/. Else define your own in the ' +
+      `foundation, as schemas/${name}.yml.`
   )
 }
 
