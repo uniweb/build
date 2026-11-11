@@ -32,6 +32,7 @@ import { queryNameFromUrl, declaredKeys, fillDeclaredKeys, fetchLevels, pageRout
 import { parentRouteOf } from '@uniweb/core/route-match'
 
 import { validateItem, validateRecordFile, validateBound, validateKeyValue, contentBodyField, rootListSection, referencesOf } from '@uniweb/schemas/conform'
+import { normalizeData } from '@uniweb/schemas/foundation'
 import { isUuid } from './uwx/uuid.js'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
@@ -49,6 +50,32 @@ import { collectSiteContent } from './site/content-collector.js'
 import { processQueries } from './site/query-processor.js'
 
 // --- the join: sections ↔ schemas -------------------------------------------
+
+/**
+ * The keys a section type declares with an inline shape — a field map or a form — whose every
+ * field gives a `default:`: the words a section draws itself, which it shows when the section holds
+ * no block of its own (`uniweb guide foundation` § A section's own words). Read by the one
+ * normalizer every form of a declaration goes through (`normalizeData`).
+ *
+ * @param {object|undefined} data - a section type's `data:`
+ * @returns {Set<string>}
+ */
+function keysWithOwnWords(data) {
+  const out = new Set()
+  let normalized = {}
+  try {
+    normalized = normalizeData(data, { strict: false }) || {}
+  } catch {
+    return out // a declaration the foundation's build stops on is reported there
+  }
+  for (const [key, decl] of Object.entries(normalized)) {
+    const fields = decl?.kind === 'fields' ? Object.values(decl.fields || {}) : decl?.kind === 'form' ? decl.fields : null
+    if (Array.isArray(fields) && fields.length > 0 && fields.every((f) => f && typeof f === 'object' && f.default !== undefined)) {
+      out.add(key)
+    }
+  }
+  return out
+}
 
 /**
  * Walk a site's sections, pair each governed data input with its schema, and
@@ -185,7 +212,16 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       const concepts = new Set(
         (foundation[type]?.content || []).filter((e) => e?.kind === 'concept').map((e) => e.key)
       )
-      const declaredNames = declared.map(([key]) => key).filter((key) => !concepts.has(key))
+      // ⛔ NOR IS A SECTION'S OWN WORDS. A key declared with an inline shape whose every field gives
+      // a `default:` holds the words a section draws itself, which an author overrides with a
+      // ```yaml:labels block (`uniweb guide foundation` § A section's own words): with no block the
+      // component shows the type's own, so it renders without data, and a page's query that feeds
+      // another section has not failed to reach it. ⛔ Until 2026-11-11 it was counted, and every
+      // publish of a site whose blog page queries its articles reported the page's Hero.
+      const ownWords = keysWithOwnWords(bindings)
+      const declaredNames = declared
+        .map(([key]) => key)
+        .filter((key) => !concepts.has(key) && !ownWords.has(key))
       if (declaredNames.length > 0 && inputs.length > 0 && fills.size === 0 && !declaredNames.some((k) => held.includes(k))) {
         const delivered = inputs.map((i) => i.as).filter(Boolean)
         setupErrors.push({

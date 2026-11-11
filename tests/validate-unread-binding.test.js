@@ -111,6 +111,42 @@ describe('a section reading a key the page does not deliver', () => {
     expect(err.message).toContain('section reads content.data.team,')
     expect(err.message).not.toContain('content.data.prompt')
   })
+
+  // ⛔ Reported until 2026-11-11, on every publish of a site whose blog page queries its articles: its
+  // Hero declares the words it draws itself (`labels`, each with a `default:`), which an author
+  // overrides with a ```yaml:labels block, and with none it shows the type's own. It renders
+  // without data, so a page's query that feeds another section had not failed to reach it.
+  const LABELS = "labels: { copy: { type: 'string', default: 'Copy' }, copied: { type: 'string', default: 'Copied' } }"
+  const metaOf = (built, data) =>
+    writeFileSync(join(built.foundationPath, 'sections', 'Team', 'meta.js'), `export default { data: { ${data} } }\n`)
+
+  it('a section\'s own words — an inline shape whose every field gives a `default:` — are not ones the page should fill', async () => {
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    metaOf(built, LABELS)
+    expect(unread(await validateDataInputs(built))).toEqual([])
+  })
+
+  it('…in the form shape too', async () => {
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    metaOf(built, "labels: { fields: [{ name: 'copy', type: 'string', default: 'Copy' }] }")
+    expect(unread(await validateDataInputs(built))).toEqual([])
+  })
+
+  it('…while a key beside them is still reported, alone', async () => {
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    metaOf(built, `${LABELS}, team: '@/member'`)
+    const [err, ...rest] = unread(await validateDataInputs(built))
+    expect(rest).toEqual([])
+    expect(err.message).toContain('section reads content.data.team,')
+    expect(err.message).not.toContain('content.data.labels')
+  })
+
+  it('CONTROL — an inline shape with a field that gives no `default:` holds data the page may be meant to fill, and is reported', async () => {
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    metaOf(built, "labels: { copy: { type: 'string', default: 'Copy' }, note: { type: 'string' } }")
+    const [err] = unread(await validateDataInputs(built))
+    expect(err.message).toContain('section reads content.data.labels,')
+  })
 })
 
 describe('⛔ and it stays quiet where silence is correct', () => {
