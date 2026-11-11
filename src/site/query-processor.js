@@ -70,7 +70,9 @@ import { resolveRecordSchemas, resolveQueriesConfig, dataKeyTyping } from './que
 import { keyOfDefaultRef } from '../uwx/data-key-types.js'
 import { standardTypeFor } from './standard-type-for.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
-import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
+import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, undeclaredFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
+import { ownsType, undeclaredAdvice, listOf } from './undeclared-fields.js'
+import { siteSelfScope } from '../uwx/self-scope.js'
 import { collectNestedRefs } from '@uniweb/schemas/format'
 import { labelIn } from './entry-label.js'
 import { fileRecordValue, makeFilePreview } from './file-records.js'
@@ -629,6 +631,7 @@ function deliverRecord(file, config, where, body = null) {
   } else {
     const misplaced = misplacedFields(schema, record)
     if (misplaced.length) throw new Error(flatFormRefusal(where, config.schema, schema, misplaced))
+    noteUnsendable(config, where, schema, record, body)
     out = { ...toDeliveredRecord(schema, record) }
     if (body) {
       placeBody(out, schema, body)
@@ -646,6 +649,54 @@ function deliverRecord(file, config, where, body = null) {
     }
   }
   return out
+}
+
+/**
+ * Keep, for the note a build ends with, what a record holds that a push cannot carry: a key its
+ * data schema has no place for (`@uniweb/schemas/conform`'s `undeclaredFields`), and a markdown body
+ * with no field to hold it. The record is still delivered as its file holds it. ⭐ A note, never a
+ * stop: a static site is not held back by its schemas (`uniweb deploy` warns and ships), and
+ * `uniweb validate`, which the push and the publish run first, reports the same records. ⛔ Until
+ * 2026-11-11 nothing before the push said so.
+ */
+function noteUnsendable(config, where, schema, record, body) {
+  const notes = config.unsendable
+  if (!notes || notes.has(where)) return
+  const undeclared = undeclaredFields(schema, record)
+  const strandedBody = !!body && typeof body.markdown === 'string' && body.markdown.trim() !== '' && !contentBodyField(schema)
+  if (undeclared.length || strandedBody) notes.set(where, { ref: config.schema, undeclared, strandedBody })
+}
+
+/**
+ * The note for each record a push cannot carry (`noteUnsendable`), one line per file.
+ *
+ * @param {Map<string, { ref: string, undeclared: Array<{ path: string, declared: string[] }>, strandedBody: boolean }>} notes
+ * @param {string} siteDir - to read the foundation's scope, which says whose types it defines
+ */
+async function warnUnsendable(notes, siteDir) {
+  if (notes.size === 0) return
+  let scope
+  for (const [where, { ref, undeclared, strandedBody }] of notes) {
+    if (scope === undefined && !ownsType(ref, null) && !String(ref).startsWith('@std/')) scope = (await siteSelfScope(siteDir).catch(() => null)) ?? null
+    const owned = ownsType(ref, scope ?? null)
+    const parts = []
+    if (undeclared.length) {
+      const one = undeclared.length === 1
+      const paths = undeclared.map((u) => u.path)
+      const top = paths.every((p) => !/[.[]/.test(p))
+      parts.push(
+        `${listOf(paths.map((p) => `"${p}"`))} ${one ? 'is not a field' : 'are not fields'} of ${ref}, so a push cannot ` +
+          `carry ${one ? 'it' : 'them'}. ` +
+          undeclaredAdvice({ type: ref, owned, declared: top ? undeclared[0].declared : [], count: undeclared.length })
+      )
+    }
+    if (strandedBody) {
+      parts.push(
+        `its markdown body has no field in ${ref} to hold it (a \`markdown\` or \`richtext\` field), so a push cannot carry it.`
+      )
+    }
+    console.warn(`[records] ${where}: ${parts.join(' And ')}`)
+  }
 }
 
 /**
@@ -862,7 +913,7 @@ async function processFileRecord(e, config, siteDir, recordsRoot, basePath) {
  * its file carries. One that names no record of its schema is delivered as written, with
  * a warning; `uniweb validate` reports it too.
  */
-function referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts }) {
+function referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts, unsendable = null }) {
   const targets = new Map() // schema ref → Map(name or own id → the delivered reference)
   const warned = new Set()
 
@@ -871,7 +922,7 @@ function referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, ba
     const pooled = poolBySchema.get(ref) || []
     const byName = new Map()
     if (!schema || pooled.length === 0) return byName
-    const config = { schema: ref, dataSchema: schema, includeDrafts, excerpt: { maxLength: 160 }, references: null }
+    const config = { schema: ref, dataSchema: schema, includeDrafts, excerpt: { maxLength: 160 }, references: null, unsendable }
     const keys = briefKeysOf(schema)
     for (const result of await readPooledRecords(pooled, config, siteDir, recordsRoot, basePath)) {
       for (const record of [result].flat()) {
@@ -1142,6 +1193,8 @@ function briefBuilder(schema) {
  *   draft is a record that is not delivered while the site is published.
  * @param {Object} [options.dataSchemas] - normalized data schemas by ref, to deliver the
  *   records in; resolved from the site's foundation when absent (`resolveRecordSchemas`)
+ * @param {boolean} [options.noteUnsendable=true] - end with a note for each record a push cannot
+ *   carry (`noteUnsendable`). Off for `uniweb validate`, which reports them itself
  * @returns {Promise<Object>} Map of query name to items array
  *
  * @example
@@ -1151,7 +1204,7 @@ function briefBuilder(schema) {
  * // { articles: [...] }
  */
 export async function processQueries(siteDir, queriesConfig, recordsDir, basePath = '/', options = {}) {
-  const { locale = null, includeDrafts = false } = options
+  const { locale = null, includeDrafts = false, noteUnsendable: noting = true } = options
   if (!queriesConfig || typeof queriesConfig !== 'object') {
     return {}
   }
@@ -1219,7 +1272,9 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     refuseRecordsWithoutSchema(resolved.missing, { dir: pool.dir, poolBySchema, queriesConfig })
     dataSchemas = resolved.schemas
   }
-  const references = referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts })
+  // What a push cannot carry, by file, said once when every query has compiled (`noteUnsendable`).
+  const unsendable = noting ? new Map() : null
+  const references = referenceHydrator({ poolBySchema, dataSchemas, siteDir, recordsRoot, basePath, includeDrafts, unsendable })
 
   const results = {}
 
@@ -1238,6 +1293,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     parsed.includeDrafts = includeDrafts
     parsed.dataSchema = (parsed.schema && dataSchemas[parsed.schema]) || null
     parsed.references = references
+    parsed.unsendable = unsendable
     if (parsed.poolEntities.length === 0) {
       const dirs = folderRef ? poolDirsForSchema(folderRef) : null
       console.warn(
@@ -1251,6 +1307,7 @@ export async function processQueries(siteDir, queriesConfig, recordsDir, basePat
     results[name] = items
     console.log(`[query-processor] Processed ${name}: ${items.length} items`)
   }
+  if (unsendable) await warnUnsendable(unsendable, siteDir)
 
   return results
 }
