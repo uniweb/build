@@ -1307,8 +1307,11 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const warnHere = (message) => console.warn(`[content-collector] ${relative(siteRoot, filePath)}: ${message}`)
   const proseMirrorContent = markdownToProseMirror(markdown, { onWarning: warnHere })
   warnOutsideVocabulary(proseMirrorContent, warnHere)
-  warnPlacementsNotOffered(proseMirrorContent, type || null, sectionTypes, warnHere)
-  if (pageConfig) warnPageKeysNamingParams(pageConfig, type || null, sectionTypes, warnHere)
+  // ⭐ The foundation's section types only for a file of the site being collected: the push reads its
+  // files through this function too, after a collect of another site may have left that one's here.
+  const typesHere = collectRoot === siteRoot ? sectionTypes : null
+  warnPlacementsNotOffered(proseMirrorContent, type || null, typesHere, warnHere)
+  if (pageConfig) warnPageKeysNamingParams(pageConfig, type || null, typesHere, warnHere)
 
   // `query: team` → `fetch: { query: team }`; a list, one config per name, each under
   // its own `as` — the one helper every level uses. Unrelated to a section type's
