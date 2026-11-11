@@ -141,6 +141,15 @@ describe('a section reading a key the page does not deliver', () => {
     expect(err.message).not.toContain('content.data.labels')
   })
 
+  it('CONTROL — blank defaults are not words: a key whose fields all default to `\'\'` or `null` is reported', async () => {
+    // An older way to declare a key a fetch fills: an editor pre-fills it empty, and the section
+    // has nothing of its own to show.
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    metaOf(built, "articles: { title: { type: 'string', default: '' }, content: { type: 'richtext', default: null } }")
+    const [err] = unread(await validateDataInputs(built))
+    expect(err.message).toContain('section reads content.data.articles,')
+  })
+
   it('CONTROL — an inline shape with a field that gives no `default:` holds data the page may be meant to fill, and is reported', async () => {
     const built = site({ metaKey: 'team', queryName: 'members' })
     metaOf(built, "labels: { copy: { type: 'string', default: 'Copy' }, note: { type: 'string' } }")

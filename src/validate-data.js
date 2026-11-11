@@ -53,9 +53,13 @@ import { processQueries } from './site/query-processor.js'
 
 /**
  * The keys a section type declares with an inline shape — a field map or a form — whose every
- * field gives a `default:`: the words a section draws itself, which it shows when the section holds
- * no block of its own (`uniweb guide foundation` § A section's own words). Read by the one
- * normalizer every form of a declaration goes through (`normalizeData`).
+ * field gives a `default:` with something in it: the words a section draws itself, which it shows
+ * when the section holds no block of its own (`uniweb guide foundation` § A section's own words).
+ * Read by the one normalizer every form of a declaration goes through (`normalizeData`).
+ *
+ * ⛔ A blank default is not a word: `default: ''`, `null` or an empty list leaves the section nothing
+ * to show, which an editor pre-fills as empty — an older way to declare a key a fetch fills, every
+ * field blank. ⛔ Until 2026-11-11 (the day this check learned of own words) any `default:` counted.
  *
  * @param {object|undefined} data - a section type's `data:`
  * @returns {Set<string>}
@@ -70,11 +74,20 @@ function keysWithOwnWords(data) {
   }
   for (const [key, decl] of Object.entries(normalized)) {
     const fields = decl?.kind === 'fields' ? Object.values(decl.fields || {}) : decl?.kind === 'form' ? decl.fields : null
-    if (Array.isArray(fields) && fields.length > 0 && fields.every((f) => f && typeof f === 'object' && f.default !== undefined)) {
+    if (Array.isArray(fields) && fields.length > 0 && fields.every((f) => f && typeof f === 'object' && shows(f.default))) {
       out.add(key)
     }
   }
   return out
+}
+
+/** Whether a field's `default:` gives the section something to show. */
+function shows(value) {
+  if (value === undefined || value === null) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'object') return Object.keys(value).length > 0
+  return true
 }
 
 /**
