@@ -839,17 +839,21 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
     }
   }
 
+  // ⭐ Replacer functions, here and for the icons below: in a replacement string `$$`, `$&`, `` $` ``
+  // and `$'` are patterns, and this is the site's own text. ⛔ Until 2026-11-11 a page saying `$$x$$`
+  // embedded `$x$`, which the browser's render then drew. The shell this replaces escapes every `<`
+  // too (`jsonForScript`), so the first `</script>` after it is its own.
   const contentScript = `<script id="__SITE_CONTENT__" type="application/json">${jsonForScript(contentForJson)}</script>`
   if (result.includes('__SITE_CONTENT__')) {
     // Replace existing site content with updated version (includes expanded dynamic routes)
     result = result.replace(
       /<script[^>]*id="__SITE_CONTENT__"[^>]*>[\s\S]*?<\/script>/,
-      contentScript
+      () => contentScript
     )
   } else {
     result = result.replace(
       '</head>',
-      `  ${contentScript}\n  </head>`
+      () => `  ${contentScript}\n  </head>`
     )
   }
 
@@ -866,12 +870,12 @@ export function injectBuildData(html, siteContent, { splitContent = false, curre
     if (result.includes('__ICON_CACHE__')) {
       result = result.replace(
         /<script[^>]*id="__ICON_CACHE__"[^>]*>[\s\S]*?<\/script>/,
-        iconScript
+        () => iconScript
       )
     } else {
       result = result.replace(
         '</head>',
-        `  ${iconScript}\n  </head>`
+        () => `  ${iconScript}\n  </head>`
       )
     }
   }
