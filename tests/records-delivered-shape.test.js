@@ -133,11 +133,27 @@ describe('a record of a data schema is delivered as a host delivers it', () => {
     expect(bio).not.toHaveProperty('content')
   })
 
-  it('a body its schema has no field for stays `content` — a push refuses that one', async () => {
+  // ⭐ One shape on both lanes [Diego, 2026-11-11]: a push refuses such a body, so no host holds it,
+  // and the build leaves it out too. ⛔ Until then it was delivered as `content`, at the top.
+  it('a body its schema has no field for is left out, as a host has no place for it', async () => {
     site('courses:\n  schema: "@/course"\n')
     w('site/records/course/go.md', '---\nidentity:\n  title: Go\n---\n\nNo field holds this.\n')
     const [course] = (await compile({ courses: { schema: '@/course' } })).courses
-    expect(textOf(course.content)).toEqual(['No field holds this.'])
+    expect(course).not.toHaveProperty('content')
+    expect(course.title).toBe('Go')
+  })
+
+  it('a field its schema lacks is left out of the list and of the record whole, at any depth', async () => {
+    site('courses:\n  schema: "@/course"\n')
+    w('site/records/course/go.md', '---\nidentity:\n  title: Go\n  level: easy\norder: 3\n---\n')
+    const [course] = (await compile({ courses: { schema: '@/course' } })).courses
+    expect(course).not.toHaveProperty('order')
+    expect(course).not.toHaveProperty('level')
+    expect(course.title).toBe('Go')
+    // The record whole, as its own file serves it.
+    const whole = course[Symbol.for('uniweb.query.whole')]
+    expect(whole.identity).toEqual({ title: 'Go' })
+    expect(whole).not.toHaveProperty('order')
   })
 
   it('⛔ a record with no data schema stops the build, naming its folder and the file to write', async () => {

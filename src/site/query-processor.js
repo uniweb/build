@@ -70,7 +70,7 @@ import { resolveRecordSchemas, resolveQueriesConfig, dataKeyTyping } from './que
 import { keyOfDefaultRef } from '../uwx/data-key-types.js'
 import { standardTypeFor } from './standard-type-for.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
-import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, undeclaredFields, mapReferences, recordLayout } from '@uniweb/schemas/conform'
+import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, undeclaredFields, withoutUndeclared, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { ownsType, undeclaredAdvice, listOf } from './undeclared-fields.js'
 import { siteSelfScope } from '../uwx/self-scope.js'
 import { collectNestedRefs } from '@uniweb/schemas/format'
@@ -593,8 +593,14 @@ export const WHOLE_RECORD = Symbol.for('uniweb.query.whole')
  *
  * A record whose data schema this build cannot read (`resolveRecordSchemas`: a foundation that
  * is not local, a schema registered under another scope) is delivered as its file holds it, a
- * markdown body as `content`; so is a body its schema has no field for — a push refuses that one.
- * One whose schema the build can read and finds nothing for stops the build (`processQueries`). A markdown record
+ * markdown body as `content`. One whose schema the build can read and finds nothing for stops the
+ * build (`processQueries`).
+ *
+ * ⭐ ONE SHAPE ON BOTH LANES [Diego, 2026-11-11: "drop it, one shape on both lanes"]: what a
+ * record's schema has no place for is left out, as a host never holds it, since a push refuses it —
+ * a key no field declares (`withoutUndeclared`), and a markdown body with no field to hold it. The
+ * build says so (`noteUnsendable`). ⛔ Until 2026-11-11 both were delivered, the body as `content`,
+ * and a component reading one worked on a static site only. A markdown record
  * also gets `excerpt` and `image` where it states none, derived from its body: the
  * static lane's own, and not what a host adds.
  *
@@ -632,14 +638,15 @@ function deliverRecord(file, config, where, body = null) {
     const misplaced = misplacedFields(schema, record)
     if (misplaced.length) throw new Error(flatFormRefusal(where, config.schema, schema, misplaced))
     noteUnsendable(config, where, schema, record, body)
-    out = { ...toDeliveredRecord(schema, record) }
+    const declared = withoutUndeclared(schema, record)
+    out = { ...toDeliveredRecord(schema, declared) }
     if (body) {
       placeBody(out, schema, body)
       out.excerpt = extractExcerpt(out, body.doc, config.excerpt)
       out.image = out.image || extractFirstImage(body.doc)
     }
     if (config.references) out = config.references.deliver(schema, out, where)
-    out[WHOLE_RECORD] = storedRecord(record, schema, config, where, body, out)
+    out[WHOLE_RECORD] = storedRecord(declared, schema, config, where, body, out)
   }
   if (handle !== undefined && handle !== null && handle !== '') {
     out.$name = String(handle)
@@ -654,8 +661,8 @@ function deliverRecord(file, config, where, body = null) {
 /**
  * Keep, for the note a build ends with, what a record holds that a push cannot carry: a key its
  * data schema has no place for (`@uniweb/schemas/conform`'s `undeclaredFields`), and a markdown body
- * with no field to hold it. The record is still delivered as its file holds it. ⭐ A note, never a
- * stop: a static site is not held back by its schemas (`uniweb deploy` warns and ships), and
+ * with no field to hold it. The record is delivered without them, as a host delivers it
+ * (`deliverRecord`). ⭐ A note, never a stop: a static site is not held back by its schemas (`uniweb deploy` warns and ships), and
  * `uniweb validate`, which the push and the publish run first, reports the same records. ⛔ Until
  * 2026-11-11 nothing before the push said so.
  */
@@ -685,14 +692,15 @@ async function warnUnsendable(notes, siteDir) {
       const paths = undeclared.map((u) => u.path)
       const top = paths.every((p) => !/[.[]/.test(p))
       parts.push(
-        `${listOf(paths.map((p) => `"${p}"`))} ${one ? 'is not a field' : 'are not fields'} of ${ref}, so a push cannot ` +
-          `carry ${one ? 'it' : 'them'}. ` +
+        `${listOf(paths.map((p) => `"${p}"`))} ${one ? 'is not a field' : 'are not fields'} of ${ref}, so the site ` +
+          `leaves ${one ? 'it' : 'them'} out, as a host does, and a push refuses ${one ? 'it' : 'them'}. ` +
           undeclaredAdvice({ type: ref, owned, declared: top ? undeclared[0].declared : [], count: undeclared.length })
       )
     }
     if (strandedBody) {
       parts.push(
-        `its markdown body has no field in ${ref} to hold it (a \`markdown\` or \`richtext\` field), so a push cannot carry it.`
+        `its markdown body has no field in ${ref} to hold it (a \`markdown\` or \`richtext\` field), so the site leaves it ` +
+          'out, as a host does, and a push refuses it.'
       )
     }
     console.warn(`[records] ${where}: ${parts.join(' And ')}`)
@@ -742,15 +750,13 @@ function placeBodyInFile(file, schema, body) {
 /**
  * Put a markdown body where the delivered record carries its schema's content body
  * field (`contentBodyField`) — unless the record already states that field, or the body
- * is empty. With no such field the body stays `content`, at the top.
+ * is empty. With no such field the body is left out, as a host has no place for it either
+ * (`deliverRecord`); ⛔ until 2026-11-11 it was delivered as `content`, at the top.
  */
 function placeBody(out, schema, body) {
   const blank = !body.markdown || !body.markdown.trim()
   const target = contentBodyField(schema)
-  if (!target) {
-    if (!blank) out.content = body.doc
-    return
-  }
+  if (!target) return
   if (blank) return
   const value = target.field?.type === 'text' ? body.markdown : body.doc
   if (!target.section) {

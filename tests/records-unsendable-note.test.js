@@ -1,5 +1,6 @@
-// ⭐ A build notes each record a push cannot carry, one line per file, and still delivers it as its
-// file holds it (`query-processor.js::noteUnsendable`). `uniweb validate` asks for no note: it
+// ⭐ A build notes each record a push cannot carry, one line per file, and delivers it without what
+// its schema has no place for, as a host delivers it: one shape on both lanes [Diego, 2026-11-11]
+// (`query-processor.js::noteUnsendable`, `deliverRecord`). `uniweb validate` asks for no note: it
 // reports the same records itself.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -47,17 +48,21 @@ async function run(options) {
 }
 
 describe('a build notes what a push cannot carry', () => {
-  it('one line per file, with what to do for whose type it is, and the record still delivered', async () => {
+  it('one line per file, with what to do for whose type it is, and the record delivered without it', async () => {
     const { byQuery, notes } = await run({})
     expect(notes).toEqual([
-      '[records] records/member/ada.yml: "order" is not a field of @/member, so a push cannot carry it. ' +
-        'Declare it in the schema, or remove it.',
-      '[records] records/std/testimonial/claude.md: "logo" is not a field of @std/testimonial, so a push cannot ' +
-        'carry it. @std/testimonial is a standard type, and a site cannot add a field to it. It has quote, name, ' +
-        'context, avatar, rating, date and url: move the value into one of those, remove it, or give these ' +
-        'records a type of your own (`schemas/<name>.yml` in the foundation, the records in `records/<name>/`).',
+      '[records] records/member/ada.yml: "order" is not a field of @/member, so the site leaves it out, as a host ' +
+        'does, and a push refuses it. Declare it in the schema, or remove it.',
+      '[records] records/std/testimonial/claude.md: "logo" is not a field of @std/testimonial, so the site leaves ' +
+        'it out, as a host does, and a push refuses it. @std/testimonial is a standard type, and a site cannot add a ' +
+        'field to it. It has quote, name, context, avatar, rating, date and url: move the value into one of those, ' +
+        'remove it, or give these records a type of your own (`schemas/<name>.yml` in the foundation, the records ' +
+        'in `records/<name>/`).',
     ])
-    expect(byQuery.members.find((r) => r.$name === 'ada')).toMatchObject({ name: 'Ada', order: 3 })
+    const ada = byQuery.members.find((r) => r.$name === 'ada')
+    expect(ada.name).toBe('Ada')
+    expect(ada).not.toHaveProperty('order')
+    expect(byQuery.quotes[0]).not.toHaveProperty('logo')
   })
 
   it('says nothing when asked not to — `uniweb validate` reports these itself', async () => {
