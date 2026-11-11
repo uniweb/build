@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url'
 import { jsxInJsMessage } from './jsx-extension.js'
 import { areaNames, describeChildren, describePlacement, describeVisuals, lowerChildren } from '@uniweb/schemas/component'
 import { describeContent, lowerData } from '@uniweb/schemas/content'
-import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
+import { normalizeData, normalizePlaceholders, schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { rootListSection } from '@uniweb/schemas/conform'
 import { SECTION_PARAMS, SECTION_KEYS, stickyDeclaration, underHeaderDeclaration, heightDeclaration } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
@@ -1255,6 +1255,25 @@ export function reportUnregistrableData(components, layouts = {}, foundationConf
 }
 
 /**
+ * The site values the foundation reads, as `main.js` declares them in `placeholders:`: one field
+ * map in the shape an inline `data:` map takes, checked as `register` will normalize it
+ * (`normalizePlaceholders`), and carried in `_self` as written. An editor shows a site's
+ * placeholders as the fields it declares; a page reads them at `website.config.placeholders`, and
+ * the runtime fills no `default`, so a declaration never reaches a page.
+ *
+ * @param {*} placeholders - `main.js`'s `placeholders`, as written
+ * @param {{ strict: boolean }} options - stop, or warn as a site reading its foundation does
+ */
+function checkPlaceholders(placeholders, { strict }) {
+  if (placeholders === undefined) return
+  try {
+    normalizePlaceholders(placeholders)
+  } catch (err) {
+    stopOrWarn([err.message], strict)
+  }
+}
+
+/**
  * One error naming every declaration problem the build found, so a developer fixes them in one
  * pass rather than one build at a time.
  *
@@ -1371,6 +1390,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
   const foundationConfig = await loadFoundationConfig(srcDir)
 
   refuseDataDeclarations('the foundation (main.js)', lowerData(foundationConfig.data))
+  checkPlaceholders(foundationConfig.placeholders, { strict })
 
   // Discover section types
   const components = await discoverComponents(srcDir, sectionPaths)
