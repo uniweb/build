@@ -26,8 +26,8 @@ export function extractTranslatableContent(siteContent, { dataModel = null } = {
   // ⭐ `i18n.exclude` — branches the site doesn't translate, such as a mounted repo's docs it shows in
   // their own language: their pages give no strings, so `init`, `status` and the rest, which read the
   // manifest, leave them alone. Routes as `agents.exclude` takes them (`isInExcludedBranch`). Their
-  // pages show the source in every language, but for a string the site translates elsewhere, since a
-  // translation is the text's wherever it appears.
+  // pages show the source in every language: only a translation written for one of their places
+  // applies there (`translationContext`).
   const exclude = siteContent.config?.i18n?.exclude
 
   // The site's own Open Graph title and description (`site.yml` `seo:`), in the site's context.
@@ -156,12 +156,34 @@ function extractFromPageMeta(page, pageRoute, units) {
  * `1-hero.md`) — so an override moved to another section when files were renumbered, and a clone,
  * whose files are not numbered, could not key it at all.
  *
+ * ⭐ A PAGE IN A BRANCH THE SITE DOESN'T TRANSLATE (`i18n.exclude`, given as `exclude`) TAKES ONLY A
+ * TRANSLATION WRITTEN FOR ITS PLACE, and its context says so (`placeOnly`): an override naming the
+ * place, which is how a pull writes what an author translated there in the app, or a free-form file
+ * for it. A translation of the text wherever it appears, a plain entry or an entry's `default`, is
+ * not one. The build (`merge.js::lookupTranslation`), the push (`locale-sync.js::translationFor`) and
+ * the pull (`reconcileTranslation`) read it. ⛔ Until 2026-11-11 such a page took the site's
+ * translation of any string it shared with the site's own pages, so a mounted repo's docs, shown in
+ * English, read a sentence in Spanish where the site's home page had the same one.
+ *
  * @param {Object} section - a section with `stableId` (and the build `id` as a fallback)
  * @param {string} pageRoute - the route of the page (or layout area) it is on
- * @returns {{ page: string, section: string }}
+ * @param {string[]} [exclude] - the site's `i18n.exclude`; none for a layout area, which is the site's own
+ * @returns {{ page: string, section: string, placeOnly?: true }}
  */
-export function translationContext(section, pageRoute) {
-  return { page: pageRoute, section: section?.stableId || section?.id || 'unknown' }
+export function translationContext(section, pageRoute, exclude = null) {
+  const context = { page: pageRoute, section: section?.stableId || section?.id || 'unknown' }
+  return isInExcludedBranch(pageRoute, exclude) ? { ...context, placeOnly: true } : context
+}
+
+/**
+ * Where a page's own words are translated — its title, label, description and keywords:
+ * `<route>:_meta`, the place an override for them names (`translationContext`).
+ *
+ * @param {string} pageRoute
+ * @param {string[]} [exclude] - the site's `i18n.exclude`
+ */
+export function pageMetaContext(pageRoute, exclude = null) {
+  return translationContext({ stableId: '_meta' }, pageRoute, exclude)
 }
 
 /**

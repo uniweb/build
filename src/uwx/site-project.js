@@ -57,7 +57,7 @@ import { buildRouteOf } from './site.js'
 import { ATOMIC_PARENT, knownMode } from './route-mode.js'
 import { fileLinkTargets } from '../site/file-links.js'
 import { DEFAULT_SECTION_TYPE } from '@uniweb/core/section-type'
-import { translationContext, SITE_META_CONTEXT } from '../i18n/extract.js'
+import { translationContext, pageMetaContext, SITE_META_CONTEXT } from '../i18n/extract.js'
 import { authorableDeclaration, DECLARATION_KEYS } from '../site/fetch-shapes.js'
 import { createTranslationCollector, writeLocaleTranslations, writeFreeformTranslations, writeKept, unwrapLocalizedContent, isProseMirrorDoc } from './locale-sync.js'
 import { unwritableNodes } from '@uniweb/content-writer'
@@ -663,7 +663,7 @@ export function pageSectionsToFiles({ pageDir, pageSections, ctx, pageContext })
         freeformRelPath,
         freeformCandidates,
         writeId: fileSectionName(filePath) !== stableId,
-        context: pageContext ? translationContext({ stableId }, pageContext.route) : null,
+        context: pageContext ? translationContext({ stableId }, pageContext.route, ctx?.exclude) : null,
         media: ctx?.media ?? null,
         sameFile: ctx?.sameFile ?? null,
         fileLinks: ctx?.fileLinks ?? null,
@@ -1138,7 +1138,7 @@ function writeMdPage({ record, place, route, ctx, report, pageContext, sourceLoc
     freeformRelPath: buildFreeformPath({ stableId }, pageContext),
     freeformCandidates: freeformPathsFor({ stableId }, pageContext),
     writeId: stableId !== name,
-    context: translationContext({ stableId }, pageContext.route),
+    context: translationContext({ stableId }, pageContext.route, ctx?.exclude),
     media: ctx?.media ?? null,
     sameFile: ctx?.sameFile ?? null,
     fileLinks: ctx?.fileLinks ?? null,
@@ -1220,7 +1220,7 @@ function writePagesTree(pages, pagesDir, sourceLocale, report, ctx, routePrefix 
     // source value goes inline into page.yml below (pageRecordToYml unwraps it). In the page's
     // context, as the build translates them (`<route>:_meta`), so an override for one page comes back.
     // Each a plain-text field: the push sends a translation's words (`site.js::localizePageMeta`).
-    const meta = { page: canon, section: '_meta' }
+    const meta = pageMetaContext(canon, ctx.exclude)
     const text = { plainText: true }
     ctx.collector?.add(record.title, meta, text)
     ctx.collector?.add(record.label, meta, text)
@@ -2047,6 +2047,8 @@ export function siteContentDocumentToProject({ document, siteRoot, backend = nul
   const mountRoutes = followMountRoutes({ siteRoot, siteYml, pagesDir, document, backend, sourceLocale, prune, report })
   siteYml = mountRoutes.siteYml
   ctx.heldMounts = mountRoutes.held
+  // The branches the site doesn't translate: a translation read there comes back for its place alone (`translationContext`).
+  ctx.exclude = siteYml?.i18n?.exclude ?? null
   // A writable mount stays one under its new name.
   const writable = (writableMounts || []).map((segment) => mountRoutes.renamed.get(segment) ?? segment)
   // ⭐ WHERE EACH PAGE IS KEPT — found in the files by the build's rules (`page-files.js`), so a page

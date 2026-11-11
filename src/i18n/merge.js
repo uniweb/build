@@ -14,7 +14,7 @@
 
 import { computeHash } from './hash.js'
 import { loadFreeformTranslation } from './freeform.js'
-import { elementText, blockElements, translationContext, SITE_META_CONTEXT, imageNodes, TRANSLATED_IMAGE_ATTRS } from './extract.js'
+import { elementText, blockElements, translationContext, pageMetaContext, SITE_META_CONTEXT, imageNodes, TRANSLATED_IMAGE_ATTRS } from './extract.js'
 import { visitDataBlockStrings } from './data-strings.js'
 import { inlineMarkdownToProseMirror } from '@uniweb/content-reader'
 
@@ -63,25 +63,27 @@ function mergeTranslationsSync(siteContent, translations, fallbackToSource, data
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
   translateSiteMeta(translated.config, translations, fallbackToSource)
+  // A page the site doesn't translate takes only a translation written for its place (`translationContext`).
+  const exclude = siteContent.config?.i18n?.exclude
 
   for (const page of translated.pages || []) {
     const pageRoute = page.route || '/'
 
     // Translate page metadata
-    translatePageMeta(page, pageRoute, translations, fallbackToSource)
+    translatePageMeta(page, pageRoute, translations, fallbackToSource, exclude)
 
     // Translate section content
     for (const section of page.sections || []) {
-      translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel)
+      translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel, exclude)
     }
   }
 
   // Translate 404 page (stored as top-level notFound)
   if (translated.notFound) {
     const pageRoute = translated.notFound.route || '/404'
-    translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource)
+    translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource, exclude)
     for (const section of translated.notFound.sections || []) {
-      translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel)
+      translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel, exclude)
     }
   }
 
@@ -113,12 +115,14 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
   // Deep clone to avoid mutating original
   const translated = JSON.parse(JSON.stringify(siteContent))
   translateSiteMeta(translated.config, translations, fallbackToSource)
+  // A page the site doesn't translate takes only a translation written for its place (`translationContext`).
+  const exclude = siteContent.config?.i18n?.exclude
 
   for (const page of translated.pages || []) {
     const pageRoute = page.route || '/'
 
     // Translate page metadata (always hash-based)
-    translatePageMeta(page, pageRoute, translations, fallbackToSource)
+    translatePageMeta(page, pageRoute, translations, fallbackToSource, exclude)
 
     // Translate section content (with free-form check)
     for (const section of page.sections || []) {
@@ -126,7 +130,8 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
         fallbackToSource,
         locale,
         localesDir,
-        dataModel
+        dataModel,
+        exclude
       })
     }
   }
@@ -134,13 +139,14 @@ async function mergeTranslationsAsync(siteContent, translations, options) {
   // Translate 404 page (stored as top-level notFound)
   if (translated.notFound) {
     const pageRoute = translated.notFound.route || '/404'
-    translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource)
+    translatePageMeta(translated.notFound, pageRoute, translations, fallbackToSource, exclude)
     for (const section of translated.notFound.sections || []) {
       await translateSectionAsync(section, translated.notFound, translations, {
         fallbackToSource,
         locale,
         localesDir,
-        dataModel
+        dataModel,
+        exclude
       })
     }
   }
@@ -242,8 +248,8 @@ function translateSiteMeta(config, translations, fallbackToSource) {
   }
 }
 
-function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
-  const context = { page: pageRoute, section: '_meta' }
+function translatePageMeta(page, pageRoute, translations, fallbackToSource, exclude = null) {
+  const context = pageMetaContext(pageRoute, exclude)
   const translate = (value) =>
     toPlainText(lookupTranslation(value, context, translations, fallbackToSource))
 
@@ -287,8 +293,8 @@ function translatePageMeta(page, pageRoute, translations, fallbackToSource) {
 /**
  * Translate a section's content (synchronous, hash-based only)
  */
-function translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel = null) {
-  const context = translationContext(section, pageRoute)
+function translateSectionSync(section, pageRoute, translations, fallbackToSource, dataModel = null, exclude = null) {
+  const context = translationContext(section, pageRoute, exclude)
 
   if (section.content?.type === 'doc') {
     translateProseMirrorDoc(section.content, context, translations, fallbackToSource)
@@ -298,7 +304,7 @@ function translateSectionSync(section, pageRoute, translations, fallbackToSource
 
   // Recursively translate subsections
   for (const subsection of section.subsections || []) {
-    translateSectionSync(subsection, pageRoute, translations, fallbackToSource, dataModel)
+    translateSectionSync(subsection, pageRoute, translations, fallbackToSource, dataModel, exclude)
   }
 }
 
@@ -310,9 +316,9 @@ function translateSectionSync(section, pageRoute, translations, fallbackToSource
  * 2. Fall back to hash-based translation (element-by-element)
  */
 async function translateSectionAsync(section, page, translations, options) {
-  const { fallbackToSource, locale, localesDir, dataModel } = options
+  const { fallbackToSource, locale, localesDir, dataModel, exclude = null } = options
   const pageRoute = page.route || '/'
-  const context = translationContext(section, pageRoute)
+  const context = translationContext(section, pageRoute, exclude)
 
   // Check for free-form translation first
   const freeform = await loadFreeformTranslation(section, page, locale, localesDir)
@@ -750,6 +756,12 @@ function lookupTranslation(source, context, translations, fallbackToSource) {
 
   if (!translation) {
     return fallbackToSource ? source : source
+  }
+
+  // ⭐ On a page the site doesn't translate, only an override naming this place (`translationContext`).
+  if (context?.placeOnly) {
+    const own = typeof translation === 'object' ? translation.overrides?.[context.key ?? `${context.page}:${context.section}`] : undefined
+    return own || source
   }
 
   // Handle simple string translation

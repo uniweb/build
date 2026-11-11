@@ -13,14 +13,17 @@ import { join } from 'node:path'
 import { translationKeepsMarkup } from './merge.js'
 import { KEPT_FILE } from './locales.js'
 import { standingFlags } from '../uwx/locale-sync.js'
+import { isInExcludedBranch } from '@uniweb/projections'
 
 /**
  * Audit a locale file against the manifest
  * @param {string} localesPath - Path to locales directory
  * @param {string} locale - Locale code (e.g., 'es')
- * @returns {Promise<Object>} Audit result { locale, exists, total, valid, missing, stale }
+ * @param {Object} [options]
+ * @param {string[]} [options.exclude] - the site's `i18n.exclude`
+ * @returns {Promise<Object>} Audit result { locale, exists, total, valid, missing, stale, excluded }
  */
-export async function auditLocale(localesPath, locale) {
+export async function auditLocale(localesPath, locale, { exclude = null } = {}) {
   const manifestPath = join(localesPath, 'manifest.json')
   const localePath = join(localesPath, `${locale}.json`)
 
@@ -51,6 +54,7 @@ export async function auditLocale(localesPath, locale) {
   const valid = []
   const missing = []
   const stale = []
+  const excluded = []
   const losesMarkup = []
   const outdated = []
 
@@ -95,10 +99,13 @@ export async function auditLocale(localesPath, locale) {
   // Check for stale entries (in translations but not in manifest)
   for (const hash of translationHashes) {
     if (!manifestHashes.has(hash)) {
-      stale.push({
-        hash,
-        translation: getTranslationText(translations[hash])
-      })
+      const entry = { hash, translation: getTranslationText(translations[hash]) }
+      // ⭐ One written for a place on a page the site doesn't translate (`i18n.exclude`) applies there
+      // (`extract.js::translationContext`), and the manifest, which takes no string from such a page,
+      // can't judge it: it is listed apart, and `--clean` keeps it. ⛔ Until 2026-11-11 it was stale, and
+      // `--clean` deleted what a pull had brought back of an author's translation on such a page.
+      if (namesExcludedPlace(translations[hash], exclude)) excluded.push(entry)
+      else stale.push(entry)
     }
   }
 
@@ -109,9 +116,20 @@ export async function auditLocale(localesPath, locale) {
     valid,
     missing,
     stale,
+    excluded,
     losesMarkup,
     outdated
   }
+}
+
+// Whether an entry's overrides name a place in a branch `exclude` names: `<route>:<section>`, whose
+// route may hold a `:` of its own (`/blog/:slug:intro`).
+function namesExcludedPlace(entry, exclude) {
+  if (!exclude || !entry || typeof entry !== 'object') return false
+  return Object.keys(entry.overrides || {}).some((place) => {
+    const at = place.lastIndexOf(':')
+    return at > 0 && isInExcludedBranch(place.slice(0, at), exclude)
+  })
 }
 
 /**
@@ -199,6 +217,9 @@ export function formatAuditReport(results, options = {}) {
     lines.push(`  Valid:   ${result.valid.length} (${coverage}%)`)
     lines.push(`  Missing: ${result.missing.length}`)
     lines.push(`  Stale:   ${result.stale.length}`)
+    if (result.excluded?.length > 0) {
+      lines.push(`  For pages i18n.exclude names: ${result.excluded.length}  (each for one place there; --clean keeps them)`)
+    }
     if (result.losesMarkup?.length > 0) {
       lines.push(`  Loses markup: ${result.losesMarkup.length}  (links/bold in the source, plain in the translation)`)
     }

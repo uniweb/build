@@ -404,9 +404,11 @@ export function localizeScalar(value, sourceLocale, translations, context = null
  * @returns {string|undefined}
  */
 export function translationFor(entry, context) {
-  if (typeof entry === 'string') return entry
+  if (typeof entry === 'string') return context?.placeOnly ? undefined : entry
   if (!entry || typeof entry !== 'object') return undefined
   const override = context ? entry.overrides?.[contextKey(context)] : undefined
+  // ⭐ On a page the site doesn't translate, only an override naming this place (`translationContext`).
+  if (context?.placeOnly) return typeof override === 'string' ? override : undefined
   return typeof override === 'string' ? override : typeof entry.default === 'string' ? entry.default : undefined
 }
 
@@ -495,6 +497,8 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
   const kept = {} // { place: { '@'?, languages? } }, what `readKept` gives back
   const keptRead = new Set() // the places read, whether or not they keep anything
   const marks = { cleared: {}, outdated: {} } // what `addStructuralMap` was told of each row beyond its value
+  // The places read on a page the site doesn't translate, which only an override says (`translationContext`).
+  marks.placeOnly = new Set()
 
   function keepMeta(place, at) {
     keptRead.add(place)
@@ -528,6 +532,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
   // says it.
   function add(localizedValue, context = null, { plainText = false } = {}) {
     if (!isLocalizedMap(localizedValue)) return
+    if (context?.placeOnly) marks.placeOnly.add(contextKey(context))
     const source = localizedValue[sourceLocale]
     if (typeof source !== 'string' || source.length === 0) return
     const hash = computeHash(source)
@@ -558,6 +563,7 @@ export function createTranslationCollector(sourceLocale, { siteRoot = null, lang
   function addStructuralMap(locale, map, context = null, checks = null, notes = null) {
     if (locale === sourceLocale || !map || typeof map !== 'object' || Array.isArray(map) || !has(locale)) return
     const place = context ? contextKey(context) : ''
+    if (context?.placeOnly) marks.placeOnly.add(place)
     for (const [src, row] of Object.entries(notes?.cleared || {})) {
       ;((marks.cleared[locale] ||= {})[computeHash(src)] ||= {})[place] = row
     }
@@ -908,18 +914,22 @@ class SeenInContexts {
 // ⛔ Until 2026-10-17 values agreed only when spelled alike, and a pull rewrote an entry that says the
 // same thing another way: `[Faire un don](/contact)` to its label, a string a heading and a link
 // share into per-place overrides, a page title's `[Se connecter](/sign-in)` to its words.
-function reconcileTranslation(existing, seen, check = null) {
+// ⭐ A PLACE ON A PAGE THE SITE DOESN'T TRANSLATE (`placeOnly`) IS SAID BY ITS OWN OVERRIDE ALONE, as a
+// build and a push read it (`translationContext`): it never takes the default, nor decides it. So what an
+// author translated there in the app comes back as an override for that place, and reaches no other.
+function reconcileTranslation(existing, seen, check = null, placeOnly = null) {
   const own = existing && typeof existing === 'object' && existing.overrides && typeof existing.overrides === 'object' ? existing.overrides : {}
   const authoredDefault = typeof existing === 'string' ? existing : existing && typeof existing === 'object' ? existing.default : undefined
+  const only = (k) => k !== null && !!placeOnly?.has(k)
   // Each place read: its context's key (null where it has none), what it read, and what says that.
   const places = [
     ...(seen.plain !== undefined ? [[null, seen.plain, check?.plain ?? saysAsIs(seen.plain)]] : []),
     ...Object.entries(seen.values).map(([k, v]) => [k, v, check?.values?.[k] ?? saysAsIs(v)]),
   ]
-  const at = (k) => (k !== null && k in own ? own[k] : authoredDefault)
+  const at = (k) => (k !== null && k in own ? own[k] : only(k) ? undefined : authoredDefault)
   if (existing !== undefined && places.length && places.every(([k, , says]) => says(at(k)))) return existing
   // The places the default speaks for: those with no override of the author's own.
-  const free = places.filter(([k]) => k === null || !(k in own))
+  const free = places.filter(([k]) => k === null || (!(k in own) && !only(k)))
   let def = authoredDefault
   if (free.length) {
     let most = -1
@@ -928,15 +938,16 @@ function reconcileTranslation(existing, seen, check = null) {
       if (agree > most) [def, most] = [candidate, agree]
     }
   } else if (def === undefined) {
-    def = places.find(([k]) => k !== null)?.[1]
+    def = places.find(([k]) => k !== null && !only(k))?.[1]
   }
   const overrides = { ...own }
   for (const [k, read, says] of places) {
     if (k === null) continue
-    if (says(def)) delete overrides[k]
+    if (!only(k) && says(def)) delete overrides[k]
     else if (!(k in own && says(own[k]))) overrides[k] = read
   }
-  return Object.keys(overrides).length ? { default: def, overrides } : def
+  if (!Object.keys(overrides).length) return def
+  return def === undefined ? { overrides } : { default: def, overrides }
 }
 
 /**
@@ -1067,13 +1078,17 @@ function jsonObjectText(entries) {
  *
  * @returns {string|object|undefined} undefined: no entry
  */
-function settleEntry(existing, seen, check, cleared, outdated) {
+function settleEntry(existing, seen, check, cleared, outdated, placeOnly = null) {
   let own = existing
   if (own && typeof own === 'object' && 'outdated' in own) {
     const { outdated: _flag, ...rest } = own
     own = rest
   }
-  const rows = Object.entries(cleared || {})
+  // ⭐ A row on a page the site doesn't translate holds its source whatever the entry's default says
+  // (`translationContext`), so clearing it ends only an override naming its place, below.
+  const only = (place) => !!place && !!placeOnly?.has(place)
+  const rows = Object.entries(cleared || {}).filter(([place]) => !only(place))
+  const placeOnlyRows = Object.entries(cleared || {}).filter(([place]) => only(place))
   const places = rows.map(([place]) => place).filter(Boolean)
   const reads = seen instanceof SeenInContexts ? seen : seen === undefined ? new SeenInContexts() : new SeenInContexts(seen)
   // Whether the author's entry, pushed to these rows, gives them what they hold: their source. That is
@@ -1081,9 +1096,10 @@ function settleEntry(existing, seen, check, cleared, outdated) {
   const ownSaysThem = (value) => typeof value === 'string' && rows.every(([, row]) => row.says(value))
   let entry
   if (reads.plain !== undefined || Object.keys(reads.values).length > 0) {
-    entry = reconcileTranslation(own, reads, check)
+    entry = reconcileTranslation(own, reads, check, placeOnly)
     const readsElsewhere = typeof entry === 'string' ? entry : entry?.default
-    if (places.length && !ownSaysThem(readsElsewhere)) {
+    // With no default, a row holding its source is said already: nothing gives it a translation.
+    if (places.length && readsElsewhere !== undefined && !ownSaysThem(readsElsewhere)) {
       const overrides = { ...(entry && typeof entry === 'object' ? entry.overrides : {}) }
       for (const [place, row] of rows) if (place) overrides[place] = row.markdown
       entry = { default: readsElsewhere, overrides }
@@ -1095,6 +1111,13 @@ function settleEntry(existing, seen, check, cleared, outdated) {
     const rest = Object.fromEntries(Object.entries(own.overrides || {}).filter(([place]) => !places.includes(place)))
     const defaultStays = typeof own.default === 'string' && ownSaysThem(own.default)
     entry = defaultStays || Object.keys(rest).length ? { ...(defaultStays ? { default: own.default } : {}), ...(Object.keys(rest).length ? { overrides: rest } : {}) } : undefined
+  }
+  for (const [place, row] of placeOnlyRows) {
+    const override = entry && typeof entry === 'object' ? entry.overrides?.[place] : undefined
+    if (typeof override !== 'string' || row.says(override)) continue
+    const { [place]: _cleared, ...overrides } = entry.overrides
+    const { overrides: _all, ...rest } = entry
+    entry = Object.keys(overrides).length ? { ...rest, overrides } : Object.keys(rest).length ? rest : undefined
   }
   if (entry === undefined) return undefined
   if (outdated && Object.keys(outdated).length) {
@@ -1174,7 +1197,7 @@ export function writeLocaleTranslations(siteRoot, byLocale, subdir = '', says = 
     for (const key of new Set([...Object.keys(read), ...Object.keys(cleared)])) {
       // Nothing to say of a row that holds its source where the file has no entry for it, and no place reads one.
       if (!(key in read) && !(key in existing)) continue
-      entries[key] = settleEntry(existing[key], read[key], says?.[locale]?.[key], cleared[key], outdated[key])
+      entries[key] = settleEntry(existing[key], read[key], says?.[locale]?.[key], cleared[key], outdated[key], marks?.placeOnly)
     }
     const fresh = Object.keys(entries).filter((key) => !(key in existing) && entries[key] !== undefined).sort()
     const same = (key) => (entries[key] === undefined ? !(key in existing) : canonicalJson(existing[key]) === canonicalJson(entries[key]))

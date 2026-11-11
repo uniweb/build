@@ -93,7 +93,7 @@ import { readKept, restoreKept, contextKey, loadLocaleTranslations, localizeScal
 import { unwrapLocalized } from './backfill.js'
 import { loadFreeformTranslation } from '../i18n/freeform.js'
 import { resolveLocaleList } from '../i18n/locales.js'
-import { translationContext, SITE_META_CONTEXT, blockElements, elementText } from '../i18n/extract.js'
+import { translationContext, pageMetaContext, SITE_META_CONTEXT, blockElements, elementText } from '../i18n/extract.js'
 import { documentSourceLocale } from './source-locale.js'
 import { splitOpenGraph, openGraphValue, seoBesideOpenGraph } from './open-graph.js'
 import { isAuthoredPreview } from './authored-preview.js'
@@ -216,21 +216,22 @@ export function buildRouteOf(record, parentRoute, sourceLocale) {
 // either a STRUCTURAL map (from locales/{locale}.json, via localizeContentDoc) or,
 // when a FREE-FORM override file exists for that section+locale, the full body
 // (loadFreeformTranslation) — the override wins. Async because the free-form read
-// hits the filesystem.
-async function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot) {
+// hits the filesystem. A page in a branch `exclude` names (the site's `i18n.exclude`) takes only a
+// translation written for its place, as the build gives it (`translationContext`).
+async function localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot, exclude = null) {
   const freeformBase = localesDir(siteRoot)
   // What a pull kept for this push to send back (`readKept`).
   const kept = readKept(siteRoot)
   // What each section type declares its data blocks are, so a block is pushed as the build translates it.
   const dataModel = await dataBlockModels(siteRoot)
 
-  const localizeSection = async (record, page) => {
+  const localizeSection = async (record, page, exclude = null) => {
     if (!record.content) return
     const stableId = record.stable_id || record.$id
     // Resolved in the section's context, as the build resolves it (`translationContext`): a
     // context-specific override applies here and nowhere else. ⛔ Until 2026-09-26 every section was
     // resolved with none, so an override never reached a backend.
-    const context = translationContext({ stableId }, page?.route)
+    const context = translationContext({ stableId }, page?.route, exclude)
     let localized = localizeContentDoc(record.content, sourceLocale, targetLocales, translations, context, (tag) => dataModel(record.type, tag))
     const freeform = new Set()
     if (page) {
@@ -251,7 +252,7 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
 
   const visitSections = async (sections, page) => {
     for (const s of sections || []) {
-      await localizeSection(s, page)
+      await localizeSection(s, page, exclude)
       if (Array.isArray(s.$children)) await visitSections(s.$children, page)
     }
   }
@@ -262,7 +263,7 @@ async function localizeContentTree(pages, layoutSections, sourceLocale, targetLo
     for (const p of pgs || []) {
       const route = buildRouteOf(p, parentRoute, sourceLocale)
       const page = { route, id: p.stable_id }
-      localizePageMeta(p, route, sourceLocale, translations)
+      localizePageMeta(p, route, sourceLocale, translations, exclude)
       if (Array.isArray(p.page_sections)) await visitSections(p.page_sections, page)
       if (Array.isArray(p.$children)) await visitPages(p.$children, route)
     }
@@ -316,8 +317,8 @@ export function documentRows(doc, sourceLocale = documentSourceLocale(doc), only
 // override never reached a backend — nor, until the same day, an entry's default.
 // ⭐ Each is a plain-text slot, so a translation reaches it as text, as the build renders it
 // (`plainTextTargets`).
-function localizePageMeta(page, route, sourceLocale, translations) {
-  const context = { page: route, section: '_meta' }
+function localizePageMeta(page, route, sourceLocale, translations, exclude = null) {
+  const context = pageMetaContext(route, exclude)
   const again = (value) =>
     value && typeof value === 'object' && typeof value[sourceLocale] === 'string'
       ? plainTextTargets(localizeScalar(value[sourceLocale], sourceLocale, translations, context), sourceLocale)
@@ -1778,7 +1779,7 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // language count. Guarding this on `targetLocales.length` is what used to send
   // a bare doc from single-locale sites — see localizeContentDoc for why one
   // field with two shapes is a store that cannot validate its own declaration.
-  await localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot)
+  await localizeContentTree(pages, layoutSections, sourceLocale, targetLocales, translations, siteRoot, siteYml.i18n?.exclude)
 
   // ⭐ A link to a page is stored by the page's id where it has one (`page-refs.js`), so it
   // survives a rename in an editor, and a pull writes it back as the path a file shows.
