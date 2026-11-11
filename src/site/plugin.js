@@ -249,10 +249,21 @@ import { mountDevSubmit } from '../dev/submit-mount.js'
  * A shell carrying the page's look by the runtime's own rule (`@uniweb/runtime/ssr`, which a
  * prerendered page's seam writes too): the scheme class on its `<html>`, and the pre-paint script
  * where the browser decides. Unchanged for a site with no dark scheme. Loaded once.
+ *
+ * ⛔ A runtime without the rule (before @uniweb/runtime 1.6.2) stops with what to do. Until
+ * 2026-11-11 every page threw `(intermediate value) is not a function` instead: a runtime held back
+ * while this package moved, or a linked runtime whose SSR bundle wasn't rebuilt.
  */
 let writeAppearanceOf = null
 async function writeShellAppearance(html, appearance) {
-  writeAppearanceOf ||= import('@uniweb/runtime/ssr').then((runtime) => runtime.writePageAppearance)
+  writeAppearanceOf ||= import('@uniweb/runtime/ssr').then(({ writePageAppearance }) => {
+    if (typeof writePageAppearance === 'function') return writePageAppearance
+    throw new Error(
+      '@uniweb/runtime has no writePageAppearance, which this @uniweb/build needs (@uniweb/runtime 1.6.2 or later). ' +
+        'Update the Uniweb packages together: npx uniweb@latest update --yes. ' +
+        'For a linked @uniweb/runtime, rebuild its SSR bundle (pnpm build:ssr), then restart.'
+    )
+  })
   return (await writeAppearanceOf)(html, appearance)
 }
 
