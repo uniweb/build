@@ -164,7 +164,7 @@ describe('reading the file', () => {
 
   it('a file that is not a map is refused', () => {
     makeSite({ blueprint: '- signup\n' })
-    expect(() => readBlueprint(SITE)).toThrow(/blueprint\.yml is a map of `signup`, `teams`, `access` and `publicQueries`/)
+    expect(() => readBlueprint(SITE)).toThrow(/blueprint\.yml is a map of `signup`, `teams`, `access`, `publicQueries` and `integrations`/)
   })
 
   it('⭐ an unquoted `@` key says to quote it — YAML names only the line', () => {
@@ -439,5 +439,75 @@ describe('what a backend would leave out', () => {
   it('CONTROL — the file exists in the fixture', () => {
     makeSite()
     expect(existsSync(join(SITE, 'blueprint.yml'))).toBe(true)
+  })
+})
+
+// ⭐ `integrations:` — what a backend started from the site begins connected to, by one of the
+// foundation's mappings. Its shape is checked exactly as a backend checks it; its `mapping:` is
+// named in full, and nothing in a `filter` is touched.
+describe('integrations', () => {
+  const FILE = {
+    integrations: {
+      'meta-catalog': { label: 'Meta catalog', mapping: '@/vehicle-to-meta', channel: 'feed', trigger: 'on_fetch', enabled: true },
+      'dms-sold': { label: 'Sold to the DMS', mapping: '@/vehicle-to-dms', channel: 'http', trigger: 'on_match', filter: { where: { status: 'sold' } } },
+      'by-hand': { mapping: '@other/thing', channel: 'file', trigger: 'manual' },
+    },
+  }
+  const WIRE_I = {
+    integrations: {
+      'meta-catalog': { ...FILE.integrations['meta-catalog'], mapping: '@acme/vehicle-to-meta' },
+      'dms-sold': { ...FILE.integrations['dms-sold'], mapping: '@acme/vehicle-to-dms' },
+      'by-hand': FILE.integrations['by-hand'],
+    },
+  }
+
+  it('the example is taken', () => {
+    expect(blueprintProblems(FILE)).toEqual([])
+  })
+
+  it('refuses what a backend refuses, naming the line', () => {
+    const found = blueprintProblems({
+      integrations: {
+        Bad_Id: { mapping: '@/x', channel: 'file', trigger: 'manual' },
+        a: { mapping: '@/x', channel: 'feed', trigger: 'on_fetch', url: 'https://x' },
+        b: { channel: 'file', trigger: 'manual' },
+        c: { mapping: '@/x', channel: 'ftp', trigger: 'manual' },
+        d: { mapping: '@/x', channel: 'feed', trigger: 'manual' },
+        e: { mapping: '@/x', channel: 'http', trigger: 'on_create', enabled: true },
+        f: { mapping: '@/x', channel: 'file', trigger: 'manual', enabled: false },
+        g: { mapping: '@/x', channel: 'file', trigger: 'manual', filter: 'sold' },
+      },
+    })
+    expect(found).toEqual([
+      expect.stringMatching(/^`integrations\.Bad_Id`: an integration's id is lowercase/),
+      expect.stringMatching(/^`integrations\.a\.url` is not one of an integration's keys/),
+      expect.stringMatching(/^`integrations\.b` names no `mapping`/),
+      expect.stringMatching(/^`integrations\.c\.channel` is one of/),
+      expect.stringMatching(/^`integrations\.d`: a `feed` integration's trigger is one of `on_fetch` — not `manual`/),
+      expect.stringMatching(/^`integrations\.e\.enabled`: a `http` integration is switched on by its owner/),
+      expect.stringMatching(/^`integrations\.f\.enabled` is `true`, or left out/),
+      expect.stringMatching(/^`integrations\.g\.filter` is a map/),
+    ])
+  })
+
+  it('names each mapping in full on the wire, and back as the file spells it', () => {
+    expect(blueprintForWire(FILE, '@acme')).toEqual(WIRE_I)
+    expect(blueprintFromWire(WIRE_I, { scope: '@acme' })).toEqual(FILE)
+    expect(sameBlueprint(blueprintForWire(FILE, '@acme'), WIRE_I)).toBe(true)
+  })
+
+  it('a pull keeps a full name the file already wrote for the same mapping', () => {
+    const local = { integrations: { x: { mapping: '@acme/vehicle-to-meta', channel: 'feed', trigger: 'on_fetch' } } }
+    const wire = { integrations: { x: { mapping: '@acme/vehicle-to-meta', channel: 'feed', trigger: 'on_fetch' } } }
+    expect(blueprintFromWire(wire, { scope: '@acme', local })).toEqual(local)
+  })
+
+  it('warns of a mapping the site\'s foundations do not declare, never refuses it', () => {
+    const declared = { types: new Set(), mappings: new Set(['@acme/vehicle-to-meta']) }
+    const blueprint = { integrations: { a: FILE.integrations['meta-catalog'], b: { ...FILE.integrations['meta-catalog'], mapping: '@/typo' } } }
+    expect(blueprintWarnings(blueprint, { scope: '@acme', declared })).toEqual([
+      expect.stringMatching(/^blueprint\.yml: `integrations\.b\.mapping` names a mapping none of this site's foundations declares/),
+    ])
+    expect(blueprintWarnings(blueprint, { scope: '@acme', declared: { types: null, mappings: null } })).toEqual([])
   })
 })

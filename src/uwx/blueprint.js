@@ -13,6 +13,8 @@
  *     all: { sales: edit }             # a team, or members, to read or edit
  * publicQueries:                       # what visitors who are not signed in may read
  *   '@/vehicle': { whole: true, where: { status: { in: [available, pending] } } }
+ * integrations:                        # what a new backend starts connected to, by a mapping
+ *   meta-catalog: { label: Meta catalog, mapping: '@/vehicle-to-meta', channel: feed, trigger: on_fetch, enabled: true }
  * ```
  *
  * ⭐ IT IS THE `backend` SERVICE'S, KEPT IN A FILE OF ITS OWN. A push sends it in that service's
@@ -24,7 +26,8 @@
  * full name for any other, as `data:` and `queries.yml` name types — and a push names each in full
  * by the rule every ref it sends follows (`qualifyRef`, with the scope `siteSelfScope` reads). The
  * backend never resolves an `@/x`. A pull writes `@/x` back, and keeps a name the file already
- * spells another way when it names the same type.
+ * spells another way when it names the same type. An integration's `mapping:` — one of the
+ * foundation's mappings (`src/mappings/`) — is named the same way; nothing in its `filter` is.
  *
  * ⭐ ITS SHAPE IS THE BACKEND'S, AND THE BACKEND CHECKS IT AT EVERY DOOR THAT WRITES THE ROW. The
  * checks here come earlier — a build, a push, `uniweb doctor`, offline — and refuse no more than
@@ -87,9 +90,20 @@ function stable(value) {
 export function blueprintForWire(blueprint, scope) {
   const out = {}
   for (const [key, value] of Object.entries(blueprint)) {
-    out[key] = TYPE_KEYS.includes(key) && isMap(value) ? qualifiedTypes(key, value, scope) : value
+    if (TYPE_KEYS.includes(key) && isMap(value)) out[key] = qualifiedTypes(key, value, scope)
+    else if (key === 'integrations' && isMap(value)) out[key] = mappingsNamed(value, (m) => qualifyRef(m, scope))
+    else out[key] = value
   }
   return out
+}
+
+/** Each integration line with its `mapping:` renamed by `rename`; nothing else in the line moves. */
+function mappingsNamed(integrations, rename) {
+  return Object.fromEntries(
+    Object.entries(integrations).map(([id, line]) =>
+      isMap(line) && typeof line.mapping === 'string' ? [id, { ...line, mapping: rename(line.mapping) }] : [id, line]
+    )
+  )
 }
 
 /**
@@ -137,6 +151,10 @@ function qualifiedTypes(key, map, scope) {
 export function blueprintFromWire(wire, { scope = null, own = null, local = null } = {}) {
   const out = {}
   for (const [key, value] of Object.entries(isMap(wire) ? wire : {})) {
+    if (key === 'integrations' && isMap(value)) {
+      out[key] = mappingsNamed(value, (m) => mappingAsFileSpells(m, local?.integrations, scope))
+      continue
+    }
     if (!TYPE_KEYS.includes(key) || !isMap(value)) {
       out[key] = value
       continue
@@ -147,6 +165,21 @@ export function blueprintFromWire(wire, { scope = null, own = null, local = null
     )
   }
   return out
+}
+
+/**
+ * A mapping's full name → as a pull writes it: as the file already spells it when it names the same
+ * one, else `@/x` when it is in the site's foundation's scope. A foundation registers only its own
+ * mappings, so every mapping in that scope is the foundation's.
+ */
+function mappingAsFileSpells(full, localIntegrations, scope) {
+  if (isMap(localIntegrations)) {
+    for (const line of Object.values(localIntegrations)) {
+      if (isMap(line) && typeof line.mapping === 'string' && qualifyRef(line.mapping, scope) === full) return line.mapping
+    }
+  }
+  const org = bareOrg(scope)
+  return org && full.startsWith(`@${org}/`) ? `@/${full.slice(org.length + 2)}` : full
 }
 
 /** Each type a file's key names, in full → as the file spells it. */
@@ -247,7 +280,7 @@ function saysTheSame(local, wire, scope) {
  * @param {object|null} blueprint - a checked blueprint (`refuseUnreadableBlueprint`)
  * @param {object} p
  * @param {string|null} p.scope - the scope the site's `@/x` resolve into
- * @param {{ types: Set<string>|null }} p.declared - what `siteDeclaredTypes` read
+ * @param {{ types: Set<string>|null, mappings?: Set<string>|null }} p.declared - what `siteDeclaredTypes` read
  * @param {boolean} [p.sending] - whether a push is about to send it
  * @returns {string[]}
  */
@@ -276,6 +309,24 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
       }
     }
   }
+  for (const [id, line] of Object.entries(isMap(blueprint.integrations) ? blueprint.integrations : {})) {
+    const mapping = isMap(line) ? line.mapping : null
+    if (typeof mapping !== 'string') continue
+    const at = `integrations.${id}.mapping`
+    if (!scoped && mapping.startsWith('@/') && sending) {
+      out.push(
+        `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own mapping, and the foundation has no scope yet, ` +
+          "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
+          "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
+      )
+    }
+    if (declared?.mappings && !declared.mappings.has(qualifyRef(mapping, scope))) {
+      out.push(
+        `${BLUEPRINT_FILE}: \`${at}\` names a mapping none of this site's foundations declares, so a backend ` +
+          `started from this site leaves the line out. Check the name against the foundation's src/mappings/.`
+      )
+    }
+  }
   return out
 }
 
@@ -294,7 +345,7 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
  */
 export async function siteBlueprintWarnings(siteRoot, { scope = null, foundationDir, siteYml, primary, sending = false } = {}) {
   const blueprint = readBlueprint(siteRoot)
-  if (!isMap(blueprint) || !TYPE_KEYS.some((key) => isMap(blueprint[key]) && Object.keys(blueprint[key]).length)) return []
+  if (!isMap(blueprint) || ![...TYPE_KEYS, 'integrations'].some((key) => isMap(blueprint[key]) && Object.keys(blueprint[key]).length)) return []
   const yml = siteYml ?? readSiteYml(siteRoot)
   const declared = await siteDeclaredTypes(siteRoot, yml, { scope, foundationDir, primary })
   return blueprintWarnings(blueprint, { scope, declared, sending })
@@ -324,10 +375,12 @@ function readSiteYml(siteRoot) {
  * @param {string} [opts.foundationDir] - the site's foundation, when a push was handed its folder
  * @param {object|null} [opts.primary] - the site's foundation's schema, already read by the caller
  *        (the static build's `foundationSections`)
- * @returns {Promise<{ types: Set<string>|null, unread: string[] }>}
+ * @returns {Promise<{ types: Set<string>|null, mappings: Set<string>|null, unread: string[] }>} `mappings`:
+ *          the mappings they define, in full, null when `types` is
  */
 export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, foundationDir, primary } = {}) {
   const types = new Set()
+  const mappings = new Set()
   const unread = []
   const dir = foundationDir ? resolve(foundationDir) : localFoundationDir(siteRoot, siteYml)
   if (!dir) {
@@ -335,7 +388,10 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
   } else {
     const schema = primary !== undefined && !foundationDir ? primary : await foundationSchema(dir)
     if (!schema) unread.push('its foundation could not be read')
-    else for (const ref of Object.keys(schema.dataSchemas || {})) types.add(qualifyRef(ref, scope))
+    else {
+      for (const ref of Object.keys(schema.dataSchemas || {})) types.add(qualifyRef(ref, scope))
+      for (const ref of Object.keys(schema._mappings || {})) mappings.add(qualifyRef(ref, scope))
+    }
   }
   for (const entry of Array.isArray(siteYml?.extensions) ? siteYml.extensions : []) {
     const declared = typeof entry === 'string' ? entry : isMap(entry) ? entry.url : null
@@ -358,8 +414,9 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
       }
       types.add(qualifyRef(ref, extScope))
     }
+    for (const ref of Object.keys(schema._mappings || {})) mappings.add(qualifyRef(ref, extScope))
   }
-  return { types: unread.length ? null : types, unread }
+  return { types: unread.length ? null : types, mappings: unread.length ? null : mappings, unread }
 }
 
 /** The site's foundation's folder, when it is in the project — else null (a catalog ref, a URL). */

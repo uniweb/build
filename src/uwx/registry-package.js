@@ -11,7 +11,9 @@
  *   entities:
  *     - model: "@uniweb/data-schema"     # one per data schema this foundation DEFINES
  *       …the §3 declaration (from data-schema.js's lowering)…
- *     - model: "@uniweb/foundation-schema"   # the foundation (info/schema/i18n/data-schemas)
+ *     - model: "@uniweb/mapping-schema"  # one per mapping this foundation defines (src/mappings/)
+ *       name, label?, description?, rules: { model, keys_from?, …the rest as written }
+ *     - model: "@uniweb/foundation-schema"   # the foundation (info/schema/i18n/data-schemas/mappings)
  *
  * `buildSchemaOnlyPackage` (below) assembles the foundation-LESS variant — only
  * `@uniweb/data-schema` entities, no foundation-schema — for a schemas-only
@@ -34,6 +36,7 @@ import { checkFoundationName, checkRegistrationScope, splitFoundationName } from
 
 const FOUNDATION_SCHEMA = '@uniweb/foundation-schema'
 const DATA_SCHEMA = '@uniweb/data-schema'
+const MAPPING_SCHEMA = '@uniweb/mapping-schema'
 
 // @uniweb/build's own version, for the exporter envelope when the caller supplies
 // none. Safe fallback if package.json isn't reachable (e.g. bundled contexts).
@@ -81,16 +84,22 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
     registrationScope(self.name, scope)
   )
 
+  const mappingEntities = buildMappingEntities(schema._mappings || {}, scoped)
+
   const foundationEntity = {
     model: FOUNDATION_SCHEMA,
     info: buildInfo(self, org, digest, runtime),
     schema: buildSchemaBlob(schema, org),
     i18n: { locales: loadI18nLocales(foundationDir) },
     'data-schemas': { refs: buildRefs(dataSchemas, scoped) },
+    ...(mappingEntities.length && {
+      mappings: { refs: mappingEntities.map((e) => ({ name: e.name })).sort((a, b) => a.name.localeCompare(b.name)) },
+    }),
   }
 
-  // Data schemas first so the foundation's refs always resolve (§5 step 5).
-  return wrapEntities([...dataSchemaEntities, foundationEntity], exporter, exportedAt)
+  // Data schemas, then mappings, then the foundation: a backend installs them in the order they
+  // arrive, and each names only what came before it or is already registered.
+  return wrapEntities([...dataSchemaEntities, ...mappingEntities, foundationEntity], exporter, exportedAt)
 }
 
 /**
@@ -165,6 +174,47 @@ function buildDataSchemaEntities(dataSchemas, scope) {
       ...toDataSchemaDeclaration(normalized, { name: scoped(ref), resolveName: scoped, resolveOptions }),
     }))
   return { entities: referencedFirst(entities), scoped, org }
+}
+
+/**
+ * One `@uniweb/mapping-schema` entity per mapping the foundation defines (`schema._mappings`,
+ * `foundation/mappings.js`): its identity flat, as a data schema's is, and the rest of the file under
+ * `rules` — the envelope's `model:` names the exchange type, so the mapping's own `model:` cannot sit
+ * beside it. `rules.model` and `rules.keys_from` are named in full; nothing else in `rules` is
+ * touched, since a backend judges it. A mapping another one names in `keys_from` comes first.
+ *
+ * @param {Object<string, object>} mappings - `{ '@/<name>': declaration }`
+ * @param {(ref: string) => string} scoped - `@/x` → the registration scope's name
+ * @returns {object[]}
+ */
+function buildMappingEntities(mappings, scoped) {
+  const entities = Object.entries(mappings)
+    .filter(([ref]) => ref.startsWith('@/'))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([ref, decl]) => {
+      const { label, description, ...rules } = decl
+      if (typeof rules.model === 'string') rules.model = scoped(rules.model)
+      if (typeof rules.keys_from === 'string') rules.keys_from = scoped(rules.keys_from)
+      return {
+        model: MAPPING_SCHEMA,
+        name: scoped(ref),
+        ...(label !== undefined && { label }),
+        ...(description !== undefined && { description }),
+        rules,
+      }
+    })
+  const byName = new Map(entities.map((e) => [e.name, e]))
+  const ordered = []
+  const state = new Set()
+  const visit = (entity) => {
+    if (state.has(entity.name)) return // done, or on the walk now — a cycle keeps the walk's order
+    state.add(entity.name)
+    const from = entity.rules.keys_from
+    if (from !== entity.name && byName.has(from)) visit(byName.get(from))
+    ordered.push(entity)
+  }
+  for (const entity of entities) visit(entity)
+  return ordered
 }
 
 /**
@@ -258,7 +308,7 @@ function buildInfo(self, org, digest, runtime) {
 }
 
 // The foundation schema an editor reads: the whole renderable schema.json MINUS identity
-// and MINUS dataSchemas, shipped as one object the backend stores and serves, and never
+// and MINUS dataSchemas and _mappings (each registered as its own entity), shipped as one object the backend stores and serves, and never
 // reads into (custodian).
 //
 // ⭐ IN ITS NORMALIZED FORM — `schemaFormat: 3` (`@uniweb/schemas/foundation`, ruled
@@ -271,7 +321,7 @@ function buildInfo(self, org, digest, runtime) {
 // It throws for a `data:` value that cannot be normalized — an inline field map that is
 // not a valid data schema — naming the component and the key; the build warns of it first.
 function buildSchemaBlob(schema, org) {
-  const { dataSchemas: _ds, ...rest } = schema
+  const { dataSchemas: _ds, _mappings: _m, ...rest } = schema
   // Every key hoisted into `info` is stripped here, so the wire carries each
   // fact ONCE. Two copies of one fact is a drift liability, and the copy inside
   // an opaque blob is the one nobody would think to update.

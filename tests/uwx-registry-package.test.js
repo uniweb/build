@@ -489,3 +489,72 @@ describe('buildSchemaOnlyPackage — a picklist names the section of its choices
     expect(() => one('@std/lists')).toThrow(/a Model this package does not define — name the section that holds them: '@std\/lists\/<section>'/)
   })
 })
+
+// ⭐ Mappings ride in the register `.uwx` beside the data schemas: identity flat, the rest under
+// `rules`, names in full,
+// data schemas → mappings → foundation, a `keys_from` target before the mapping naming it.
+describe('buildRegistryPackage — mappings', () => {
+  const schema = {
+    ...schemaJson(),
+    _mappings: {
+      '@/vehicle-to-meta': {
+        label: 'Meta catalog',
+        model: '@/article',
+        direction: 'out',
+        shape: 'list',
+        format: { type: 'csv' },
+        key: 'id',
+        keys_from: '@/dms-inventory',
+        fields: [{ title: 'listing.title' }],
+      },
+      '@/dms-inventory': { model: '@std/person', direction: 'in', shape: 'list', format: { type: 'csv' } },
+    },
+  }
+  const doc = buildRegistryPackage({ schema, exportedAt: '2026-11-11T00:00:00Z' })
+  const kinds = doc.entities.map((e) => e.model)
+
+  it('one @uniweb/mapping-schema entity per mapping, in the agreed bytes', () => {
+    expect(doc.entities.find((e) => e.name === '@acme/vehicle-to-meta')).toEqual({
+      model: '@uniweb/mapping-schema',
+      name: '@acme/vehicle-to-meta',
+      label: 'Meta catalog',
+      rules: {
+        model: '@acme/article',
+        direction: 'out',
+        shape: 'list',
+        format: { type: 'csv' },
+        key: 'id',
+        keys_from: '@acme/dms-inventory',
+        fields: [{ title: 'listing.title' }],
+      },
+    })
+  })
+
+  it('a full name passes through; an absent label stays absent', () => {
+    const e = doc.entities.find((x) => x.name === '@acme/dms-inventory')
+    expect(e.rules.model).toBe('@std/person')
+    expect('label' in e).toBe(false)
+  })
+
+  it('data schemas, then mappings (keys_from target first), then the foundation', () => {
+    expect(kinds.lastIndexOf('@uniweb/data-schema')).toBeLessThan(kinds.indexOf('@uniweb/mapping-schema'))
+    expect(kinds.at(-1)).toBe('@uniweb/foundation-schema')
+    const names = doc.entities.filter((e) => e.model === '@uniweb/mapping-schema').map((e) => e.name)
+    expect(names).toEqual(['@acme/dms-inventory', '@acme/vehicle-to-meta'])
+  })
+
+  it('the foundation names them in a sorted `mappings.refs`, and its editor blob does not carry them', () => {
+    const f = doc.entities.at(-1)
+    expect(f.mappings).toEqual({ refs: [{ name: '@acme/dms-inventory' }, { name: '@acme/vehicle-to-meta' }] })
+    expect(JSON.stringify(f.schema)).not.toContain('vehicle-to-meta')
+  })
+
+  it('no @/ is left in the bytes', () => {
+    expect(JSON.stringify(doc.entities.filter((e) => e.model === '@uniweb/mapping-schema'))).not.toContain('"@/')
+  })
+
+  it('a foundation with no mappings sends no `mappings` Section', () => {
+    const plain = buildRegistryPackage({ schema: schemaJson() })
+    expect('mappings' in plain.entities.at(-1)).toBe(false)
+  })
+})

@@ -23,7 +23,7 @@ import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 export const BLUEPRINT_FILE = 'blueprint.yml'
 
 /** What the file holds, in the order a pull writes it. */
-export const BLUEPRINT_KEYS = Object.freeze(['signup', 'teams', 'access', 'publicQueries'])
+export const BLUEPRINT_KEYS = Object.freeze(['signup', 'teams', 'access', 'publicQueries', 'integrations'])
 
 /** The two keys whose entries are types. */
 export const TYPE_KEYS = Object.freeze(['access', 'publicQueries'])
@@ -33,6 +33,23 @@ const LEVELS = Object.freeze(['read', 'edit'])
 const ACCESS_KEYS = Object.freeze(['add', 'all'])
 const QUERY_KEYS = Object.freeze(['whole', 'where', 'sort', 'limit'])
 const TEAM_KEYS = Object.freeze(['label'])
+
+/**
+ * An integration line, as a backend takes it. Refused here exactly as a backend refuses them, and no
+ * more: a line this takes, a backend takes.
+ */
+const INTEGRATION_KEYS = Object.freeze(['label', 'mapping', 'channel', 'trigger', 'filter', 'enabled'])
+const CHANNELS = Object.freeze(['file', 'feed', 'email', 'http'])
+const TRIGGERS = Object.freeze(['manual', 'on_fetch', 'on_create', 'on_match'])
+/** Each channel → the triggers it pairs with. */
+const PAIRS = Object.freeze({
+  file: ['manual'],
+  feed: ['on_fetch'],
+  email: ['on_create', 'on_match', 'manual'],
+  http: ['on_create', 'on_match', 'manual'],
+})
+/** The channels a line may switch on with `enabled: true`. */
+const ENABLEABLE = Object.freeze(['file', 'feed'])
 
 /** In `all`, every member of the home org: the one name there that is not a team. */
 const MEMBERS = 'members'
@@ -133,6 +150,7 @@ export function blueprintProblems(blueprint) {
   if (teams !== undefined) found.push(...teamProblems(teams))
   if (blueprint.access !== undefined) found.push(...accessProblems(blueprint.access, teamIds))
   if (blueprint.publicQueries !== undefined) found.push(...publicQueryProblems(blueprint.publicQueries))
+  if (blueprint.integrations !== undefined) found.push(...integrationProblems(blueprint.integrations))
   return found
 }
 
@@ -267,6 +285,79 @@ function publicQueryProblems(queries) {
     }
   }
   return found
+}
+
+function integrationProblems(integrations) {
+  if (!isMap(integrations)) {
+    return [
+      `\`integrations\` is a map of integrations by id — \`integrations: { meta-catalog: { mapping: '@/vehicle-to-meta', channel: feed, trigger: on_fetch } }\` — not ${described(integrations)}.`,
+    ]
+  }
+  const found = []
+  for (const [id, line] of Object.entries(integrations)) {
+    const at = `integrations.${id}`
+    if (!TEAM_ID.test(id)) {
+      found.push(`\`${at}\`: an integration's id is lowercase letters, digits and dashes — its name goes in its \`label\`.`)
+      continue
+    }
+    if (!isMap(line)) {
+      found.push(`\`${at}\` is a map of ${listed(INTEGRATION_KEYS)} — not ${described(line)}.`)
+      continue
+    }
+    for (const key of Object.keys(line)) {
+      if (!INTEGRATION_KEYS.includes(key)) {
+        found.push(
+          `\`${at}.${key}\` is not one of an integration's keys, which are ${listed(INTEGRATION_KEYS)}. ` +
+            'An address, a URL or a key is the owner\'s to give in the admin app, never the file\'s.'
+        )
+      }
+    }
+    if ('label' in line && (typeof line.label !== 'string' || !line.label.trim())) {
+      found.push(`\`${at}.label\` is the integration's name — not ${described(line.label)}.`)
+    }
+    if (!('mapping' in line)) {
+      found.push(`\`${at}\` names no \`mapping\`: one of the foundation's own is \`mapping: '@/<name>'\`.`)
+    } else {
+      const name = refNameProblem(`${at}.mapping`, line.mapping, 'mapping')
+      if (name) found.push(name)
+    }
+    const channelOk = CHANNELS.includes(line.channel)
+    const triggerOk = TRIGGERS.includes(line.trigger)
+    if (!channelOk) found.push(`\`${at}.channel\` is one of ${listed(CHANNELS)} — not ${described(line.channel)}.`)
+    if (!triggerOk) found.push(`\`${at}.trigger\` is one of ${listed(TRIGGERS)} — not ${described(line.trigger)}.`)
+    if (channelOk && triggerOk && !PAIRS[line.channel].includes(line.trigger)) {
+      found.push(`\`${at}\`: a \`${line.channel}\` integration's trigger is one of ${listed(PAIRS[line.channel])} — not \`${line.trigger}\`.`)
+    }
+    if ('filter' in line && !isMap(line.filter)) {
+      found.push(`\`${at}.filter\` is a map — \`filter: { where: { status: sold } }\` — not ${described(line.filter)}.`)
+    }
+    if ('enabled' in line) {
+      if (line.enabled !== true) {
+        found.push(
+          typeof line.enabled === 'string' && SWITCH_WORDS.test(line.enabled.trim())
+            ? `\`${at}.enabled\` is the text \`${line.enabled}\` — YAML reads yes, no, on and off as words. Write \`enabled: true\`, or leave it out.`
+            : `\`${at}.enabled\` is \`true\`, or left out — not ${described(line.enabled)}.`
+        )
+      } else if (channelOk && !ENABLEABLE.includes(line.channel)) {
+        found.push(
+          `\`${at}.enabled\`: a \`${line.channel}\` integration is switched on by its owner in the admin app, ` +
+            'once its address is given. Leave `enabled` out.'
+        )
+      }
+    }
+  }
+  return found
+}
+
+/** A name that must be `@/x` or `@scope/x`, or null. */
+function refNameProblem(at, ref, what) {
+  try {
+    parseSchemaRef(ref)
+    return null
+  } catch {
+    const bare = String(ref).replace(/^@?\/?/, '')
+    return `\`${at}\` names no ${what}: one of the foundation's own is \`'@/${bare}'\`, and any other is named in full, \`'@scope/${bare}'\`.`
+  }
 }
 
 /** A type's name is `@/x` or `@scope/x` (`parseSchemaRef`), or null. */

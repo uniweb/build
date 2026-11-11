@@ -23,6 +23,7 @@ import { normalizeData, schemaDeclarationOf } from '@uniweb/schemas/foundation'
 import { rootListSection } from '@uniweb/schemas/conform'
 import { SECTION_PARAMS, SECTION_KEYS, stickyDeclaration, underHeaderDeclaration, heightDeclaration } from '@uniweb/schemas/section'
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
+import { buildMappingMap } from './foundation/mappings.js'
 import {
   composeSupports,
   deriveRecordsSupport,
@@ -1342,6 +1343,10 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
     { srcDir },
   )
 
+  // The mappings it defines — every file in its `mappings/` folder (`foundation/mappings.js`),
+  // registered beside its data schemas. Editor-time: `_mappings`, never on a page.
+  const mappings = await buildMappingMap(srcDir, { ownTypes: ownSchemaRefs(srcDir) })
+
   // Discover layouts from src/layouts/
   const layouts = await discoverLayoutsInPath(srcDir)
   // The layout a page that names none renders with — the entry gets the same answer
@@ -1423,6 +1428,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null) 
     },
     // Layout metadata (full, for editor)
     ...(Object.keys(dataSchemas).length > 0 && { dataSchemas }),
+    ...(Object.keys(mappings).length > 0 && { _mappings: mappings }),
     ...(Object.keys(layouts).length > 0 && { _layouts: layouts }),
     ...components,
   }
