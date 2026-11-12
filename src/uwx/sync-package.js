@@ -122,6 +122,37 @@ function collectReferencedModels(node, acc) {
 // with its serve URL.
 const isReadersText = (node, key) => key === 'text' && node.type === 'text'
 
+/**
+ * The site-root pictures that software other than the site's pages fetches by their address: the
+ * favicon, the touch icon a phone puts on its home screen, the site's card picture (`info.preview`),
+ * and every social image (`seo`, the site's and each page's). A push uploads them as they are,
+ * because what fetches them takes a PNG icon or a JPEG or PNG picture, not the WebP a page's
+ * picture is prepared to.
+ *
+ * @param {object|null} siteDoc - the site-content document
+ * @returns {Set<string>}
+ */
+function outsideAssetRefs(siteDoc) {
+  const refs = new Set()
+  if (!siteDoc) return refs
+  const take = (value) => {
+    if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) refs.add(value)
+    else walkEntityAssets(value, (ref) => ref.startsWith('/') && refs.add(ref))
+  }
+  take(siteDoc.info?.favicon)
+  take(siteDoc.info?.preview)
+  take(siteDoc.settings?.touch_icon)
+  take(siteDoc.settings?.seo)
+  const visit = (pages) => {
+    for (const page of pages || []) {
+      take(page.seo)
+      visit(page.$children)
+    }
+  }
+  visit(siteDoc.pages)
+  return refs
+}
+
 // Invoke visitor(ref) for every local asset path string anywhere in the document.
 function walkEntityAssets(node, visitor) {
   if (typeof node === 'string') {
@@ -295,7 +326,7 @@ function rewriteEntityAssets(node, map, ids, bare = null) {
  *   siteContent: { buffer, entityCount, index, models }|null,
  *   records: { buffer, entityCount, index, models, links }|null,
  *   hashes: Object<string,string>, warnings: string[], refusals: string[],
- *   skipped: number, localAssets: string[], applied: object, namesNew: string[],
+ *   skipped: number, localAssets: string[], outsideAssets: string[], applied: object, namesNew: string[],
  *   recordItemIdentity: { stamped: number, unknown: number, unbanked: string[] } }>}
  *   Each record entry of `records.index` carries `lists`: the record's list items as
  *   sent (`record-items.js::recordItemLists`), for the caller to bank against the
@@ -548,6 +579,9 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     if (sitePath(face?.src)) localAssetSet.add(face.src)
   }
   const localAssets = [...localAssetSet]
+  // ⭐ The local pictures other software fetches by their address, which a push uploads as they are
+  // (`outsideAssetRefs`). Every other picture is one a page draws, and is prepared before it is stored.
+  const outsideAssets = [...outsideAssetRefs(siteDoc)].filter((ref) => localAssetSet.has(ref))
 
   // ⭐ THE IDENTITY OF A RECORD'S LIST ITEMS (`record-items.js`), taken on each document as it
   // will be sent — after every rewrite above. `opts.recordItemUuids` is the caller's bank: per
@@ -719,7 +753,7 @@ export async function emitSyncPackages(siteRoot, opts = {}) {
     // Records that name a record this push creates — see `namesNew` above.
     namesNew,
     refusals,
-    localAssets, applied,
+    localAssets, outsideAssets, applied,
     // The files a push uploads for its file records, each `{ ref, path, contentType }` — the file, and
     // a PDF's preview — and for its sections' co-located media, each `{ ref, path }`. Uploaded through
     // the media lane; `ref` is the key the second emit rewrites.

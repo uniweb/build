@@ -93,6 +93,13 @@ describe('bare-string asset references', () => {
     expect(pkg.localAssets).toEqual(expect.arrayContaining(Object.keys(SERVED)))
   })
 
+  it('⭐ the ones other software fetches are named, to go up as they are: the card, the favicon and every social image', async () => {
+    const pkg = await emitSyncPackages(project())
+    expect([...pkg.outsideAssets].sort()).toEqual(['/f.png', '/images/card.png', '/og.png', '/page-og.png'])
+    // A picture a page draws is not among them, and is prepared.
+    expect(pkg.outsideAssets).not.toContain('/param.png')
+  })
+
   it('ride the wire as the plain serve URL — and no identity attr lands on info', async () => {
     const doc = siteDocOf(await emitSyncPackages(project(), { assetRewrite: SERVED, assetIds: IDS }))
     expect(doc.info.preview).toBe(SERVED['/images/card.png'])
@@ -187,6 +194,8 @@ describe('the touch icon — sent only where the deployment takes it', () => {
   it('⭐ is surfaced for upload, rides as its serve URL, and pulls back as the path', async () => {
     const root = withTouchIcon()
     expect((await emitSyncPackages(root, TAKES)).localAssets).toContain('/touch-icon.png')
+    // A phone takes a PNG for its home screen, so the icon goes up as it is.
+    expect((await emitSyncPackages(root, TAKES)).outsideAssets).toContain('/touch-icon.png')
     const doc = siteDocOf(await emitSyncPackages(root, { ...TAKES, assetRewrite: SERVED_TOUCH, assetIds: IDS_TOUCH }))
     expect(doc.settings.touch_icon).toBe(TOUCH)
     // A bare string, like the favicon: no identity attr lands beside it.
