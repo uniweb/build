@@ -531,8 +531,8 @@ describe('integrations', () => {
   })
 })
 
-// ⭐ `vendor:` — a vendor function the platform runs in place of an address, on an `http` line:
-// `'@/courses#grade'`, a vendor file the site's foundations carry and the function it exports. The
+// ⭐ `vendor:` — a compute function the platform runs in place of an address, on an `http` line:
+// `'@/courses#grade'`, a compute file the site's foundations carry and the function it exports. The
 // file is named in full on the wire as a mapping is; the `#export` never moves.
 describe('integrations — vendor:', () => {
   const FILE = {
@@ -566,11 +566,11 @@ describe('integrations — vendor:', () => {
       },
     })
     expect(found).toEqual([
-      expect.stringMatching(/^`integrations\.a\.vendor` is a vendor file and the function it exports/),
-      expect.stringMatching(/^`integrations\.b\.vendor` names no vendor file/),
-      expect.stringMatching(/^`integrations\.c\.vendor` is a vendor file and the function it exports/),
-      expect.stringMatching(/^`integrations\.d\.vendor`: a vendor function answers, so it sits on an `http` integration — not a `email` one/),
-      expect.stringMatching(/^`integrations\.e\.vendor` is a vendor file and the function it exports/),
+      expect.stringMatching(/^`integrations\.a\.vendor` is a compute file and the function it exports/),
+      expect.stringMatching(/^`integrations\.b\.vendor` names no compute file/),
+      expect.stringMatching(/^`integrations\.c\.vendor` is a compute file and the function it exports/),
+      expect.stringMatching(/^`integrations\.d\.vendor`: a compute function answers, so it sits on an `http` integration — not a `email` one/),
+      expect.stringMatching(/^`integrations\.e\.vendor` is a compute file and the function it exports/),
     ])
   })
 
@@ -597,7 +597,7 @@ describe('integrations — vendor:', () => {
     }
     expect(blueprintWarnings(blueprint, { scope: '@acme', declared })).toEqual([
       expect.stringMatching(/^blueprint\.yml: `integrations\.typo\.vendor` names the function `grde`, which `@\/courses` does not export — it exports `grade`, `eligible`/),
-      expect.stringMatching(/^blueprint\.yml: `integrations\.none\.vendor` names a vendor file none of this site's foundations carries/),
+      expect.stringMatching(/^blueprint\.yml: `integrations\.none\.vendor` names a compute file none of this site's foundations carries/),
     ])
     expect(blueprintWarnings(blueprint, { scope: '@acme', declared: { types: null, mappings: null, vendors: null } })).toEqual([])
   })

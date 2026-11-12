@@ -1421,24 +1421,24 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
     Object.assign(mappings, map)
   }
 
-  // Its vendor functions — every file in its `vendors/` folder (`foundation/vendors.js`), shipped
-  // as written — and the library ones its main.js carries (`vendors: ['@acme/x']`), in full.
-  // Editor-time: `_vendors` holds each file's exports, never on a page.
-  const vendors = {}
+  // Its compute functions — every file in its `compute/` folder (`foundation/compute.js`), shipped
+  // as written — and the library ones its main.js carries (`compute: ['@acme/x']`), in full.
+  // Editor-time: `_compute` holds each file's exports, never on a page.
+  const compute = {}
   {
-    const { buildVendorMap } = await import('./foundation/vendors.js')
-    const own = await buildVendorMap(srcDir)
+    const { buildComputeMap } = await import('./foundation/compute.js')
+    const own = await buildComputeMap(srcDir)
     for (const warning of own.warnings) console.warn(`[uniweb] ${warning}`)
-    Object.assign(vendors, own.map)
+    Object.assign(compute, own.map)
   }
-  if (foundationConfig.vendors !== undefined) {
-    const { resolveLibraryVendors } = await import('./foundation/library-vendors.js')
-    const { map, warnings } = await resolveLibraryVendors(foundationConfig.vendors, {
+  if (foundationConfig.compute !== undefined) {
+    const { resolveLibraryCompute } = await import('./foundation/library-compute.js')
+    const { map, warnings } = await resolveLibraryCompute(foundationConfig.compute, {
       srcDir,
       ownScope: splitFoundationName(foundationNameOf({ config: foundationConfig, pkg: identity }).name || '').scope,
     })
     for (const warning of warnings) console.warn(`[uniweb] ${warning}`)
-    Object.assign(vendors, map)
+    Object.assign(compute, map)
   }
 
   // Discover layouts from src/layouts/
@@ -1473,8 +1473,8 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
 
   // Build _self, stripping the raw extension boolean in favor of normalized role, and the
   // declared `defaultLayout` in favor of the resolved one (`resolveDefaultLayout`)
-  // `mappings` goes to `_mappings` with the foundation's own, and `vendors` to `_vendors`, each fact once.
-  const { extension: _ext, defaultLayout: _declaredLayout, mappings: _libraryMappings, vendors: _libraryVendors, ...configWithoutExtension } = foundationConfig
+  // `mappings` goes to `_mappings` with the foundation's own, and `compute` to `_compute`, each fact once.
+  const { extension: _ext, defaultLayout: _declaredLayout, mappings: _libraryMappings, compute: _libraryCompute, ...configWithoutExtension } = foundationConfig
 
   // `supports` is the one identity field the build knows better than the file.
   // `identity.supports` is already normalized (absent stays absent, `[]` stays
@@ -1524,7 +1524,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
     // Layout metadata (full, for editor)
     ...(Object.keys(dataSchemas).length > 0 && { dataSchemas }),
     ...(Object.keys(mappings).length > 0 && { _mappings: mappings }),
-    ...(Object.keys(vendors).length > 0 && { _vendors: vendors }),
+    ...(Object.keys(compute).length > 0 && { _compute: compute }),
     ...(Object.keys(layouts).length > 0 && { _layouts: layouts }),
     ...components,
   }

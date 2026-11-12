@@ -40,8 +40,8 @@ const TEAM_KEYS = Object.freeze(['label'])
  */
 const INTEGRATION_KEYS = Object.freeze(['label', 'mapping', 'channel', 'trigger', 'filter', 'enabled', 'reply', 'reply_about', 'vendor'])
 /**
- * `vendor:`: a vendor function the platform runs in place of an address, `'@/courses#grade'` — a
- * vendor file the site's foundations carry, named as a mapping is, then `#` and the function it
+ * `vendor:`: a compute function the platform runs in place of an address, `'@/courses#grade'` — a
+ * compute file the site's foundations carry, named as a mapping is, then `#` and the function it
  * exports. Only on the answering channel, since a function's answer is what the reply reads.
  */
 const VENDOR_FN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
@@ -359,7 +359,7 @@ function integrationProblems(integrations) {
       const problem = vendorRefProblem(`${at}.vendor`, line.vendor)
       if (problem) found.push(problem)
       if (channelOk && line.channel !== REPLYING) {
-        found.push(`\`${at}.vendor\`: a vendor function answers, so it sits on an \`${REPLYING}\` integration — not a \`${line.channel}\` one.`)
+        found.push(`\`${at}.vendor\`: a compute function answers, so it sits on an \`${REPLYING}\` integration — not a \`${line.channel}\` one.`)
       }
     }
     if ('filter' in line && !isMap(line.filter)) {
@@ -383,15 +383,15 @@ function integrationProblems(integrations) {
   return found
 }
 
-/** A vendor function's name, `'@/<file>#<function>'` or `'@scope/<file>#<function>'`, or null. */
+/** A compute function's name, `'@/<file>#<function>'` or `'@scope/<file>#<function>'`, or null. */
 function vendorRefProblem(at, ref) {
   const hash = typeof ref === 'string' ? ref.lastIndexOf('#') : -1
   const file = hash > 0 ? ref.slice(0, hash) : null
   const fn = hash > 0 ? ref.slice(hash + 1) : null
   if (!file || !VENDOR_FN.test(fn)) {
-    return `\`${at}\` is a vendor file and the function it exports — \`'@/courses#grade'\` — not ${described(ref)}.`
+    return `\`${at}\` is a compute file and the function it exports — \`'@/courses#grade'\` — not ${described(ref)}.`
   }
-  return refNameProblem(at, file, 'vendor file')
+  return refNameProblem(at, file, 'compute file')
 }
 
 /** A name that must be `@/x` or `@scope/x`, or null. */

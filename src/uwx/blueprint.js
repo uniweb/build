@@ -105,7 +105,7 @@ const MAPPING_KEYS = Object.freeze(['mapping', 'reply'])
 
 /**
  * Each integration line with the mappings it names (`mapping:`, `reply:`) renamed by `rename`, and
- * the vendor file its `vendor:` names (`'@/courses#grade'`: the part before `#`) by `renameVendor`;
+ * the compute file its `vendor:` names (`'@/courses#grade'`: the part before `#`) by `renameVendor`;
  * nothing else in the line moves — the `#export` is the function's own name, `reply_about` is a
  * field, and a `filter` names fields.
  */
@@ -214,7 +214,7 @@ function mappingAsFileSpells(full, localIntegrations, scope) {
   return org && full.startsWith(`@${org}/`) ? `@/${full.slice(org.length + 2)}` : full
 }
 
-/** A vendor file's full name → as a pull writes it, by the rule `mappingAsFileSpells` follows. */
+/** A compute file's full name → as a pull writes it, by the rule `mappingAsFileSpells` follows. */
 function vendorAsFileSpells(full, localIntegrations, scope) {
   if (isMap(localIntegrations)) {
     for (const line of Object.values(localIntegrations)) {
@@ -360,7 +360,7 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
   return out
 }
 
-/** What the vendor function an integration line names (`vendor: '@/courses#grade'`) warns of. */
+/** What the compute function an integration line names (`vendor: '@/courses#grade'`) warns of. */
 function vendorWarnings(line, id, { scoped, scope, declared, sending }) {
   const vendor = isMap(line) ? splitVendorRef(line.vendor) : null
   if (!vendor) return []
@@ -368,7 +368,7 @@ function vendorWarnings(line, id, { scoped, scope, declared, sending }) {
   const at = `integrations.${id}.vendor`
   if (!scoped && vendor.file.startsWith('@/') && sending) {
     out.push(
-      `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own vendor file, and the foundation has no scope yet, ` +
+      `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own compute file, and the foundation has no scope yet, ` +
         "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
         "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
     )
@@ -377,8 +377,8 @@ function vendorWarnings(line, id, { scoped, scope, declared, sending }) {
     const exports = declared.vendors.get(qualifyRef(vendor.file, scope))
     if (!exports) {
       out.push(
-        `${BLUEPRINT_FILE}: \`${at}\` names a vendor file none of this site's foundations carries, so a backend ` +
-          "started from this site leaves the line out. A foundation's own is a file in src/vendors/; a library's is listed in its main.js, `vendors: ['@scope/<name>']`."
+        `${BLUEPRINT_FILE}: \`${at}\` names a compute file none of this site's foundations carries, so a backend ` +
+          "started from this site leaves the line out. A foundation's own is a file in src/compute/; a library's is listed in its main.js, `compute: ['@scope/<name>']`."
       )
     } else if (exports.size && !exports.has(vendor.fn)) {
       out.push(
@@ -457,7 +457,7 @@ function readSiteYml(siteRoot) {
  * @param {object|null} [opts.primary] - the site's foundation's schema, already read by the caller
  *        (the static build's `foundationSections`)
  * @returns {Promise<{ types: Set<string>|null, mappings: Set<string>|null, vendors: Map<string, Set<string>>|null, unread: string[] }>}
- *          `mappings`: the mappings they define, in full; `vendors`: the vendor files they carry, in
+ *          `mappings`: the mappings they define, in full; `vendors`: the compute files they carry, in
  *          full → the functions each exports (empty when a library's could not be read); each null
  *          when `types` is
  */
@@ -466,7 +466,7 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
   const mappings = new Set()
   const vendors = new Map()
   const addVendors = (schema, at) => {
-    for (const [ref, v] of Object.entries(schema._vendors || {})) vendors.set(qualifyRef(ref, at), new Set(v?.exports || []))
+    for (const [ref, v] of Object.entries(schema._compute || {})) vendors.set(qualifyRef(ref, at), new Set(v?.exports || []))
   }
   const unread = []
   const dir = foundationDir ? resolve(foundationDir) : localFoundationDir(siteRoot, siteYml)

@@ -13,7 +13,7 @@
  *       …the §3 declaration (from data-schema.js's lowering)…
  *     - model: "@uniweb/mapping-schema"  # one per mapping this foundation defines (src/mappings/)
  *       name, label?, description?, rules: { model, keys_from?, …the rest as written }
- *     - model: "@uniweb/vendor-schema"   # one per vendor file this foundation defines (src/vendors/)
+ *     - model: "@uniweb/vendor-schema"   # one per compute file this foundation defines (src/compute/)
  *       name, exports, sha256, size      # the file itself goes up after, by its sha256
  *     - model: "@uniweb/foundation-schema"   # the foundation (info/schema/i18n/data-schemas/mappings/vendors)
  *
@@ -70,9 +70,9 @@ try {
  *   in the foundation-schema entity's `info.digest`; the backend stores it
  *   OPAQUE and returns it on the foundation-latest read so `publish`/`status`
  *   can detect "code changed since release" with no local state.
- * @param {Object} [params.vendors] - `{ '@/<name>': { exports, sha256, size } }`, the vendor files
- *   the foundation defines, read from disk by the caller (`vendorFileDigest`) when it registers.
- *   `schema._vendors` names them and the library ones; this gives the bytes' digest.
+ * @param {Object} [params.vendors] - `{ '@/<name>': { exports, sha256, size } }`, the compute files
+ *   the foundation defines, read from disk by the caller (`computeFileDigest`) when it registers.
+ *   `schema._compute` names them and the library ones; this gives the bytes' digest.
  * @returns {Object} the `.uwx` document (uwx/1; entities, names only, no uuids).
  */
 export function buildRegistryPackage({ schema, foundationDir, scope, exporter, exportedAt, digest, runtime, vendors } = {}) {
@@ -104,12 +104,12 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
     .map((name) => ({ name }))
 
   const vendorEntities = buildVendorEntities(vendors || {}, scoped)
-  // Its own vendor files, and the library ones its main.js carries (`_vendors` keys in full), which
+  // Its own compute files, and the library ones its main.js carries (`_compute` keys in full), which
   // their library registers and uploads: a foundation names those, and registers none.
   const vendorRefs = [
     ...new Set([
       ...vendorEntities.map((e) => e.name),
-      ...Object.keys(schema._vendors || {}).filter((ref) => !ref.startsWith('@/')),
+      ...Object.keys(schema._compute || {}).filter((ref) => !ref.startsWith('@/')),
     ]),
   ]
     .sort((a, b) => a.localeCompare(b))
@@ -125,7 +125,7 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
     ...(vendorRefs.length && { vendors: { refs: vendorRefs } }),
   }
 
-  // Data schemas, then mappings, then vendor files, then the foundation: a backend installs them in
+  // Data schemas, then mappings, then compute files, then the foundation: a backend installs them in
   // the order they arrive, and each names only what came before it or is already registered.
   return wrapEntities([...dataSchemaEntities, ...mappingEntities, ...vendorEntities, foundationEntity], exporter, exportedAt)
 }
@@ -145,7 +145,7 @@ export function buildRegistryPackage({ schema, foundationDir, scope, exporter, e
  * @param {Object} [params.mappings] - map `{ '@/<name>': declaration }` of the
  *   mappings it defines (`buildMappingMap` over its `mappings/`).
  * @param {Object} [params.vendors] - map `{ '@/<name>': { exports, sha256, size } }` of the
- *   vendor files it defines (its `vendors/`).
+ *   compute files it defines (its `compute/`).
  * @param {string} [params.scope] - org scope (`@std`/`std`) resolving `@/x` -> `@std/x`.
  * @param {Object} [params.exporter] - `{ tool, version, instance }` envelope.
  * @param {string} [params.exportedAt] - ISO timestamp (default: now).
@@ -161,7 +161,7 @@ export function buildSchemaOnlyPackage({ schemas, mappings, vendors, scope, expo
   const mappingEntities = buildMappingEntities(mappings || {}, scoped)
   const vendorEntities = buildVendorEntities(vendors || {}, scoped)
   if (entities.length === 0 && mappingEntities.length === 0 && vendorEntities.length === 0) {
-    throw new Error('buildSchemaOnlyPackage: no data schemas, mappings or vendor files to register (expected a map of "@/<name>" -> declaration).')
+    throw new Error('buildSchemaOnlyPackage: no data schemas, mappings or compute files to register (expected a map of "@/<name>" -> declaration).')
   }
   return wrapEntities([...entities, ...mappingEntities, ...vendorEntities], exporter, exportedAt)
 }
@@ -252,7 +252,7 @@ function buildMappingEntities(mappings, scoped) {
 }
 
 /**
- * One `@uniweb/vendor-schema` entity per vendor file the package defines: its full name, the
+ * One `@uniweb/vendor-schema` entity per compute file the package defines: its full name, the
  * functions it exports (sorted), and the `sha256` and `size` of its bytes as on disk. No source: the
  * file goes up after the call, addressed by that `sha256` (`vendor-uploads`). No `label` or
  * `description`: a `.js` file has nowhere to declare them.
@@ -365,7 +365,7 @@ function buildInfo(self, org, digest, runtime) {
 }
 
 // The foundation schema an editor reads: the whole renderable schema.json MINUS identity
-// and MINUS dataSchemas, _mappings and _vendors (each registered as its own entity, or named by ref), shipped as one object the backend stores and serves, and never
+// and MINUS dataSchemas, _mappings and _compute (each registered as its own entity, or named by ref), shipped as one object the backend stores and serves, and never
 // reads into (custodian).
 //
 // ⭐ IN ITS NORMALIZED FORM — `schemaFormat: 3` (`@uniweb/schemas/foundation`, ruled
@@ -378,7 +378,7 @@ function buildInfo(self, org, digest, runtime) {
 // It throws for a `data:` value that cannot be normalized — an inline field map that is
 // not a valid data schema — naming the component and the key; the build warns of it first.
 function buildSchemaBlob(schema, org) {
-  const { dataSchemas: _ds, _mappings: _m, _vendors: _v2, ...rest } = schema
+  const { dataSchemas: _ds, _mappings: _m, _compute: _v2, ...rest } = schema
   // Every key hoisted into `info` is stripped here, so the wire carries each
   // fact ONCE. Two copies of one fact is a drift liability, and the copy inside
   // an opaque blob is the one nobody would think to update.

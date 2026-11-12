@@ -1,9 +1,14 @@
 /**
- * A foundation's or library's vendor functions — `vendors/<name>.js`, one plain-JS module per file:
+ * A foundation's or library's compute functions — `compute/<name>.js`, one plain-JS module per file:
  * small pure functions a backend's integration calls by `file#export`, run outside every backend.
  *
+ * ⚖️ TWO WORDS, ONE THING. In the foundation it is its compute: the `compute/` folder and `main.js`'s
+ * `compute:`. To an integration it stands where an outside vendor's address would, so `blueprint.yml`
+ * names one with `vendor:`, and the registry's wire keeps that word too (`@uniweb/vendor-schema`,
+ * `vendor-uploads`, the foundation-schema's `vendors.refs`).
+ *
  * ```js
- * // src/vendors/courses.js
+ * // src/compute/courses.js
  * export function grade(input) {
  *   …
  *   return { points, max }
@@ -35,7 +40,7 @@
  * The limits on a file's size and its number of exports are the registry's to state, and its
  * refusal names them; the build doesn't restate them.
  *
- * Vendors are editor-time only: they ride in `schema.json` as `_vendors` (each file's `exports`) and
+ * Compute files are editor-time only: they ride in `schema.json` as `_compute` (each file's `exports`) and
  * never reach a page.
  *
  * @module
@@ -46,19 +51,19 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 
 /** The folder, under a foundation's source root or a library's root. */
-export const VENDORS_DIR = 'vendors'
+export const COMPUTE_DIR = 'compute'
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
 /**
- * The vendor files a package defines, by name, sorted. A `.js` file is one by being there; a name
+ * The compute files a package defines, by name, sorted. A `.js` file is one by being there; a name
  * with a leading `_` is left out.
  *
  * @param {string} srcDir - a foundation's source root, or a library's root
  * @returns {{ name: string, file: string }[]}
  */
-export function ownVendorFiles(srcDir) {
-  const dir = join(srcDir, VENDORS_DIR)
+export function ownComputeFiles(srcDir) {
+  const dir = join(srcDir, COMPUTE_DIR)
   if (!existsSync(dir)) return []
   return readdirSync(dir)
     .sort()
@@ -72,29 +77,29 @@ export function ownVendorFiles(srcDir) {
  * @param {string} file
  * @returns {{ sha256: string, size: number }}
  */
-export function vendorFileDigest(file) {
+export function computeFileDigest(file) {
   const bytes = readFileSync(file)
   return { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length }
 }
 
 /**
- * Read and check one vendor file.
+ * Read and check one compute file.
  *
  * @param {string} file
  * @returns {Promise<{ exports: string[], problems: string[], warnings: string[] }>}
  */
-export async function readVendorFile(file) {
+export async function readComputeFile(file) {
   const source = readFileSync(file, 'utf8')
-  return checkVendorSource(source)
+  return checkComputeSource(source)
 }
 
 /**
- * Check a vendor module's source. Exported for tests.
+ * Check a compute module's source. Exported for tests.
  *
  * @param {string} source
  * @returns {Promise<{ exports: string[], problems: string[], warnings: string[] }>}
  */
-export async function checkVendorSource(source) {
+export async function checkComputeSource(source) {
   const { parseAst } = await import('vite')
   let ast
   try {
@@ -126,17 +131,17 @@ export async function checkVendorSource(source) {
   for (const node of ast.body) {
     switch (node.type) {
       case 'ImportDeclaration':
-        problems.push(`imports \`${node.source.value}\`: a vendor file has no imports. Keep a helper inside the file; a function that needs a package is a real service, reached at its address.`)
+        problems.push(`imports \`${node.source.value}\`: a compute file has no imports. Keep a helper inside the file; a function that needs a package is a real service, reached at its address.`)
         break
       case 'ExportAllDeclaration':
-        problems.push(`re-exports \`${node.source.value}\`: a vendor file has no imports, so it exports only functions it defines.`)
+        problems.push(`re-exports \`${node.source.value}\`: a compute file has no imports, so it exports only functions it defines.`)
         break
       case 'ExportDefaultDeclaration':
         problems.push('has a default export: an integration names a function by its name, `file#export`. Export each function by name.')
         break
       case 'ExportNamedDeclaration': {
         if (node.source) {
-          problems.push(`re-exports from \`${node.source.value}\`: a vendor file has no imports, so it exports only functions it defines.`)
+          problems.push(`re-exports from \`${node.source.value}\`: a compute file has no imports, so it exports only functions it defines.`)
           break
         }
         const decl = node.declaration
@@ -147,13 +152,13 @@ export async function checkVendorSource(source) {
             if (d.id.type !== 'Identifier') {
               problems.push('exports a destructured binding: export each function by name.')
             } else if (decl.kind !== 'const' || !isFunctionNode(d.init)) {
-              problems.push(`exports \`${d.id.name}\`, which is not a function: a vendor file exports only functions. Keep a table or a constant unexported.`)
+              problems.push(`exports \`${d.id.name}\`, which is not a function: a compute file exports only functions. Keep a table or a constant unexported.`)
             } else {
               exported.set(d.id.name, d.id.name)
             }
           }
         } else if (decl) {
-          problems.push(`exports a ${decl.type === 'ClassDeclaration' ? 'class' : 'value'}, which is not a function: a vendor file exports only functions.`)
+          problems.push(`exports a ${decl.type === 'ClassDeclaration' ? 'class' : 'value'}, which is not a function: a compute file exports only functions.`)
         }
         for (const spec of node.specifiers || []) {
           const local = spec.local.name ?? spec.local.value
@@ -161,7 +166,7 @@ export async function checkVendorSource(source) {
           if (name === 'default') {
             problems.push('has a default export: an integration names a function by its name, `file#export`. Export each function by name.')
           } else if (!topFunctions.has(local)) {
-            problems.push(`exports \`${name}\`, which is not a function the file defines: a vendor file exports only functions.`)
+            problems.push(`exports \`${name}\`, which is not a function the file defines: a compute file exports only functions.`)
           } else {
             exported.set(name, local)
           }
@@ -182,7 +187,7 @@ export async function checkVendorSource(source) {
   // Dynamic `import()` anywhere in the file.
   walk(ast, (node) => {
     if (node.type === 'ImportExpression') {
-      problems.push('calls `import()`: a vendor file has no imports. Keep a helper inside the file; a function that needs a package is a real service, reached at its address.')
+      problems.push('calls `import()`: a compute file has no imports. Keep a helper inside the file; a function that needs a package is a real service, reached at its address.')
     }
   })
 
@@ -195,23 +200,23 @@ export async function checkVendorSource(source) {
 }
 
 /**
- * Read and check every vendor file a package defines.
+ * Read and check every compute file a package defines.
  *
  * @param {string} srcDir - a foundation's source root, or a library's root
  * @param {object} [opts]
- * @param {string} [opts.shownIn] - the folder as its messages name it (a library's is `vendors`)
+ * @param {string} [opts.shownIn] - the folder as its messages name it (a library's is `compute`)
  * @returns {Promise<{ map: Object<string, { exports: string[] }>, warnings: string[] }>}
  *   `{ '@/<name>': { exports } }`
  * @throws {Error} naming every file that cannot be registered, and why
  */
-export async function buildVendorMap(srcDir, { shownIn = `src/${VENDORS_DIR}` } = {}) {
-  const files = ownVendorFiles(srcDir)
+export async function buildComputeMap(srcDir, { shownIn = `src/${COMPUTE_DIR}` } = {}) {
+  const files = ownComputeFiles(srcDir)
   const map = {}
   const found = []
   const warnings = []
   for (const { name, file } of files) {
     const at = `${shownIn}/${basename(file)}`
-    const { exports, problems, warnings: w } = await readVendorFile(file)
+    const { exports, problems, warnings: w } = await readComputeFile(file)
     if (problems.length) found.push(...problems.map((p) => `${at} ${p}`))
     else map[`@/${name}`] = { exports }
     warnings.push(...w.map((x) => `${at}: ${x}`))
@@ -220,7 +225,7 @@ export async function buildVendorMap(srcDir, { shownIn = `src/${VENDORS_DIR}` } 
     throw new Error(
       found.length === 1
         ? `[uniweb] ${found[0]}`
-        : `[uniweb] vendor files that cannot be registered:\n${found.map((f) => `  - ${f}`).join('\n')}`
+        : `[uniweb] compute files that cannot be registered:\n${found.map((f) => `  - ${f}`).join('\n')}`
     )
   }
   return { map, warnings }
@@ -259,12 +264,12 @@ function missingGlobals(ast) {
   const out = []
   for (const name of NODE_ONLY) {
     if (used.has(name) && !declared.has(name)) {
-      out.push(`uses \`${name}\`, which is Node's: a vendor function runs with the standard web globals (\`JSON\`, \`Math\`, \`Intl\`, \`Date\`, \`crypto.subtle\`), not in Node, so it isn't there.`)
+      out.push(`uses \`${name}\`, which is Node's: a compute function runs with the standard web globals (\`JSON\`, \`Math\`, \`Intl\`, \`Date\`, \`crypto.subtle\`), not in Node, so it isn't there.`)
     }
   }
   for (const name of NETWORK) {
     if (used.has(name) && !declared.has(name)) {
-      out.push(`uses \`${name}\`, which throws where it runs: a vendor function has no network. A function that needs the network is a real service, reached at its address.`)
+      out.push(`uses \`${name}\`, which throws where it runs: a compute function has no network. A function that needs the network is a real service, reached at its address.`)
     }
   }
   return out

@@ -1,6 +1,6 @@
 /**
- * A local run of a vendor function enforces the rules the public contract states for where it runs
- * (`docs/development/vendor-functions.md` § What it can't do): the web's globals and not Node's, no
+ * A local run of a compute function enforces the rules the public contract states for where it runs
+ * (`docs/development/compute-functions.md` § What it can't do): the web's globals and not Node's, no
  * network, frozen built-in prototypes, a JSON object in and out within their sizes, and a stop for a
  * call that never ends. Each case is one a test that imports the file in Node lets pass.
  */
@@ -9,21 +9,21 @@ import { describe, it, expect, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runVendorFunction, LIMITS } from '../src/foundation/vendor-run.js'
+import { runComputeFunction, LIMITS } from '../src/foundation/compute-run.js'
 
-const dir = mkdtempSync(join(tmpdir(), 'uw-vendor-run-'))
+const dir = mkdtempSync(join(tmpdir(), 'uw-compute-run-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 let n = 0
 async function call(source, exportName, input = {}) {
   const file = join(dir, `v${n++}.js`)
   writeFileSync(file, source)
-  return runVendorFunction({ file, exportName, inputText: typeof input === 'string' ? input : JSON.stringify(input) })
+  return runComputeFunction({ file, exportName, inputText: typeof input === 'string' ? input : JSON.stringify(input) })
 }
 
 const fn = (body, params = 'input') => `export function f(${params}) {\n${body}\n}\n`
 
-describe('a local run of a vendor function', () => {
+describe('a local run of a compute function', () => {
   it('⭐ answers with what the function returns, and how long it took', async () => {
     const r = await call(fn('return { points: input.answers.length }'), 'f', { answers: [1, 2] })
     expect(r).toMatchObject({ ok: true, answer: { points: 2 }, warnings: [] })
@@ -45,7 +45,7 @@ describe('a local run of a vendor function', () => {
   it('⭐ has no network: fetch throws', async () => {
     const r = await call(fn('return fetch("http://example.test")'), 'f')
     expect(r.ok).toBe(false)
-    expect(r.failure).toMatch(/fetch is not available: a vendor function has no network/)
+    expect(r.failure).toMatch(/fetch is not available: a compute function has no network/)
   })
 
   it('⭐ freezes the built-in prototypes: an assignment one of them shadows throws, and says what to write', async () => {

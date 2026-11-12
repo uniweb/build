@@ -1,5 +1,5 @@
 /**
- * The worker a local run of a vendor function happens in (`vendor-run.js`). It takes away, before
+ * The worker a local run of a compute function happens in (`compute-run.js`). It takes away, before
  * the file loads, what §"What it can't do" of the public contract says a function doesn't have:
  *
  *   - Node's globals (`process`, `Buffer`, `setImmediate`, …), since it runs with the web's;
@@ -73,7 +73,7 @@ async function main() {
       configurable: true,
       writable: true,
       value: function () {
-        throw new TypeError(`${name} is not available: a vendor function has no network.`)
+        throw new TypeError(`${name} is not available: a compute function has no network.`)
       },
     })
   }

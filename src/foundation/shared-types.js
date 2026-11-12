@@ -25,7 +25,7 @@ import { workspaceRootOf } from '../site/workspace-extension.js'
 import { classifyPackage, isSchemasPackage } from '../utils/classify-package.js'
 import { librariesOf } from './libraries.js'
 import { MAPPINGS_DIR, ownMappingFiles } from './mappings.js'
-import { VENDORS_DIR, ownVendorFiles } from './vendors.js'
+import { COMPUTE_DIR, ownComputeFiles } from './compute.js'
 
 const real = (path) => {
   try {
@@ -197,17 +197,17 @@ export async function workspaceMappingFiles(ref, fromDir) {
 }
 
 /**
- * ⭐ A VENDOR FILE ANOTHER PACKAGE DEFINES, found by the rule `workspaceMappingFiles` finds a mapping
- * by: a foundation whose name gives the scope and whose own `vendors/` holds it, or a library of that
- * scope that holds `vendors/` (`foundation/vendors.js`). A foundation names one in its `main.js`
- * (`vendors: ['@acme/grading']`).
+ * ⭐ A COMPUTE FILE ANOTHER PACKAGE DEFINES, found by the rule `workspaceMappingFiles` finds a mapping
+ * by: a foundation whose name gives the scope and whose own `compute/` holds it, or a library of that
+ * scope that holds `compute/` (`foundation/compute.js`). A foundation names one in its `main.js`
+ * (`compute: ['@acme/grading']`).
  *
  * @param {string} ref - `@scope/name`
  * @param {string} fromDir - the foundation (its source folder) or site asking
  * @returns {Promise<string[]>} the files that define it, each once; the caller refuses more than one
  */
-export async function workspaceVendorFiles(ref, fromDir) {
-  return workspaceDeclarationFiles(ref, fromDir, VENDORS_DIR, ownVendorFiles)
+export async function workspaceComputeFiles(ref, fromDir) {
+  return workspaceDeclarationFiles(ref, fromDir, COMPUTE_DIR, ownComputeFiles)
 }
 
 /** The files of the packages a package may read that define `ref` in their `folder`. */

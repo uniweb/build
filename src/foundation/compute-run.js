@@ -1,5 +1,5 @@
 /**
- * ⭐ A LOCAL RUN OF ONE VENDOR FUNCTION, under the rules the public contract states for where it
+ * ⭐ A LOCAL RUN OF ONE COMPUTE FUNCTION, under the rules the public contract states for where it
  * runs: the web's globals and not Node's, no network, frozen built-in prototypes, a JSON input, an
  * answer that is a plain JSON object of bounded size, and a short time per call.
  *
@@ -18,7 +18,7 @@
 
 import { readFileSync } from 'node:fs'
 import { Worker } from 'node:worker_threads'
-import { checkVendorSource } from './vendors.js'
+import { checkComputeSource } from './compute.js'
 
 export const LIMITS = Object.freeze({
   inputBytes: 1024 * 1024,
@@ -34,13 +34,13 @@ const FROZEN_HINT =
   '. The built-in prototypes are frozen, so assigning a property one of them has throws, as does adding to one.' +
   " Define the property instead: in an object literal, with Object.defineProperty, or as a class field (`class GradingError extends Error { name = 'GradingError' }`)."
 
-const WORKER = new URL('./vendor-run-worker.js', import.meta.url)
+const WORKER = new URL('./compute-run-worker.js', import.meta.url)
 
 /**
- * Run `exportName` from the vendor file at `file` on `inputText`.
+ * Run `exportName` from the compute file at `file` on `inputText`.
  *
  * @param {object} p
- * @param {string} p.file - the vendor file
+ * @param {string} p.file - the compute file
  * @param {string} p.exportName - the function to call
  * @param {string} p.inputText - the input, as JSON text
  * @returns {Promise<{
@@ -55,9 +55,9 @@ const WORKER = new URL('./vendor-run-worker.js', import.meta.url)
  *   `problems` when the file itself can't be registered). `warnings` are the build's, and the
  *   budget's when the call took longer than it.
  */
-export async function runVendorFunction({ file, exportName, inputText }) {
+export async function runComputeFunction({ file, exportName, inputText }) {
   const source = readFileSync(file, 'utf8')
-  const { exports, problems, warnings } = await checkVendorSource(source)
+  const { exports, problems, warnings } = await checkComputeSource(source)
   if (problems.length) {
     return { ok: false, failure: 'The file can\'t be registered, so it doesn\'t run:', problems, warnings }
   }
