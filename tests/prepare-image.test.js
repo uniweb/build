@@ -47,7 +47,7 @@ function withChunk(png, type, data) {
 }
 
 describe('prepareImage — what it makes', () => {
-  it('⭐ a phone photo becomes a WebP, turned upright, its profile kept, its camera and location gone', async () => {
+  it('⭐ a phone photo becomes a WebP, turned upright, its colour in sRGB, its camera and location gone', async () => {
     const input = await phonePhoto()
     const before = await sharp(input).metadata()
     expect(before.orientation).toBe(6)
@@ -61,7 +61,12 @@ describe('prepareImage — what it makes', () => {
     expect([after.width, after.height]).toEqual([48, 64]) // turned
     expect(after.orientation ?? 1).toBe(1)
     expect(after.exif).toBeUndefined()
-    expect(after.icc).toBeDefined()
+    // Converted into sRGB with no profile embedded, as a host converting it would: equal to an
+    // explicit transform to sRGB, and not the P3 values read as sRGB.
+    expect(after.icc).toBeUndefined()
+    const mean = async (b) => (await sharp(b).stats()).channels.slice(0, 3).map((c) => Math.round(c.mean))
+    const toSrgb = await sharp(input).autoOrient().withIccProfile('srgb').webp({ quality: IMAGE_RULE.quality }).toBuffer()
+    expect(await mean(out.bytes)).toEqual(await mean(toSrgb))
     expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
   })
 

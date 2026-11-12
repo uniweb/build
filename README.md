@@ -160,7 +160,7 @@ This processing is a static build's (`uniweb build`, `uniweb export`, `uniweb de
 - Media in frontmatter fields: `background`, `image`, `thumbnail`, `poster`, `avatar`, `logo`, `icon`, `video`, `pdf`, etc.
 
 **Image processing:**
-- PNG, JPG, JPEG, GIF → A WebP at quality 85 when it is at least 10% smaller, otherwise the file as it is. Either way it is turned upright as the photo's orientation says, keeps its transparency, animation and colour profile, and loses its location and camera data
+- PNG, JPG, JPEG, GIF → A WebP at quality 85 when it is at least 10% smaller, otherwise the file as it is. Either way it is turned upright as the photo's orientation says, keeps its transparency and animation, and loses its location and camera data. A WebP's colour is converted to sRGB with no profile embedded; a kept file keeps its own
 - TIFF, HEIC → Always a WebP, since most browsers can't show them (a HEIC this machine can't decode, and a BMP, is copied as it is, with a warning)
 - SVG, WebP, AVIF → Copied as-is (already optimized formats)
 - All processed assets get content-hashed filenames for cache busting

@@ -14,8 +14,11 @@
  * 4. **Orientation is applied**: the pixels are turned as the photo's EXIF says. A file that would be
  *    kept but needs turning is converted instead, so no stored picture depends on a tag to stand up.
  * 5. **Location and camera data are dropped**, from a kept file too, which loses them without being
- *    re-encoded (`withoutPrivateMetadata`). The colour profile is kept, so a phone's Display P3 photo
- *    keeps its colours on a screen that shows them.
+ *    re-encoded (`withoutPrivateMetadata`). **A WebP's colour is converted to sRGB, with no profile
+ *    embedded**, as a host converting a picture that wasn't prepared does, so the two agree: a phone's
+ *    Display P3 photo keeps its colours, managed into sRGB, and loses the wider gamut. A kept file
+ *    keeps its own profile, since it isn't re-encoded and dropping the profile alone would shift its
+ *    colours.
  * 6. **No size cap.** A prepared file is the only copy kept, so it keeps its pixels.
  * 7. **Which files.** JPEG, PNG, GIF, TIFF, HEIC and BMP are prepared; SVG, ICO, WebP and AVIF are
  *    left as they are. A file this machine can't decode (HEIC with HEVC, and BMP, which sharp's
@@ -78,9 +81,9 @@ export async function prepareImage(bytes, ext, { quality = IMAGE_RULE.quality } 
   let webp
   try {
     meta = await sharp(bytes, { animated: true }).metadata()
+    // sharp's default output: colour managed into sRGB, and every profile and tag dropped.
     webp = await sharp(bytes, { animated: true })
       .autoOrient()
-      .keepIccProfile()
       .webp({ quality })
       .toBuffer()
   } catch {
