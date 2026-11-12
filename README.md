@@ -109,7 +109,7 @@ siteContentPlugin({
   assets: {                    // Asset processing (optional)
     process: true,             // Process assets in production (default: true)
     convertToWebp: true,       // Convert images to WebP (default: true)
-    quality: 80,               // WebP quality 1-100 (default: 80)
+    quality: 85,               // WebP quality 1-100 (default: 85, the rule's)
     outputDir: 'assets',       // Output subdirectory (default: 'assets')
     videoPosters: true         // Extract poster from videos (default: true, requires ffmpeg)
   }
@@ -148,7 +148,7 @@ seo:
 
 The plugin automatically discovers and processes assets referenced in your content. In content-driven sites, markdown acts as "code" - local asset references are like implicit imports and get optimized during build.
 
-This processing is a static build's (`uniweb build`, `uniweb export`, `uniweb deploy --host`). `uniweb publish` and `uniweb push` upload each file as it is.
+This processing is a static build's (`uniweb build`, `uniweb export`, `uniweb deploy --host`). Its pictures follow the same rule `uniweb push` and `uniweb publish` apply to what they upload (`prepareImage`, from `@uniweb/build/images`), so a picture is the same wherever the site is served.
 
 **Supported path formats:**
 - `./image.png` - Relative to the markdown file
@@ -160,7 +160,8 @@ This processing is a static build's (`uniweb build`, `uniweb export`, `uniweb de
 - Media in frontmatter fields: `background`, `image`, `thumbnail`, `poster`, `avatar`, `logo`, `icon`, `video`, `pdf`, etc.
 
 **Image processing:**
-- PNG, JPG, JPEG, GIF → Converted to WebP (quality 80) for smaller file sizes, turned upright as the photo's orientation says, with animation kept
+- PNG, JPG, JPEG, GIF → A WebP at quality 85 when it is at least 10% smaller, otherwise the file as it is. Either way it is turned upright as the photo's orientation says, keeps its transparency, animation and colour profile, and loses its location and camera data
+- TIFF, HEIC → Always a WebP, since most browsers can't show them (a HEIC this machine can't decode, and a BMP, is copied as it is, with a warning)
 - SVG, WebP, AVIF → Copied as-is (already optimized formats)
 - All processed assets get content-hashed filenames for cache busting
 

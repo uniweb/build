@@ -286,7 +286,7 @@ async function writeShellAppearance(html, appearance) {
  * @param {Object} [options.assets] - Asset processing configuration
  * @param {boolean} [options.assets.process=true] - Process assets in production builds
  * @param {boolean} [options.assets.convertToWebp=true] - Convert images to WebP
- * @param {number} [options.assets.quality=80] - WebP quality (1-100)
+ * @param {number} [options.assets.quality] - WebP quality (1-100); the rule's (`IMAGE_RULE`) when unset
  * @param {string} [options.assets.outputDir='assets'] - Output subdirectory for processed assets
  * @param {boolean} [options.assets.videoPosters=true] - Extract poster frames from videos (requires ffmpeg)
  * @param {string} [options.foundationPath] - Path to foundation directory (for loading theme vars)
@@ -309,7 +309,8 @@ export function siteContentPlugin(options = {}) {
   const assetsOptions = {
     process: assetsConfig.process !== false, // Default true
     convertToWebp: assetsConfig.convertToWebp !== false, // Default true
-    quality: assetsConfig.quality || 80,
+    // The site's own WebP quality, when it sets one; otherwise the rule's (`prepareImage`).
+    quality: assetsConfig.quality,
     outputDir: assetsConfig.outputDir || 'assets',
     videoPosters: assetsConfig.videoPosters !== false // Default true
   }

@@ -121,12 +121,30 @@ describe('an image the build copies', () => {
   })
 
   it('keeps every frame of an animated GIF, and gives the size of one', async () => {
+    // Two flat frames: a WebP of it would not save a tenth, so the GIF is kept as it is.
     const [width, height, pages] = [8, 6, 2]
     const raw = Buffer.alloc(width * height * pages * 3, 200)
     raw.fill(40, width * height * 3) // the second frame differs from the first
     const gif = await sharp(raw, { raw: { width, height: height * pages, channels: 3, pageHeight: height } }).gif().toBuffer()
 
     const { ref, pathMapping, files } = await copied('loop.gif', gif)
+    expect(pathMapping[ref]).toMatch(/\.gif$/)
+    expect(files[ref]).toMatchObject({ width, height })
+    const made = await sharp(await readFile(join(outputDir, pathMapping[ref])), { animated: true }).metadata()
+    expect(made.pages).toBe(pages)
+  })
+
+  it('a GIF the WebP shrinks becomes an animated WebP with every frame', async () => {
+    const [width, height, pages] = [48, 36, 3]
+    const raw = Buffer.alloc(width * height * pages * 3)
+    let x = 7
+    for (let i = 0; i < raw.length; i++) {
+      x = (x * 1103515245 + 12345) & 0x7fffffff
+      raw[i] = (x >> 16) & 0xff
+    }
+    const gif = await sharp(raw, { raw: { width, height: height * pages, channels: 3, pageHeight: height } }).gif().toBuffer()
+
+    const { ref, pathMapping, files } = await copied('noise.gif', gif)
     expect(pathMapping[ref]).toMatch(/\.webp$/)
     expect(files[ref]).toMatchObject({ width, height })
     const made = await sharp(await readFile(join(outputDir, pathMapping[ref])), { animated: true }).metadata()

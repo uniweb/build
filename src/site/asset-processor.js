@@ -1,8 +1,10 @@
 /**
  * Asset Processor
  *
- * Processes site assets (images) during build:
- * - Converts images to WebP for optimization
+ * Processes site assets (images) during a static build:
+ * - Prepares each picture under the one rule a push applies to what it uploads (`prepareImage`):
+ *   a WebP when it saves, turned upright, without location and camera data. So a static site and a
+ *   site published with Uniweb show the same picture.
  * - Generates content-hashed filenames for cache busting
  * - Caches processed assets to avoid redundant work
  *
@@ -13,12 +15,9 @@ import { readFile, writeFile, mkdir, stat, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, basename, extname, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
-import sharp from 'sharp'
 import { mimeFor } from '@uniweb/semantic-parser'
 import { drawnSize, RAN_OUT } from './drawn-size.js'
-
-// Image formats that can be converted to WebP
-const CONVERTIBLE_FORMATS = ['.png', '.jpg', '.jpeg', '.gif']
+import { prepareImage, isPreparableImage } from '../prepare-image.js'
 
 // Image formats to pass through without conversion
 const PASSTHROUGH_FORMATS = ['.svg', '.webp', '.avif', '.ico']
@@ -50,25 +49,6 @@ async function getFileHash(filePath) {
 }
 
 /**
- * Convert an image to WebP format
- *
- * @param {Buffer} input - Input image buffer
- * @param {Object} options - Conversion options
- * @returns {Promise<Buffer>} WebP buffer
- */
-async function convertToWebp(input, options = {}) {
-  const { quality = 80 } = options
-
-  // ⭐ The picture as the author saw it. The conversion drops the tag saying how to turn a phone's
-  // photo, so it's turned first, and sharp reads one frame unless told otherwise. ⛔ Until 2026-11-02
-  // a portrait photo was drawn on its side, and an animated GIF was its first frame.
-  return sharp(input, { animated: true })
-    .autoOrient()
-    .webp({ quality })
-    .toBuffer()
-}
-
-/**
  * The size of a file the site serves, whole, so running out of it means it has none. Quiet, because a
  * file with no size is still copied.
  */
@@ -89,7 +69,7 @@ export async function processAsset(asset, options = {}) {
     outputDir,
     assetsSubdir = 'assets',
     convertToWebp: shouldConvert = true,
-    quality = 80,
+    quality,
     basePath = '/'
   } = options
 
@@ -119,12 +99,17 @@ export async function processAsset(asset, options = {}) {
     let outputExt = ext
     let converted = false
 
-    if (isImage && shouldConvert && CONVERTIBLE_FORMATS.includes(ext)) {
-      // Convert to WebP
-      const input = await readFile(resolved)
-      outputBuffer = await convertToWebp(input, { quality })
-      outputExt = '.webp'
-      converted = true
+    if (isImage && shouldConvert && isPreparableImage(ext)) {
+      // The picture under the one rule: a WebP when it saves, kept otherwise without its private
+      // data. ⛔ Until 2026-11-12 every PNG, JPEG and GIF became a WebP at quality 80, larger or not,
+      // its colour profile converted away, and a phone's location kept in a JPEG nothing converted.
+      const prepared = await prepareImage(await readFile(resolved), ext, quality ? { quality } : undefined)
+      if (prepared.unreadable) {
+        console.warn(`[asset-processor] ${basename(resolved)} is copied as it is: it can't be converted here, and some browsers can't show it`)
+      }
+      outputBuffer = prepared.bytes
+      outputExt = `.${prepared.ext}`
+      converted = prepared.converted
     } else if (isImage && PASSTHROUGH_FORMATS.includes(ext)) {
       // Copy as-is for SVG, WebP, etc.
       outputBuffer = await readFile(resolved)

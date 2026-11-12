@@ -11,6 +11,9 @@ import { existsSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
 import sharp from 'sharp'
 
+// The one rule for a picture a site keeps — what a push uploads, what a static build copies.
+export { prepareImage, withoutPrivateMetadata, isPreparableImage, IMAGE_RULE } from './prepare-image.js'
+
 // Supported image extensions
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 
