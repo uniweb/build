@@ -35,7 +35,7 @@ import { jsxExtensionGuard } from '../jsx-extension.js'
 import { foundationScopeDefine } from '../foundation/scope-define.js'
 import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
-import { checkFoundationResolution } from '../utils/foundation-resolution-check.js'
+import { foundationImportsPlugin } from './foundation-imports.js'
 import { detectFoundationType } from './foundation-ref.js'
 import { librariesOf } from '../foundation/libraries.js'
 import { libraryImports } from '../foundation/library-imports.js'
@@ -288,19 +288,6 @@ export async function defineSiteConfig(options = {}) {
           )
         }
 
-        // Do we and vite agree on which directory that was? Two resolutions run
-        // here — ours by path, vite's by the bare specifier below
-        // (`alias['#foundation'] = foundationInfo.name`) — and when they diverge
-        // the quiet outcome is worse than the loud one: a stale entry in vite's
-        // directory builds the WRONG foundation and reports success.
-        const agreement = checkFoundationResolution({
-          name: foundationInfo.name,
-          generatedInto: srcDir,
-          generatedEntry: entryPath,
-          siteRoot,
-        })
-        if (!agreement.ok) console.warn(`\n${agreement.message}\n`)
-
         // Code the foundation's stylesheet names no `@source` for: here is where its classes go
         // missing, in a site build and under `uniweb dev`, while its own build has them all.
         const unread = unreadFolders(join(srcDir, 'styles.css'))
@@ -401,32 +388,11 @@ export async function defineSiteConfig(options = {}) {
     // Point #foundation at a virtual noop module.
     alias['#foundation'] = '\0__foundation-noop__'
   } else if (foundationInfo.type !== 'url') {
-    // Bundled mode: #foundation points to the actual package.
-    //
-    // ⛔ **A BARE SPECIFIER, NOT `foundationInfo.path` — and the obvious
-    // "improvement" is measured and wrong.** We hold the resolved path right
-    // here, and handing vite the *name* instead is what lets its node_modules
-    // lookup disagree with ours (the whole reason
-    // `uniweb:ensure-foundation-entry` now runs `checkFoundationResolution`).
-    // Collapsing the two by aliasing to the path looks like it deletes that bug
-    // class. It does not:
-    //
-    //   A vite alias is PREFIX replacement, so `#foundation/styles` — which the
-    //   site's own `entry.js` imports — becomes `<path>/styles`, a filesystem
-    //   path. That bypasses the foundation's `exports` map, and the map is where
-    //   `./styles` → `./styles.css` lives (along with `./dist` and
-    //   `./dist/styles`). Measured 2026-09-01 on a stock marketing scaffold:
-    //   `[vite:load-fallback] Could not load <path>/src/styles (imported by
-    //   entry.js): ENOENT`. A HEALTHY project fails to build.
-    //
-    // Splitting it — exact `#foundation` → path, `#foundation/*` → name — is
-    // worse still: on a diverged tree the entry would come from one directory
-    // and the stylesheet from another, which is a state neither consistent
-    // option can reach.
-    //
-    // ⇒ **The name is load-bearing because the exports map is.** Detecting the
-    // disagreement is the correct shape; eliminating it costs the exports map.
-    alias['#foundation'] = foundationInfo.name
+    // Bundled mode: `#foundation` and `#foundation/<sub>` are read from the folder
+    // `detectFoundationType` found, through that folder's own exports map
+    // (`foundation-imports.js`), never through node_modules, where a package
+    // manager may hold a stale copy of it.
+    plugins.push(foundationImportsPlugin(foundationInfo.path))
   }
 
   // Virtual module plugin for the noop foundation stub
