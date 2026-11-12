@@ -111,8 +111,7 @@ siteContentPlugin({
     convertToWebp: true,       // Convert images to WebP (default: true)
     quality: 80,               // WebP quality 1-100 (default: 80)
     outputDir: 'assets',       // Output subdirectory (default: 'assets')
-    videoPosters: true,        // Extract poster from videos (default: true, requires ffmpeg)
-    pdfThumbnails: true        // Generate PDF thumbnails (default: true, requires pdf-lib)
+    videoPosters: true         // Extract poster from videos (default: true, requires ffmpeg)
   }
 })
 ```
@@ -149,29 +148,28 @@ seo:
 
 The plugin automatically discovers and processes assets referenced in your content. In content-driven sites, markdown acts as "code" - local asset references are like implicit imports and get optimized during build.
 
+This processing is a static build's (`uniweb build`, `uniweb export`, `uniweb deploy --host`). `uniweb publish` and `uniweb push` upload each file as it is.
+
 **Supported path formats:**
 - `./image.png` - Relative to the markdown file
 - `../shared/logo.png` - Relative paths with parent traversal
-- `/images/hero.png` - Absolute paths (resolved from `public/` or `assets/` folder)
+- `/images/hero.png` - Absolute paths, resolved from `public/`
 
 **What gets processed:**
 - Images in markdown content: `![Alt](./photo.jpg)`
 - Media in frontmatter fields: `background`, `image`, `thumbnail`, `poster`, `avatar`, `logo`, `icon`, `video`, `pdf`, etc.
 
 **Image processing:**
-- PNG, JPG, JPEG, GIF → Converted to WebP for smaller file sizes
+- PNG, JPG, JPEG, GIF → Converted to WebP (quality 80) for smaller file sizes, turned upright as the photo's orientation says, with animation kept
 - SVG, WebP, AVIF → Copied as-is (already optimized formats)
 - All processed assets get content-hashed filenames for cache busting
 
 **Video poster extraction** (requires `ffmpeg` on system):
 - MP4, WebM, MOV, AVI, MKV → Poster frame extracted at 1 second
-- Poster images converted to WebP and added to `_assetMeta.posters`
+- The poster is converted to WebP and set as the video's `poster` in the built page
 - Skipped if an explicit `poster` attribute is provided in markdown
 
-**PDF thumbnail generation** (requires `pdf-lib` package):
-- PDF files → Placeholder thumbnail with page count
-- Thumbnails added to `_assetMeta.thumbnails`
-- Skipped if an explicit `preview` attribute is provided in markdown
+A PDF's preview is the one its author names with `preview`.
 
 **Explicit poster/preview images:**
 
