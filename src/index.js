@@ -98,8 +98,9 @@ export { classifyPackage, isExtensionPackage, isSchemasPackage } from './utils/c
 export { collectStandaloneSchemas, routedSchema } from './resolve-data-schema.js'
 
 // One name in a scope is one type: the names a workspace's packages define twice
-export { typesDefinedTwice, packageTypeScope, workspaceTypeFiles, workspaceMappingFiles } from './foundation/shared-types.js'
+export { typesDefinedTwice, packageTypeScope, workspaceTypeFiles, workspaceMappingFiles, workspaceVendorFiles } from './foundation/shared-types.js'
 export { buildMappingMap, ownMappingFiles, loadMappingFile } from './foundation/mappings.js'
+export { buildVendorMap, ownVendorFiles, readVendorFile, vendorFileDigest, VENDORS_DIR } from './foundation/vendors.js'
 
 // Default export is the combined Vite plugin
 export { default } from './vite-foundation-plugin.js'

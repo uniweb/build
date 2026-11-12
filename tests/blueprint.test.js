@@ -530,3 +530,75 @@ describe('integrations', () => {
     ])
   })
 })
+
+// ⭐ `vendor:` — a vendor function the platform runs in place of an address, on an `http` line:
+// `'@/courses#grade'`, a vendor file the site's foundations carry and the function it exports. The
+// file is named in full on the wire as a mapping is; the `#export` never moves.
+describe('integrations — vendor:', () => {
+  const FILE = {
+    integrations: {
+      'auto-grade': {
+        mapping: '@/submission-to-grader', channel: 'http', trigger: 'on_change', vendor: '@/courses#grade',
+        reply: '@/grade-back', reply_about: 'identity.submission', enabled: true,
+      },
+      shared: { mapping: '@/x', channel: 'http', trigger: 'on_create', vendor: '@lib/grading#score' },
+    },
+  }
+  const WIRE_V = {
+    integrations: {
+      'auto-grade': { ...FILE.integrations['auto-grade'], mapping: '@acme/submission-to-grader', reply: '@acme/grade-back', vendor: '@acme/courses#grade' },
+      shared: { ...FILE.integrations.shared, mapping: '@acme/x' },
+    },
+  }
+
+  it('the example is taken — and only a line naming a vendor switches an http line on', () => {
+    expect(blueprintProblems(FILE)).toEqual([])
+  })
+
+  it('refuses a vendor that is not a file and a function, or not on an http line', () => {
+    const found = blueprintProblems({
+      integrations: {
+        a: { mapping: '@/x', channel: 'http', trigger: 'on_create', vendor: '@/courses' },
+        b: { mapping: '@/x', channel: 'http', trigger: 'on_create', vendor: 'courses#grade' },
+        c: { mapping: '@/x', channel: 'http', trigger: 'on_create', vendor: '@/courses#not-a-name' },
+        d: { mapping: '@/x', channel: 'email', trigger: 'on_create', vendor: '@/courses#grade' },
+        e: { mapping: '@/x', channel: 'http', trigger: 'on_create', vendor: 3 },
+      },
+    })
+    expect(found).toEqual([
+      expect.stringMatching(/^`integrations\.a\.vendor` is a vendor file and the function it exports/),
+      expect.stringMatching(/^`integrations\.b\.vendor` names no vendor file/),
+      expect.stringMatching(/^`integrations\.c\.vendor` is a vendor file and the function it exports/),
+      expect.stringMatching(/^`integrations\.d\.vendor`: a vendor function answers, so it sits on an `http` integration — not a `email` one/),
+      expect.stringMatching(/^`integrations\.e\.vendor` is a vendor file and the function it exports/),
+    ])
+  })
+
+  it('names the file in full on the wire, the function as written, and back as the file spells it', () => {
+    expect(blueprintForWire(FILE, '@acme')).toEqual(WIRE_V)
+    expect(blueprintFromWire(WIRE_V, { scope: '@acme' })).toEqual(FILE)
+    const local = { integrations: { x: { mapping: '@/x', channel: 'http', trigger: 'on_create', vendor: '@acme/courses#grade' } } }
+    const wire = { integrations: { x: { mapping: '@acme/x', channel: 'http', trigger: 'on_create', vendor: '@acme/courses#grade' } } }
+    expect(blueprintFromWire(wire, { scope: '@acme', local }).integrations.x.vendor).toBe('@acme/courses#grade')
+  })
+
+  it('warns of a file no foundation carries, or a function it does not export — never refuses', () => {
+    const declared = {
+      types: new Set(),
+      mappings: new Set(['@acme/submission-to-grader', '@acme/grade-back', '@acme/x']),
+      vendors: new Map([['@acme/courses', new Set(['grade', 'eligible'])]]),
+    }
+    const blueprint = {
+      integrations: {
+        ok: FILE.integrations['auto-grade'],
+        typo: { ...FILE.integrations['auto-grade'], vendor: '@/courses#grde' },
+        none: { ...FILE.integrations['auto-grade'], vendor: '@/nope#grade' },
+      },
+    }
+    expect(blueprintWarnings(blueprint, { scope: '@acme', declared })).toEqual([
+      expect.stringMatching(/^blueprint\.yml: `integrations\.typo\.vendor` names the function `grde`, which `@\/courses` does not export — it exports `grade`, `eligible`/),
+      expect.stringMatching(/^blueprint\.yml: `integrations\.none\.vendor` names a vendor file none of this site's foundations carries/),
+    ])
+    expect(blueprintWarnings(blueprint, { scope: '@acme', declared: { types: null, mappings: null, vendors: null } })).toEqual([])
+  })
+})

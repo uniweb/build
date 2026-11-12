@@ -38,7 +38,13 @@ const TEAM_KEYS = Object.freeze(['label'])
  * An integration line, as a backend takes it. Refused here exactly as a backend refuses them, and no
  * more: a line this takes, a backend takes.
  */
-const INTEGRATION_KEYS = Object.freeze(['label', 'mapping', 'channel', 'trigger', 'filter', 'enabled', 'reply', 'reply_about'])
+const INTEGRATION_KEYS = Object.freeze(['label', 'mapping', 'channel', 'trigger', 'filter', 'enabled', 'reply', 'reply_about', 'vendor'])
+/**
+ * `vendor:`: a vendor function the platform runs in place of an address, `'@/courses#grade'` — a
+ * vendor file the site's foundations carry, named as a mapping is, then `#` and the function it
+ * exports. Only on the answering channel, since a function's answer is what the reply reads.
+ */
+const VENDOR_FN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 /** The one channel whose endpoint answers, so the one a `reply` mapping may sit on. */
 const REPLYING = 'http'
 /** `reply_about`: a field of the reply's type, `section.field`. */
@@ -52,7 +58,10 @@ const PAIRS = Object.freeze({
   email: ['on_create', 'on_match', 'on_change', 'manual'],
   http: ['on_create', 'on_match', 'on_change', 'manual'],
 })
-/** The channels a line may switch on with `enabled: true`. */
+/**
+ * The channels a line may switch on with `enabled: true` — and an `http` line that names a `vendor:`,
+ * which has no address for its owner to give first.
+ */
 const ENABLEABLE = Object.freeze(['file', 'feed'])
 
 /** In `all`, every member of the home org: the one name there that is not a team. */
@@ -346,6 +355,13 @@ function integrationProblems(integrations) {
         found.push(`\`${at}.reply_about\` is a field of the reply's type, \`section.field\` — \`identity.submission\` — not ${described(line.reply_about)}.`)
       }
     }
+    if ('vendor' in line) {
+      const problem = vendorRefProblem(`${at}.vendor`, line.vendor)
+      if (problem) found.push(problem)
+      if (channelOk && line.channel !== REPLYING) {
+        found.push(`\`${at}.vendor\`: a vendor function answers, so it sits on an \`${REPLYING}\` integration — not a \`${line.channel}\` one.`)
+      }
+    }
     if ('filter' in line && !isMap(line.filter)) {
       found.push(`\`${at}.filter\` is a map — \`filter: { where: { status: sold } }\` — not ${described(line.filter)}.`)
     }
@@ -356,7 +372,7 @@ function integrationProblems(integrations) {
             ? `\`${at}.enabled\` is the text \`${line.enabled}\` — YAML reads yes, no, on and off as words. Write \`enabled: true\`, or leave it out.`
             : `\`${at}.enabled\` is \`true\`, or left out — not ${described(line.enabled)}.`
         )
-      } else if (channelOk && !ENABLEABLE.includes(line.channel)) {
+      } else if (channelOk && !ENABLEABLE.includes(line.channel) && !(line.channel === REPLYING && 'vendor' in line)) {
         found.push(
           `\`${at}.enabled\`: a \`${line.channel}\` integration is switched on by its owner in the admin app, ` +
             'once its address is given. Leave `enabled` out.'
@@ -365,6 +381,17 @@ function integrationProblems(integrations) {
     }
   }
   return found
+}
+
+/** A vendor function's name, `'@/<file>#<function>'` or `'@scope/<file>#<function>'`, or null. */
+function vendorRefProblem(at, ref) {
+  const hash = typeof ref === 'string' ? ref.lastIndexOf('#') : -1
+  const file = hash > 0 ? ref.slice(0, hash) : null
+  const fn = hash > 0 ? ref.slice(hash + 1) : null
+  if (!file || !VENDOR_FN.test(fn)) {
+    return `\`${at}\` is a vendor file and the function it exports — \`'@/courses#grade'\` — not ${described(ref)}.`
+  }
+  return refNameProblem(at, file, 'vendor file')
 }
 
 /** A name that must be `@/x` or `@scope/x`, or null. */

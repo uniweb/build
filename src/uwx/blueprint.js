@@ -92,7 +92,9 @@ export function blueprintForWire(blueprint, scope) {
   const out = {}
   for (const [key, value] of Object.entries(blueprint)) {
     if (TYPE_KEYS.includes(key) && isMap(value)) out[key] = qualifiedTypes(key, value, scope)
-    else if (key === 'integrations' && isMap(value)) out[key] = mappingsNamed(value, (m) => qualifyRef(m, scope))
+    else if (key === 'integrations' && isMap(value)) {
+      out[key] = mappingsNamed(value, (m) => qualifyRef(m, scope), (file) => qualifyRef(file, scope))
+    }
     else out[key] = value
   }
   return out
@@ -102,18 +104,30 @@ export function blueprintForWire(blueprint, scope) {
 const MAPPING_KEYS = Object.freeze(['mapping', 'reply'])
 
 /**
- * Each integration line with the mappings it names (`mapping:`, `reply:`) renamed by `rename`;
- * nothing else in the line moves — `reply_about` is a field, and a `filter` names fields.
+ * Each integration line with the mappings it names (`mapping:`, `reply:`) renamed by `rename`, and
+ * the vendor file its `vendor:` names (`'@/courses#grade'`: the part before `#`) by `renameVendor`;
+ * nothing else in the line moves — the `#export` is the function's own name, `reply_about` is a
+ * field, and a `filter` names fields.
  */
-function mappingsNamed(integrations, rename) {
+function mappingsNamed(integrations, rename, renameVendor) {
   return Object.fromEntries(
     Object.entries(integrations).map(([id, line]) => {
       if (!isMap(line)) return [id, line]
       const out = { ...line }
       for (const key of MAPPING_KEYS) if (typeof line[key] === 'string') out[key] = rename(line[key])
+      const vendor = splitVendorRef(line.vendor)
+      if (vendor && renameVendor) out.vendor = `${renameVendor(vendor.file)}#${vendor.fn}`
       return [id, out]
     })
   )
+}
+
+/** `'@/courses#grade'` → `{ file: '@/courses', fn: 'grade' }`, or null when it is not that shape. */
+export function splitVendorRef(ref) {
+  if (typeof ref !== 'string') return null
+  const at = ref.lastIndexOf('#')
+  if (at <= 0 || at === ref.length - 1) return null
+  return { file: ref.slice(0, at), fn: ref.slice(at + 1) }
 }
 
 /**
@@ -162,7 +176,11 @@ export function blueprintFromWire(wire, { scope = null, own = null, local = null
   const out = {}
   for (const [key, value] of Object.entries(isMap(wire) ? wire : {})) {
     if (key === 'integrations' && isMap(value)) {
-      out[key] = mappingsNamed(value, (m) => mappingAsFileSpells(m, local?.integrations, scope))
+      out[key] = mappingsNamed(
+        value,
+        (m) => mappingAsFileSpells(m, local?.integrations, scope),
+        (file) => vendorAsFileSpells(file, local?.integrations, scope)
+      )
       continue
     }
     if (!TYPE_KEYS.includes(key) || !isMap(value)) {
@@ -190,6 +208,18 @@ function mappingAsFileSpells(full, localIntegrations, scope) {
     for (const key of MAPPING_KEYS) {
       if (typeof line[key] === 'string' && qualifyRef(line[key], scope) === full) return line[key]
     }
+    }
+  }
+  const org = bareOrg(scope)
+  return org && full.startsWith(`@${org}/`) ? `@/${full.slice(org.length + 2)}` : full
+}
+
+/** A vendor file's full name → as a pull writes it, by the rule `mappingAsFileSpells` follows. */
+function vendorAsFileSpells(full, localIntegrations, scope) {
+  if (isMap(localIntegrations)) {
+    for (const line of Object.values(localIntegrations)) {
+      const vendor = isMap(line) ? splitVendorRef(line.vendor) : null
+      if (vendor && qualifyRef(vendor.file, scope) === full) return vendor.file
     }
   }
   const org = bareOrg(scope)
@@ -325,6 +355,36 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
   }
   for (const [id, line] of Object.entries(isMap(blueprint.integrations) ? blueprint.integrations : {})) {
     for (const key of MAPPING_KEYS) out.push(...mappingWarnings(line, id, key, { scoped, scope, declared, sending }))
+    out.push(...vendorWarnings(line, id, { scoped, scope, declared, sending }))
+  }
+  return out
+}
+
+/** What the vendor function an integration line names (`vendor: '@/courses#grade'`) warns of. */
+function vendorWarnings(line, id, { scoped, scope, declared, sending }) {
+  const vendor = isMap(line) ? splitVendorRef(line.vendor) : null
+  if (!vendor) return []
+  const out = []
+  const at = `integrations.${id}.vendor`
+  if (!scoped && vendor.file.startsWith('@/') && sending) {
+    out.push(
+      `${BLUEPRINT_FILE}: \`${at}\` is the foundation's own vendor file, and the foundation has no scope yet, ` +
+        "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
+        "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
+    )
+  }
+  if (declared?.vendors) {
+    const exports = declared.vendors.get(qualifyRef(vendor.file, scope))
+    if (!exports) {
+      out.push(
+        `${BLUEPRINT_FILE}: \`${at}\` names a vendor file none of this site's foundations carries, so a backend ` +
+          "started from this site leaves the line out. A foundation's own is a file in src/vendors/; a library's is listed in its main.js, `vendors: ['@scope/<name>']`."
+      )
+    } else if (exports.size && !exports.has(vendor.fn)) {
+      out.push(
+        `${BLUEPRINT_FILE}: \`${at}\` names the function \`${vendor.fn}\`, which \`${vendor.file}\` does not export — it exports ${[...exports].map((e) => `\`${e}\``).join(', ')}.`
+      )
+    }
   }
   return out
 }
@@ -396,12 +456,18 @@ function readSiteYml(siteRoot) {
  * @param {string} [opts.foundationDir] - the site's foundation, when a push was handed its folder
  * @param {object|null} [opts.primary] - the site's foundation's schema, already read by the caller
  *        (the static build's `foundationSections`)
- * @returns {Promise<{ types: Set<string>|null, mappings: Set<string>|null, unread: string[] }>} `mappings`:
- *          the mappings they define, in full, null when `types` is
+ * @returns {Promise<{ types: Set<string>|null, mappings: Set<string>|null, vendors: Map<string, Set<string>>|null, unread: string[] }>}
+ *          `mappings`: the mappings they define, in full; `vendors`: the vendor files they carry, in
+ *          full → the functions each exports (empty when a library's could not be read); each null
+ *          when `types` is
  */
 export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, foundationDir, primary } = {}) {
   const types = new Set()
   const mappings = new Set()
+  const vendors = new Map()
+  const addVendors = (schema, at) => {
+    for (const [ref, v] of Object.entries(schema._vendors || {})) vendors.set(qualifyRef(ref, at), new Set(v?.exports || []))
+  }
   const unread = []
   const dir = foundationDir ? resolve(foundationDir) : localFoundationDir(siteRoot, siteYml)
   if (!dir) {
@@ -412,6 +478,7 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
     else {
       for (const ref of Object.keys(schema.dataSchemas || {})) types.add(qualifyRef(ref, scope))
       for (const ref of Object.keys(schema._mappings || {})) mappings.add(qualifyRef(ref, scope))
+      addVendors(schema, scope)
     }
   }
   for (const entry of Array.isArray(siteYml?.extensions) ? siteYml.extensions : []) {
@@ -436,8 +503,14 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
       types.add(qualifyRef(ref, extScope))
     }
     for (const ref of Object.keys(schema._mappings || {})) mappings.add(qualifyRef(ref, extScope))
+    addVendors(schema, extScope)
   }
-  return { types: unread.length ? null : types, mappings: unread.length ? null : mappings, unread }
+  return {
+    types: unread.length ? null : types,
+    mappings: unread.length ? null : mappings,
+    vendors: unread.length ? null : vendors,
+    unread,
+  }
 }
 
 /** The site's foundation's folder, when it is in the project — else null (a catalog ref, a URL). */
