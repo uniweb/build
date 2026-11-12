@@ -162,7 +162,9 @@ This processing is a static build's (`uniweb build`, `uniweb export`, `uniweb de
 **Image processing:**
 - PNG, JPG, JPEG, GIF → A WebP at quality 85 when it is at least 10% smaller, otherwise the file as it is. Either way it is turned upright as the photo's orientation says, keeps its transparency and animation, and loses its location and camera data. A WebP's colour is converted to sRGB with no profile embedded; a kept file keeps its own
 - TIFF, HEIC → Always a WebP, since most browsers can't show them (a HEIC this machine can't decode, and a BMP, is copied as it is, with a warning)
-- SVG, WebP, AVIF → Copied as-is (already optimized formats)
+- WebP → Copied without its location and camera data, or turned and made again when its orientation says to turn it
+- SVG, AVIF → Copied as-is
+- `public/` is copied as it is beside these copies, so a photo there keeps its metadata in that copy
 - All processed assets get content-hashed filenames for cache busting
 
 **Video poster extraction** (requires `ffmpeg` on system):

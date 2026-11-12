@@ -33,11 +33,11 @@ describe('an image the build copies', () => {
   })
 
   /** Write a file and copy it as a build does. */
-  const copied = async (name, bytes) => {
+  const copied = async (name, bytes, options = {}) => {
     const resolved = join(dir, name)
     await writeFile(resolved, bytes)
     const ref = `./${name}`
-    return { ref, ...(await processAssets({ [ref]: { original: ref, resolved, isImage: true } }, { outputDir })) }
+    return { ref, ...(await processAssets({ [ref]: { original: ref, resolved, isImage: true } }, { outputDir, ...options })) }
   }
 
   const built = (ref, attrs, pathMapping, files) =>
@@ -63,11 +63,20 @@ describe('an image the build copies', () => {
     expect(drawn(built(ref, {}, pathMapping, files))).toMatchObject({ width: 64, height: 32 })
   })
 
-  // Only WebKit turns a WebP by its EXIF, so a size would have the wrong proportions in the others. It
-  // is copied as it is, so the file isn't turned to agree.
-  it('gives no size to a file browsers would draw differently', async () => {
+  // Only WebKit turns a WebP by its EXIF. The rule turns one whose EXIF says to (`prepareImage`), so
+  // every browser draws it the same, and at the size it was turned to.
+  it('turns a WebP its EXIF says to turn, and gives the size every browser draws it at', async () => {
     const bytes = await solid(64, 32).withMetadata({ orientation: 6 }).webp().toBuffer()
     const { ref, pathMapping, files } = await copied('turned.webp', bytes)
+    expect(files[ref]).toMatchObject({ width: 32, height: 64 })
+    expect(drawn(built(ref, {}, pathMapping, files))).toMatchObject({ width: 32, height: 64 })
+  })
+
+  // A build that turns conversion off (the site plugin's `assets.convertToWebp: false`) copies the WebP
+  // as it is, so a size would have the wrong proportions in every browser but WebKit.
+  it('gives no size to a file browsers would draw differently', async () => {
+    const bytes = await solid(64, 32).withMetadata({ orientation: 6 }).webp().toBuffer()
+    const { ref, pathMapping, files } = await copied('turned.webp', bytes, { convertToWebp: false })
     expect(files[ref]).not.toHaveProperty('width')
     const image = drawn(built(ref, {}, pathMapping, files))
     expect(image).not.toHaveProperty('width')

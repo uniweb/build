@@ -148,9 +148,9 @@ describe('prepareImage — what it makes', () => {
     expect(out.bytes.equals(bmp)).toBe(true)
   })
 
-  it('SVG, ICO, WebP and AVIF are left as they are', async () => {
+  it('SVG, ICO and AVIF are left as they are', async () => {
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')
-    for (const ext of ['svg', 'ico', 'webp', 'avif']) {
+    for (const ext of ['svg', 'ico', 'avif']) {
       expect(isPreparableImage(ext)).toBe(false)
       const out = await prepareImage(svg, ext)
       expect(out).toEqual({ bytes: svg, ext, converted: false })
@@ -172,7 +172,97 @@ describe('prepareImage — what it makes', () => {
   })
 })
 
+const XMP =
+  '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+  '<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Somebody</dc:creator>' +
+  '</rdf:Description></rdf:RDF></x:xmpmeta>'
+
+/** A WebP with an orientation, the camera, where it was taken, and who took it (XMP). */
+const phoneWebp = (orientation = 1) =>
+  noise(64, 48)
+    .withMetadata({ orientation })
+    .withExif({
+      IFD0: { Make: 'PhoneMaker', Model: 'Phone 15' },
+      IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '45/1 25/1 0/1' },
+    })
+    .withXmp(XMP)
+    .webp({ quality: 80 })
+    .toBuffer()
+
+/** The flags of a WebP's `VP8X` chunk. */
+const vp8xFlags = (webp) => webp[webp.indexOf(Buffer.from('VP8X')) + 8]
+
+const sameRaw = async (a, b) => (await sharp(a).raw().toBuffer()).equals(await sharp(b).raw().toBuffer())
+
+describe('prepareImage — a WebP', () => {
+  it('⭐ is kept without its location, camera data and XMP, its pixels untouched', async () => {
+    const input = await phoneWebp()
+    expect(input.includes(Buffer.from('PhoneMaker')) && input.includes(Buffer.from('Somebody'))).toBe(true)
+    const out = await prepareImage(input, 'webp')
+    expect(out).toMatchObject({ ext: 'webp', converted: false })
+    expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+    expect(out.bytes.includes(Buffer.from('Somebody'))).toBe(false)
+    const meta = await sharp(out.bytes).metadata()
+    expect(meta.exif).toBeUndefined()
+    expect(meta.xmp).toBeUndefined()
+    expect(meta.icc).toBeDefined()
+    expect(vp8xFlags(out.bytes) & 0x0c).toBe(0)
+    expect(await sameRaw(out.bytes, input)).toBe(true)
+  })
+
+  it('one its EXIF says to turn is turned, like any picture a page draws', async () => {
+    const out = await prepareImage(await phoneWebp(6), 'webp')
+    expect(out).toMatchObject({ ext: 'webp', converted: true })
+    expect(await sharp(out.bytes).metadata()).toMatchObject({ width: 48, height: 64 })
+    expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+  })
+})
+
+describe('prepareImage — keepFormat: a picture other software fetches by its address', () => {
+  it('⭐ stays in its format and loses its location and camera data, its orientation kept alone', async () => {
+    const input = await phonePhoto()
+    expect(input.includes(Buffer.from('PhoneMaker'))).toBe(true)
+    const out = await prepareImage(input, 'jpg', { keepFormat: true })
+    expect(out).toMatchObject({ ext: 'jpg', converted: false })
+    expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+    const meta = await sharp(out.bytes).metadata()
+    expect(meta).toMatchObject({ format: 'jpeg', orientation: 6, width: 64, height: 48 })
+    // The orientation alone: `Exif\0\0` and one entry.
+    expect(meta.exif.length).toBeLessThanOrEqual(32)
+    expect(meta.icc).toBeDefined()
+    expect(await sameRaw(out.bytes, input)).toBe(true)
+  })
+
+  it('a picture with no orientation keeps no EXIF at all', async () => {
+    const input = await noise(64, 48).withExif({ IFD0: { Make: 'PhoneMaker' } }).png().toBuffer()
+    expect((await sharp(input).metadata()).exif).toBeDefined()
+    const out = await prepareImage(input, 'png', { keepFormat: true })
+    expect(out).toMatchObject({ ext: 'png', converted: false })
+    expect((await sharp(out.bytes).metadata()).exif).toBeUndefined()
+    expect(await sameRaw(out.bytes, input)).toBe(true)
+  })
+
+  it('a WebP keeps its orientation alone, announced by its flag, and loses its XMP', async () => {
+    const out = await prepareImage(await phoneWebp(6), 'webp', { keepFormat: true })
+    expect(out).toMatchObject({ ext: 'webp', converted: false })
+    const meta = await sharp(out.bytes).metadata()
+    expect(meta).toMatchObject({ orientation: 6, width: 64, height: 48 })
+    expect(meta.xmp).toBeUndefined()
+    expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+    expect(vp8xFlags(out.bytes) & 0x0c).toBe(0x08)
+  })
+})
+
 describe('withoutPrivateMetadata — a kept file loses its private data and nothing else', () => {
+  it('a PNG keeps the orientation it states ahead of its image data, alone', async () => {
+    const png = await noise(16, 8).withMetadata({ orientation: 6 }).withExif({ IFD0: { Make: 'PhoneMaker' } }).png().toBuffer()
+    expect(png.indexOf(Buffer.from('eXIf'))).toBeLessThan(png.indexOf(Buffer.from('IDAT')))
+    const out = withoutPrivateMetadata(png, 'png')
+    expect(out.includes(Buffer.from('PhoneMaker'))).toBe(false)
+    expect((await sharp(out).metadata()).orientation).toBe(6)
+    expect(await sameRaw(out, png)).toBe(true)
+  })
+
   it('a progressive JPEG: every scan kept, EXIF and comments gone, still the same picture', async () => {
     const input = await noise(64, 48)
       .withExif({ IFD0: { Make: 'PhoneMaker' } })
