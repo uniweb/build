@@ -83,6 +83,22 @@ describe('an image the build copies', () => {
     expect(image).not.toHaveProperty('height')
   })
 
+  it('copies a BMP it cannot read as it is, and says it only stays as large as it is', async () => {
+    const bmp = Buffer.from(
+      '424d3a0000000000000036000000280000000100000001000000010018000000000004000000130b0000130b00000000000000000000ff000000',
+      'hex',
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await copied('scan.bmp', bmp)
+      const said = warn.mock.calls.map((call) => call.join(' ')).join('\n')
+      expect(said).toMatch(/scan\.bmp is copied as it is: it can't be made smaller here\. Export it as PNG or JPEG/)
+      expect(said).not.toMatch(/some browsers/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('leaves a size the author wrote, whole or in part', async () => {
     const { ref, pathMapping, files } = await copied('hero.png', await solid(780, 1170).png().toBuffer())
     expect(drawn(built(ref, { width: 300, height: 200 }, pathMapping, files))).toMatchObject({ width: 300, height: 200 })

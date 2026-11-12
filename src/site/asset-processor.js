@@ -22,6 +22,13 @@ import { prepareImage, isPreparableImage } from '../prepare-image.js'
 // Image formats to pass through without conversion
 const PASSTHROUGH_FORMATS = ['.svg', '.webp', '.avif', '.ico']
 
+/** What to tell an author whose picture couldn't be read here, by its format: a BMP is drawn by every browser, a HEIC by few. */
+function unreadable(ext) {
+  if (ext === '.heic' || ext === '.heif') return "it can't be converted here, and most browsers won't show it. Export it as JPEG."
+  if (ext === '.bmp') return "it can't be made smaller here. Export it as PNG or JPEG for a smaller file."
+  return "it can't be read here, so check that it opens."
+}
+
 /**
  * Prefix a root-relative URL with the site's base path.
  *
@@ -105,7 +112,7 @@ export async function processAsset(asset, options = {}) {
       // its colour profile converted away, and a phone's location kept in a JPEG nothing converted.
       const prepared = await prepareImage(await readFile(resolved), ext, quality ? { quality } : undefined)
       if (prepared.unreadable) {
-        console.warn(`[asset-processor] ${basename(resolved)} is copied as it is: it can't be converted here, and some browsers can't show it`)
+        console.warn(`[asset-processor] ${basename(resolved)} is copied as it is: ${unreadable(ext)}`)
       }
       outputBuffer = prepared.bytes
       outputExt = `.${prepared.ext}`
