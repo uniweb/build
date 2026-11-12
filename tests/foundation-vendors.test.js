@@ -144,6 +144,11 @@ describe('vendors/ in a foundation and a library', () => {
     expect(await workspaceVendorFiles('@lib/grading', shop)).toEqual([join(ROOT, 'grading/vendors/grading.js')])
   })
 
+  it('only a vendor file makes one: a vendors/ of JSON, or of `_` files, does not', () => {
+    expect(isSchemasPackage(library('data-only', '@lib', { 'vendors/table.json': '{}' }))).toBe(false)
+    expect(isSchemasPackage(library('helpers-only', '@lib', { 'vendors/_helper.js': 'export const x = 1\n' }))).toBe(false)
+  })
+
   it('⭐ main.js `vendors:` carries a library\'s files by full name, and refuses what it cannot', async () => {
     library('grading', '@lib', { 'vendors/grading.js': GRADER, 'vendors/broken.js': "import x from 'y'\nexport function f() {}" })
     const shop = foundation('shop', '@shop/storefront')

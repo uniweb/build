@@ -71,6 +71,10 @@ describe('a local run of a vendor function', () => {
     expect((await call(fn('return [1]'), 'f')).failure).toMatch(/returned an array, not an object/)
     expect((await call(fn('return 3'), 'f')).failure).toMatch(/returned number, not an object/)
     expect((await call(fn('return { n: 1n }'), 'f')).failure).toMatch(/can't be written as JSON/)
+    // Judged as the JSON the caller gets: a Date is a string there, a Map an empty object.
+    expect((await call(fn('return new Date(0)'), 'f')).failure).toMatch(/returned a Date, which becomes "1970/)
+    expect((await call(fn('return new Map([[1, 2]])'), 'f')).failure).toMatch(/returned a Map, which becomes \{\}/)
+    expect((await call(fn('return { toJSON() { return undefined } }'), 'f')).failure).toMatch(/becomes nothing as JSON/)
     expect((await call(fn(`return { s: 'x'.repeat(${LIMITS.answerBytes}) }`), 'f')).failure).toMatch(/over the 256 KiB an answer may be/)
   })
 

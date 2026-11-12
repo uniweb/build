@@ -127,7 +127,20 @@ function answerOutcome(answer) {
   } catch (err) {
     return { kind: 'not-json', message: messageOf(err) }
   }
+  // What reaches the caller is the JSON, so judge that: a Date becomes a string, a Map `{}`.
+  const sent = text === undefined ? undefined : JSON.parse(text)
+  if (sent === null || typeof sent !== 'object' || Array.isArray(sent)) {
+    return { kind: 'not-object', got: `${describe(answer)}, which becomes ${sent === undefined ? 'nothing' : JSON.stringify(sent).slice(0, 40)} as JSON` }
+  }
+  if (Object.prototype.toString.call(answer) !== '[object Object]') {
+    return { kind: 'not-object', got: `${describe(answer)}, which becomes ${text.slice(0, 40)} as JSON` }
+  }
   return { kind: 'answered', text }
+}
+
+function describe(value) {
+  const tag = Object.prototype.toString.call(value).slice(8, -1)
+  return `a ${tag}`
 }
 
 function messageOf(err) {

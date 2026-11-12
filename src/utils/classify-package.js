@@ -117,11 +117,11 @@ export function isSchemasPackage(packagePath) {
   // 2. A schemas/ directory of schema files, a mappings/ one of mappings, or a vendors/ one of
   //    vendor files (a library of mappings or vendor files alone is one too: `register` in it
   //    registers them).
-  for (const folder of ['schemas', 'mappings', 'vendors']) {
+  for (const [folder, files] of [['schemas', /\.(js|json|ya?ml)$/], ['mappings', /\.(js|json|ya?ml)$/], ['vendors', /^[^_].*\.js$/]]) {
     const dir = join(packagePath, folder)
     if (!existsSync(dir)) continue
     try {
-      if (readdirSync(dir).some((f) => /\.(js|json|ya?ml)$/.test(f))) return true
+      if (readdirSync(dir).some((f) => files.test(f))) return true
     } catch {
       // unreadable: not this signal
     }

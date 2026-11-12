@@ -126,7 +126,7 @@ export async function checkVendorSource(source) {
   for (const node of ast.body) {
     switch (node.type) {
       case 'ImportDeclaration':
-        problems.push(`imports \`${node.source.value}\`: a vendor file has no imports. Keep a helper inside the file; a function that needs a package is a real vendor.`)
+        problems.push(`imports \`${node.source.value}\`: a vendor file has no imports. Keep a helper inside the file; a function that needs a package is a real service, reached at its address.`)
         break
       case 'ExportAllDeclaration':
         problems.push(`re-exports \`${node.source.value}\`: a vendor file has no imports, so it exports only functions it defines.`)
@@ -182,7 +182,7 @@ export async function checkVendorSource(source) {
   // Dynamic `import()` anywhere in the file.
   walk(ast, (node) => {
     if (node.type === 'ImportExpression') {
-      problems.push('calls `import()`: a vendor file has no imports. Keep a helper inside the file; a function that needs a package is a real vendor.')
+      problems.push('calls `import()`: a vendor file has no imports. Keep a helper inside the file; a function that needs a package is a real service, reached at its address.')
     }
   })
 
