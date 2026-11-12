@@ -26,6 +26,12 @@
  * once, at the top of the file, is fine. The check reads names, so a write through another name for
  * the same object gets past it.
  *
+ * It also WARNS of a name the file uses but never declares that isn't there when it runs: Node's
+ * (`process`, `Buffer`, `require`, …), since it runs with the standard web globals, and the
+ * network's (`fetch`, …), which throws there. A test that imports the file runs it in Node, where
+ * these work, so the build is where a developer hears of them. Only a warning: a use guarded by
+ * `typeof` is fine.
+ *
  * The limits on a file's size and its number of exports are the registry's to state, and its
  * refusal names them; the build doesn't restate them.
  *
@@ -185,7 +191,7 @@ export async function checkVendorSource(source) {
     problems.push('exports no function: export each function an integration calls by name, `export function grade(input) { … }`.')
   }
 
-  return { exports, problems: [...new Set(problems)], warnings: callWrites(ast, topNames) }
+  return { exports, problems: [...new Set(problems)], warnings: [...missingGlobals(ast), ...callWrites(ast, topNames)] }
 }
 
 /**
@@ -218,6 +224,74 @@ export async function buildVendorMap(srcDir, { shownIn = `src/${VENDORS_DIR}` } 
     )
   }
   return { map, warnings }
+}
+
+// --- the missing-globals check ------------------------------------------------------------------
+
+const NODE_ONLY = ['process', 'Buffer', 'require', 'module', 'exports', '__dirname', '__filename', 'global', 'setImmediate', 'clearImmediate']
+const NETWORK = ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource']
+
+/**
+ * Each name from `NODE_ONLY` or `NETWORK` the file reads without declaring it anywhere. A name the
+ * file declares, at any depth, is taken as its own; a property name (`x.process`, `{ fetch: … }`)
+ * is not a use.
+ */
+function missingGlobals(ast) {
+  const declared = new Set()
+  walk(ast, (node) => {
+    if (node.type === 'VariableDeclarator') for (const n of patternNames(node.id)) declared.add(n)
+    else if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration' || node.type === 'FunctionExpression' || node.type === 'ClassExpression') && node.id) declared.add(node.id.name)
+    if (isFunctionNode(node) || node.type === 'FunctionDeclaration') for (const p of node.params) for (const n of patternNames(p)) declared.add(n)
+    if (node.type === 'CatchClause' && node.param) for (const n of patternNames(node.param)) declared.add(n)
+  })
+  const used = new Set()
+  const visit = (node, parent, key) => {
+    if (!node || typeof node.type !== 'string') return
+    if (node.type === 'Identifier' && !isPropertyName(parent, key)) used.add(node.name)
+    for (const k of Object.keys(node)) {
+      if (k === 'type' || k === 'start' || k === 'end') continue
+      const child = node[k]
+      if (Array.isArray(child)) for (const c of child) visit(c, node, k)
+      else if (child && typeof child.type === 'string') visit(child, node, k)
+    }
+  }
+  visit(ast, null, null)
+  const out = []
+  for (const name of NODE_ONLY) {
+    if (used.has(name) && !declared.has(name)) {
+      out.push(`uses \`${name}\`, which is Node's: a vendor function runs with the standard web globals (\`JSON\`, \`Math\`, \`Intl\`, \`Date\`, \`crypto.subtle\`), not in Node, so it isn't there.`)
+    }
+  }
+  for (const name of NETWORK) {
+    if (used.has(name) && !declared.has(name)) {
+      out.push(`uses \`${name}\`, which throws where it runs: a vendor function has no network. A function that needs the network is a real service, reached at its address.`)
+    }
+  }
+  return out
+}
+
+/** Whether an Identifier at `parent[key]` names a property or a label, not a binding. */
+function isPropertyName(parent, key) {
+  if (!parent) return false
+  switch (parent.type) {
+    case 'MemberExpression':
+      return key === 'property' && !parent.computed
+    case 'Property':
+      return key === 'key' && !parent.computed && !parent.shorthand
+    case 'MethodDefinition':
+    case 'PropertyDefinition':
+      return key === 'key' && !parent.computed
+    case 'LabeledStatement':
+    case 'BreakStatement':
+    case 'ContinueStatement':
+      return key === 'label'
+    case 'MetaProperty':
+      return true
+    case 'ExportSpecifier':
+      return key === 'exported'
+    default:
+      return false
+  }
 }
 
 // --- the call-writes check -----------------------------------------------------------------------

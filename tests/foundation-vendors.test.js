@@ -102,6 +102,25 @@ describe('a vendor file — the warning about a call that writes outside itself'
   })
 })
 
+describe('a vendor file — the warning about a name that isn\'t there when it runs', () => {
+  it('⭐ warns of Node\'s globals and the network, which a test in Node lets pass', async () => {
+    const { warnings, problems } = await checkVendorSource(
+      'export async function grade(input) {\n  const r = await fetch(input.url)\n  return { at: process.env.X, b: Buffer.from(input.s) }\n}\n'
+    )
+    expect(problems).toEqual([])
+    expect(warnings.map((x) => x.match(/`(\w+)`/)[1])).toEqual(['process', 'Buffer', 'fetch'])
+    expect(warnings[2]).toMatch(/no network/)
+  })
+
+  it('says nothing of the same names as properties, labels or the file\'s own bindings', async () => {
+    const { warnings } = await checkVendorSource(
+      'const fetch = (x) => x\n' +
+        'export function grade(input, { process }) {\n  const o = { Buffer: 1, require() {} }\n  o.module = input.global\n  class A { exports = 1 }\n  return { a: fetch(1), b: process, c: typeof setImmediate }\n}\n'
+    )
+    expect(warnings).toEqual([expect.stringMatching(/^uses `setImmediate`/)])
+  })
+})
+
 describe('vendors/ in a foundation and a library', () => {
   it('reads a package\'s own `.js` files, leaving out `_` names, into `{ "@/name": { exports } }`', async () => {
     const shop = foundation('shop', '@shop/storefront')
