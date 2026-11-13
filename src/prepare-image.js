@@ -15,17 +15,17 @@
  *    kept but needs turning is converted instead, so no picture a page draws depends on a tag to
  *    stand up.
  * 5. **Location and camera data are dropped**, from a kept file too, which loses them without being
- *    re-encoded (`withoutPrivateMetadata`). Its orientation stays, alone, since that is what turns
- *    it. **A WebP's colour is converted to sRGB, with no profile embedded**, as a host converting a
+ *    re-encoded (`withoutPrivateMetadata`), a HEIC this machine can't decode and an AVIF included.
+ *    Its orientation stays, alone, since that is what turns it. **A WebP's colour is converted to sRGB, with no profile embedded**, as a host converting a
  *    picture that wasn't prepared does, so the two agree: a phone's Display P3 photo keeps its
  *    colours, managed into sRGB, and loses the wider gamut. A kept file keeps its own profile, since
  *    it isn't re-encoded and dropping the profile alone would shift its colours.
  * 6. **No size cap.** A prepared file is the only copy kept, so it keeps its pixels.
  * 7. **Which files.** JPEG, PNG, GIF, TIFF, HEIC and BMP are converted under the keep test. A WebP is
- *    kept without its location and camera data, unless its EXIF says to turn it. SVG, ICO and AVIF
- *    are left as they are, an AVIF's metadata included. A file this machine can't decode (HEIC with
- *    HEVC, and BMP, which sharp's builds don't read) is left as it is and reported `unreadable`, for
- *    its caller to say so.
+ *    kept without its location and camera data, unless its EXIF says to turn it, and so is an AVIF.
+ *    SVG and ICO are left as they are. A file this machine can't decode (HEIC with HEVC, and BMP,
+ *    which sharp's builds don't read) is kept without its private data and reported `unreadable`,
+ *    for its caller to say so.
  * 8. **A picture other software fetches by its address** (`keepFormat`: a favicon, a touch icon, a
  *    social image) stays in its format, since a home screen takes a PNG and a link preview a JPEG or
  *    PNG. It only loses its location and camera data.
@@ -49,7 +49,7 @@ export const IMAGE_RULE = Object.freeze({
 })
 
 /** Formats the rule prepares, by extension. */
-const PREPARED = new Set(['jpg', 'jpeg', 'png', 'gif', 'tif', 'tiff', 'heic', 'heif', 'bmp', 'webp'])
+const PREPARED = new Set(['jpg', 'jpeg', 'png', 'gif', 'tif', 'tiff', 'heic', 'heif', 'bmp', 'webp', 'avif'])
 
 /** Formats every browser draws: kept when the WebP saves too little. */
 const DRAWN_EVERYWHERE = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'])
@@ -82,7 +82,8 @@ export async function prepareImage(bytes, ext, { quality = IMAGE_RULE.quality, k
   const kind = extOf(ext)
   if (!PREPARED.has(kind)) return { bytes, ext: kind, converted: false }
   const kept = () => ({ bytes: withoutPrivateMetadata(bytes, kind), ext: kind, converted: false })
-  if (keepFormat || (kind === 'png' && isAnimatedPng(bytes))) return kept()
+  // An AVIF is drawn everywhere already, and its turn is a property of the image, not a tag.
+  if (keepFormat || kind === 'avif' || (kind === 'png' && isAnimatedPng(bytes))) return kept()
 
   let meta
   let webp
@@ -101,7 +102,7 @@ export async function prepareImage(bytes, ext, { quality = IMAGE_RULE.quality, k
     // nothing here could read, is reported, since a page may not show it.
     const drawn = DRAWN_EVERYWHERE.has(kind)
     return {
-      bytes: drawn ? withoutPrivateMetadata(bytes, kind) : bytes,
+      bytes: withoutPrivateMetadata(bytes, kind),
       ext: kind,
       converted: false,
       ...(drawn && meta ? {} : { unreadable: true }),
@@ -126,6 +127,8 @@ export async function prepareImage(bytes, ext, { quality = IMAGE_RULE.quality, k
  *   after the image data turns nothing in a browser, so its orientation goes with it.
  * - **WebP:** drops its `EXIF` and `XMP ` chunks and the flags that announce them, and keeps every
  *   other chunk.
+ * - **HEIC, AVIF:** zeroes the bytes of its EXIF and XMP items where they lie (`stripHeif`), every
+ *   size and offset unchanged, its colour profile and turn untouched.
  * - Anything else, or a file that doesn't parse as its format, is returned as it is.
  *
  * @param {Buffer} bytes
@@ -137,6 +140,7 @@ export function withoutPrivateMetadata(bytes, ext) {
   if (kind === 'jpg' || kind === 'jpeg') return stripJpeg(bytes) ?? bytes
   if (kind === 'png') return stripPng(bytes) ?? bytes
   if (kind === 'webp') return stripWebp(bytes) ?? bytes
+  if (kind === 'heic' || kind === 'heif' || kind === 'avif') return stripHeif(bytes) ?? bytes
   return bytes
 }
 
@@ -310,6 +314,131 @@ function isAnimatedPng(buf) {
     if (type === 'acTL' || type === 'IDAT') return false
   })
   return animated
+}
+
+// ── HEIF: HEIC and AVIF ──────────────────────────────────────────────────────────────────────────
+
+/** An ISOBMFF box at `at`: its type and where its payload starts and ends, or null past `end`. */
+function isoBox(buf, at, end) {
+  if (at + 8 > end) return null
+  let size = buf.readUInt32BE(at)
+  let head = 8
+  if (size === 1) {
+    if (at + 16 > end) return null
+    size = Number(buf.readBigUInt64BE(at + 8))
+    head = 16
+  } else if (size === 0) size = end - at
+  if (size < head || at + size > end) return null
+  return { type: buf.toString('latin1', at + 4, at + 8), start: at + head, end: at + size }
+}
+
+/** Every box between `from` and `end`, or null when one doesn't parse. */
+function isoBoxes(buf, from, end) {
+  const boxes = []
+  for (let at = from; at < end; ) {
+    const box = isoBox(buf, at, end)
+    if (!box) return null
+    boxes.push(box)
+    at = box.end
+  }
+  return boxes
+}
+
+/** An unsigned number of 0, 2, 4 or 8 bytes, as an `iloc` box sizes its fields. */
+function readSized(buf, at, size) {
+  if (size === 0) return 0
+  if (size === 2) return buf.readUInt16BE(at)
+  if (size === 4) return buf.readUInt32BE(at)
+  if (size === 8) return Number(buf.readBigUInt64BE(at))
+  return NaN
+}
+
+/** The ids of a HEIF file's private items: its EXIF, and XMP stored as a `mime` item. */
+function privateHeifItems(buf, iinf) {
+  const version = buf[iinf.start]
+  const first = iinf.start + 4 + (version === 0 ? 2 : 4)
+  const entries = isoBoxes(buf, first, iinf.end)
+  if (!entries) return null
+  const ids = new Set()
+  for (const infe of entries) {
+    if (infe.type !== 'infe') continue
+    const v = buf[infe.start]
+    if (v < 2) continue // versions 0 and 1 name no item type
+    let at = infe.start + 4
+    const id = v === 2 ? buf.readUInt16BE(at) : buf.readUInt32BE(at)
+    at += (v === 2 ? 2 : 4) + 2 // the id, then its protection index
+    const type = buf.toString('latin1', at, at + 4)
+    at += 4
+    const nameEnd = buf.indexOf(0, at)
+    if (nameEnd < 0 || nameEnd >= infe.end) continue
+    if (type === 'Exif') ids.add(id)
+    if (type === 'mime') {
+      const contentEnd = buf.indexOf(0, nameEnd + 1)
+      const content = buf.toString('latin1', nameEnd + 1, contentEnd < 0 ? infe.end : Math.min(contentEnd, infe.end))
+      if (/xmp|rdf\+xml/i.test(content)) ids.add(id)
+    }
+  }
+  return ids
+}
+
+/**
+ * A HEIF file (a HEIC or an AVIF) without its EXIF and XMP. Each is an item whose bytes lie in
+ * `mdat` or `idat`, where `iloc` says; those bytes are zeroed in place, so no size or offset moves.
+ * The picture's colour profile (`colr`) and turn (`irot`) are properties of the image item, which
+ * this leaves alone, and an item's EXIF is not what turns a HEIF picture. Null when the file doesn't
+ * parse, or an item's place can't be read.
+ */
+function stripHeif(buf) {
+  const top = isoBoxes(buf, 0, buf.length)
+  const meta = top?.find((b) => b.type === 'meta')
+  if (!meta) return null
+  const children = isoBoxes(buf, meta.start + 4, meta.end)
+  if (!children) return null
+  const iinf = children.find((b) => b.type === 'iinf')
+  const iloc = children.find((b) => b.type === 'iloc')
+  const idat = children.find((b) => b.type === 'idat')
+  if (!iinf || !iloc) return null
+  const ids = privateHeifItems(buf, iinf)
+  if (!ids) return null
+  if (ids.size === 0) return buf
+
+  const out = Buffer.from(buf)
+  const version = buf[iloc.start]
+  let at = iloc.start + 4
+  const offsetSize = buf[at] >> 4
+  const lengthSize = buf[at] & 15
+  const baseSize = buf[at + 1] >> 4
+  const indexSize = version === 1 || version === 2 ? buf[at + 1] & 15 : 0
+  at += 2
+  const wide = version === 2
+  const count = wide ? buf.readUInt32BE(at) : buf.readUInt16BE(at)
+  at += wide ? 4 : 2
+  for (let i = 0; i < count; i++) {
+    if (at > iloc.end) return null
+    const id = wide ? buf.readUInt32BE(at) : buf.readUInt16BE(at)
+    at += wide ? 4 : 2
+    const method = version === 1 || version === 2 ? buf.readUInt16BE(at) & 15 : 0
+    if (version === 1 || version === 2) at += 2
+    at += 2 // the data reference index
+    const base = readSized(buf, at, baseSize)
+    at += baseSize
+    const extents = buf.readUInt16BE(at)
+    at += 2
+    for (let e = 0; e < extents; e++) {
+      at += indexSize
+      const offset = readSized(buf, at, offsetSize)
+      at += offsetSize
+      const length = readSized(buf, at, lengthSize)
+      at += lengthSize
+      if (!ids.has(id)) continue
+      // Where the item's bytes are: in the file (method 0) or in `idat` (method 1). A length of 0
+      // would mean "to the end", which is never a metadata item's, so it is left alone.
+      const from = method === 0 ? base + offset : method === 1 && idat ? idat.start + base + offset : NaN
+      if (!Number.isFinite(from) || !(length > 0) || from + length > out.length) return null
+      out.fill(0, from, from + length)
+    }
+  }
+  return out
 }
 
 // ── WebP ─────────────────────────────────────────────────────────────────────────────────────────

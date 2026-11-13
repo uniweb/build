@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { crc32 } from 'node:zlib'
+import { readFileSync } from 'node:fs'
 import sharp from 'sharp'
 import { prepareImage, withoutPrivateMetadata, isPreparableImage, IMAGE_RULE } from '../src/prepare-image.js'
 
@@ -148,9 +149,9 @@ describe('prepareImage — what it makes', () => {
     expect(out.bytes.equals(bmp)).toBe(true)
   })
 
-  it('SVG, ICO and AVIF are left as they are', async () => {
+  it('SVG and ICO are left as they are', async () => {
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')
-    for (const ext of ['svg', 'ico', 'avif']) {
+    for (const ext of ['svg', 'ico']) {
       expect(isPreparableImage(ext)).toBe(false)
       const out = await prepareImage(svg, ext)
       expect(out).toEqual({ bytes: svg, ext, converted: false })
@@ -215,6 +216,52 @@ describe('prepareImage — a WebP', () => {
     expect(out).toMatchObject({ ext: 'webp', converted: true })
     expect(await sharp(out.bytes).metadata()).toMatchObject({ width: 48, height: 64 })
     expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+  })
+})
+
+/** An AVIF with a colour profile, the camera, where it was taken, and who took it (XMP). */
+const phoneAvif = () =>
+  noise(64, 48)
+    .withExif({
+      IFD0: { Make: 'PhoneMaker', Model: 'Phone 15' },
+      IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '45/1 25/1 0/1' },
+    })
+    .withXmp(XMP)
+    .withIccProfile('p3')
+    .avif({ quality: 60 })
+    .toBuffer()
+
+describe('prepareImage — a HEIF file: an AVIF, or a HEIC this machine cannot decode', () => {
+  it('⭐ an AVIF is kept, its EXIF and XMP zeroed in place: the same length, the same pixels, its profile kept', async () => {
+    const input = await phoneAvif()
+    expect(input.includes(Buffer.from('PhoneMaker')) && input.includes(Buffer.from('Somebody'))).toBe(true)
+    const out = await prepareImage(input, 'avif')
+    expect(out).toMatchObject({ ext: 'avif', converted: false })
+    expect(out.bytes.length).toBe(input.length)
+    expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+    expect(out.bytes.includes(Buffer.from('Somebody'))).toBe(false)
+    const meta = await sharp(out.bytes).metadata()
+    // The items stay where they were, their bytes all zero.
+    expect(meta.exif.every((b) => b === 0)).toBe(true)
+    expect(meta.icc).toBeDefined()
+    expect(await sameRaw(out.bytes, input)).toBe(true)
+  })
+
+  it('⭐ a HEIC with HEVC pixels, which sharp builds cannot decode, goes up without its private data', async () => {
+    // Made by macOS `sips` from a JPEG with a camera and a location: the format a phone writes.
+    const input = readFileSync(new URL('./fixtures/phone-hevc.heic', import.meta.url))
+    expect(input.includes(Buffer.from('PhoneMaker'))).toBe(true)
+    const out = await prepareImage(input, 'heic')
+    expect(out.bytes.includes(Buffer.from('PhoneMaker'))).toBe(false)
+    // Where sharp decodes HEVC it converts the HEIC; where it doesn't, the HEIC keeps its length.
+    if (!out.converted) expect(out).toMatchObject({ ext: 'heic', unreadable: true })
+    if (!out.converted) expect(out.bytes.length).toBe(input.length)
+  })
+
+  it('a file that is not boxes is returned as it is', () => {
+    const junk = Buffer.from('not a picture at all')
+    expect(withoutPrivateMetadata(junk, 'heic')).toBe(junk)
+    expect(withoutPrivateMetadata(junk, 'avif')).toBe(junk)
   })
 })
 
