@@ -59,4 +59,6 @@ export {
   mergeDataIntoContent
 } from './data-fetcher.js'
 export { loadDeployYml, resolveTarget, resolvePublishTarget } from './deploy-config.js'
+// One section, one file: what a page holds twice, for the build and a pull to say alike.
+export { sectionFilesNamedTwice, describeSectionsNamedTwice } from './section-files.js'
 export { recordLastDeploy, recordTarget, forgetDeploys, forgetDeployYml, retireDeployYmlKeys } from './deploy-config-writer.js'

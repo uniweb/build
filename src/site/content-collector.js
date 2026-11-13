@@ -25,6 +25,7 @@ import { resolveQueriesConfig, toConfigQueries, dataKeyTyping, foundationSection
 import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
 import { isMarkdownFile, isIgnoredFolder } from '../utils/content-files.js'
+import { sectionFilesNamedTwice, describeSectionsNamedTwice } from './section-files.js'
 import { readLayoutFolder, DEFAULT_LAYOUT, layoutAreaRoute } from './layout-folder.js'
 import { mountEntriesOf } from './mount-entries.js'
 import { basename, join, parse, relative, resolve, sep } from 'node:path'
@@ -1624,6 +1625,17 @@ async function processPage(pagePath, pageName, siteRoot, { isIndex = false, pare
       assetCollection: { assets: {}, hasExplicitPoster: new Set() },
       iconCollection: { icons: new Set(), bySource: new Map() }
     }
+  }
+
+  // ⛔ One section, one file: `1-lost.md` beside `lost.md` is the section `lost` twice, which a merge
+  // leaves without a word (`section-files.js`). A build draws both, so it says so and goes on, as a
+  // build does; a push refuses the page (`sync-package.js`), and a pull names it after its merge.
+  const twice = sectionFilesNamedTwice(await readdir(pagePath))
+  if (twice.length) {
+    console.warn(
+      `[content-collector] ${describeSectionsNamedTwice(relative(siteRoot, pagePath).split(sep).join('/'), twice)}. ` +
+        'A number orders a section and never names it, so a push refuses this page: give each its own name, or keep one.'
+    )
   }
 
   let hierarchicalSections = []
