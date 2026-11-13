@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 
-const MANIFEST_FILENAME = '.manifest.json'
+import { FREEFORM_MANIFEST as MANIFEST_FILENAME } from './locales.js'
 
 /**
  * Compute a hash of a ProseMirror document for staleness detection

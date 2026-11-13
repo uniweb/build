@@ -13,7 +13,7 @@
  */
 
 import { readFile, writeFile, readdir, mkdir, rm } from 'fs/promises'
-import { RESERVED_LOCALE_FILES } from './locales.js'
+import { RESERVED_LOCALE_FILES, RECORD_LOCALES_DIR } from './locales.js'
 import { existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { DATA_DIR, resolveDefaultLocale } from '@uniweb/core'
@@ -55,7 +55,7 @@ import {
 // ⚠️ `RECORD_LOCALES_DIR`, and not `RECORDS_DIR`, since 2026-09-21: that name is the
 // site's own `records/` directory now (`site/entity-pool.js`), and this one is
 // `locales/records/` — two directories, one word, so the constant says which.
-export const RECORD_LOCALES_DIR = 'records'
+export { RECORD_LOCALES_DIR }
 
 // ---------------------------------------------------------------------------
 // A record's model — what a push sends it as

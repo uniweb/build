@@ -29,10 +29,9 @@ import { ASSET_SLOTS } from '@uniweb/semantic-parser'
 import { computeSourceHash, manifestText } from '../i18n/freeform-manifest.js'
 import { sameMarkdownDocument, canonicalJson } from './same-content.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
-import { KEPT_FILE, RESERVED_LOCALE_FILES } from '../i18n/locales.js'
+import { KEPT_FILE, RESERVED_LOCALE_FILES, FREEFORM_MANIFEST } from '../i18n/locales.js'
 import { isSmallEdit, wordOverlap } from '../i18n/word-overlap.js'
 
-const FREEFORM_MANIFEST = '.manifest.json'
 
 // The directory a site keeps its translations in — `site.yml`'s `i18n.localesDir`, else `locales`,
 // the rule the build and `uniweb i18n` read it by — for the push and the pull alike. `subdir` scopes a

@@ -5,6 +5,7 @@
 
 import { join, relative, resolve, sep } from 'node:path'
 import { mountEntriesOf } from '../site/mount-entries.js'
+import { unsentTranslationFiles } from '../i18n/locales.js'
 
 /**
  * `site.yml::paths.pages` / `paths.layout`, else `pages/` and `layout/` — resolved
@@ -38,7 +39,8 @@ export function siteContentDirs(siteRoot, siteYml) {
  * mount's may lead out of it (`../docs`):
  *
  * - `config`: `site.yml`, `theme.yml`, `head.html`, `queries.yml`;
- * - `translations`: `locales`;
+ * - `translations`: `site.yml`'s `i18n.localesDir`, else `locales`, with `unsent`: the files there a push
+ *   never sends, its tools' own (`unsentTranslationFiles`);
  * - `pages`, `layout`, `records`: where `paths:` puts them, else their own names;
  * - `media`: `public`, where the files a page names are kept;
  * - `mount`: each `paths: { pages/<segment>: <dir> }` folder, with its `segment` and `abs`.
@@ -53,7 +55,11 @@ export function siteContentDirs(siteRoot, siteYml) {
  *
  * @param {string} siteRoot
  * @param {object|null} siteYml - the parsed `site.yml`
- * @returns {Array<{ path: string, kind: 'config'|'translations'|'pages'|'layout'|'records'|'media'|'mount', segment?: string, abs: string }>}
+ * ⛔ Until 2026-11-13 the translations were always `locales`, whatever `i18n.localesDir` said, while the
+ * push read them where it said: a site that moved them had its translations outside what a push
+ * checks is committed, what `uniweb status` counts, and what a pull merges.
+ *
+ * @returns {Array<{ path: string, kind: 'config'|'translations'|'pages'|'layout'|'records'|'media'|'mount', segment?: string, abs: string, unsent?: string[] }>}
  */
 export function siteContentRoots(siteRoot, siteYml) {
   const paths = siteYml?.paths
@@ -63,7 +69,9 @@ export function siteContentRoots(siteRoot, siteYml) {
   }
   const roots = []
   for (const file of ['site.yml', 'theme.yml', 'head.html', 'queries.yml']) roots.push({ ...at(file), kind: 'config' })
-  roots.push({ ...at('locales'), kind: 'translations' })
+  const localesDir = typeof siteYml?.i18n?.localesDir === 'string' && siteYml.i18n.localesDir.trim() ? siteYml.i18n.localesDir.trim() : 'locales'
+  const translations = at(localesDir)
+  roots.push({ ...translations, kind: 'translations', unsent: unsentTranslationFiles(translations.path) })
   roots.push({ ...at(paths?.pages || 'pages'), kind: 'pages' })
   roots.push({ ...at(paths?.layout || 'layout'), kind: 'layout' })
   roots.push({ ...at(paths?.records || 'records'), kind: 'records' })

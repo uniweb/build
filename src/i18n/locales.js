@@ -16,6 +16,36 @@ import { normalizeLanguageList, resolveDefaultLocale } from '@uniweb/core/locale
 export const KEPT_FILE = '_kept.json'
 export const RESERVED_LOCALE_FILES = new Set(['manifest.json', '_memory.json', KEPT_FILE])
 
+// Where record translations are kept, inside the locales directory: `locales/records/`.
+export const RECORD_LOCALES_DIR = 'records'
+
+// A free-form language's record of the source each of its bodies was translated from:
+// `locales/freeform/{locale}/.manifest.json`.
+export const FREEFORM_MANIFEST = '.manifest.json'
+
+/**
+ * The files in a site's translations directory that are its tools' own, never part of what a push
+ * sends, as paths from the site (POSIX; `*` stands for a language): each reserved file but
+ * `_kept.json`, which a push sends back, beside the site's translations and its records', and each
+ * free-form language's manifest.
+ *
+ * ⭐ A CHANGE TO ONE IS NOT A CHANGE THE BACKEND LACKS. `i18n extract` refreshes `manifest.json`, and
+ * a commit that only did that was taken for a records change: a pull's merge then started from an older
+ * sync point than the one the backend named, and a teammate's own published work came back as the
+ * app's, in conflict with itself (Sublime Hair Studio, 2026-11-12).
+ *
+ * @param {string} [dir] - the translations directory, from the site
+ * @returns {string[]}
+ */
+export function unsentTranslationFiles(dir = 'locales') {
+  const own = [...RESERVED_LOCALE_FILES].filter((f) => f !== KEPT_FILE)
+  return [
+    ...own.map((f) => `${dir}/${f}`),
+    ...own.map((f) => `${dir}/${RECORD_LOCALES_DIR}/${f}`),
+    `${dir}/freeform/*/${FREEFORM_MANIFEST}`,
+  ]
+}
+
 /**
  * The locales a directory holds translations for — one per `<locale>.json` — sorted.
  *

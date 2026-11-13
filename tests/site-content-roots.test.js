@@ -13,6 +13,7 @@ import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { siteProjectToDocument, siteContentRoots } from '../src/uwx/index.js'
+import { computeHash } from '../src/i18n/hash.js'
 
 let ROOT
 const w = (rel, body) => {
@@ -70,6 +71,17 @@ describe('the roots of a site', () => {
     expect(roots.find((r) => r.kind === 'mount')).toMatchObject({ segment: 'docs', abs: join(ROOT, 'docs-repo') })
   })
 
+  it("take the translations from `i18n.localesDir`, and name the files there a push never sends", () => {
+    const at = (yml) => siteContentRoots(site(), yml).find((r) => r.kind === 'translations')
+    expect(at({})).toMatchObject({ path: 'locales', abs: join(ROOT, 'site', 'locales') })
+    expect(at({}).unsent).toEqual([
+      'locales/manifest.json', 'locales/_memory.json', 'locales/records/manifest.json',
+      'locales/records/_memory.json', 'locales/freeform/*/.manifest.json',
+    ])
+    expect(at({ i18n: { localesDir: 'translations' } })).toMatchObject({ path: 'translations', abs: join(ROOT, 'site', 'translations') })
+    expect(at({ i18n: { localesDir: 'translations' } }).unsent[0]).toBe('translations/manifest.json')
+  })
+
   it('follow `paths:` where it moves the pages, layout and records', () => {
     const roots = siteContentRoots(site(), { paths: { pages: 'content', layout: '../chrome', records: 'data/records' } })
     expect(roots.filter((r) => ['pages', 'layout', 'records'].includes(r.kind)).map((r) => r.path)).toEqual(['content', '../chrome', 'data/records'])
@@ -86,6 +98,19 @@ describe('⭐ a push reads nothing outside the roots', () => {
       appendFileSync(join(ROOT, f), f.endsWith('.json') ? '\n' : '\nAn edit.\n')
       expect(await doc(), f).toBe(before)
     }
+  })
+
+  it("⭐ the translation tools' own files change nothing a push sends", async () => {
+    const tools = ['site/locales/manifest.json', 'site/locales/_memory.json', 'site/locales/records/manifest.json', 'site/locales/freeform/es/.manifest.json']
+    for (const f of tools) w(f, '{ "version": "1.0", "units": {} }\n')
+    const before = await doc()
+    for (const f of tools) {
+      writeFileSync(join(ROOT, f), '{ "version": "1.0", "units": { "deadbeef": { "source": "Welcome" } } }\n')
+      expect(await doc(), f).toBe(before)
+    }
+    // CONTROL: a translation beside them does move it.
+    w('site/locales/es.json', JSON.stringify({ [computeHash('Welcome')]: 'Bienvenido' }) + '\n')
+    expect(await doc()).not.toBe(before)
   })
 
   it('CONTROL — a file under each root does change it', async () => {
