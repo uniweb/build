@@ -32,7 +32,7 @@ export const FREEFORM_MANIFEST = '.manifest.json'
  * ⭐ A CHANGE TO ONE IS NOT A CHANGE THE BACKEND LACKS. `i18n extract` refreshes `manifest.json`, and
  * a commit that only did that was taken for a records change: a pull's merge then started from an older
  * sync point than the one the backend named, and a teammate's own published work came back as the
- * app's, in conflict with itself (Sublime Hair Studio, 2026-11-12).
+ * app's, in conflict with itself (measured on a site's pull, 2026-11-12).
  *
  * @param {string} [dir] - the translations directory, from the site
  * @returns {string[]}
