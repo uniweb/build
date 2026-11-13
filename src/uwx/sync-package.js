@@ -125,9 +125,10 @@ const isReadersText = (node, key) => key === 'text' && node.type === 'text'
 /**
  * The site-root pictures that software other than the site's pages fetches by their address: the
  * favicon, the touch icon a phone puts on its home screen, the site's card picture (`info.preview`),
- * and every social image (`seo`, the site's and each page's). A push uploads them as they are,
- * because what fetches them takes a PNG icon or a JPEG or PNG picture, not the WebP a page's
- * picture is prepared to.
+ * and every social image (`seo`, the site's and each page's). A push uploads them in their own
+ * format, without their location and camera data (`prepareImage`'s `keepFormat`), because what
+ * fetches them takes a PNG icon or a JPEG or PNG picture, not the WebP a page's picture is prepared
+ * to. ⛔ Until 2026-11-12 they went up exactly as they were, location included.
  *
  * @param {object|null} siteDoc - the site-content document
  * @returns {Set<string>}
