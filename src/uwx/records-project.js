@@ -32,7 +32,7 @@
 // site-content uuid. Nothing is silently dropped: an unplaceable or unresolvable
 // record is reported.
 
-import { readBackendState, updateBackendMap } from './sync-store.js'
+import { readBackendState, updateBackendMap, setBackendMap } from './sync-store.js'
 import { restoreAssetRefs } from './asset-map.js'
 import { documentSchema } from './entity-document.js'
 import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -103,6 +103,37 @@ export function findRecordFileByUuid(poolDir, uuid) {
     if (readFileUuid(path, format) === uuid) return { path, format }
   }
   return null
+}
+
+/**
+ * Every single-record file under the records directory, by the own id it holds — a mounted type's
+ * folder left out, since its files are another site's. A list file (BibTeX) is no single record.
+ *
+ * @returns {Map<string, string>} own id → path
+ */
+function recordFilesByOwnId(recordsRoot, mountedDirs) {
+  const byOwnId = new Map()
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (e.name.startsWith('_') || e.name.startsWith('.')) continue
+      const path = join(dir, e.name)
+      if (e.isDirectory()) {
+        if (!mountedDirs.has(resolve(path))) walk(path)
+        continue
+      }
+      const format = formatForExt(extname(e.name).toLowerCase())
+      const own = format ? readFileUuid(path, format) : null
+      if (typeof own === 'string' && own && !byOwnId.has(own)) byOwnId.set(own, path)
+    }
+  }
+  walk(recordsRoot)
+  return byOwnId
 }
 
 // ⭐ A RECORD KEPT IN A BIBTEX FILE — several entries in one — is found by its entry's `$uuid`, so
@@ -738,7 +769,9 @@ function holdsPattern(abs) {
  * @param {{ own: Set<string>|null, keyTypes: Map<string, string>|null }} [params.opts.foundation] - what the
  *        site's foundation declares, as `readSiteFoundationDeclarations` reads it; absent, its built schema
  * @param {string} [params.opts.sourceLocale]
- * @returns {{ updated: string[], placed: string[], unchanged: string[], skipped: object[], warnings: string[], locales: object }}
+ * @param {boolean} [params.opts.prune] - remove the file of a record this backend held and no longer
+ *        holds, and its mapping: a record removed in the app (`removed`)
+ * @returns {{ updated: string[], placed: string[], unchanged: string[], removed: string[], skipped: object[], warnings: string[], locales: object }}
  */
 export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = {} }) {
   // The site's language, as its `site.yml` says it — written by the pull of the site's content, which
@@ -956,6 +989,42 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   for (const [theirs, rel] of pulledFiles.pathByUuid) poolPathByUuid.set(theirs, rel)
   warnings.push(...pulledFiles.warnings)
 
+  // ⭐ A RECORD REMOVED IN THE APP IS REMOVED HERE (`opts.prune`), as a page or a section is. A record
+  // this backend held — its own id mapped to the entity it became — and no longer holds anywhere in the
+  // folder it answered with was removed there: its file goes, and its mapping with it, so a file kept
+  // anyway goes up as a new record on the next push. In a repository the pull writes this onto its
+  // stand-in, so git merges the removal, or stops on it where the record was changed here too. A record
+  // never pushed to this backend has no mapping and is never touched, and a pull that took no folder
+  // removes nothing. ⛔ Until 2026-11-13 the file stayed, and a push called it unchanged, since nothing
+  // in it had changed: a record its owner deleted in the app stayed in a static build of the same files,
+  // and the copy and the site disagreed with nothing to say so (measured on a site, 2026-11-12).
+  const removed = []
+  if (opts.prune && folderDoc && opts.backend) {
+    const held = new Set([...recordDocs.map((d) => d?.$uuid).filter(Boolean), ...folderIndex.keys(), ...poolPathByUuid.keys()])
+    const goneOwnIds = Object.entries(recordMap)
+      .filter(([, theirs]) => typeof theirs === 'string' && theirs && !held.has(theirs))
+      .map(([own]) => own)
+    if (goneOwnIds.length && !held.size) {
+      // ⛔ AN ANSWER HOLDING NO RECORD REMOVES NONE, as an empty level of pages removes none
+      // (`site-project.js`), so a malformed or partial answer can't empty the records directory. Said,
+      // since a site whose records were all removed in the app still has them in its files.
+      warnings.push(
+        `the backend's folder holds no records, so this pull removed none of the ${goneOwnIds.length} this copy has pushed. ` +
+          'If they were all removed in the app, delete their files'
+      )
+    } else if (goneOwnIds.length) {
+      const files = recordFilesByOwnId(recordsRoot, new Set(mounts.map((m) => resolve(m.at))))
+      for (const own of goneOwnIds) {
+        const path = files.get(own)
+        if (!path) continue
+        unlinkSync(path)
+        removed.push(path)
+      }
+      const gone = new Set(goneOwnIds)
+      setBackendMap(siteRoot, opts.backend, 'records', Object.fromEntries(Object.entries(recordMap).filter(([own]) => !gone.has(own))))
+    }
+  }
+
   const records = folderToFolderYml({ folderDoc, siteRoot, poolPathByUuid, sourceLocale })
   warnings.push(...records.warnings)
   for (const path of keptBib) {
@@ -977,7 +1046,7 @@ export function recordsToProject({ folderDoc, recordDocs = [], siteRoot, opts = 
   }
 
   return {
-    updated, placed, unchanged, skipped, warnings, locales, freeform, records: records.status, recordsFile: records.file,
+    updated, placed, unchanged, removed, skipped, warnings, locales, freeform, records: records.status, recordsFile: records.file,
     // The file records' bytes to fetch — `{ url, path, poolPath }` each (`./file-records.js`).
     fileDownloads: pulledFiles.downloads,
     // Mounted records, another site's files, which this pull read and left as they are.
