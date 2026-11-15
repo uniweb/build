@@ -10,6 +10,7 @@ export { siteContentPlugin } from './plugin.js'
 export { defineSiteConfig, readSiteConfig, default } from './config.js'
 // What `uniweb dev` hands the dev server of a site a backend holds (`./preview.js`).
 export { PREVIEW_ENV, encodePreview, readPreview } from './preview.js'
+export { PUBLISHED_ENV, encodePublished, readPublished } from './published.js'
 // Where a site's dev server listens, as it states it, for `uniweb dev` (`./dev-server.js`).
 export { DEV_PORT_ENV, DEV_RECORD_ENV, runningDevServer, stopDevServer } from './dev-server.js'
 // Where a statically built site lives, as its deploy target or author states it (`./site-address.js`).

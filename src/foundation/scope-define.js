@@ -24,6 +24,13 @@
  * A dev rebuild never ships: it empties `dist/` and writes no `entry-ssr.js`,
  * so `register` builds again before it uploads (`foundationNeedsBuild`).
  *
+ * ⭐ The one working copy that talks to a real backend is one served by
+ * `uniweb dev --published` (`../site/published.js`): it is answered by the
+ * published site's own services, which hold the types as `register` stored
+ * them, so it is stamped as a build is and sends `@acme/x` as the published
+ * site does [Diego, 2026-11-15]. It still ships nothing: a dev rebuild stays
+ * one.
+ *
  * An author's own `define` for the key wins: it is left untouched.
  */
 
@@ -33,6 +40,7 @@ import { loadFoundationConfig } from '../schema.js'
 import { foundationNameOf, splitFoundationName } from '../foundation-name.js'
 import { resolveFoundationSrcDir } from '../utils/foundation-source-root.js'
 import { hasDevRebuildMarker } from './dev-rebuild.js'
+import { PUBLISHED_ENV } from '../site/published.js'
 
 export const FOUNDATION_SCOPE_KEY = '__FOUNDATION_SCOPE__'
 
@@ -48,7 +56,7 @@ export function foundationScopeDefine({ foundationDir } = {}) {
     name: 'uniweb:foundation-scope',
     async config(config, { command }) {
       if (config.define && FOUNDATION_SCOPE_KEY in config.define) return
-      const workingCopy = command === 'serve' || hasDevRebuildMarker(config)
+      const workingCopy = (command === 'serve' || hasDevRebuildMarker(config)) && !process.env[PUBLISHED_ENV]
       const scope = workingCopy ? null : await foundationScope(foundationDir ?? config.root ?? process.cwd())
       return { define: { [FOUNDATION_SCOPE_KEY]: JSON.stringify(scope) } }
     },

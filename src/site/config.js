@@ -42,6 +42,7 @@ import { libraryImports } from '../foundation/library-imports.js'
 import { copiedLibraries, copiedLibrariesWarning } from '../foundation/libraries.js'
 import { workspaceRootOf } from './workspace-extension.js'
 import { readPreview, PREVIEW_ENV } from './preview.js'
+import { PUBLISHED_ENV } from './published.js'
 import { previewMediaPlugin } from './preview-media.js'
 import { previewDirectoryIndexPlugin } from './preview-directory-index.js'
 import { devServerRecordPlugin, requestedDevPort } from './dev-server.js'
@@ -437,6 +438,22 @@ export async function defineSiteConfig(options = {}) {
       // and in dev an extension's `import 'react'` had nothing to resolve against.
       serveInDev: foundationInfo.type === 'url' || hasExtensions
     }))
+  }
+
+  if (process.env[PUBLISHED_ENV]) {
+    // ⛔ NOR DOES A PUBLISHED SITE'S. `uniweb dev --published` hands its dev server the
+    // services a published page carries, for that server alone (`./published.js`).
+    plugins.push({
+      name: 'uniweb:published-only',
+      config(_config, env) {
+        if (env.command === 'build') {
+          throw new Error(
+            `[site] ${PUBLISHED_ENV} is what \`uniweb dev --published\` read from a published ` +
+              'site, for one dev server, and a build does not take it. Unset it to build.'
+          )
+        }
+      }
+    })
   }
 
   if (preview) {

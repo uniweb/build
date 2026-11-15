@@ -244,6 +244,8 @@ import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { refuseSearchOption } from './search-declared.js'
 import { mountDevApi } from '../dev/api-mount.js'
 import { mountDevSubmit } from '../dev/submit-mount.js'
+import { mountPublished } from '../dev/published-mount.js'
+import { readPublished, localServices } from './published.js'
 
 /**
  * A shell carrying the page's look by the runtime's own rule (`@uniweb/runtime/ssr`, which a
@@ -402,12 +404,20 @@ export function siteContentPlugin(options = {}) {
   // never in a build.
   let devApiAddress = null
   let devSubmitAddress = null
+  // Under `uniweb dev --published`, the published site's services instead, at the dev server's
+  // own addresses (`./published.js`): the host tier, as the published page carries it.
+  let publishedServices = null
   /**
    * The dev payload names those addresses as the site's `backend` and `submit` services:
    * the site tier, which `resolveService` reads when no host speaks. A build never gets
-   * here with one.
+   * here with one. Under `--published` the dev server is the host, and its payload carries
+   * the host's block, as a published page does.
    */
   const withDevServices = (content) => {
+    if (publishedServices && content?.config) {
+      content.config.services = publishedServices
+      return content
+    }
     if (devApiAddress && content?.config) content.config.backend = devApiAddress
     if (devSubmitAddress && content?.config) content.config.submit = devSubmitAddress
     return content
@@ -756,20 +766,32 @@ export function siteContentPlugin(options = {}) {
       // ⚠️ Synchronous on purpose — see mountDevApi. An await here and the
       // middleware lands after Vite's SPA fallback, which answers the API with
       // index.html and says nothing about why.
-      try {
-        devApiAddress = mountDevApi(devServer, { root: resolvedSitePath })
-      } catch (err) {
-        console.error(`[dev-api] ${err.message}`)
-      }
+      //
+      // ⭐ `uniweb dev --published` answers every service the published site has with that
+      // site's own, forwarded (`../dev/published-mount.js`), so neither the mock nor the
+      // local form handler is mounted: the page talks to what visitors of the published site
+      // talk to. A handed value that says nothing usable stops the server here.
+      const published = readPublished()
+      if (published) {
+        const { services, targets } = localServices(published)
+        publishedServices = services
+        mountPublished(devServer, { targets, site: published.site, base: basePath })
+      } else {
+        try {
+          devApiAddress = mountDevApi(devServer, { root: resolvedSitePath })
+        } catch (err) {
+          console.error(`[dev-api] ${err.message}`)
+        }
 
-      // A site's forms, taken locally in development when site.yml asks its host for
-      // them (`services: { submit: true }`): the dev server is that host here, so a form
-      // shows and can be sent before the site is published. Synchronous for the same
-      // reason as the mount above.
-      try {
-        devSubmitAddress = mountDevSubmit(devServer, { root: resolvedSitePath, base: basePath })
-      } catch (err) {
-        console.error(`[dev-submit] ${err.message}`)
+        // A site's forms, taken locally in development when site.yml asks its host for
+        // them (`services: { submit: true }`): the dev server is that host here, so a form
+        // shows and can be sent before the site is published. Synchronous for the same
+        // reason as the mount above.
+        try {
+          devSubmitAddress = mountDevSubmit(devServer, { root: resolvedSitePath, base: basePath })
+        } catch (err) {
+          console.error(`[dev-submit] ${err.message}`)
+        }
       }
 
       // A site-relative workspace extension (`/effects/entry.js`) is served from

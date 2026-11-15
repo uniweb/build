@@ -131,6 +131,18 @@ describe('a site that bundles its foundation', () => {
     expect(await plugin.config({}, { command: 'serve', mode: 'development' })).toEqual({ define: { __FOUNDATION_SCOPE__: 'null' } })
   })
 
+  it('⭐ `uniweb dev --published` stamps the scope, as a build does: that copy talks to a real backend', async () => {
+    site()
+    process.env.UNIWEB_PUBLISHED = JSON.stringify({ site: 'http://s.localhost:8080/', backend: 'http://localhost:8080', services: {} })
+    try {
+      const { defineSiteConfig } = await import('../src/site/config.js')
+      const plugin = scopePlugin(await defineSiteConfig())
+      expect(await plugin.config({}, { command: 'serve', mode: 'development' })).toEqual({ define: { __FOUNDATION_SCOPE__: '"@acme"' } })
+    } finally {
+      delete process.env.UNIWEB_PUBLISHED
+    }
+  })
+
   it('a foundation it loads by URL carries its own, set by that foundation’s build', async () => {
     site()
     process.env.VITE_FOUNDATION_MODE = 'runtime'
