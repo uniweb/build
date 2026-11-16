@@ -381,38 +381,74 @@ export function deriveRecordsSupport(components, foundationData) {
  *
  * | authored | derived | emitted |
  * |---|---|---|
- * | absent | some | the derived set |
+ * | absent | some, nothing blind | the derived set |
  * | absent | none, nothing blind | ⭐ `[]` — a **proven** none, not an assumed one |
- * | absent | none, something blind | ⛔ nothing — UNKNOWN, honestly |
+ * | absent | anything, something blind | ⛔ nothing — UNKNOWN, honestly |
  * | a list | any | the union |
  * | `[]` | some | the union, with a warning: the evidence contradicts the claim |
  *
- * ⭐ **The union only ever grows the set**, so the failure the authored-only
- * design guarded against — publishing a set shorter than the truth — stays
- * unreachable: whatever a developer wrote is still there.
+ * ⭐ **A published list is COMPLETE** (since 2026-11-16). So a blind derivation
+ * with nothing authored publishes nothing even when it found some services: a
+ * partial list would read as "these and only these" to a reader that hides what is
+ * not listed. Until then such a list went
+ * out short with a warning, and a reader could trust it only in the presence
+ * direction. A list the developer authored is theirs to make complete, and the build
+ * says so when it was blind (`reportSupports`).
+ *
+ * ⭐ **The union only ever grows the set**, so whatever a developer wrote is still
+ * there — `required` (`uniweb.requires`) included: a service a foundation cannot work
+ * without is one it supports, so `requires ⊆ supports` holds by construction.
  *
  * @param {string[]|undefined} authored - normalized `uniweb.supports`; `undefined` when absent
  * @param {{services: string[], blind: boolean}|null} derived - null when not derived (a dev rebuild)
+ * @param {string[]} [required] - `composeRequires`' result
  * @returns {{supports?: string[]}} spread into `_self`; `{}` keeps the key absent
  */
-export function composeSupports(authored, derived) {
+export function composeSupports(authored, derived, required = []) {
   // An authored name this field may not carry is dropped HERE rather than at
   // its source: `package.json` is the developer's file, and rewriting it is
   // `doctor --fix`'s job. `reportSupports` says what was dropped and why.
   // ⛔ Absence must survive the filter — `undefined` is UNKNOWN, `[]` is a
   // declaration, and mapping one to the other loses a state.
   const declared = authored === undefined ? undefined : nameable(authored)
+  const needs = nameable(required || [])
+  const nothingAuthored = declared === undefined && needs.length === 0
 
   // No derivation ran (dev rebuild): the authored value is the whole answer,
   // and an absent one stays absent.
-  if (!derived) return declared === undefined ? {} : { supports: declared }
+  if (!derived) return nothingAuthored ? {} : { supports: union(declared, needs) }
 
   const { services, blind } = derived
 
-  if (declared === undefined && services.length === 0) {
-    return blind ? {} : { supports: [] }
-  }
+  // Nothing authored: the derivation is the whole answer, if it saw everything.
+  if (nothingAuthored) return blind ? {} : { supports: union(services) }
 
-  const union = [...new Set([...(declared || []), ...services])].sort()
-  return { supports: union }
+  return { supports: union(declared, services, needs) }
+}
+
+/**
+ * Compose `info.requires` — the services a foundation cannot work without.
+ *
+ * ⭐ **Authored only, never derived.** Code that reaches a service and code that cannot
+ * work without one look the same in the bundle: a search box shown only when
+ * `isSearchEnabled()` is true reaches `search` exactly as a course site reaches
+ * `backend`. Telling them apart would mean proving a code path has no fallback.
+ *
+ * ⛔ **ALWAYS EMITTED, `[]` when nothing is authored.** Its presence is what tells a
+ * reader this foundation was built by a toolchain that knows the field — and so that
+ * its `supports`, when present, is complete (`composeSupports`). Absent means a build
+ * from before the field: what it needs is unknown and its `supports` a lower bound.
+ * Both changes ship in the same build, so no artifact carries `requires` beside a
+ * short `supports`. For the need itself `[]` and absent read alike: nothing required.
+ *
+ * @param {string[]|undefined} authored - normalized `uniweb.requires`
+ * @returns {string[]} sorted, never undefined
+ */
+export function composeRequires(authored) {
+  return union(nameable(authored || []))
+}
+
+/** Sorted, de-duplicated union of name lists; `undefined` lists contribute nothing. */
+function union(...lists) {
+  return [...new Set(lists.flatMap((l) => l || []))].sort()
 }
