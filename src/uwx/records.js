@@ -73,6 +73,11 @@ import { loadFreeformRecord } from '../i18n/freeform.js'
 import { isDraftRecord } from '../site/record-draft.js'
 import { LINK_MODEL, linkRecordRefusal } from './link-records.js'
 import { FILE_MODEL } from './file-records.js'
+import { isBackendModel, backendRecordsRefusal } from '../backend-models.js'
+
+// What `typedFor` answers for a data key typed by a Model only a site backend holds: known, with no
+// declaration to map records by.
+const BACKEND_HELD = Symbol('backend-held')
 
 const DATE_KINDS = new Set(['date', 'datetime'])
 // The record's OWN keys — identity and transport, never a field of any section, never
@@ -1076,6 +1081,12 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     const key = keyOfDefaultRef(schema)
     const type = key ? keyTypes.get(key) : null
     if (!type || explicitBy.has(schema)) return null
+    // A type only a site backend holds (`@uniweb/catalog`) has no declaration to read, here or from
+    // the backend, and is a type all the same: the query names it, and a folder of it is refused.
+    if (isBackendModel(type)) {
+      keyTyped.set(schema, type)
+      return BACKEND_HELD
+    }
     const declaration = await declarationFor(modelFor(type, `data key "${key}"`))
     if (!declaration) return null
     keyTyped.set(schema, type)
@@ -1209,8 +1220,18 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   for (const [schema, poolEntities] of poolBySchema) {
     if (schema === LINK_MODEL || schema === FILE_MODEL) continue
     const label = poolEntities[0].dirs.join('/')
+    // ⛔ Records only a site backend holds (`@uniweb/catalog`, `../backend-models.js`) are never a
+    // site's files: the owner writes them in the app. Refused, as a build refuses them.
+    if (isBackendModel(schema)) {
+      refusals.push(backendRecordsRefusal(`${pool.dir}/${label}/`, schema))
+      continue
+    }
     const modelName = modelFor(schema, `${pool.dir}/${label}/`)
     const declaration = (await declarationFor(modelName)) || (await typedFor(schema))
+    if (declaration === BACKEND_HELD) {
+      refusals.push(backendRecordsRefusal(`${pool.dir}/${label}/`, keyTyped.get(schema)))
+      continue
+    }
     if (!declaration) {
       // An explicit schema the author asked for is a hard error; one only the
       // folder's name supplied is refused for the folder, with the rest of the push.
@@ -1376,8 +1397,12 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   for (const { name, decl } of queries) {
     const schema = decl.schema || decl.model
     const hasRecords = poolBySchema.has(schema)
-    // A query over link records names a system Model, which resolves whatever the foundation holds.
-    const resolved = schema === LINK_MODEL || schema === FILE_MODEL || (hasRecords
+    // A query over link records names a system Model, which resolves whatever the foundation holds,
+    // and so does one over a Model only a site backend holds (`@uniweb/catalog`): its declaration
+    // goes up, and the published site's records service answers it. The backend's data-schema read
+    // answers neither (404, measured 2026-11-16), so asking it would refuse the push.
+    const backendHeld = isBackendModel(schema)
+    const resolved = schema === LINK_MODEL || schema === FILE_MODEL || backendHeld || (hasRecords
       ? !unresolved.has(schema)
       : Boolean((await declarationFor(modelFor(schema, `query "${name}"`))) || (await typedFor(schema))))
     if (!resolved) {
@@ -1385,7 +1410,8 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
       if (!hasRecords) refusals.push(noDataSchema(`query "${name}"`, qualifyRef(schema, scope)))
       continue
     }
-    if (!hasRecords) {
+    // A query a data key types by such a Model (`store: {}`, typed `@uniweb/catalog`) has none either.
+    if (!hasRecords && !backendHeld && !isBackendModel(keyTyped.get(schema))) {
       // "Nothing pushed" and "nothing there" look identical, so say which.
       const dirs = poolDirsForSchema(schema)
       warnings.push(

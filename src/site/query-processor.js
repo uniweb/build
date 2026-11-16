@@ -69,6 +69,7 @@ import { refuseNotOneRecord } from './record-file.js'
 import { resolveRecordSchemas, resolveQueriesConfig, dataKeyTyping } from './queries-config.js'
 import { keyOfDefaultRef } from '../uwx/data-key-types.js'
 import { standardTypeFor } from './standard-type-for.js'
+import { isBackendModel, backendRecordsRefusal, backendQueryNote } from '../backend-models.js'
 import { parseFrontmatter } from '../utils/frontmatter.js'
 import { toDeliveredRecord, toStoredRecord, storedPath, briefFieldMap, contentBodyField, misplacedFields, undeclaredFields, withoutUndeclared, mapReferences, recordLayout } from '@uniweb/schemas/conform'
 import { ownsType, undeclaredAdvice, listOf } from './undeclared-fields.js'
@@ -1267,6 +1268,8 @@ export async function processQueries(siteDir, queriesConfigIn, recordsDir, baseP
     poolBySchema.delete(ref)
     poolBySchema.set(type, [...(poolBySchema.get(type) || []), ...held])
   }
+  // Once typed, so a folder named for a key typed `@uniweb/catalog` is refused with the catalog's own.
+  refuseBackendRecords(poolBySchema, pool.dir)
 
   // ⭐ THE DATA SCHEMA EACH QUERY'S RECORDS ARE DELIVERED IN (`deliverRecord`) — resolved
   // from the foundation's source once for every query and every folder of records.
@@ -1305,7 +1308,11 @@ export async function processQueries(siteDir, queriesConfigIn, recordsDir, baseP
     parsed.dataSchema = (parsed.schema && dataSchemas[parsed.schema]) || null
     parsed.references = references
     parsed.unsendable = unsendable
-    if (parsed.poolEntities.length === 0) {
+    if (parsed.poolEntities.length === 0 && isBackendModel(parsed.schema)) {
+      // ⭐ Records only a site backend holds (`@uniweb/catalog`): none here, ever, so `[]` is the
+      // answer, and the published site's records service answers it with what the owner made public.
+      console.log(`[query-processor] ${backendQueryNote(name, parsed.schema)}`)
+    } else if (parsed.poolEntities.length === 0) {
       const dirs = folderRef ? poolDirsForSchema(folderRef) : null
       console.warn(
         `[query-processor] Query "${name}" matches no records — ` +
@@ -1348,6 +1355,22 @@ async function querySchemas(siteDir, queriesConfig, typing = new Map(), poolBySc
     )
   }
   return { schemas, missing }
+}
+
+/**
+ * Stop the build for files kept as records of a Model only a site backend holds — `records/uniweb/catalog/`
+ * (`../backend-models.js`): its records are written in the app, on the site's backend, so a site reads
+ * them with a query and holds none. A push refuses the same files.
+ *
+ * @param {Map<string, Array>} poolBySchema - the records, by the ref their folder names
+ * @param {string} dir - the records directory, as the site names it
+ */
+export function refuseBackendRecords(poolBySchema, dir) {
+  const lines = []
+  for (const [ref, held] of poolBySchema) {
+    if (isBackendModel(ref) && held?.length) lines.push(backendRecordsRefusal(`${dir}/${held[0].dirs.join('/')}/`, ref))
+  }
+  if (lines.length) throw new Error(`[uniweb] ${lines.join('\n')}`)
 }
 
 /**

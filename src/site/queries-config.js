@@ -32,6 +32,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { recordLayout } from '@uniweb/schemas/conform'
 import { isSystemRecordRef } from '@uniweb/schemas/system'
+import { isBackendModel } from '../backend-models.js'
 import { detectFoundationType, parseCatalogRef } from './foundation-ref.js'
 import { readRegisteredFoundation } from './registered-foundation.js'
 import { buildDataSchemaMap, SCHEMA_NOT_FOUND } from '../resolve-data-schema.js'
@@ -387,7 +388,9 @@ export async function dataKeyTyping(siteRoot, declarations, opts = {}) {
   const { schemas } = await resolveRecordSchemas(siteRoot, [...named, ...keyTypes.values()], { siteYml })
   for (const [key, type] of keyTypes) {
     const ref = defaultSchema(key)
-    if (schemas[ref] || explicit.has(ref) || !schemas[type]) continue
+    // A type only a site backend holds (`@uniweb/catalog`) has no definition here, and is a type all
+    // the same (`../backend-models.js`).
+    if (schemas[ref] || explicit.has(ref) || !(schemas[type] || isBackendModel(type))) continue
     typing.set(ref, type)
   }
   return typing

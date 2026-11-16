@@ -45,6 +45,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, isAbsolute, extname, basename } from 'node:path'
 import { dataRefOf } from '@uniweb/core/data-keys'
 import { SYSTEM_RECORD_SCHEMAS } from '@uniweb/schemas/system'
+import { BACKEND_MODELS, isBackendModel } from './backend-models.js'
 import { assertOptionsTargets, assertI18nPaths } from './uwx/data-schema.js'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
@@ -228,15 +229,25 @@ export async function resolveSchemaRef(ref, { srcDir, aliases }) {
 
   // ⭐ THE SYSTEM MODELS A SITE'S RECORDS MAY NAME — `@uniweb/link` — resolve from the build's own
   // copy (`@uniweb/schemas/system`), whatever the foundation holds: a site with no backend builds,
-  // validates and renders a link record with it. Every other `@uniweb/` name is platform plumbing,
-  // never a data-schema source. (The whole scope was refused until 2026-09-28.)
+  // validates and renders a link record with it. A backend-held one — `@uniweb/catalog` — has no
+  // copy here (`./backend-models.js`): `buildDataSchemaMap` passes over it, so asking for its
+  // definition is a mistake that says so. Every other `@uniweb/` name is platform plumbing, never a
+  // data-schema source. (The whole scope was refused until 2026-09-28.)
   if (scope === RESERVED_SYSTEM_SCOPE) {
     const system = SYSTEM_RECORD_SCHEMAS[name]
     if (system) return normalizeNamedSchema(system, ref)
+    if (isBackendModel(ref)) {
+      throw new Error(
+        `'${ref}' is a site backend's own Model: only the backend defines it, and a site's records are never ` +
+          `of it. A site reads it with a query or a data key.`
+      )
+    }
     const allowed = Object.keys(SYSTEM_RECORD_SCHEMAS).map((n) => `'@${scope}/${n}'`).join(', ')
+    const read = BACKEND_MODELS.map((m) => `'${m}'`).join(', ')
     throw new Error(
       `'@${scope}' is the reserved platform system namespace: the only data schemas a site's records ` +
-        `may name in it are ${allowed}. Use '@std/${name}' for the shared standard schemas.`
+        `may name in it are ${allowed}, and a query or a data key may also read ${read}, which a site ` +
+        `backend holds. Use '@std/${name}' for the shared standard schemas.`
     )
   }
 
@@ -346,7 +357,9 @@ export async function buildDataSchemaMap(refs, { srcDir }) {
   const queue = Array.from(refs)
   while (queue.length > 0) {
     const ref = queue.shift()
-    if (map[ref]) continue
+    // A backend-held system Model (`@uniweb/catalog`) is a ref with no definition here: a data key or
+    // a query reads it, and the backend's definition is the only one (`./backend-models.js`).
+    if (map[ref] || isBackendModel(ref)) continue
     map[ref] = await resolveSchemaRef(ref, { srcDir, aliases })
     for (const target of collectNestedRefs(map[ref])) {
       if (!map[target]) queue.push(target)
