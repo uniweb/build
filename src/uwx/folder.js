@@ -159,8 +159,19 @@ function recordOf(item) {
 
 /**
  * Walk a folder document's `contents` tree, visiting every item with the keys that
- * address it: its slash-joined `name` chain, whether that chain is UNIQUE among its
- * siblings, and — for a leaf — the uuid of the record it references.
+ * address it: its slash-joined `name` chain, whether that chain names it alone
+ * (`unique`), and — for a leaf — the uuid of the record it references.
+ *
+ * ⭐ A SUB-FOLDER'S CHAIN NAMES IT WHATEVER RECORDS SIT BESIDE IT. `folder.yml` refuses two
+ * sub-folders of one name at one level (`site/records-config.js::resolveFolder`), so a branch
+ * is counted among the branches beside it. A leaf's chain names it only when nothing beside
+ * it, branch or leaf, has its name: a leaf has its record's key, and never takes a branch's.
+ * ⛔ Until 2026-11-16 a branch was counted among every item beside it, so a record named like
+ * a sub-folder (`template/blog` at the top, beside the sub-folder `blog`) left the sub-folder
+ * with no key. A key an earlier push had banked kept it bound while the map was merged; once
+ * the map was written whole (2026-11-13), the next push sent the sub-folder with no `$uuid`,
+ * as a new item, and the backend refused it: "409 Conflict — another item already has this
+ * name" (measured on a site, 2026-11-15).
  *
  * ⛔ IT MUST RECURSE INTO `$children`. `contents` is SELF-NESTING: a walk of the
  * top level sees the branches and misses every record under them — which is 6 of
@@ -170,13 +181,17 @@ function recordOf(item) {
 function walkFolderItems(contents, cb, prefix = '') {
   const items = (contents || []).filter((item) => item && typeof item === 'object')
   const count = new Map()
+  const branches = new Map()
   for (const item of items) {
-    if (typeof item.name === 'string') count.set(item.name, (count.get(item.name) || 0) + 1)
+    if (typeof item.name !== 'string') continue
+    count.set(item.name, (count.get(item.name) || 0) + 1)
+    if (item.kind === 'branch') branches.set(item.name, (branches.get(item.name) || 0) + 1)
   }
   for (const item of items) {
     const seg = typeof item.name === 'string' ? item.name : null
     const path = seg ? (prefix ? `${prefix}/${seg}` : seg) : prefix
-    if (seg) cb({ path, unique: count.get(seg) === 1, record: recordOf(item) }, item)
+    const unique = item.kind === 'branch' ? branches.get(seg) === 1 : count.get(seg) === 1
+    if (seg) cb({ path, unique, record: recordOf(item) }, item)
     walkFolderItems(item.$children, cb, path)
   }
 }
@@ -186,8 +201,9 @@ function walkFolderItems(contents, cb, prefix = '') {
  *
  * ⭐ A PLACEMENT IS KEYED BY THE RECORD IT REFERENCES — `@<record uuid>` — because a
  * record has one placement, so that key is unique in the folder whatever the names
- * are. A branch, and a leaf whose name no sibling shares, is ALSO keyed by its `name`
- * chain, which is what every placement map banked before 2026-09-21 holds.
+ * are. A branch is keyed by its `name` chain, and so is a leaf whose name nothing beside
+ * it shares (`walkFolderItems`), which is what every placement map banked before
+ * 2026-09-21 holds.
  *
  * ⛔ The chain alone assumed no two siblings share a name. Two records of different
  * schemas can (`article/intro`, `person/intro`), and keyed by `intro` both would
@@ -240,7 +256,8 @@ export function collectFolderRecordTypes(doc) {
  * by a comment in this file that was true of the entity and false of its contents.
  *
  * ⭐ A leaf takes the uuid banked under its record (`@<record uuid>`) first, and its
- * `name` chain only when no sibling shares the name — the one key an older map has.
+ * `name` chain only when no sibling shares the name — the one key an older map has. A
+ * branch takes its chain's, which no other branch beside it has.
  * ⛔ No uuid is stamped twice: two items claiming one row is the failure the record
  * key exists to prevent, so a second claimant goes out without one, as a new row.
  *

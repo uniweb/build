@@ -210,6 +210,43 @@ describe('two records with one name in one folder', () => {
     expect(next.contents.map((c) => c.$uuid)).toEqual(['P-1', undefined])
   })
 })
+
+// ⛔ MEASURED ON A SITE, 2026-11-15: `folder.yml` placed its articles in a sub-folder `blog`, and a
+// record of another schema, `template/blog`, sat at the top beside it. The sub-folder was banked only
+// while no item beside it shared its name, so it had no key once the map was written whole, and the
+// next push sent it as a new item: "409 Conflict — another item already has this name".
+describe('a sub-folder and a record of one name, side by side', () => {
+  const stored = {
+    contents: [
+      {
+        kind: 'branch',
+        name: 'blog',
+        $uuid: 'B-1',
+        $children: [{ kind: 'ref', name: 'hello', entry: { schema: '@acme/article', entity: 'R-H' }, $uuid: 'P-H' }],
+      },
+      { kind: 'ref', name: 'blog', entry: { schema: '@acme/template', entity: 'R-B' }, $uuid: 'P-B' },
+    ],
+  }
+  const unstamped = (doc) => JSON.parse(JSON.stringify(doc, (k, v) => (k === '$uuid' ? undefined : v)))
+
+  it('⭐ the sub-folder is banked by its name, and the record by itself', () => {
+    expect(collectFolderItemUuids(stored)).toEqual({ blog: 'B-1', 'blog/hello': 'P-H', '@R-H': 'P-H', '@R-B': 'P-B' })
+  })
+
+  it('⭐ the next push sends each with its own identity', () => {
+    const next = unstamped(stored)
+    stampFolderItemUuids(next, collectFolderItemUuids(stored))
+    expect(next.contents[0].$uuid).toBe('B-1')
+    expect(next.contents[0].$children[0].$uuid).toBe('P-H')
+    expect(next.contents[1].$uuid).toBe('P-B')
+  })
+
+  it('a new record named like the sub-folder never takes its key', () => {
+    const next = { contents: [{ kind: 'branch', name: 'blog', $children: [] }, { kind: 'ref', name: 'blog', entry: { $ref: 'template/blog' } }] }
+    stampFolderItemUuids(next, { blog: 'B-1' })
+    expect(next.contents.map((c) => c.$uuid)).toEqual(['B-1', undefined])
+  })
+})
 // ⭐ A FILE IS NOT ALWAYS ONE RECORD, and a record's id is not always its file's
 // stem — the folder places the records a file PRODUCED.
 describe('the folder references the records files produce', () => {
