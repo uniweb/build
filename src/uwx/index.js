@@ -50,14 +50,18 @@ export {
   extensionDeclaration,
   isExtensionUrl,
   isSiteRelativeExtensionUrl,
+  buildRouteOf,
 } from './site.js'
+// A `page:` reference read as the runtime reads one — a page's id, else its route — over pages a
+// caller lists (`uniweb promote` names a post's page so, on the site as pushed).
+export { pageRefIndex } from './page-refs.js'
 export {
   resolveQueriesConfig,
   queriesYmlPath,
   QUERIES_YML_RELPATH,
 } from './queries-config.js'
 // Edits to a YAML file an author wrote — the one editor; files are written through project-writer.js.
-export { editYamlText, setYamlKey, replaceInYamlList } from './yaml-edit.js'
+export { editYamlText, setYamlKey, setYamlKeyFirst, replaceInYamlList } from './yaml-edit.js'
 export { buildFolderEntity,
   collectFolderItemUuids,
   collectFolderRecordTypes,
