@@ -107,6 +107,30 @@ export function localServices({ site, base = null, services }) {
   return { services: local, targets }
 }
 
+/**
+ * The site's queries as the published page carries them: each `schema` the copy spells `@/x` named
+ * in full, `<scope>/x`, with the scope of the foundation's name. A backend matches a type's name
+ * exactly, and a published page holds its queries as the backend registered them, so a records ask
+ * for `@/course` finds nothing there. Every other value is left as written, and so is every query
+ * when the foundation's name has no scope.
+ *
+ * @param {object|undefined} queries - the payload's `config.queries`
+ * @param {string|null} scope - `@acme` for `@acme/courses`
+ * @returns {object|undefined}
+ */
+export function queriesInFull(queries, scope) {
+  if (!isPlainObject(queries) || typeof scope !== 'string' || !scope.startsWith('@')) return queries
+  const full = {}
+  for (const [name, query] of Object.entries(queries)) {
+    const schema = query?.schema
+    full[name] =
+      isPlainObject(query) && typeof schema === 'string' && schema.startsWith('@/')
+        ? { ...query, schema: `${scope}/${schema.slice(2)}` }
+        : query
+  }
+  return full
+}
+
 // A segment of the dev server's own address, so only a name that is one.
 const SERVICE_NAME = /^[A-Za-z0-9_-]+$/
 

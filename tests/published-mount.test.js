@@ -10,7 +10,7 @@ import { createServer } from 'node:http'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PUBLISHED_ENV, PUBLISHED_MOUNT, encodePublished, readPublished, localServices } from '../src/site/published.js'
+import { PUBLISHED_ENV, PUBLISHED_MOUNT, encodePublished, readPublished, localServices, queriesInFull } from '../src/site/published.js'
 import { mountPublished, firstPartyCookie } from '../src/dev/published-mount.js'
 import { siteContentPlugin } from '../src/site/plugin.js'
 
@@ -110,6 +110,29 @@ describe('localServices — the host block, at the dev server’s own addresses'
   })
 })
 
+describe('queriesInFull — the site’s queries, named as the published page names them', () => {
+  it('⭐ names each `@/x` type in full, with the scope of the foundation’s name', () => {
+    const queries = {
+      courses: { schema: '@/course', sort: 'order asc' },
+      people: { schema: '@std/person' },
+      posts: { schema: 'post' },
+    }
+    expect(queriesInFull(queries, '@acme')).toEqual({
+      courses: { schema: '@acme/course', sort: 'order asc' },
+      people: { schema: '@std/person' },
+      posts: { schema: 'post' },
+    })
+    // The copy's own declarations are not changed in place.
+    expect(queries.courses.schema).toBe('@/course')
+  })
+
+  it('leaves every query as written when the foundation’s name has no scope', () => {
+    const queries = { courses: { schema: '@/course' } }
+    expect(queriesInFull(queries, null)).toBe(queries)
+    expect(queriesInFull(undefined, '@acme')).toBeUndefined()
+  })
+})
+
 describe('mountPublished — forwarding, same-origin', () => {
   let host
 
@@ -192,16 +215,28 @@ describe('the dev payload under `--published`', () => {
   })
 
   /** Drive the site plugin in Vite's dev order — configureServer, then buildStart. */
-  async function devPayload(yml) {
+  async function devPayload(yml, { files = {}, foundationName } = {}) {
     root = await mkdtemp(join(tmpdir(), 'uniweb-published-payload-'))
     await writeFile(join(root, 'site.yml'), yml)
     await mkdir(join(root, 'mock'), { recursive: true })
     await writeFile(join(root, 'mock', 'api.js'), 'export default () => new Response("{}")\n')
     await mkdir(join(root, 'pages', 'home'), { recursive: true })
     await writeFile(join(root, 'pages', 'home', '1-hero.md'), '---\ntype: Hero\n---\n# Home\n')
+    for (const [rel, body] of Object.entries(files)) await writeFile(join(root, rel), body)
+    // A foundation beside the site, named as `main.js` names it.
+    let foundationPath
+    if (foundationName) {
+      foundationPath = join(root, 'foundation')
+      await mkdir(foundationPath, { recursive: true })
+      await writeFile(
+        join(foundationPath, 'package.json'),
+        JSON.stringify({ name: 'src', type: 'module', main: './_entry.generated.js' })
+      )
+      await writeFile(join(foundationPath, 'main.js'), `export default { name: '${foundationName}' }\n`)
+    }
     console.log = () => {}
     console.warn = () => {}
-    const plugin = siteContentPlugin({ sitePath: './' })
+    const plugin = siteContentPlugin({ sitePath: './', foundationPath })
     await plugin.configResolved({ root, publicDir: join(root, 'public'), build: { outDir: 'dist' }, command: 'serve', base: '/' })
     const server = { ...fakeServer(), ws: { send: () => {} } }
     plugin.configureServer(server)
@@ -226,6 +261,27 @@ describe('the dev payload under `--published`', () => {
     // The mock's address is not the site's: the published site's backend answers.
     expect(content.config.backend).toBeUndefined()
     expect((await server.call('/_api/session')).passed).toBe(true)
+  })
+
+  it('⭐ names the site’s query types in full, as the published page does', async () => {
+    process.env[PUBLISHED_ENV] = encodePublished({
+      site: 'http://acme.localhost:8080/',
+      backend: 'http://localhost:8080',
+      services: { records: { endpoint: '/_query/{locale}' } },
+    })
+    const { content } = await devPayload('name: S\nservices:\n  records: true\n', {
+      files: { 'queries.yml': "courses:\n  schema: '@/course'\n  sort: order asc\n" },
+      foundationName: '@acme/courses',
+    })
+    expect(content.config.queries.courses).toMatchObject({ schema: '@acme/course' })
+  })
+
+  it('control: a working copy without it keeps `@/x`, which its own files answer', async () => {
+    const { content } = await devPayload('name: S\nservices:\n  records: true\n', {
+      files: { 'queries.yml': "courses:\n  schema: '@/course'\n  sort: order asc\n" },
+      foundationName: '@acme/courses',
+    })
+    expect(content.config.queries.courses).toMatchObject({ schema: '@/course' })
   })
 
   it('control: without it, `$devBackend` answers and the payload carries no host block', async () => {

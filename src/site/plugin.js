@@ -245,7 +245,8 @@ import { refuseSearchOption } from './search-declared.js'
 import { mountDevApi } from '../dev/api-mount.js'
 import { mountDevSubmit } from '../dev/submit-mount.js'
 import { mountPublished } from '../dev/published-mount.js'
-import { readPublished, localServices } from './published.js'
+import { readPublished, localServices, queriesInFull } from './published.js'
+import { foundationScope } from '../foundation/scope-define.js'
 
 /**
  * A shell carrying the page's look by the runtime's own rule (`@uniweb/runtime/ssr`, which a
@@ -407,15 +408,19 @@ export function siteContentPlugin(options = {}) {
   // Under `uniweb dev --published`, the published site's services instead, at the dev server's
   // own addresses (`./published.js`): the host tier, as the published page carries it.
   let publishedServices = null
+  // ...and the scope of the foundation's name, which names the site's queries in full there.
+  let publishedScope = null
   /**
    * The dev payload names those addresses as the site's `backend` and `submit` services:
    * the site tier, which `resolveService` reads when no host speaks. A build never gets
    * here with one. Under `--published` the dev server is the host, and its payload carries
-   * the host's block, as a published page does.
+   * the host's block, as a published page does, and its queries with their types named in
+   * full, as the published page holds them (`queriesInFull`).
    */
   const withDevServices = (content) => {
     if (publishedServices && content?.config) {
       content.config.services = publishedServices
+      content.config.queries = queriesInFull(content.config.queries, publishedScope)
       return content
     }
     if (devApiAddress && content?.config) content.config.backend = devApiAddress
@@ -669,6 +674,7 @@ export function siteContentPlugin(options = {}) {
       viteRoot = config.root
       isProduction = config.command === 'build'
       basePath = config.base || '/'
+      if (!isProduction && foundationPath && readPublished()) publishedScope = await foundationScope(foundationPath)
 
       // In dev mode, process collections early so JSON files exist before server starts
       // This runs before configureServer, ensuring data is available immediately
