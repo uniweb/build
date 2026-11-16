@@ -23,7 +23,6 @@ import { fileURLToPath } from 'node:url'
 import { parseAst, build } from 'vite'
 import {
   deriveSupports,
-  composeRequires,
   composeSupports,
   deriveRecordsSupport,
   unnameableIn,
@@ -308,53 +307,6 @@ describe('composeSupports — the three states must not collapse', () => {
     expect(composeSupports(undefined, null)).toEqual({})
     expect(composeSupports([], null)).toEqual({ supports: [] })
     expect(composeSupports(['search'], null)).toEqual({ supports: ['search'] })
-  })
-})
-
-describe('composeSupports — a published list is complete', () => {
-  test('⛔ blind with nothing authored → absent, EVEN WHEN it found some services', () => {
-    // A partial list reads as "these and only these" to a reader that hides what is
-    // not listed. Until 2026-11-16 this published ['submit'], short, with a warning.
-    expect(composeSupports(undefined, derived(['submit'], true))).toEqual({})
-  })
-
-  test('blind with something authored → the union; the authored list is the developer\'s claim', () => {
-    expect(composeSupports(['booking'], derived(['submit'], true))).toEqual({ supports: ['booking', 'submit'] })
-  })
-})
-
-describe('composeSupports — what a foundation requires, it supports', () => {
-  test('a required service joins the published set', () => {
-    expect(composeSupports(undefined, derived(['search']), ['backend'])).toEqual({ supports: ['backend', 'search'] })
-    expect(composeSupports(['submit'], derived([]), ['backend'])).toEqual({ supports: ['backend', 'submit'] })
-  })
-
-  test('a requirement is authored, so a blind derivation still publishes a list', () => {
-    // `info.requires` non-empty beside an absent `supports` would contradict
-    // requires ⊆ supports; the developer has claimed the list, and is warned it is unchecked.
-    expect(composeSupports(undefined, derived(['submit'], true), ['backend'])).toEqual({
-      supports: ['backend', 'submit'],
-    })
-  })
-
-  test('a dev rebuild publishes what was authored, requirements included', () => {
-    expect(composeSupports(undefined, null, ['backend'])).toEqual({ supports: ['backend'] })
-    expect(composeSupports(undefined, null, [])).toEqual({})
-  })
-})
-
-describe('composeRequires — authored only, always emitted', () => {
-  test('nothing authored → [] — present, so a reader knows the build knows the field', () => {
-    expect(composeRequires(undefined)).toEqual([])
-    expect(composeRequires([])).toEqual([])
-  })
-
-  test('sorted and de-duplicated', () => {
-    expect(composeRequires(['search', 'backend', 'search'])).toEqual(['backend', 'search'])
-  })
-
-  test('a name the field may not carry is dropped, as from supports', () => {
-    expect(composeRequires(['tracking', 'backend'])).toEqual(['backend'])
   })
 })
 

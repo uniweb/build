@@ -25,7 +25,6 @@ import { SECTION_PARAMS, SECTION_KEYS, stickyDeclaration, underHeaderDeclaration
 import { collectSchemaRefs, buildDataSchemaMap, ownSchemaRefs } from './resolve-data-schema.js'
 import { buildMappingMap } from './foundation/mappings.js'
 import {
-  composeRequires,
   composeSupports,
   deriveRecordsSupport,
   unnameableIn,
@@ -148,24 +147,17 @@ export async function loadComponentMeta(componentDir) {
  * Sorted and de-duplicated so a re-export of one foundation version is
  * byte-identical — the same reason `buildRefs` sorts.
  *
- * ⭐ `uniweb.requires` — the services the foundation cannot work without — takes the
- * same grammar through the same function (`key`), so the two lists can never be
- * spelled differently. What it becomes on the wire is `composeRequires`' to say.
- *
- * @param {*} value - the raw `uniweb.supports` (or `uniweb.requires`) value, if any
+ * @param {*} value - the raw `uniweb.supports` value, if any
  * @param {string} packagePath - for the warning message
- * @param {'supports'|'requires'} [key]
- * @returns {{supports?: string[]}} `{}` when undeclared, keyed by `key`
+ * @returns {{supports?: string[]}} `{}` when undeclared
  */
-function normalizeSupports(value, packagePath, key = 'supports') {
+function normalizeSupports(value, packagePath) {
   if (value === undefined || value === null) return {}
 
   if (!Array.isArray(value)) {
     console.warn(
-      `Warning: ${packagePath} declares \`uniweb.${key}\` as ${typeof value}; expected an array of service names. Ignoring it.\n` +
-        (key === 'supports'
-          ? `  An ignored declaration reads downstream as UNKNOWN, not as "supports nothing".`
-          : `  An ignored declaration requires nothing.`),
+      `Warning: ${packagePath} declares \`uniweb.supports\` as ${typeof value}; expected an array of service names. Ignoring it.\n` +
+        `  An ignored declaration reads downstream as UNKNOWN, not as "supports nothing".`,
     )
     return {}
   }
@@ -178,11 +170,11 @@ function normalizeSupports(value, packagePath, key = 'supports') {
   }
   if (dropped.length > 0) {
     console.warn(
-      `Warning: ${packagePath} has ${dropped.length} non-name entr${dropped.length === 1 ? 'y' : 'ies'} in \`uniweb.${key}\`. Ignoring ${dropped.length === 1 ? 'it' : 'them'}.`,
+      `Warning: ${packagePath} has ${dropped.length} non-name entr${dropped.length === 1 ? 'y' : 'ies'} in \`uniweb.supports\`. Ignoring ${dropped.length === 1 ? 'it' : 'them'}.`,
     )
   }
 
-  return { [key]: [...new Set(names)].sort() }
+  return { supports: [...new Set(names)].sort() }
 }
 
 /**
@@ -243,8 +235,6 @@ export async function loadPackageJson(srcDir) {
       // Spread rather than assigned so an absent declaration stays ABSENT — see
       // normalizeSupports for why that is load-bearing.
       ...normalizeSupports(pkg.uniweb?.supports, packagePath),
-      // `uniweb.requires`, the same grammar: the services it cannot work without.
-      ...normalizeSupports(pkg.uniweb?.requires, packagePath, 'requires'),
     }
   } catch (error) {
     // A package.json that is there and cannot be read stops the build, as a `meta.js` does
@@ -1146,15 +1136,14 @@ export async function discoverComponents(srcDir, sectionPaths = DEFAULT_SECTION_
  * developer is working.
  *
  * @param {string} srcDir
- * @param {string[]|undefined} authored - normalized `uniweb.supports` (or `uniweb.requires`)
- * @param {'supports'|'requires'} [key]
+ * @param {string[]|undefined} authored - normalized `uniweb.supports`
  * @throws {Error} naming each old name and the new one
  */
-function refuseRenamedSupports(srcDir, authored, key = 'supports') {
+function refuseRenamedSupports(srcDir, authored) {
   const renamed = (authored || []).filter((s) => RENAMED_SERVICES[s])
   if (!renamed.length) return
   throw new Error(
-    `${srcDir}/package.json: \`uniweb.${key}\` names ${renamed.map((s) => `\`${s}\``).join(', ')}, which is now ` +
+    `${srcDir}/package.json: \`uniweb.supports\` names ${renamed.map((s) => `\`${s}\``).join(', ')}, which is now ` +
       `${renamed.map((s) => `\`${RENAMED_SERVICES[s]}\``).join(', ')} — the site's own backend is the \`backend\` ` +
       'service. Rename it in package.json.',
   )
@@ -1173,27 +1162,23 @@ function refuseRenamedSupports(srcDir, authored, key = 'supports') {
  * read in a diff — a build that rewrites source on every run is a surprise, and
  * the artifact is already correct without it.
  */
-function reportSupports(srcDir, authored, derived, emitted, required) {
+function reportSupports(srcDir, authored, derived, emitted) {
   // ⛔ BEFORE the dev-rebuild bail: a name this field may not carry is dropped
   // from what ships, and a developer who typed one has to hear it. Left below
   // the bail it would be silent in dev, which is where they are working.
-  for (const [key, names] of [['supports', authored], ['requires', required]]) {
-    const dropped = unnameableIn(names)
-    if (dropped.length > 0) {
-      console.warn(
-        `Warning: ${srcDir}/package.json declares \`uniweb.${key}: ${dropped.join(', ')}\`, ` +
-          `which this field does not carry. A foundation renders no surface for it — the runtime ` +
-          `handles it for every foundation alike — so naming it would tell a consumer that any ` +
-          `foundation NOT naming it lacks the capability, which is false. Dropped.`,
-      )
-    }
+  const dropped = unnameableIn(authored)
+  if (dropped.length > 0) {
+    console.warn(
+      `Warning: ${srcDir}/package.json declares \`uniweb.supports: ${dropped.join(', ')}\`, ` +
+        `which this field does not carry. A foundation renders no surface for it — the runtime ` +
+        `handles it for every foundation alike — so naming it would tell a consumer that any ` +
+        `foundation NOT naming it lacks the capability, which is false. Dropped.`,
+    )
   }
 
   if (!derived) return
 
-  // What the BUNDLE added: a required name the code never reaches is said below, and is
-  // not "derived".
-  const added = (emitted || []).filter((s) => derived.services.includes(s) && !(authored || []).includes(s))
+  const added = (emitted || []).filter((s) => !(authored || []).includes(s))
 
   if (added.length > 0) {
     const list = added.join(', ')
@@ -1215,36 +1200,26 @@ function reportSupports(srcDir, authored, derived, emitted, required) {
     }
   }
 
-  // A required service the code never reaches: published as declared (a need is the
-  // developer's claim, and the reach may be a computed name), but likely a typo or a
-  // leftover, and a site would have it locked on for nothing.
-  const unreached = composeRequires(required).filter((s) => !derived.services.includes(s))
-  if (unreached.length > 0) {
-    console.warn(
-      `Warning: ${srcDir}/package.json declares \`uniweb.requires: ${unreached.join(', ')}\`, ` +
-        `but no code in the bundle reaches ${unreached.length === 1 ? 'it' : 'them'}. ` +
-        `A site using this foundation will have ${unreached.length === 1 ? 'it' : 'them'} always on. ` +
-        `Check the name, unless the code reaches ${unreached.length === 1 ? 'it' : 'them'} by a computed name.`,
-    )
-  }
-
   // ⛔ WARN WHENEVER THE DERIVATION WAS BLIND — not only when it came back empty.
   //
-  // A published list is complete (`composeSupports`), so a blind derivation with
-  // nothing authored publishes NO list, even when it found some services: the
-  // developer is the one person who can complete it. With something authored, the
-  // authored list is published and claimed complete, so they must hear the build
-  // could not check it.
+  // This used to require an empty result, which left the more likely case
+  // silent: a foundation that reaches `submit` through a literal and `booking`
+  // through a computed name publishes `["submit"]` — short, with no warning, and
+  // the one person who could fix it never hears about it.
+  //
+  // ⭐ That is what makes the lower bound tolerable. How often a foundation
+  // computes a service name is unknowable from here — foundations are
+  // third-party — but it does not need to be known, because the build detects
+  // its own blindness and can say so to the developer at the moment they build.
   if (derived.blind) {
-    const found = derived.services.length > 0 ? ` It found ${derived.services.join(', ')}.` : ''
+    const empty = emitted === undefined || emitted.length === 0
     console.warn(
-      emitted === undefined
+      empty
         ? `Warning: a service is resolved by a computed name, so \`uniweb.supports\` cannot be ` +
-            `derived completely and is left undeclared — a published list must be complete.${found} ` +
-            `List every service the foundation uses in package.json to publish it.`
-        : `Warning: a service is resolved by a computed name, so the build cannot check that ` +
-            `\`uniweb.supports\` [${emitted.join(', ')}] is complete, and a consumer reads it as complete. ` +
-            `Add any service missing from it to package.json.`,
+            `derived and is left undeclared. List it in package.json to publish it.`
+        : `Warning: a service is resolved by a computed name, so the derived ` +
+            `\`uniweb.supports\` may be incomplete. Add any service missing from ` +
+            `[${(emitted || []).join(', ')}] to package.json.`,
     )
     for (const at of derived.blindAt || []) console.warn(`  at ${at}`)
   }
@@ -1518,7 +1493,6 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
   // convenience — the artifact would disagree with itself depending on which
   // command wrote it. One rule: the derivation runs on a real build.
   refuseRenamedSupports(srcDir, identity.supports)
-  refuseRenamedSupports(srcDir, identity.requires, 'requires')
   const derived = derivedSupports && {
     ...derivedSupports,
     services: deriveRecordsSupport(components, foundationConfig.data)
@@ -1526,11 +1500,8 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
       : derivedSupports.services,
   }
 
-  // `requires` is authored only and ALWAYS emitted (`composeRequires`): its presence
-  // tells a reader the `supports` beside it is complete. It is unioned into `supports`.
-  const requires = composeRequires(identity.requires)
-  const supports = composeSupports(identity.supports, derived, requires)
-  reportSupports(srcDir, identity.supports, derived, supports.supports, identity.requires)
+  const supports = composeSupports(identity.supports, derived)
+  reportSupports(srcDir, identity.supports, derived, supports.supports)
 
   // The foundation's name, by the one rule every reader shares (`foundation-name.js`):
   // `main.js`'s `name`, else `package.json`'s. ⚠️ Until 2026-09-21 the `main.js` value
@@ -1543,7 +1514,6 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
       ...configWithoutExtension,
       ...identity,
       ...supports,
-      requires,
       ...(name && { name }),
       ...(foundationConfig.description && { description: foundationConfig.description }),
       ...(defaultLayout && { defaultLayout }),

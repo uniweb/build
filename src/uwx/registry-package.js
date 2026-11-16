@@ -361,10 +361,6 @@ function buildInfo(self, org, digest, runtime) {
   // "none" and must survive as one, while an ABSENT key means UNKNOWN — the
   // same three-state rule `runtime` states above, for the same reason.
   if (Array.isArray(self.supports)) info.supports = self.supports
-  // The services it cannot work without (`uniweb.requires`, `composeRequires`). A build
-  // that knows the field always writes it, `[]` included, and its presence is what says
-  // `supports` is complete; ABSENT means a build from before the field.
-  if (Array.isArray(self.requires)) info.requires = self.requires
   return info
 }
 
@@ -386,7 +382,7 @@ function buildSchemaBlob(schema, org) {
   // Every key hoisted into `info` is stripped here, so the wire carries each
   // fact ONCE. Two copies of one fact is a drift liability, and the copy inside
   // an opaque blob is the one nobody would think to update.
-  const { name: _n, version: _v, description: _d, role: _r, supports: _s, requires: _q, ...selfConfig } =
+  const { name: _n, version: _v, description: _d, role: _r, supports: _s, ...selfConfig } =
     rest._self || {}
   return normalizeFoundationSchema({ ...rest, _self: selfConfig }, { scope: org || undefined })
 }

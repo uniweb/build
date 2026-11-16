@@ -90,10 +90,6 @@ export function foundationSchemaToEntity(schema, opts = {}) {
   // "none"; an ABSENT key means UNKNOWN. Mirrors `buildInfo` in
   // `registry-package.js`, which is the path `uniweb register` actually takes.
   if (Array.isArray(self.supports)) info.supports = self.supports
-  // The services it cannot work without (`uniweb.requires`, `composeRequires`). A build
-  // that knows the field always writes it, `[]` included, and its presence is what says
-  // `supports` is complete; ABSENT means a build from before the field.
-  if (Array.isArray(self.requires)) info.requires = self.requires
 
   // ── schema — the whole renderable schema.json minus identity and minus
   // dataSchemas, shipped WHOLE as one opaque blob. ───────────────────────────
@@ -104,7 +100,6 @@ export function foundationSchemaToEntity(schema, opts = {}) {
     description: _d,
     role: _r,
     supports: _s,
-    requires: _q,
     ...selfConfig
   } = rest._self || {}
   const schemaBlob = { ...rest, _self: selfConfig }

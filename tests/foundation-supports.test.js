@@ -128,36 +128,11 @@ describe('buildSchema — the declaration reaches _self', () => {
   })
 })
 
-describe('uniweb.requires — authored, normalized like supports, always on _self', () => {
-  it('normalizes a declared list', async () => {
-    const id = await loadPackageJson(foundationDir({ uniweb: { requires: ['backend', 'backend'] } }))
-    expect(id.requires).toEqual(['backend'])
-  })
-
-  it('is [] on _self when nothing is declared — its presence marks a build that knows it', async () => {
-    const schema = await buildSchema(foundationDir({}))
-    expect(schema._self.requires).toEqual([])
-  })
-
-  it('carries a requirement and folds it into supports', async () => {
-    const schema = await buildSchema(foundationDir({ uniweb: { requires: ['backend'] } }))
-    expect(schema._self.requires).toEqual(['backend'])
-    expect(schema._self.supports).toEqual(['backend'])
-  })
-
-  it('⛔ stops on a renamed service, naming the new name', async () => {
-    await expect(buildSchema(foundationDir({ uniweb: { requires: ['api'] } }))).rejects.toThrow(
-      /`uniweb\.requires` names `api`, which is now `backend`/
-    )
-  })
-})
-
 // ── the register wire ────────────────────────────────────────────────────────
 
-function schemaJson(supports, requires) {
+function schemaJson(supports) {
   const self = { name: '@acme/marketing', version: '1.2.0', role: 'foundation', vars: {} }
   if (supports !== undefined) self.supports = supports
-  if (requires !== undefined) self.requires = requires
   return { _self: self, Hero: { name: 'Hero', path: 'sections/Hero' } }
 }
 
@@ -184,27 +159,6 @@ describe('buildRegistryPackage — hoisted to info, stripped from the blob', () 
     expect(f.schema._self.supports).toBeUndefined()
     // the rest of _self still rides in the blob — this strips one key, not the object
     expect(f.schema._self.vars).toEqual({})
-  })
-})
-
-describe('info.requires — hoisted when the build wrote it, absent when it did not', () => {
-  const foundation = (doc) => doc.entities.find((e) => e.model === '@uniweb/foundation-schema')
-  const sectionData = (entity, name) => entity.items.find((i) => i.section === name).data
-
-  it('hoists a requirement, and an empty one — [] says the supports beside it is complete', () => {
-    expect(foundation(buildRegistryPackage({ schema: schemaJson(['backend'], ['backend']) })).info.requires).toEqual(['backend'])
-    expect(foundation(buildRegistryPackage({ schema: schemaJson(['search'], []) })).info.requires).toEqual([])
-  })
-
-  it('omits it for a build from before the field, and strips it from the blob', () => {
-    expect('requires' in foundation(buildRegistryPackage({ schema: schemaJson(['search']) })).info).toBe(false)
-    expect(foundation(buildRegistryPackage({ schema: schemaJson([], []) })).schema._self.requires).toBeUndefined()
-  })
-
-  it('the other emitter agrees', () => {
-    const entity = foundationSchemaToEntity(schemaJson(['backend'], ['backend']))
-    expect(sectionData(entity, 'info').requires).toEqual(['backend'])
-    expect(sectionData(entity, 'schema').schema._self.requires).toBeUndefined()
   })
 })
 
