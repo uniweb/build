@@ -313,8 +313,9 @@ function loadYamlFile(filePath) {
 // rewritten, and every comment, blank line and list the author wrote stays (`editYamlText`). ⛔ Until then
 // every writer here dumped the whole file — a pull that changed one key of `site.yml` left the Starter
 // template's 93 lines as 10, and a `pull --merge` conflicted on the whole commented header. The whole dump
-// remains for a file with nothing to keep (none yet, unreadable) and one the editor declines (an alias or a
-// `<<` merge key, or a result that would read differently).
+// remains for a file with nothing to keep (none yet, unreadable) and one the editor declines (a `<<` merge
+// key in the file's own map, or a result that would read differently). An anchor and its aliases no longer
+// stop an edit (2026-11-16).
 function writeYamlIfChanged(filePath, value, prior) {
   if (prior.read && canonicalJson(value) === canonicalJson(prior.value)) return 'unchanged'
   const edited = prior.read ? editYamlText(prior.text, prior.value, value, YAML_DUMP_OPTS) : null

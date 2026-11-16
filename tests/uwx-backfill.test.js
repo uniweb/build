@@ -120,13 +120,20 @@ describe('backfillUuid — an author\'s file gains one line and loses nothing', 
     expect(readFileSync(f, 'utf8')).toBe(recorded.replace('$uuid: old-uuid', '$uuid: new-uuid'))
   })
 
-  it('a file it cannot edit in place is re-rendered whole, and the result says so', () => {
+  it('⭐ an anchor and its alias stay: the file gains its one line (re-rendered whole until 2026-11-16)', () => {
     const f = join(dir, 'anchored.yml')
     writeFileSync(f, 'base: &b\n  size: 1\ncopy: *b\n')
+    expect(backfillUuid(f, '0192-eeee')).toEqual({ status: 'updated' })
+    expect(readFileSync(f, 'utf8')).toBe('$uuid: 0192-eeee\nbase: &b\n  size: 1\ncopy: *b\n')
+  })
+
+  it('a file it cannot edit in place is re-rendered whole, and the result says so', () => {
+    const f = join(dir, 'flow.yml')
+    writeFileSync(f, '{ title: T, size: 1 }\n')
     const res = backfillUuid(f, '0192-eeee')
     expect(res.status).toBe('updated')
     expect(res.warning).toMatch(/rewritten whole/)
-    expect(yaml.load(readFileSync(f, 'utf8'))).toEqual({ $uuid: '0192-eeee', base: { size: 1 }, copy: { size: 1 } })
+    expect(yaml.load(readFileSync(f, 'utf8'))).toEqual({ $uuid: '0192-eeee', title: 'T', size: 1 })
   })
 })
 

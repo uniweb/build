@@ -20,7 +20,7 @@
 // beside a comment, a new key PREPENDED above a file's header comments.*
 
 import yaml from 'js-yaml'
-import { parseDocument, isMap, isSeq, isScalar, Scalar, visit } from 'yaml'
+import { parseDocument, isAlias, isMap, isSeq, isScalar, Scalar } from 'yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 
 /** js-yaml's options for every value the framework writes into YAML, so output is byte-stable. */
@@ -48,7 +48,8 @@ function columnOf(text, key) {
 /**
  * Where a pair's text ends: after its value, its trailing comment and its newline.
  *
- * ⛔ A SCALAR ENDS WHERE ITS OWN TEXT DOES — `range[1]`, then the rest of that line. Its
+ * ⛔ A SCALAR ENDS WHERE ITS OWN TEXT DOES — `range[1]`, then the rest of that line, and so
+ * does an alias (`*persona`). Its
  * `range[2]` also spans the comment lines that follow it, and for an empty value (`team:`)
  * every comment and blank line up to the next key, at any indentation: those belong to what
  * comes next. ⛔ Until 2026-10-08 this read `range[2]`, and a pull that gave a bare `team:` its
@@ -56,7 +57,7 @@ function columnOf(text, key) {
  */
 function pairEnd(text, pair) {
   const node = pair.value ?? pair.key
-  let end = isScalar(node) ? node.range[1] : node.range[2]
+  let end = isScalar(node) || isAlias(node) ? node.range[1] : node.range[2]
   if (text[end - 1] !== '\n') {
     const nl = text.indexOf('\n', end)
     const rest = nl === -1 ? text.slice(end) : text.slice(end, nl)
@@ -75,22 +76,69 @@ function indented(text, col, first) {
     .join('\n')
 }
 
-/** An alias or a `<<` merge key: one edit could change what another place says. */
-function usesReferences(doc) {
-  let found = false
-  visit(doc, {
-    Alias() {
-      found = true
-      return visit.BREAK
-    },
-    Pair(_, pair) {
-      if (isScalar(pair.key) && pair.key.value === '<<') {
-        found = true
-        return visit.BREAK
-      }
+/** A map that merges another into it (`<<: *base`): some of what it says is not its own to edit. */
+const holdsMergeKey = (map) => map.items.some((pair) => isScalar(pair.key) && pair.key.value === '<<')
+
+/** What a value read from YAML holds at `path` (keys and list indexes); undefined where it holds nothing. */
+function valueAt(value, path) {
+  let v = value
+  for (const step of path) {
+    if (v === null || typeof v !== 'object') return undefined
+    v = v[step]
+  }
+  return v
+}
+
+/**
+ * Every place whose value another place gives it: each alias (`*persona`), with the path of the
+ * anchor it names (`&persona`), and each map that merges another into it (`<<`). Walked in the
+ * file's order, so an alias names the last anchor of its name before it, as YAML reads it.
+ */
+function referencesOf(root) {
+  const places = []
+  const anchorPathOf = new Map()
+  const anchors = new Map()
+  const walk = (node, path) => {
+    if (!node) return
+    if (isAlias(node)) {
+      places.push({ node, path })
+      if (anchors.has(node.source)) anchorPathOf.set(node, anchors.get(node.source))
+      return
     }
-  })
-  return found
+    if (node.anchor) anchors.set(node.anchor, path)
+    if (isMap(node)) {
+      if (holdsMergeKey(node)) places.push({ node, path })
+      for (const pair of node.items) {
+        if (!isScalar(pair.key) || pair.key.value === '<<') continue
+        walk(pair.value, [...path, String(pair.key.value)])
+      }
+    } else if (isSeq(node)) {
+      node.items.forEach((item, i) => walk(item, [...path, i]))
+    }
+  }
+  walk(root, [])
+  return { places, anchorPathOf }
+}
+
+/** Whether an alias, left as it is, says `value`: whether its anchor's place is to say it. */
+function aliasHolds(cx, alias, value) {
+  const at = cx.anchorPathOf.get(alias)
+  return at !== undefined && sameValue(valueAt(cx.after, at), value)
+}
+
+/** Whether `node`, or anything in it, is a place that must be written as its own value. */
+function holdsForced(cx, node) {
+  if (!cx.force.size || !node) return false
+  if (cx.force.has(node)) return true
+  if (isMap(node)) return node.items.some((pair) => holdsForced(cx, pair.value))
+  if (isSeq(node)) return node.items.some((item) => holdsForced(cx, item))
+  return false
+}
+
+/** `key: value` as js-yaml writes it, with the value's anchor kept: `key: &persona value`. */
+function anchored(whole, key, anchor, dump) {
+  const head = dump({ [key]: null }).replace(/ null\n$/, '')
+  return whole.startsWith(head) ? `${head} &${anchor}${whole.slice(head.length)}` : whole
 }
 
 /**
@@ -117,15 +165,20 @@ function scalarText(text, node, value, dump, inFlow) {
 /**
  * Make one list say `after` — `before` is what it says now, the same length — by
  * rewriting each changed entry where it stands. False for anything else (a list that
- * grew or shrank, an entry that is not a one-line scalar): the caller writes it whole.
+ * grew or shrank, an entry that is not a one-line scalar, an alias that would no longer
+ * say its entry): the caller writes it whole.
  */
-function editSeq(text, seq, before, after, edits, dump) {
+function editSeq(cx, seq, before, after, edits) {
   if (seq.items.length !== before.length || before.length !== after.length) return false
   const inner = []
   for (let i = 0; i < after.length; i++) {
-    if (sameValue(before[i], after[i])) continue
     const node = seq.items[i]
-    const now = isScalar(node) ? scalarText(text, node, after[i], dump, seq.flow) : null
+    if (isAlias(node)) {
+      if (!cx.force.has(node) && aliasHolds(cx, node, after[i])) continue
+      return false
+    }
+    if (sameValue(before[i], after[i]) && !holdsForced(cx, node)) continue
+    const now = isScalar(node) ? scalarText(cx.text, node, after[i], cx.dump, seq.flow) : null
     if (now === null) return false
     inner.push({ start: node.range[0], end: node.range[1], text: now })
   }
@@ -137,11 +190,14 @@ function editSeq(text, seq, before, after, edits, dump) {
  * Make one block map say `after` — `before` is what it says now — by edits to its own
  * entries: a removed key's lines go, a changed scalar is rewritten where it stands, a
  * changed map or same-length list is edited the same way one level down, anything else
- * is written whole in its place, and a new key goes after the last one. False when the
- * map is not one this can edit (a key that is not a plain scalar, or not first on its line).
+ * is written whole in its place, and a new key goes after the last one. An alias stays
+ * where its anchor's place is to say what it says, and is written as its own value where
+ * not; a value written whole keeps its anchor. False when the map is not one this can edit
+ * (a key that is not a plain scalar, or not first on its line, or a `<<` merge key).
  */
-function editMap(text, map, before, after, edits, dump) {
-  if (!map.items.length || !map.items[0].key?.range) return false
+function editMap(cx, map, before, after, edits) {
+  const { text, dump } = cx
+  if (!map.items.length || !map.items[0].key?.range || holdsMergeKey(map)) return false
   const col = columnOf(text, map.items[0].key)
   if (col === null) return false
   const seen = new Set()
@@ -158,44 +214,49 @@ function editMap(text, map, before, after, edits, dump) {
       edits.push({ start: lineStart(text, pair.key.range[0]), end: stop, text: '' })
       continue
     }
-    if (Object.hasOwn(before, key) && sameValue(before[key], after[key])) continue
     const next = after[key]
-    const inner = []
-    if (isMap(value) && !value.flow && isPlainObject(before[key]) && isPlainObject(next)) {
-      if (editMap(text, value, before[key], next, inner, dump)) {
-        edits.push(...inner)
-        continue
+    if (isAlias(value)) {
+      // ⭐ An alias stays where its anchor's place is to say what this one says; written whole
+      // below where it is not, as its own value.
+      if (!cx.force.has(value) && aliasHolds(cx, value, next)) continue
+    } else {
+      if (Object.hasOwn(before, key) && sameValue(before[key], next) && !holdsForced(cx, value)) continue
+      const inner = []
+      if (isMap(value) && !value.flow && isPlainObject(before[key]) && isPlainObject(next)) {
+        if (editMap(cx, value, before[key], next, inner)) {
+          edits.push(...inner)
+          continue
+        }
+      } else if (isSeq(value) && Array.isArray(before[key]) && Array.isArray(next)) {
+        if (editSeq(cx, value, before[key], next, inner)) {
+          edits.push(...inner)
+          continue
+        }
+      } else if (isScalar(value)) {
+        const now = scalarText(text, value, next, dump, false)
+        if (now !== null) {
+          edits.push({ start: value.range[0], end: value.range[1], text: now })
+          continue
+        }
       }
-    } else if (isSeq(value) && Array.isArray(before[key]) && Array.isArray(next)) {
-      if (editSeq(text, value, before[key], next, inner, dump)) {
-        edits.push(...inner)
-        continue
-      }
-    } else if (isScalar(value)) {
-      const now = scalarText(text, value, next, dump, false)
-      if (now !== null) {
-        edits.push({ start: value.range[0], end: value.range[1], text: now })
-        continue
+      // ⭐ A BARE KEY GIVEN A VALUE KEEPS ITS LINE — and any comment the author wrote on it — and
+      // the value goes under it: `team:  # the people` gains `  schema: '@/team'` beneath.
+      const bare = isScalar(value) && value.value === null && value.range[0] === value.range[1]
+      if (bare && (isPlainObject(next) || Array.isArray(next))) {
+        const whole = indented(dump({ [key]: next }), col, false)
+        const nl = whole.indexOf('\n')
+        if (nl !== -1 && nl < whole.length - 1) {
+          edits.push({ start: stop, end: stop, text: (text[stop - 1] === '\n' ? '' : '\n') + whole.slice(nl + 1) })
+          continue
+        }
       }
     }
-    // ⭐ A BARE KEY GIVEN A VALUE KEEPS ITS LINE — and any comment the author wrote on it — and
-    // the value goes under it: `team:  # the people` gains `  schema: '@/team'` beneath.
-    const bare = isScalar(value) && value.value === null && value.range[0] === value.range[1]
-    if (bare && (isPlainObject(next) || Array.isArray(next))) {
-      const whole = indented(dump({ [key]: next }), col, false)
-      const nl = whole.indexOf('\n')
-      if (nl !== -1 && nl < whole.length - 1) {
-        edits.push({ start: stop, end: stop, text: (text[stop - 1] === '\n' ? '' : '\n') + whole.slice(nl + 1) })
-        continue
-      }
-    }
-    // Written whole — in flow style when the author wrote it that way (`tags: [a, b]`).
+    // Written whole — in flow style when the author wrote it that way (`tags: [a, b]`), and
+    // with its anchor, so an alias that names it still does.
     const flow = (isMap(value) || isSeq(value)) && value.flow
-    edits.push({
-      start: pair.key.range[0],
-      end: stop,
-      text: indented(dump({ [key]: next }, flow ? { flowLevel: 1 } : {}), col, false)
-    })
+    let whole = dump({ [key]: next }, flow ? { flowLevel: 1 } : {})
+    if (!isAlias(value) && value?.anchor) whole = anchored(whole, key, value.anchor, dump)
+    edits.push({ start: pair.key.range[0], end: stop, text: indented(whole, col, false) })
   }
   for (const key of Object.keys(after)) {
     if (seen.has(key) || after[key] === undefined) continue
@@ -224,12 +285,24 @@ function editMap(text, map, before, after, edits, dump) {
  * of `site.yml` left the Starter template's 93 lines as 10 — every comment gone — and a
  * `pull --merge` then conflicted on the whole commented header (F1, F12).*
  *
+ * ⭐ AN ANCHOR AND ITS ALIASES STAY. A value written once and named again (`&persona` …
+ * `*persona`) is edited where its anchor is, and an alias stays wherever its anchor's place
+ * is to say what it says. Where it is not (the app changed one of the two places), the
+ * alias's place is written as its own value: an edit that changed what an alias says is
+ * found by the read back, and made again with that place written whole. ⛔ Until 2026-11-16
+ * any alias or `<<` merge key made the engine decline the file, and the writer then dumped
+ * it whole: a pull that changed one key of a docs site's `site.yml` took all its comments,
+ * turned its anchor into two copies and a folded `>` block into `|` (measured on a site,
+ * 2026-11-16). A map that merges another into it (`<<`) is still written whole by the map it
+ * is in, and the file whole when it is the file's own.
+ *
  * @param {string} text - the file as it is
  * @param {object} before - what it says, read by the build's reader
  * @param {object} after - what it must say
  * @param {object} [dumpOptions] - js-yaml's, for what is written
  * @returns {string|null} the edited text; null when the file cannot be edited in place —
- *   not a map, an alias or merge key, a parse error, or a result that reads differently
+ *   not a map, a `<<` merge key in the file's own map, a parse error, or a result that
+ *   reads differently
  */
 export function editYamlText(text, before, after, dumpOptions = YAML_DUMP_OPTS) {
   if (typeof text !== 'string' || !isPlainObject(before) || !isPlainObject(after)) return null
@@ -239,29 +312,51 @@ export function editYamlText(text, before, after, dumpOptions = YAML_DUMP_OPTS) 
   } catch {
     return null
   }
-  if (doc.errors.length || usesReferences(doc)) return null
+  if (doc.errors.length) return null
   const dump = (value, extra = {}) => yaml.dump(value, { ...dumpOptions, ...extra })
-  const edits = []
   if (doc.contents === null || doc.contents === undefined) {
     // Comments and nothing else: what the file says goes after them.
-    const lead = text && !text.endsWith('\n') ? '\n' : ''
-    edits.push({ start: text.length, end: text.length, text: lead + dump(after) })
-  } else if (!isMap(doc.contents) || doc.contents.flow || !editMap(text, doc.contents, before, after, edits, dump)) {
-    return null
+    const out = text + (text && !text.endsWith('\n') ? '\n' : '') + dump(after)
+    return sameValue(readOrUndefined(out), after) ? out : null
   }
-  // Last first, so an offset is never moved by an edit before it. At one offset: a removal
-  // before an insertion, and the outer map's new keys before the inner map's, so the inner
-  // map's land first in the text.
+  if (!isMap(doc.contents) || doc.contents.flow) return null
+  const { places, anchorPathOf } = referencesOf(doc.contents)
+  const cx = { text, dump, after, anchorPathOf, force: new Set() }
+  // Each round writes at least one more place as its own value, so there are at most as many
+  // rounds as places.
+  for (;;) {
+    const edits = []
+    if (!editMap(cx, doc.contents, before, after, edits)) return null
+    const out = applyEdits(text, edits)
+    const read = readOrUndefined(out)
+    if (read !== undefined && sameValue(read, after)) return out
+    // A place another gives its value to that does not say what `after` says there — or every
+    // one, when an anchor was lost and the text no longer reads — is written as its own value.
+    const wrong = places.filter(
+      (p) => !cx.force.has(p.node) && (read === undefined || !sameValue(valueAt(read, p.path), valueAt(after, p.path)))
+    )
+    if (!wrong.length) return null
+    for (const p of wrong) cx.force.add(p.node)
+  }
+}
+
+// Last first, so an offset is never moved by an edit before it. At one offset: a removal
+// before an insertion, and the outer map's new keys before the inner map's, so the inner
+// map's land first in the text.
+function applyEdits(text, edits) {
   const order = edits.map((e, i) => ({ ...e, i })).sort((a, b) => b.start - a.start || b.end - a.end || b.i - a.i)
   let out = text
   for (const e of order) out = out.slice(0, e.start) + e.text + out.slice(e.end)
-  let read
+  return out
+}
+
+/** What `text` says, as the build reads it — undefined when it does not read. */
+function readOrUndefined(text) {
   try {
-    read = yaml.load(out, YAML_OPTIONS) ?? {}
+    return yaml.load(text, YAML_OPTIONS) ?? {}
   } catch {
-    return null
+    return undefined
   }
-  return sameValue(read, after) ? out : null
 }
 
 /** What `text` says, as the build reads it — null when it is not YAML, or not a map. */
@@ -301,7 +396,8 @@ export function setYamlKey(text, key, value) {
  * @param {string} key
  * @param {*} value
  * @returns {string|null} the new contents; null when the text cannot be edited in place — not a
- *   block map, an alias or merge key, a parse error, or a result that reads differently
+ *   block map, a parse error, or a result that reads differently. A line before the first key
+ *   changes nothing an anchor or an alias says, so neither stops it.
  */
 export function setYamlKeyFirst(text, key, value) {
   const before = readMap(text)
@@ -313,7 +409,7 @@ export function setYamlKeyFirst(text, key, value) {
   } catch {
     return null
   }
-  if (doc.errors.length || usesReferences(doc)) return null
+  if (doc.errors.length) return null
   const line = yaml.dump({ [key]: value }, YAML_DUMP_OPTS)
   let out
   if (doc.contents === null || doc.contents === undefined) {

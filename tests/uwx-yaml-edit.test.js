@@ -9,8 +9,13 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import yaml from 'js-yaml'
 import { editYamlText, setYamlKey, replaceInYamlList } from '../src/uwx/index.js'
 import { setYamlKeyFirst } from '../src/uwx/yaml-edit.js'
+import { YAML_OPTIONS } from '../src/utils/yaml-schema.js'
+
+// What a text says, as the build reads it.
+const read = (text) => yaml.load(text, YAML_OPTIONS)
 
 const SITE = `# The sample site
 name: Research Profile
@@ -57,7 +62,11 @@ describe('setYamlKey', () => {
   it('refuses a text it cannot read, or keep, as it is', () => {
     expect(setYamlKey('not: [valid', 'foundation', 'y')).toBeNull()
     expect(setYamlKey('- a\n- b\n', 'foundation', 'y')).toBeNull() // not a map
-    expect(setYamlKey('base: &b x\nfoundation: *b\n', 'foundation', 'y')).toBeNull() // an alias
+    expect(setYamlKey('<<: { a: 1 }\nfoundation: x\n', 'foundation', 'y')).toBeNull() // the file's own map merges
+  })
+
+  it('⭐ an alias set to another value is written as its own value, and its anchor stays (refused until 2026-11-16)', () => {
+    expect(setYamlKey('base: &b x\nfoundation: *b\n', 'foundation', 'web')).toBe('base: &b x\nfoundation: web\n')
   })
 })
 
@@ -121,6 +130,90 @@ describe('editYamlText — lists', () => {
   })
 })
 
+// ⛔ Measured 2026-11-16 on a docs site: its `site.yml` gave an assistant's settings once, under an
+// anchor, and named them again with an alias. The engine declined any alias, so the writer dumped the
+// file whole, and a pull that changed only its favicon took every comment, made the anchor two copies
+// and the folded `>` block a `|`: 28 lines added, 91 removed.
+describe('editYamlText — an anchor and its aliases', () => {
+  const PERSONA = `name: docs
+# the mark, the same upload the other sites use
+favicon: https://example.com/a.svg
+services:
+  # site search on the host
+  search: true
+  assistant: &persona
+    tone: plain
+    maxTokens: 1024
+    system: >
+        You are the help
+        assistant.
+    capabilities:
+        - answer
+
+# ⛔ the host that serves the site today reads this key, so it names the same settings
+intelligence: *persona
+build:
+    prerender: true
+`
+  const before = read(PERSONA)
+  const assistant = before.services.assistant
+  const withAssistant = (a) => ({ ...before, services: { ...before.services, assistant: a } })
+
+  it('⭐ a change elsewhere is that line alone: the anchor, the alias, the comments and the folded block stay', () => {
+    expect(editYamlText(PERSONA, before, { ...before, favicon: '/favicon.svg' })).toBe(
+      PERSONA.replace('favicon: https://example.com/a.svg', 'favicon: /favicon.svg')
+    )
+  })
+
+  it('both places changed alike: edited where the anchor is, and the alias stays', () => {
+    const changed = { ...assistant, maxTokens: 2048 }
+    const out = editYamlText(PERSONA, before, { ...withAssistant(changed), intelligence: changed })
+    expect(out).toBe(PERSONA.replace('maxTokens: 1024', 'maxTokens: 2048'))
+  })
+
+  it('⭐ one place changed: the anchor is edited where it stands, and the alias is written as its own value', () => {
+    const out = editYamlText(PERSONA, before, withAssistant({ ...assistant, maxTokens: 2048 }))
+    expect(read(out)).toEqual(withAssistant({ ...assistant, maxTokens: 2048 }))
+    expect(out).toContain('  assistant: &persona\n    tone: plain\n    maxTokens: 2048\n')
+    expect(out).not.toContain('*persona')
+    // …and everything the edit had no reason to touch is as it was
+    expect(out).toContain('# the mark, the same upload the other sites use\n')
+    expect(out).toContain("# ⛔ the host that serves the site today reads this key, so it names the same settings\nintelligence:\n")
+    expect(out.endsWith('build:\n    prerender: true\n')).toBe(true)
+  })
+
+  it('the other place changed: the alias is written as its own value, and the anchor is left as it was', () => {
+    const out = editYamlText(PERSONA, before, { ...before, intelligence: { ...assistant, maxTokens: 9 } })
+    expect(read(out)).toEqual({ ...before, intelligence: { ...assistant, maxTokens: 9 } })
+    expect(out.slice(0, out.indexOf('# ⛔'))).toBe(PERSONA.slice(0, PERSONA.indexOf('# ⛔')))
+  })
+
+  it('an anchored value written whole keeps its anchor', () => {
+    const out = editYamlText('a: &x [1, 2]\nb: *x\n', { a: [1, 2], b: [1, 2] }, { a: [1, 2, 3], b: [1, 2, 3] })
+    expect(out).toBe('a: &x [1, 2, 3]\nb: *x\n')
+  })
+
+  it('an alias in a list stays while it says its entry', () => {
+    const text = 'base: &b x\nlist:\n  - *b\n  - y\n'
+    expect(editYamlText(text, read(text), { base: 'x', list: ['x', 'z'] })).toBe('base: &b x\nlist:\n  - *b\n  - z\n')
+  })
+
+  it('a map that merges another in is written whole when it changes, and the rest of the file stays', () => {
+    const text = '# defaults\nbase: &b\n  a: 1\nsite:\n  <<: *b\n  c: 3\n# after\nname: x\n'
+    const out = editYamlText(text, read(text), { base: { a: 1 }, site: { a: 1, c: 4 }, name: 'x' })
+    expect(read(out)).toEqual({ base: { a: 1 }, site: { a: 1, c: 4 }, name: 'x' })
+    expect(out.startsWith('# defaults\nbase: &b\n  a: 1\n')).toBe(true)
+    expect(out.endsWith('# after\nname: x\n')).toBe(true)
+    // unchanged, it is left as it is
+    expect(editYamlText(text, read(text), { ...read(text), name: 'web' })).toBe(text.replace('name: x', 'name: web'))
+  })
+
+  it('CONTROL — a merge key in the file’s own map is still declined, so the writer writes it whole', () => {
+    const text = 'base: &b { a: 1 }\n<<: *b\nname: x\n'
+    expect(editYamlText(text, read(text), { ...read(text), name: 'web' })).toBeNull()
+  })
+})
+
 // ⛔ Measured 2026-10-08: a pull that gave a bare `team:` its schema deleted the blank line and the
 // `# Build options` heading under it. The parser hangs every comment that follows an empty value
 // on that value, up to the next key; they belong to what follows.
@@ -178,9 +271,12 @@ describe('setYamlKeyFirst — an identity written into a file an author wrote', 
     expect(setYamlKeyFirst('# only a comment\n', '$uuid', 'u')).toBe('# only a comment\n$uuid: u\n')
   })
 
-  it('null for what it cannot edit in place: a flow map, an alias, a list', () => {
+  it('null for what it cannot edit in place: a flow map, a list', () => {
     expect(setYamlKeyFirst('{ title: T }\n', '$uuid', 'u')).toBeNull()
-    expect(setYamlKeyFirst('a: &x 1\nb: *x\n', '$uuid', 'u')).toBeNull()
     expect(setYamlKeyFirst('- a\n- b\n', '$uuid', 'u')).toBeNull()
+  })
+
+  it('⭐ an anchor and its alias are no reason to decline — the line before them changes neither (refused until 2026-11-16)', () => {
+    expect(setYamlKeyFirst('a: &x 1\nb: *x\n', '$uuid', 'u')).toBe('$uuid: u\na: &x 1\nb: *x\n')
   })
 })

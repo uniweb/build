@@ -239,10 +239,16 @@ describe('⭐ a config file is EDITED, not re-dumped — its comments stay (F1)'
     expect(read()).toBe(broken)
   })
 
-  it('⚠️ a file with an alias is written whole — same meaning, comments not kept', () => {
+  it('⭐ a file with an anchor and an alias is edited like any other — its comments stay (written whole until 2026-11-16)', () => {
     write('# shared\ndefaults: &d\n  prerender: true\nbuild: *d\nname: A\n')
     writeSiteConfig(dir, { name: 'B' })
-    expect(yaml.load(read())).toEqual({ defaults: { prerender: true }, build: { prerender: true }, name: 'B' })
+    expect(read()).toBe('# shared\ndefaults: &d\n  prerender: true\nbuild: *d\nname: B\n')
+  })
+
+  it('⚠️ a file whose own map merges another in (`<<`) is written whole — same meaning, comments not kept', () => {
+    write('# shared\nbase: &b { prerender: true }\n<<: *b\nname: A\n')
+    writeSiteConfig(dir, { name: 'B' })
+    expect(yaml.load(read())).toEqual({ base: { prerender: true }, prerender: true, name: 'B' })
     expect(read()).not.toContain('# shared')
   })
 })
