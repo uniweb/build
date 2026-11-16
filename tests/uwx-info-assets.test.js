@@ -134,6 +134,30 @@ describe('bare-string asset references', () => {
     expect(doc.info.favicon).toBe('https://assets.example/ff')
     expect(stats.restored).toBe(0)
   })
+
+  // ⛔ Measured 2026-11-16 on a docs site: `site.yml` named its favicon by the address the host
+  // serves an upload at, and a header the site had just added drew `/favicon.svg`, a file of the
+  // same bytes, so the push recorded that address for `/favicon.svg`. The pull then wrote
+  // `favicon: /favicon.svg`, and `uniweb status` named `site.yml` as changed on the backend.
+  it('⭐ a favicon named by its served address stays that address, though a file of the same bytes now has it', async () => {
+    const root = project()
+    const file = join(root, 'site.yml')
+    writeFileSync(file, readFileSync(file, 'utf8').replace('favicon: /f.png', `favicon: ${SERVED['/f.png']}`))
+    const before = readFileSync(file, 'utf8')
+    const doc = siteDocOf(await emitSyncPackages(root, { assetRewrite: SERVED, assetIds: IDS }))
+    expect(doc.info.favicon).toBe(SERVED['/f.png'])
+    updateBackendMap(root, ORIGIN, 'assets', IDS)
+    siteContentDocumentToProject({ document: doc, siteRoot: root, backend: ORIGIN })
+    expect(readFileSync(file, 'utf8')).toBe(before)
+  })
+
+  it('CONTROL — the same address pulled into a copy that names nothing there is the path the map holds', async () => {
+    const dest = tmp('uwx-bare-pull-')
+    mkdirSync(join(dest, 'pages'), { recursive: true })
+    updateBackendMap(dest, ORIGIN, 'assets', IDS)
+    siteContentDocumentToProject({ document: { info: { name: 'S', favicon: SERVED['/f.png'] } }, siteRoot: dest, backend: ORIGIN })
+    expect(yaml.load(readFileSync(join(dest, 'site.yml'), 'utf8')).favicon).toBe('/f.png')
+  })
 })
 
 describe('the favicon, whatever its type', () => {

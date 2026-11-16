@@ -157,9 +157,10 @@ const looksLikeAddress = (v) => v.startsWith('/') || /^https?:\/\//i.test(v)
 
 /**
  * Whether two references name the same stored file: the same string, or two references the map gives
- * one asset id. A backend keeps a file by its bytes, so two files with the same bytes are one asset, with
- * one id and one served address. A stored reference to it says nothing of which path it came from, and
- * `restoreAssetRefs` gives it the first path the map lists.
+ * one asset id — a path it keeps, or the address the host serves one at. A backend keeps a file by its
+ * bytes, so two files with the same bytes are one asset, with one id and one served address. A stored
+ * reference to it says nothing of which path it came from, and `restoreAssetRefs` gives it the first
+ * path the map lists.
  *
  * A relative reference is read from the file it is written in (`fromFile`), as the push keyed it
  * (`located-media.js::siteFileKey`).
@@ -174,10 +175,23 @@ const looksLikeAddress = (v) => v.startsWith('/') || /^https?:\/\//i.test(v)
  * @returns {(a: string, b: string, fromFile?: string|null) => boolean}
  */
 export function sameStoredFile(map, { siteRoot = null, tree = () => [] } = {}) {
+  const byServed = new Map()
+  for (const v of Object.values(map || {})) {
+    if (v?.served && v?.id && !byServed.has(v.served)) byServed.set(v.served, v.id)
+  }
   const idOf = (ref, fromFile) => {
     if (typeof ref !== 'string' || !ref) return null
     const own = map?.[ref]?.id
     if (own) return own
+    // ⭐ An address the host serves a stored file at names that file, by the fingerprint a push
+    // recorded for it (`servedFingerprint`), as `restoreAssetRefs` reads it. ⛔ Until 2026-11-16
+    // only a path did, so a `site.yml` naming its favicon by the host's address came back as the
+    // path of a file of the same bytes the site had just begun to use (`/favicon.svg`), and
+    // `uniweb status` called that a change on the backend (measured on a site, 2026-11-16).
+    if (looksLikeAddress(ref)) {
+      const served = byServed.get(servedFingerprint(ref))
+      if (served) return served
+    }
     if (!siteRoot || !fromFile || ref.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(ref)) return null
     const key = siteFileKey(siteRoot, resolve(dirname(fromFile), ref), tree())
     return (key && map?.[key]?.id) || null
