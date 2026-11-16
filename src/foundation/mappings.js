@@ -28,6 +28,11 @@
  *   - a `keys_from` that names no mapping, or an `@/x` that isn't one of the foundation's;
  *   - a reverse `follow` line's `model` that names no type, or an `@/x` the foundation doesn't define.
  *
+ * A `set` mapping (`shape: set`) reads one file into several linked types: its `model` is the root
+ * part's type, and each of its `parts` names its own `model` (and may carry its own `keys_from` and
+ * `follow`). Each part is checked, and written in full, as a mapping's top level is; the rest of a
+ * set's rules are the backend's to judge.
+ *
  * Mappings are editor-time only: they ride in `schema.json` as `_mappings` and never reach a page.
  *
  * @module
@@ -125,35 +130,57 @@ export function mappingProblems(decl, { types, names }) {
   }
   if (!('model' in decl)) {
     found.push("`model` is missing: name the type the mapping translates, `model: '@/vehicle'`.")
-  } else {
-    const problem = refProblem('model', decl.model, 'type')
-    if (problem) found.push(problem)
-    else if (decl.model.startsWith('@/') && !types.has(decl.model)) {
-      found.push(`\`model\` is \`${decl.model}\`, which is not one of the foundation's types (src/schemas/).`)
+  }
+  found.push(...ruleProblems(decl, '', { types, names }))
+  if (Array.isArray(decl.parts)) {
+    for (const [i, part] of decl.parts.entries()) {
+      const at = `parts[${i}].`
+      if (!isMap(part)) continue
+      if (!('model' in part)) found.push(`\`${at}model\` is missing: name the type this part reads, \`model: '@/lesson'\`.`)
+      found.push(...ruleProblems(part, at, { types, names }))
     }
   }
-  if ('keys_from' in decl) {
-    const problem = refProblem('keys_from', decl.keys_from, 'mapping')
+  return found
+}
+
+/** The names one rule set gives — a mapping's top level, or one part of a `set` — checked. */
+function ruleProblems(rules, at, { types, names }) {
+  const found = []
+  if ('model' in rules) {
+    const problem = refProblem(`${at}model`, rules.model, 'type')
     if (problem) found.push(problem)
-    else if (decl.keys_from.startsWith('@/') && !names.has(decl.keys_from)) {
-      found.push(`\`keys_from\` is \`${decl.keys_from}\`, which is not one of the foundation's mappings (src/${MAPPINGS_DIR}/).`)
+    else if (rules.model.startsWith('@/') && !types.has(rules.model)) {
+      found.push(`\`${at}model\` is \`${rules.model}\`, which is not one of the foundation's types (src/schemas/).`)
     }
   }
-  found.push(...followProblems(decl.follow, types))
+  if ('keys_from' in rules) {
+    const problem = refProblem(`${at}keys_from`, rules.keys_from, 'mapping')
+    if (problem) found.push(problem)
+    else if (rules.keys_from.startsWith('@/') && !names.has(rules.keys_from)) {
+      found.push(`\`${at}keys_from\` is \`${rules.keys_from}\`, which is not one of the foundation's mappings (src/${MAPPINGS_DIR}/).`)
+    }
+  }
+  found.push(...followProblems(rules.follow, types, at))
   return found
 }
 
 /**
  * A mapping with every type and mapping it names in full (`scoped`: `@/x` → `@scope/x`): its `model`,
- * its `keys_from` and a reverse `follow` line's `model`. Nothing else moves, and the file's own object
- * is never touched.
+ * its `keys_from` and a reverse `follow` line's `model`, and the same in each of a `set`'s `parts`.
+ * Nothing else moves, and the file's own object is never touched.
  *
  * @param {object} decl - as written
  * @param {(ref: string) => string} scoped
  * @returns {object}
  */
 export function mappingInFull(decl, scoped) {
-  const out = { ...decl }
+  const out = rulesInFull(decl, scoped)
+  if (Array.isArray(out.parts)) out.parts = out.parts.map((part) => (isMap(part) ? rulesInFull(part, scoped) : part))
+  return out
+}
+
+function rulesInFull(rules, scoped) {
+  const out = { ...rules }
   if (typeof out.model === 'string') out.model = scoped(out.model)
   if (typeof out.keys_from === 'string') out.keys_from = scoped(out.keys_from)
   if (Array.isArray(out.follow)) {
@@ -187,9 +214,10 @@ export function followModels(follow) {
   return out
 }
 
-function followProblems(follow, types) {
+function followProblems(follow, types, prefix = '') {
   const found = []
-  for (const { at, spec } of followModels(follow)) {
+  for (const { at: where, spec } of followModels(follow)) {
+    const at = `${prefix}${where}`
     const problem = refProblem(at, spec.model, 'type')
     if (problem) found.push(problem)
     else if (spec.model.startsWith('@/') && !types.has(spec.model)) {

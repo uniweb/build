@@ -216,7 +216,7 @@ function buildDataSchemaEntities(dataSchemas, scope) {
  * One `@uniweb/mapping-schema` entity per mapping the foundation defines (`schema._mappings`,
  * `foundation/mappings.js`): its identity flat, as a data schema's is, and the rest of the file under
  * `rules` — the envelope's `model:` names the exchange type, so the mapping's own `model:` cannot sit
- * beside it. `rules.model`, `rules.keys_from` and a reverse `follow` line's `model` are named in
+ * beside it. `rules.model`, `rules.keys_from` and a reverse `follow` line's `model` (and the same in each of a `set`'s `parts`) are named in
  * full; nothing else in `rules` is touched, since a backend judges it. A mapping another one names in `keys_from` comes first.
  *
  * @param {Object<string, object>} mappings - `{ '@/<name>': declaration }`

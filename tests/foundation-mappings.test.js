@@ -63,4 +63,14 @@ describe('src/mappings/', () => {
     w('b.yml', "model: '@/vehicle'\nkeys_from: '@/a'\n")
     expect(Object.keys(await buildMappingMap(SRC, { ownTypes: ['@/vehicle'] }))).toEqual(['@/a', '@/b'])
   })
+
+  it("a `set` checks each part's `model`, `keys_from` and `follow` as it checks the top level's", async () => {
+    w('a.yml', "model: '@/course'\nshape: set\nparts:\n  - { id: course, model: '@/course', path: courses, root: true }\n  - { id: lesson, model: '@/lesson', path: courses/modules/lessons }\n")
+    expect(Object.keys(await buildMappingMap(SRC, { ownTypes: ['@/course', '@/lesson'] }))).toEqual(['@/a'])
+    w('b.yml', "model: '@/course'\nshape: set\nparts:\n  - { id: x, model: '@/nope' }\n  - { id: y }\n  - { id: z, model: '@/lesson', follow: [{ k: { model: '@/gone', field: f } }] }\n")
+    const err = await buildMappingMap(SRC, { ownTypes: ['@/course', '@/lesson'] }).catch((e) => e)
+    expect(err.message).toMatch(/b\.yml: `parts\[0\]\.model` is `@\/nope`, which is not one of the foundation's types/)
+    expect(err.message).toMatch(/b\.yml: `parts\[1\]\.model` is missing/)
+    expect(err.message).toMatch(/b\.yml: `parts\[2\]\.follow\[0\]\.k\.model` is `@\/gone`/)
+  })
 })

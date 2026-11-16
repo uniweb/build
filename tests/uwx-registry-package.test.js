@@ -508,6 +508,16 @@ describe('buildRegistryPackage — mappings', () => {
         fields: [{ title: 'listing.title' }],
       },
       '@/dms-inventory': { model: '@std/person', direction: 'in', shape: 'list', format: { type: 'csv' } },
+      '@/course-import': {
+        model: '@/article',
+        direction: 'in',
+        shape: 'set',
+        format: { type: 'json' },
+        parts: [
+          { id: 'course', model: '@/article', path: 'courses', key: 'id', root: true, fields: [{ title: 'title' }] },
+          { id: 'person', model: '@std/person', path: 'courses/people', follow: [{ c: { model: '@/article', field: 'x' } }] },
+        ],
+      },
       '@/submission-to-grader': {
         model: '@/article',
         follow: [
@@ -547,6 +557,16 @@ describe('buildRegistryPackage — mappings', () => {
     expect(schema._mappings['@/submission-to-grader'].follow[1].key.model).toBe('@/article')
   })
 
+  it("a `set`'s `parts[*].model` (and a part's reverse `follow`) is named in full; nothing else in a part is touched", () => {
+    const e = doc.entities.find((x) => x.name === '@acme/course-import')
+    expect(e.rules.model).toBe('@acme/article')
+    expect(e.rules.parts).toEqual([
+      { id: 'course', model: '@acme/article', path: 'courses', key: 'id', root: true, fields: [{ title: 'title' }] },
+      { id: 'person', model: '@std/person', path: 'courses/people', follow: [{ c: { model: '@acme/article', field: 'x' } }] },
+    ])
+    expect(schema._mappings['@/course-import'].parts[0].model).toBe('@/article')
+  })
+
   it('a full name passes through; an absent label stays absent', () => {
     const e = doc.entities.find((x) => x.name === '@acme/dms-inventory')
     expect(e.rules.model).toBe('@std/person')
@@ -557,13 +577,13 @@ describe('buildRegistryPackage — mappings', () => {
     expect(kinds.lastIndexOf('@uniweb/data-schema')).toBeLessThan(kinds.indexOf('@uniweb/mapping-schema'))
     expect(kinds.at(-1)).toBe('@uniweb/foundation-schema')
     const names = doc.entities.filter((e) => e.model === '@uniweb/mapping-schema').map((e) => e.name)
-    expect(names).toEqual(['@acme/dms-inventory', '@acme/submission-to-grader', '@acme/vehicle-to-meta'])
+    expect(names).toEqual(['@acme/course-import', '@acme/dms-inventory', '@acme/submission-to-grader', '@acme/vehicle-to-meta'])
   })
 
   it('the foundation names them in a sorted `mappings.refs`, and its editor blob does not carry them', () => {
     const f = doc.entities.at(-1)
     expect(f.mappings).toEqual({
-      refs: [{ name: '@acme/dms-inventory' }, { name: '@acme/submission-to-grader' }, { name: '@acme/vehicle-to-meta' }],
+      refs: [{ name: '@acme/course-import' }, { name: '@acme/dms-inventory' }, { name: '@acme/submission-to-grader' }, { name: '@acme/vehicle-to-meta' }],
     })
     expect(JSON.stringify(f.schema)).not.toContain('vehicle-to-meta')
   })
