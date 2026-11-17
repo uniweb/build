@@ -128,14 +128,19 @@ describe('buildSchema — the declaration reaches _self', () => {
   })
 })
 
-describe('uniweb.requires — authored, normalized like supports, always on _self', () => {
+describe('uniweb.requires — authored, normalized like supports, on _self only when declared', () => {
   it('normalizes a declared list', async () => {
     const id = await loadPackageJson(foundationDir({ uniweb: { requires: ['backend', 'backend'] } }))
     expect(id.requires).toEqual(['backend'])
   })
 
-  it('is [] on _self when nothing is declared — its presence marks a build that knows it', async () => {
+  it('is absent from _self when nothing is declared — the register document stays as it was', async () => {
     const schema = await buildSchema(foundationDir({}))
+    expect('requires' in schema._self).toBe(false)
+  })
+
+  it('is [] on _self when declared empty — an author saying the supports beside it is complete', async () => {
+    const schema = await buildSchema(foundationDir({ uniweb: { requires: [] } }))
     expect(schema._self.requires).toEqual([])
   })
 

@@ -343,9 +343,9 @@ describe('composeSupports — what a foundation requires, it supports', () => {
   })
 })
 
-describe('composeRequires — authored only, always emitted', () => {
-  test('nothing authored → [] — present, so a reader knows the build knows the field', () => {
-    expect(composeRequires(undefined)).toEqual([])
+describe('composeRequires — authored only, emitted only when authored', () => {
+  test('nothing authored → undefined, so the register document stays as it was; [] stays []', () => {
+    expect(composeRequires(undefined)).toBeUndefined()
     expect(composeRequires([])).toEqual([])
   })
 

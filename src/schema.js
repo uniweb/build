@@ -1218,7 +1218,7 @@ function reportSupports(srcDir, authored, derived, emitted, required) {
   // A required service the code never reaches: published as declared (a need is the
   // developer's claim, and the reach may be a computed name), but likely a typo or a
   // leftover, and a site would have it locked on for nothing.
-  const unreached = composeRequires(required).filter((s) => !derived.services.includes(s))
+  const unreached = (composeRequires(required) || []).filter((s) => !derived.services.includes(s))
   if (unreached.length > 0) {
     console.warn(
       `Warning: ${srcDir}/package.json declares \`uniweb.requires: ${unreached.join(', ')}\`, ` +
@@ -1526,8 +1526,8 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
       : derivedSupports.services,
   }
 
-  // `requires` is authored only and ALWAYS emitted (`composeRequires`): its presence
-  // tells a reader the `supports` beside it is complete. It is unioned into `supports`.
+  // `requires` is authored only, and emitted only when authored (`composeRequires`): its
+  // presence tells a reader the `supports` beside it is complete. It is unioned into `supports`.
   const requires = composeRequires(identity.requires)
   const supports = composeSupports(identity.supports, derived, requires)
   reportSupports(srcDir, identity.supports, derived, supports.supports, identity.requires)
@@ -1543,7 +1543,7 @@ export async function buildSchema(srcDir, sectionPaths, derivedSupports = null, 
       ...configWithoutExtension,
       ...identity,
       ...supports,
-      requires,
+      ...(requires && { requires }),
       ...(name && { name }),
       ...(foundationConfig.description && { description: foundationConfig.description }),
       ...(defaultLayout && { defaultLayout }),

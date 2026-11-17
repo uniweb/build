@@ -434,18 +434,19 @@ export function composeSupports(authored, derived, required = []) {
  * `isSearchEnabled()` is true reaches `search` exactly as a course site reaches
  * `backend`. Telling them apart would mean proving a code path has no fallback.
  *
- * ⛔ **ALWAYS EMITTED, `[]` when nothing is authored.** Its presence is what tells a
- * reader this foundation was built by a toolchain that knows the field — and so that
- * its `supports`, when present, is complete (`composeSupports`). Absent means a build
- * from before the field: what it needs is unknown and its `supports` a lower bound.
- * Both changes ship in the same build, so no artifact carries `requires` beside a
- * short `supports`. For the need itself `[]` and absent read alike: nothing required.
+ * ⭐ **Emitted only when authored.** A foundation that declares nothing sends no
+ * `requires`, so its register document is what it was before the field existed and
+ * any backend takes it. One that declares it (`[]` included) says two things: what it
+ * cannot work without, and that its `supports`, when present, is complete
+ * (`composeSupports`). Absent means unknown: nothing required, and `supports` a lower
+ * bound. A backend that predates the field refuses a document carrying it, so only an
+ * author who opts in needs one that knows it.
  *
  * @param {string[]|undefined} authored - normalized `uniweb.requires`
- * @returns {string[]} sorted, never undefined
+ * @returns {string[]|undefined} sorted; undefined when nothing was authored
  */
 export function composeRequires(authored) {
-  return union(nameable(authored || []))
+  return authored === undefined ? undefined : union(nameable(authored))
 }
 
 /** Sorted, de-duplicated union of name lists; `undefined` lists contribute nothing. */
