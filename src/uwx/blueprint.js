@@ -53,6 +53,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import yaml from 'js-yaml'
 import { qualifyRef } from '@uniweb/schemas/refs'
+import { dataRefOf } from '@uniweb/core/data-keys'
+import { isBackendModel } from '../backend-models.js'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
 import { unresolveSelfScope, bareOrg } from './self-scope.js'
 import { writeYamlFile } from './project-writer.js'
@@ -441,6 +443,29 @@ function readSiteYml(siteRoot) {
 }
 
 /**
+ * The Models only a site backend holds (`@uniweb/catalog`) that a foundation's section types, layouts or
+ * main.js declare as data. Its `schema.json` carries no copy of one (`../backend-models.js`), so its
+ * data keys say it is a type the foundation renders, as a site backend counts it when it starts
+ * (backend, 2026-11-17: a blueprint line opening the catalog is applied once a foundation declares it).
+ */
+function backendModelsRendered(schema) {
+  const out = new Set()
+  const visit = (data) => {
+    if (!isMap(data)) return
+    for (const value of Object.values(data)) {
+      const { ref } = dataRefOf(value)
+      if (isBackendModel(ref)) out.add(ref)
+    }
+  }
+  for (const [key, entry] of Object.entries(schema || {})) {
+    if (key === '_self') visit(entry?.data)
+    else if (key === '_layouts' && isMap(entry)) for (const layout of Object.values(entry)) visit(layout?.data)
+    else if (key !== 'dataSchemas' && !key.startsWith('_')) visit(entry?.data)
+  }
+  return out
+}
+
+/**
  * The types a site's foundations declare, each in full — the data schemas a backend started from the
  * site installs: its foundation's and each extension's, the `dataSchemas` `register` registers.
  * `types` is null when any of them cannot be read here, since a type the others do not declare may
@@ -477,6 +502,7 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
     if (!schema) unread.push('its foundation could not be read')
     else {
       for (const ref of Object.keys(schema.dataSchemas || {})) types.add(qualifyRef(ref, scope))
+      for (const ref of backendModelsRendered(schema)) types.add(ref)
       for (const ref of Object.keys(schema._mappings || {})) mappings.add(qualifyRef(ref, scope))
       addVendors(schema, scope)
     }
@@ -502,6 +528,7 @@ export async function siteDeclaredTypes(siteRoot, siteYml, { scope = null, found
       }
       types.add(qualifyRef(ref, extScope))
     }
+    for (const ref of backendModelsRendered(schema)) types.add(ref)
     for (const ref of Object.keys(schema._mappings || {})) mappings.add(qualifyRef(ref, extScope))
     addVendors(schema, extScope)
   }

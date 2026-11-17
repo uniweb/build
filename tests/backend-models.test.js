@@ -20,6 +20,8 @@ import { emitSyncPackages, readZip } from '../src/uwx/index.js'
 import { buildSchema } from '../src/schema.js'
 import { extractRuntimeSchema } from '../src/runtime-schema.js'
 import { isBackendModel } from '../src/backend-models.js'
+import { blueprintWarnings, siteDeclaredTypes } from '../src/uwx/blueprint.js'
+import yaml from 'js-yaml'
 
 let ROOT, SITE, FDN, logs, warns
 beforeEach(() => {
@@ -159,5 +161,26 @@ describe('a query a data key types', () => {
       /records\/store\/: @uniweb\/catalog is a site backend's own/
     )
     expect((await emit()).refusals).toEqual([expect.stringMatching(/^records\/store\/: @uniweb\/catalog is a site backend's own/)])
+  })
+})
+
+describe("a blueprint that opens it to visitors", () => {
+  const opensIt = { publicQueries: { '@uniweb/catalog': { whole: true } } }
+  const declaredOf = () => siteDeclaredTypes(SITE, yaml.load(readFileSync(join(SITE, 'site.yml'), 'utf8')), { scope: '@acme' })
+
+  it('⭐ names no type it does not know: a section that reads the catalog declares it', async () => {
+    await makeSite()
+    const declared = await declaredOf()
+    expect(declared.types.has('@uniweb/catalog')).toBe(true)
+    expect(blueprintWarnings(opensIt, { scope: '@acme', declared })).toEqual([])
+  })
+
+  it('CONTROL — with no section that reads it, the line is still named as one a backend leaves out', async () => {
+    await makeSite({ storeKey: '@std/article' })
+    const declared = await declaredOf()
+    expect(declared.types.has('@uniweb/catalog')).toBe(false)
+    expect(blueprintWarnings(opensIt, { scope: '@acme', declared })).toEqual([
+      expect.stringMatching(/`publicQueries\.@uniweb\/catalog` names a type none of this site's foundations declares/),
+    ])
   })
 })
