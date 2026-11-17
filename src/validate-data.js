@@ -33,6 +33,7 @@ import { parentRouteOf } from '@uniweb/core/route-match'
 
 import { validateItem, validateRecordFile, validateBound, validateKeyValue, contentBodyField, rootListSection, referencesOf, undeclaredFields } from '@uniweb/schemas/conform'
 import { normalizeData } from '@uniweb/schemas/foundation'
+import { markdownToProseMirror } from '@uniweb/content-reader'
 import { isUuid } from './uwx/uuid.js'
 import { validateAndNormalizeSchema, buildDataSchemaMap } from './resolve-data-schema.js'
 
@@ -326,7 +327,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       recordCount++
       // A delivered record is named by `$name` — the handle its file's pool entry is keyed by.
       if (item && typeof item.$name === 'string') checkedRecords.add(recordKey(entry.ref, item.$name))
-      for (const finding of validateItem(entry.schema, item)) {
+      for (const finding of validateItem(entry.schema, item, READ_RICH_TEXT)) {
         violations.push({
           file: entry.path,
           schema: entry.ref,
@@ -388,6 +389,12 @@ function listViolation(finding, label, base) {
   const idx = Number(m[1])
   return { ...base, item: label(idx), ...finding, field: finding.field.slice(m[0].length) || finding.field }
 }
+
+/**
+ * A rich-text field written as markdown, read into the document a push sends, so its `max_length`
+ * counts the characters a reader sees (`@uniweb/schemas/rich-text-length`, 2026-11-17).
+ */
+const READ_RICH_TEXT = { readRichText: (markdown) => markdownToProseMirror(markdown) }
 
 /**
  * Check the records in the records directory that pass 2 did not, each against the
@@ -465,7 +472,7 @@ async function validateRecordFiles(siteRoot, { srcDir, dataSchemas, keyTypes = n
       if (!checked.has(recordKey(ref, r.slug))) {
         out.checked++
         out.schemas.add(ref)
-        for (const finding of validateRecordFile(schema, record)) {
+        for (const finding of validateRecordFile(schema, record, READ_RICH_TEXT)) {
           out.violations.push({ file: pooled.relPath, schema: ref, item: r.slug, users: [], ...finding })
         }
       }
