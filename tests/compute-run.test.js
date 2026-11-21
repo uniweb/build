@@ -1,6 +1,6 @@
 /**
  * A local run of a compute function enforces the rules the public contract states for where it runs
- * (`docs/development/compute-functions.md` § What it can't do): the web's globals and not Node's, no
+ * (`docs/web-apps/compute-functions.md` § What it can't do): the web's globals and not Node's, no
  * network, frozen built-in prototypes, a JSON object in and out within their sizes, and a stop for a
  * call that never ends. Each case is one a test that imports the file in Node lets pass.
  */
