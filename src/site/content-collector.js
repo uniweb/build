@@ -928,6 +928,26 @@ function resolveDisplayTitle(declaredTitle, segment, sections) {
 }
 
 /**
+ * ⭐ A DOCUMENT FOLDER'S OWN REDIRECT OR REWRITE, from its `folder.yml`, as `processPage` reads a
+ * `page.yml`'s. A page that redirects holds no section, so in folder mode it is a directory holding
+ * only its `folder.yml`, as in page mode it is one holding only a `page.yml`. That is how a moved page
+ * keeps its old address in either mode. The push sends it (`uwx/site.js::buildPageData`), a host serves
+ * it (`resolveRoute`), and a pull writes it back (`uwx/site-project.js::pageRecordToYml`). ⛔ Until
+ * 2026-11-21 neither container below read it: a hosted site redirected, while `uniweb dev` and a static
+ * build showed an empty page there, as with a container's `fetch:` until 2026-09-11.
+ *
+ * @param {object} dirConfig - the folder's `folder.yml`
+ * @param {string} route - the folder's route
+ * @returns {object} the page fields its redirect or rewrite gives; none when it has neither
+ */
+function documentFolderRedirect(dirConfig, route) {
+  // A relative redirect resolves against the page's own route — core's rule, as in `processPage`.
+  if (dirConfig.redirect) return { redirect: authoredRedirectTarget(route, dirConfig.redirect), seo: { noindex: true } }
+  if (dirConfig.rewrite) return { rewrite: dirConfig.rewrite, seo: { noindex: true } }
+  return {}
+}
+
+/**
  * ⭐ A PAGE'S SETTINGS, read from its config by one rule: a `page.yml` or `folder.yml`, or the
  * frontmatter of a page that is one `.md` file (`page-settings.js`). Its title is the caller's,
  * worked out from what the page holds.
@@ -2279,7 +2299,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
           fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')), 'page')) || null,
           hasContent: false,
           sections: [],
-          order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
+          order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined,
+          ...documentFolderRedirect(dirConfig, containerRoute)
         }
 
         pages.push(containerPage)
@@ -2361,7 +2382,8 @@ async function collectPagesRecursive(dirPath, parentRoute, siteRoot, orderConfig
         fetch: parseFetchConfig(...fetchIn(dirConfig, relative(siteRoot, join(entryPath, 'folder.yml')), 'page')) || null,
         hasContent: false,
         sections: [],
-        order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined
+        order: typeof dirConfig.order === 'number' ? dirConfig.order : undefined,
+        ...documentFolderRedirect(dirConfig, containerRoute)
       }
 
       if (isSiteRoot && entry === '404') {
