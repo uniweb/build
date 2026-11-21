@@ -259,4 +259,29 @@ describe('COMPONENTS.md reads the lowered list', () => {
     expect(md).toContain('**items** — Cards [3-6]\n  Each entry: title — Feature')
     expect(md).toContain('**md:faq** — Questions [2+]')
   })
+
+  it('shows each param as the editor offers it: its label, its description, each option by its label', async () => {
+    meta('Feature', {
+      params: {
+        layout: {
+          type: 'select',
+          label: 'Layout',
+          description: 'Where the media goes on wide screens.',
+          options: [
+            { value: 'media-right', label: 'Media on the right' },
+            { value: 'stacked', label: 'Media below the text' },
+          ],
+          default: 'media-right',
+        },
+        tone: { type: 'select', options: ['plain', 'bold'], default: 'plain' },
+        bordered: { type: 'boolean', label: 'Show a border', default: false },
+      },
+    })
+    const md = generateDocsFromSchema(await buildSchema(dir))
+    expect(md).toContain(
+      '**layout** = `media-right` — Layout\n  Where the media goes on wide screens.\n  `media-right` Media on the right · `stacked` Media below the text\n'
+    )
+    expect(md).toContain('**tone** = `plain`\n  `plain` · `bold`\n')
+    expect(md).toContain('**bordered** = `false` — Show a border\n')
+  })
 })

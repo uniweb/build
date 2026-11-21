@@ -13,6 +13,19 @@ import { buildSchema } from './schema.js'
 import { resolveFoundationSrcPath } from './utils/foundation-source-root.js'
 
 /**
+ * One option of a select, as COMPONENTS.md lists it: the value the frontmatter writes, then the
+ * label an author reads, when it says more than the value.
+ *
+ * @param {string|{ value: string, label?: string }} option
+ * @returns {string}
+ */
+function optionWords(option) {
+  if (!option || typeof option !== 'object') return `\`${option}\``
+  const label = typeof option.label === 'string' && option.label && option.label !== option.value ? ` ${option.label}` : ''
+  return `\`${option.value}\`${label}`
+}
+
+/**
  * Generate markdown documentation for a single component
  *
  * @param {string} name - Component name
@@ -39,37 +52,24 @@ function generateComponentDocs(name, meta) {
     lines.push('')
   }
 
-  // Parameters (shown first - most important for content authors)
+  // Parameters (shown first - most important for content authors). ⭐ Each as the editor offers it:
+  // the name and value a section's frontmatter writes, beside the words an author reads — the
+  // param's label and description, and each option's label. ⛔ Until 2026-11-21 a select showed its
+  // option values alone and no label, so a dropdown named for a page's subjects ("Entity model",
+  // "Reusable backend") read here as a list of slugs, and the catalog couldn't show what an author
+  // would be offered.
   if (meta.params && Object.keys(meta.params).length > 0) {
     lines.push('### Parameters')
     lines.push('')
 
     for (const [key, prop] of Object.entries(meta.params)) {
       const defaultVal = prop.default !== undefined ? prop.default : ''
-
-      // Parameter name with default
-      if (defaultVal !== '') {
-        lines.push(`**${key}** = \`${defaultVal}\``)
-      } else {
-        lines.push(`**${key}**`)
+      const head = defaultVal !== '' ? `**${key}** = \`${defaultVal}\`` : `**${key}**`
+      lines.push(typeof prop.label === 'string' && prop.label ? `${head} — ${prop.label}` : head)
+      if (typeof prop.description === 'string' && prop.description) lines.push(`  ${prop.description}`)
+      if (prop.type === 'select' && Array.isArray(prop.options)) {
+        lines.push(`  ${prop.options.map(optionWords).join(' · ')}`)
       }
-
-      // For select type, show options on next line
-      if (prop.type === 'select' && prop.options) {
-        const optionValues = prop.options.map(o =>
-          typeof o === 'object' ? o.value : o
-        ).join(' | ')
-        lines.push(`  ${optionValues}`)
-      } else if (prop.type === 'boolean') {
-        // For boolean, show the label as description
-        if (prop.label) {
-          lines.push(`  ${prop.label}`)
-        }
-      } else if (prop.label) {
-        // For other types, show label
-        lines.push(`  ${prop.label}`)
-      }
-
       lines.push('')
     }
   }
