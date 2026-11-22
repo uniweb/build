@@ -161,7 +161,17 @@ function shapeOf(text, key) {
   const { body } = parseFrontmatter(text)
   const { raw, sequence, data, ...rest } = parseContent(markdownToProseMirror(body))
   const { [key]: _words, ...otherData } = data || {}
-  return { read: JSON.stringify({ ...rest, data: otherData }), words: data?.[key] }
+  return { read: JSON.stringify(withoutEmpty({ ...rest, data: otherData })), words: data?.[key] }
+}
+
+// A part a section holds nothing in reads the same whether the parser gives it empty or leaves it
+// out: a block above a section's first item gives the section a part of its own, whose lists come
+// back empty. ⛔ Until 2026-11-22 the two compared as different, so a section made only of items
+// had no place for its words.
+function withoutEmpty(shape) {
+  const empty = (v) =>
+    v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length)
+  return Object.fromEntries(Object.entries(shape).filter(([, v]) => !empty(v)))
 }
 
 /** The lines of a text outside fenced code, as their indexes: where a block can go. */

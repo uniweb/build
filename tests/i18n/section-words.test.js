@@ -120,6 +120,17 @@ describe('withWords — the defaults written in as the section’s own block', (
     expect(content.items.map((item) => item.title)).toEqual(['Basic', 'Pro'])
   })
 
+  it('at the top of a section made only of items, which the items don’t notice', () => {
+    // ⛔ Refused until 2026-11-22: the block gives the section a part of its own, whose empty lists
+    // compared as a change, so a section made only of items had no place for its words.
+    const text = '---\ntype: Catalog\n---\n\n## First\n\nOne.\n\n## Second\n\nTwo.\n'
+    const result = withWords(text, 'labels', WORDS)
+    expect(result.text).toBe('---\ntype: Catalog\n---\n\n```yaml:labels\nsearch: "Search…"\nempty: "No \\"results\\""\n```\n\n## First\n\nOne.\n\n## Second\n\nTwo.\n')
+    const content = read(result.text)
+    expect(content.data.labels).toEqual({ search: 'Search…', empty: 'No "results"' })
+    expect(content.items.map((item) => [item.title, item.data])).toEqual([['First', {}], ['Second', {}]])
+  })
+
   it('never inside a block of code, and keeps the file’s line endings', () => {
     const text = '# Setup\r\n\r\n```sh\r\n# not a heading\r\nnpm i\r\n```\r\n'
     const result = withWords(text, 'labels', WORDS)
