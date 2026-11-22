@@ -314,11 +314,12 @@ describe('the @std standards, as register sends them', () => {
     expect(doc.entities.find((e) => e.name === '@std/person').icon).toBe('lu-user')
   })
 
-  // Form and nav declare `linkable: false` (2026-09-30 [Diego]); every other standard is
+  // Form and nav declare `linkable: false` (2026-09-30 [Diego]), and so does overlay (2026-11-22): a
+  // block inside a section, never placed in a site's folder or referenced. Every other standard is
   // linkable by saying nothing, so it is sent with no `linkable` at all.
-  it('sends form and nav as linkable: false, and the rest with no linkable', () => {
+  it('sends form, nav and overlay as linkable: false, and the rest with no linkable', () => {
     const declared = doc.entities.filter((e) => 'linkable' in e).map((e) => [e.name, e.linkable]).sort()
-    expect(declared).toEqual([['@std/form', false], ['@std/nav', false]])
+    expect(declared).toEqual([['@std/form', false], ['@std/nav', false], ['@std/overlay', false]])
   })
 })
 

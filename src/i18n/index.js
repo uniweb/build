@@ -20,6 +20,7 @@ import { keepEditedTranslations, rowsWantTranslation, manifestRows, settleFlags 
 import { readKept, standingFlags } from '../uwx/locale-sync.js'
 import { mergeTranslations, generateAllLocales, translationsHoldingHtml } from './merge.js'
 import { auditLocale, cleanLocale, formatAuditReport } from './audit.js'
+import { sectionsMissingWords, withWords } from './words.js'
 import {
   extractRecordContent,
   buildLocalizedRecords,
@@ -76,6 +77,10 @@ export {
   auditLocale,
   cleanLocale,
   formatAuditReport,
+
+  // A section type's own words a section doesn't hold
+  sectionsMissingWords,
+  withWords,
 
   // Collection functions
   extractRecordContent,
