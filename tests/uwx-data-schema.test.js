@@ -479,6 +479,12 @@ describe('toDataSchemaDeclaration — grantable & readable_with (2026-10-14)', (
     expect(lower({ grantable: false, fields: { name: 'string' } }, '@/x', '@acme/x').grantable).toBe(false)
   })
 
+  it('sends `open_to_members` only as an authored false', () => {
+    expect(lower({ fields: { name: 'string' } }, '@/x', '@acme/x')).not.toHaveProperty('open_to_members')
+    expect(lower({ open_to_members: true, fields: { name: 'string' } }, '@/x', '@acme/x')).not.toHaveProperty('open_to_members')
+    expect(lower({ open_to_members: false, fields: { name: 'string' } }, '@/x', '@acme/x').open_to_members).toBe(false)
+  })
+
   it('carries `readable_with` on a reference, and on a list of them', () => {
     const d = lower(
       {

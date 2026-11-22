@@ -78,7 +78,7 @@ export function isContentBodyField(field) {
  *   register supplies it (`registry-package.js`), naming the section a short `'@/x'` means.
  *   Falls back to `resolveName`, which resolves the scope and keeps the rest as written.
  * @returns {Object} the declaration (`{ name, label?, plural?, icon?, description?,
- *          source_locale?, linkable?, grantable?, sections, i18n }`) — `i18n` always, `{}`
+ *          source_locale?, linkable?, grantable?, open_to_members?, sections, i18n }`) — `i18n` always, `{}`
  *          when the schema has no labels in other languages.
  */
 export function toDataSchemaDeclaration(normalized, { name, resolveName, resolveOptions } = {}) {
@@ -149,6 +149,10 @@ export function toDataSchemaDeclaration(normalized, { name, resolveName, resolve
   // `grantable` — AUTHORED ONLY, like `linkable`: a model's entries may be shared one at a
   // time unless it says `grantable: false` (omitted ⇒ true) [Diego, 2026-10-14].
   if (normalized.grantable === false) decl.grantable = false
+
+  // `open_to_members` — AUTHORED ONLY, like `grantable`: an organization's members reach a
+  // model's entries by belonging to it unless it says `open_to_members: false` (omitted ⇒ true).
+  if (normalized.openToMembers === false) decl.open_to_members = false
 
   decl.sections = sections
 
