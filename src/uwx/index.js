@@ -97,6 +97,9 @@ export { siteDefaultSectionType } from '../site/queries-config.js'
 // Every place a push reads the site's content from, mounts included — the one answer the CLI's
 // committed-content check, a pull's merge and `uniweb status` read (`site-dirs.js`).
 export { siteContentRoots } from './site-dirs.js'
+// The tree a picture beside a page is keyed in, and the file a key names (`located-media.js`): a pull
+// finds a picture where the push read it, a mounted folder's included.
+export { siteTree, siteFileOf } from './located-media.js'
 export {
   siteInfoToConfig,
   sectionRecordToFile,
