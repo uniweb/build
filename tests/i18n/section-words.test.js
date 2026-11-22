@@ -86,6 +86,14 @@ describe('sectionsMissingWords — which sections show the foundation’s words 
     expect(files).not.toContain('pages/docs/1-catalog.md')
   })
 
+  it('names the item a block sits under, which the section doesn’t read as its own', async () => {
+    // A block at the end of a section with items is the last item's (⛔ listed as no block until 2026-11-22).
+    w('site/pages/home/6-end.md', '---\ntype: Catalog\n---\n\n# With items\n\n### One\n\nThe first.\n\n### Two & three\n\nThe last.\n\n```yaml:labels\nsearch: Find\nempty: Nothing\n```\n')
+    const entry = (await sectionsMissingWords(SITE)).find((f) => f.file === 'pages/home/6-end.md')
+    expect(entry).toMatchObject({ hasBlock: false, inItem: 'Two & three', words: [{ name: 'search' }, { name: 'empty' }] })
+    expect((await sectionsMissingWords(SITE)).find((f) => f.file === 'pages/home/1-catalog.md')).not.toHaveProperty('inItem')
+  })
+
   it('reads a route as the collector does', () => {
     const pages = join(SITE, 'pages')
     expect(routeOfSection(join(pages, 'home/1-catalog.md'), pages, 'home')).toBe('/')

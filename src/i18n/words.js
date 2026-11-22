@@ -85,7 +85,8 @@ export function wordKeysByType(sections) {
  * @param {object} [options]
  * @param {object} [options.siteYml] - an already-read site.yml
  * @returns {Promise<Array<{ file: string, route: string|null, type: string, key: string,
- *   words: Array<{ name: string, text: string }>, hasBlock: boolean }>>} `file` relative to the site
+ *   words: Array<{ name: string, text: string }>, hasBlock: boolean, inItem?: string }>>} `file` relative to the
+ *   site; `inItem`, the heading of the item a block for the key sits under, which the section doesn't read
  */
 export async function sectionsMissingWords(siteRoot, { siteYml = null } = {}) {
   const yml = siteYml || (yaml.load(await readFile(join(siteRoot, 'site.yml'), 'utf8'), YAML_OPTIONS) || {})
@@ -116,18 +117,36 @@ export async function sectionsMissingWords(siteRoot, { siteYml = null } = {}) {
     if (!keys || !Object.keys(keys).length) continue
     // What the section reads as its own: a block after an item's heading is that item's.
     let blocks
+    let items
     try {
-      blocks = parseContent(markdownToProseMirror(parsed.body)).data || {}
+      const content = parseContent(markdownToProseMirror(parsed.body))
+      blocks = content.data || {}
+      items = content.items || []
     } catch {
       continue
     }
     for (const [key, words] of Object.entries(keys)) {
       const held = blocks[key]
       const missing = words.filter(({ name }) => !(held && typeof held === 'object' && typeof held[name] === 'string'))
-      if (missing.length) found.push({ file: relative(siteRoot, file), route, type, key, words: missing, hasBlock: key in blocks })
+      if (!missing.length) continue
+      const entry = { file: relative(siteRoot, file), route, type, key, words: missing, hasBlock: key in blocks }
+      // ⭐ A block written after an item's heading, as at the end of a section with items, is that
+      // item's, and the section reads none of it: name the item, so the author moves the block rather
+      // than being told there is none, and `--write` adds no second one beside it.
+      const under = entry.hasBlock ? -1 : items.findIndex((item) => item?.data && typeof item.data === 'object' && key in item.data)
+      if (under >= 0) entry.inItem = plainText(items[under].title) || `item ${under + 1}`
+      found.push(entry)
     }
   }
   return found
+}
+
+/** An item's heading as plain text, for a message. */
+function plainText(html) {
+  return String(html ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .trim()
 }
 
 // ─── Writing the words into a section ─────────────────────────────────────────────────────────
