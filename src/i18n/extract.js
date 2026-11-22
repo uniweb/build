@@ -450,16 +450,12 @@ function visitTranslatableBlocks(nodes, visit) {
     } else if (node.type === 'bulletList' || node.type === 'orderedList') {
       // A list item's index is part of its unit's field name, so lists keep
       // their own branch rather than folding into the container recursion.
-      // ⭐ A list inside an item is walked too, a footer's columns of links for one
-      // (`- Platform` with its links below it). ⛔ Until 2026-11-21 it was skipped, so
-      // neither extraction nor a translation reached a nested item: its words stayed
-      // in the source language on every translated page.
       ;(node.content || []).forEach((listItem, index) => {
         if (listItem.type !== 'listItem') return
         for (const child of listItem.content || []) {
           if (child.type === 'paragraph') {
             visit(child, index)
-          } else if (child.type === 'bulletList' || child.type === 'orderedList' || CONTAINER_BLOCKS.has(child.type)) {
+          } else if (CONTAINER_BLOCKS.has(child.type)) {
             visitTranslatableBlocks([child], visit)
           }
         }

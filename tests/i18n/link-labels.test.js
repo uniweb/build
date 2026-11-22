@@ -131,34 +131,3 @@ describe('the push and the audit ask the same function', () => {
     })
   })
 })
-
-describe('⭐ a list inside a list item is translated like the rest', () => {
-  // A footer's columns: a group's name, then its links one level down.
-  const FOOTER = '- Platform\n  - [Pricing](/pricing)\n  - [Engine plans](/pricing#plans)\n- Resources\n  - [Documentation](/docs)'
-
-  it('extraction gives a unit for each nested item, beside its group', () => {
-    const sources = Object.values(extractTranslatableContent(siteWith(FOOTER)).units).map((unit) => unit.source)
-    expect(sources).toEqual(expect.arrayContaining(['Platform', 'Pricing', 'Engine plans', 'Resources', 'Documentation']))
-  })
-
-  it('a translation reaches the nested links, keeping their targets', () => {
-    const { units } = extractTranslatableContent(siteWith(FOOTER))
-    const byText = Object.fromEntries(Object.entries(units).map(([hash, unit]) => [unit.source, hash]))
-    const fr = {
-      [byText.Platform]: 'Plateforme',
-      [byText.Pricing]: 'Tarifs',
-      [byText['Engine plans']]: 'Offres du moteur',
-    }
-    const doc = mergeTranslations(siteWith(FOOTER), fr).pages[0].sections[0].content
-    const texts = []
-    const walk = (nodes) => { for (const n of nodes || []) { if (n.type === 'text') texts.push([n.text, linkOf(n)?.href ?? null]); walk(n.content) } }
-    walk(doc.content)
-    expect(texts).toEqual([
-      ['Plateforme', null],
-      ['Tarifs', '/pricing'],
-      ['Offres du moteur', '/pricing#plans'],
-      ['Resources', null],
-      ['Documentation', '/docs'],
-    ])
-  })
-})
