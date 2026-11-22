@@ -189,6 +189,10 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
     // Its route query, when it is on a parametric route — a page nested inside one included,
     // which is a level this check did not have.
     const route = pageRouteQuery(page, access)
+    // The sections that received none of what reached them, and the binding keys of what filled a
+    // key of any section on the page — decided once the page is walked (THE JOIN, RUN THE OTHER WAY).
+    const unread = []
+    const reached = new Set()
     walkSections(page.sections || [], (section) => {
       const type = section.type
       if (!type) return
@@ -210,6 +214,7 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       const inputs = collectInputs(levels)
       const held = nodesOfType(section.content, 'dataBlock').map((node) => node.attrs?.tag).filter(Boolean)
       const fills = fillDeclaredKeys(declared, levels, { queries: config.queries, held })
+      for (const { fetch: input } of fills.values()) if (typeof input?.as === 'string') reached.add(input.as)
 
       // ⭐ **THE JOIN, RUN THE OTHER WAY: data arrived, and no key this section reads is
       // filled by it.** Everything below asks "for each filled key, is its data right?".
@@ -253,19 +258,8 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
         .map(([key]) => key)
         .filter((key) => !concepts.has(key) && !ownWords.has(key) && !blockTypes.has(key))
       if (declaredNames.length > 0 && inputs.length > 0 && fills.size === 0 && !declaredNames.some((k) => held.includes(k))) {
-        const delivered = inputs.map((i) => i.as).filter(Boolean)
-        setupErrors.push({
-          file: `${page.route || '/'} · ${type}`,
-          message:
-            `section reads ${declaredNames.map((k) => `content.data.${k}`).join(' or ')}, ` +
-            `but this page delivers ${delivered.map((k) => `\`${k}\``).join(', ')}, and none of it fills them — ` +
-            `not by name, and not by schema. The section will render with no data and nothing else will say so. ` +
-            `Name the query for the key the section reads, give the fetch that key with \`as:\`, or give the ` +
-            `section its own \`query: <name>\`.`,
-          // One user per declared key, so `uniweb validate` can print
-          // `used by /team › Team › data.team` — the key is the thing to rename.
-          users: declaredNames.map((k) => ({ route: page.route, section: type, key: k })),
-        })
+        const own = new Set(toFetchList(section.fetch).map((f) => f?.as).filter((as) => typeof as === 'string'))
+        unread.push({ type, declaredNames, inputs, own })
       }
 
       for (const [key, { fetch: input }] of fills) {
@@ -306,6 +300,30 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
         entry.users.push({ route: page.route, section: type, key })
       }
     })
+
+    // ⛔ NOR WHAT ANOTHER SECTION TOOK. A section is reported for what reached it and reached no
+    // section on the page, and for a query of its own that fills nothing: there the author meant
+    // data to arrive and the names didn't meet. A delivery another section on the page took arrived
+    // where it was meant to; a section that reads none of it, such as a form that can name a person
+    // on a location's page whose query fed the location's header, renders as it should.
+    // ⛔ Until 2026-11-22 each section was asked on its own, and every record page whose query fed
+    // its header reported the form beside it.
+    for (const { type, declaredNames, inputs, own } of unread) {
+      const delivered = inputs.filter((i) => own.has(i.as) || !reached.has(i.as)).map((i) => i.as)
+      if (!delivered.length) continue
+      setupErrors.push({
+        file: `${page.route || '/'} · ${type}`,
+        message:
+          `section reads ${declaredNames.map((k) => `content.data.${k}`).join(' or ')}, ` +
+          `but this page delivers ${delivered.map((k) => `\`${k}\``).join(', ')}, and none of it fills them — ` +
+          `not by name, and not by schema. The section will render with no data and nothing else will say so. ` +
+          `Name the query for the key the section reads, give the fetch that key with \`as:\`, or give the ` +
+          `section its own \`query: <name>\`.`,
+        // One user per declared key, so `uniweb validate` can print
+        // `used by /team › Team › data.team` — the key is the thing to rename.
+        users: declaredNames.map((k) => ({ route: page.route, section: type, key: k })),
+      })
+    }
   }
 
   // Pass 2 — validate each unique pair ONCE, attribute findings to its users.

@@ -220,3 +220,42 @@ describe('⛔ and it stays quiet where silence is correct', () => {
     expect(unread(report)).toEqual([])
   })
 })
+
+// ⛔ Reported until 2026-11-22: each section was asked on its own, so on a record's page whose query
+// fed its header, the form beside it, which can name a person, was reported as data that failed to
+// arrive. A delivery another section on the page took arrived where it was meant to.
+describe('⛔ a delivery another section on the page took', () => {
+  // The page gets a second section, a `Signup` that can name a contact (`@/contact`, linkable).
+  const besideTeam = (built, signupFrontmatter = '') => {
+    const fdn = built.foundationPath
+    mkdirSync(join(fdn, 'sections', 'Signup'), { recursive: true })
+    writeFileSync(join(fdn, 'sections', 'Signup', 'meta.js'), "export default { data: { contact: '@/contact' } }\n")
+    writeFileSync(join(fdn, 'sections', 'Signup', 'index.jsx'), 'export default function Signup() { return null }\n')
+    writeFileSync(join(fdn, 'schemas', 'contact.yml'), 'fields:\n  name:\n    type: string\n')
+    const page = join(built.siteRoot, 'pages', 'home')
+    rmSync(join(page, 'index.md'))
+    writeFileSync(join(page, '1-team.md'), '---\ntype: Team\n---\n\n# Team\n')
+    writeFileSync(join(page, '2-signup.md'), `---\ntype: Signup\n${signupFrontmatter}---\n\n# Write to us\n`)
+    return built
+  }
+
+  it('is not reported on a section beside the one it filled', async () => {
+    const built = besideTeam(site({ metaKey: 'team', queryName: 'team' }))
+    expect(unread(await validateDataInputs(built))).toEqual([])
+  })
+
+  it('CONTROL — one that filled no section on the page is reported on each section that reads data', async () => {
+    const built = besideTeam(site({ metaKey: 'team', queryName: 'members' }))
+    const errs = unread(await validateDataInputs(built))
+    expect(errs.map((e) => e.file).sort()).toEqual(['/ · Signup', '/ · Team'])
+    expect(errs[0].message).toContain('this page delivers `members`')
+  })
+
+  it('CONTROL — a section\'s own query that fills nothing is reported, whatever the page\'s query filled', async () => {
+    const built = besideTeam(site({ metaKey: 'team', queryName: 'team' }), 'query: team\n')
+    const [err, ...rest] = unread(await validateDataInputs(built))
+    expect(rest).toEqual([])
+    expect(err.file).toBe('/ · Signup')
+    expect(err.message).toContain('section reads content.data.contact,')
+  })
+})
