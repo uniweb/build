@@ -130,10 +130,10 @@ describe('cloudflare-pages adapter', () => {
    * the given pages and returning the {contentPath, routePrefix} shape
    * the adapter expects.
    */
-  async function makeLocale(prefix, pages, fileName = 'site-content.json') {
+  async function makeLocale(prefix, pages, fileName = 'site-content.json', config) {
     const contentPath = join(distDir, fileName)
     const { writeFile } = await import('node:fs/promises')
-    await writeFile(contentPath, JSON.stringify({ pages }))
+    await writeFile(contentPath, JSON.stringify(config ? { pages, config } : { pages }))
     return { contentPath, routePrefix: prefix }
   }
 
@@ -184,6 +184,32 @@ describe('cloudflare-pages adapter', () => {
     const body = await readFile(join(distDir, '_redirects'), 'utf8')
     expect(body).toMatch(/^\/old \/new 302$/m)
     expect(body).toMatch(/^\/fr\/old \/fr\/new 302$/m)
+  })
+
+  test('a page with its own address in a locale redirects at that address too', async () => {
+    // `slug: { es: desarrolladores }` on a redirect page: Spanish readers know it as
+    // /es/desarrolladores, and the app answers /es/developers as well.
+    const pages = [
+      { route: '/developers', redirect: '/framework' },
+      { route: '/framework', hasContent: true },
+      { route: '/proxied', rewrite: 'https://upstream.example' },
+    ]
+    const config = {
+      defaultLanguage: 'en',
+      languages: ['en', 'es'],
+      i18n: { routeTranslations: { es: { '/developers': '/desarrolladores', '/proxied': '/delegado' } } },
+    }
+    const en = await makeLocale('', pages, 'site-content.json', config)
+    const es = await makeLocale('/es', pages, 'es-content.json', { ...config, activeLocale: 'es' })
+    const result = await emitRedirectsFile(distDir, [en, es])
+
+    const body = await readFile(join(distDir, '_redirects'), 'utf8')
+    expect(body).toMatch(/^\/developers \/framework 302$/m)
+    expect(body).toMatch(/^\/es\/desarrolladores \/es\/framework 302$/m)
+    expect(body).toMatch(/^\/es\/developers \/es\/framework 302$/m)
+    expect(body).toMatch(/^\/es\/delegado\/\* https:\/\/upstream\.example\/:splat 200$/m)
+    // One entry per address: English has one, Spanish two, for each page.
+    expect(result.count).toBe(6)
   })
 
   test('preserves a hand-authored _redirects by appending', async () => {

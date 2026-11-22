@@ -30,7 +30,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { resolveRoute } from '@uniweb/core/resolve-route'
+import { resolveRoute, translateRoute } from '@uniweb/core/resolve-route'
 
 import { DeployError, spawnTool, readCredential, credentialHint } from './deploy-utils.js'
 import {
@@ -60,18 +60,27 @@ async function collectRoutingEntries(localeConfigs) {
   for (const localeConfig of localeConfigs) {
     const siteContent = JSON.parse(await readFile(localeConfig.contentPath, 'utf8'))
     const prefix = localeConfig.routePrefix || ''
+    const locale = prefix ? prefix.slice(1) : undefined
     for (const page of siteContent.pages || []) {
-      if (page.redirect) {
-        // Where the app sends a visitor of this locale (`resolveRoute`): a page of the site in their
-        // language, anything else as written. ⛔ Until 2026-09-30 the target was written raw, so
-        // `/fr/old` redirected a French reader to the English page.
-        const route = `${prefix}${page.route}`
-        const resolved = resolveRoute(siteContent, route, { activeLocale: prefix ? prefix.slice(1) : undefined })
-        const location = resolved.kind === 'redirect' ? resolved.location : page.redirect
-        entries.push(`${route} ${location} 302`)
-      }
-      if (page.rewrite) {
-        entries.push(`${prefix}${page.route}/* ${page.rewrite}/:splat 200`)
+      if (!page.redirect && !page.rewrite) continue
+      // The page's addresses in this locale: the one it shows there (`translateRoute`: its own
+      // `slug:`, or a translated ancestor's) and its canonical one, which the app answers too.
+      // ⛔ Until 2026-11-22 only the canonical one was written, so a redirect page with
+      // `slug: { es: desarrolladores }` redirected at /es/developers and not at /es/desarrolladores,
+      // the address the app, the sitemap and every link give it.
+      const routes = new Set([`${prefix}${translateRoute(siteContent, page.route, locale)}`, `${prefix}${page.route}`])
+      for (const route of routes) {
+        if (page.redirect) {
+          // Where the app sends a visitor of this locale (`resolveRoute`): a page of the site in their
+          // language, anything else as written. ⛔ Until 2026-09-30 the target was written raw, so
+          // `/fr/old` redirected a French reader to the English page.
+          const resolved = resolveRoute(siteContent, route, { activeLocale: locale })
+          const location = resolved.kind === 'redirect' ? resolved.location : page.redirect
+          entries.push(`${route} ${location} 302`)
+        }
+        if (page.rewrite) {
+          entries.push(`${route}/* ${page.rewrite}/:splat 200`)
+        }
       }
     }
   }
