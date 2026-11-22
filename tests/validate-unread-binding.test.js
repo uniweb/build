@@ -150,6 +150,31 @@ describe('a section reading a key the page does not deliver', () => {
     expect(err.message).toContain('section reads content.data.articles,')
   })
 
+  // ⛔ Reported until 2026-11-22: a key typed by a block type (a data schema that is not linkable, as
+  // `@std/overlay` is) is filled by the section's own block, never by a query, since a Model's
+  // unlinkable entries are in no site's folder. A Hero that can carry a picture's words, on a blog
+  // page that queries its articles, reported it.
+  const blockSchema = (built, linkable) =>
+    writeFileSync(
+      join(built.foundationPath, 'schemas', 'caption.yml'),
+      `${linkable === false ? 'linkable: false\n' : ''}fields:\n  text:\n    type: string\n`
+    )
+
+  it('a block type\'s key, its schema not linkable, is not one the page should fill', async () => {
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    blockSchema(built, false)
+    metaOf(built, "caption: { schema: '@/caption', single: true }")
+    expect(unread(await validateDataInputs(built))).toEqual([])
+  })
+
+  it('CONTROL — the same key typed by a linkable schema is reported', async () => {
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    blockSchema(built, true)
+    metaOf(built, "caption: { schema: '@/caption', single: true }")
+    const [err] = unread(await validateDataInputs(built))
+    expect(err.message).toContain('section reads content.data.caption,')
+  })
+
   it('CONTROL — an inline shape with a field that gives no `default:` holds data the page may be meant to fill, and is reported', async () => {
     const built = site({ metaKey: 'team', queryName: 'members' })
     metaOf(built, "labels: { copy: { type: 'string', default: 'Copy' }, note: { type: 'string' } }")

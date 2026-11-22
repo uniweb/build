@@ -234,9 +234,15 @@ export async function validateDataInputs({ siteRoot, foundationPath }) {
       // another section has not failed to reach it. ⛔ Until 2026-11-11 it was counted, and every
       // publish of a site whose blog page queries its articles reported the page's Hero.
       const ownWords = keysWithOwnWords(bindings)
+      // ⛔ NOR IS A BLOCK TYPE'S. A key typed by a data schema that is not linkable (`linkable: false`,
+      // as `@std/overlay` is) is filled by the section's own block and never by a query: a Model's
+      // unlinkable entries stay out of every site's folder, so a query has none to answer with. A
+      // section holding no such block renders without it. ⛔ Until 2026-11-22 it was counted, and a
+      // blog page whose Hero can carry a picture's words (`overlay: '@std/overlay'`) reported it.
+      const blockTypes = new Set(declared.filter(([, ref]) => ref && dataSchemas[ref]?.linkable === false).map(([key]) => key))
       const declaredNames = declared
         .map(([key]) => key)
-        .filter((key) => !concepts.has(key) && !ownWords.has(key))
+        .filter((key) => !concepts.has(key) && !ownWords.has(key) && !blockTypes.has(key))
       if (declaredNames.length > 0 && inputs.length > 0 && fills.size === 0 && !declaredNames.some((k) => held.includes(k))) {
         const delivered = inputs.map((i) => i.as).filter(Boolean)
         setupErrors.push({
