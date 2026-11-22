@@ -77,7 +77,16 @@ function keysWithOwnWords(data) {
   }
   for (const [key, decl] of Object.entries(normalized)) {
     const fields = decl?.kind === 'fields' ? Object.values(decl.fields || {}) : decl?.kind === 'form' ? decl.fields : null
-    if (Array.isArray(fields) && fields.length > 0 && fields.every((f) => f && typeof f === 'object' && shows(f.default))) {
+    // Every field gives a default, and at least one shows: a word that is empty by default (a second
+    // line an author may add, a mark beside a required field) is still the section's own, while a
+    // key whose every default is blank has nothing to show without data. ⛔ Until 2026-11-22 every
+    // default had to show, and a section whose words included one empty by default was reported.
+    if (
+      Array.isArray(fields) &&
+      fields.length > 0 &&
+      fields.every((f) => f && typeof f === 'object' && f.default !== undefined) &&
+      fields.some((f) => shows(f.default))
+    ) {
       out.add(key)
     }
   }

@@ -141,6 +141,14 @@ describe('a section reading a key the page does not deliver', () => {
     expect(err.message).not.toContain('content.data.labels')
   })
 
+  it('…with some of them empty by default, as a second line or a mark an author may add', async () => {
+    // ⛔ Reported until 2026-11-22: every default had to show, so a section whose words held one
+    // empty by default (a thank-you's second line) counted as data the page should fill.
+    const built = site({ metaKey: 'team', queryName: 'members' })
+    metaOf(built, "labels: { sent: { type: 'string', default: 'Thank you' }, sentText: { type: 'string', default: '' }, required: { type: 'string', default: '' } }")
+    expect(unread(await validateDataInputs(built))).toEqual([])
+  })
+
   it('CONTROL — blank defaults are not words: a key whose fields all default to `\'\'` or `null` is reported', async () => {
     // An older way to declare a key a fetch fills: an editor pre-fills it empty, and the section
     // has nothing of its own to show.
