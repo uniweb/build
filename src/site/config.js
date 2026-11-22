@@ -38,6 +38,7 @@ import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { foundationImportsPlugin } from './foundation-imports.js'
 import { detectFoundationType } from './foundation-ref.js'
 import { librariesOf } from '../foundation/libraries.js'
+import { mountEntriesOf } from './mount-entries.js'
 import { libraryImports } from '../foundation/library-imports.js'
 import { copiedLibraries, copiedLibrariesWarning } from '../foundation/libraries.js'
 import { workspaceRootOf } from './workspace-extension.js'
@@ -575,13 +576,24 @@ export async function defineSiteConfig(options = {}) {
         allow: (() => {
           const allowed = ['..']
           const parentDir = resolve(siteRoot, '..')
+          const within = realpathOr(parentDir)
           const paths = siteConfig.paths || {}
-          for (const key of ['pages', 'layout', 'records']) {
-            if (paths[key]) {
-              const resolved = resolve(siteRoot, paths[key])
-              if (!resolved.startsWith(parentDir)) {
-                allowed.push(resolved)
-              }
+          // ⭐ Each directory the site's content comes from, wherever it is: `pages`, `layout` and
+          // `records` moved whole, and the directories mounted into them, `pages/<segment>`
+          // (`mountEntriesOf`, the one rule for a mount's key) and `records/<type>`. ⛔ Until
+          // 2026-11-22 only the three whole keys were here, so a page in a mount outside the site's
+          // parent (`pages/docs: ../../docs`) had its own pictures refused under `uniweb dev`, 403
+          // "outside of Vite serving allow list", while the build showed them.
+          const contentDirs = [
+            ...['pages', 'layout', 'records'].map((key) => paths[key]),
+            ...mountEntriesOf(paths).map(([, dir]) => dir),
+            ...Object.entries(paths).filter(([key]) => key.startsWith('records/')).map(([, dir]) => dir),
+          ]
+          for (const dir of contentDirs) {
+            if (typeof dir !== 'string' || !dir) continue
+            const resolved = realpathOr(resolve(siteRoot, dir))
+            if (resolved !== within && !resolved.startsWith(within + sep) && !allowed.includes(resolved)) {
+              allowed.push(resolved)
             }
           }
           // ⭐ And each library the bundled foundation imports, from wherever it is (`librariesOf`).
@@ -589,7 +601,6 @@ export async function defineSiteConfig(options = {}) {
           // ⛔ Until 2026-11-09 an image or font a library outside the workspace names in its CSS
           // was refused, "403 … outside of Vite serving allow list" (measured under npm, `file:`).
           if (!isRuntimeMode && foundationInfo.type === 'local' && foundationInfo.path) {
-            const within = realpathOr(parentDir)
             for (const { dir } of librariesOf(foundationInfo.path)) {
               if (dir !== within && !dir.startsWith(within + sep)) allowed.push(dir)
             }
