@@ -275,8 +275,9 @@ export function dataBlockNodes(doc) {
  *
  * Keyed by the alt text alone, as every unit is keyed by its words (`hash.js`): the file is not in
  * the key because the build, the dev server and a push each hold a different address for it by the
- * time they translate. So two images with the same alt text share a translation, and a place that
- * needs another one takes an override.
+ * time they translate. So two images with the same alt text share a translation, and one in another
+ * section that needs another takes an override, which names a page and a section: two in one section,
+ * such as a picture's light and dark versions, need alt texts of their own.
  *
  * ⭐ Separate from `extractFromProseMirrorDoc` for the reason `extractFromDataBlocks` is: that is
  * the block-element keying the editor shares, pinned by tests/i18n/structural-keying-vectors.json,
