@@ -17,6 +17,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { evaluateQuery } from '@uniweb/core'
 import { resolveDefaultLocale } from '@uniweb/core/locale-config'
 import { fillRoutePattern, recordHandle } from '@uniweb/core/route-match'
 import { recordRoutes, generateRecordSearchIndex, renderPageMarkdown } from '@uniweb/projections'
@@ -82,8 +83,17 @@ export async function recordProjections(
     // No compiled file: a query answered by a records service, or an external one — its records
     // are not this build's to list.
     if (!path) continue
-    const records = await read(path)
-    if (!Array.isArray(records)) continue
+    const compiled = await read(path)
+    if (!Array.isArray(compiled)) continue
+    // ⭐ THE QUERY'S SET, as the prerender expands it (`expandDynamicPages`): the compiled file
+    // holds every record the query's fixed `where` selects, in its sort, each with the branch it
+    // sits in, and the runtime applies `scope` and `limit` (`./query-processor.js`, which bakes
+    // neither). A scope the route binds (`:dir`) has no page to bind it here, so it is left out.
+    // ⛔ Until 2026-11-22 every record in the file was a page here, and a site whose records of one
+    // type sat in two branches listed pages, in llms.txt and as markdown, that the build never made.
+    const decl = queries[name] || {}
+    const scope = typeof decl.scope === 'string' && !/(^|\/):/.test(decl.scope) ? decl.scope : undefined
+    const records = evaluateQuery(compiled, { scope, limit: decl.limit }, { locale })
     indexes.push(generateRecordSearchIndex(name, { ...(queries[name] || {}), pattern, field }, records, locale))
 
     const template = (content.pages || []).find((page) => page.route === pattern)

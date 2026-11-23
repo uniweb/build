@@ -54,6 +54,29 @@ describe('recordProjections', () => {
     expect(pages[1].markdown).toContain('The details, in depth.')
   })
 
+  // ⛔ Until 2026-11-22 every record in the compiled file was a page here, while the prerender
+  // makes a page for each record of the query's set: the file holds every record its fixed `where`
+  // selects, with the branch each sits in (`$branch`), and the runtime applies `scope` and `limit`.
+  // A site whose services sat in two branches listed pages for the other branch that don't exist.
+  test('the pages are the query’s set: its scope and its limit, as the prerender makes them', async () => {
+    const { content, dataRoot } = talksSite([
+      { $name: 'keynote', title: 'Keynote', $branch: 'main' },
+      { $name: 'workshop', title: 'Workshop', $branch: 'main/day-2' },
+      { $name: 'dinner', title: 'Dinner', $branch: 'social' },
+    ])
+    content.config.queries = { talks: { scope: 'main' } }
+    const scoped = await recordProjections(content, { read: compiledData(dataRoot), locale: 'en' })
+    expect(scoped.pages.map((page) => page.route)).toEqual(['/talks/keynote', '/talks/workshop'])
+    expect(scoped.entries.map((entry) => entry.route)).toEqual(['/talks/keynote', '/talks/workshop'])
+
+    content.config.queries = { talks: { scope: 'main', limit: 1 } }
+    expect((await recordProjections(content, { read: compiledData(dataRoot), locale: 'en' })).pages.map((page) => page.route)).toEqual(['/talks/keynote'])
+
+    // A scope the route binds has no page to bind it here: every page's records are listed.
+    content.config.queries = { talks: { scope: ':dir' } }
+    expect((await recordProjections(content, { read: compiledData(dataRoot), locale: 'en' })).pages).toHaveLength(3)
+  })
+
   test('a query with no compiled file has no record pages to list — a host’s records are its own', async () => {
     const { content, dataRoot } = talksSite([{ $name: 'a', title: 'A' }])
     content.pages[0].fetch = { query: 'talks', as: 'talks' }
