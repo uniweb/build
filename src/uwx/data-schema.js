@@ -190,9 +190,28 @@ function sectionPaths(sections) {
   return out
 }
 
+// The text a choice's value takes in a label path: a string as itself, a number or a boolean as
+// its JSON text (`1`, `true`) [backend, 2026-11-23].
+const optionToken = (value) => (typeof value === 'string' ? value : JSON.stringify(value))
+
 // Why a label path names no label of these sections, or null when it does.
 function labelPathProblem(path, sections) {
   if (/^model\.(?:label|plural|description)$/.test(path)) return null
+  // A choice's label in another language: `section.<path>.field.<key>.option.<value>.label`, for a
+  // value of the field's closed set, in a set whose choices carry labels [backend, 2026-11-23].
+  const option = /^section\.(.+?)\.field\.([^./]+)\.option\.(.+)\.label$/.exec(path)
+  if (option) {
+    const at = sectionAt(sections, option[1])
+    if (!at) return `names no section '${option[1]}'`
+    const entries = at.fields?.[option[2]]?.enum
+    if (!Array.isArray(entries)) return `names no closed set: field '${option[2]}' in section '${option[1]}' has no enum`
+    if (!entries.some((e) => e && typeof e === 'object' && typeof e.label === 'string')) {
+      return `names a choice of a set with no labels: give field '${option[2]}''s choices a label first`
+    }
+    const tokens = entries.map((e) => optionToken(e && typeof e === 'object' ? e.value : e))
+    if (!tokens.includes(option[3])) return `names no choice '${option[3]}' of field '${option[2]}': its choices are ${tokens.map((t) => `'${t}'`).join(', ')}`
+    return null
+  }
   const field = /^section\.(.+)\.field\.([^./]+)\.(?:label|description)$/.exec(path)
   const section = field || /^section\.(.+)\.(?:label|description)$/.exec(path)
   if (!section) return 'is not a label path'

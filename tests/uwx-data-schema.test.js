@@ -969,6 +969,42 @@ describe('toDataSchemaDeclaration — i18n', () => {
     )
   })
 
+  // A choice's label in another language rides in `i18n` too, at
+  // `section.<path>.field.<key>.option.<value>.label` [backend, 2026-11-23].
+  const placeSchema = (fr) => ({
+    sections: {
+      brief: {
+        brief: true,
+        fields: {
+          status: { type: 'string', enum: [{ value: 'open', label: 'Open' }, { value: 'opening-soon', label: 'Opening soon' }] },
+          stars: { type: 'number', enum: [{ value: 1, label: 'One' }, { value: 2, label: 'Two' }] },
+          code: { type: 'string', enum: ['a', 'b'] },
+          hours: { type: 'object', fields: { week: { type: 'array', items: { type: 'object', fields: { day: { type: 'string', enum: [{ value: 'mon', label: 'Monday' }] } } } } } },
+        },
+      },
+    },
+    i18n: { fr },
+  })
+
+  it('carries a choice’s label in another language, a number named by its JSON text, a nested section by its path', () => {
+    const fr = {
+      'section.brief.field.status.option.opening-soon.label': 'Ouverture prochaine',
+      'section.brief.field.stars.option.1.label': 'Une',
+      'section.brief/hours/week.field.day.option.mon.label': 'Lundi',
+    }
+    expect(lower(placeSchema(fr), '@/place', '@acme/place').i18n.fr).toEqual(fr)
+  })
+
+  it('refuses a choice the set lacks, a set with no labels, and a field with no set, as a registry does', () => {
+    expect(() => lower(placeSchema({ 'section.brief.field.status.option.closed.label': 'Fermé' }), '@/place', '@acme/place')).toThrow(
+      /names no choice 'closed' of field 'status': its choices are 'open', 'opening-soon'/
+    )
+    expect(() => lower(placeSchema({ 'section.brief.field.code.option.a.label': 'A' }), '@/place', '@acme/place')).toThrow(
+      /names a choice of a set with no labels/
+    )
+    expect(() => lower(placeSchema({ 'section.brief.field.hours.option.x.label': 'X' }), '@/place', '@acme/place')).toThrow(/names no closed set/)
+  })
+
   it('is checked where schemas resolve, before any register', () => {
     const schema = validateAndNormalizeSchema(cv({ 'section.career.label': 'Carrière' }), '@/cv')
     expect(() => assertI18nPaths({ '@/cv': schema })).toThrow(/names no section 'career'/)
