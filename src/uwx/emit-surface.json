@@ -36,6 +36,9 @@
         ],
         "template": [
           "site.yml::template"
+        ],
+        "template_name": [
+          "site.yml::templateName"
         ]
       }
     },

@@ -160,6 +160,8 @@ const INFO_TO_SITE_YML = {
   // ⛔ The site's declaration is not verbatim — see the explicit `settings.fetch`
   // branch below: it projects to `site.yml::query` or `site.yml::fetch`.
   template: 'template',
+  // ⭐ `template_name` — a template's card name of its own, one plain string, verbatim.
+  template_name: 'templateName',
   // ⭐ `tags` — authored, non-localized tokens; the filter facet for a list of site
   // cards. Round-trips verbatim like any authored list.
   tags: 'tags',

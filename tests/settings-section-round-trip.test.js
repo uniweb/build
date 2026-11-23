@@ -52,7 +52,7 @@ function fullSite() {
     join(root, 'site.yml'),
     [
       "name: S", "foundation: '@a/b@1.0.0'", 'description: D', 'favicon: /f.svg',
-      'template: true', 'tags: [academic, portfolio]',
+      'template: true', 'templateName: Law Firm', 'tags: [academic, portfolio]',
       'preview: /images/card.png',
       'languages: [en, fr]', 'defaultLanguage: en', 'publishLanguages: [en]',
       'base: /x/', 'seo: { image: /og.png }', 'keywords: [a, b]',
@@ -80,8 +80,13 @@ describe('the info / settings split', () => {
     // a title, a subtitle, an icon, a "this is a template" badge, the facets, and
     // the foundation that says what the thing is.
     expect(Object.keys(doc.info).sort()).toEqual([
-      'description', 'favicon', 'foundation', 'name', 'preview', 'tags', 'template',
+      'description', 'favicon', 'foundation', 'name', 'preview', 'tags', 'template', 'template_name',
     ])
+
+    // ⭐ A template's card name of its own rides beside the site's name, one plain string
+    // [backend, 2026-11-23]; the card's title reads it, else `name`.
+    expect(doc.info.template_name).toBe('Law Firm')
+    expect(doc.info.name).toBe('S')
 
     // ⭐ `preview` (the card image) is carried and round-trips [Diego, 2026-09-10] — an
     // author's address, the only kind sent since 2026-10-29 (below). Until 2026-09-10 this
@@ -130,6 +135,17 @@ describe('the info / settings split', () => {
     // `query:` is the authoring shorthand; the wire carries the desugared form under
     // the name every other tier already uses.
     expect(doc.settings.fetch).toEqual({ query: 'articles' })
+  })
+})
+
+describe('`templateName` — a template card\'s own name', () => {
+  it('is refused when it is not one plain string, naming what it is for', async () => {
+    for (const bad of ['templateName: { en: Law Firm }', "templateName: '  '"]) {
+      const root = fullSite()
+      const yml = readFileSync(join(root, 'site.yml'), 'utf8').replace('templateName: Law Firm', bad)
+      writeFileSync(join(root, 'site.yml'), yml)
+      await expect(siteProjectToDocument(root)).rejects.toThrow(/'templateName' is the name a template's card shows/)
+    }
   })
 })
 

@@ -1690,6 +1690,18 @@ export async function siteProjectToDocument(siteRoot, opts = {}) {
   // backend applies a clonability designation to this site-content entity (it is
   // NOT a registry artifact). Verbatim; absent → a normal (non-template) site.
   setIf(info, 'template', siteYml.template)
+  // ⭐ `template_name` — a template's card name of its own ("Law Firm"), so the site keeps its
+  // business's name (`name`, "Harlow & Pine") in its pages' titles, its `llms.txt` and a site made
+  // from it, while the gallery's card says what kind of site it is: the card's title reads it, else
+  // `name` [backend, 2026-11-23]. One plain string, like `name`, sent only when written [Diego,
+  // 2026-11-23: "we can use a separate name. that's fine"].
+  if (siteYml.templateName !== undefined && (typeof siteYml.templateName !== 'string' || !siteYml.templateName.trim())) {
+    throw new Error(
+      "site.yml: 'templateName' is the name a template's card shows in the app's gallery — one plain string, " +
+        "such as 'Law Firm'. The site's own name stays in 'name'."
+    )
+  }
+  setIf(info, 'template_name', siteYml.templateName?.trim())
   // ⭐ `tags` — the filter facet for a list of site cards, chiefly the template
   // picker. An array of NON-LOCALIZED tokens (`[academic, portfolio]`); the site
   // never renders them and carries no labels for them, because the chip a user
