@@ -74,6 +74,8 @@ import { isDraftRecord } from '../site/record-draft.js'
 import { LINK_MODEL, linkRecordRefusal } from './link-records.js'
 import { FILE_MODEL } from './file-records.js'
 import { isBackendModel, backendRecordsRefusal } from '../backend-models.js'
+import { BLUEPRINT_FILE, readBlueprint } from './blueprint-file.js'
+const isPlainMap = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 // What `typedFor` answers for a data key typed by a Model only a site backend holds: known, with no
 // declaration to map records by.
@@ -1394,6 +1396,22 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
   // folder whose schema resolved to nothing is refused with the folder, above; one that reads no
   // folder is refused here (`noDataSchema`). ⛔ Until 2026-11-11 such a query was "schema-less":
   // its declaration went up naming no Model and a publish uploaded its compiled files.
+  // The types this site's own backend holds, named in full: 'public' for one its blueprint opens
+  // to visitors (`publicQueries`), 'members' for one it names only for its members (`access`).
+  let backendTypes = null
+  const siteBackendTypes = () => {
+    if (backendTypes) return backendTypes
+    backendTypes = new Map()
+    let blueprint = null
+    try {
+      blueprint = readBlueprint(siteRoot)
+    } catch {
+      // An unreadable blueprint is refused where the site's config is read; it opens nothing here.
+    }
+    for (const type of Object.keys(isPlainMap(blueprint?.access) ? blueprint.access : {})) backendTypes.set(qualifyRef(type, scope), 'members')
+    for (const type of Object.keys(isPlainMap(blueprint?.publicQueries) ? blueprint.publicQueries : {})) backendTypes.set(qualifyRef(type, scope), 'public')
+    return backendTypes
+  }
   for (const { name, decl } of queries) {
     const schema = decl.schema || decl.model
     const hasRecords = poolBySchema.has(schema)
@@ -1412,6 +1430,18 @@ export async function buildRecordEntities(siteRoot, opts = {}) {
     }
     // A query a data key types by such a Model (`store: {}`, typed `@uniweb/catalog`) has none either.
     if (!hasRecords && !backendHeld && !isBackendModel(keyTyped.get(schema))) {
+      // A type the site's own backend holds (`blueprint.yml`) has its entries there, written by
+      // its members, so no file holds one: that is not news. ⛔ Until 2026-11-24 every build and
+      // publish of such a site said "nothing to push" for it.
+      const held = siteBackendTypes().get(qualifyRef(schema, scope))
+      if (held === 'public') continue
+      if (held === 'members') {
+        warnings.push(
+          `query "${name}": ${schema} is held by this site's backend, and ${BLUEPRINT_FILE}'s publicQueries doesn't ` +
+            'open it, so the published site answers this query with nothing for a visitor who isn\'t signed in.'
+        )
+        continue
+      }
       // "Nothing pushed" and "nothing there" look identical, so say which.
       const dirs = poolDirsForSchema(schema)
       warnings.push(
