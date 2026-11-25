@@ -242,7 +242,8 @@ import { mergeTranslations } from '../i18n/merge.js'
 import { localesToBuild } from '../i18n/locales.js'
 import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { refuseSearchOption } from './search-declared.js'
-import { mountDevApi } from '../dev/api-mount.js'
+import { mountDevApi, forwardsDevBackend } from '../dev/api-mount.js'
+import { mountDevCompute, FUNCTIONS_KEY_ENV } from '../dev/compute-mount.js'
 import { mountDevSubmit } from '../dev/submit-mount.js'
 import { mountPublished } from '../dev/published-mount.js'
 import { readPublished, localServices, queriesInFull } from './published.js'
@@ -787,6 +788,17 @@ export function siteContentPlugin(options = {}) {
           devApiAddress = mountDevApi(devServer, { root: resolvedSitePath })
         } catch (err) {
           console.error(`[dev-api] ${err.message}`)
+        }
+
+        // A backend on this machine (`$devBackend: <address>`) runs its integrations' compute
+        // calls against a runner; the dev server is that runner, from the working copy
+        // (`../dev/compute-mount.js`). Synchronous for the same reason as the mount above.
+        if (foundationPath && forwardsDevBackend(resolvedSitePath)) {
+          try {
+            mountDevCompute(devServer, { foundationDir: foundationPath, key: process.env[FUNCTIONS_KEY_ENV] || null })
+          } catch (err) {
+            console.error(`[dev-compute] ${err.message}`)
+          }
         }
 
         // A site's forms, taken locally in development when site.yml asks its host for

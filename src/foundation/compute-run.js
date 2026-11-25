@@ -51,7 +51,9 @@ const WORKER = new URL('./compute-run-worker.js', import.meta.url)
  *   warnings: string[],
  *   wallMs?: number,
  *   cpuMs?: number,
- * }>} `ok` with the parsed `answer`, or not, with `failure` saying why in a sentence (and
+ *   reason?: 'cannot-start'|'not-exported'|'input-too-large'|'input-not-json'|'failed'|'limit',
+ * }>} `ok` with the parsed `answer`, or not, with `failure` saying why in a sentence and `reason`
+ *   saying which kind of failure it is, for a caller that answers as the platform's runner does (and
  *   `problems` when the file itself can't be registered). `warnings` are the build's, and the
  *   budget's when the call took longer than it.
  */
@@ -59,11 +61,12 @@ export async function runComputeFunction({ file, exportName, inputText }) {
   const source = readFileSync(file, 'utf8')
   const { exports, problems, warnings } = await checkComputeSource(source)
   if (problems.length) {
-    return { ok: false, failure: 'The file can\'t be registered, so it doesn\'t run:', problems, warnings }
+    return { ok: false, reason: 'cannot-start', failure: 'The file can\'t be registered, so it doesn\'t run:', problems, warnings }
   }
   if (!exports.includes(exportName)) {
     return {
       ok: false,
+      reason: 'not-exported',
       failure: `The file doesn't export \`${exportName}\`. It exports ${exports.map((e) => `\`${e}\``).join(', ')}.`,
       warnings,
     }
@@ -71,16 +74,16 @@ export async function runComputeFunction({ file, exportName, inputText }) {
 
   const inputBytes = Buffer.byteLength(inputText)
   if (inputBytes > LIMITS.inputBytes) {
-    return { ok: false, failure: `The input is ${kib(inputBytes)}, over the ${kib(LIMITS.inputBytes)} an input may be.`, warnings }
+    return { ok: false, reason: 'input-too-large', failure: `The input is ${kib(inputBytes)}, over the ${kib(LIMITS.inputBytes)} an input may be.`, warnings }
   }
   let input
   try {
     input = JSON.parse(inputText)
   } catch (err) {
-    return { ok: false, failure: `The input isn't JSON: ${err.message}`, warnings }
+    return { ok: false, reason: 'input-not-json', failure: `The input isn't JSON: ${err.message}`, warnings }
   }
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
-    return { ok: false, failure: 'The input is JSON but not an object: a function takes the object its integration\'s mapping writes.', warnings }
+    return { ok: false, reason: 'input-not-json', failure: 'The input is JSON but not an object: a function takes the object its integration\'s mapping writes.', warnings }
   }
 
   const outcome = await inWorker({ source, exportName, inputText })
@@ -92,13 +95,14 @@ export async function runComputeFunction({ file, exportName, inputText }) {
     case 'answered': {
       const bytes = Buffer.byteLength(outcome.text)
       if (bytes > LIMITS.answerBytes) {
-        return { ok: false, failure: `The answer is ${kib(bytes)}, over the ${kib(LIMITS.answerBytes)} an answer may be.`, warnings: all, ...timing }
+        return { ok: false, reason: 'failed', failure: `The answer is ${kib(bytes)}, over the ${kib(LIMITS.answerBytes)} an answer may be.`, warnings: all, ...timing }
       }
       return { ok: true, answer: JSON.parse(outcome.text), warnings: all, ...timing }
     }
     case 'threw':
       return {
         ok: false,
+        reason: 'failed',
         failure: outcome.isError
           ? `It threw ${outcome.message}${FROZEN.test(outcome.message) ? FROZEN_HINT : ''}`
           : `It ${outcome.message}. Throw an Error with a message a person can read.`,
@@ -106,20 +110,20 @@ export async function runComputeFunction({ file, exportName, inputText }) {
         ...timing,
       }
     case 'not-object':
-      return { ok: false, failure: `It returned ${outcome.got}, not an object: an answer is a JSON object, or a promise of one.`, warnings: all, ...timing }
+      return { ok: false, reason: 'failed', failure: `It returned ${outcome.got}, not an object: an answer is a JSON object, or a promise of one.`, warnings: all, ...timing }
     case 'not-json':
-      return { ok: false, failure: `Its answer can't be written as JSON: ${outcome.message}`, warnings: all, ...timing }
+      return { ok: false, reason: 'failed', failure: `Its answer can't be written as JSON: ${outcome.message}`, warnings: all, ...timing }
     case 'load-failed':
-      return { ok: false, failure: `The file failed as it loaded: ${outcome.message}`, warnings: all }
+      return { ok: false, reason: 'cannot-start', failure: `The file failed as it loaded: ${outcome.message}`, warnings: all }
     case 'not-exported':
-      return { ok: false, failure: `The file doesn't export \`${exportName}\` as a function.`, warnings: all }
+      return { ok: false, reason: 'not-exported', failure: `The file doesn't export \`${exportName}\` as a function.`, warnings: all }
     case 'timed-out':
-      return { ok: false, failure: `It was still running after ${LIMITS.wallMs / 1000} s, and was stopped.`, warnings: all, wallMs: LIMITS.wallMs }
+      return { ok: false, reason: 'limit', failure: `It was still running after ${LIMITS.wallMs / 1000} s, and was stopped.`, warnings: all, wallMs: LIMITS.wallMs }
     case 'unsettled':
-      return { ok: false, failure: 'It returned a promise that never settles.', warnings: all }
+      return { ok: false, reason: 'failed', failure: 'It returned a promise that never settles.', warnings: all }
     case 'crashed':
     default:
-      return { ok: false, failure: `The run stopped: ${outcome.message}`, warnings: all }
+      return { ok: false, reason: 'failed', failure: `The run stopped: ${outcome.message}`, warnings: all }
   }
 }
 
