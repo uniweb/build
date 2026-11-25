@@ -242,7 +242,12 @@ import { mergeTranslations } from '../i18n/merge.js'
 import { localesToBuild } from '../i18n/locales.js'
 import { dataBlockModels, NO_DATA_MODELS } from '../i18n/data-models.js'
 import { refuseSearchOption } from './search-declared.js'
-import { mountDevApi, forwardsDevBackend } from '../dev/api-mount.js'
+import { mountDevApi, forwardsDevBackend, devRecordsAddress, siteServiceNames } from '../dev/api-mount.js'
+import { mountDevRecords } from '../dev/records-mount.js'
+import { answerFromFiles } from '../dev/records-files.js'
+import { mountDevSearch } from '../dev/search-endpoint.js'
+import { readEndpoint } from '@uniweb/core/services'
+import { getSearchIndexFilename } from '@uniweb/projections/search'
 import { mountDevCompute, FUNCTIONS_KEY_ENV } from '../dev/compute-mount.js'
 import { mountDevSubmit } from '../dev/submit-mount.js'
 import { mountPublished } from '../dev/published-mount.js'
@@ -406,6 +411,13 @@ export function siteContentPlugin(options = {}) {
   // never in a build.
   let devApiAddress = null
   let devSubmitAddress = null
+  // With a backend's records beside the site's (`$devBackend.records`), the dev server is the site's
+  // host: its payload carries a host block — its records service, its own addresses, and search —
+  // and the site's queries named in full, as the backend holds their types (`../dev/records-mount.js`).
+  let devRecordsService = null
+  let devSearchAddress = null
+  let devHostScope = null
+  let devServiceNames = []
   // Under `uniweb dev --published`, the published site's services instead, at the dev server's
   // own addresses (`./published.js`): the host tier, as the published page carries it.
   let publishedServices = null
@@ -419,6 +431,25 @@ export function siteContentPlugin(options = {}) {
    * full, as the published page holds them (`queriesInFull`).
    */
   const withDevServices = (content) => {
+    if (devRecordsService && content?.config) {
+      const config = content.config
+      const block = { records: devRecordsService }
+      if (devApiAddress) block.backend = devApiAddress
+      if (devSubmitAddress) block.submit = devSubmitAddress
+      // Any other service the site names with an address of its own keeps it: a host block
+      // answers for every service, and one it doesn't name is off.
+      for (const name of devServiceNames) {
+        if (name in block || name === 'search') continue
+        if (readEndpoint(config[name])) block[name] = config[name]
+      }
+      // Search: the site's own address, else the dev server's, unless the site switched it off.
+      const search = config.search
+      const off = search === false || (search && typeof search === 'object' && search.enabled === false)
+      if (!off) block.search = readEndpoint(search) ? search : devSearchAddress
+      config.services = block
+      config.queries = queriesInFull(config.queries, devHostScope)
+      return content
+    }
     if (publishedServices && content?.config) {
       content.config.services = publishedServices
       content.config.queries = queriesInFull(content.config.queries, publishedScope)
@@ -676,6 +707,13 @@ export function siteContentPlugin(options = {}) {
       isProduction = config.command === 'build'
       basePath = config.base || '/'
       if (!isProduction && foundationPath && readPublished()) publishedScope = await foundationScope(foundationPath)
+      if (!isProduction && foundationPath && !readPublished()) {
+        try {
+          if (devRecordsAddress(resolve(config.root, sitePath))) devHostScope = await foundationScope(foundationPath)
+        } catch {
+          // An unusable records address is said once, where the server mounts it.
+        }
+      }
 
       // In dev mode, process collections early so JSON files exist before server starts
       // This runs before configureServer, ensuring data is available immediately
@@ -788,6 +826,40 @@ export function siteContentPlugin(options = {}) {
           devApiAddress = mountDevApi(devServer, { root: resolvedSitePath })
         } catch (err) {
           console.error(`[dev-api] ${err.message}`)
+        }
+
+        // A backend's records beside the site's (`$devBackend.records`): the dev server answers
+        // the site's records itself, its files merged with the backend's (`../dev/records-mount.js`),
+        // and offers search, since a host block it publishes answers for every service.
+        let recordsAddress = null
+        try {
+          recordsAddress = devRecordsAddress(resolvedSitePath)
+        } catch (err) {
+          console.error(`[dev-records] ${err.message}`)
+        }
+        if (recordsAddress) {
+          devServiceNames = siteServiceNames(resolvedSitePath)
+          const defaultLocale = () => resolveDefaultLocale(siteContent?.config ?? {}) ?? null
+          const readCompiled = async (locale, file) => {
+            if (locale && locale !== defaultLocale()) return localizedDataFile(locale, file)
+            try {
+              return JSON.parse(await readFile(join(resolvedPublicDir, DATA_DIR, file), 'utf-8'))
+            } catch {
+              return null
+            }
+          }
+          devRecordsService = mountDevRecords(devServer, {
+            address: recordsAddress,
+            answerFiles: ({ key, question, locale, offset }) =>
+              answerFromFiles({ key, question, locale, offset, queries: siteContent?.config?.queries, read: readCompiled }),
+          })
+          devSearchAddress = mountDevSearch(devServer, {
+            readIndex: async (lang) => {
+              const fallback = defaultLocale()
+              const file = await devProjection(`/${getSearchIndexFilename(lang || fallback, fallback)}`)
+              return file ? JSON.parse(file.source) : null
+            },
+          })
         }
 
         // A backend on this machine (`$devBackend: <address>`) runs its integrations' compute
@@ -1430,3 +1502,4 @@ export function siteContentPlugin(options = {}) {
 }
 
 export default siteContentPlugin
+

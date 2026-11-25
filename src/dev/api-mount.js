@@ -69,6 +69,18 @@ export const DEV_API_ADDRESS = '/_api'
  * `DEV_BACKEND_ADDRESS_MARKER`), and sends full names. A module keeps `@/x`, which is how a
  * local mock holds them.
  *
+ * ## And a backend's records, beside it
+ *
+ * ```yaml
+ * $devBackend:
+ *   backend: http://localhost:1234/api                          # as above
+ *   records: http://localhost:1234/records/{locale}   # its public records
+ * ```
+ *
+ * The map form names each service the backend answers, a whole address each. With `records`, the
+ * dev server is the site's host: it answers the site's records itself, merging its record files
+ * with the backend's public records (`./records-mount.js`). The string form is `backend` alone.
+ *
  * ## ⛔ Development only, and it cannot leak
  *
  * `$devBackend` is read by the dev plugin and by nothing else: no build reads it, no
@@ -108,7 +120,7 @@ export function mountDevApi(server, { root }) {
     return null
   }
 
-  const spec = site.$devBackend
+  const spec = devBackendParts(site.$devBackend).backend
   if (!spec) return null
   const mount = DEV_API_ADDRESS
   const address = devBackendAddress(spec)
@@ -213,7 +225,7 @@ export function devBackendAddress(spec) {
 export function forwardsDevBackend(root) {
   try {
     const site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
-    return Boolean(devBackendAddress(site.$devBackend))
+    return Boolean(devBackendAddress(devBackendParts(site.$devBackend).backend))
   } catch {
     return false
   }
@@ -239,4 +251,75 @@ function mountDevAddress(server, address) {
   })
   console.log(`[dev-api] ${prefix}/* → ${address}`)
   return prefix
+}
+
+/**
+ * `$devBackend` as its parts: the string form is the `backend` service alone; the map form names
+ * each service, `backend` and `records`.
+ *
+ * @param {unknown} value - `site.yml::$devBackend` as written
+ * @returns {{ backend: string|null, records: string|null }}
+ * @throws {Error} for a value that is neither, or a map with a key it doesn't take
+ */
+export function devBackendParts(value) {
+  if (value === undefined || value === null || value === false || value === '') return { backend: null, records: null }
+  if (typeof value === 'string') return { backend: value, records: null }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('$devBackend is a module, a backend\'s address, or a map of `backend:` and `records:` addresses.')
+  }
+  const unknown = Object.keys(value).filter((k) => k !== 'backend' && k !== 'records')
+  if (unknown.length) {
+    throw new Error(`$devBackend takes \`backend:\` and \`records:\`, not ${unknown.map((k) => `\`${k}:\``).join(', ')}.`)
+  }
+  return {
+    backend: typeof value.backend === 'string' && value.backend ? value.backend : null,
+    records: typeof value.records === 'string' && value.records ? value.records : null,
+  }
+}
+
+/**
+ * The backend's records address the site's `$devBackend` names, or null when it names none.
+ * Read from the raw `site.yml`, as `mountDevApi` reads it.
+ *
+ * @param {string} root - the site directory
+ * @returns {string|null}
+ * @throws {Error} for an address that is not http(s), or has no `{locale}` slot
+ */
+export function devRecordsAddress(root) {
+  let site
+  try {
+    site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
+  } catch {
+    return null
+  }
+  const { records } = devBackendParts(site.$devBackend)
+  if (!records) return null
+  let url = null
+  try {
+    url = new URL(records.replace('{locale}', 'x'))
+  } catch {
+    // reported below
+  }
+  if (!url || !/^https?:$/.test(url.protocol) || !url.host) {
+    throw new Error(`$devBackend.records: '${records}' is not an http(s) address. Write the backend's whole records address.`)
+  }
+  if (!records.includes('{locale}')) {
+    throw new Error(`$devBackend.records: '${records}' has no {locale} slot, where each question's language goes.`)
+  }
+  return records
+}
+
+/**
+ * The services a site's `site.yml` names, read from the raw file.
+ *
+ * @param {string} root - the site directory
+ * @returns {string[]}
+ */
+export function siteServiceNames(root) {
+  try {
+    const site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
+    return site.services && typeof site.services === 'object' && !Array.isArray(site.services) ? Object.keys(site.services) : []
+  } catch {
+    return []
+  }
 }
