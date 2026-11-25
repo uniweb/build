@@ -248,7 +248,7 @@ import { answerFromFiles } from '../dev/records-files.js'
 import { mountDevSearch } from '../dev/search-endpoint.js'
 import { readEndpoint } from '@uniweb/core/services'
 import { getSearchIndexFilename } from '@uniweb/projections/search'
-import { mountDevCompute, FUNCTIONS_KEY_ENV } from '../dev/compute-mount.js'
+import { mountDevCompute, serveDevCompute, FUNCTIONS_KEY_ENV, FUNCTIONS_PORT_ENV } from '../dev/compute-mount.js'
 import { mountDevSubmit } from '../dev/submit-mount.js'
 import { mountPublished } from '../dev/published-mount.js'
 import { readPublished, localServices, queriesInFull } from './published.js'
@@ -866,10 +866,22 @@ export function siteContentPlugin(options = {}) {
         // calls against a runner; the dev server is that runner, from the working copy
         // (`../dev/compute-mount.js`). Synchronous for the same reason as the mount above.
         if (foundationPath && forwardsDevBackend(resolvedSitePath)) {
+          const key = process.env[FUNCTIONS_KEY_ENV] || null
           try {
-            mountDevCompute(devServer, { foundationDir: foundationPath, key: process.env[FUNCTIONS_KEY_ENV] || null })
+            mountDevCompute(devServer, { foundationDir: foundationPath, key })
           } catch (err) {
             console.error(`[dev-compute] ${err.message}`)
+          }
+          // ⭐ And on a server of its own, on IPv4 loopback, when `uniweb dev` names the port its
+          // engine was given for it: a backend in Docker reaches this machine over IPv4 only, and
+          // the dev server may be listening on `::1` (`serveDevCompute`).
+          const port = Number(process.env[FUNCTIONS_PORT_ENV])
+          if (Number.isInteger(port) && port > 0) {
+            serveDevCompute({ foundationDir: foundationPath, key, port })
+              .then((runner) => devServer.httpServer?.once('close', () => runner.close()))
+              .catch((err) =>
+                console.error(`[dev-compute] the compute runner could not listen on 127.0.0.1:${port}: ${err.message}. The engine's compute calls will fail.`)
+              )
           }
         }
 

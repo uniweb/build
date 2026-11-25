@@ -226,3 +226,21 @@ describe('the dev server mounts it', () => {
     expect((await ask(await devServer('./mock/api.js'))).status).toBe(0)
   })
 })
+
+describe('serveDevCompute — the runner on a server of its own', () => {
+  it('⭐ answers on 127.0.0.1 at the port it is given, as the mounted runner does', async () => {
+    foundation({ 'compute/grading.js': GRADER })
+    const { serveDevCompute } = await import('../src/dev/compute-mount.js')
+    const runner = await serveDevCompute({ foundationDir: dir, port: 0, log: () => {} })
+    try {
+      const { address, port } = runner.address()
+      expect(address).toBe('127.0.0.1')
+      const ok = await fetch(`http://127.0.0.1:${port}${DEV_COMPUTE_ADDRESS}/acme/grading/1/grade`, { method: 'POST', body: '{"answers":["b"]}' })
+      expect([ok.status, await ok.json()]).toEqual([200, { points: 1, max: 1 }])
+      const elsewhere = await fetch(`http://127.0.0.1:${port}/other`, { method: 'POST', body: '{}' })
+      expect([elsewhere.status, elsewhere.headers.get('x-uniweb-error')]).toEqual([404, 'function-not-found'])
+    } finally {
+      await new Promise((done) => runner.close(done))
+    }
+  })
+})

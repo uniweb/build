@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { runComputeFunction, LIMITS } from '../foundation/compute-run.js'
 import { workspaceComputeFiles } from '../foundation/shared-types.js'
@@ -12,6 +13,9 @@ export const DEV_COMPUTE_ADDRESS = '/_compute'
 
 /** The variable that hands the runner the site's functions key, so it checks each call's signature. */
 export const FUNCTIONS_KEY_ENV = 'UNIWEB_FUNCTIONS_KEY'
+
+/** The variable that names the port the runner answers on, on a server of its own (`serveDevCompute`). */
+export const FUNCTIONS_PORT_ENV = 'UNIWEB_FUNCTIONS_PORT'
 
 /**
  * `uniweb dev`'s compute runner — what answers a backend running on the developer's machine when
@@ -190,4 +194,37 @@ function refuse(res, status, error, message) {
   const body = { error }
   if (message) body.message = String(message).slice(0, 1000)
   res.end(JSON.stringify(body))
+}
+
+/**
+ * The runner on a server of its own, on `127.0.0.1:<port>` — what a backend in Docker calls.
+ *
+ * ⭐ WHY NOT THE DEV SERVER'S OWN ADDRESS. A backend running in Docker reaches this machine through
+ * `host.docker.internal`, over IPv4, and the dev server listens where `localhost` resolves, which
+ * Node takes as `::1` first: measured, a container got no connection to a server on `::1` and an
+ * answer from one on `127.0.0.1`. Binding the dev server to `127.0.0.1` instead would move the
+ * address its page is opened at, and a sign-in cookie the backend sets for `localhost` would not be
+ * sent there. So the runner listens on IPv4 loopback, on the port the backend was given for it, and
+ * the dev server stays where it is — on whatever port it takes.
+ *
+ * It answers exactly what `mountDevCompute` answers, under the same `/_compute` path.
+ *
+ * @param {object} options
+ * @param {string} options.foundationDir
+ * @param {string|null} [options.key]
+ * @param {number} options.port
+ * @param {string} [options.host]
+ * @param {(line: string) => void} [options.log]
+ * @returns {Promise<import('node:http').Server>} once it listens
+ */
+export async function serveDevCompute({ foundationDir, key = null, port, host = '127.0.0.1', log = console.log }) {
+  let handler = null
+  mountDevCompute({ middlewares: { use: (fn) => (handler = fn) } }, { foundationDir, key, log: () => {} })
+  const server = createServer((req, res) => handler(req, res, () => refuse(res, 404, 'function-not-found')))
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, host, resolve)
+  })
+  log(`[dev-compute] http://${host}:${port}${DEV_COMPUTE_ADDRESS}/* runs this project's compute functions for a backend on this machine`)
+  return server
 }
