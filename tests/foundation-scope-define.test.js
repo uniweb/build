@@ -13,7 +13,7 @@ import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build, createServer } from 'vite'
 import { foundationScopeDefine } from '../src/foundation/scope-define.js'
-import { DEV_REBUILD_MARKER } from '../src/foundation/dev-rebuild.js'
+import { DEV_REBUILD_MARKER, DEV_BACKEND_ADDRESS_MARKER } from '../src/foundation/dev-rebuild.js'
 import { defineFoundationConfig } from '../src/foundation/config.js'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
@@ -143,6 +143,23 @@ describe('a site that bundles its foundation', () => {
     }
   })
 
+  it('⭐ a site whose `$devBackend` is an address stamps the scope under `uniweb dev`: that copy talks to a real backend', async () => {
+    site()
+    writeFileSync('site.yml', 'name: Test\nfoundation: src\n$devBackend: http://localhost:1234/api\n')
+    const { defineSiteConfig } = await import('../src/site/config.js')
+    const plugins = (await defineSiteConfig()).plugins
+    const plugin = scopePlugin({ plugins })
+    expect(await plugin.config({ plugins }, { command: 'serve', mode: 'development' })).toEqual({ define: { __FOUNDATION_SCOPE__: '"@acme"' } })
+  })
+
+  it('CONTROL — a `$devBackend` module keeps the working copy’s null', async () => {
+    site()
+    writeFileSync('site.yml', 'name: Test\nfoundation: src\n$devBackend: ./mock/api.js\n')
+    const { defineSiteConfig } = await import('../src/site/config.js')
+    const plugins = (await defineSiteConfig()).plugins
+    expect(await scopePlugin({ plugins }).config({ plugins }, { command: 'serve', mode: 'development' })).toEqual({ define: { __FOUNDATION_SCOPE__: 'null' } })
+  })
+
   it('a foundation it loads by URL carries its own, set by that foundation’s build', async () => {
     site()
     process.env.VITE_FOUNDATION_MODE = 'runtime'
@@ -152,6 +169,12 @@ describe('a site that bundles its foundation', () => {
 })
 
 describe('a working copy — `uniweb dev`', () => {
+  it('⭐ a dev rebuild for a site whose `$devBackend` is an address stamps the scope', async () => {
+    const dir = foundation('@acme/marketing')
+    const plugins = [{ name: DEV_REBUILD_MARKER }, { name: DEV_BACKEND_ADDRESS_MARKER }, foundationScopeDefine({ foundationDir: dir })]
+    expect(await built(dir, { plugins })).toEqual({ own: '@acme', depScope: '@acme' })
+  })
+
   it('⭐ a dev rebuild stamps null, and does not read the name', async () => {
     // A `main.js` that does not load: read, it would stop the rebuild.
     const dir = foundation('@acme/marketing')

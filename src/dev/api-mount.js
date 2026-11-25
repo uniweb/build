@@ -3,6 +3,7 @@ import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
 import { YAML_OPTIONS } from '../utils/yaml-schema.js'
+import { forwardRequest, problem } from './forward.js'
 
 /**
  * Where `uniweb dev` answers the site's `backend` service when `$devBackend` names a handler.
@@ -50,6 +51,24 @@ export const DEV_API_ADDRESS = '/_api'
  * whole contract, and anything that can produce one — a hand-written stub, a
  * recorded fixture, someone's real service in a function — mounts the same way.
  *
+ * ## Or an address: a backend running on this machine
+ *
+ * ```yaml
+ * $devBackend: http://localhost:1234/api   # forward /_api/* here
+ * ```
+ *
+ * An `http:` or `https:` address instead of a module, and the dev server forwards each
+ * request under `/_api` to it, `/_api/<rest>` → `<address>/<rest>` (`./forward.js`): the page
+ * stays same-origin, so the backend needs no CORS, and a cookie it sets is kept first-party
+ * on the dev server's origin. The developer writes the whole address, and nothing here
+ * composes a route onto it. The request carries the address's origin as its `Origin`, the
+ * origin a site's backend is reached from in production, where it answers on the site's own.
+ *
+ * A backend there holds the foundation's types as `register` stored them, `@<scope>/x`, so the
+ * working copy is stamped with its scope, as a build is (`foundation/scope-define.js`, through
+ * `DEV_BACKEND_ADDRESS_MARKER`), and sends full names. A module keeps `@/x`, which is how a
+ * local mock holds them.
+ *
  * ## ⛔ Development only, and it cannot leak
  *
  * `$devBackend` is read by the dev plugin and by nothing else: no build reads it, no
@@ -92,6 +111,8 @@ export function mountDevApi(server, { root }) {
   const spec = site.$devBackend
   if (!spec) return null
   const mount = DEV_API_ADDRESS
+  const address = devBackendAddress(spec)
+  if (address) return mountDevAddress(server, address)
 
   // Loaded once, lazily, and awaited by the middleware. ⚠️ Loud and specific on
   // failure: a dev API that silently fails to load looks exactly like a backend
@@ -152,4 +173,70 @@ export function mountDevApi(server, { root }) {
 
   console.log(`[dev-api] '${spec}' answering ${prefix}/*`)
   return mount
+}
+
+/**
+ * The address `$devBackend` names, or null when it names a module.
+ *
+ * ⛔ A value with a scheme that isn't http(s) is refused rather than loaded as a path:
+ * `localhost:1234/api` parses as the scheme `localhost:`, and loaded as a module it would fail
+ * with a message about a file.
+ *
+ * @param {unknown} spec - `site.yml::$devBackend` as written
+ * @returns {string|null}
+ * @throws {Error} for an address that is not http(s)
+ */
+export function devBackendAddress(spec) {
+  if (typeof spec !== 'string' || !/^[a-z][a-z0-9+.-]*:/i.test(spec)) return null
+  let url = null
+  try {
+    url = new URL(spec)
+  } catch {
+    // reported below
+  }
+  if (!url || !/^https?:$/.test(url.protocol) || !url.host) {
+    throw new Error(
+      `$devBackend: '${spec}' is neither a module path nor an http(s) address. ` +
+        'Write a backend’s whole address, e.g. http://localhost:1234/api, or a module, e.g. ./mock/api.js.'
+    )
+  }
+  return url.href.replace(/\/+$/, '')
+}
+
+/**
+ * Whether the site at `root` forwards its `backend` service to an address in `uniweb dev`.
+ * Read from the raw `site.yml`, as `mountDevApi` reads it.
+ *
+ * @param {string} root - the site directory
+ * @returns {boolean}
+ */
+export function forwardsDevBackend(root) {
+  try {
+    const site = yaml.load(readFileSync(join(root, 'site.yml'), 'utf8'), YAML_OPTIONS) || {}
+    return Boolean(devBackendAddress(site.$devBackend))
+  } catch {
+    return false
+  }
+}
+
+/** `$devBackend: <address>` — forward the mount to it. Synchronous, as `mountDevApi` must be. */
+function mountDevAddress(server, address) {
+  const prefix = DEV_API_ADDRESS
+  const origin = new URL(address).origin
+  server.middlewares.use(async (req, res, next) => {
+    if (!req.url || (req.url !== prefix && !req.url.startsWith(`${prefix}/`) && !req.url.startsWith(`${prefix}?`))) return next()
+    // `/_api/x` → `<address>/x`, `/_api?q` → `<address>?q`, `/_api` → `<address>`
+    const sent = await forwardRequest(req, res, `${address}${req.url.slice(prefix.length)}`, { origin })
+    if (!sent.ok) {
+      const err = sent.error
+      problem(
+        res,
+        502,
+        'Backend Unreachable',
+        `$devBackend: could not reach ${address} (${err?.cause?.message || err.message}). Is the backend running?`
+      )
+    }
+  })
+  console.log(`[dev-api] ${prefix}/* → ${address}`)
+  return prefix
 }

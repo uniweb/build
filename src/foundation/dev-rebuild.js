@@ -29,3 +29,20 @@ export const DEV_REBUILD_MARKER = 'uniweb:dev-foundation-rebuild'
 export function hasDevRebuildMarker(config) {
   return (config?.plugins || []).flat(Infinity).some((p) => p?.name === DEV_REBUILD_MARKER)
 }
+
+/**
+ * Marks a working copy that talks to a REAL backend — a site whose `$devBackend` is an address
+ * (`dev/api-mount.js`). Such a backend holds the foundation's types as `register` stored them,
+ * `@<scope>/x`, so the copy is stamped with its scope, as a build is (`scope-define.js`). The
+ * site's dev config carries it, and so does the foundation rebuild it runs in runtime mode
+ * (`dev/plugin.js`), whose config the foundation's own `vite.config.js` makes.
+ */
+export const DEV_BACKEND_ADDRESS_MARKER = 'uniweb:dev-backend-address'
+
+/**
+ * @param {{ plugins?: unknown[] }} config
+ * @returns {boolean}
+ */
+export function hasDevBackendAddressMarker(config) {
+  return (config?.plugins || []).flat(Infinity).some((p) => p?.name === DEV_BACKEND_ADDRESS_MARKER)
+}

@@ -26,7 +26,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import { build } from 'vite'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
-import { DEV_REBUILD_MARKER } from '../foundation/dev-rebuild.js'
+import { DEV_REBUILD_MARKER, DEV_BACKEND_ADDRESS_MARKER } from '../foundation/dev-rebuild.js'
 import { shouldRegenerateForFile } from '../generate-entry.js'
 
 /** Directories that never hold foundation source and must never be walked. */
@@ -87,6 +87,7 @@ function resolveWatchTargets(srcPath) {
  * @param {string} [options.serve='/foundation'] - URL path to serve from
  * @param {boolean} [options.watch=true] - Watch for source changes
  * @param {boolean} [options.buildOnStart=true] - Build on server start
+ * @param {boolean} [options.backendAddress=false] - the site's `$devBackend` is an address
  */
 export function foundationDevPlugin(options = {}) {
   const {
@@ -94,7 +95,10 @@ export function foundationDevPlugin(options = {}) {
     path: foundationPath = '../foundation',
     serve: servePath = '/foundation',
     watch: shouldWatch = true,
-    buildOnStart = true
+    buildOnStart = true,
+    // The site's `$devBackend` is an address: the rebuilt copy talks to a real backend and is
+    // stamped with its scope (`foundation/dev-rebuild.js`).
+    backendAddress = false
   } = options
 
   let resolvedFoundationPath = null
@@ -134,7 +138,7 @@ export function foundationDevPlugin(options = {}) {
           // rather than an option because the foundation's own vite.config.js
           // constructs the plugin, not us; and rather than `mode`/`command`,
           // which both say "build" here since this IS a real build.
-          plugins: [{ name: DEV_REBUILD_MARKER }],
+          plugins: [{ name: DEV_REBUILD_MARKER }, backendAddress && { name: DEV_BACKEND_ADDRESS_MARKER }].filter(Boolean),
           build: {
             outDir: 'dist',
             emptyOutDir: true,

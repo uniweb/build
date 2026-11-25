@@ -10,7 +10,8 @@
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mountDevApi, DEV_API_ADDRESS } from '../src/dev/api-mount.js'
+import { createServer } from 'node:http'
+import { mountDevApi, DEV_API_ADDRESS, devBackendAddress, forwardsDevBackend } from '../src/dev/api-mount.js'
 import { siteContentPlugin } from '../src/site/plugin.js'
 
 /** A Vite-shaped dev server: collects middleware, and loads modules by URL. */
@@ -219,5 +220,115 @@ describe('the payload `uniweb dev` serves names the address', () => {
   it('CONTROL — without `$devBackend` there is no address: `backend: true` asks a host, and none speaks here', async () => {
     const content = await devPayload('name: S\nservices:\n  backend: true\n')
     expect(content.config.backend).toBeUndefined()
+  })
+})
+
+describe('`$devBackend: <address>` — a backend on this machine', () => {
+  // ⭐ The page stays same-origin on `/_api`, and the dev server forwards to the address the
+  // developer wrote, so the backend needs no CORS and its cookie is first-party here.
+  let dir
+  let backend
+  let seen
+  let saved
+
+  beforeEach(async () => {
+    saved = console.log
+    console.log = () => {}
+    seen = []
+    backend = createServer((req, res) => {
+      const chunks = []
+      req.on('data', (c) => chunks.push(c))
+      req.on('end', () => {
+        seen.push({ url: req.url, method: req.method, origin: req.headers.origin, host: req.headers.host, body: Buffer.concat(chunks).toString() })
+        res.setHeader('content-type', 'application/json')
+        res.setHeader('set-cookie', 'sid=abc; Domain=localhost; Path=/api; HttpOnly; SameSite=Lax')
+        res.end(JSON.stringify({ ok: true }))
+      })
+    })
+    await new Promise((done) => backend.listen(0, '127.0.0.1', done))
+  })
+  afterEach(async () => {
+    console.log = saved
+    await new Promise((done) => backend.close(done))
+    if (dir) await rm(dir, { recursive: true, force: true })
+    dir = undefined
+  })
+
+  const address = () => `http://127.0.0.1:${backend.address().port}/api`
+
+  async function siteWith(spec) {
+    dir = await mkdtemp(join(tmpdir(), 'uniweb-devapi-addr-'))
+    await writeFile(join(dir, 'site.yml'), `name: S\nservices:\n  backend: true\n$devBackend: ${spec}\n`)
+    return dir
+  }
+
+  function call(server, url, { method = 'GET', headers = {}, body } = {}) {
+    const req = { url, method, headers: { host: 'localhost:5173', ...headers }, socket: {} }
+    req[Symbol.asyncIterator] = async function* () {
+      if (body) yield Buffer.from(body)
+    }
+    const res = { statusCode: 0, headers: {}, body: undefined, setHeader(k, v) { this.headers[k] = v }, end(b) { this.body = b } }
+    let passed = false
+    return (async () => {
+      for (const fn of server.stack) await fn(req, res, () => { passed = true })
+      return { ...res, passed }
+    })()
+  }
+
+  it('⭐ forwards /_api/<rest> to <address>/<rest>, its method, body and query, and answers at the same address', async () => {
+    const server = fakeServer()
+    expect(mountDevApi(server, { root: await siteWith(address()) })).toBe(DEV_API_ADDRESS)
+
+    const res = await call(server, '/_api/entities?model=x', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"a":1}' })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body.toString())).toEqual({ ok: true })
+    expect(seen[0]).toMatchObject({ url: '/api/entities?model=x', method: 'POST', body: '{"a":1}' })
+    expect(seen[0].host).toBe(`127.0.0.1:${backend.address().port}`)
+  })
+
+  it('⭐ keeps the backend’s cookie first-party on the dev server, and sends the address’s origin as Origin', async () => {
+    const server = fakeServer()
+    mountDevApi(server, { root: await siteWith(address()) })
+    const res = await call(server, '/_api/auth/login', { method: 'POST', headers: { origin: 'http://localhost:5173' }, body: '{}' })
+    expect(res.headers['set-cookie']).toEqual(['sid=abc; Path=/; HttpOnly; SameSite=Lax'])
+    expect(seen[0].origin).toBe(`http://127.0.0.1:${backend.address().port}`)
+  })
+
+  it('a trailing slash in the address composes no double slash', async () => {
+    const server = fakeServer()
+    mountDevApi(server, { root: await siteWith(`${address()}/`) })
+    await call(server, '/_api/auth/me')
+    expect(seen[0].url).toBe('/api/auth/me')
+  })
+
+  it('passes everything outside the mount straight through', async () => {
+    const server = fakeServer()
+    mountDevApi(server, { root: await siteWith(address()) })
+    const res = await call(server, '/_apis/x')
+    expect(res.passed).toBe(true)
+    expect(seen).toEqual([])
+  })
+
+  it('answers 502, naming the address, when nothing is listening there', async () => {
+    const server = fakeServer()
+    mountDevApi(server, { root: await siteWith('http://127.0.0.1:1/api') })
+    const res = await call(server, '/_api/auth/me')
+    expect(res.statusCode).toBe(502)
+    expect(JSON.parse(res.body)).toMatchObject({ title: 'Backend Unreachable' })
+    expect(JSON.parse(res.body).detail).toContain('http://127.0.0.1:1/api')
+  })
+
+  it('⛔ refuses an address that is not http(s), rather than loading it as a module', async () => {
+    // `localhost:1234/api` parses as the scheme `localhost:`.
+    expect(() => devBackendAddress('localhost:1234/api')).toThrow(/neither a module path nor an http\(s\) address/)
+    expect(() => devBackendAddress('ftp://x/api')).toThrow(/http\(s\)/)
+    expect(devBackendAddress('./mock/api.js')).toBeNull()
+    expect(devBackendAddress('http://localhost:1234/api/')).toBe('http://localhost:1234/api')
+  })
+
+  it('`forwardsDevBackend` says which form the site wrote', async () => {
+    expect(forwardsDevBackend(await siteWith(address()))).toBe(true)
+    await rm(dir, { recursive: true, force: true })
+    expect(forwardsDevBackend(await siteWith('./mock/api.js'))).toBe(false)
   })
 })

@@ -33,6 +33,8 @@ import {
 import { importMapPlugin } from '../import-map-plugin.js'
 import { jsxExtensionGuard } from '../jsx-extension.js'
 import { foundationScopeDefine } from '../foundation/scope-define.js'
+import { DEV_BACKEND_ADDRESS_MARKER } from '../foundation/dev-rebuild.js'
+import { forwardsDevBackend } from '../dev/api-mount.js'
 import { resolveModuleUrl, resolveExtensionUrls } from './extension-urls.js'
 import { resolveFoundationSrcPath } from '../utils/foundation-source-root.js'
 import { foundationImportsPlugin } from './foundation-imports.js'
@@ -338,6 +340,7 @@ export async function defineSiteConfig(options = {}) {
   // the foundation does (`library-imports.js`).
   const bundledFoundation = !isRuntimeMode && foundationInfo.type === 'local' && foundationInfo.path ? foundationInfo.path : null
 
+  const backendAddress = forwardsDevBackend(siteRoot)
   const plugins = [
     // Ensure foundation entry exists first (bundled mode only)
     ensureFoundationEntryPlugin,
@@ -362,6 +365,9 @@ export async function defineSiteConfig(options = {}) {
     // scope in a build, null under `uniweb dev` (`foundation/scope-define.js`). A foundation
     // loaded by URL carries its own, set by its build.
     !isRuntimeMode && foundationInfo.path && foundationScopeDefine({ foundationDir: foundationInfo.path }),
+    // ...and stamped with its scope under `uniweb dev` too when the site's `$devBackend` is an
+    // address: that copy talks to a real backend, which holds the types under their full names.
+    backendAddress && { name: DEV_BACKEND_ADDRESS_MARKER },
 
     // Foundation dev server (only in runtime mode with local foundation)
     isRuntimeMode &&
@@ -370,7 +376,8 @@ export async function defineSiteConfig(options = {}) {
         name: foundationInfo.name,
         path: foundationInfo.path,
         serve: '/foundation',
-        watch: true
+        watch: true,
+        backendAddress
       }),
 
     // The dev server says where it listens, for `uniweb dev` to read (`dev-server.js`).
