@@ -32,7 +32,15 @@ const SIGNUP = Object.freeze(['open', 'invite_only'])
 const LEVELS = Object.freeze(['read', 'edit'])
 const ACCESS_KEYS = Object.freeze(['add', 'all'])
 const QUERY_KEYS = Object.freeze(['whole', 'where', 'sort', 'limit'])
-const TEAM_KEYS = Object.freeze(['label'])
+const TEAM_KEYS = Object.freeze(['label', 'joins'])
+/**
+ * A team's condition: who the backend keeps in it, by what they hold — `joins: { holds: ['@/membership'] }`
+ * puts in everyone holding a record of a type listed, bought or by a live subscription, and takes
+ * them out when it lapses or is refunded. A list is *any of*. Its keys are the backend's closed
+ * list of kinds, of which a blueprint names `holds` alone. A blueprint names types, since no record
+ * exists when a backend starts; a condition on one record is set in the Admin App.
+ */
+const JOIN_KINDS = Object.freeze(['holds'])
 
 /**
  * An integration line, as a backend takes it. Refused here exactly as a backend refuses them, and no
@@ -189,9 +197,10 @@ function teamProblems(teams) {
     }
     for (const key of Object.keys(team)) {
       if (!TEAM_KEYS.includes(key)) {
-        found.push(`\`${at}.${key}\` is not a team's key: a team has a \`label\`, and starts with no one in it.`)
+        found.push(`\`${at}.${key}\` is not a team's key: a team has a \`label\`, and \`joins\` for who the backend keeps in it.`)
       }
     }
+    if ('joins' in team) found.push(...joinsProblems(`${at}.joins`, team.joins))
     if ('label' in team && (typeof team.label !== 'string' || !team.label.trim())) {
       found.push(`\`${at}.label\` is the team's name — not ${described(team.label)}.`)
       continue
@@ -200,6 +209,32 @@ function teamProblems(teams) {
     const name = 'label' in team ? team.label : id
     if (named.has(name)) found.push(`\`teams.${named.get(name)}\` and \`${at}\` are both named \`${name}\`: give each team its own.`)
     else named.set(name, id)
+  }
+  return found
+}
+
+function joinsProblems(at, joins) {
+  if (!isMap(joins) || !Object.keys(joins).length) {
+    return [`\`${at}\` says who the backend keeps in the team — \`joins: { holds: ['@/membership'] }\` — not ${described(joins)}.`]
+  }
+  const found = []
+  for (const [kind, value] of Object.entries(joins)) {
+    if (!JOIN_KINDS.includes(kind)) {
+      found.push(`\`${at}.${kind}\` is not a condition a blueprint names: ${listed(JOIN_KINDS)}.`)
+      continue
+    }
+    if (!Array.isArray(value) || !value.length) {
+      found.push(`\`${at}.${kind}\` is a list of types — \`${kind}: ['@/membership']\` — not ${described(value)}.`)
+      continue
+    }
+    for (const type of value) {
+      if (typeof type !== 'string' || !/^@[^/\s]*\/[^\s]+$/.test(type)) {
+        found.push(
+          `\`${at}.${kind}\` lists ${described(type)}: a blueprint names types (\`@/membership\`), since no record exists ` +
+            'when a backend starts. A condition on one record is set in the Admin App.'
+        )
+      }
+    }
   }
   return found
 }

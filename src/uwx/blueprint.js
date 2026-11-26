@@ -94,10 +94,39 @@ export function blueprintForWire(blueprint, scope) {
   const out = {}
   for (const [key, value] of Object.entries(blueprint)) {
     if (TYPE_KEYS.includes(key) && isMap(value)) out[key] = qualifiedTypes(key, value, scope)
+    else if (key === 'teams' && isMap(value)) out[key] = teamsNaming(value, (type) => qualifyRef(type, scope))
     else if (key === 'integrations' && isMap(value)) {
       out[key] = mappingsNamed(value, (m) => qualifyRef(m, scope), (file) => qualifyRef(file, scope))
     }
     else out[key] = value
+  }
+  return out
+}
+
+/**
+ * Each team with the types its condition names (`joins: { holds: [...] }`) renamed by `rename`;
+ * nothing else in the team moves.
+ */
+function teamsNaming(teams, rename) {
+  return Object.fromEntries(
+    Object.entries(teams).map(([id, team]) => {
+      if (!isMap(team) || !isMap(team.joins)) return [id, team]
+      const joins = Object.fromEntries(
+        Object.entries(team.joins).map(([kind, types]) => [kind, Array.isArray(types) ? types.map((t) => (typeof t === 'string' ? rename(t) : t)) : types])
+      )
+      return [id, { ...team, joins }]
+    })
+  )
+}
+
+/** The types each team's condition names, in the file's spelling, with where each is named. */
+function conditionTypes(teams) {
+  const out = []
+  for (const [id, team] of Object.entries(isMap(teams) ? teams : {})) {
+    if (!isMap(team) || !isMap(team.joins)) continue
+    for (const [kind, types] of Object.entries(team.joins)) {
+      if (Array.isArray(types)) for (const type of types) if (typeof type === 'string') out.push({ type, at: `teams.${id}.joins.${kind}` })
+    }
   }
   return out
 }
@@ -177,6 +206,11 @@ function qualifiedTypes(key, map, scope) {
 export function blueprintFromWire(wire, { scope = null, own = null, local = null } = {}) {
   const out = {}
   for (const [key, value] of Object.entries(isMap(wire) ? wire : {})) {
+    if (key === 'teams' && isMap(value)) {
+      const spelled = new Map(conditionTypes(local?.teams).map(({ type }) => [qualifyRef(type, scope), type]))
+      out[key] = teamsNaming(value, (type) => spelled.get(type) ?? unresolveSelfScope(type, scope, own))
+      continue
+    }
     if (key === 'integrations' && isMap(value)) {
       out[key] = mappingsNamed(
         value,
@@ -353,6 +387,21 @@ export function blueprintWarnings(blueprint, { scope, declared, sending = false 
             'started from this site leaves the line out. Check the name against the foundation\'s data schemas.'
         )
       }
+    }
+  }
+  for (const { type, at } of conditionTypes(blueprint.teams)) {
+    if (!scoped && type.startsWith('@/') && sending) {
+      out.push(
+        `${BLUEPRINT_FILE}: \`${at}\` names the foundation's own type \`${type}\`, and the foundation has no scope yet, ` +
+          "so a push sends it as written — the backend never resolves an `@/x`. A foundation's scope is part " +
+          "of its name — `name: '@org/<name>'` in its main.js, which `uniweb register` writes."
+      )
+    }
+    if (declared?.types && !declared.types.has(qualifyRef(type, scope))) {
+      out.push(
+        `${BLUEPRINT_FILE}: \`${at}\` names \`${type}\`, a type none of this site's foundations declares, so nobody can ` +
+          'hold one and the team stays empty. Check the name against the foundation\'s data schemas.'
+      )
     }
   }
   for (const [id, line] of Object.entries(isMap(blueprint.integrations) ? blueprint.integrations : {})) {

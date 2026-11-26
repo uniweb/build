@@ -602,3 +602,46 @@ describe('integrations — vendor:', () => {
     expect(blueprintWarnings(blueprint, { scope: '@acme', declared: { types: null, mappings: null, vendors: null } })).toEqual([])
   })
 })
+
+describe('a team the backend keeps by condition — `joins`', () => {
+  const FILE = {
+    teams: { 'paid-members': { label: 'Paid members', joins: { holds: ['@/membership', '@std/pass'] } } },
+    access: { '@/photo': { add: ['paid-members'] } },
+  }
+
+  it('is a team, which `access` names like any other', () => {
+    expect(blueprintProblems(FILE)).toEqual([])
+  })
+
+  const refused = [
+    ['`joins` that is no map', { joins: ['@/membership'] }, /`teams\.t\.joins` says who the backend keeps in the team/],
+    ['`joins` with nothing in it', { joins: {} }, /`teams\.t\.joins` says who the backend keeps in the team/],
+    ['a condition a blueprint does not name', { joins: { signed_up: true } }, /`teams\.t\.joins\.signed_up` is not a condition a blueprint names/],
+    ['`holds` as one word', { joins: { holds: '@/membership' } }, /`teams\.t\.joins\.holds` is a list of types/],
+    ['`holds` naming a record', { joins: { holds: ['0b1e6a2c-1d1f-4b8e-9c33-6e1c1a2b3c4d'] } }, /a blueprint names types .* a condition on one record is set in the Admin App/i],
+  ]
+  for (const [what, team, message] of refused) {
+    it(`refuses ${what}`, () => {
+      expect(blueprintProblems({ teams: { t: team } }).join('\n')).toMatch(message)
+    })
+  }
+
+  it('sends each type in full, and a pull writes the file back', () => {
+    const wire = blueprintForWire(FILE, '@acme')
+    expect(wire.teams['paid-members'].joins.holds).toEqual(['@acme/membership', '@std/pass'])
+    expect(blueprintFromWire(wire, { scope: '@acme' })).toEqual(FILE)
+  })
+
+  it('keeps the spelling the file already gives', () => {
+    const local = { teams: { t: { joins: { holds: ['@acme/membership'] } } } }
+    const wire = blueprintForWire(local, '@acme')
+    expect(blueprintFromWire(wire, { scope: '@acme', local })).toEqual(local)
+  })
+
+  it('warns of a type no foundation declares, by where it is named', () => {
+    const declared = { types: new Set(['@acme/membership']) }
+    expect(blueprintWarnings({ teams: { t: { joins: { holds: ['@/membership', '@/memebrship'] } } } }, { scope: '@acme', declared })).toEqual([
+      expect.stringMatching(/^blueprint\.yml: `teams\.t\.joins\.holds` names `@\/memebrship`, a type none of this site's foundations declares/),
+    ])
+  })
+})
