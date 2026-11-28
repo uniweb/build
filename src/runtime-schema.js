@@ -341,7 +341,8 @@ export function extractAllLayoutRuntimeSchemas(layoutsMeta) {
  *   code  `handlers`, `defaultInsets`, `xref`, `transports`, `outputs` — functions and
  *         components, so the entry REFERENCES each from the module and the bundler drops the rest
  *         of `main.js`'s default export.
- *   data  `defaultLayout`, `defaultSection`, `viewTransitions`, `scroll`; `vars`, each var's
+ *   data  `defaultLayout`, `defaultSection`, `viewTransitions`, `scroll`; `backgrounds`, each
+ *         named background's value without its label; `vars`, each var's
  *         `default`, `type` and `applyTo` — all `@uniweb/theming` reads; `data`, each key's schema
  *         ref — all `declaredKeys` reads. Written as a literal, like a section type's lean schema.
  *
@@ -369,7 +370,30 @@ export function extractFoundationRuntime(config = {}) {
   if (vars) data.vars = vars
   const keys = leanDataKeys(config?.data)
   if (keys) data.data = keys
+  const backgrounds = leanBackgrounds(config?.backgrounds)
+  if (backgrounds) data.backgrounds = backgrounds
   return { code, data }
+}
+
+/** What an editor reads of a named background, and a page does not: kept in the schema (`_self`). */
+const EDITOR_BACKGROUND_FIELDS = new Set(['label', 'description', 'preview'])
+
+/**
+ * A foundation's named backgrounds (`backgrounds:`) as a page draws them: each value without its
+ * label, description and preview, which only an editor shows. A section picks one by name
+ * (`background: dots`), and the site's theme may define one of the same name, which wins
+ * (`Block.namedBackground`, @uniweb/core) [2026-11-28].
+ */
+function leanBackgrounds(backgrounds) {
+  if (!backgrounds || typeof backgrounds !== 'object' || Array.isArray(backgrounds)) return null
+  const out = {}
+  for (const [name, definition] of Object.entries(backgrounds)) {
+    if (typeof definition === 'string') out[name] = definition
+    else if (definition && typeof definition === 'object' && !Array.isArray(definition)) {
+      out[name] = Object.fromEntries(Object.entries(definition).filter(([field]) => !EDITOR_BACKGROUND_FIELDS.has(field)))
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /** The `main.js` capabilities the runtime calls or renders — referenced, never copied. */
