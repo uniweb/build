@@ -21,6 +21,7 @@
  */
 
 import { readFile, readdir, stat } from 'node:fs/promises'
+import { overlayProblems } from './background-check.js'
 import { resolveQueriesConfig, toConfigQueries, dataKeyTyping, foundationSections } from './queries-config.js'
 import { isSectionKey } from '@uniweb/schemas/section'
 import { parseNumericPrefix, compareByNumericPrefix } from '../utils/numeric-prefix.js'
@@ -1314,6 +1315,11 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
       `[content-collector] ${relative(siteRoot, filePath)}: grid: ${JSON.stringify(params.grid)} is not a layout — ` +
         `write a column count (grid: 3) or relative widths (grid: '40/60'). The component's own layout applies.`
     )
+  }
+
+  // An overlay the runtime won't draw as written (`./background-check.js`).
+  for (const problem of overlayProblems(params.background)) {
+    console.warn(`[content-collector] ${relative(siteRoot, filePath)}: ${problem}`)
   }
 
   // Convert markdown to ProseMirror. ⭐ Insets stay as the author wrote them —
