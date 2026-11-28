@@ -10,7 +10,8 @@
  *
  * Section frontmatter reserved properties:
  * - type: Component type (e.g., "Hero", "Features")
- * - hidden: `true` makes the section a draft — left out of a published build, kept in dev
+ * - hidden: `true` hides the section wherever a page is shown — a published build, and `uniweb dev`
+ *   unless started with `--hidden` (`withoutHidden`)
  * - props: Additional component props (merged with other params)
  * - fetch: The section's binding — names a query (query, as, where, sort, limit, current,
  *   prerender, detailPage); `query:` is its shorthand
@@ -1220,8 +1221,8 @@ async function processFileAsPage(filePath, fileName, siteRoot, parentRoute) {
       lastModified: fileStat.mtime?.toISOString() || null,
       isDynamic: false,
       paramName: null,
-      // The file IS the page, so its `hidden: true` drafts the page — left out of a published
-      // build, kept in dev — rather than leaving a page with no section (2026-09-28).
+      // The file IS the page, so its `hidden: true` hides the page (`withoutHidden`) rather than
+      // leaving a page with no section (2026-09-28).
       hidden: section.hidden === true,
       // As written: the caller lays the folder's and the site's under it (`mergeLayoutConfig`).
       layout: pageConfig.layout ?? {},
@@ -1283,10 +1284,11 @@ async function processMarkdownFile(filePath, id, siteRoot, defaultStableId = nul
   const params = Object.fromEntries(
     Object.entries(frontMatter).filter(([key]) => !isSectionKey(key) && key !== 'fetch' && !(atomic && isAtomicPageKey(key)))
   )
-  // ⭐ `hidden: true` — a draft section, the page's meaning one level down: left out of a
-  // published build, kept by `uniweb dev`, and synced as the section's own `hidden`
-  // [Diego, 2026-09-28]. ⛔ Until then it was an ordinary param: the component received it
-  // and the section rendered everywhere.
+  // ⭐ `hidden: true` — a hidden section, the page's meaning one level down: left out wherever a
+  // page is shown (`withoutHidden`), and synced as the section's own `hidden`, the field the app's
+  // eye toggle writes [Diego, 2026-09-28: "make a section's hidden: real"]. ⛔ Until then it was an
+  // ordinary param: the component received it and the section rendered everywhere. ⛔ From then
+  // until 2026-11-28 `uniweb dev` kept it, unmarked, while the app's preview left it out.
   if (hidden !== undefined && typeof hidden !== 'boolean') {
     console.warn(
       `[content-collector] ${relative(siteRoot, filePath)}: hidden: ${JSON.stringify(hidden)} is not true or false — ` +
@@ -2979,8 +2981,8 @@ export async function collectSiteContent(sitePath, options = {}) {
   // readiness"): on published build paths, only the publishable intersection
   // (publishLanguages ∩ languages; absent field = all declared) ships — in
   // the embedded languages list and in route translations. Dev keeps the
-  // full declared set so draft locales stay previewable, mirroring how
-  // `hidden` pages behave. Invalid publish configs (nothing publishable /
+  // full declared set so draft locales stay previewable: a language not yet
+  // published is one in progress, not hidden. Invalid publish configs (nothing publishable /
   // default not publishable) hard-error the publish build, warn-only in dev.
   const { publishable, explicit: hasPublishList } = resolvePublishableLocales(siteConfig)
   if (dropUnpublished && langValidation.errors.length > 0) {
@@ -3042,7 +3044,7 @@ export async function collectSiteContent(sitePath, options = {}) {
     )
   }
 
-  return {
+  const collected = {
     config: {
       ...runtimeSiteConfig,
       // Embed the RESOLVED effective default (defaultLanguage || languages[0]
@@ -3082,29 +3084,45 @@ export async function collectSiteContent(sitePath, options = {}) {
       // these, so they only reach the page if a consumer injects `links`.
       links: themeLinks
     },
-    // Reachability axis: on the published build paths, drop `hidden` pages and
-    // their whole subtree (cascade), and every `hidden` section with its children.
-    // Dev keeps them so drafts stay previewable.
-    pages: dropUnpublished ? dropUnpublishedPages(pages).map(withoutHiddenSections) : pages,
+    // Reachability axis: what is hidden is left out on the published build paths here, and by
+    // the dev server unless it was asked to show it (`withoutHidden`, `./dev-hidden.js`).
+    pages,
     // Layout area sets: { default: { header: page, footer: page, ... }, marketing: { ... } }
-    layouts: dropUnpublished ? withoutHiddenAreas(layouts) : layouts,
-    // ⭐ THE SAME REACHABILITY AXIS, for the 404 slot. `hidden: true` means DRAFT —
-    // "excluded from the published site" (`docs/reference/page-configuration.md`);
-    // `hideIn: ['*']` is the control for "routed but in no nav".
-    // ⛔ The 404 was exempt BY ACCIDENT until 2026-09-12: it is lifted out of
-    // `pages` before the prune runs, and the prune only filters `pages`, so the
-    // flag never reached it — we published a page its author had marked as not
-    // for publishing, while a backend-published site dropped it. Ruled
-    // [Diego, 2026-09-12]: the flag is literal and framework moves to the lane
-    // that honoured it. The site still gets a `404.html` (the SPA fallback
-    // shell), and `uniweb dev` keeps the page previewable like any other draft.
-    // No cascade to resolve: this slot is root-level only, so its own flag is
-    // the only one that can apply.
-    notFound: dropUnpublished ? (notFound?.hidden ? null : withoutHiddenSections(notFound)) : notFound,
+    layouts,
+    notFound,
     assets: assetCollection.assets,
     hasExplicitPoster: assetCollection.hasExplicitPoster,
     // Icon manifest for preloading
     icons: iconManifest
+  }
+  return dropUnpublished ? withoutHidden(collected) : collected
+}
+
+/**
+ * The site as it is shown: without its hidden pages, each with its whole subtree, and without
+ * every hidden section with its child sections, in the pages, the layout areas and the 404 alike.
+ * `hidden: true` means hidden wherever a page is shown: a published build, the app's preview, and
+ * `uniweb dev` unless it was started with `--hidden` [Diego, 2026-11-28]. One rule for all three,
+ * so the dev server leaves out exactly what a published build does.
+ *
+ * ⭐ THE 404 SLOT TOO. `hideIn: ['*']` is the control for "routed but in no nav".
+ * ⛔ The 404 was exempt BY ACCIDENT until 2026-09-12: it is lifted out of `pages` before the
+ * prune runs, and the prune only filtered `pages`, so the flag never reached it — we published a
+ * page its author had marked as not for publishing, while a backend-published site dropped it.
+ * Ruled [Diego, 2026-09-12]: the flag is literal and framework moves to the lane that honoured
+ * it. The site still gets a `404.html` (the SPA fallback shell). No cascade to resolve: this slot
+ * is root-level only, so its own flag is the only one that can apply.
+ *
+ * @param {Object} content - what `collectSiteContent` collected, hidden content kept
+ * @returns {Object} the same content without what is hidden
+ */
+export function withoutHidden(content) {
+  if (!content) return content
+  return {
+    ...content,
+    pages: dropUnpublishedPages(content.pages).map(withoutHiddenSections),
+    layouts: withoutHiddenAreas(content.layouts),
+    notFound: content.notFound?.hidden ? null : withoutHiddenSections(content.notFound),
   }
 }
 

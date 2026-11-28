@@ -1,7 +1,7 @@
 // Page-visibility helpers — the two orthogonal axes a page carries:
 //   • Reachability — `hidden: bool`. `true` = excluded from the PUBLISHED output
-//     entirely (see `dropUnpublishedPages`, and `dropHiddenSections` for a section).
-//     Still previewable in `uniweb dev`.
+//     entirely (see `dropUnpublishedPages`, and `dropHiddenSections` for a section), and
+//     from `uniweb dev` unless it was started with `--hidden` (`./dev-hidden.js`).
 //   • Nav placement — `hideIn: string[]`. Which nav areas suppress the page while
 //     it IS routed (see `normalizeHideIn`). `['*']` = suppressed from every area.
 
@@ -40,9 +40,9 @@ export function normalizeHideIn(config = {}) {
 /**
  * Drop unpublished pages — the reachability axis. A page with `hidden: true` is
  * excluded from the PUBLISHED output entirely, and the exclusion CASCADES to its
- * whole subtree: drafting a container drafts the branch. Applied only on the
- * published build paths (`uniweb build` / link-mode deploy); `uniweb dev` keeps
- * hidden pages so in-progress work stays previewable by direct URL.
+ * whole subtree: hiding a container hides the branch. Applied wherever a page is
+ * shown (`withoutHidden`): the published build paths (`uniweb build` / link-mode
+ * deploy), and `uniweb dev` unless it was started with `--hidden`.
  *
  * Cascade is resolved via the parent-route chain (the same `parent` route strings
  * the hierarchy is built from), so no surviving page is ever left pointing at a
@@ -71,9 +71,8 @@ export function dropUnpublishedPages(pages) {
 
 /**
  * Drop hidden sections — the same reachability axis, one level down. A section with
- * `hidden: true` in its frontmatter is a draft: left out of the PUBLISHED output together
- * with its child sections, and kept by `uniweb dev` so it stays previewable. Applied where
- * `dropUnpublishedPages` is, to a page's sections and a layout area's alike.
+ * `hidden: true` in its frontmatter is left out together with its child sections, wherever
+ * `dropUnpublishedPages` is applied, to a page's sections and a layout area's alike.
  *
  * @param {Array<object>} sections - collected sections (each may hold `subsections`)
  * @returns {Array<object>} the sections without the hidden ones, at every depth

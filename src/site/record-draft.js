@@ -2,9 +2,10 @@
 // not delivered while the site is published (ruled 2026-09-21 [Diego]).
 //
 // ⭐ ONE RULE, READ BY BOTH LANES. The build leaves a draft out of what it delivers —
-// the compiled query files a static host serves — and keeps it in `pnpm dev`, where
-// the author previews it, as a hidden page stays previewable. A backend holds the
-// same state as an entity's `disabled`, which withdraws it from every delivery read.
+// the compiled query files a static host serves — and so does `uniweb dev`, as it leaves
+// out a hidden section, unless it was started with `--hidden` to preview what is hidden
+// (`./dev-hidden.js`) [Diego, 2026-11-28]. A backend holds the same state as an entity's
+// `disabled`, which withdraws it from every delivery read.
 //
 // ⚖️ NOT THE SAME AS A LEADING `_`. A file named `_x.md` is not a record at all: it
 // is not read, not pushed, not in the folder. A draft IS a record — the folder has

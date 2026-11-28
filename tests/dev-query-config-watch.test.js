@@ -15,6 +15,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { siteContentPlugin, siteRootChange } from '../src/site/plugin.js'
+import { HIDDEN_ENV } from '../src/site/dev-hidden.js'
 
 let ROOT
 let plugin
@@ -126,12 +127,24 @@ describe('the dev server regenerates the query files', { timeout: 15000 }, () =>
     }, WAIT)
   })
 
-  it('a draft is previewed — the dev server compiles it, as it keeps a hidden page', async () => {
-    // A production build leaves it out (`record-draft.test.js`); `pnpm dev` is where the
-    // author looks at it.
+  it('a draft is left out, as a hidden section is, and as a production build leaves it out', async () => {
+    // `draft: true` means left out wherever a page is shown, `uniweb dev` included
+    // [Diego, 2026-11-28]; a production build's half is `record-draft.test.js`.
     w('queries.yml', "recent:\n  schema: '@/article'\n")
     w('records/article/c.md', '---\ntitle: C\ndraft: true\n---\n')
     await startDev()
+    expect(titles('recent')).toEqual(['A', 'B'])
+  })
+
+  it('`uniweb dev --hidden` previews it: the dev server it starts compiles the draft', async () => {
+    w('queries.yml', "recent:\n  schema: '@/article'\n")
+    w('records/article/c.md', '---\ntitle: C\ndraft: true\n---\n')
+    process.env[HIDDEN_ENV] = '1'
+    try {
+      await startDev()
+    } finally {
+      delete process.env[HIDDEN_ENV]
+    }
     expect(titles('recent')).toEqual(['A', 'B', 'C'])
   })
 

@@ -11,6 +11,8 @@ export { defineSiteConfig, readSiteConfig, default } from './config.js'
 // What `uniweb dev` hands the dev server of a site a backend holds (`./preview.js`).
 export { PREVIEW_ENV, encodePreview, readPreview } from './preview.js'
 export { PUBLISHED_ENV, encodePublished, readPublished } from './published.js'
+// What `uniweb dev --hidden` hands the dev server: show what is hidden, marked (`./dev-hidden.js`).
+export { HIDDEN_ENV } from './dev-hidden.js'
 // Where a site's dev server listens, as it states it, for `uniweb dev` (`./dev-server.js`).
 export { DEV_PORT_ENV, DEV_RECORD_ENV, runningDevServer, stopDevServer } from './dev-server.js'
 // Where a statically built site lives, as its deploy target or author states it (`./site-address.js`).

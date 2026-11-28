@@ -31,7 +31,8 @@ import { watch, existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { resolveDefaultLocale, resolveFetchConfigs, DATA_DIR } from '@uniweb/core'
 import { partitionKnowledgePages, INDEX_FILENAME } from '@uniweb/projections'
-import { collectSiteContent, mountEntriesOf } from './content-collector.js'
+import { collectSiteContent, mountEntriesOf, withoutHidden } from './content-collector.js'
+import { showsHidden, hiddenInSite, hiddenNote, hiddenMarks } from './dev-hidden.js'
 import { processAssets, rewriteSiteContentPaths } from './asset-processor.js'
 import { collectTranslatedAssets } from './assets.js'
 import { processAdvancedAssets } from './advanced-processors.js'
@@ -387,6 +388,17 @@ export function siteContentPlugin(options = {}) {
    * answers, decided by what is behind the destination — so the subtraction
    * belongs to the pipeline, not to the collector.
    */
+  /**
+   * The collected site as the dev server shows it: without what is hidden, as a published site
+   * is, unless `uniweb dev --hidden` started it, which keeps it and marks it (`./dev-hidden.js`).
+   * A production build left it out already, in the collector.
+   */
+  function shownInDev(collected) {
+    if (isProduction) return collected
+    devHidden = hiddenInSite(collected)
+    return showHidden ? collected : withoutHidden(collected)
+  }
+
   async function collectForBundle(path, options) {
     const collected = await collectSiteContent(path, options)
     const { knowledgePages, renderedPages } = partitionKnowledgePages(collected.pages || [])
@@ -467,6 +479,9 @@ export function siteContentPlugin(options = {}) {
   let resolvedOutDir = null
   let viteRoot = null // Vite's config.root: the dev server serves a file under it by its path
   let isProduction = false
+  // `uniweb dev --hidden`: this dev server shows what is hidden, marked (`./dev-hidden.js`).
+  let showHidden = false
+  let devHidden = null // what is hidden in the site, when this dev server last collected it
   let watcher = null
   let server = null
   let localeTranslations = {} // Cache: { locale: translations }
@@ -540,9 +555,10 @@ export function siteContentPlugin(options = {}) {
     if (queries) console.log('[site-content] Materializing queries...')
     const byQuery = await processQueries(resolvedSitePath, queries || {}, resolvedRecordsDir, basePath, {
       locale: resolveDefaultLocale(config ?? {}) ?? null,
-      // ⭐ A draft is previewable here, as a hidden page is — `pnpm dev` is where the
-      // author looks at it. A production build leaves it out (`buildStart`).
-      includeDrafts: !isProduction,
+      // ⭐ A draft record is left out here, as a hidden section is, unless this dev server was
+      // started to show what is hidden (`uniweb dev --hidden`, `./dev-hidden.js`). ⛔ Until
+      // 2026-11-28 `pnpm dev` always kept drafts. A production build leaves them out.
+      includeDrafts: showHidden,
     })
     await writeQueryFiles(resolvedSitePath, byQuery, queries)
   }
@@ -705,6 +721,7 @@ export function siteContentPlugin(options = {}) {
       resolvedOutDir = resolve(config.root, config.build.outDir)
       viteRoot = config.root
       isProduction = config.command === 'build'
+      showHidden = !isProduction && showsHidden()
       basePath = config.base || '/'
       if (!isProduction && foundationPath && readPublished()) publishedScope = await foundationScope(foundationPath)
       if (!isProduction && foundationPath && !readPublished()) {
@@ -758,11 +775,15 @@ export function siteContentPlugin(options = {}) {
     async buildStart() {
       // Collect content at build start
       try {
-        // dropUnpublished only on a production build — in dev (serve) hidden
-        // pages stay in the graph so in-progress drafts remain previewable.
+        // dropUnpublished only on a production build: dev keeps the languages not yet
+        // published, and leaves out what is hidden unless asked (`shownInDev`).
         // strict on a production build: a mount that contributes no pages is a
         // warning while you author and a broken deploy once you ship.
-        siteContent = devMedia(locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction }))))
+        siteContent = devMedia(locate(withDevServices(shownInDev(await collectForBundle(resolvedSitePath, { foundationPath, dropUnpublished: isProduction, base: basePath, strict: isProduction })))))
+        if (!isProduction && devHidden) {
+          const note = hiddenNote(devHidden, showHidden)
+          if (note) console.log(note)
+        }
         dataModelPromise = null
         headHtml = await loadHeadHtml()
         console.log(`[site-content] Collected ${siteContent.pages?.length || 0} pages`)
@@ -977,7 +998,7 @@ export function siteContentPlugin(options = {}) {
             rebuildQueries = false
             console.log('[site-content] Content changed, rebuilding...')
             try {
-              siteContent = devMedia(locate(withDevServices(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath }))))
+              siteContent = devMedia(locate(withDevServices(shownInDev(await collectForBundle(resolvedSitePath, { foundationPath, base: basePath })))))
               dataModelPromise = null
               headHtml = await loadHeadHtml()
               if (materialize) {
@@ -1314,6 +1335,11 @@ export function siteContentPlugin(options = {}) {
       // The touch icon: site.yml's `touchIcon:`, the PNG iOS puts on a home screen.
       const touchIcon = touchIconHref(contentToInject?.config?.touchIcon, basePath)
       if (touchIcon) headInjection += `    <link rel="apple-touch-icon" href="${touchIcon}">\n`
+
+      // What is hidden, marked, where this dev server shows it (`uniweb dev --hidden`).
+      if (showHidden && devHidden && (devHidden.count.pages || devHidden.count.sections)) {
+        headInjection += hiddenMarks(devHidden)
+      }
 
       // Inject content as JSON script tag
       if (inject) {

@@ -1,15 +1,18 @@
 /**
- * `hidden:` in a section's frontmatter — a draft section, the page's meaning one level
- * down [Diego, 2026-09-28]: left out of a published build with its child sections, kept
- * by `uniweb dev` so it stays previewable, synced as the section's own `hidden`, and
- * written back by a pull. ⛔ Until then it was an ordinary param: the component received
- * it and the section rendered everywhere, and a pull dropped a stored one.
+ * `hidden:` in a section's frontmatter — the page's meaning one level down [Diego,
+ * 2026-09-28: "make a section's hidden: real"]: left out with its child sections wherever a
+ * page is shown — a published build, and `uniweb dev` unless started with `--hidden`
+ * [Diego, 2026-11-28] — synced as the section's own `hidden`, and written back by a pull.
+ * ⛔ Until 2026-09-28 it was an ordinary param: the component received it and the section
+ * rendered everywhere, and a pull dropped a stored one. ⛔ From then until 2026-11-28
+ * `uniweb dev` kept it, unmarked, while the app's preview left it out.
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import collectSiteContent, { processMarkdownFile } from '../src/site/content-collector.js'
+import collectSiteContent, { processMarkdownFile, withoutHidden } from '../src/site/content-collector.js'
+import { hiddenInSite, hiddenNote, hiddenMarks, showsHidden, HIDDEN_ENV } from '../src/site/dev-hidden.js'
 import { dropHiddenSections } from '../src/site/nav-visibility.js'
 import { siteProjectToDocument, siteContentDocumentToProject } from '../src/uwx/index.js'
 
@@ -81,11 +84,20 @@ describe('the build', () => {
     expect(layouts.default.footer.sections.map((s) => s.type)).toEqual(['Footer'])
   })
 
-  it('dev keeps them, so a draft stays previewable', async () => {
+  it('the collector keeps them for a reader of every section, marked, as `i18n extract` and `validate` are', async () => {
     write(dir, site)
     const { pages, layouts } = await collectSiteContent(dir)
     expect(typesOf(pages.find((p) => p.route === '/'))).toEqual(['Hero', 'Features'])
     expect(layouts.default.header.sections.map((s) => s.hidden)).toEqual([true])
+  })
+
+  it('`withoutHidden` leaves out exactly what a published build does: the dev server applies it', async () => {
+    write(dir, site)
+    const kept = await collectSiteContent(dir)
+    const published = await collectSiteContent(dir, { dropUnpublished: true })
+    const shown = withoutHidden(kept)
+    expect(shown.pages.map((p) => [p.route, typesOf(p)])).toEqual(published.pages.map((p) => [p.route, typesOf(p)]))
+    expect(Object.keys(shown.layouts.default)).toEqual(Object.keys(published.layouts.default))
   })
 
   it('a hidden section takes its child sections with it, and a hidden child goes alone', () => {
@@ -260,5 +272,48 @@ describe('a section’s data on the wire — `params.fetch` [2026-09-28]', () =>
     } finally {
       rmSync(dest, { recursive: true, force: true })
     }
+  })
+})
+
+describe('the dev server: what is hidden, left out or shown marked (`uniweb dev --hidden`)', () => {
+  const pagesSite = {
+    ...site,
+    'pages/drafts/page.yml': 'title: Drafts\nhidden: true\n',
+    'pages/drafts/1-intro.md': '---\ntype: Hero\n---\n\n# Soon\n',
+    'pages/drafts/later/page.yml': 'title: Later\n',
+    'pages/drafts/later/1-x.md': '---\ntype: Hero\n---\n\n# Later\n',
+  }
+
+  it('the flag reaches the dev server in its environment, and nothing else turns it on', () => {
+    expect(showsHidden({ [HIDDEN_ENV]: '1' })).toBe(true)
+    expect(showsHidden({})).toBe(false)
+    expect(showsHidden({ [HIDDEN_ENV]: 'true' })).toBe(false)
+  })
+
+  it('names each hidden section by its DOM id, under its page, an area\'s under every page', async () => {
+    write(dir, pagesSite)
+    const hidden = hiddenInSite(await collectSiteContent(dir))
+    expect(hidden.sections['/']).toEqual(['section-draft'])
+    expect(hidden.sections['*']).toEqual(['section-header'])
+    expect(hidden.pages.sort()).toEqual(['/drafts', '/drafts/later'])
+    expect(hidden.count).toEqual({ pages: 2, sections: 2 })
+  })
+
+  it('says what it left out and how to see it, or what it shows', async () => {
+    write(dir, pagesSite)
+    const hidden = hiddenInSite(await collectSiteContent(dir))
+    expect(hiddenNote(hidden, false)).toBe(
+      '[site-content] Leaving out 2 hidden sections and 2 hidden pages, as a published site does. To see them: uniweb dev --hidden'
+    )
+    expect(hiddenNote(hidden, true)).toMatch(/^\[site-content\] Showing 2 hidden sections and 2 hidden pages, marked as hidden/)
+    expect(hiddenNote({ count: { pages: 0, sections: 0 } }, false)).toBeNull()
+  })
+
+  it('marks from the page\'s head, with what it read escaped so no route ends its script', () => {
+    const html = hiddenMarks({ pages: ['/a</script>'], sections: { '/': ['section-x'] } })
+    expect(html).toContain('<style id="uw-dev-hidden">')
+    expect(html).toContain('[data-uw-hidden]')
+    const script = html.slice(html.indexOf('<script'), html.lastIndexOf('</script>'))
+    expect(script).not.toMatch(/<\/script/i)
   })
 })
